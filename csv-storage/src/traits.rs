@@ -4,7 +4,7 @@
 //! All implementations MUST use these traits, not custom interfaces.
 
 use async_trait::async_trait;
-use csv_core::cross_chain::HashEntry as CrossChainRegistryEntry;
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_proof::proof::ReplayId;
 use super::errors::{StorageError, ReplayDbError};
 

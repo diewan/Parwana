@@ -67,7 +67,7 @@ pub fn cmd_acquire_lease(
     let lease = lease_manager
         .leases
         .get(&sanad_id_hash)
-        .expect("lease should exist after acquisition");
+        .ok_or_else(|| anyhow::anyhow!("Lease not found after acquisition"))?;
 
     output::success(&format!("Lease acquired: {}", lease_id));
     output::info(&format!("  Sanad ID: {}", sanad_id_hash));
@@ -82,8 +82,8 @@ pub fn cmd_acquire_lease(
         hex::encode(lease_id.as_bytes())
     ));
 
-    // Store lease info in state for later use
-    state.store_lease(sanad_id_hash, lease_id, owner_hash, ttl_secs);
+    // Note: Lease state is managed exclusively by csv-runtime.
+    // The CLI returns the lease token to the user for use with transfer commands.
 
     Ok(())
 }

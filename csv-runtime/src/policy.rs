@@ -73,7 +73,7 @@ impl RuntimePolicy {
             allow_rpc_fallback: false,
             max_retries: 3,
             retry_delay: Duration::from_secs(5),
-            enforce_strict_finality: false,
+            enforce_strict_finality: true,
             mode: RuntimeMode::Normal,
         }
     }
@@ -85,11 +85,14 @@ impl RuntimePolicy {
         policy
     }
 
-    /// Set the runtime mode and update policy settings accordingly
+    /// Set the runtime mode and update policy settings accordingly.
+    ///
+    /// Note: enforce_strict_finality is always true regardless of mode.
+    /// Finality is never optional in the CSV protocol.
     pub fn set_mode(&mut self, mode: RuntimeMode) {
         self.mode = mode;
         self.allow_rpc_fallback = mode.allows_rpc_fallback();
-        self.enforce_strict_finality = mode.enforces_strict_finality();
+        self.enforce_strict_finality = true; // finality is always enforced
         self.max_retries = mode.max_retries();
         self.retry_delay = mode.retry_delay();
     }
@@ -106,9 +109,29 @@ impl RuntimePolicy {
             .or(Some(1))
     }
 
-    /// Set the finality depth for a specific chain
+   /// Set the finality depth for a specific chain
     pub fn set_finality_depth(&mut self, chain_id: String, depth: u64) {
         self.finality_depths.insert(chain_id, depth);
+    }
+
+    /// Check that the observed finality depth meets the required threshold for a chain.
+    ///
+    /// Returns `Err` if `observed < required` for the given chain.
+    /// This enforces hard-fail finality: transfers are aborted if finality
+    /// requirements are not met, regardless of runtime mode.
+    pub fn check_finality_threshold(
+        &self,
+        chain: &str,
+        observed: u64,
+    ) -> Result<(), String> {
+        let required = self.finality_depth_for_chain(chain);
+        let required = required.unwrap_or(1);
+        if observed < required {
+            return Err(format!(
+                "Chain {chain}: observed {observed} < required {required}"
+            ));
+        }
+        Ok(())
     }
 
     /// Create a production policy (no fallbacks, strict enforcement)
@@ -186,7 +209,8 @@ mod tests {
         let policy = RuntimePolicy::development();
         assert_eq!(policy.mode, RuntimeMode::Degraded);
         assert!(policy.allow_rpc_fallback);
-        assert!(!policy.enforce_strict_finality);
+        // Finality is always enforced regardless of mode
+        assert!(policy.enforce_strict_finality);
     }
 
     #[test]
@@ -194,7 +218,8 @@ mod tests {
         let policy = RuntimePolicy::unsafe_mode();
         assert_eq!(policy.mode, RuntimeMode::Unsafe);
         assert!(policy.allow_rpc_fallback);
-        assert!(!policy.enforce_strict_finality);
+        // Finality is always enforced regardless of mode
+        assert!(policy.enforce_strict_finality);
         assert!(policy.mode.requires_operator_confirmation());
     }
 

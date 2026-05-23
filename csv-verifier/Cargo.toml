@@ -5,7 +5,6 @@ edition = "2024"
 description = "CSV Verifier - Canonical verifier with unified proof verification"
 
 [dependencies]
-csv-core = { path = "../csv-core" }
 csv-proof = { path = "../csv-proof" }
 csv-hash = { path = "../csv-hash" }
 csv-codec = { path = "../csv-codec" }

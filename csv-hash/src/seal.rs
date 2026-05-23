@@ -143,7 +143,7 @@ impl SealPoint {
     /// # Errors
     /// Returns `CanonicalError::SerializationError` if encoding fails.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, CanonicalError> {
-        Ok(to_canonical_cbor(self)?)
+        to_canonical_cbor(self)
     }
 
     /// Deserialize from canonical CBOR bytes.
@@ -151,7 +151,7 @@ impl SealPoint {
     /// # Errors
     /// Returns `CanonicalError::DeserializationError` if decoding fails.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CanonicalError> {
-        Ok(from_canonical_cbor(bytes)?)
+        from_canonical_cbor(bytes)
     }
 }
 
@@ -286,7 +286,7 @@ impl CommitAnchor {
     /// # Errors
     /// Returns `CanonicalError::SerializationError` if encoding fails.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, CanonicalError> {
-        Ok(to_canonical_cbor(self)?)
+        to_canonical_cbor(self)
     }
 
     /// Deserialize from canonical CBOR bytes.
@@ -294,7 +294,7 @@ impl CommitAnchor {
     /// # Errors
     /// Returns `CanonicalError::DeserializationError` if decoding fails.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CanonicalError> {
-        Ok(from_canonical_cbor(bytes)?)
+        from_canonical_cbor(bytes)
     }
 }
 

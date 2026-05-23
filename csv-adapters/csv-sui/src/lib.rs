@@ -1,4 +1,7 @@
 //! Sui Adapter for CSV (Client-Side Validation)
+#![allow(clippy::needless_return)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::collapsible_if)]
 //!
 //! This adapter implements the SealProtocol trait for Sui,
 //! using owned objects with one_time attributes as seals.

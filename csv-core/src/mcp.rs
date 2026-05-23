@@ -98,6 +98,8 @@ pub mod error_codes {
     pub const BTC_REORG_DETECTED: &str = "BTC_006";
     /// Insufficient Bitcoin confirmations.
     pub const BTC_INSUFFICIENT_CONFIRMATIONS: &str = "BTC_007";
+    /// Insufficient Bitcoin funds.
+    pub const BTC_INSUFFICIENT_FUNDS: &str = "BTC_008";
 
     // Ethereum adapter errors (ETH_001 - ETH_099)
     /// Ethereum RPC error.
@@ -529,23 +531,9 @@ pub use csv_hash::chain_id::ChainId;
 
 // ─── Verification level ────────────────────────────────────────────────────
 
-/// Explicit verification tier returned by all proof verification paths.
-///
-/// Callers MUST check this. `is_valid: true` with `StructuralOnly`
-/// does not constitute cryptographic proof of state transition validity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(missing_docs)]
-pub enum VerificationLevel {
-    /// Script/structure checked. No cryptographic proof verified.
-    StructuralOnly,
-    /// Merkle inclusion verified. Finality not yet confirmed.
-    MerkleVerified,
-    /// Full cryptographic verification complete.
-    FullyVerified,
-    /// Consensus-confirmed on source chain; finality threshold met.
-    ConsensusVerified,
-}
+/// Verification level has been moved to csv-protocol.
+/// Re-exporting for backward compatibility during migration.
+pub use csv_protocol::verification::VerificationLevel;
 
 // ─── Agent-facing result types ─────────────────────────────────────────────
 

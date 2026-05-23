@@ -3,13 +3,18 @@
 ## 1. Scope
 
 This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
+
 - Core protocol logic in `csv-core`
-- Chain adapters in `csv-bitcoin`, `csv-ethereum`, `csv-solana`, `csv-sui`, `csv-aptos`
-- CLI tooling in `csv-cli`
+- Protocol orchestration in `csv-protocol`
+- Chain adapters in `csv-adapters/csv-bitcoin`, `csv-adapters/csv-ethereum`, `csv-adapters/csv-solana`, `csv-adapters/csv-sui`, `csv-adapters/csv-aptos`, `csv-adapters/csv-celestia`
+- Runtime orchestration in `csv-runtime` (TransferCoordinator, execution journal, lease management)
+- CLI tooling in `csv-cli` (stateless client — delegates to runtime)
 - SDK in `csv-sdk`
-- Wallet in `csv-wallet`
+- Storage layer in `csv-storage` (RocksDB, PostgreSQL, in-memory backends)
 - MCP server in `csv-mcp-server`
 - Smart contracts in `csv-contracts`
+
+**Note:** `csv-wallet`, `csv-explorer/*`, and `typescript-sdk/` do not exist in the current codebase.
 
 **Out of scope:** Chain-level consensus, external oracle services, user device security.
 
@@ -22,7 +27,8 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 | RPC providers | Untrusted | May return incorrect data; quorum required |
 | Indexers | Untrusted | May be delayed or return stale data |
 | Client (CLI/SDK) | Trusted | Runs on user-controlled hardware |
-| Wallet | Trusted | Holds user keys; requires passphrase |
+| csv-runtime | Trusted | Sole authority for protocol execution, lease management, and replay protection |
+| csv-storage backends | Semi-trusted | May fail; protocol handles failures gracefully |
 
 ## 3. Adversarial Models
 
@@ -33,6 +39,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Incorrect proof generation, failed transfers, or minting of invalid Sanads.
 
 **Mitigation:**
+
 - RPC quorum client (`csv-core/src/rpc.rs`) requires agreement from multiple providers
 - Finality depth checks prevent acting on unconfirmed transactions
 - Inclusion proofs are verified against on-chain state roots
@@ -44,6 +51,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Client acts on outdated state, leading to failed transfers or double-spends.
 
 **Mitigation:**
+
 - All indexer data is verified against on-chain state before use
 - `csv-core/src/finality.rs` tracks finality state independently
 - Reorg detection (`csv-core/src/reorg.rs`) handles chain reorganizations
@@ -55,6 +63,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Client may generate proofs based on incorrect state roots.
 
 **Mitigation:**
+
 - Quorum client requires agreement from ≥2/3 of providers
 - Disagreement triggers fallback to additional providers
 - All RPC responses are logged for audit
@@ -66,6 +75,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Transfer stalls; destination chain may reject late proofs.
 
 **Mitigation:**
+
 - Configurable finality depth per chain
 - Timeout handling in `csv-core/src/cross_chain.rs`
 - Recovery engine (`csv-core/src/recovery_engine.rs`) handles stuck transfers
@@ -77,6 +87,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Transfer cannot complete; funds may be temporarily locked.
 
 **Mitigation:**
+
 - Multiple RPC endpoints per chain
 - Timeout-based fallback to alternative providers
 - Recovery engine can retry with different providers
@@ -90,6 +101,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Double-spend of Sanad; loss of destination chain integrity.
 
 **Mitigation:**
+
 - Source chain lock consumes the seal, preventing reuse
 - Cross-chain registry (`CrossChainRegistry`) tracks all transfers
 - Lease system prevents concurrent transfer attempts on same Sanad
@@ -102,6 +114,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Unauthorized minting on destination chain.
 
 **Mitigation:**
+
 - Tagged hashing with domain separation (`csv_tagged_hash`)
 - Chain-specific hash algorithms (`CrossChainHashAlgorithm`)
 - Replay registry (`csv-core/src/replay_registry.rs`) tracks all processed proofs
@@ -114,6 +127,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Race conditions, double-spend attempts, inconsistent state.
 
 **Mitigation:**
+
 - `csv cross-chain acquire-lease` command required before transfer
 - `--lease-token` flag on transfer command validates lease ownership
 - Lease expires after TTL, preventing indefinite locking
@@ -126,6 +140,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Unauthorized minting; loss of destination chain integrity.
 
 **Mitigation:**
+
 - Canonical CBOR serialization (`csv-core/src/canonical.rs`) prevents encoding ambiguity
 - Tagged hashing ensures proof data cannot be substituted
 - Merkle proofs are verified against on-chain state roots
@@ -138,6 +153,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Unauthorized transfer of another user's Sanad.
 
 **Mitigation:**
+
 - Signature verification using chain-specific schemes (Secp256k1, Ed25519)
 - Ownership proofs include the signer's public key
 - `csv-core/src/signature.rs` validates signature scheme matches chain
@@ -149,6 +165,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Sanad locked on source chain with no destination mint; funds lost.
 
 **Mitigation:**
+
 - Recovery engine (`csv-core/src/recovery_engine.rs`) detects stuck transfers
 - Timeout-based recovery releases locked seals
 - Transfer status tracking enables monitoring
@@ -162,6 +179,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Full control over user's Sanads and funds.
 
 **Mitigation:**
+
 - Encrypted state storage (`csv-cli/src/state.rs`)
 - Passphrase required for all operations
 - Keys never stored in plaintext
@@ -173,6 +191,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Unauthorized operations or data exfiltration.
 
 **Mitigation:**
+
 - All inputs validated before use
 - Hex decoding with length checks
 - No shell command execution from user input
@@ -184,6 +203,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Unauthorized operations, data leakage, or resource exhaustion.
 
 **Mitigation:**
+
 - Zod schema validation on all tool inputs (`csv-mcp-server/src/validation/schemas.ts`)
 - Structured audit logging (`csv-mcp-server/src/audit/logger.ts`)
 - Lease acquisition pattern prevents concurrent operations
@@ -198,6 +218,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Loss of Sanad integrity, unauthorized minting.
 
 **Mitigation:**
+
 - Contract manifest governance (`csv-contracts/`) tracks deployed versions
 - Bytecode hash verification prevents unauthorized deployments
 - Semantic versioning ensures compatible upgrades
@@ -209,6 +230,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Double-minting, state corruption.
 
 **Mitigation:**
+
 - Checks-Effects-Interactions pattern in contract code
 - State changes before external calls
 - No external calls after mint completion
@@ -222,6 +244,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Data tampering, proof forgery.
 
 **Mitigation:**
+
 - TLS required for all RPC connections
 - Certificate pinning for known providers
 - Response signing verification where available
@@ -233,6 +256,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Impact:** Quorum consensus can be manipulated.
 
 **Mitigation:**
+
 - Diverse provider selection (different infrastructure providers)
 - Provider reputation tracking
 - Fallback to public endpoints
@@ -271,6 +295,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 ## 10. Review Schedule
 
 This threat model should be reviewed:
+
 - After each protocol upgrade
 - When adding new chain adapters
 - When modifying core cryptographic primitives

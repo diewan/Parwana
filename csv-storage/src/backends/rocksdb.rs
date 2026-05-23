@@ -1,7 +1,7 @@
 //! RocksDB-backed replay database with CAS semantics.
 
 use async_trait::async_trait;
-use csv_core::cross_chain::HashEntry as CrossChainRegistryEntry;
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_proof::proof::ReplayId;
 use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, DBCompressionType, Options, DB};
@@ -46,16 +46,19 @@ impl RocksDbReplayDb {
         Ok(Self { db: Arc::new(db) })
     }
 
-    fn cf_replay(&self) -> &ColumnFamily {
-        self.db.cf_handle(CF_REPLAY).expect("replay_entries CF")
+    fn cf_replay(&self) -> Result<&ColumnFamily, ReplayDbError> {
+        self.db.cf_handle(CF_REPLAY)
+            .ok_or_else(|| ReplayDbError::Storage("replay_entries column family not found".to_string()))
     }
 
-    fn cf_conflict(&self) -> &ColumnFamily {
-        self.db.cf_handle(CF_CONFLICT).expect("replay_conflicts CF")
+    fn cf_conflict(&self) -> Result<&ColumnFamily, ReplayDbError> {
+        self.db.cf_handle(CF_CONFLICT)
+            .ok_or_else(|| ReplayDbError::Storage("replay_conflicts column family not found".to_string()))
     }
 
-    fn cf_transfers(&self) -> &ColumnFamily {
-        self.db.cf_handle(CF_TRANSFERS).expect("transfer_entries CF")
+    fn cf_transfers(&self) -> Result<&ColumnFamily, ReplayDbError> {
+        self.db.cf_handle(CF_TRANSFERS)
+            .ok_or_else(|| ReplayDbError::Storage("transfer_entries column family not found".to_string()))
     }
 
     fn encode_state(state: ReplayEntryState) -> Vec<u8> {
@@ -76,7 +79,7 @@ impl RocksDbReplayDb {
     }
 
     fn key_exists_in_conflict_cf(&self, key: &[u8]) -> Result<bool, ReplayDbError> {
-        match self.db.get_cf(self.cf_conflict(), key) {
+        match self.db.get_cf(self.cf_conflict()?, key) {
             Ok(Some(_)) => Ok(true),
             Ok(None) => Ok(false),
             Err(e) => Err(ReplayDbError::Storage(format!("RocksDB error: {e}"))),
@@ -84,7 +87,7 @@ impl RocksDbReplayDb {
     }
 
     fn read_state(&self, key: &[u8]) -> Result<Option<ReplayEntryState>, ReplayDbError> {
-        match self.db.get_cf(self.cf_replay(), key) {
+        match self.db.get_cf(self.cf_replay()?, key) {
             Ok(Some(val)) => Ok(Self::decode_state(&val)),
             Ok(None) => Ok(None),
             Err(e) => Err(ReplayDbError::Storage(format!("RocksDB read error: {e}"))),
@@ -97,8 +100,8 @@ impl RocksDbReplayDb {
         }
         let val = Self::encode_state(state);
         let mut batch = rocksdb::WriteBatch::default();
-        batch.put_cf(self.cf_replay(), key, &val);
-        batch.put_cf(self.cf_conflict(), key, b"1");
+        batch.put_cf(self.cf_replay()?, key, &val);
+        batch.put_cf(self.cf_conflict()?, key, b"1");
         self.db
             .write(batch)
             .map_err(|e| ReplayDbError::Storage(format!("RocksDB write error: {e}")))?;
@@ -138,7 +141,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         };
         let val = Self::encode_state(state);
         self.db
-            .put_cf(self.cf_replay(), key, val)
+            .put_cf(self.cf_replay()?, key, val)
             .map_err(|e| ReplayDbError::Storage(format!("RocksDB error: {e}")))?;
         Ok(())
     }
@@ -157,7 +160,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         };
         let val = Self::encode_state(state);
         self.db
-            .put_cf(self.cf_replay(), key, val)
+            .put_cf(self.cf_replay()?, key, val)
             .map_err(|e| ReplayDbError::Storage(format!("RocksDB error: {e}")))?;
         Ok(())
     }
@@ -170,7 +173,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         let val = to_canonical_cbor(entry)
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
         self.db
-            .put_cf(self.cf_transfers(), key, val)
+            .put_cf(self.cf_transfers()?, key, val)
             .map_err(|e| ReplayDbError::Storage(format!("RocksDB error: {e}")))?;
         Ok(())
     }
@@ -181,7 +184,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         let mut transfers = Vec::new();
         for result in self
             .db
-            .iterator_cf(self.cf_transfers(), rocksdb::IteratorMode::Start)
+            .iterator_cf(self.cf_transfers()?, rocksdb::IteratorMode::Start)
         {
             let (_key, value) = result
                 .map_err(|e| ReplayDbError::Storage(format!("RocksDB iterator error: {e}")))?;

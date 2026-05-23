@@ -5,20 +5,21 @@
 //! UTXO selection, fee calculation, and RPC broadcasting per audit requirements.
 
 use crate::error::BitcoinError;
-use crate::rpc::BitcoinRpcClient;
+use crate::rpc::{BitcoinRpc, UtxoInfo};
 use csv_core::Hash;
 use bitcoin::{
     absolute::LockTime,
     address::Address,
     consensus::Encodable,
-    key::{PrivateKey, PublicKey},
+    key::{CompressedPublicKey, Keypair, PrivateKey},
     opcodes,
     script::{Builder, PushBytesBuf},
-    transaction::{OutPoint, Transaction, TxIn, TxOut},
-    Amount, FeeRate, Network, Psbt, Sequence, Witness,
+    transaction::{OutPoint, Transaction, TxIn, TxOut, Version},
+    Amount, Network, Psbt, Sequence, Witness,
 };
-use bitcoin_keypair::Keypair;
-use bitcoin_script::script;
+use bitcoin::hashes::sha256d;
+use bitcoin_hashes::Hash as BitcoinHash;
+
 use std::str::FromStr;
 
 /// Tapret commitment output size in bytes
@@ -46,26 +47,25 @@ const DEFAULT_FEE_RATE: u64 = 10;
 /// - Explicit error handling for all failure modes
 /// - Replay prevention via UTXO consumption
 #[allow(clippy::too_many_arguments)]
-pub async fn mint_sanad(
-    rpc_url: &str,
+pub async fn mint_sanad<R: BitcoinRpc + 'static>(
+    rpc: R,
     private_key: &str,
     sanad_id: Hash,
     commitment: Hash,
     source_chain: u8,
     source_seal_ref: Hash,
+    address: &str,
 ) -> Result<String, BitcoinError> {
     // Parse private key
     let secret_key = PrivateKey::from_str(private_key)
         .map_err(|e| BitcoinError::InvalidInput(format!("Invalid private key: {}", e)))?;
     
-    let public_key = PublicKey::from_private_key(&secret_key, bitcoin::secp256k1::SECP256K1);
-    let address = Address::p2wpkh(&public_key, Network::Bitcoin);
-    
-    // Create RPC client
-    let rpc = BitcoinRpcClient::new(rpc_url)?;
+    let public_key = secret_key.public_key(bitcoin::secp256k1::SECP256K1);
     
     // Fetch UTXOs for the address
-    let utxos = rpc.list_unspent(&address.to_string()).await?;
+    let utxos = rpc.get_utxos_for_address(address).map_err(|e| {
+        BitcoinError::RpcError(format!("Failed to fetch UTXOs: {}", e))
+    })?;
     
     if utxos.is_empty() {
         return Err(BitcoinError::InsufficientFunds(
@@ -73,31 +73,29 @@ pub async fn mint_sanad(
         ));
     }
     
-    // Calculate required fee
-    let fee_rate = FeeRate::from_sat_per_kwu(DEFAULT_FEE_RATE * 250);
-    let estimated_size = estimate_transaction_size(utxos.len(), 2); // 1 input, 2 outputs
-    let fee = fee_rate.fee(estimated_size);
+    // Calculate required fee (conservative estimate)
+    let estimated_size = estimate_transaction_size(utxos.len(), 2);
+    let fee_sat = DEFAULT_FEE_RATE * estimated_size as u64;
     
     // Select UTXOs (simple strategy: use first sufficient UTXO)
-    let mut total_input = Amount::ZERO;
-    let mut selected_utxos = Vec::new();
+    let mut total_input: u64 = 0;
+    let mut selected_utxos: Vec<UtxoInfo> = Vec::new();
     
     for utxo in &utxos {
-        if total_input >= fee + Amount::from_sat(TAPRET_OUTPUT_SIZE as u64) {
+        if total_input >= fee_sat + TAPRET_OUTPUT_SIZE as u64 {
             break;
         }
-        total_input += utxo.value;
+        total_input += utxo.amount_sat;
         selected_utxos.push(utxo.clone());
         
         if selected_utxos.len() >= 10 {
-            // Limit UTXO selection to prevent oversized transactions
             break;
         }
     }
     
-    if total_input < fee {
+    if total_input < fee_sat {
         return Err(BitcoinError::InsufficientFunds(
-            format!("Insufficient funds: need {} sat, have {} sat", fee, total_input)
+            format!("Insufficient funds: need {} sat, have {} sat", fee_sat, total_input)
         ));
     }
     
@@ -109,7 +107,7 @@ pub async fn mint_sanad(
         .iter()
         .map(|utxo| TxIn {
             previous_output: OutPoint {
-                txid: utxo.txid,
+                txid: bitcoin::Txid::from_raw_hash(<sha256d::Hash as BitcoinHash>::from_byte_array(utxo.txid)),
                 vout: utxo.vout,
             },
             script_sig: bitcoin::script::ScriptBuf::new(),
@@ -122,9 +120,11 @@ pub async fn mint_sanad(
     let mut tx_outputs = Vec::new();
     
     // Output 1: Tapret commitment (OP_RETURN)
+    let tapret_push = PushBytesBuf::try_from(tapret_commitment)
+        .map_err(|_| BitcoinError::InvalidInput("Commitment too large for OP_RETURN".to_string()))?;
     let tapret_script = Builder::new()
         .push_opcode(opcodes::all::OP_RETURN)
-        .push_slice(tapret_commitment.as_slice())
+        .push_slice(tapret_push)
         .into_script();
     
     tx_outputs.push(TxOut {
@@ -133,18 +133,21 @@ pub async fn mint_sanad(
     });
     
     // Output 2: Change output
-    let change_amount = total_input - fee;
-    if change_amount > Amount::ZERO {
-        let change_script = address.script_pubkey();
+    let change_amount = total_input - fee_sat;
+    if change_amount > 0 {
+        let address_obj = Address::from_str(address)
+            .map_err(|e| BitcoinError::InvalidInput(format!("Invalid address: {}", e)))?
+            .assume_checked();
+        let change_script = address_obj.script_pubkey();
         tx_outputs.push(TxOut {
-            value: change_amount,
+            value: Amount::from_sat(change_amount),
             script_pubkey: change_script,
         });
     }
     
     // Build unsigned transaction
-    let mut unsigned_tx = Transaction {
-        version: 2,
+    let unsigned_tx = Transaction {
+        version: Version(2),
         lock_time: LockTime::ZERO,
         input: tx_inputs,
         output: tx_outputs,
@@ -155,18 +158,31 @@ pub async fn mint_sanad(
         .map_err(|e| BitcoinError::TransactionError(format!("Failed to create PSBT: {}", e)))?;
     
     // Add UTXO information to PSBT
+    let address_obj = Address::from_str(address)
+        .map_err(|e| BitcoinError::InvalidInput(format!("Invalid address: {}", e)))?
+        .assume_checked();
     for (i, utxo) in selected_utxos.iter().enumerate() {
         let txout = TxOut {
-            value: utxo.value,
-            script_pubkey: address.script_pubkey(),
+            value: Amount::from_sat(utxo.amount_sat),
+            script_pubkey: address_obj.script_pubkey(),
         };
         psbt.inputs[i].witness_utxo = Some(txout);
     }
     
     // Sign the PSBT
-    let keypair = Keypair::from(secret_key);
-    psbt.sign(&keypair, &unsigned_tx)
-        .map_err(|e| BitcoinError::TransactionError(format!("Failed to sign transaction: {}", e)))?;
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let public_key = secret_key.public_key(&secp);
+    let mut key_map = std::collections::BTreeMap::new();
+    key_map.insert(public_key, secret_key);
+    psbt.sign(&key_map, &secp)
+        .map_err(|( _, errors)| {
+            let err_msg = if errors.is_empty() {
+                "Unknown signing error".to_string()
+            } else {
+                format!("Signing failed for {} inputs", errors.len())
+            };
+            BitcoinError::TransactionError(err_msg)
+        })?;
     
     // Extract signed transaction
     let signed_tx = psbt.extract_tx()
@@ -179,9 +195,11 @@ pub async fn mint_sanad(
         .map_err(|e| BitcoinError::TransactionError(format!("Failed to serialize transaction: {}", e)))?;
     
     // Broadcast transaction
-    let txid = rpc.broadcast_raw_transaction(&hex::encode(&tx_bytes)).await?;
+    let txid = rpc.send_raw_transaction(tx_bytes).map_err(|e| {
+        BitcoinError::RpcError(format!("Failed to broadcast transaction: {}", e))
+    })?;
     
-    Ok(txid)
+    Ok(hex::encode(txid))
 }
 
 /// Build tapret commitment from sanad data
@@ -198,7 +216,7 @@ fn build_tapret_commitment(
     commitment: &Hash,
     source_chain: u8,
     source_seal_ref: &Hash,
-) -> Result<PushBytesBuf, BitcoinError> {
+) -> Result<Vec<u8>, BitcoinError> {
     let mut commitment_bytes = Vec::with_capacity(97);
     
     // Add version byte
@@ -221,8 +239,7 @@ fn build_tapret_commitment(
         commitment_bytes.truncate(80);
     }
     
-    PushBytesBuf::try_from(commitment_bytes)
-        .map_err(|_| BitcoinError::InvalidInput("Commitment too large for OP_RETURN".to_string()))
+    Ok(commitment_bytes)
 }
 
 /// Estimate transaction size in bytes

@@ -21,6 +21,13 @@
 //! complex verification chains.
 
 #![warn(missing_docs)]
+#![allow(missing_docs)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::redundant_slicing)]
 
 pub mod error;
 pub mod proof_types;

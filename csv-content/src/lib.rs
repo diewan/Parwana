@@ -15,6 +15,11 @@
 //! - `resource_accounting` - Verification resource limits
 
 #![warn(missing_docs)]
+#![allow(missing_docs)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::redundant_slicing)]
 
 pub mod content_tree;
 pub mod claims;

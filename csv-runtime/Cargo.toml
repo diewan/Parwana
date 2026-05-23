@@ -34,6 +34,10 @@ csv-proof = { path = "../csv-proof" }
 
 [features]
 default = ["persistent"]
-persistent = ["csv-storage/rocksdb"]
+persistent = ["csv-storage/rocksdb", "dep:rocksdb"]
 postgres = ["dep:sqlx", "dep:chrono", "csv-storage/postgres"]
 serde = []
+
+[dependencies.rocksdb]
+version = "0.22"
+optional = true

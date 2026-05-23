@@ -46,6 +46,14 @@ pub enum BitcoinError {
     #[error("Storage error: {0}")]
     StorageError(String),
 
+    /// Transaction building/signing error
+    #[error("Transaction error: {0}")]
+    TransactionError(String),
+
+    /// Insufficient funds
+    #[error("Insufficient funds: {0}")]
+    InsufficientFunds(String),
+
     /// Wrapper for core adapter errors
     #[error(transparent)]
     CoreError(#[from] csv_core::ProtocolError),
@@ -76,6 +84,8 @@ impl From<BitcoinError> for csv_core::ProtocolError {
                 csv_core::ProtocolError::Generic(format!("MPC: {}", msg))
             }
             BitcoinError::StorageError(msg) => csv_core::ProtocolError::StorageError(msg),
+            BitcoinError::TransactionError(msg) => csv_core::ProtocolError::Generic(msg),
+            BitcoinError::InsufficientFunds(msg) => csv_core::ProtocolError::Generic(msg),
         }
     }
 }
@@ -95,6 +105,8 @@ impl BitcoinError {
             BitcoinError::RegistryFull(_) => false,
             BitcoinError::CoreError(_) => false,
             BitcoinError::StorageError(_) => false,
+            BitcoinError::TransactionError(_) => false,
+            BitcoinError::InsufficientFunds(_) => false,
         }
     }
 }
@@ -115,6 +127,8 @@ impl HasErrorSuggestion for BitcoinError {
             BitcoinError::MpcError(_) => "BTC_MPC_ERROR",
             BitcoinError::StorageError(_) => "BTC_STORAGE_ERROR",
             BitcoinError::CoreError(e) => e.error_code(),
+            BitcoinError::TransactionError(_) => "BTC_TRANSACTION_ERROR",
+            BitcoinError::InsufficientFunds(_) => error_codes::BTC_INSUFFICIENT_FUNDS,
         }
     }
 
@@ -188,6 +202,8 @@ impl HasErrorSuggestion for BitcoinError {
                 msg
             ),
             BitcoinError::CoreError(e) => e.suggested_fix(),
+            BitcoinError::TransactionError(msg) => format!("Transaction building/signing failed: {}. Check input data and retry.", msg),
+            BitcoinError::InsufficientFunds(msg) => format!("{} Add more Bitcoin to your wallet or use a different address with sufficient balance.", msg),
         }
     }
 
@@ -195,6 +211,8 @@ impl HasErrorSuggestion for BitcoinError {
         match self {
             BitcoinError::CoreError(e) => e.docs_url(),
             BitcoinError::MpcError(_) => "https://docs.csv.network/errors/mpc".to_string(),
+            BitcoinError::TransactionError(_) => "https://docs.csv.network/errors/bitcoin".to_string(),
+            BitcoinError::InsufficientFunds(_) => "https://docs.csv.network/errors/bitcoin".to_string(),
             _ => error_codes::docs_url(self.error_code()),
         }
     }
@@ -225,6 +243,8 @@ impl HasErrorSuggestion for BitcoinError {
             }),
             BitcoinError::CoreError(e) => e.fix_action(),
             BitcoinError::InvalidInput(_) => None,
+            BitcoinError::TransactionError(_) => None,
+            BitcoinError::InsufficientFunds(_) => None,
             _ => None,
         }
     }

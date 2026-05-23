@@ -101,8 +101,8 @@ pub use csv_hash::chain_id::ChainId;
 /// ### Adding a new chain
 ///
 /// 1. Create a new `csv-{chain}` crate implementing `ChainBackend`
-/// 2. The chain ID is specified in the chain's configuration file
-
+/// 2. The chain ID is specified in the chain's configuration file.
+///
 /// Built-in chain IDs for the five supported chains.
 ///
 /// These are convenience constants — the protocol accepts any string ID.

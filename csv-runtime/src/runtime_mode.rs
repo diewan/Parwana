@@ -41,13 +41,12 @@ impl RuntimeMode {
         }
     }
 
-    /// Returns true if the mode enforces strict finality
+    /// Returns true if the mode enforces strict finality.
+    ///
+    /// Finality is NEVER optional across any runtime mode.
+    /// Degraded mode may allow RPC fallback but MUST NOT reduce finality requirements.
     pub fn enforces_strict_finality(&self) -> bool {
-        match self {
-            RuntimeMode::Normal => true,
-            RuntimeMode::Degraded => false,
-            RuntimeMode::Unsafe => false,
-        }
+        true // finality is never optional
     }
 
     /// Returns the maximum allowed retry count for this mode
@@ -362,11 +361,11 @@ mod tests {
         assert_eq!(RuntimeMode::Normal.max_retries(), 3);
 
         assert!(RuntimeMode::Degraded.allows_rpc_fallback());
-        assert!(!RuntimeMode::Degraded.enforces_strict_finality());
+        assert!(RuntimeMode::Degraded.enforces_strict_finality());
         assert_eq!(RuntimeMode::Degraded.max_retries(), 5);
 
         assert!(RuntimeMode::Unsafe.allows_rpc_fallback());
-        assert!(!RuntimeMode::Unsafe.enforces_strict_finality());
+        assert!(RuntimeMode::Unsafe.enforces_strict_finality());
         assert_eq!(RuntimeMode::Unsafe.max_retries(), 1);
         assert!(RuntimeMode::Unsafe.requires_operator_confirmation());
     }

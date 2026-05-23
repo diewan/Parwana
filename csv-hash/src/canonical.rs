@@ -96,7 +96,7 @@ pub fn to_canonical_cbor_with_tag<T: serde::Serialize>(
     value: &T,
     tag: u64,
 ) -> Result<Vec<u8>, CanonicalError> {
-    if tag < CBOR_TAG_RANGE_START || tag > CBOR_TAG_RANGE_END {
+    if !(CBOR_TAG_RANGE_START..=CBOR_TAG_RANGE_END).contains(&tag) {
         return Err(CanonicalError::SerializationError(format!(
             "CBOR tag {} is outside reserved range {}–{}",
             tag, CBOR_TAG_RANGE_START, CBOR_TAG_RANGE_END

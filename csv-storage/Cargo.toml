@@ -5,7 +5,6 @@ edition = "2024"
 description = "CSV Storage - Persistence abstractions and implementations"
 
 [dependencies]
-csv-core = { path = "../csv-core" }
 csv-hash = { path = "../csv-hash" }
 csv-proof = { path = "../csv-proof" }
 csv-protocol = { path = "../csv-protocol" }

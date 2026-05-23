@@ -1,4 +1,7 @@
 //! Celestia Adapter for CSV (Client-Side Validation)
+#![allow(clippy::let_and_return)]
+#![allow(clippy::collapsible_if)]
+#![allow(unexpected_cfgs)]
 //!
 //! This adapter provides **Data Availability (DA)** for large Sanad proofs,
 //! particularly STARK proofs that are too large for on-chain storage.

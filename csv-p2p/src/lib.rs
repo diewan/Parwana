@@ -1,3 +1,6 @@
+#![allow(unexpected_cfgs)]
+#![allow(clippy::let_and_return)]
+#![allow(clippy::collapsible_if)]
 //! P2P proof transport layer for the CSV protocol.
 //!
 //! This crate provides traits and implementations for distributing proof

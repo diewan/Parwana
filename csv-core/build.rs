@@ -3,6 +3,8 @@
 //! This ensures all version strings come from a single source of truth:
 //! the workspace Cargo.toml [workspace.package] version field.
 
+#![allow(clippy::use_debug)]
+
 use std::env;
 use std::fs;
 use std::path::Path;

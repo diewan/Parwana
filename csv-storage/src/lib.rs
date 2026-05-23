@@ -1,4 +1,5 @@
 //! CSV Storage - Persistence abstractions and implementations
+#![allow(clippy::collapsible_if)]
 //!
 //! This crate provides storage traits and concrete implementations for:
 //! - Replay database (deduplication, nullifier tracking)
@@ -11,6 +12,7 @@
 //! - InMemory (testing)
 
 #![warn(missing_docs)]
+#![allow(unexpected_cfgs)]
 
 pub mod traits;
 pub mod errors;

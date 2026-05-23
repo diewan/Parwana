@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 //! SQLite persistence for CSV Adapter seals and anchors
 
 #[cfg(feature = "sqlite")]

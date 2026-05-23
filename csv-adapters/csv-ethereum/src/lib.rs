@@ -1,4 +1,7 @@
 //! Ethereum Adapter for CSV (Client-Side Validation)
+#![allow(clippy::needless_return)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::collapsible_if)]
 //!
 //! This adapter implements the SealProtocol trait for Ethereum,
 //! using storage slots as single-use seals and LOG events for commitment publication.

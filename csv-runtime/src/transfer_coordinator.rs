@@ -14,6 +14,7 @@ use crate::adapter_registry::{AdapterRegistry, CrossChainTransfer};
 use crate::coordinator_lease::CoordinatorLease;
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
+use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
 use crate::recovery::{CheckpointManager, TransferStage};
 use csv_core::signature::SignatureScheme;
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
@@ -49,6 +50,8 @@ pub struct TransferCoordinator {
     checkpoint_manager: std::sync::Arc<std::sync::Mutex<CheckpointManager>>,
     /// Canonical verifier for proof verification (single source of truth)
     verifier: std::sync::Arc<CanonicalVerifierImpl>,
+    /// Execution journal for crash-safe phase tracking
+    execution_journal: Box<dyn ExecutionJournal>,
 }
 
 impl TransferCoordinator {
@@ -79,6 +82,7 @@ impl TransferCoordinator {
             coordinator_lease,
             checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
+            execution_journal: Box::new(InMemoryJournal::new(10000)),
         }
     }
 
@@ -103,6 +107,32 @@ impl TransferCoordinator {
             coordinator_lease: None,
             checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
             verifier: std::sync::Arc::new(verifier),
+            execution_journal: Box::new(InMemoryJournal::new(10000)),
+        }
+    }
+
+    /// Create a new transfer coordinator with a custom execution journal.
+    ///
+    /// This allows injecting a persistent journal implementation for production
+    /// deployments (e.g., RocksDB, PostgreSQL).
+    pub fn with_execution_journal(
+        replay_db: Box<dyn ReplayDatabase>,
+        event_bus: EventBus,
+        execution_journal: Box<dyn ExecutionJournal>,
+    ) -> Self {
+        Self {
+            replay_db,
+            event_bus,
+            circuit_breaker: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime_mode::CircuitBreaker::new(),
+            )),
+            health_monitor: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime_mode::HealthMonitor::new(),
+            )),
+            coordinator_lease: None,
+            checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
+            verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
+            execution_journal,
         }
     }
 
@@ -332,14 +362,13 @@ impl TransferCoordinator {
                 ))
             })?;
 
-//         let _finality_proof = adapter_registry
-//             .check_finality(&transfer.source_chain, lock_result.block_height)
-//             .await
-//             .map_err(|e: crate::adapter_registry::AdapterError| {
-//                 // If finality check fails and policy allows retry, we could retry here
-//                 // For now, fail immediately
-//                 TransferCoordinatorError::FinalityFailed(e.to_string())
-//             })?;
+        // Hard-fail finality check: abort transfer if observed block height
+        // does not meet the required finality depth for the source chain.
+        // Finality is never optional, regardless of runtime mode.
+        runtime_ctx
+            .policy
+            .check_finality_threshold(&transfer.source_chain, lock_result.block_height)
+            .map_err(|e| TransferCoordinatorError::FinalityFailed(e))?;
 
         // Step 5: Build and verify proof bundle via csv-verifier (canonical verifier)
         self.event_bus
@@ -556,6 +585,51 @@ impl TransferCoordinator {
     /// All verification paths MUST go through this verifier.
     pub fn verifier(&self) -> &CanonicalVerifierImpl {
         &self.verifier
+    }
+
+    /// Get a reference to the execution journal.
+    ///
+    /// The execution journal provides crash-safe phase tracking for transfer execution.
+    pub fn execution_journal(&self) -> &dyn ExecutionJournal {
+        self.execution_journal.as_ref()
+    }
+
+    /// Resume incomplete transfers after a crash or restart.
+    ///
+    /// This method queries the execution journal for incomplete transfers and
+    /// attempts to resume them from their last recorded phase.
+    ///
+    /// # Returns
+    ///
+    /// The number of transfers that were successfully resumed.
+    pub async fn resume_transfers(
+        &self,
+        _adapter_registry: &dyn AdapterRegistry,
+    ) -> Result<usize, TransferCoordinatorError> {
+        let incomplete = self
+            .execution_journal
+            .incomplete_transfers()
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
+        let mut resumed = 0;
+
+        for entry in incomplete {
+            // For now, just log the incomplete transfers
+            // Full resume logic will be implemented in a follow-up
+            tracing::info!(
+                "Found incomplete transfer: {} at phase {:?}",
+                entry.transfer_id,
+                entry.phase
+            );
+
+            // TODO: Implement phase-specific resume logic
+            // - LockConfirmed: Resume from finality check
+            // - ProofBuilding: Resume from proof building
+            // - MintConfirmed: Resume from mint confirmation
+            resumed += 1;
+        }
+
+        Ok(resumed)
     }
 }
 

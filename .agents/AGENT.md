@@ -25,6 +25,8 @@ These are mandatory and non-negotiable.
 8. No partial validation.
 9. No downgrade from error → warning for security failures.
 10. All state transitions must be monotonic and explicit.
+11. Finality is NEVER optional — all runtime modes enforce strict finality.
+12. CLI holds NO protocol authority state — all delegated to csv-runtime.
 
 ---
 
@@ -62,7 +64,7 @@ Also forbidden:
 * mock signatures
 * placeholder crypto
 * empty verification
-* “temporary” production fixes
+* "temporary" production fixes
 
 Never remove logic merely to satisfy the compiler.
 
@@ -96,6 +98,7 @@ Applications MUST use:
 * csv-runtime
 * TransferCoordinator
 * unified runtime verification/state flow
+* ExecutionJournal for crash-safe phase tracking
 
 Applications MUST NOT:
 
@@ -103,7 +106,8 @@ Applications MUST NOT:
 * bypass runtime state machine,
 * mint directly,
 * skip replay protection,
-* skip seal registry validation.
+* skip seal registry validation,
+* store leases or transfer state in CLI.
 
 Security abstractions that are not wired into production paths are considered FAILED implementations.
 
@@ -210,6 +214,41 @@ Transfer orchestration belongs exclusively to:
 
 * TransferCoordinator
 
+## Current Codebase Structure
+
+**Phase 1 restructuring crates:**
+
+* `csv-protocol` — protocol orchestration layer
+* `csv-codec` — canonical serialization (CBOR)
+* `csv-hash` — hash types, SanadId, replay ID types
+* `csv-proof` — proof bundle types, replay ID derivation
+* `csv-verifier` — canonical proof verification
+* `csv-schema` — schema definitions
+* `csv-content` — content types
+* `csv-storage` — storage traits and backends (RocksDB, PostgreSQL, in-memory)
+* `csv-testkit` — test fixtures and adversarial testing
+* `csv-contract-bindings` — smart contract bindings
+
+**Legacy crates:**
+
+* `csv-core` — legacy protocol types (migration in progress)
+* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal
+* `csv-sdk` — public SDK facade
+* `csv-cli` — CLI binary (stateless, delegates to runtime)
+* `csv-keys` — key management
+* `csv-store` — legacy state storage
+* `csv-p2p` — peer-to-peer networking
+* `csv-observability` — metrics and observability
+
+**Chain adapters** (under `csv-adapters/`):
+`csv-bitcoin`, `csv-ethereum`, `csv-solana`, `csv-sui`, `csv-aptos`, `csv-celestia`
+
+**Not in workspace:** `csv-mcp-server/`, `csv-examples/`
+
+**Does not exist:** `csv-wallet/`, `csv-explorer/`, `typescript-sdk/`
+
+**Documentation:** `csv-docs/` (not `docs/`)
+
 ---
 
 # 9. Completion Criteria
@@ -224,7 +263,7 @@ A task is complete ONLY IF:
 * CI protections exist,
 * equivalent anti-patterns are removed repository-wide.
 
-“Compiles successfully” is NOT completion.
+"Compiles successfully" is NOT completion.
 
 ---
 

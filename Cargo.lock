@@ -2987,8 +2987,12 @@ dependencies = [
  "csv-codec",
  "csv-hash",
  "csv-proof",
+ "ed25519-dalek",
  "hex",
  "log",
+ "pqcrypto-dilithium",
+ "pqcrypto-traits",
+ "secp256k1 0.28.2",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3007,6 +3011,7 @@ dependencies = [
  "csv-storage",
  "csv-verifier",
  "hex",
+ "rocksdb",
  "serde",
  "serde_json",
  "sqlx",
@@ -3109,7 +3114,6 @@ name = "csv-storage"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "csv-core",
  "csv-hash",
  "csv-proof",
  "csv-protocol",
@@ -3196,7 +3200,6 @@ name = "csv-verifier"
 version = "0.1.0"
 dependencies = [
  "csv-codec",
- "csv-core",
  "csv-hash",
  "csv-proof",
  "csv-protocol",

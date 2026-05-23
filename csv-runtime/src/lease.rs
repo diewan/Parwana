@@ -125,33 +125,29 @@ impl TransferLease {
     /// * `epoch` - The epoch counter (must be >= any previous epoch for this transfer)
     /// * `now` - The current system time
     /// * `duration` - How long the lease should be valid
-    ///
-    /// # Panics
-    ///
-    /// Panics if `duration` exceeds `MAX_LEASE_DURATION_SECS`.
     pub fn acquire(
         transfer_id: TransferId,
         runtime_id: RuntimeId,
         epoch: u64,
         now: SystemTime,
         duration: std::time::Duration,
-    ) -> Self {
-        assert!(
-            duration.as_secs() <= MAX_LEASE_DURATION_SECS,
-            "lease duration {}s exceeds maximum {}s",
-            duration.as_secs(),
-            MAX_LEASE_DURATION_SECS
-        );
+    ) -> Result<Self, LeaseValidationError> {
+        if duration.as_secs() > MAX_LEASE_DURATION_SECS {
+            return Err(LeaseValidationError::DurationExceeded {
+                requested_secs: duration.as_secs(),
+                max_secs: MAX_LEASE_DURATION_SECS,
+            });
+        }
         let expires_at = now
             .checked_add(duration)
-            .expect("lease expiration overflow");
-        Self {
+            .ok_or(LeaseValidationError::ExpirationOverflow)?;
+        Ok(Self {
             transfer_id,
             epoch,
             owner_runtime_id: runtime_id,
             acquired_at: now,
             expires_at,
-        }
+        })
     }
 
     /// Returns true if the lease is currently active relative to `now`.
@@ -188,7 +184,7 @@ impl TransferLease {
     ///
     /// This is used when a runtime renews its lease after a long-running
     /// operation. The epoch must increase to prevent stale lease adoption.
-    pub fn renew(&self, now: SystemTime, duration: std::time::Duration) -> Self {
+    pub fn renew(&self, now: SystemTime, duration: std::time::Duration) -> Result<Self, LeaseValidationError> {
         Self::acquire(
             self.transfer_id.clone(),
             self.owner_runtime_id,
@@ -274,6 +270,15 @@ pub enum LeaseValidationError {
         /// The runtime that owns this lease.
         owner: RuntimeId,
     },
+    /// Lease duration exceeds maximum allowed.
+    DurationExceeded {
+        /// Requested duration in seconds.
+        requested_secs: u64,
+        /// Maximum allowed duration in seconds.
+        max_secs: u64,
+    },
+    /// Lease expiration time overflow.
+    ExpirationOverflow,
 }
 
 impl core::fmt::Display for LeaseValidationError {
@@ -294,6 +299,18 @@ impl core::fmt::Display for LeaseValidationError {
                 f,
                 "Lease for transfer {:?} is owned by runtime {}, not the calling runtime",
                 transfer_id, owner
+            ),
+            Self::DurationExceeded {
+                requested_secs,
+                max_secs,
+            } => write!(
+                f,
+                "Lease duration {}s exceeds maximum {}s",
+                requested_secs, max_secs
+            ),
+            Self::ExpirationOverflow => write!(
+                f,
+                "Lease expiration time overflow"
             ),
         }
     }

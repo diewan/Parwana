@@ -1,7 +1,7 @@
-//! Browser localStorage implementation for CSV Wallet storage
+//! Browser localStorage implementation for CSV storage
 //!
 //! This module provides browser-specific localStorage persistence for the unified
-//! storage format, enabling csv-wallet to share data with csv-cli.
+//! storage format.
 
 use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use serde::{Deserialize, Serialize};
@@ -172,7 +172,7 @@ pub const WALLET_MNEMONIC_KEY: &str = "mnemonic_encrypted";
 
 /// Get wallet storage instance.
 pub fn wallet_storage() -> Result<LocalStorageManager, BrowserStorageError> {
-    LocalStorageManager::new("csv-wallet")
+    LocalStorageManager::new("csv-cli")
 }
 
 /// Get seal storage instance.

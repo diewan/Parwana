@@ -13,9 +13,21 @@ pub enum ProtocolError {
     #[error("Replay detected: {0}")]
     ReplayDetected(String),
 
+    /// Seal replay detected
+    #[error("Seal replay detected: {0}")]
+    SealReplay(String),
+
     /// Finality error
     #[error("Finality error: {0}")]
     FinalityError(String),
+
+    /// Finality not reached
+    #[error("Finality not reached: {0}")]
+    FinalityNotReached(String),
+
+    /// Inclusion proof failed
+    #[error("Inclusion proof failed: {0}")]
+    InclusionProofFailed(String),
 
     /// Serialization error
     #[error("Serialization error: {0}")]
@@ -32,6 +44,18 @@ pub enum ProtocolError {
     /// Codec error
     #[error("Codec error: {0}")]
     CodecError(String),
+
+    /// Signature verification failed
+    #[error("Signature verification failed: {0}")]
+    SignatureVerificationFailed(String),
+
+    /// Invalid input
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    /// Generic error with message
+    #[error("{0}")]
+    Generic(String),
 }
 
 impl From<csv_codec::CodecError> for ProtocolError {

@@ -1,7 +1,7 @@
 //! In-memory replay database (testing only).
 
 use async_trait::async_trait;
-use csv_core::cross_chain::HashEntry as CrossChainRegistryEntry;
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_proof::proof::ReplayId;
 use std::collections::HashMap;

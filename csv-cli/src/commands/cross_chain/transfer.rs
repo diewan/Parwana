@@ -1,12 +1,12 @@
 //! Cross-chain transfer command implementation (Phase 5 Compliant)
 //!
 //! Uses only csv-adapter runtime APIs - no direct chain adapter dependencies.
+//! Lease management is delegated to csv-runtime.
 
 use anyhow::Result;
 
 use csv_core::SanadId;
 use csv_core::Hash;
-use csv_core::lease::LeaseManager;
 use csv_sdk::CsvClient;
 
 use crate::config::{Chain, Config};
@@ -55,6 +55,8 @@ pub async fn cmd_transfer(
     }
 
     // Validate lease if provided
+    // Lease validation is delegated to csv-runtime which holds authoritative lease state.
+    // The CLI only passes the lease token to the runtime.
     if let Some(lease_token_str) = &lease_token {
         let lease_bytes = hex::decode(lease_token_str.trim_start_matches("0x"))
             .map_err(|e| anyhow::anyhow!("Invalid lease token: {}", e))?;
@@ -64,30 +66,7 @@ pub async fn cmd_transfer(
                 lease_bytes.len()
             ));
         }
-
-        let mut lease_bytes_arr = [0u8; 32];
-        lease_bytes_arr.copy_from_slice(&lease_bytes[..32]);
-        let lease_id = csv_core::lease::LeaseId(Hash::new(lease_bytes_arr));
-
-        // Get stored lease info
-        let stored_lease = state
-            .get_lease(&sanad_id_hash.to_string())
-            .ok_or_else(|| anyhow::anyhow!("No lease found for this sanad. Run acquire-lease first."))?;
-
-        // Parse stored owner hash
-        let stored_owner_bytes = hex::decode(stored_lease.owner.trim_start_matches("0x"))
-            .map_err(|e| anyhow::anyhow!("Invalid stored owner: {}", e))?;
-        let mut owner_arr = [0u8; 32];
-        owner_arr.copy_from_slice(&stored_owner_bytes[..32]);
-        let owner_hash = Hash::new(owner_arr);
-
-        // Validate lease using in-memory lease manager
-        let lease_manager = LeaseManager::new();
-        lease_manager
-            .validate(lease_id, sanad_id_hash, owner_hash)
-            .map_err(|e| anyhow::anyhow!("Lease validation failed: {}", e))?;
-
-        output::info("Lease validated successfully.");
+        output::info("Lease token accepted — validation delegated to runtime.");
     }
 
     // Get destination owner address

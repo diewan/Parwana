@@ -388,18 +388,19 @@ impl RocksDbEventStore {
     const POSITIONS_PREFIX: &'static str = "pos:";
 
     /// Build a key for storing an event.
+    /// Uses raw bytes for aggregate ID to avoid serde_json dependency.
     fn event_key(aggregate_id: &csv_core::SanadId, version: u64) -> String {
-        format!("{}{:?}:{}", Self::EVENTS_PREFIX, aggregate_id, version)
+        format!("{}{}:{:x}", Self::EVENTS_PREFIX, hex::encode(aggregate_id.as_bytes()), version)
     }
 
     /// Build a key for storing a snapshot.
     fn snapshot_key(aggregate_id: &csv_core::SanadId) -> String {
-        format!("{}{:?}", Self::SNAPSHOTS_PREFIX, aggregate_id)
+        format!("{}{}", Self::SNAPSHOTS_PREFIX, hex::encode(aggregate_id.as_bytes()))
     }
 
     /// Build a key for storing a position.
     fn position_key(aggregate_id: &csv_core::SanadId) -> String {
-        format!("{}{:?}", Self::POSITIONS_PREFIX, aggregate_id)
+        format!("{}{}", Self::POSITIONS_PREFIX, hex::encode(aggregate_id.as_bytes()))
     }
 }
 
@@ -585,19 +586,22 @@ impl EventStore for RocksDbEventStore {
 
     fn list_aggregates(&self) -> Result<Vec<csv_core::SanadId>, EventStoreError> {
         let mut aggregates = std::collections::HashSet::new();
+        let prefix = Self::EVENTS_PREFIX;
 
-        for item in self.db.prefix_iterator(Self::EVENTS_PREFIX.as_bytes()) {
+        for item in self.db.prefix_iterator(prefix.as_bytes()) {
             let (key, _) = item.map_err(|e| EventStoreError::Io(e.to_string()))?;
             let key_str = String::from_utf8(key.to_vec())
                 .map_err(|e| EventStoreError::Io(e.to_string()))?;
-            // Extract aggregate ID from key format "evt:{aggregate_id}:version"
-            if let Some(rest) = key_str.strip_prefix(Self::EVENTS_PREFIX) {
+            // Extract aggregate ID from key format "evt:{hex_aggregate_id}:version"
+            if let Some(rest) = key_str.strip_prefix(prefix) {
                 if let Some(colon_pos) = rest.find(':') {
-                    let agg_str = &rest[..colon_pos];
-                    // Parse the aggregate ID from the string representation
-                    // This is a simplification - in production you'd use a proper key scheme
-                    if let Ok(agg) = serde_json::from_str::<csv_core::SanadId>(agg_str) {
-                        aggregates.insert(agg);
+                    let hex_id = &rest[..colon_pos];
+                    if let Ok(bytes) = hex::decode(hex_id) {
+                        if bytes.len() == 32 {
+                            let mut array = [0u8; 32];
+                            array.copy_from_slice(&bytes);
+                            aggregates.insert(csv_core::SanadId::new(array));
+                        }
                     }
                 }
             }

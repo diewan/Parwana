@@ -413,7 +413,6 @@ This prevents Byzantine-destination attacks where a malicious destination adapte
 returns a `MintReceipt` claiming success. The coordinator currently trusts this. Before marking a transfer complete, the coordinator must independently verify the mint transaction is present on-chain — not via the same adapter instance that performed the mint, but via a quorum verification call against independent RPC nodes.
 The coordinator currently trusts the adapter's `MintReceipt`. This invariant is presented as the target security model, not current behavior.
 
-
 ### Observability
 
 The observability stack tracks RPC trust metrics:
@@ -448,11 +447,80 @@ When reviewing code changes, verify:
 
 ---
 
+## Invariant: Finality Is Never Optional
+
+**Rule:** All runtime modes (Normal, Degraded, Unsafe) MUST enforce strict finality.
+
+**Prohibited:**
+
+- Setting `enforces_strict_finality()` to `false` in any mode
+- Using placeholder finality proofs (e.g., `FinalityProof::new(vec![0u8; 32], ...)`)
+- Commenting out finality checks with `// TODO` or `// FIXME`
+
+**Correct Pattern:**
+
+```rust
+// All modes enforce strict finality
+pub fn enforces_strict_finality(&self) -> bool {
+    true // finality is never optional
+}
+```
+
+**Security Impact:** Bypassing finality enables double-spend attacks where a transfer is minted before the source lock is irreversibly confirmed.
+
+---
+
+## Invariant: CLI Holds No Protocol Authority State
+
+**Rule:** The CLI (`csv-cli`) MUST NOT store leases, transfers, or any protocol authority state.
+
+**Prohibited:**
+
+- `UnifiedStateManager` storing leases in-memory
+- CLI calling `store_lease()` or `get_lease()`
+- CLI implementing transfer execution logic
+
+**Correct Pattern:**
+
+```rust
+// CLI is a stateless client — all protocol authority lives in csv-runtime
+let lease_token = csv_runtime_client.acquire_lease(...).await?;
+// Display the token; do NOT store in CLI state
+```
+
+**Security Impact:** CLI authority state breaks the authority model and enables race conditions between CLI and runtime.
+
+---
+
+## Invariant: Execution Journal Provides Crash-Safe Recovery
+
+**Rule:** Every transfer phase transition MUST be recorded in the execution journal before and after execution.
+
+**Prohibited:**
+
+- Executing phases without journal entries
+- Crash between phases without recovery path
+- Using in-memory-only state for transfer coordination
+
+**Correct Pattern:**
+
+```rust
+// Record BEFORE phase execution
+journal.record(TransferPhaseEntry { phase: ..., outcome: PhaseOutcome::Entered, .. })?;
+// Execute phase
+// Record AFTER phase execution
+journal.record(TransferPhaseEntry { phase: ..., outcome: PhaseOutcome::Completed, .. })?;
+```
+
+**Security Impact:** Without crash-safe journaling, crashes between phases cause duplicate mints or lost transfers.
+
+---
+
 ## Questions?
 
 If you're unsure whether your change violates an invariant:
 
-1. Read the relevant section of `docs/PLAN.md`
+1. Read the relevant section of `csv-docs/PLAN.md`
 2. Ask in #protocol-security channel before merging
 
 **When in doubt, ask. Security is everyone's responsibility.**

@@ -1,4 +1,7 @@
 //! Bitcoin Adapter for CSV (Client-Side Validation)
+#![allow(clippy::needless_return)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::collapsible_if)]
 //!
 //! This adapter implements the SealProtocol trait for Bitcoin,
 //! using UTXOs as single-use seals and Tapret/Opret for commitment publication.

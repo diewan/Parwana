@@ -35,7 +35,6 @@ This security policy applies to all crates in the CSV Protocol workspace:
 - csv-runtime
 - csv-sdk
 - csv-cli
-- csv-wallet
 - csv-keys
 - csv-store
 - csv-p2p

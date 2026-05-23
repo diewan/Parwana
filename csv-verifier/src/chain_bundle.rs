@@ -4,7 +4,7 @@
 //! Composing inclusion + finality into a bundle MUST use [`verify_chain_proof_bundle`]
 //! so protocol semantics stay in csv-verifier, not adapter `ops.rs`.
 
-use csv_core::backend::{ChainOpError, ChainProofProvider};
+use csv_protocol::backend::{ChainOpError, ChainProofProvider};
 use csv_hash::Hash;
 use csv_proof::proof::{FinalityProof, InclusionProof};
 use thiserror::Error;

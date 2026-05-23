@@ -6,11 +6,14 @@ use crate::error::CodecError;
 
 /// Current CSV protocol version
 pub const PROTOCOL_VERSION_MAJOR: u16 = 1;
+#[allow(missing_docs)]
 pub const PROTOCOL_VERSION_MINOR: u16 = 0;
+#[allow(missing_docs)]
 pub const PROTOCOL_VERSION_PATCH: u16 = 0;
 
 /// Protocol version tuple
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(missing_docs)]
 pub struct ProtocolVersion {
     pub major: u16,
     pub minor: u16,

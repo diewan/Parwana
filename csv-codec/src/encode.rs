@@ -3,7 +3,6 @@
 //! This module provides encoding functions that enforce canonical serialization rules.
 
 use crate::byte_order::{to_le_bytes, to_le_bytes_32};
-use crate::error::CodecError;
 
 /// Encode a u64 as little-endian bytes
 pub fn encode_u64(value: u64) -> [u8; 8] {

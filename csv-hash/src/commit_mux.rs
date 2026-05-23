@@ -11,7 +11,6 @@ use std::vec::Vec;
 
 use crate::Hash;
 use crate::csv_tagged_hash;
-use crate::canonical::to_canonical_cbor;
 
 /// Protocol identifier (32 bytes)
 pub type ProtocolId = [u8; 32];
@@ -195,7 +194,7 @@ impl CommitMux {
                 (idx - 1, true) // Sibling is to the left
             };
 
-            if sibling_idx < level.len() as usize {
+            if sibling_idx < level.len() {
                 branch.push(MerkleBranchNode {
                     hash: level[sibling_idx],
                     is_left,

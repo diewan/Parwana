@@ -189,6 +189,7 @@ pub enum HashParseError {
 
 /// Exhaustive enum for domain-separated hashing (RFC-0002).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[allow(missing_docs)]
 pub enum HashDomain {
     // Seal domains
     BitcoinSealV1,
@@ -276,6 +277,7 @@ impl HashDomain {
 
 /// Domain category for grouping related hash domains (RFC-0002).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(missing_docs)]
 pub enum DomainCategory {
     Seal,
     Commitment,

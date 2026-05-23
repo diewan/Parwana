@@ -1,7 +1,6 @@
-//! Application state types for CSV Wallet and CLI.
+//! Application state types for CSV CLI.
 //!
-//! This module provides the core state types used by both
-//! csv-wallet (browser) and csv-cli (desktop) applications.
+//! This module provides the core state types used by csv-cli.
 //!
 //! # Module Structure
 //!

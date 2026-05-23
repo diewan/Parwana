@@ -2,15 +2,31 @@
 
 Chain-agnostic client-side validation protocol for cross-chain seal verification.
 
-## Workspace Crates
+## Workspace Crates (20 members)
+
+**Phase 1 restructuring crates (new architecture):**
 
 | Crate | Description |
 |-------|-------------|
-| [csv-core](csv-core/) | Core protocol types, traits, and proof system |
-| [csv-runtime](csv-runtime/) | Runtime orchestration, lease management, replay detection |
+| [csv-protocol](csv-protocol/) | Protocol orchestration layer |
+| [csv-codec](csv-codec/) | Canonical serialization (CBOR) |
+| [csv-hash](csv-hash/) | Hash types, SanadId, replay ID types |
+| [csv-proof](csv-proof/) | Proof bundle types, replay ID derivation |
+| [csv-verifier](csv-verifier/) | Canonical proof verification |
+| [csv-schema](csv-schema/) | Schema definitions |
+| [csv-content](csv-content/) | Content types |
+| [csv-storage](csv-storage/) | Storage traits and backends (RocksDB, PostgreSQL, in-memory) |
+| [csv-testkit](csv-testkit/) | Test fixtures and adversarial testing |
+| [csv-contract-bindings](csv-contract-bindings/) | Smart contract bindings |
+
+**Legacy crates (being refactored/deprecated):**
+
+| Crate | Description |
+|-------|-------------|
+| [csv-core](csv-core/) | Core protocol types, traits, and proof system (migration in progress) |
+| [csv-runtime](csv-runtime/) | Runtime orchestration, lease management, replay detection, execution journal |
 | [csv-sdk](csv-sdk/) | Unified SDK — single entry point for all operations |
-| [csv-cli](csv-cli/) | CLI tool for seals, proofs, sanads, and wallets |
-| [csv-wallet](csv-wallet/) | Multi-chain wallet with Dioxus UI |
+| [csv-cli](csv-cli/) | CLI tool (stateless — delegates to csv-runtime) |
 | [csv-keys](csv-keys/) | Secure key storage with BIP-39/BIP-44 support |
 | [csv-store](csv-store/) | Persistence layer (SQLite, browser storage) |
 | [csv-p2p](csv-p2p/) | P2P proof transport via Nostr |
@@ -54,15 +70,22 @@ CXXFLAGS="-include cstdint" cargo test --workspace --all-features
 
 ```
 csv-sdk (public facade)
-  └── csv-runtime (orchestration)
-        └── csv-core (protocol types & traits)
-              ├── csv-bitcoin
-              ├── csv-ethereum
-              ├── csv-solana
-              ├── csv-sui
-              ├── csv-aptos
-              └── csv-celestia
+  └── csv-runtime (orchestration + execution journal)
+        └── csv-protocol / csv-core (protocol types & traits)
+              ├── csv-adapters/csv-bitcoin
+              ├── csv-adapters/csv-ethereum
+              ├── csv-adapters/csv-solana
+              ├── csv-adapters/csv-sui
+              ├── csv-adapters/csv-aptos
+              └── csv-adapters/csv-celestia
 ```
+
+## Notes
+
+- `csv-wallet`, `csv-explorer/*`, and `typescript-sdk/` do not exist in the current codebase.
+- All documentation is in `csv-docs/` (not `docs/`).
+- Finality is NEVER optional — all runtime modes enforce strict finality.
+- CLI holds NO protocol authority state (leases, transfers) — all delegated to csv-runtime.
 
 ## License
 

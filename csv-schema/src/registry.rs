@@ -48,6 +48,7 @@ pub enum FieldConstraint {
 
 /// Schema field definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct SchemaField {
     /// Field name
     pub name: String,
@@ -63,6 +64,7 @@ pub struct SchemaField {
 
 /// Compiled schema (internal representation)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct CompiledSchema {
     /// Schema name
     pub name: String,
@@ -78,6 +80,7 @@ pub struct CompiledSchema {
 
 /// Schema definition (user-facing)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct Schema {
     /// Schema name
     pub name: String,
@@ -89,6 +92,7 @@ pub struct Schema {
 
 /// Schema diff operation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub enum SchemaDiffOp {
     /// Field added
     FieldAdded {

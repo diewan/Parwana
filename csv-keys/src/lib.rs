@@ -1,4 +1,5 @@
 //! CSV Adapter Keystore — Secure key storage with BIP-39/BIP-44 support.
+#![allow(clippy::collapsible_if)]
 //!
 //! This crate provides secure cryptographic key management for the CSV Adapter,
 //! implementing industry standards:
@@ -41,6 +42,7 @@
 //! ```
 
 #![warn(missing_docs)]
+#![allow(unexpected_cfgs)]
 
 pub mod bip39;
 pub mod bip44;

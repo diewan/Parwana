@@ -42,11 +42,13 @@
 //! here could allow fraudulent proofs to be accepted, leading to
 //! unauthorized state transitions or double-spends.
 
-use csv_core::error::{ProtocolError, Result};
-use csv_core::mcp::VerificationLevel;
+use csv_protocol::error::{ProtocolError, Result as ProtocolResult};
+use csv_protocol::verification::VerificationLevel;
 use csv_proof::proof::ProofBundle;
-use csv_core::signature::{Signature, SignatureScheme, verify_signatures};
+use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};
 use serde::Serialize;
+
+type Result<T> = std::result::Result<T, ProtocolError>;
 
 /// Machine-readable error code for verification failures.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -995,11 +997,11 @@ fn verify_bundle_signatures(bundle: &ProofBundle, scheme: SignatureScheme) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_core::dag::{DAGNode, DAGSegment};
+    use csv_hash::dag::{DAGNode, DAGSegment};
     use csv_hash::Hash;
     use csv_proof::proof::{FinalityProof, InclusionProof};
     use csv_hash::seal::{CommitAnchor, SealPoint};
-    use csv_core::signature::SignatureScheme;
+    use csv_protocol::signature::SignatureScheme;
 
     fn make_secp256k1_signature_bytes(message: &[u8; 32]) -> Vec<u8> {
         use secp256k1::{Message, Secp256k1, SecretKey};

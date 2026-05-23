@@ -14,7 +14,7 @@ pub enum SchemaError {
 }
 
 /// Validate data against schema
-pub fn validate_schema<T>(data: &T) -> Result<(), SchemaError> {
+pub fn validate_schema<T>(_data: &T) -> Result<(), SchemaError> {
     // Placeholder: actual schema validation implementation
     Ok(())
 }
