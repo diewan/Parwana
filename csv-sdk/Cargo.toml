@@ -1,0 +1,132 @@
+[package]
+name = "csv-sdk"
+version = "0.1.0"
+edition = "2024"
+description = "Unified SDK for CSV (Client-Side Validation) protocol — single entry point for all CSV operations"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-sdk"
+readme = "README.md"
+keywords = ["blockchain", "cryptography", "csv-validation", "cross-chain", "smart-contracts"]
+categories = ["cryptography::cryptocurrencies", "authentication"]
+publish = true
+rust-version = "1.93"
+
+[lib]
+doctest = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Core — always included
+csv-core = { path = "../csv-core", default-features = false, features = ["std"] }
+csv-verifier = { path = "../csv-verifier" }
+csv-p2p = { path = "../csv-p2p", optional = true }
+
+# Chain adapters — optional, enabled via feature flags
+# csv-bitcoin compiles for all targets
+csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true }
+# csv-ethereum, csv-sui, csv-aptos, csv-solana depend on C libraries (c-kzg, etc.)
+# that don't compile for wasm32 — see target-specific dependencies below
+
+# Persistence
+csv-store = { path = "../csv-store", optional = true }
+csv-storage = { path = "../csv-storage", optional = true }
+csv-runtime = { path = "../csv-runtime", optional = true }
+
+# Key management
+csv-keys = { path = "../csv-keys", optional = true }
+
+# Async runtime
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"], optional = true }
+async-std = { version = "1", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { workspace = true, features = ["Window", "Document", "HtmlElement", "console"], optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+
+# Serialization / utilities
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4.3"
+bs58 = "0.5"
+sha2 = "0.10"
+sha3 = "0.10"
+log = "0.4"
+toml = "0.8"
+dirs = { version = "5.0", optional = true }
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"], optional = true }
+sqlx = { version = "0.8.2", features = ["sqlite", "_rt-tokio", "tls-rustls"], optional = true }
+
+# Optional: bring in chain-specific heavy deps when full chain support is needed
+bitcoin = { version = "0.32", features = ["serde", "rand"], optional = true }
+ed25519-dalek = { version = "2.0", features = ["rand_core"], optional = true }
+bip32 = { version = "0.5", features = ["std", "mnemonic"], optional = true }
+solana-sdk = { version = "3.0", optional = true }
+
+# Chain adapters that depend on C libraries (c-kzg, etc.) which don't compile for wasm32
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }
+csv-sui = { path = "../csv-adapters/csv-sui", optional = true }
+csv-aptos = { path = "../csv-adapters/csv-aptos", optional = true }
+csv-solana = { path = "../csv-adapters/csv-solana", optional = true }
+
+[features]
+default = ["std", "tokio", "native"]
+std = ["csv-core/std"]
+
+# Chain features
+bitcoin = ["dep:csv-bitcoin", "dep:bitcoin"]
+ethereum = ["dep:csv-ethereum", "csv-ethereum/rpc"]
+sui = ["dep:csv-sui", "csv-sui/rpc"]
+aptos = ["dep:csv-aptos", "csv-aptos/rpc"]
+solana = ["dep:csv-solana", "csv-solana/rpc"]
+all-chains = ["bitcoin", "ethereum", "sui", "aptos", "solana"]
+
+# RPC features for chain queries
+rpc = [
+    "bitcoin",
+    "ethereum",
+    "csv-bitcoin/rpc",
+    "csv-bitcoin/signet-rest",
+    "csv-ethereum/rpc",
+]
+
+# Runtime features
+tokio = ["dep:tokio"]
+async-std = ["dep:async-std"]
+wasm = ["dep:wasm-bindgen-futures", "dep:web-sys", "dep:gloo-timers", "csv-core/std"]
+
+# Storage features
+sqlite = ["dep:csv-store", "dep:sqlx", "dep:chrono"]
+in-memory = []
+
+# Cross-chain persistence (SC-02)
+cross-chain-persist = ["dep:csv-storage", "dep:sqlx", "dep:chrono"]
+
+# Wallet / crypto
+wallet = ["dep:csv-keys", "dep:ed25519-dalek", "dep:bip32"]
+
+# P2P proof delivery
+p2p = ["dep:csv-p2p"]
+
+# Native-only features (require non-wasm32 target)
+# Enables dirs (filesystem access), tokio full runtime, and chain adapters
+# that depend on C libraries (c-kzg, etc.)
+native = ["dep:dirs"]
+
+# Experimental features
+experimental = ["csv-core/experimental"]
+
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"
+csv-store = { path = "../csv-store" }
+
+[lints]
+workspace = true

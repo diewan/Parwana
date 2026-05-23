@@ -1,0 +1,71 @@
+//! Cross-Chain Subscriptions Example
+//!
+//! This example demonstrates how to create and manage subscription sanads
+//! that can be transferred across chains.
+//!
+//! Run with: `cargo run --example subscriptions --features "all-chains,tokio"`
+
+use csv_sdk::prelude::*;
+
+fn main() -> Result<()> {
+    println!("=== CSV Adapter: Cross-Chain Subscriptions Demo ===\n");
+
+    // Initialize client with all chains
+    let rt = tokio::runtime::Runtime::new()?;
+    let client = rt.block_on(async {
+        CsvClient::builder()
+            .with_all_chains()
+            .with_store_backend(StoreBackend::InMemory)
+            .build()
+    })?;
+
+    println!("✓ Client initialized with all chains\n");
+
+    // Create a subscription sanad on Bitcoin
+    println!("Creating subscription sanad on Bitcoin...");
+    let commitment = Hash::from([1u8; 32]);
+
+    let sanad =
+        rt.block_on(async { client.sanads().create(commitment, ChainId::new("bitcoin")) })?;
+
+    println!("✓ Created sanad: {:?}\n", sanad.id);
+
+    // Query the sanad
+    println!("Querying sanad status...");
+    let found_sanad = rt.block_on(async { client.sanads().get(&sanad.id) })?;
+    if let Some(found_sanad) = found_sanad {
+        println!("✓ Found sanad: {:?}\n", found_sanad.id);
+    }
+
+    // Simulate cross-chain transfer to Ethereum
+    println!("Initiating cross-chain transfer to Ethereum...");
+    println!("  1. Locking sanad on Bitcoin...");
+    println!("  2. Generating proof bundle...");
+    println!("  3. Verifying on Ethereum...");
+    println!("  4. Minting destination sanad...");
+
+    let transfer_id = rt.block_on(async {
+        client
+            .transfers()
+            .cross_chain(sanad.id.clone(), ChainId::new("ethereum"))
+            .to_address("0x1234567890abcdef".to_string())
+            .execute()
+            .await
+    })?;
+
+    println!("\n✓ Transfer initiated: {}\n", transfer_id);
+
+    // Check status
+    let status = rt.block_on(async { client.transfers().status(&transfer_id) })?;
+    println!("Transfer status: {:?}", status);
+
+    println!("\n=== Demo Complete ===");
+    println!("In production, this would:");
+    println!("  - Broadcast lock transaction on Bitcoin");
+    println!("  - Wait for finality (6 confirmations)");
+    println!("  - Generate inclusion proof");
+    println!("  - Submit proof to Ethereum contract");
+    println!("  - Mint equivalent sanad on Ethereum");
+
+    Ok(())
+}

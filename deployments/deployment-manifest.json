@@ -1,0 +1,59 @@
+{
+  "manifest_version": "1.0.0",
+  "protocol_version": "0.1.0",
+  "network": "testnet",
+  "updated_at": "2026-05-21T00:00:00Z",
+  "deployments": {
+    "ethereum": {
+      "network": "sepolia",
+      "chain_id": 11155111,
+      "deployment_block": "10854941",
+      "deployment_timestamp": "",
+      "verified": false,
+      "contracts": [
+        {
+          "name": "CSVLock",
+          "address": "0xac1E3Bd5FB767C6B6b23Ac19309FF3d1739D0fD2",
+          "deployment_tx": "",
+          "block_number": "10854941",
+          "bytecode_hash": "",
+          "verified": false,
+          "constructor_args": {
+            "mintContract": "0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820"
+          }
+        },
+        {
+          "name": "CSVMint",
+          "address": "0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820",
+          "deployment_tx": "",
+          "block_number": "10854941",
+          "bytecode_hash": "",
+          "verified": false,
+          "constructor_args": {
+            "lockContract": "0xac1E3Bd5FB767C6B6b23Ac19309FF3d1739D0fD2",
+            "verifier": ""
+          }
+        }
+      ]
+    },
+    "solana": {
+      "network": "devnet",
+      "program_id": "",
+      "verified": false
+    },
+    "sui": {
+      "network": "testnet",
+      "package_id": "",
+      "verified": false
+    },
+    "aptos": {
+      "network": "testnet",
+      "module_address": "",
+      "verified": false
+    }
+  },
+  "checksums": {
+    "abi_constitution": "docs/contracts/ABI_CONSTITUTION.md",
+    "canonical_events": "csv-core/src/events.rs"
+  }
+}

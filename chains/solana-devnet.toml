@@ -1,0 +1,27 @@
+chain_id = "solana-devnet"
+chain_name = "solana-devnet"
+default_network = "testnet"
+rpc_endpoints = ["https://api.devnet.solana.com"]
+block_explorer_urls = ["https://explorer.solana.com/?cluster=devnet"]
+start_block = 0
+
+[capabilities]
+state_model = "Account"
+finality_depth = 32
+deterministic_finality = false
+proof_model = "SlotConfirmation"
+replay_protection = "PdaClosed"
+native_single_use_semantics = true
+reorg_risk = "Low"
+max_safe_reorg_depth = 32
+supports_light_client_proofs = false
+supports_state_proofs = false
+supports_transaction_inclusion_proofs = true
+supports_offline_verification = false
+supports_zk_proofs = false
+chain_role = "Settlement"
+
+[capabilities.finality_model.OptimisticWithSlotExpiry]
+slots = 32
+
+[custom_settings]

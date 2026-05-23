@@ -1,0 +1,12 @@
+[package]
+name = "csv-contract-bindings"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Contract Bindings - Type-safe smart contract ABI bindings for all supported chains"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }

@@ -1,0 +1,43 @@
+# Node Modules
+node_modules/
+dist/
+coverage/
+
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.qwen/
+.vscode/
+*~
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+
+# Build artifacts
+target/
+
+# Foundry build artifacts (Ethereum)
+**/out/
+**/cache/
+**/broadcast/
+**/lib/forge-std/
+**/foundry.toml.bak
+**/forge-std/
+
+# Sui Move build artifacts
+**/Move.lock
+**/build/
+
+# Chain specific
+.aptos/
+
+# Solana
+test-ledger/

@@ -1,0 +1,93 @@
+[package]
+name = "csv-keys"
+version = "0.1.0"
+edition = "2024"
+description = "Secure key storage for CSV Adapter with BIP-39/BIP-44 support"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-keystore"
+readme = "README.md"
+keywords = ["keystore", "bip39", "bip44", "crypto", "wallet"]
+categories = ["cryptography", "cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[dependencies]
+csv-core = { path = "../csv-core", default-features = false, features = ["std"] }
+
+# BIP-39 mnemonic support
+bip39 = { version = "2.0", features = ["rand", "zeroize"] }
+
+# BIP-32/BIP-44 HD wallet derivation
+bip32 = { version = "0.5", features = ["secp256k1-ffi", "alloc"], optional = true }
+
+# Encryption
+aes-gcm = "0.10"
+aes = "0.8"
+cipher = "0.4"
+ctr = "0.9"
+
+# KDF (Key Derivation)
+scrypt = { version = "0.11", default-features = false }
+argon2 = { version = "0.5", optional = true }
+
+# Memory safety
+zeroize = { version = "1.7", features = ["derive", "alloc", "zeroize_derive"] }
+
+# Random number generation
+rand = { version = "0.8", features = ["std", "std_rng"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.6", features = ["v4", "serde", "js"] }
+
+# Cryptographic primitives
+sha2 = "0.10"
+sha3 = "0.10"
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false }
+
+# Encoding
+hex = "0.4.3"
+base64 = "0.22"
+bs58 = { version = "0.5", optional = true }
+
+# Secp256k1 for Bitcoin/Ethereum
+secp256k1 = { version = "0.29", features = ["global-context", "rand-std"], optional = true }
+
+# Bitcoin library for address derivation
+bitcoin = { version = "0.32", optional = true }
+
+# Blake2 for Sui address hashing
+blake2 = { version = "0.10", optional = true }
+
+# Ed25519 for Sui/Aptos/Solana
+ed25519-dalek = { version = "2.0", features = ["rand_core"], optional = true }
+
+# Browser support (optional)
+web-sys = { workspace = true, features = ["Window", "Storage"], optional = true }
+js-sys = { version = "0.3", optional = true }
+
+# Error handling
+thiserror = "1.0"
+
+# Directory resolution for file keystore (native-only)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = "5.0"
+
+[features]
+default = ["bip44", "secp256k1"]
+bip44 = ["bip32", "secp256k1", "ed25519-dalek", "bitcoin", "blake2", "bs58"]
+secp256k1 = ["dep:secp256k1"]
+ed25519 = ["ed25519-dalek"]
+bitcoin = ["dep:bitcoin"]
+blake2 = ["dep:blake2"]
+wasm = ["getrandom/js", "argon2", "web-sys", "js-sys"]
+production = ["argon2"]
+
+[dev-dependencies]
+tempfile = "3.9"

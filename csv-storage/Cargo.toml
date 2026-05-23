@@ -1,0 +1,33 @@
+[package]
+name = "csv-storage"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Storage - Persistence abstractions and implementations"
+
+[dependencies]
+csv-core = { path = "../csv-core" }
+csv-hash = { path = "../csv-hash" }
+csv-proof = { path = "../csv-proof" }
+csv-protocol = { path = "../csv-protocol" }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4.3"
+tokio = { version = "1", features = ["rt", "macros", "sync"] }
+rocksdb = { version = "0.22", optional = true }
+sqlx = { version = "0.8", optional = true, features = ["postgres", "_rt-tokio", "tls-rustls", "chrono"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[[test]]
+name = "rocksdb_replay"
+path = "tests/rocksdb_replay.rs"
+required-features = ["rocksdb"]
+
+[features]
+default = ["rocksdb"]
+rocksdb = ["dep:rocksdb"]
+postgres = ["dep:sqlx"]

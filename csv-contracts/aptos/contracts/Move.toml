@@ -1,0 +1,11 @@
+[package]
+name = "csv-seal-v2"
+version = "1.0.0"
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "testnet" }
+
+[addresses]
+csv_seal = "0x4e8e35b340112baca1ca18e422da4c7d447d17fa560fbfd0e0c24de3de239b1b"
+aptos_framework = "0x1"
+CSV = "0x4e8e35b340112baca1ca18e422da4c7d447d17fa560fbfd0e0c24de3de239b1b"  # Will be set to deploying account address

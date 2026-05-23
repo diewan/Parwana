@@ -1,0 +1,21 @@
+[package]
+name = "csv-testkit"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Testkit - Testing utilities and shared fixtures"
+
+[dependencies]
+csv-core = { path = "../csv-core" }
+csv-protocol = { path = "../csv-protocol" }
+csv-hash = { path = "../csv-hash" }
+csv-codec = { path = "../csv-codec" }
+csv-proof = { path = "../csv-proof" }
+csv-verifier = { path = "../csv-verifier" }
+csv-storage = { path = "../csv-storage" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[[test]]
+name = "adversarial_integration"
+path = "tests/adversarial_integration.rs"

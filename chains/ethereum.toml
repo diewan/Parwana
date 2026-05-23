@@ -1,0 +1,29 @@
+# Ethereum Sepolia testnet — contract addresses updated by csv-contracts/ethereum/scripts/deploy.sh
+chain_id = "ethereum-sepolia"
+chain_name = "Ethereum Sepolia"
+default_network = "testnet"
+rpc_endpoints = ["https://rpc.sepolia.org"]
+block_explorer_urls = ["https://sepolia.etherscan.io"]
+start_block = 0
+
+[capabilities]
+state_model = "Account"
+finality_model = "FinalizedCheckpoint"
+finality_depth = 2
+deterministic_finality = true
+proof_model = "MerklePatricia"
+replay_protection = "SmartContractNullifier"
+native_single_use_semantics = false
+reorg_risk = "Medium"
+max_safe_reorg_depth = 12
+supports_light_client_proofs = true
+supports_state_proofs = true
+supports_transaction_inclusion_proofs = true
+supports_offline_verification = true
+supports_zk_proofs = true
+chain_role = "Settlement"
+
+[custom_settings]
+chain_id_numeric = 11155111
+lock_contract_address = "0xac1E3Bd5FB767C6B6b23Ac19309FF3d1739D0fD2"
+mint_contract_address = "0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820"

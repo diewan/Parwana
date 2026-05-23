@@ -1,0 +1,10 @@
+{
+  "transition_dag": [],
+  "signatures": [],
+  "seal_ref": {
+    "seal_id": "invalid",
+    "chain": "ethereum"
+  },
+  "inclusion_proof": null,
+  "finality_proof": null
+}

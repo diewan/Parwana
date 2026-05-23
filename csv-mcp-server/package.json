@@ -1,0 +1,50 @@
+{
+  "name": "@csv-adapter/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for CSV Protocol — enables AI agents to operate CSV sanads workflows",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "csv-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "lint": "eslint src/ --ext .ts"
+  },
+  "keywords": [
+    "mcp",
+    "csv",
+    "client-side-validation",
+    "ai",
+    "agent",
+    "blockchain",
+    "cross-chain"
+  ],
+  "author": "Amin Razavi",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/client-side-validation/csv-adapter"
+  },
+  "bugs": {
+    "url": "https://github.com/client-side-validation/csv-adapter/issues"
+  },
+  "homepage": "https://github.com/client-side-validation/csv-adapter",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "tsx": "^4.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

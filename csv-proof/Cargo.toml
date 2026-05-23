@@ -1,0 +1,14 @@
+[package]
+name = "csv-proof"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Proof - Proof types, proof composition, proof validation primitives, proof DAGs"
+
+[dependencies]
+csv-hash = { path = "../csv-hash" }
+csv-codec = { path = "../csv-codec" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1"
+async-trait = "0.1"
+log = "0.4"
+hex = "0.4"

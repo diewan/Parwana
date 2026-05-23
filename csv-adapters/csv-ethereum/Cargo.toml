@@ -1,0 +1,75 @@
+[package]
+name = "csv-ethereum"
+version = "0.1.0"
+edition = "2024"
+description = "Ethereum adapter for CSV (Client-Side Validation) with storage slot seals and light-client proofs"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-ethereum"
+readme = "README.md"
+keywords = ["ethereum", "blockchain", "cryptography", "csv-validation", "nullifier"]
+categories = ["cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+csv-core = { path = "../../csv-core" }
+csv-verifier = { path = "../../csv-verifier" }
+csv-proof = { path = "../../csv-proof" }
+csv-hash = { path = "../../csv-hash" }
+csv-store = { path = "../../csv-store", optional = true }
+async-trait.workspace = true
+rand = "0.8"
+serde = { workspace = true, features = ["derive"] }
+thiserror = "1.0"
+hex = "0.4.3"
+sha2 = "0.10"
+sha3 = "0.10"
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+secp256k1 = { version = "0.28", features = ["global-context", "rand-std", "recovery"] }
+log = "0.4"
+alloy-primitives = "1.5"
+alloy-rlp = "0.3"
+alloy-trie = "0.8"
+alloy-consensus = "1.8"
+
+# Real Groth16 pairing verification
+ark-bn254        = { version = "0.4", optional = true }
+ark-groth16      = { version = "0.4", optional = true }
+ark-serialize    = { version = "0.4", optional = true }
+ark-ec           = { version = "0.4", optional = true }
+ark-ff           = { version = "0.4", optional = true }
+ark-snark        = { version = "0.4", optional = true }
+
+# Official Ethereum implementations for maximum compatibility
+alloy = { version = "1.8", features = ["full"], optional = true }
+alloy-sol-types = { version = "1.5", optional = true }
+alloy-contract = { version = "1.0", optional = true }
+reqwest = { version = "0.12", features = ["json"], optional = true }
+url = { version = "2.5", optional = true }
+
+# Async runtime — non-optional for polling (PF-03)
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+serde_json = "1.0"
+
+[features]
+default = []
+# Real Groth16 pairing verification — feature-gated so the mock path is unreachable in production
+real-groth16 = ["dep:ark-bn254", "dep:ark-groth16", "dep:ark-serialize", "dep:ark-ec", "dep:ark-ff", "dep:ark-snark"]
+rpc = ["alloy", "alloy-sol-types", "alloy-contract", "csv-store", "reqwest", "url"]
+# quorum = ["csv-core/quorum", "reqwest", "url"]  # REMOVED: quorum moved out of core per implementation.md
+production = ["rpc"]
+test-utils = []
+
+[build-dependencies]
+serde_json = "1.0"
+
+[dev-dependencies]
+rand = "0.8"
+tokio = { version = "1", features = ["rt", "macros"] }

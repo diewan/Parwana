@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+
+members = [
+    # Core crates (Phase 1 restructuring)
+    "csv-protocol",
+    "csv-codec",
+    "csv-hash",
+    "csv-proof",
+    "csv-verifier",
+    "csv-schema",
+    "csv-content",
+    "csv-storage",
+    "csv-testkit",
+    "csv-contract-bindings",
+    # Legacy crates (to be refactored/deprecated)
+    "csv-core",
+    "csv-runtime",
+    "csv-sdk",
+    "csv-cli",
+    "csv-keys",
+    "csv-store",
+    "csv-p2p",
+    "csv-observability",
+    # Explorer sub-crates (optional local checkout)
+    # "csv-explorer/shared",
+    # "csv-explorer/storage",
+    # "csv-explorer/indexer",
+    # "csv-explorer/api",
+    # "csv-explorer/ui",
+    # Chain adapter crates
+    "csv-adapters/csv-bitcoin",
+    "csv-adapters/csv-ethereum",
+    "csv-adapters/csv-solana",
+    "csv-adapters/csv-sui",
+    "csv-adapters/csv-aptos",
+    "csv-adapters/csv-celestia",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Amin Razavi"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4.3"
+sha2 = "0.10"
+sha3 = "0.10"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "macros", "time", "rt-multi-thread", "sync"] }
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde", "js"] }
+getrandom = { version = "0.2", features = ["js"] }
+web-sys = { version = "0.3", features = ["Window", "console"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+tracing = "0.1"
+futures = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
+toml = "0.8"
+sqlx = { version = "0.8", features = ["sqlite", "postgres", "_rt-tokio", "tls-rustls", "chrono"] }
+config = "0.13"
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+csv-core = { path = "csv-core" }
+async-graphql = "5.0"
+async-graphql-axum = "=5.0.6"
+axum = "0.6"
+tower = "0.4"
+tower-http = { version = "0.4", features = ["fs", "trace", "cors"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+prometheus = "0.13"
+lazy_static = "1.4"
+dioxus = { version = "0.7", features = ["web"] }
+dioxus-web = "0.7"
+dioxus-desktop = "0.7"
+
+# spl-token-2022-interface 2.1.0: ambiguous PodU64 `.into()` with solana_zero_copy (Rust 1.93+).
+# Local patch: third_party/spl-token-2022-interface — remove when upstream fixes land.
+[patch.crates-io]
+spl-token-2022-interface = { path = "third_party/spl-token-2022-interface" }
+
+[workspace.lints]

@@ -1,0 +1,64 @@
+[package]
+name = "csv-bitcoin"
+version = "0.1.0"
+edition = "2024"
+description = "Bitcoin adapter for CSV (Client-Side Validation) with UTXO seals and SPV proofs"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-bitcoin"
+readme = "README.md"
+keywords = ["bitcoin", "blockchain", "cryptography", "csv-validation", "utxo"]
+categories = ["cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+csv-core = { path = "../../csv-core", default-features = false, features = ["std"] }
+csv-verifier = { path = "../../csv-verifier" }
+csv-proof = { path = "../../csv-proof" }
+csv-store = { path = "../../csv-store", optional = true, default-features = false }
+async-trait.workspace = true
+bitcoin = { version = "0.32", default-features = false, features = ["serde", "rand-std", "std"] }
+bitcoin_hashes = "0.14"
+bitcoincore-rpc = { version = "0.19", optional = true }
+secp256k1 = { version = "0.29", features = ["rand-std", "global-context"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["rt", "time"] }
+hex = "0.4.3"
+sha2 = "0.10"
+rand = "0.8"
+bip32 = { version = "0.5", features = ["std", "mnemonic"] }
+serde_json = "1.0"
+log = "0.4"
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["json"], optional = true }
+
+[features]
+default = []
+rpc = ["bitcoincore-rpc", "dep:csv-store", "csv-store?/sqlite"]
+signet-rest = ["reqwest", "dep:csv-store", "csv-store?/browser-storage"]
+production = ["rpc"]
+sp1-guest = []
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = "1.0"
+
+[[example]]
+name = "signet_real_tx_demo"
+required-features = ["signet-rest"]
+
+[[example]]
+name = "signet_funding_addr"
+required-features = ["signet-rest"]
+
+[[example]]
+name = "signet_fixed_seed"
+required-features = ["signet-rest"]

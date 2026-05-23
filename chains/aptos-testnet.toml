@@ -1,0 +1,25 @@
+chain_id = "aptos-testnet"
+chain_name = "aptos-testnet"
+default_network = "testnet"
+rpc_endpoints = ["https://fullnode.testnet.aptoslabs.com/v1"]
+block_explorer_urls = ["https://explorer.aptoslabs.com/?network=testnet"]
+start_block = 0
+
+[capabilities]
+state_model = "Resource"
+finality_model = "BftInstant"
+finality_depth = 1
+deterministic_finality = true
+proof_model = "AccumulatorPath"
+replay_protection = "ResourceDeleted"
+native_single_use_semantics = true
+reorg_risk = "Low"
+max_safe_reorg_depth = 0
+supports_light_client_proofs = true
+supports_state_proofs = true
+supports_transaction_inclusion_proofs = true
+supports_offline_verification = true
+supports_zk_proofs = false
+chain_role = "Settlement"
+
+[custom_settings]

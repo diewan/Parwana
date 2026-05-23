@@ -1,0 +1,20 @@
+[package]
+name = "csv-verifier"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Verifier - Canonical verifier with unified proof verification"
+
+[dependencies]
+csv-core = { path = "../csv-core" }
+csv-proof = { path = "../csv-proof" }
+csv-hash = { path = "../csv-hash" }
+csv-codec = { path = "../csv-codec" }
+csv-protocol = { path = "../csv-protocol" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+hex = "0.4.3"
+
+[dev-dependencies]
+secp256k1 = { version = "0.28", features = ["rand-std"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"

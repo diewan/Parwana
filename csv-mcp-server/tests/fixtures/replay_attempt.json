@@ -1,0 +1,8 @@
+{
+  "transfer_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "replay_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "source_chain": "ethereum",
+  "destination_chain": "solana",
+  "seal_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "already_consumed": true
+}

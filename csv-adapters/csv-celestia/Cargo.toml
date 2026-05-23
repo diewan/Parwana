@@ -1,0 +1,58 @@
+[package]
+name = "csv-celestia"
+version = "0.1.0"
+edition = "2024"
+description = "Celestia adapter for CSV (Client-Side Validation) - Data Availability layer for Sanad proofs"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-celestia"
+readme = "README.md"
+keywords = ["celestia", "data-availability", "blockchain", "csv-validation", "stark"]
+categories = ["cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+csv-core = { path = "../../csv-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4.3"
+sha2 = "0.10"
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+
+# IPFS support for off-chain storage alongside Celestia
+# STARK proofs can be large; IPFS provides complementary storage
+cid = { version = "0.11", default-features = false, features = ["std"] }
+multibase = { version = "0.9", default-features = false }
+multihash = { version = "0.19", default-features = false, features = ["std"] }
+
+# Celestia uses secp256k1 for signatures (Tendermint style)
+secp256k1 = { version = "0.29", features = ["rand-std", "global-context"] }
+
+# Real RPC dependencies (optional, enabled with --features rpc)
+reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+base64 = { version = "0.22", optional = true }
+
+# Tendermint RPC for Celestia
+async-trait.workspace = true
+
+[features]
+default = []
+# Enables real RPC client (real JSON-RPC calls over HTTP to Tendermint)
+rpc = ["reqwest", "base64"]
+# Enables quorum-based RPC consensus support using csv-core's quorum feature
+# quorum = ["csv-core/quorum"]  # REMOVED: quorum moved out of core per implementation.md
+
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"
+reqwest = { version = "0.12", features = ["json"] }

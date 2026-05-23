@@ -1,0 +1,58 @@
+[package]
+name = "csv-aptos"
+version = "0.1.0"
+edition = "2024"
+description = "Aptos adapter for CSV (Client-Side Validation) with resource-based seals"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-aptos"
+readme = "README.md"
+keywords = ["aptos", "blockchain", "cryptography", "csv-validation", "move"]
+categories = ["cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+csv-core = { path = "../../csv-core" }
+csv-verifier = { path = "../../csv-verifier" }
+csv-proof = { path = "../../csv-proof" }
+csv-hash = { path = "../../csv-hash" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4.3"
+sha2 = "0.10"
+sha3 = "0.10"
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+base64 = "0.22"
+
+# Native Aptos SDK (required per Phase 3)
+aptos-sdk = "0.4"
+aptos-bcs = "0.1"
+
+# Async runtime
+tokio = { version = "1", features = ["rt", "time", "macros"] }
+reqwest = { version = "0.12", features = ["json"], optional = true }
+async-trait.workspace = true
+rand_core = "0.6"
+
+[features]
+default = []
+# Enables real RPC client (HTTP client for network calls)
+rpc = ["tokio/macros", "reqwest"]
+# Enables aptos-sdk integration
+aptos-sdk = []
+# Dev/mocks feature for test utilities
+dev-mocks = []
+
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"

@@ -1,0 +1,29 @@
+[package]
+name = "csv-protocol"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Protocol - State machines, protocol constants, types, invariants, replay semantics, transition legality, versioning"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+csv-hash = { path = "../csv-hash" }
+csv-codec = { path = "../csv-codec" }
+csv-proof = { path = "../csv-proof" }
+thiserror = "1"
+async-trait = "0.1"
+log = "0.4"
+
+[dev-dependencies]
+csv-hash = { path = "../csv-hash" }
+csv-codec = { path = "../csv-codec" }
+hex = "0.4"
+
+[[test]]
+name = "golden_vectors"
+path = "tests/golden_vectors.rs"
+
+[[test]]
+name = "protocol_constitution"
+path = "tests/protocol_constitution.rs"

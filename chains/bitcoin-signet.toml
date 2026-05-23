@@ -1,0 +1,27 @@
+chain_id = "bitcoin-signet"
+chain_name = "bitcoin-signet"
+default_network = "testnet"
+rpc_endpoints = ["https://mempool.space/signet/api"]
+block_explorer_urls = ["https://mempool.space/signet"]
+start_block = 0
+
+[capabilities]
+state_model = "Utxo"
+finality_depth = 6
+deterministic_finality = false
+proof_model = "SpvMerkle"
+replay_protection = "UtxoSpentCheck"
+native_single_use_semantics = true
+reorg_risk = "High"
+max_safe_reorg_depth = 6
+supports_light_client_proofs = true
+supports_state_proofs = false
+supports_transaction_inclusion_proofs = true
+supports_offline_verification = true
+supports_zk_proofs = false
+chain_role = "Settlement"
+
+[capabilities.finality_model.ProofOfWork]
+confirmations = 6
+
+[custom_settings]

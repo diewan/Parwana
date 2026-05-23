@@ -1,0 +1,60 @@
+[package]
+name = "csv-sui"
+version = "0.1.0"
+edition = "2024"
+description = "Sui adapter for CSV (Client-Side Validation) with object-based seals"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://docs.rs/csv-sui"
+readme = "README.md"
+keywords = ["sui", "blockchain", "cryptography", "csv-validation", "objects"]
+categories = ["cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+csv-core = { path = "../../csv-core" }
+csv-verifier = { path = "../../csv-verifier" }
+csv-proof = { path = "../../csv-proof" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4.3"
+sha2 = "0.10"
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+serde_bytes = "0.11"
+
+# Real RPC dependencies (optional, enabled with --features rpc)
+reqwest = { version = "0.12", features = ["json"], optional = true }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+base64 = { version = "0.22", optional = true }
+
+# Sui Rust SDK crates for contract deployment (sui-rust-sdk from crates.io)
+# These replace the legacy sui-sdk from the monorepo which had tokio version conflicts
+sui-rpc = { version = "0.3.1", optional = true }
+sui-sdk-types = { version = "0.3.1", optional = true }
+sui-transaction-builder = { version = "0.3.1", optional = true }
+sui-crypto = { version = "0.3.0", optional = true, features = ["ed25519"] }
+bcs = { version = "0.1", optional = true }
+async-trait.workspace = true
+rand = "0.8"
+
+[features]
+default = []
+# Enables real RPC client (real JSON-RPC calls over HTTP)
+rpc = ["reqwest", "base64"]
+# Sui SDK deployment feature - uses sui-rust-sdk crates from crates.io
+sui-sdk-deploy = ["sui-rpc", "sui-sdk-types", "sui-transaction-builder", "sui-crypto", "bcs"]
+
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"
+reqwest = { version = "0.12", features = ["json"] }

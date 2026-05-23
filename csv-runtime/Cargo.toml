@@ -1,0 +1,39 @@
+[package]
+name = "csv-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "CSV Protocol runtime orchestration engine"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+csv-core = { path = "../csv-core" }
+csv-verifier = { path = "../csv-verifier" }
+csv-proof = { path = "../csv-proof" }
+csv-hash = { path = "../csv-hash" }
+csv-storage = { path = "../csv-storage" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+tracing = "0.1"
+async-trait = "0.1"
+uuid = { version = "1.1", features = ["v4", "serde"] }
+serde_json = "1.0"
+hex = "0.4"
+sqlx = { version = "0.8.2", features = ["postgres", "_rt-tokio", "tls-rustls", "chrono", "uuid"], optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+
+# csv-runtime is native-only (depends on tokio net, etc.)
+# wasm32 is not supported - see compile_error! in lib.rs
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"
+csv-codec = { path = "../csv-codec" }
+csv-hash = { path = "../csv-hash" }
+csv-proof = { path = "../csv-proof" }
+
+[features]
+default = ["persistent"]
+persistent = ["csv-storage/rocksdb"]
+postgres = ["dep:sqlx", "dep:chrono", "csv-storage/postgres"]
+serde = []

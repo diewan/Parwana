@@ -1,0 +1,68 @@
+[package]
+name = "csv-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI tool for CSV Adapter — cross-chain Sanads, proofs, wallets, and end-to-end testing"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/client-side-validation/csv-protocol"
+homepage = "https://github.com/client-side-validation/csv-protocol"
+documentation = "https://github.com/client-side-validation/csv-protocol/blob/main/csv-cli/README.md"
+readme = "README.md"
+keywords = ["cli", "blockchain", "cryptography", "csv-validation", "cross-chain"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+publish = true
+rust-version = "1.93"
+
+[[bin]]
+name = "csv"
+path = "src/main.rs"
+
+[dependencies]
+# Phase 5 Compliant: Use only runtime and core types
+# No direct chain adapter dependencies - all operations go through csv-adapter
+csv-sdk = { path = "../csv-sdk", features = ["bitcoin", "ethereum", "sui", "aptos"] }
+csv-core = { path = "../csv-core" }
+csv-verifier = { path = "../csv-verifier" }
+csv-hash = { path = "../csv-hash" }
+csv-schema = { path = "../csv-schema" }
+csv-store = { path = "../csv-store", features = ["clap"] }
+csv-keys = { path = "../csv-keys" }
+
+# CLI framework and utilities (no chain-specific crypto)
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+hex = "0.4"
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1.0"
+dirs = "5.0"
+colored = "2.0"
+toml = "0.8"
+chrono = "0.4"
+tracing = "0.1"
+bs58 = "0.5"
+
+# Cryptography dependencies for wallet key generation
+sha2 = "0.10"
+sha3 = "0.10"
+blake2 = "0.10"
+typenum = "1.17"
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+secp256k1 = { version = "0.28", features = ["rand-std"] }
+rand = "0.8"
+
+# State file encryption
+aes-gcm = { version = "0.10", features = ["std"] }
+aead = "0.5"
+argon2 = { version = "0.5", features = ["std"] }
+base64 = "0.21"
+
+# HTTP client for RPC calls
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.0"

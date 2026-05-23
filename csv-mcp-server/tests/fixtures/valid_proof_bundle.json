@@ -1,0 +1,25 @@
+{
+  "transition_dag": [],
+  "signatures": [],
+  "seal_ref": {
+    "seal_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "chain": "ethereum",
+    "tx_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "output_index": 0
+  },
+  "anchor_ref": {
+    "anchor_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "block_height": 100000
+  },
+  "inclusion_proof": {
+    "proof_bytes": "dGVzdCBwcm9vZiBieXRlcw==",
+    "block_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "block_number": 100000,
+    "position": 0
+  },
+  "finality_proof": {
+    "finality_data": "ZmluYWxpdHkgZGF0YQ==",
+    "confirmations": 6,
+    "is_deterministic": false
+  }
+}
