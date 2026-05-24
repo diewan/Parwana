@@ -6,22 +6,22 @@
 use async_trait::async_trait;
 use bitcoin::Network;
 use bitcoin_hashes::Hash as BitcoinHash;
-use csv_core::backend::{
+use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperation, SanadOperationResult, TransactionStatus,
 };
-use csv_core::Hash;
-use csv_core::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
-use csv_core::sanad::SanadId;
-use csv_core::seal::{CommitAnchor, SealPoint};
-use csv_core::signature::SignatureScheme;
+use csv_hash::Hash;
+use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
 use crate::rpc::BitcoinRpc;
 use crate::seal_protocol::BitcoinSealProtocol;
 use crate::types::BitcoinSealPoint;
-use csv_core::SealProtocol;
+use csv_protocol::seal_protocol::SealProtocol;
 
 /// Bitcoin-specific extension to ChainSigner that accepts prevout amounts
 ///
@@ -112,8 +112,8 @@ impl ChainQuery for BitcoinChainQuery {
     async fn get_transaction(
         &self,
         tx_hash: &str,
-    ) -> ChainOpResult<csv_core::backend::TransactionInfo> {
-        use csv_core::backend::{TransactionInfo, TransactionStatus};
+    ) -> ChainOpResult<csv_protocol::backend::TransactionInfo> {
+        use csv_protocol::backend::{TransactionInfo, TransactionStatus};
 
         // Parse the txid
         let txid_bytes = hex::decode(tx_hash.trim_start_matches("0x"))
@@ -160,17 +160,17 @@ impl ChainQuery for BitcoinChainQuery {
         let tx_info = self.get_transaction(tx_hash).await?;
 
         match tx_info.status {
-            csv_core::backend::TransactionStatus::Pending => Ok(FinalityStatus::Pending),
-            csv_core::backend::TransactionStatus::Confirmed { block_height, .. } => {
+            csv_protocol::backend::TransactionStatus::Pending => Ok(FinalityStatus::Pending),
+            csv_protocol::backend::TransactionStatus::Confirmed { block_height, .. } => {
                 // Treat confirmed as finalized for Bitcoin (6+ confirmations)
                 Ok(FinalityStatus::Finalized {
                     block_height,
                     finality_block: block_height,
                 })
             }
-            csv_core::backend::TransactionStatus::Failed { .. } => Ok(FinalityStatus::Orphaned),
-            csv_core::backend::TransactionStatus::Dropped => Ok(FinalityStatus::Orphaned),
-            csv_core::backend::TransactionStatus::Unknown => Ok(FinalityStatus::Pending),
+            csv_protocol::backend::TransactionStatus::Failed { .. } => Ok(FinalityStatus::Orphaned),
+            csv_protocol::backend::TransactionStatus::Dropped => Ok(FinalityStatus::Orphaned),
+            csv_protocol::backend::TransactionStatus::Unknown => Ok(FinalityStatus::Pending),
         }
     }
 
@@ -540,7 +540,7 @@ impl ChainBroadcaster for BitcoinChainBroadcaster {
             })?;
 
             if confirmations >= required_confirmations {
-                use csv_core::backend::TransactionStatus;
+                use csv_protocol::backend::TransactionStatus;
                 return Ok(TransactionStatus::Confirmed {
                     block_height: 0,
                     confirmations,
@@ -909,7 +909,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
 
         Ok(SanadOperationResult {
             sanad_id: SanadId(Hash::from([0u8; 32])), // Implementation note: compute from asset hash
-            operation: csv_core::backend::SanadOperation::Create,
+            operation: csv_protocol::backend::SanadOperation::Create,
             transaction_hash: hex::encode(seal.txid),
             block_height: 0,
             chain_id: "bitcoin".to_string(),
@@ -999,7 +999,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
 
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),
-            operation: csv_core::backend::SanadOperation::Lock,
+            operation: csv_protocol::backend::SanadOperation::Lock,
             transaction_hash: signed_tx,
             block_height: self.adapter.get_current_height(),
             chain_id: "bitcoin".to_string(),
@@ -1483,7 +1483,7 @@ impl ChainQuery for BitcoinBackend {
     async fn get_transaction(
         &self,
         tx_hash: &str,
-    ) -> ChainOpResult<csv_core::backend::TransactionInfo> {
+    ) -> ChainOpResult<csv_protocol::backend::TransactionInfo> {
         let query = BitcoinChainQuery::new(self.rpc.clone_boxed(), self.network);
         query.get_transaction(tx_hash).await
     }

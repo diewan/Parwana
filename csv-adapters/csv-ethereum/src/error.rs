@@ -1,6 +1,6 @@
 //! Ethereum adapter error types
 
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
 
 /// Ethereum adapter specific errors
@@ -40,7 +40,7 @@ pub enum EthereumError {
 
     /// Wrapper for core adapter errors
     #[error(transparent)]
-    CoreError(#[from] csv_core::ProtocolError),
+    CoreError(#[from] csv_protocol::ProtocolError),
 }
 
 impl EthereumError {
@@ -167,29 +167,29 @@ impl HasErrorSuggestion for EthereumError {
     }
 }
 
-impl From<EthereumError> for csv_core::ProtocolError {
+impl From<EthereumError> for csv_protocol::ProtocolError {
     fn from(err: EthereumError) -> Self {
         match err {
             EthereumError::CoreError(e) => e,
-            EthereumError::RpcError(msg) => csv_core::ProtocolError::NetworkError(msg),
-            EthereumError::SlotUsed(msg) => csv_core::ProtocolError::InvalidSeal(msg),
+            EthereumError::RpcError(msg) => csv_protocol::ProtocolError::NetworkError(msg),
+            EthereumError::SlotUsed(msg) => csv_protocol::ProtocolError::InvalidSeal(msg),
             EthereumError::InvalidReceiptProof(msg) => {
-                csv_core::ProtocolError::InclusionProofFailed(msg)
+                csv_protocol::ProtocolError::InclusionProofFailed(msg)
             }
-            EthereumError::ReorgDetected { block, depth } => csv_core::ProtocolError::ReorgInvalid(
+            EthereumError::ReorgDetected { block, depth } => csv_protocol::ProtocolError::ReorgInvalid(
                 format!("Reorg at block {}, depth {}", block, depth),
             ),
             EthereumError::InsufficientConfirmations { got, need } => {
-                csv_core::ProtocolError::FinalityNotReached(format!(
+                csv_protocol::ProtocolError::FinalityNotReached(format!(
                     "Got {} confirmations, need {}",
                     got, need
                 ))
             }
             EthereumError::WalletError(msg) => {
-                csv_core::ProtocolError::Generic(format!("Wallet error: {}", msg))
+                csv_protocol::ProtocolError::Generic(format!("Wallet error: {}", msg))
             }
-            EthereumError::ConfigError(msg) => csv_core::ProtocolError::InvalidConfig(msg),
-            EthereumError::DeploymentError(msg) => csv_core::ProtocolError::PublishFailed(msg),
+            EthereumError::ConfigError(msg) => csv_protocol::ProtocolError::InvalidConfig(msg),
+            EthereumError::DeploymentError(msg) => csv_protocol::ProtocolError::PublishFailed(msg),
         }
     }
 }

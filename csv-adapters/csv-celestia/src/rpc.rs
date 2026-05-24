@@ -43,7 +43,7 @@ use crate::namespace::Namespace;
 use crate::types::{CelestiaFinalityProof, CelestiaHeader};
 
 #[cfg(all(feature = "rpc", feature = "quorum"))]
-use csv_core::rpc::{QuorumClient, QuorumConfig, RpcProvider};
+use csv_protocol::rpc::{QuorumClient, QuorumConfig, RpcProvider};
 
 /// Celestia node RPC client
 #[derive(Clone, Debug)]

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use csv_core::proof::ProofBundle;
+use csv_proof::proof::ProofBundle;
 use tracing::{debug, info, warn};
 
 use crate::{DeliveredProof, EventId, ProofTransport, TransportError};

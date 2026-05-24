@@ -5,7 +5,7 @@
 #[cfg(feature = "rpc")]
 use crate::error::{SuiError, SuiResult};
 #[cfg(feature = "rpc")]
-use csv_core::Hash as CsvHash;
+use csv_hash::Hash as CsvHash;
 
 /// Mint a sanad on Sui using direct JSON-RPC transaction submission
 ///

@@ -6,7 +6,7 @@
 
 use crate::error::EthereumError;
 use crate::rpc::EthereumRpcClient;
-use csv_core::Hash;
+use csv_hash::Hash;
 use ethers::{
     abi::AbiEncode,
     prelude::*,

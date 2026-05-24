@@ -6,9 +6,9 @@
 //! - crash recovery
 //! - node migration
 
-use csv_core::Hash;
-use csv_core::ChainId;
-use csv_core::replay_registry::{ReplayEntry, ReplayKey};
+use csv_hash::Hash;
+use csv_hash::chain_id::ChainId;
+use csv_protocol::replay::{ReplayEntry, ReplayKey};
 use rusqlite::{Connection, Result as RusqliteResult, params};
 
 /// Persistent replay registry store

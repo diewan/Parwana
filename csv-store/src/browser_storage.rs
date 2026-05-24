@@ -3,7 +3,7 @@
 //! This module provides browser-specific localStorage persistence for the unified
 //! storage format.
 
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{StateStorage, StorageError};

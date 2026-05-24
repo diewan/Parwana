@@ -5,8 +5,8 @@
 
 use anyhow::Result;
 
-use csv_core::SanadId;
-use csv_core::Hash;
+use csv_hash::sanad::SanadId;
+use csv_hash::Hash;
 use csv_sdk::CsvClient;
 
 use crate::config::{Chain, Config};

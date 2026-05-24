@@ -10,7 +10,7 @@ use bitcoin::{
     taproot::TaprootSpendInfo,
 };
 
-use csv_core::Hash as CsvHash;
+use csv_hash::Hash as CsvHash;
 
 /// Tapret commitment for output key derivation
 #[derive(Clone, Debug, PartialEq, Eq)]

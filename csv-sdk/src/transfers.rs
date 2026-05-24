@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use csv_core::{ChainId, Hash, SanadId};
+use csv_hash::chain_id::ChainId;
+use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -183,7 +185,7 @@ pub struct TransferRecord {
     pub lock_tx_hash: Option<String>,
     /// Inclusion proof of the lock transaction (populated after proof generation)
     #[allow(dead_code)]
-    pub inclusion_proof: Option<csv_core::InclusionProof>,
+    pub inclusion_proof: Option<csv_protocol::proof::InclusionProof>,
 }
 
 /// Fluent builder for a cross-chain transfer.
@@ -198,7 +200,7 @@ pub struct TransferBuilder {
     to_address: Option<String>,
     priority: Priority,
     metadata: HashMap<String, String>,
-    lease_token: Option<csv_core::Hash>,
+    lease_token: Option<csv_hash::Hash>,
 }
 
 impl TransferBuilder {
@@ -252,7 +254,7 @@ impl TransferBuilder {
     ///
     /// The lease token must have been acquired via the
     /// [`TransferManager::acquire_lease()`] method before calling this.
-    pub fn with_lease_token(mut self, lease_token: csv_core::Hash) -> Self {
+    pub fn with_lease_token(mut self, lease_token: Hash) -> Self {
         self.lease_token = Some(lease_token);
         self
     }
@@ -348,8 +350,8 @@ impl TransferBuilder {
             .await?;
 
         let finality_block = match tx_status {
-            csv_core::backend::TransactionStatus::Confirmed { block_height, .. } => block_height,
-            csv_core::backend::TransactionStatus::Failed { reason } => {
+            csv_protocol::backend::TransactionStatus::Confirmed { block_height, .. } => block_height,
+            csv_protocol::backend::TransactionStatus::Failed { .. } => {
                 record.status = crate::TransferStatus::Failed {
                     error_code: "LOCK_FAILED".to_string(),
                     retryable: true,

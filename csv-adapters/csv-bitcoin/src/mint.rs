@@ -6,7 +6,7 @@
 
 use crate::error::BitcoinError;
 use crate::rpc::{BitcoinRpc, UtxoInfo};
-use csv_core::Hash;
+use csv_hash::Hash;
 use bitcoin::{
     absolute::LockTime,
     address::Address,

@@ -31,7 +31,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use csv_core::ChainId;
+use csv_hash::chain_id::ChainId;
 #[cfg(feature = "tokio")]
 use tokio::sync::broadcast;
 
@@ -50,7 +50,7 @@ use crate::wallet::WalletManager;
 /// Handle to the underlying storage backend.
 pub enum StoreHandle {
     /// In-memory seal and anchor store.
-    InMemory(csv_core::InMemorySealStore),
+    InMemory(csv_protocol::InMemorySealStore),
     /// SQLite-backed store (requires `sqlite` feature).
     #[cfg(feature = "sqlite")]
     Sqlite(csv_store::SqliteSealStore),
@@ -58,8 +58,8 @@ pub enum StoreHandle {
 
 impl StoreHandle {
     /// Save a Sanad to the store.
-    pub fn save_sanad(&mut self, record: &csv_core::SanadRecord) -> Result<(), CsvError> {
-        use csv_core::SanadStore;
+    pub fn save_sanad(&mut self, record: &csv_protocol::SanadRecord) -> Result<(), CsvError> {
+        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
                 .save_sanad(record)
@@ -74,9 +74,9 @@ impl StoreHandle {
     /// Get a Sanad by its ID.
     pub fn get_sanad(
         &self,
-        sanad_id: &csv_core::SanadId,
-    ) -> Result<Option<csv_core::SanadRecord>, CsvError> {
-        use csv_core::SanadStore;
+        sanad_id: &csv_protocol::SanadId,
+    ) -> Result<Option<csv_protocol::SanadRecord>, CsvError> {
+        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
                 .get_sanad(sanad_id)
@@ -92,8 +92,8 @@ impl StoreHandle {
     pub fn list_sanads_by_chain(
         &self,
         chain: &str,
-    ) -> Result<Vec<csv_core::SanadRecord>, CsvError> {
-        use csv_core::SanadStore;
+    ) -> Result<Vec<csv_protocol::SanadRecord>, CsvError> {
+        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
                 .list_sanads_by_chain(chain)
@@ -108,10 +108,10 @@ impl StoreHandle {
     /// Mark a Sanad as consumed.
     pub fn consume_sanad(
         &mut self,
-        sanad_id: &csv_core::SanadId,
+        sanad_id: &csv_protocol::SanadId,
         consumed_at: u64,
     ) -> Result<(), CsvError> {
-        use csv_core::SanadStore;
+        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
                 .consume_sanad(sanad_id, consumed_at)
@@ -124,8 +124,8 @@ impl StoreHandle {
     }
 
     /// List all active (unconsumed) Sanads.
-    pub fn list_active_sanads(&self) -> Result<Vec<csv_core::SanadRecord>, CsvError> {
-        use csv_core::SanadStore;
+    pub fn list_active_sanads(&self) -> Result<Vec<csv_protocol::SanadRecord>, CsvError> {
+        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
                 .list_active_sanads()
@@ -138,8 +138,8 @@ impl StoreHandle {
     }
 
     /// Check if a Sanad exists.
-    pub fn has_sanad(&self, sanad_id: &csv_core::SanadId) -> Result<bool, CsvError> {
-        use csv_core::SanadStore;
+    pub fn has_sanad(&self, sanad_id: &csv_protocol::SanadId) -> Result<bool, CsvError> {
+        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
                 .has_sanad(sanad_id)
@@ -275,7 +275,7 @@ impl CsvClient {
     /// Once deployed, provide the contract address directly to the SDK.
     pub fn deploy(&self) -> crate::Result<()> {
         Err(CsvError::CapabilityUnavailable {
-            chain: csv_core::ChainId::new("unknown"),
+            chain: csv_hash::chain_id::ChainId::new("unknown"),
             capability: "contract_deployment".to_string(),
         })
     }
@@ -403,7 +403,7 @@ impl CsvClient {
         chain: ChainId,
         _config: &crate::config::Config,
         network: NetworkType,
-    ) -> Result<Option<std::sync::Arc<dyn csv_core::ChainBackend>>, CsvError> {
+    ) -> Result<Option<std::sync::Arc<dyn csv_protocol::backend::ChainBackend>>, CsvError> {
         let _builder = crate::runtime::AdapterBuilder::new();
         let _is_testnet = matches!(network, NetworkType::Testnet);
 
@@ -666,7 +666,7 @@ impl ClientRef {
             enabled_chains: HashSet::new(),
             wallet: None,
             store: Arc::new(std::sync::Mutex::new(crate::client::StoreHandle::InMemory(
-                csv_core::InMemorySealStore::new(),
+                csv_hash::chain_id::InMemorySealStore::new(),
             ))),
             config: Config::default(),
             event_tx,

@@ -3,9 +3,9 @@
 //! Defines the supported blockchain networks and their configurations.
 //!
 //! Chain IDs are strings for extensibility (100+ chains without code changes).
-//! Uses csv_core::ChainId as the canonical type.
+//! Uses csv_hash::chain_id::ChainId as the canonical type.
 
-pub use csv_core::ChainId;
+pub use csv_hash::chain_id::ChainId;
 use serde::{Deserialize, Serialize};
 
 /// Network environment.

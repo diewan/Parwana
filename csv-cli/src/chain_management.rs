@@ -2,7 +2,7 @@
 
 use clap::{Args, Subcommand};
 use std::path::Path;
-use csv_core::chain_discovery::ChainDiscovery;
+use csv_protocol::chain_discovery::ChainDiscovery;
 
 /// Chain management commands
 #[derive(Debug, Subcommand)]

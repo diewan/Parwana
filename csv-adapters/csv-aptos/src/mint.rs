@@ -3,7 +3,7 @@
 //! This module provides SDK-based minting using Move entry functions.
 
 use crate::error::AptosError;
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Mint a sanad on Aptos using the csv_seal Move module
 #[allow(clippy::too_many_arguments)]

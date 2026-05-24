@@ -19,7 +19,9 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-csv-core = { path = "../csv-core", default-features = false, features = ["std"] }
+csv-protocol = { path = "../csv-protocol" }
+csv-hash = { path = "../csv-hash" }
+csv-proof = { path = "../csv-proof" }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }

@@ -36,7 +36,8 @@
 //! # }
 //! ```
 
-use csv_core::{ChainId, SanadId};
+use csv_hash::chain_id::ChainId;
+use csv_hash::sanad::SanadId;
 #[cfg(feature = "tokio")]
 use tokio::sync::broadcast;
 

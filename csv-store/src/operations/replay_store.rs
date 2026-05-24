@@ -2,7 +2,7 @@
 //!
 //! Provides SQLite-backed storage for replay detection with crash-safe persistence.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Persistent replay store
 #[cfg(feature = "sqlite")]

@@ -7,7 +7,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, AeadCore, KeyInit, OsRng},
 };
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;

@@ -3,7 +3,7 @@
 // Invariant: State transitions must follow legal paths only.
 // Forbidden transitions must hard fail at compile time or runtime.
 
-use csv_core::transfer_stage::TransferStage;
+use csv_protocol::transfer_state::TransferStage;
 
 /// Test that illegal state transitions are detected and rejected.
 #[test]

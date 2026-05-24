@@ -98,8 +98,8 @@ pub enum KeystoreError {
 /// Tuple of (mnemonic phrase, vector of (chain, keystore_file))
 pub fn create_full_wallet(
     encryption_passphrase: &Passphrase,
-) -> Result<(String, Vec<(csv_core::ChainId, KeystoreFile)>), KeystoreError> {
-    use csv_core::ChainId;
+) -> Result<(String, Vec<(csv_hash::chain_id::ChainId, KeystoreFile)>), KeystoreError> {
+    use csv_hash::chain_id::ChainId;
 
     // Generate mnemonic
     let mnemonic = Mnemonic::generate(MnemonicType::Words24);

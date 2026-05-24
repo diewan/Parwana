@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "quorum")]
-use csv_core::rpc::quorum_client::QuorumClient;
+use csv_protocol::rpc::quorum_client::QuorumClient;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

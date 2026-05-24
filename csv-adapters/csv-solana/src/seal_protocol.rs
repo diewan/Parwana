@@ -5,7 +5,7 @@
 //! lamports to the destination, making the seal cryptographically unspendable.
 
 use csv_protocol::seal_protocol::SealProtocol;
-use csv_core::{
+use csv_protocol::{
     Hash, Result, dag::DAGSegment, error::ProtocolError, proof::ProofBundle,
     signature::SignatureScheme,
 };
@@ -493,13 +493,13 @@ impl SealProtocol for SolanaSealProtocol {
             seals
                 .first()
                 .map(|s| unsafe {
-                    csv_core::seal::SealPoint::new_unchecked(
+                    csv_protocol::seal::SealPoint::new_unchecked(
                         s.account.to_bytes().to_vec(),
                         Some(s.lamports),
                     )
                 })
                 .unwrap_or_else(|| unsafe {
-                    csv_core::seal::SealPoint::new_unchecked(
+                    csv_protocol::seal::SealPoint::new_unchecked(
                         anchor_ref.signature.as_ref()[..32].to_vec(),
                         None,
                     )
@@ -508,7 +508,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create anchor_ref from SolanaCommitAnchor
         let core_anchor_ref = unsafe {
-            csv_core::seal::CommitAnchor::new_unchecked(
+            csv_protocol::seal::CommitAnchor::new_unchecked(
                 anchor_ref.signature.as_ref().to_vec(),
                 anchor_ref.block_height,
                 serde_json::to_vec(&anchor_ref.account_changes).unwrap_or_default(),
@@ -517,7 +517,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create inclusion proof
         let inclusion_proof = unsafe {
-            csv_core::proof::InclusionProof::new_unchecked(
+            csv_protocol::proof::InclusionProof::new_unchecked(
                 solana_inclusion
                     .account_proofs
                     .iter()
@@ -535,7 +535,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create finality proof - Solana has deterministic finality after 31 slots
         let finality_proof = unsafe {
-            csv_core::proof::FinalityProof::new_unchecked(
+            csv_protocol::proof::FinalityProof::new_unchecked(
                 solana_finality.block_hash.as_bytes().to_vec(),
                 solana_finality.confirmation_depth,
                 true, // Solana has deterministic finality
@@ -544,7 +544,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create a complete proof bundle
         let bundle = unsafe {
-            csv_core::proof::ProofBundle::new_unchecked(
+            csv_protocol::proof::ProofBundle::new_unchecked(
                 segment,
                 vec![anchor_ref.signature.as_ref().to_vec()],
                 seal_ref,

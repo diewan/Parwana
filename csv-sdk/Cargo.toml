@@ -23,7 +23,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Core — always included
-csv-core = { path = "../csv-core", default-features = false, features = ["std"] }
+csv-protocol = { path = "../csv-protocol" }
+csv-hash = { path = "../csv-hash" }
+csv-proof = { path = "../csv-proof" }
 csv-verifier = { path = "../csv-verifier" }
 csv-p2p = { path = "../csv-p2p", optional = true }
 
@@ -78,7 +80,7 @@ csv-solana = { path = "../csv-adapters/csv-solana", optional = true }
 
 [features]
 default = ["std", "tokio", "native"]
-std = ["csv-core/std"]
+std = []
 
 # Chain features
 bitcoin = ["dep:csv-bitcoin", "dep:bitcoin"]
@@ -100,7 +102,7 @@ rpc = [
 # Runtime features
 tokio = ["dep:tokio"]
 async-std = ["dep:async-std"]
-wasm = ["dep:wasm-bindgen-futures", "dep:web-sys", "dep:gloo-timers", "csv-core/std"]
+wasm = ["dep:wasm-bindgen-futures", "dep:web-sys", "dep:gloo-timers"]
 
 # Storage features
 sqlite = ["dep:csv-store", "dep:sqlx", "dep:chrono"]
@@ -121,7 +123,7 @@ p2p = ["dep:csv-p2p"]
 native = ["dep:dirs"]
 
 # Experimental features
-experimental = ["csv-core/experimental"]
+experimental = []
 
 [dev-dependencies]
 rand = "0.8"

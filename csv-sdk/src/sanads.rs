@@ -15,7 +15,10 @@
 
 use std::sync::Arc;
 
-use csv_core::{ChainId, Hash, Sanad, SanadId};
+use csv_hash::chain_id::ChainId;
+use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
+use csv_protocol::Sanad;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -106,7 +109,7 @@ impl SanadsManager {
         //   let sanad = Sanad::new(commitment.hash(), owner_proof, salt);
 
         let salt = generate_salt();
-        let owner = csv_core::OwnershipProof {
+        let owner = csv_protocol::OwnershipProof {
             proof: vec![0u8; 32], // Derived from wallet in full implementation
             owner: vec![0u8; 32],
             scheme: None,
@@ -115,7 +118,7 @@ impl SanadsManager {
         let sanad = Sanad::new(commitment, owner, &salt);
 
         // Persist the Sanad to the store
-        let record = csv_core::SanadRecord {
+        let record = csv_protocol::SanadRecord {
             sanad_id: sanad.id.clone(),
             chain: chain.to_string(),
             owner: sanad.owner.owner.clone(),

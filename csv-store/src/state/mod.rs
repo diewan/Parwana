@@ -43,7 +43,7 @@ pub mod wallet;
 pub use backend::FileStorage;
 pub use backend::{StorageBackend, StorageError};
 pub use core::{ChainConfig, Network};
-pub use csv_core::ChainId;
+pub use csv_hash::chain_id::ChainId;
 pub use domain::{
     ContractRecord, ProofRecord, SanadRecord, SanadStatus, SealRecord, SealStatus, TestResult,
     TestStatus, TransactionRecord, TransactionStatus, TransactionType, TransferRecord,

@@ -8,18 +8,18 @@
 
 use std::sync::Mutex;
 
-use csv_core::Hash;
-use csv_core::SealProtocol;
-use csv_core::commitment::Commitment;
-use csv_core::dag::DAGSegment;
-use csv_core::error::ProtocolError;
-use csv_core::error::Result as CoreResult;
-use csv_core::proof::{FinalityProof, ProofBundle};
-use csv_core::seal::CommitAnchor as CoreCommitAnchor;
-use csv_core::seal::SealPoint as CoreSealPoint;
+use csv_protocol::Hash;
+use csv_protocol::SealProtocol;
+use csv_protocol::commitment::Commitment;
+use csv_protocol::dag::DAGSegment;
+use csv_protocol::error::ProtocolError;
+use csv_protocol::error::Result as CoreResult;
+use csv_protocol::proof::{FinalityProof, ProofBundle};
+use csv_protocol::seal::CommitAnchor as CoreCommitAnchor;
+use csv_protocol::seal::SealPoint as CoreSealPoint;
 
 #[cfg(feature = "rpc")]
-use csv_core::proof_pipeline::ChainVerifier;
+use csv_protocol::proof_pipeline::ChainVerifier;
 #[cfg(feature = "rpc")]
 use crate::finality::FinalityCheckerTrait;
 
@@ -491,7 +491,7 @@ impl SealProtocol for EthereumSealProtocol {
             CoreCommitAnchor::new(anchor.tx_hash.to_vec(), anchor.block_number, vec![])
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?;
 
-        let inclusion_proof = csv_core::InclusionProof::new(
+        let inclusion_proof = csv_protocol::InclusionProof::new(
             inclusion.merkle_proof.clone(),
             Hash::new(inclusion.block_hash),
             inclusion.log_index,
@@ -563,8 +563,8 @@ impl SealProtocol for EthereumSealProtocol {
         self.domain_separator
     }
 
-    fn signature_scheme(&self) -> csv_core::SignatureScheme {
-        csv_core::SignatureScheme::Secp256k1
+    fn signature_scheme(&self) -> csv_protocol::SignatureScheme {
+        csv_protocol::SignatureScheme::Secp256k1
     }
 }
 

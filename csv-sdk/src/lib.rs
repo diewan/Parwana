@@ -78,19 +78,22 @@ pub mod sanads;
 pub mod transfers;
 pub mod wallet;
 
-// Re-export core types from csv-core (🔒 STABLE API only by default)
-pub use csv_core::{
-    CONSIGNMENT_VERSION, CommitAnchor, Commitment, Consignment, CrossChainLockEvent, DAGNode,
-    DAGSegment, FinalityProof, Genesis, Hash, InclusionProof, OwnedState, OwnershipProof,
-    ProofBundle, ProtocolError, Result as CoreResult, SCHEMA_VERSION, Sanad, SanadId, Schema,
-    SealPoint, SealProtocol, StateRef, StoreError, Transition,
+// Re-export core types from new modular crates (🔒 STABLE API only by default)
+pub use csv_protocol::{
+    CommitAnchor, Commitment, Consignment, CrossChainLockEvent, DAGNode,
+    DAGSegment, FinalityProof, Genesis, InclusionProof, OwnedState, OwnershipProof,
+    ProtocolError, Result as CoreResult, Sanad, SealProtocol, StateRef, StoreError, Transition,
 };
+pub use csv_hash::Hash;
+pub use csv_hash::sanad::SanadId;
+pub use csv_hash::seal::SealPoint;
+pub use csv_proof::proof::ProofBundle;
 
 // Re-export canonical protocol types (🔒 STABLE + 🟡 BETA)
-pub use csv_core::protocol_version::{
+pub use csv_protocol::protocol_version::{
     Capabilities, ErrorCode, PROTOCOL_VERSION, ProtocolVersion, SyncStatus, TransferStatus,
 };
-pub use csv_core::ChainId;
+pub use csv_hash::chain_id::ChainId;
 
 // ===========================================================================
 // Experimental re-exports (feature-gated)
@@ -101,9 +104,7 @@ pub use csv_core::ChainId;
 /// These APIs may change or be removed without notice.
 #[cfg(feature = "experimental")]
 pub mod experimental {
-    pub use csv_core::commit_mux::{CommitMux, MuxLeaf, MuxProof};
-    pub use csv_core::rgb::{CrossChainError, RgbValidationError, RgbValidationResult};
-    pub use csv_core::vm::{DeterministicVM, VMError, VMInputs, VMOutputs};
+    pub use csv_hash::commit_mux::{CommitMux, MuxLeaf, MuxProof};
 }
 
 /// Re-export error types

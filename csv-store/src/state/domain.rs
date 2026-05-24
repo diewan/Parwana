@@ -3,7 +3,7 @@
 //! These types represent the core CSV (Client-Side Validation) domain model.
 
 use super::core::ChainId;
-use csv_core::SimplifiedTransferStatus;
+use csv_protocol::SimplifiedTransferStatus;
 use serde::{Deserialize, Serialize};
 
 /// Status of a Sanad.
@@ -58,7 +58,7 @@ pub struct SanadRecord {
 /// Status of a cross-chain transfer.
 ///
 /// Re-exported from csv_core for compatibility.
-/// Use [`csv_core::SimplifiedTransferStatus`] for the canonical definition.
+/// Use [`csv_protocol::SimplifiedTransferStatus`] for the canonical definition.
 pub type TransferStatus = SimplifiedTransferStatus;
 
 /// A cross-chain transfer record.

@@ -2,7 +2,7 @@
 //!
 //! Provides SQLite-backed storage for transfer states with crash-safe persistence.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Persistent transfer store
 #[cfg(feature = "sqlite")]

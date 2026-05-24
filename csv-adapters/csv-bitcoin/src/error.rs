@@ -1,6 +1,6 @@
 //! Bitcoin adapter error types
 
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
 
 /// Bitcoin adapter specific errors

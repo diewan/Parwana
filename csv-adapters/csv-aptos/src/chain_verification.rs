@@ -1,7 +1,7 @@
 //! Chain-native Aptos inclusion/finality checks (RULE 3).
 
-use csv_core::backend::{ChainOpError, ChainOpResult};
-use csv_core::Hash;
+use csv_protocol::backend::{ChainOpError, ChainOpResult};
+use csv_hash::Hash;
 use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_verifier::{
     verify_chain_proof_bundle, ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier,

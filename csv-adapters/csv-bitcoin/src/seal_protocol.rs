@@ -15,16 +15,16 @@ use bitcoin;
 use bitcoin_hashes::Hash as _;
 use std::sync::{Arc, Mutex};
 
-use csv_core::Hash;
-use csv_core::SealProtocol;
-use csv_core::commitment::Commitment;
-use csv_core::dag::DAGSegment;
-use csv_core::error::ProtocolError;
-use csv_core::error::Result as CoreResult;
-use csv_core::proof::{FinalityProof, ProofBundle};
-use csv_core::sanad::SanadId;
-use csv_core::seal::CommitAnchor as CoreCommitAnchor;
-use csv_core::seal::SealPoint as CoreSealPoint;
+use csv_hash::Hash;
+use csv_protocol::seal_protocol::SealProtocol;
+use csv_hash::commitment::Commitment;
+use csv_hash::dag::DAGSegment;
+use csv_protocol::error::ProtocolError;
+use csv_protocol::error::Result as CoreResult;
+use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
+use csv_hash::seal::SealPoint as CoreSealPoint;
 
 use crate::config::BitcoinConfig;
 use crate::error::{BitcoinError, BitcoinResult};

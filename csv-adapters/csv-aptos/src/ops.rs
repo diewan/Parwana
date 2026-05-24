@@ -9,17 +9,17 @@
 //! - ChainSanadOps: Sanad management operations
 //!
 use async_trait::async_trait;
-use csv_core::SealProtocol;
-use csv_core::backend::{
+use csv_protocol::seal_protocol::SealProtocol;
+use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
-use csv_core::Hash;
-use csv_core::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
-use csv_core::sanad::SanadId;
-use csv_core::seal::{CommitAnchor, SealPoint};
-use csv_core::signature::SignatureScheme;
+use csv_hash::Hash;
+use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_protocol::signature::SignatureScheme;
 use sha3::{Digest, Sha3_256};
 use std::sync::Arc;
 

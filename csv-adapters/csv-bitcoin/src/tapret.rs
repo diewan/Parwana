@@ -22,7 +22,7 @@ use bitcoin::{
     script::{Builder, PushBytesBuf},
 };
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Tapret commitment script: OP_RETURN <65 bytes>
 pub const TAPRET_SCRIPT_SIZE: usize = 67;

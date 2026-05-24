@@ -2,7 +2,7 @@
 //!
 //! Provides SQLite-backed storage for proof records with crash-safe persistence.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Persistent proof store
 #[cfg(feature = "sqlite")]

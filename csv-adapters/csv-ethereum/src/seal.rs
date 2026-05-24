@@ -7,10 +7,10 @@
 use crate::error::{EthereumError, EthereumResult};
 use crate::types::EthereumSealPoint;
 #[cfg(feature = "rpc")]
-use csv_core::Hash;
+use csv_protocol::Hash;
 #[cfg(feature = "rpc")]
-use csv_core::SealStore;
-use csv_core::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
+use csv_protocol::SealStore;
+use csv_protocol::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
 #[cfg(feature = "rpc")]
 use csv_store::SqliteSealStore;
 use std::collections::HashSet;
@@ -134,7 +134,7 @@ impl SealRegistry {
         if let Some(store) = &self.store {
             let seal_id = self.build_seal_id_bytes(seal);
             let commitment_hash = Hash::new(seal.seal_id);
-            let record = csv_core::SealRecord {
+            let record = csv_protocol::SealRecord {
                 chain: "ethereum".to_string(),
                 seal_id,
                 consumed_at_height: seal.slot_index,

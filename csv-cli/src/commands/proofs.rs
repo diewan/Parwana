@@ -93,7 +93,7 @@ fn cmd_generate(
 ) -> Result<()> {
     use csv_sdk::prelude::CsvClient;
 
-    use csv_core::sanad::SanadId;
+    use csv_hash::sanad::SanadId;
 
     output::header(&format!("Generating Proof on {}", chain));
 
@@ -113,7 +113,7 @@ fn cmd_generate(
     let _chain_config = config.chain(&chain)?;
 
     // Build CSV client with the chain enabled
-    let adapter_chain = csv_core::ChainId::new(chain.as_str());
+    let adapter_chain = csv_hash::chain_id::ChainId::new(chain.as_str());
 
     output::progress(1, 4, "Initializing CSV client...");
 
@@ -162,7 +162,7 @@ fn cmd_generate(
         generated_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let cbor_bytes = csv_core::canonical::to_canonical_cbor(&proof_output)
+    let cbor_bytes = csv_hash::canonical::to_canonical_cbor(&proof_output)
         .map_err(|e| anyhow::anyhow!("CBOR serialization failed: {}", e))?;
 
     output::progress(4, 4, "Finalizing...");
@@ -193,7 +193,8 @@ fn cmd_verify(
     canonical: bool,
     proof_tree: bool,
 ) -> Result<()> {
-    use csv_core::{proof::ProofBundle, sanad::SanadId};
+    use csv_proof::proof::ProofBundle;
+    use csv_hash::sanad::SanadId;
     use csv_sdk::prelude::CsvClient;
 
     output::header(&format!("Verifying Proof on {}", chain));
@@ -208,7 +209,7 @@ fn cmd_verify(
     };
 
     // Try CBOR first, fall back to JSON for backward compatibility
-    let proof_output: ProofOutput = csv_core::canonical::from_canonical_cbor(&proof_bytes)
+    let proof_output: ProofOutput = csv_hash::canonical::from_canonical_cbor(&proof_bytes)
         .or_else(|_| {
             // Fallback: try parsing as JSON
             let json: serde_json::Value = serde_json::from_slice(&proof_bytes)
@@ -246,7 +247,7 @@ fn cmd_verify(
     output::progress(1, 4, "Building CSV client...");
 
     // Build the CSV client
-    let adapter_chain = csv_core::ChainId::new(chain.as_str());
+    let adapter_chain = csv_hash::chain_id::ChainId::new(chain.as_str());
 
     let client = CsvClient::builder()
         .with_chain(adapter_chain.clone())
@@ -261,12 +262,12 @@ fn cmd_verify(
 
     // Reconstruct the proof bundle
     let proof_bundle = {
-        use csv_core::{
+        use csv_protocol::{
             dag::{DAGNode, DAGSegment},
-            Hash,
             proof::{FinalityProof, InclusionProof},
             seal::{CommitAnchor, SealPoint},
         };
+        use csv_hash::Hash;
 
         let dag_root = hex::decode(&proof_output.dag_root)
             .ok()
@@ -322,9 +323,9 @@ fn cmd_verify(
     output::progress(4, 4, "Finalizing verification...");
 
     let level = if valid {
-        csv_core::mcp::VerificationLevel::FullyVerified
+        csv_protocol::mcp::VerificationLevel::FullyVerified
     } else {
-        csv_core::mcp::VerificationLevel::StructuralOnly
+        csv_protocol::mcp::VerificationLevel::StructuralOnly
     };
 
     let result = serde_json::json!({
@@ -362,7 +363,7 @@ fn cmd_verify_cross_chain(
     let proof_bytes = std::fs::read(&proof_file)?;
 
     // Try CBOR first, fall back to JSON
-    let proof_output: ProofOutput = csv_core::canonical::from_canonical_cbor(&proof_bytes)
+    let proof_output: ProofOutput = csv_hash::canonical::from_canonical_cbor(&proof_bytes)
         .or_else(|_| {
             let json: serde_json::Value = serde_json::from_slice(&proof_bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid proof format: {}", e))?;

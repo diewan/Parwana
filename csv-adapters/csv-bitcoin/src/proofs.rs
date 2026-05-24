@@ -34,7 +34,7 @@ fn txid_to_bytes(txid: &Txid) -> [u8; 32] {
 }
 use bitcoin::hashes::sha256d;
 use bitcoin::{Txid, blockdata::block::Header, merkle_tree::PartialMerkleTree};
-use csv_core::Hash as CoreHash;
+use csv_hash::Hash as CoreHash;
 
 /// Double-SHA256 hash of two 32-byte inputs (Bitcoin Merkle node hash).
 /// Uses raw double-SHA256 (SHA256(SHA256(left || right))) as per Bitcoin protocol.

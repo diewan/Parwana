@@ -27,8 +27,8 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use csv_core::commit_mux::{CommitMux, MuxLeaf, MuxProof};
-use csv_core::Hash;
+use csv_protocol::commit_mux::{CommitMux, MuxLeaf, MuxProof};
+use csv_hash::Hash;
 
 use crate::error::{BitcoinError, BitcoinResult};
 use crate::types::BitcoinSealPoint;
@@ -238,20 +238,20 @@ pub trait MpcTreeExt {
     fn merkle_branch(
         &self,
         leaf_index: usize,
-    ) -> Option<Vec<csv_core::commit_mux::MerkleBranchNode>>;
+    ) -> Option<Vec<csv_protocol::commit_mux::MerkleBranchNode>>;
 }
 
 impl MpcTreeExt for CommitMux {
     fn merkle_branch(
         &self,
         leaf_index: usize,
-    ) -> Option<Vec<csv_core::commit_mux::MerkleBranchNode>> {
+    ) -> Option<Vec<csv_protocol::commit_mux::MerkleBranchNode>> {
         if leaf_index >= self.leaves.len() {
             return None;
         }
 
         // Collect all leaf hashes
-        let mut current_level: Vec<csv_core::Hash> =
+        let mut current_level: Vec<csv_hash::Hash> =
             self.leaves.iter().map(|l| l.hash()).collect();
 
         let mut branch = Vec::new();
@@ -274,25 +274,25 @@ impl MpcTreeExt for CommitMux {
                     let pair_start_index = next_level.len() * 2;
                     if current_index == pair_start_index {
                         // Target is left, sibling is sanad
-                        branch.push(csv_core::commit_mux::MerkleBranchNode {
+                        branch.push(csv_protocol::commit_mux::MerkleBranchNode {
                             hash: sanad,
                             is_left: false,
                         });
                     } else if current_index == pair_start_index + 1 {
                         // Target is sanad, sibling is left
-                        branch.push(csv_core::commit_mux::MerkleBranchNode {
+                        branch.push(csv_protocol::commit_mux::MerkleBranchNode {
                             hash: left,
                             is_left: true,
                         });
                     }
 
                     // Hash the pair for next level
-                    use csv_core::tagged_hash::csv_tagged_hash;
+                    use csv_hash::tagged_hash::csv_tagged_hash;
                     let mut data = [0u8; 64];
                     data[..32].copy_from_slice(left.as_bytes());
                     data[32..].copy_from_slice(sanad.as_bytes());
                     let parent_hash = csv_tagged_hash("mpc-internal", &data);
-                    next_level.push(csv_core::Hash::new(parent_hash));
+                    next_level.push(csv_hash::Hash::new(parent_hash));
                 }
             }
 

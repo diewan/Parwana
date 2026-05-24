@@ -5,10 +5,10 @@
 //! included in a Bitcoin block without requiring a full node.
 
 use bitcoin::hashes::{Hash as BitcoinHash, sha256d};
-use csv_core::Hash;
-use csv_core::protocol_version::builtin;
-use csv_core::seal::SealPoint;
-use csv_core::zk_proof::{ProofSystem, VerifierKey, ZkPublicInputs, ZkSealProof};
+use csv_hash::Hash;
+use csv_protocol::protocol_version::builtin;
+use csv_hash::seal::SealPoint;
+use csv_proof::zk_proof::{ProofSystem, VerifierKey, ZkPublicInputs, ZkSealProof};
 
 /// Input to the SP1 Bitcoin SPV guest program
 #[derive(Debug, Clone, PartialEq, Eq)]

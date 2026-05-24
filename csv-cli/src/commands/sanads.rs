@@ -5,7 +5,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::Subcommand;
 use sha2::Digest;
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 use crate::config::{Chain, Config};
 use crate::output;

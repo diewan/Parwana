@@ -23,7 +23,7 @@ pub use ipfs::IpfsTransport;
 pub use nostr::NostrTransport;
 pub use proof_delivery::{ProofFilter, ProofRouter};
 
-use csv_core::proof::ProofBundle;
+use csv_proof::proof::ProofBundle;
 use thiserror::Error;
 
 /// Errors that can occur during P2P proof transport operations.

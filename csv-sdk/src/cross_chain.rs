@@ -1,12 +1,12 @@
 //! Cross-chain operations for CSV sanads.
 //!
-//! This module builds on top of [`csv_core::cross_chain`] which provides the
+//! This module builds on top of [`csv_protocol::cross_chain`] which provides the
 //! core cross-chain types and orchestrator ([`CrossChainTransfer`],
 //! [`StandardTransferVerifier`], [`CrossChainRegistry`], etc.).
 //!
 //! # Relationship with csv-core
 //!
-//! - `csv_core::cross_chain` — Core types (lock events, inclusion proofs,
+//! - `csv_protocol::cross_chain` — Core types (lock events, inclusion proofs,
 //!   finality proofs, transfer state machine, in-memory registry).
 //! - `csv_sdk::cross_chain` — SDK extensions: SQLite-backed persistence
 //!   ([`PersistentTransferRegistry`]), chain-specific mint operations
@@ -16,7 +16,7 @@
 //! ## Architecture
 //!
 //! ```text
-//! csv_core::cross_chain::CrossChainTransfer (orchestrator)
+//! csv_protocol::cross_chain::CrossChainTransfer (orchestrator)
 //!     ↕ loads/saves from
 //! csv_sdk::cross_chain::PersistentTransferRegistry (SQLite)
 //!     ↕ used by
@@ -26,18 +26,19 @@
 //! ## Usage
 //!
 //! 1. Use `PersistentTransferRegistry` for SQLite-backed double-spend tracking.
-//! 2. Load persisted transfers into `csv_core::CrossChainRegistry` via
+//! 2. Load persisted transfers into `csv_protocol::CrossChainRegistry` via
 //!    [`PersistentTransferRegistry::load_into_registry`].
-//! 3. Use `csv_core::CrossChainTransfer::execute` with loaded registry.
+//! 3. Use `csv_protocol::CrossChainTransfer::execute` with loaded registry.
 //! 4. Save updated registry back via [`PersistentTransferRegistry::save_from_registry`].
 //!
-//! ## Re-exports from csv_core::cross_chain
+//! ## Re-exports from csv_protocol::cross_chain
 //!
-//! For convenience, key types from `csv_core::cross_chain` are re-exported
+//! For convenience, key types from `csv_protocol::cross_chain` are re-exported
 //! here so that SDK consumers don't need to depend on csv-core directly
 //! for cross-chain operations.
 
-use csv_core::{ChainId, Hash};
+use csv_hash::chain_id::ChainId;
+use csv_hash::Hash;
 
 use crate::CsvError;
 

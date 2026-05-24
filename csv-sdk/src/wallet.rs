@@ -12,7 +12,7 @@
 //! | Sui | 44' | 784' | m/44'/784'/0'/0'/i |
 //! | Aptos | 44' | 637' | m/44'/637'/0'/0'/i |
 
-use csv_core::ChainId;
+use csv_hash::chain_id::ChainId;
 
 #[cfg(feature = "wallet")]
 use csv_keys::{Mnemonic, MnemonicType, restore_from_mnemonic as csv_restore_from_mnemonic};

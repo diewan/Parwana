@@ -10,8 +10,8 @@
 //! 2. Account state proofs via get_multiple_accounts with proof
 //! 3. Finality verification via slot depth and cluster consensus
 
-use csv_core::Hash;
-use csv_core::proof::{FinalityProof, InclusionProof};
+use csv_hash::Hash;
+use csv_hash::proof::{FinalityProof, InclusionProof};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;

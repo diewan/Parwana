@@ -14,7 +14,7 @@ use csv_keys::{
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
-use csv_core::ChainId;
+use csv_hash::chain_id::ChainId;
 use csv_store::state::WalletAccount;
 
 /// Import wallet from mnemonic phrase.

@@ -47,10 +47,13 @@ use sha2::Digest as Sha2Digest;
 #[allow(unused_imports)]
 use sha3::Digest;
 
-use csv_core::{
-    BalanceInfo, ChainBackend, ChainId, DeploymentStatus, Hash, ProofBundle, SanadId,
-    SanadOperationResult, TransactionInfo, TransactionStatus,
+use csv_protocol::backend::{
+    BalanceInfo, ChainBackend, DeploymentStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
+use csv_hash::chain_id::ChainId;
+use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
+use csv_proof::proof::ProofBundle;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -619,7 +622,7 @@ impl ChainRuntime {
                 })?;
 
         // Create a simple DAG segment with the sanad commitment
-        use csv_core::dag::{DAGNode, DAGSegment};
+        use csv_protocol::dag::{DAGNode, DAGSegment};
         let dag_node = DAGNode::new(
             commitment,
             vec![], // No inputs for lock operation

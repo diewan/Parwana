@@ -19,7 +19,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-csv-core = { path = "../../csv-core" }
+csv-protocol = { path = "../../csv-protocol" }
+csv-hash = { path = "../../csv-hash" }
 csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
 csv-store = { path = "../../csv-store", optional = true }

@@ -6,7 +6,6 @@ description = "CSV Protocol runtime orchestration engine"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-csv-core = { path = "../csv-core" }
 csv-protocol = { path = "../csv-protocol" }
 csv-verifier = { path = "../csv-verifier" }
 csv-proof = { path = "../csv-proof" }

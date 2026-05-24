@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::event_envelope::{AggregateSnapshot, EventFilter, RuntimeEventEnvelope, StreamPosition};
 use crate::lease::TransferLease;
-use csv_core::replay_record::GlobalReplayRecord;
+use crate::replay_record::GlobalReplayRecord;
 use csv_protocol::sanad::SanadId;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;

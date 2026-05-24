@@ -21,12 +21,12 @@
 //! 3. Seal is now "consumed" (cannot publish different commitment there)
 //! ```
 
-use csv_core::dag::DAGSegment;
-use csv_core::error::Result as CoreResult;
-use csv_core::Hash;
-use csv_core::proof::ProofBundle;
-use csv_core::seal_protocol::SealProtocol;
-use csv_core::signature::SignatureScheme;
+use csv_protocol::dag::DAGSegment;
+use csv_protocol::error::Result as CoreResult;
+use csv_hash::Hash;
+use csv_proof::proof::ProofBundle;
+use csv_protocol::seal_protocol::SealProtocol;
+use csv_protocol::signature::SignatureScheme;
 
 use crate::blob::Blob;
 use crate::commitment::{BlobCommitment, CommitmentProof, FraudProof};
@@ -92,10 +92,10 @@ where
     }
 }
 
-/// Convert CelestiaError to csv_core::error::ProtocolError
-impl From<CelestiaError> for csv_core::error::ProtocolError {
+/// Convert CelestiaError to csv_protocol::error::ProtocolError
+impl From<CelestiaError> for csv_protocol::error::ProtocolError {
     fn from(err: CelestiaError) -> Self {
-        csv_core::error::ProtocolError::Generic(err.to_string())
+        csv_protocol::error::ProtocolError::Generic(err.to_string())
     }
 }
 
@@ -116,7 +116,7 @@ where
 
         // Check that seal hasn't been consumed
         if !seal.is_valid() {
-            return Err(csv_core::error::ProtocolError::InvalidSeal(
+            return Err(csv_protocol::error::ProtocolError::InvalidSeal(
                 "Seal already consumed".to_string(),
             ));
         }
@@ -168,7 +168,7 @@ where
     fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
         // Verify seal hasn't been consumed
         if !seal.is_valid() {
-            return Err(csv_core::error::ProtocolError::InvalidSeal(
+            return Err(csv_protocol::error::ProtocolError::InvalidSeal(
                 "Seal has been consumed".to_string(),
             ));
         }
@@ -228,18 +228,18 @@ where
         let finality = self.verify_finality(anchor.clone())?;
 
         let seal_ref =
-            csv_core::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height))
+            csv_hash::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height))
                 .map_err(|e| {
-                    csv_core::error::ProtocolError::InvalidSeal(format!("Invalid seal: {}", e))
+                    csv_protocol::error::ProtocolError::InvalidSeal(format!("Invalid seal: {}", e))
                 })?;
 
-        let anchor_ref = csv_core::seal::CommitAnchor::new(
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(
             anchor.tx_hash.to_vec(),
             anchor.height,
             anchor.commitment.as_bytes().to_vec(),
         )
         .map_err(|e| {
-            csv_core::error::ProtocolError::InvalidSeal(format!("Invalid anchor: {}", e))
+            csv_protocol::error::ProtocolError::InvalidSeal(format!("Invalid anchor: {}", e))
         })?;
 
         // Construct proof bytes from row_proof and data_proof
@@ -251,26 +251,26 @@ where
             proof_bytes.extend_from_slice(hash);
         }
 
-        let inclusion_proof = csv_core::proof::InclusionProof::new(
+        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
             proof_bytes,
-            csv_core::Hash::new(inclusion.block_hash),
+            csv_hash::Hash::new(inclusion.block_hash),
             inclusion.height,
             inclusion.row_index as u64,
         )
         .map_err(|e| {
-            csv_core::error::ProtocolError::InclusionProofFailed(format!(
+            csv_protocol::error::ProtocolError::InclusionProofFailed(format!(
                 "Invalid inclusion proof: {}",
                 e
             ))
         })?;
 
-        let finality_proof = csv_core::proof::FinalityProof::new(
+        let finality_proof = csv_protocol::proof::FinalityProof::new(
             anchor.block_hash.to_vec(),
             anchor.height,
             !finality.quorum_signatures.is_empty(),
         )
         .map_err(|e| {
-            csv_core::error::ProtocolError::FinalityNotReached(format!(
+            csv_protocol::error::ProtocolError::FinalityNotReached(format!(
                 "Invalid finality proof: {}",
                 e
             ))
@@ -280,7 +280,7 @@ where
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        csv_core::proof::ProofBundle::new(
+        csv_protocol::proof::ProofBundle::new(
             transition_dag,
             signatures,
             seal_ref,
@@ -289,7 +289,7 @@ where
             finality_proof,
         )
         .map_err(|e| {
-            csv_core::error::ProtocolError::Generic(format!("Failed to build proof bundle: {}", e))
+            csv_protocol::error::ProtocolError::Generic(format!("Failed to build proof bundle: {}", e))
         })
     }
 

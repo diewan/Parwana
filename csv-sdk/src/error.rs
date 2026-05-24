@@ -6,9 +6,9 @@
 
 use thiserror::Error;
 
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 
-use csv_core::ChainId;
+use csv_hash::chain_id::ChainId;
 
 /// Unified error type for all CSV operations.
 ///

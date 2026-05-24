@@ -19,13 +19,13 @@
 //! - Verifiable: Anyone can verify without trusting Bitcoin RPC
 
 use bitcoin::hashes::Hash as BitcoinHash;
-use csv_core::protocol_version::builtin;
-use csv_core::seal::SealPoint;
+use csv_protocol::protocol_version::builtin;
+use csv_hash::seal::SealPoint;
 #[cfg(test)]
-use csv_core::Hash;
+use csv_hash::Hash;
 #[cfg(test)]
-use csv_core::zk_proof::{VerifierKey, ZkPublicInputs};
-use csv_core::zk_proof::{
+use csv_proof::zk_proof::{VerifierKey, ZkPublicInputs};
+use csv_proof::zk_proof::{
     ChainWitness, ProofSystem, ZkError, ZkProver, ZkSealProof,
 };
 
@@ -235,7 +235,7 @@ impl Sp1BtcSpvInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_core::ChainId;
+    use csv_hash::chain_id::ChainId;
 
     #[test]
     fn test_bitcoin_spv_prover_creation() {

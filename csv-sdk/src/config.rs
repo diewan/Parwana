@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use csv_core::ChainId;
+use csv_hash::chain_id::ChainId;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
 use dirs;

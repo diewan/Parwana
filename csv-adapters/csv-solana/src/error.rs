@@ -1,6 +1,6 @@
 //! Error types for Solana adapter
 
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
 
 /// Solana-specific errors
@@ -116,9 +116,9 @@ impl From<ed25519_dalek::ed25519::Error> for SolanaError {
     }
 }
 
-impl From<SolanaError> for csv_core::error::ProtocolError {
+impl From<SolanaError> for csv_protocol::error::ProtocolError {
     fn from(err: SolanaError) -> Self {
-        csv_core::error::ProtocolError::NetworkError(format!("Solana: {}", err))
+        csv_protocol::error::ProtocolError::NetworkError(format!("Solana: {}", err))
     }
 }
 

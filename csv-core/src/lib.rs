@@ -249,9 +249,6 @@ pub mod store;
 // Store re-exports for csv-store and csv-p2p
 pub use store::{AnchorRecord, SanadRecord, SanadStore, SealRecord, SealStore, StoreError};
 
-// Transfer lifecycle state machine - 🔒 STABLE
-pub mod transfer_stage;
-
 // Client-side validation (Sprint 2)// Cross-chain transfer
 pub mod client;
 pub mod commitment_chain;
@@ -268,12 +265,6 @@ pub mod verified;
 
 // ZK proof infrastructure (Phase 5)
 pub mod zk_proof;
-
-// Atomic swap / HTLSE (Phase 3)
-pub mod atomic_swap;
-
-// Stealth addresses (Phase 3.3)
-pub mod stealth;
 
 // ===========================================================================
 // Re-exports: Protocol Contract (🔒 STABLE + 🟡 BETA)
@@ -322,8 +313,9 @@ pub use cross_chain::{
     CrossChainTransferProof, TransferVerifier, CrossChainDomain,
 };
 
-// Transfer stage (protocol lifecycle)
-pub use transfer_stage::TransferStage;
+// Transfer stage (protocol lifecycle) - moved to csv-protocol
+// pub use transfer_stage::TransferStage;
+// Nullifier types - moved to csv-hash
 pub use csv_hash::nullifier::{
     DoubleSpendError, SealConsumption, SealNullifier,
 };
@@ -386,23 +378,12 @@ pub use store::InMemorySealStore;
 #[cfg(feature = "experimental")]
 
 // ===========================================================================
-// Re-exports: Phase 3 (Atomic Swap / HTLSE)
+// Re-exports: Phase 3 (Atomic Swap / HTLSE) - DELETED
 // ===========================================================================
 
-pub use atomic_swap::{
-    AtomicSwapBackend, AtomicSwapError, AtomicSwapOffer, AtomicSwapRegistry, AtomicSwapState,
-    DefaultTimeouts, HashLock, SwapDirection, SwapRecord, blocks_to_duration, compute_swap_id,
-    derive_hash_lock, is_timeout_valid, verify_hash_lock,
-};
-
 // ===========================================================================
-// Re-exports: Phase 3 (Stealth Addresses)
+// Re-exports: Phase 3 (Stealth Addresses) - DELETED
 // ===========================================================================
-
-pub use stealth::{
-    EphemeralPoint, ScanPublicKey, SpendPublicKey, StealthAddress, StealthAddressPair,
-    StealthScanEntry, StealthWallet, compute_ephemeral_point, derive_stealth_base,
-};
 
 // ===========================================================================
 // Re-exports: Phase 3 (Pedersen Commitments) - feature-gated

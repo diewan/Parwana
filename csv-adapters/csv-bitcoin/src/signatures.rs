@@ -3,8 +3,8 @@
 //! Bitcoin uses ECDSA signatures over the secp256k1 curve.
 //! Signature format: 64 bytes [r (32)] [s (32)] or 65 bytes [recovery_id (1)] [r (32)] [s (32)]
 
-use csv_core::error::ProtocolError;
-use csv_core::error::Result;
+use csv_protocol::error::ProtocolError;
+use csv_protocol::error::Result;
 
 /// Verify a Bitcoin ECDSA signature
 pub fn verify_bitcoin_signature(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result<()> {

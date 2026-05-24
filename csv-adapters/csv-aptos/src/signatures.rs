@@ -4,8 +4,8 @@
 //! Signature format: 64 bytes (R || S)
 //! Public key format: 32 bytes
 
-use csv_core::error::ProtocolError;
-use csv_core::error::Result;
+use csv_protocol::error::ProtocolError;
+use csv_protocol::error::Result;
 
 /// Verify an Aptos Ed25519 signature
 ///

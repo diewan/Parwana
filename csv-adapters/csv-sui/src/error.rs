@@ -3,7 +3,7 @@
 //! This module provides a comprehensive error taxonomy for the Sui adapter,
 //! with chain-specific error variants and recovery guidance.
 
-use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
 
 /// Comprehensive error types for the Sui adapter.
@@ -73,7 +73,7 @@ pub enum SuiError {
 
     /// Core adapter error from csv-adapter-core.
     #[error(transparent)]
-    CoreError(#[from] csv_core::ProtocolError),
+    CoreError(#[from] csv_protocol::ProtocolError),
 }
 
 impl SuiError {
@@ -286,30 +286,30 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for SuiError {
     }
 }
 
-impl From<SuiError> for csv_core::ProtocolError {
+impl From<SuiError> for csv_protocol::ProtocolError {
     fn from(err: SuiError) -> Self {
         match err {
             SuiError::CoreError(e) => e,
             SuiError::RpcError(msg) | SuiError::TransactionFailed(msg) => {
-                csv_core::ProtocolError::NetworkError(msg)
+                csv_protocol::ProtocolError::NetworkError(msg)
             }
-            SuiError::ObjectUsed(msg) => csv_core::ProtocolError::InvalidSeal(msg),
+            SuiError::ObjectUsed(msg) => csv_protocol::ProtocolError::InvalidSeal(msg),
             SuiError::StateProofFailed(msg) | SuiError::EventProofFailed(msg) => {
-                csv_core::ProtocolError::InclusionProofFailed(msg)
+                csv_protocol::ProtocolError::InclusionProofFailed(msg)
             }
-            SuiError::CheckpointFailed(msg) => csv_core::ProtocolError::NetworkError(msg),
-            SuiError::SerializationError(msg) => csv_core::ProtocolError::InvalidSeal(msg),
+            SuiError::CheckpointFailed(msg) => csv_protocol::ProtocolError::NetworkError(msg),
+            SuiError::SerializationError(msg) => csv_protocol::ProtocolError::InvalidSeal(msg),
             SuiError::ConfirmationTimeout {
                 tx_digest,
                 timeout_ms,
-            } => csv_core::ProtocolError::NetworkError(format!(
+            } => csv_protocol::ProtocolError::NetworkError(format!(
                 "Timeout waiting for tx {} after {}ms",
                 tx_digest, timeout_ms
             )),
             SuiError::ReorgDetected { checkpoint } => {
-                csv_core::ProtocolError::ReorgInvalid(format!("Reorg at checkpoint {}", checkpoint))
+                csv_protocol::ProtocolError::ReorgInvalid(format!("Reorg at checkpoint {}", checkpoint))
             }
-            sui_err => csv_core::ProtocolError::NetworkError(format!("{}", sui_err)),
+            sui_err => csv_protocol::ProtocolError::NetworkError(format!("{}", sui_err)),
         }
     }
 }
@@ -344,10 +344,10 @@ mod tests {
     #[test]
     fn test_error_conversion() {
         let sui_err = SuiError::StateProofFailed("bad proof".to_string());
-        let core_err: csv_core::ProtocolError = sui_err.into();
+        let core_err: csv_protocol::ProtocolError = sui_err.into();
         assert!(matches!(
             core_err,
-            csv_core::ProtocolError::InclusionProofFailed(_)
+            csv_protocol::ProtocolError::InclusionProofFailed(_)
         ));
     }
 }

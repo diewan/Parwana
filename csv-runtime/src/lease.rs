@@ -73,7 +73,7 @@ pub const MAX_LEASE_DURATION_SECS: u64 = 300;
 /// use csv_runtime::lease::{TransferLease, RuntimeId, DEFAULT_LEASE_DURATION_SECS};
 /// use std::time::{Duration, SystemTime};
 /// use uuid::Uuid;
-/// use csv_core::SanadId;
+/// use csv_hash::sanad::SanadId;
 ///
 /// let transfer_id = SanadId::from_bytes(&[0u8; 32]);
 /// let runtime_id = RuntimeId::new_v4();

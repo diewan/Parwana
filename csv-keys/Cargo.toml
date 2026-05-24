@@ -15,7 +15,7 @@ publish = true
 rust-version = "1.93"
 
 [dependencies]
-csv-core = { path = "../csv-core", default-features = false, features = ["std"] }
+csv-hash = { path = "../csv-hash" }
 
 # BIP-39 mnemonic support
 bip39 = { version = "2.0", features = ["rand", "zeroize"] }

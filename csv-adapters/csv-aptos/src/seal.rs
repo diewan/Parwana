@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AptosError, AptosResult};
 use crate::types::AptosSealPoint;
-use csv_core::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
+use csv_protocol::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
 
 /// A persisted seal record that can be serialized.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

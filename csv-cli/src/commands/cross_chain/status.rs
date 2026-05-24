@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 use crate::config::{Chain, Config};
 use crate::output;

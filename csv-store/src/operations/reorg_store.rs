@@ -2,7 +2,7 @@
 //!
 //! Provides SQLite-backed storage for reorg detection with crash-safe persistence.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Persistent reorg store
 #[cfg(feature = "sqlite")]

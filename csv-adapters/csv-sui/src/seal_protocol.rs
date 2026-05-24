@@ -13,17 +13,17 @@
 
 use std::sync::Mutex;
 
-use csv_core::dag::DAGSegment;
-use csv_core::error::ProtocolError;
-use csv_core::error::Result as CoreResult;
-use csv_core::proof::{FinalityProof, ProofBundle};
+use csv_protocol::dag::DAGSegment;
+use csv_protocol::error::ProtocolError;
+use csv_protocol::error::Result as CoreResult;
+use csv_proof::proof::{FinalityProof, ProofBundle};
 
 #[cfg(feature = "rpc")]
 type SignedTransaction = (Vec<u8>, Vec<u8>, Vec<u8>);
-use csv_core::Hash;
+use csv_hash::Hash;
 use csv_protocol::seal_protocol::SealProtocol;
-use csv_core::commitment::Commitment;
-use csv_core::seal::{CommitAnchor as CoreCommitAnchor, SealPoint as CoreSealPoint};
+use csv_protocol::commitment::Commitment;
+use csv_hash::seal::{CommitAnchor as CoreCommitAnchor, SealPoint as CoreSealPoint};
 
 use crate::checkpoint::{CheckpointVerifier, CheckpointVerifierTrait};
 use crate::config::SuiConfig;
