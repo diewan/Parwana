@@ -10,7 +10,7 @@
 //! - **Fix suggestions**: Errors include actionable `FixAction` for autonomous resolution
 
 use crate::collections::HashMap;
-use crate::protocol_version::ProtocolVersion;
+use csv_protocol::version::ProtocolVersion;
 use serde::Serialize;
 
 /// Trait for types that can provide machine-actionable error suggestions.

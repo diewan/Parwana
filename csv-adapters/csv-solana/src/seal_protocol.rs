@@ -4,16 +4,13 @@
 //! as single-use seals. When a seal is consumed, the PDA account is closed, transferring
 //! lamports to the destination, making the seal cryptographically unspendable.
 
-use csv_protocol::seal_protocol::SealProtocol;
-use csv_protocol::{
-    error::ProtocolError,
-    signature::SignatureScheme,
-};
 use csv_hash::Hash;
 use csv_proof::proof::ProofBundle;
+use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
 use solana_system_interface::instruction as system_instruction;
+use std::str::FromStr;
 
 use crate::config::SolanaConfig;
 use crate::error::{SolanaError, SolanaResult};
@@ -127,30 +124,28 @@ impl SolanaSealProtocol {
         self.wallet.as_ref()
     }
 
-    /// Derive seal PDA from sanad ID and owner
-    fn derive_seal_pda(&self, sanad_id: &Hash, owner: &Pubkey) -> Pubkey {
-        let _seeds = [b"csv-seal", sanad_id.as_slice(), owner.as_ref()];
-        // In production, this would use find_program_address with the actual CSV program
-        // For now, we compute a deterministic hash-based address
-        let mut hasher = Sha256::new();
-        hasher.update(SOLANA_DOMAIN_SEPARATOR);
-        hasher.update(b"seal");
-        hasher.update(sanad_id.as_bytes());
-        hasher.update(owner.as_ref());
-        let hash = hasher.finalize();
+    fn csv_program_id(&self) -> SolanaResult<Pubkey> {
+        Pubkey::from_str(&self.config.csv_program_id).map_err(|e| {
+            SolanaError::InvalidProgramId(format!("{} ({})", self.config.csv_program_id, e))
+        })
+    }
 
-        // Convert first 32 bytes to pubkey
-        Pubkey::new_from_array(hash.into())
+    /// Derive the Anchor `SanadAccount` PDA from the on-chain seeds.
+    fn derive_seal_pda(&self, sanad_id: &Hash, owner: &Pubkey) -> SolanaResult<Pubkey> {
+        let program_id = self.csv_program_id()?;
+        let (pda, _bump) = Pubkey::find_program_address(
+            &[b"sanad", owner.as_ref(), sanad_id.as_bytes()],
+            &program_id,
+        );
+        Ok(pda)
     }
 
     /// Derive commitment PDA from commitment hash
-    fn derive_commitment_pda(&self, commitment: &Hash) -> Pubkey {
-        let mut hasher = Sha256::new();
-        hasher.update(SOLANA_DOMAIN_SEPARATOR);
-        hasher.update(b"commitment");
-        hasher.update(commitment.as_bytes());
-        let hash = hasher.finalize();
-        Pubkey::new_from_array(hash.into())
+    fn derive_commitment_pda(&self, commitment: &Hash) -> SolanaResult<Pubkey> {
+        let program_id = self.csv_program_id()?;
+        let (pda, _bump) =
+            Pubkey::find_program_address(&[b"commitment", commitment.as_bytes()], &program_id);
+        Ok(pda)
     }
 
     /// Check if RPC client is available
@@ -192,7 +187,10 @@ impl SealProtocol for SolanaSealProtocol {
     type FinalityProof = SolanaFinalityProof;
 
     /// Create a new seal account (PDA) for a sanad
-    fn create_seal(&self, amount: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    fn create_seal(
+        &self,
+        amount: Option<u64>,
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         let wallet = self
             .wallet
             .as_ref()
@@ -200,7 +198,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         let owner = wallet.pubkey();
         let sanad_id = Hash::new(Self::generate_sanad_id());
-        let seal_pda = self.derive_seal_pda(&sanad_id, &owner);
+        let seal_pda = self.derive_seal_pda(&sanad_id, &owner)?;
 
         let lamports = amount.unwrap_or(1_000_000); // Default 0.001 SOL rent exemption
 
@@ -257,7 +255,11 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Publish a commitment to the seal account
-    fn publish(&self, hash: Hash, seal_point: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
+    fn publish(
+        &self,
+        hash: Hash,
+        seal_point: Self::SealPoint,
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
         let rpc = self.check_rpc()?;
         let wallet = self
             .wallet
@@ -265,7 +267,7 @@ impl SealProtocol for SolanaSealProtocol {
             .ok_or_else(|| SolanaError::Wallet("No wallet configured".to_string()))?;
 
         let owner = wallet.pubkey();
-        let commitment_pda = self.derive_commitment_pda(&hash);
+        let commitment_pda = self.derive_commitment_pda(&hash)?;
 
         // Get recent blockhash
         let recent_blockhash = rpc
@@ -343,7 +345,10 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Verify inclusion by checking the transaction is in a block
-    fn verify_inclusion(&self, anchor_ref: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    fn verify_inclusion(
+        &self,
+        anchor_ref: Self::CommitAnchor,
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
         let _rpc = self.check_rpc()?;
 
         // In production, this would:
@@ -377,7 +382,10 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Verify finality by checking block depth
-    fn verify_finality(&self, anchor_ref: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    fn verify_finality(
+        &self,
+        anchor_ref: Self::CommitAnchor,
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
         let _rpc = self.check_rpc()?;
 
         // Solana has deterministic finality after ~32 slots (12-16 seconds)
@@ -652,10 +660,11 @@ mod tests {
         let sanad_id = Hash::new([1u8; 32]);
         let owner = Pubkey::new_unique();
 
-        let pda1 = adapter.derive_seal_pda(&sanad_id, &owner);
-        let pda2 = adapter.derive_seal_pda(&sanad_id, &owner);
+        let pda1 = adapter.derive_seal_pda(&sanad_id, &owner).unwrap();
+        let pda2 = adapter.derive_seal_pda(&sanad_id, &owner).unwrap();
 
         assert_eq!(pda1, pda2, "PDA derivation should be deterministic");
+        assert!(!pda1.is_on_curve(), "PDA must be off-curve");
     }
 
     #[test]

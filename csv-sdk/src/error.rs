@@ -6,7 +6,7 @@
 
 use thiserror::Error;
 
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
+use csv_core::mcp::{FixAction, HasErrorSuggestion, error_codes};
 
 use csv_hash::chain_id::ChainId;
 
@@ -332,15 +332,9 @@ impl HasErrorSuggestion for CsvError {
 }
 
 // Conversion from csv-adapter-core errors
-impl From<csv_core::ProtocolError> for CsvError {
-    fn from(err: csv_core::ProtocolError) -> Self {
+impl From<csv_protocol::error::ProtocolError> for CsvError {
+    fn from(err: csv_protocol::error::ProtocolError) -> Self {
         CsvError::Generic(err.to_string())
-    }
-}
-
-impl From<csv_core::StoreError> for CsvError {
-    fn from(err: csv_core::StoreError) -> Self {
-        CsvError::StoreError(err.to_string())
     }
 }
 

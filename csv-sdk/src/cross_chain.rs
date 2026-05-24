@@ -39,8 +39,13 @@
 
 use csv_hash::chain_id::ChainId;
 use csv_hash::Hash;
+use csv_hash::seal::SealPoint;
+use csv_protocol::cross_chain::{CrossChainRegistry, CrossChainRegistryEntry};
 
 use crate::CsvError;
+
+#[cfg(feature = "sqlite")]
+use sqlx::SqlitePool;
 
 /// Result type for cross-chain operations.
 pub type CrossChainResult<T> = Result<T, CrossChainError>;
@@ -446,17 +451,24 @@ pub async fn mint_sanad_on_chain(
         #[cfg(feature = "bitcoin")]
         "bitcoin" => {
             use csv_bitcoin::mint::mint_sanad;
+            use csv_bitcoin::rpc::MempoolSignetRpc;
 
-            mint_sanad(
-                rpc_url,
+            let rpc = MempoolSignetRpc::new(rpc_url).map_err(|e| {
+                CrossChainError::RpcError(format!("Failed to create RPC client: {}", e))
+            })?;
+
+            let tx_hash: Result<String, csv_bitcoin::error::BitcoinError> = mint_sanad(
+                rpc,
                 private_key,
                 sanad_id,
                 commitment,
                 source_chain,
                 source_seal_ref,
+                contract,
             )
-            .await
-            .map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
+            .await;
+
+            tx_hash.map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
         }
 
         #[cfg(not(feature = "bitcoin"))]

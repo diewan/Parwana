@@ -8,6 +8,9 @@ use bitcoin::hashes::{Hash as BitcoinHash, sha256d};
 use csv_hash::Hash;
 
 use csv_hash::seal::SealPoint;
+use csv_core::zk_proof::ProofSystem;
+use csv_protocol::cross_chain::{VerifierKey, ZkPublicInputs, ZkSealProof};
+use csv_protocol::version::builtin;
 
 
 /// Input to the SP1 Bitcoin SPV guest program
@@ -161,14 +164,19 @@ impl Sp1BtcSpvOutput {
             }
         };
 
-        let verifier_key = VerifierKey::new(
-            builtin::BITCOIN.clone(),
+        let verifier_key = VerifierKey {
+            chain: builtin::BITCOIN.clone(),
+            hash_algorithm: csv_protocol::cross_chain::CrossChainHashAlgorithm::Sha256,
             key_bytes,
-            ProofSystem::SP1,
-            1,
-        );
+            proof_system: "SP1".to_string(),
+            version: 1,
+        };
 
-        ZkSealProof::new(proof_bytes, verifier_key, self.public_inputs.clone())
+        Ok(ZkSealProof {
+            proof_bytes,
+            verifier_key,
+            public_inputs: self.public_inputs.clone(),
+        })
     }
 }
 

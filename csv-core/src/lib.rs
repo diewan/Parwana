@@ -64,7 +64,7 @@ pub mod collections;
 pub use csv_hash::commitment::Commitment;
 pub use csv_hash::sanad::SanadId;
 pub use csv_hash::chain_id::ChainId;
-pub use commitments_ext::CommitmentScheme;
+pub use csv_proof::commitments_ext::CommitmentScheme;
 pub use csv_hash::{
     Hash, HashDomain, HashParseError, DomainCategory,
     SealHash, CommitmentHash, SanadIdHash, NullifierHash, ReplayIdHash,
@@ -169,7 +169,7 @@ pub mod client;
 // pub mod commitment_chain; // DELETED - use csv_proof::commitment_chain
 // pub mod cross_chain; // DELETED - use csv_protocol::cross_chain
 pub mod state_store;
-pub mod validator
+pub mod validator;
 // pub mod seal_protocol; // DELETED - use csv_protocol::seal_protocol
 
 // Multi-dimensional verification result types (Phase 1)
@@ -208,7 +208,7 @@ pub use csv_hash::nullifier::OptimizedSealNullifier;
 // ===========================================================================
 
 // Advanced commitment types
-pub use commitments_ext::{
+pub use csv_proof::commitments_ext::{
     EnhancedCommitment, FinalityProofType, InclusionProofType, ProofMetadata,
 };
 
@@ -252,10 +252,6 @@ pub use store::InMemorySealStore;
 // pub use vm::{
 //     AluVmAdapter, DeterministicVM, MeteredVMAdapter, PassthroughVM, VMError, VMInputs, VMOutputs,
 //     execute_transition,
-
-/// Experimental module — feature-gated behind `experimental`.
-/// These APIs may change or be removed without notice.
-#[cfg(feature = "experimental")]
 
 // ===========================================================================
 // Re-exports: Phase 3 (Pedersen Commitments) - feature-gated

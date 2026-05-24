@@ -10,7 +10,7 @@ use spin::RwLock;
 use std::sync::Arc;
 
 use csv_hash::Hash;
-use crate::lease::now_secs;
+use csv_protocol::lease::now_secs;
 use csv_proof::proof::ProofBundle;
 
 /// Thread-safe proof cache with LRU eviction policy

@@ -22,6 +22,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use csv_core::store::InMemorySealStore;
 use csv_hash::chain_id::ChainId;
 
 use crate::config::Config;
@@ -33,12 +34,6 @@ use crate::wallet::Wallet;
 pub enum StoreBackend {
     /// In-memory store (non-persistent, for testing).
     InMemory,
-    /// SQLite file at the given path.
-    #[cfg(feature = "sqlite")]
-    Sqlite {
-        /// Path to the SQLite database.
-        path: String,
-    },
 }
 
 /// Internal state for the client builder.
@@ -171,13 +166,8 @@ impl ClientBuilder {
         // Initialize store backend
         let store = match self.state.store_backend.unwrap_or(StoreBackend::InMemory) {
             StoreBackend::InMemory => {
-                crate::client::StoreHandle::InMemory(csv_hash::chain_id::InMemorySealStore::new())
+                crate::client::StoreHandle::InMemory(InMemorySealStore::new())
             }
-            #[cfg(feature = "sqlite")]
-            StoreBackend::Sqlite { ref path } => crate::client::StoreHandle::Sqlite(
-                csv_store::SqliteSealStore::open(path)
-                    .map_err(|e| CsvError::StoreError(e.to_string()))?,
-            ),
         };
 
         let store_arc = Arc::new(std::sync::Mutex::new(store));

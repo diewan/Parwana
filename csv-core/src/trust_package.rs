@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
-use crate::signature::SignatureScheme;
+use csv_protocol::signature::SignatureScheme;
 
 /// Errors that can occur when working with trust packages.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -253,7 +253,7 @@ impl TrustPackage {
         scheme: SignatureScheme,
         secret_key: &[u8],
     ) -> Result<(), TrustPackageError> {
-        use crate::signature::Signature;
+        use csv_protocol::signature::Signature;
 
         let message = self.signing_message();
 
@@ -280,7 +280,7 @@ impl TrustPackage {
             return Err(TrustPackageError::SignatureInvalid);
         }
 
-        use crate::signature::Signature;
+        use csv_protocol::signature::Signature;
 
         let message = self.signing_message();
         let sig = Signature::new(

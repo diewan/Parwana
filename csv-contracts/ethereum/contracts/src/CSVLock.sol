@@ -31,6 +31,7 @@ contract CSVLock {
     /// @notice Lock record for refund support
     struct LockRecord {
         bytes32 commitment;
+        address owner;
         uint256 timestamp;
         uint8 destinationChain;
         bytes32 destinationOwnerRoot; // Hash of destination owner for verification
@@ -193,6 +194,7 @@ contract CSVLock {
         usedSeals[sanadId] = true;
         locks[sanadId] = LockRecord({
             commitment: commitment,
+            owner: msg.sender,
             timestamp: block.timestamp,
             destinationChain: destinationChain,
             destinationOwnerRoot: destinationOwnerRoot,
@@ -271,6 +273,9 @@ contract CSVLock {
         // Verify the caller is the legitimate owner by checking the destination owner hash
         if (lock.destinationOwnerRoot != destinationOwnerHash) {
             revert InvalidMintContract();
+        }
+        if (lock.owner != msg.sender) {
+            revert NotOwner();
         }
 
         // Verify not already refunded

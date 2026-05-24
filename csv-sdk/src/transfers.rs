@@ -351,7 +351,7 @@ impl TransferBuilder {
 
         let finality_block = match tx_status {
             csv_protocol::backend::TransactionStatus::Confirmed { block_height, .. } => block_height,
-            csv_protocol::backend::TransactionStatus::Failed { .. } => {
+            csv_protocol::backend::TransactionStatus::Failed { reason, .. } => {
                 record.status = crate::TransferStatus::Failed {
                     error_code: "LOCK_FAILED".to_string(),
                     retryable: true,

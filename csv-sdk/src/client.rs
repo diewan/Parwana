@@ -46,26 +46,19 @@ use crate::sanads::SanadsManager;
 use crate::transfers::TransferManager;
 use crate::wallet::Wallet;
 use crate::wallet::WalletManager;
+use csv_core::store::{InMemorySealStore, SanadRecord, SanadStore};
 
 /// Handle to the underlying storage backend.
 pub enum StoreHandle {
     /// In-memory seal and anchor store.
-    InMemory(csv_protocol::InMemorySealStore),
-    /// SQLite-backed store (requires `sqlite` feature).
-    #[cfg(feature = "sqlite")]
-    Sqlite(csv_store::SqliteSealStore),
+    InMemory(InMemorySealStore),
 }
 
 impl StoreHandle {
     /// Save a Sanad to the store.
-    pub fn save_sanad(&mut self, record: &csv_protocol::SanadRecord) -> Result<(), CsvError> {
-        use csv_protocol::SanadStore;
+    pub fn save_sanad(&mut self, record: &SanadRecord) -> Result<(), CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
-                .save_sanad(record)
-                .map_err(|e| CsvError::StoreError(e.to_string())),
-            #[cfg(feature = "sqlite")]
-            StoreHandle::Sqlite(store) => store
                 .save_sanad(record)
                 .map_err(|e| CsvError::StoreError(e.to_string())),
         }
@@ -74,15 +67,10 @@ impl StoreHandle {
     /// Get a Sanad by its ID.
     pub fn get_sanad(
         &self,
-        sanad_id: &csv_protocol::SanadId,
-    ) -> Result<Option<csv_protocol::SanadRecord>, CsvError> {
-        use csv_protocol::SanadStore;
+        sanad_id: &csv_hash::sanad::SanadId,
+    ) -> Result<Option<SanadRecord>, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
-                .get_sanad(sanad_id)
-                .map_err(|e| CsvError::StoreError(e.to_string())),
-            #[cfg(feature = "sqlite")]
-            StoreHandle::Sqlite(store) => store
                 .get_sanad(sanad_id)
                 .map_err(|e| CsvError::StoreError(e.to_string())),
         }
@@ -92,14 +80,9 @@ impl StoreHandle {
     pub fn list_sanads_by_chain(
         &self,
         chain: &str,
-    ) -> Result<Vec<csv_protocol::SanadRecord>, CsvError> {
-        use csv_protocol::SanadStore;
+    ) -> Result<Vec<SanadRecord>, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
-                .list_sanads_by_chain(chain)
-                .map_err(|e| CsvError::StoreError(e.to_string())),
-            #[cfg(feature = "sqlite")]
-            StoreHandle::Sqlite(store) => store
                 .list_sanads_by_chain(chain)
                 .map_err(|e| CsvError::StoreError(e.to_string())),
         }
@@ -108,46 +91,31 @@ impl StoreHandle {
     /// Mark a Sanad as consumed.
     pub fn consume_sanad(
         &mut self,
-        sanad_id: &csv_protocol::SanadId,
+        sanad_id: &csv_hash::sanad::SanadId,
         consumed_at: u64,
     ) -> Result<(), CsvError> {
-        use csv_protocol::SanadStore;
         match self {
             StoreHandle::InMemory(store) => store
-                .consume_sanad(sanad_id, consumed_at)
-                .map_err(|e| CsvError::StoreError(e.to_string())),
-            #[cfg(feature = "sqlite")]
-            StoreHandle::Sqlite(store) => store
                 .consume_sanad(sanad_id, consumed_at)
                 .map_err(|e| CsvError::StoreError(e.to_string())),
         }
     }
 
     /// List all active (unconsumed) Sanads.
-    pub fn list_active_sanads(&self) -> Result<Vec<csv_protocol::SanadRecord>, CsvError> {
-        use csv_protocol::SanadStore;
+    pub fn list_active_sanads(&self) -> Result<Vec<SanadRecord>, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
-                .list_active_sanads()
-                .map_err(|e| CsvError::StoreError(e.to_string())),
-            #[cfg(feature = "sqlite")]
-            StoreHandle::Sqlite(store) => store
                 .list_active_sanads()
                 .map_err(|e| CsvError::StoreError(e.to_string())),
         }
     }
 
     /// Check if a Sanad exists.
-    pub fn has_sanad(&self, sanad_id: &csv_protocol::SanadId) -> Result<bool, CsvError> {
-        use csv_protocol::SanadStore;
+    pub fn has_sanad(&self, sanad_id: &csv_hash::sanad::SanadId) -> Result<bool, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
                 .has_sanad(sanad_id)
-                .map_err(|e| CsvError::StoreError(e.to_string())),
-            #[cfg(feature = "sqlite")]
-            StoreHandle::Sqlite(store) => store
-                .has_sanad(sanad_id)
-                .map_err(|e| CsvError::StoreError(e.to_string())),
+                .map_err(|e: csv_core::store::StoreError| CsvError::StoreError(e.to_string())),
         }
     }
 }
@@ -666,11 +634,11 @@ impl ClientRef {
             enabled_chains: HashSet::new(),
             wallet: None,
             store: Arc::new(std::sync::Mutex::new(crate::client::StoreHandle::InMemory(
-                csv_hash::chain_id::InMemorySealStore::new(),
+                InMemorySealStore::new(),
             ))),
             config: Config::default(),
             event_tx,
-            chain_runtime: None,
+            chain_runtime: None
         }
     }
 

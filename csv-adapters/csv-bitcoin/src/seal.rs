@@ -3,6 +3,7 @@
 use crate::error::{BitcoinError, BitcoinResult};
 use crate::types::BitcoinSealPoint;
 use crate::wallet::Bip86Path;
+use csv_protocol::invariants::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
 
 
 #[cfg(feature = "rpc")]
@@ -20,9 +21,9 @@ pub struct SealRegistry {
     seal_queue: BoundedQueue<Vec<u8>>,
     /// Maximum size of the registry
     max_size: usize,
-    /// Optional SQLite storage for persistence
+    /// Optional SQLite storage for persistence (disabled - SqliteSealStore not available)
     #[cfg(feature = "rpc")]
-    storage: Option<SqliteSealStore>,
+    storage: Option<()>, // Placeholder - SqliteSealStore commented out in csv-store
 }
 
 impl SealRegistry {
@@ -44,32 +45,19 @@ impl SealRegistry {
     }
 
     /// Create a seal registry with SQLite persistence
+    /// NOTE: Disabled - SqliteSealStore implementation is commented out in csv-store
     #[cfg(feature = "rpc")]
-    pub fn with_storage(path: &str) -> Result<Self, BitcoinError> {
-        let storage = SqliteSealStore::open(path)
-            .map_err(|e| BitcoinError::StorageError(format!("Failed to open seal store: {}", e)))?;
-
-        let mut registry = Self::new();
-        registry.storage = Some(storage);
-
-        // Load existing seals from storage
-        registry.load_from_storage()?;
-
-        Ok(registry)
+    pub fn with_storage(_path: &str) -> Result<Self, BitcoinError> {
+        Err(BitcoinError::StorageError(
+            "SQLite storage is currently disabled. SqliteSealStore implementation is commented out in csv-store.".to_string()
+        ))
     }
 
     /// Load used seals from storage into memory
+    /// NOTE: Disabled - SqliteSealStore implementation is commented out in csv-store
     #[cfg(feature = "rpc")]
     fn load_from_storage(&mut self) -> BitcoinResult<()> {
-        if let Some(ref storage) = self.storage {
-            let records = storage
-                .get_seals("bitcoin")
-                .map_err(|e| BitcoinError::StorageError(format!("Failed to load seals: {}", e)))?;
-
-            for record in records {
-                self.used_seals.insert(record.seal_id);
-            }
-        }
+        // No-op since storage is disabled
         Ok(())
     }
 
@@ -93,23 +81,9 @@ impl SealRegistry {
         self.mark_seal_used_at_height(seal, height)?;
 
         // Then persist if storage is configured
-        if let Some(ref mut storage) = self.storage {
-            let record = csv_store::state::SealRecord {
-                chain: "bitcoin".to_string(),
-                seal_id: seal.to_vec(),
-                consumed_at_height: height,
-                commitment_hash: csv_hash::Hash::new([0u8; 32]), // Placeholder
-                recorded_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            };
-            // Use interior mutability via the trait method
-            // Since we can't mutably borrow from &self, we need a different approach
-            // For now, skip persistence in this context - will be done by caller
-            storage.save_seal(&record).map_err(|e| {
-                BitcoinError::StorageError(format!("Failed to persist seal: {}", e))
-            })?;
+        // NOTE: Disabled - SqliteSealStore implementation is commented out in csv-store
+        if let Some(_) = self.storage {
+            // Storage disabled - no-op
         }
         Ok(())
     }

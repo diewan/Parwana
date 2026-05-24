@@ -365,8 +365,8 @@ pub enum ZkError {
 pub fn verify_zk_proof(
     proof: &[u8],
     verifier_key: Option<&VerifierKey>,
-) -> crate::verified::VerificationResult {
-    use crate::verified::{
+) -> csv_protocol::verified::VerificationResult {
+    use csv_protocol::verified::{
         FinalityStrength, InclusionStrength, VerificationAssurance, VerificationFailure,
         VerificationResult, VerifiedComponents,
     };

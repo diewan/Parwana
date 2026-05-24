@@ -225,7 +225,7 @@ impl ChainRuntime {
         commitment: &Hash,
         block_height: u64,
         anchor_id: &[u8],
-    ) -> Result<csv_core::InclusionProof, CsvError> {
+    ) -> Result<csv_proof::proof::InclusionProof, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
         adapter
@@ -362,7 +362,7 @@ impl ChainRuntime {
         &self,
         chain: ChainId,
         value: Option<u64>,
-    ) -> Result<csv_core::SealPoint, CsvError> {
+    ) -> Result<csv_hash::seal::SealPoint, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
         // Delegate to the adapter's create_seal method
@@ -380,9 +380,9 @@ impl ChainRuntime {
     pub async fn publish_seal(
         &self,
         chain: ChainId,
-        seal: csv_core::SealPoint,
-        commitment: csv_core::Hash,
-    ) -> Result<csv_core::CommitAnchor, CsvError> {
+        seal: csv_hash::seal::SealPoint,
+        commitment: csv_hash::Hash,
+    ) -> Result<csv_hash::seal::CommitAnchor, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
         // Delegate to the adapter's publish_seal method
@@ -402,7 +402,7 @@ impl ChainRuntime {
         chain: ChainId,
         source_chain: &str,
         source_sanad_id: &SanadId,
-        lock_proof: &csv_core::InclusionProof,
+        lock_proof: &csv_proof::proof::InclusionProof,
         new_owner: &str,
     ) -> Result<SanadOperationResult, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
@@ -591,7 +591,7 @@ impl ChainRuntime {
                 })?;
 
         // Create commitment from sanad_id (the sanad's hash is the commitment)
-        let commitment = csv_core::Hash::new(*sanad_id.as_bytes());
+        let commitment = csv_hash::Hash::new(*sanad_id.as_bytes());
 
         // Build inclusion proof from chain state
         let inclusion_proof = adapter
@@ -622,7 +622,7 @@ impl ChainRuntime {
                 })?;
 
         // Create a simple DAG segment with the sanad commitment
-        use csv_protocol::dag::{DAGNode, DAGSegment};
+        use csv_hash::dag::{DAGNode, DAGSegment};
         let dag_node = DAGNode::new(
             commitment,
             vec![], // No inputs for lock operation
@@ -637,13 +637,13 @@ impl ChainRuntime {
         let proof_bundle = ProofBundle::new(
             dag_segment,
             vec![], // Signatures will be added by the caller
-            csv_core::seal::SealPoint::new(seal_id.clone(), None).map_err(|e| {
+            csv_hash::seal::SealPoint::new(seal_id.clone(), None).map_err(|e| {
                 CsvError::ProtocolError {
                     chain: chain.clone(),
                     message: format!("Failed to create seal ref: {}", e),
                 }
             })?,
-            csv_core::seal::CommitAnchor::new(
+            csv_hash::seal::CommitAnchor::new(
                 seal_id,
                 block_height,
                 inclusion_proof.proof_bytes.clone(),
@@ -689,7 +689,7 @@ impl ChainRuntime {
         let adapter = self.get_adapter(chain.clone()).await?;
 
         let signature_scheme = adapter.signature_scheme();
-        let commitment = csv_core::Hash::new(*sanad_id.as_bytes());
+        let commitment = csv_hash::Hash::new(*sanad_id.as_bytes());
 
         let policy = match chain.as_str() {
             "bitcoin" | "btc" => csv_verifier::ChainBundlePolicy::bitcoin(),
@@ -724,7 +724,7 @@ impl ChainRuntime {
         // Create a seal registry checker for replay protection
         // The closure now only captures pre-fetched data, not self
         let seal_checker = move |seal_id: &[u8]| {
-            let check_sanad_id = csv_core::SanadId::from_bytes(seal_id);
+            let check_sanad_id = csv_hash::sanad::SanadId::from_bytes(seal_id);
             // Only return consumed if the seal_id matches the pre-fetched sanad_id AND it was consumed
             if check_sanad_id == seal_check_data.sanad_id {
                 if seal_check_data.is_consumed {
@@ -770,7 +770,7 @@ impl ChainRuntime {
     pub async fn broadcast_proof(
         &self,
         chain: ChainId,
-        proof: &csv_core::InclusionProof,
+        proof: &csv_proof::proof::InclusionProof,
     ) -> Result<(), CsvError> {
         use csv_p2p::{NostrTransport, ProofTransport};
 
@@ -780,20 +780,20 @@ impl ChainRuntime {
         })?;
 
         // Build a minimal ProofBundle from the InclusionProof for broadcast
-        let proof_bundle = csv_core::ProofBundle {
+        let proof_bundle = csv_proof::proof::ProofBundle {
             version: 1,
-            transition_dag: csv_core::dag::DAGSegment::new(vec![], proof.block_hash),
+            transition_dag: csv_hash::dag::DAGSegment::new(vec![], proof.block_hash),
             signatures: vec![],
-            seal_ref: csv_core::SealPoint::new(vec![], None)
+            seal_ref: csv_hash::seal::SealPoint::new(vec![], None)
                 .map_err(|e| CsvError::P2PError(format!("Failed to create seal ref: {}", e)))?,
-            anchor_ref: csv_core::seal::CommitAnchor::new(
+            anchor_ref: csv_hash::seal::CommitAnchor::new(
                 vec![],
                 proof.position,
                 chain.to_string().into_bytes(),
             )
             .map_err(|e| CsvError::P2PError(format!("Failed to create anchor ref: {}", e)))?,
             inclusion_proof: proof.clone(),
-            finality_proof: csv_core::FinalityProof::new(vec![], 1, true).map_err(|e| {
+            finality_proof: csv_proof::proof::FinalityProof::new(vec![], 1, true).map_err(|e| {
                 CsvError::P2PError(format!("Failed to create finality proof: {}", e))
             })?,
             provenance: None,
@@ -819,7 +819,7 @@ impl ChainRuntime {
     async fn pre_fetch_seal_data(&self, sanad_id: &SanadId) -> Result<SealCheckData, CsvError> {
         // Clone the Arc to avoid capturing self in the spawned task
         let store_arc = Arc::clone(&self.client.store);
-        let sanad_id_clone: csv_core::sanad::SanadId = sanad_id.clone();
+        let sanad_id_clone: csv_hash::sanad::SanadId = sanad_id.clone();
 
         // Run the store access in a blocking task since it uses std::sync::Mutex
         #[cfg(feature = "tokio")]

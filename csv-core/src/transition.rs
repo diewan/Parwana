@@ -7,11 +7,11 @@
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
-use crate::dag::DAGNode;
+use csv_hash::dag::DAGNode;
 use csv_hash::{DomainSeparatedHash, TransitionDomain};
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
-use crate::state::{GlobalState, Metadata, StateAssignment, StateRef};
+use csv_protocol::state::{GlobalState, Metadata, StateAssignment, StateRef};
 
 /// A contract transition
 ///
@@ -102,7 +102,7 @@ impl Transition {
                 .flat_map(|m| m.value.clone())
                 .collect::<Vec<_>>()
                 .chunks(32)
-                .map(|c| c.to_vec())
+                .map(|c: &[u8]| c.to_vec())
                 .collect(),
             Vec::new(), // Parents must be set externally
         )

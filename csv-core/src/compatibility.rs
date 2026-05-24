@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use csv_hash::chain_id::ChainId;
-use crate::protocol_version::ProtocolVersion;
+use csv_protocol::version::ProtocolVersion;
 
 /// Compatibility matrix for version negotiation across protocol components.
 #[derive(Clone, Debug, Serialize, Deserialize)]

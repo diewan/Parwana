@@ -2696,6 +2696,7 @@ dependencies = [
  "bitcoin 0.32.9",
  "bitcoin_hashes 0.14.1",
  "bitcoincore-rpc",
+ "csv-core",
  "csv-hash",
  "csv-proof",
  "csv-protocol",
@@ -2754,6 +2755,7 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
+ "csv-core",
  "csv-hash",
  "csv-keys",
  "csv-proof",
@@ -2813,6 +2815,39 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "bloomfilter",
+ "chrono",
+ "ciborium",
+ "csv-codec",
+ "csv-content",
+ "csv-contract-bindings",
+ "csv-hash",
+ "csv-observability",
+ "csv-proof",
+ "csv-protocol",
+ "ed25519-dalek",
+ "hex",
+ "lazy_static",
+ "log",
+ "proptest",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sha3 0.10.9",
+ "spin",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -3025,6 +3060,7 @@ dependencies = [
  "chrono",
  "csv-aptos",
  "csv-bitcoin",
+ "csv-core",
  "csv-ethereum",
  "csv-hash",
  "csv-keys",
@@ -4277,6 +4313,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hex-conservative"

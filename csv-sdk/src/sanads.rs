@@ -19,6 +19,7 @@ use csv_hash::chain_id::ChainId;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_protocol::Sanad;
+use csv_core::store::SanadRecord;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -118,7 +119,7 @@ impl SanadsManager {
         let sanad = Sanad::new(commitment, owner, &salt);
 
         // Persist the Sanad to the store
-        let record = csv_protocol::SanadRecord {
+        let record = SanadRecord {
             sanad_id: sanad.id.clone(),
             chain: chain.to_string(),
             owner: sanad.owner.owner.clone(),
@@ -208,8 +209,7 @@ impl SanadsManager {
             }
 
             if let Some(ref owner) = filters.owner {
-                let owner_bytes = owner.as_bytes();
-                if record.owner != owner_bytes {
+                if record.owner != owner.as_bytes() {
                     continue;
                 }
             }

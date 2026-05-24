@@ -35,6 +35,9 @@ mod error_codes {
     pub const BTC_REORG_DETECTED: u32 = 3005;
     pub const BTC_INSUFFICIENT_CONFIRMATIONS: u32 = 3007;
     pub const BTC_INSUFFICIENT_FUNDS: u32 = 3008;
+    pub const BTC_MPC_ERROR: u32 = 3009;
+    pub const BTC_STORAGE_ERROR: u32 = 3010;
+    pub const BTC_TRANSACTION_ERROR: u32 = 3011;
 
     pub fn docs_url(code: u32) -> String {
         format!("https://docs.csv-protocol.io/errors/{}", code)
@@ -150,7 +153,7 @@ impl BitcoinError {
 }
 
 impl HasErrorSuggestion for BitcoinError {
-    fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> u32 {
         match self {
             BitcoinError::RpcError(_) => error_codes::BTC_RPC_ERROR,
             BitcoinError::TransactionNotFound(_) => error_codes::BTC_TRANSACTION_NOT_FOUND,
@@ -162,10 +165,10 @@ impl HasErrorSuggestion for BitcoinError {
                 error_codes::BTC_INSUFFICIENT_CONFIRMATIONS
             }
             BitcoinError::InvalidInput(_) => error_codes::BTC_RPC_ERROR,
-            BitcoinError::MpcError(_) => "BTC_MPC_ERROR",
-            BitcoinError::StorageError(_) => "BTC_STORAGE_ERROR",
-            BitcoinError::CoreError(e) => e.error_code(),
-            BitcoinError::TransactionError(_) => "BTC_TRANSACTION_ERROR",
+            BitcoinError::MpcError(_) => error_codes::BTC_MPC_ERROR,
+            BitcoinError::StorageError(_) => error_codes::BTC_STORAGE_ERROR,
+            BitcoinError::CoreError(_) => error_codes::BTC_RPC_ERROR,
+            BitcoinError::TransactionError(_) => error_codes::BTC_TRANSACTION_ERROR,
             BitcoinError::InsufficientFunds(_) => error_codes::BTC_INSUFFICIENT_FUNDS,
         }
     }
@@ -239,7 +242,7 @@ impl HasErrorSuggestion for BitcoinError {
                 "MPC tree operation failed: {}. Check commitment data and retry.",
                 msg
             ),
-            BitcoinError::CoreError(e) => e.suggested_fix(),
+            BitcoinError::CoreError(_) => "https://docs.csv.network/errors/protocol".to_string(),
             BitcoinError::TransactionError(msg) => format!("Transaction building/signing failed: {}. Check input data and retry.", msg),
             BitcoinError::InsufficientFunds(msg) => format!("{} Add more Bitcoin to your wallet or use a different address with sufficient balance.", msg),
         }
@@ -247,7 +250,7 @@ impl HasErrorSuggestion for BitcoinError {
 
     fn docs_url(&self) -> String {
         match self {
-            BitcoinError::CoreError(e) => e.docs_url(),
+            BitcoinError::CoreError(_) => "https://docs.csv.network/errors/protocol".to_string(),
             BitcoinError::MpcError(_) => "https://docs.csv.network/errors/mpc".to_string(),
             BitcoinError::TransactionError(_) => "https://docs.csv.network/errors/bitcoin".to_string(),
             BitcoinError::InsufficientFunds(_) => "https://docs.csv.network/errors/bitcoin".to_string(),
@@ -258,28 +261,34 @@ impl HasErrorSuggestion for BitcoinError {
     fn fix_action(&self) -> Option<FixAction> {
         match self {
             BitcoinError::RpcError(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
+                backoff_secs: 60,
+                parameter_changes: vec![
                     "rpc_endpoint".to_string(),
                     "https://mempool.space/api".to_string(),
-                )]),
+                ],
             }),
             BitcoinError::InsufficientConfirmations { need, .. } => {
-                Some(FixAction::WaitForConfirmations {
-                    confirmations: *need as u32,
-                    estimated_seconds: *need * 600,
+                Some(FixAction::Retry {
+                    backoff_secs: (*need * 600) as u64,
+                    parameter_changes: vec![
+                        "wait_for_confirmations".to_string(),
+                        need.to_string(),
+                    ],
                 })
             }
             BitcoinError::ReorgDetected { .. } => Some(FixAction::CheckState {
+                check: "reorg_detected".to_string(),
                 url: "https://mempool.space".to_string(),
                 what: "Check current Bitcoin chain tip".to_string(),
             }),
             BitcoinError::TransactionNotFound(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
+                backoff_secs: 60,
+                parameter_changes: vec![
                     "wait_seconds".to_string(),
                     "60".to_string(),
-                )]),
+                ],
             }),
-            BitcoinError::CoreError(e) => e.fix_action(),
+            BitcoinError::CoreError(_) => None,
             BitcoinError::InvalidInput(_) => None,
             BitcoinError::TransactionError(_) => None,
             BitcoinError::InsufficientFunds(_) => None,

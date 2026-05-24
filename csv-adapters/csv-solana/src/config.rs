@@ -91,7 +91,7 @@ impl Default for SolanaConfig {
         Self {
             network: Network::Devnet,
             rpc_url: Network::Devnet.default_rpc_url().to_string(),
-            csv_program_id: "CsvProgram11111111111111111111111111111111111".to_string(),
+            csv_program_id: "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj".to_string(),
             keypair: None,
             commitment: Some("confirmed".to_string()),
             max_retries: 3,

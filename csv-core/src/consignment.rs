@@ -8,10 +8,10 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::genesis::Genesis;
+use csv_protocol::genesis::Genesis;
 use csv_hash::Hash;
 use csv_hash::seal::CommitAnchor;
-use crate::state::{Metadata, StateAssignment};
+use csv_protocol::state::{Metadata, StateAssignment};
 use crate::transition::Transition;
 
 /// Consignment version for forward compatibility

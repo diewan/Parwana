@@ -11,11 +11,11 @@ use bitcoin::{
     absolute::LockTime,
     address::Address,
     consensus::Encodable,
-    key::{CompressedPublicKey, Keypair, PrivateKey},
+    key::PrivateKey,
     opcodes,
     script::{Builder, PushBytesBuf},
     transaction::{OutPoint, Transaction, TxIn, TxOut, Version},
-    Amount, Network, Psbt, Sequence, Witness,
+    Amount, Psbt, Sequence, Witness,
 };
 use bitcoin::hashes::sha256d;
 use bitcoin_hashes::Hash as BitcoinHash;

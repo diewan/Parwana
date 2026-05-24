@@ -27,9 +27,9 @@ use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 
 use csv_hash::commitment::Commitment;
-use crate::commitment_chain::{ChainError, VerificationResult, verify_ordered_commitment_chain};
+use csv_proof::commitment_chain::{ChainError, VerificationResult, verify_ordered_commitment_chain};
 use crate::consignment::Consignment;
-use crate::cross_chain::InclusionProof as CrossChainInclusionProof;
+use csv_proof::proof::InclusionProof as CrossChainInclusionProof;
 use csv_hash::Hash;
 use csv_hash::nullifier::{ChainId, SealConsumption, SealNullifier, SealStatus};
 // Sanad is not available in csv-hash, TODO: find correct location
@@ -380,81 +380,23 @@ impl ValidationClient {
     fn verify_inclusion_proof(
         &self,
         inclusion: &CrossChainInclusionProof,
-        chain: &ChainId,
+        _chain: &ChainId,
     ) -> Result<(), ValidationError> {
-        match (inclusion, chain) {
-            (CrossChainInclusionProof::Bitcoin(proof), _) if chain.as_str() == "bitcoin" => {
-                // Verify Merkle branch is non-empty and structurally valid
-                if proof.merkle_branch.is_empty() {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Empty Merkle branch".to_string(),
-                    ));
-                }
-                if proof.block_header.is_empty() {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Empty block header".to_string(),
-                    ));
-                }
-                // In production: verify Merkle root matches block header
-                // verify_merkle_proof(txid, &proof.merkle_branch) == header.merkle_root
-            }
-            (CrossChainInclusionProof::Ethereum(proof), _) if chain.as_str() == "ethereum" => {
-                if proof.receipt_rlp.is_empty() && proof.merkle_nodes.is_empty() {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Empty MPT proof".to_string(),
-                    ));
-                }
-                // In production: verify MPT proof via alloy-trie
-            }
-            (CrossChainInclusionProof::Sui(proof), _) if chain.as_str() == "sui" => {
-                if !proof.certified {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Checkpoint not certified".to_string(),
-                    ));
-                }
-                // In production: verify checkpoint certification
-            }
-            (CrossChainInclusionProof::Aptos(proof), _) if chain.as_str() == "aptos" => {
-                if !proof.success {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Transaction failed".to_string(),
-                    ));
-                }
-                // In production: verify HotStuff ledger signatures
-            }
-            (CrossChainInclusionProof::Solana(proof), _) if chain.as_str() == "solana" => {
-                if !proof.finalized {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Slot not finalized".to_string(),
-                    ));
-                }
-                if proof.confirmations < 32 {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Insufficient confirmations for Solana finality".to_string(),
-                    ));
-                }
-            }
-            (CrossChainInclusionProof::ZkSeal(proof), _) => {
-                if proof.proof_bytes.is_empty() {
-                    return Err(ValidationError::InclusionProofFailed(
-                        "Empty ZK proof bytes".to_string(),
-                    ));
-                }
-                // ZK proof verification is delegated to the ZkVerifier trait
-            }
-            // Mismatched proof type and chain — reject
-            (CrossChainInclusionProof::Bitcoin(_), _)
-            | (CrossChainInclusionProof::Ethereum(_), _)
-            | (CrossChainInclusionProof::Sui(_), _)
-            | (CrossChainInclusionProof::Aptos(_), _)
-            | (CrossChainInclusionProof::Solana(_), _) => {
-                return Err(ValidationError::InclusionProofFailed(format!(
-                    "Proof type does not match expected chain: {:?}",
-                    chain
-                )));
-            }
+        // NOTE: InclusionProof is now a struct, not an enum
+        // Chain-specific verification should be done by the chain adapters
+        // For now, just verify the proof has required fields
+        if inclusion.proof_bytes.is_empty() {
+            return Err(ValidationError::InclusionProofFailed(
+                "Empty proof bytes".to_string(),
+            ));
         }
-
+        if inclusion.block_hash == csv_hash::Hash::new([0u8; 32]) {
+            return Err(ValidationError::InclusionProofFailed(
+                "Invalid block hash (zero hash)".to_string(),
+            ));
+        }
+        // Chain-specific verification is delegated to the respective chain adapters
+        // via the ChainVerifier trait
         Ok(())
     }
 

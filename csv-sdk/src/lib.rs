@@ -79,18 +79,20 @@ pub mod transfers;
 pub mod wallet;
 
 // Re-export core types from new modular crates (🔒 STABLE API only by default)
-pub use csv_protocol::{
-    CommitAnchor, Commitment, Consignment, CrossChainLockEvent, DAGNode,
-    DAGSegment, FinalityProof, Genesis, InclusionProof, OwnedState, OwnershipProof,
-    ProtocolError, Result as CoreResult, Sanad, SealProtocol, StateRef, StoreError, Transition,
-};
+pub use csv_hash::seal::{CommitAnchor, SealPoint};
+pub use csv_hash::commitment::Commitment;
+pub use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+pub use csv_protocol::error::ProtocolError;
+pub use csv_protocol::genesis::Genesis;
+pub use csv_protocol::seal_protocol::SealProtocol;
+pub use csv_protocol::state::{StateRef, OwnedState};
+pub use csv_core::transition::Transition;
+pub use csv_hash::dag::{DAGNode, DAGSegment};
 pub use csv_hash::Hash;
 pub use csv_hash::sanad::SanadId;
-pub use csv_hash::seal::SealPoint;
-pub use csv_proof::proof::ProofBundle;
 
 // Re-export canonical protocol types (🔒 STABLE + 🟡 BETA)
-pub use csv_protocol::protocol_version::{
+pub use csv_protocol::version::{
     Capabilities, ErrorCode, PROTOCOL_VERSION, ProtocolVersion, SyncStatus, TransferStatus,
 };
 pub use csv_hash::chain_id::ChainId;
