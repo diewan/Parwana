@@ -677,7 +677,7 @@ impl ChainSanadOps for AptosBackend {
     ) -> ChainOpResult<SanadOperationResult> {
         // Parse the destination chain to ensure it's valid
         let _destination = destination_chain
-            .parse::<csv_core::ChainId>()
+            .parse::<csv_hash::chain_id::ChainId>()
             .map_err(|_| {
                 ChainOpError::InvalidInput(format!(
                     "Invalid destination chain: {}",
@@ -728,7 +728,7 @@ impl ChainSanadOps for AptosBackend {
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         // Parse the source chain to ensure it's valid
-        let _source = source_chain.parse::<csv_core::ChainId>().map_err(|_| {
+        let _source = source_chain.parse::<csv_hash::chain_id::ChainId>().map_err(|_| {
             ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
         })?;
 

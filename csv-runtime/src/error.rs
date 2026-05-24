@@ -135,18 +135,6 @@ pub enum TransferCoordinatorError {
     #[error("Mint failed: {0}")]
     MintFailed(String),
 
-    /// Replay database error
-    #[error("Replay database error: {0}")]
-    ReplayDbError(String),
-
-    /// Runtime error
-    #[error("Runtime error: {0}")]
-    RuntimeError(String),
-
-    /// Transfer not found in journal
-    #[error("Transfer not found")]
-    NotFound,
-
     /// Transfer already complete
     #[error("Transfer already complete")]
     AlreadyComplete,
@@ -165,13 +153,15 @@ impl TransferCoordinatorError {
             TransferCoordinatorError::UnsupportedOperation(_) => FailureDomain::Consensus,
             TransferCoordinatorError::VerificationFailed(_) => FailureDomain::Verification,
             TransferCoordinatorError::LockFailed(_) => FailureDomain::Rpc,
+            TransferCoordinatorError::NoLeaseBackend => FailureDomain::Consensus,
+            TransferCoordinatorError::LeaseViolation(_) => FailureDomain::Consensus,
+            TransferCoordinatorError::NotFound => FailureDomain::Storage,
+            TransferCoordinatorError::ReplayDbError(_) => FailureDomain::Storage,
+            TransferCoordinatorError::RuntimeError(_) => FailureDomain::Consensus,
             TransferCoordinatorError::FinalityFailed(_) => FailureDomain::Finality,
             TransferCoordinatorError::ProofBuildFailed(_) => FailureDomain::Verification,
             TransferCoordinatorError::ProofVerificationFailed(_) => FailureDomain::Verification,
             TransferCoordinatorError::MintFailed(_) => FailureDomain::Rpc,
-            TransferCoordinatorError::ReplayDbError(_) => FailureDomain::Storage,
-            TransferCoordinatorError::RuntimeError(_) => FailureDomain::Consensus,
-            TransferCoordinatorError::NotFound => FailureDomain::Storage,
             TransferCoordinatorError::AlreadyComplete => FailureDomain::Consensus,
             TransferCoordinatorError::AlreadyRolledBack => FailureDomain::Consensus,
         }

@@ -9,7 +9,41 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AptosError, AptosResult};
 use crate::types::AptosSealPoint;
-use csv_protocol::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
+
+// Local implementation (hardening module removed during migration)
+const MAX_SEAL_NULLIFIER_SIZE: usize = 1024;
+
+#[derive(Debug)]
+pub struct BoundedQueue<T> {
+    items: Vec<T>,
+    capacity: usize,
+}
+
+impl<T> BoundedQueue<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            items: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    pub fn push(&mut self, item: T) -> Option<T> {
+        if self.items.len() >= self.capacity {
+            self.items.remove(0)
+        } else {
+            None
+        }
+        .and_then(|_| {
+            self.items.push(item);
+            None
+        });
+        None
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+}
 
 /// A persisted seal record that can be serialized.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

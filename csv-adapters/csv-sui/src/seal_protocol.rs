@@ -592,9 +592,9 @@ impl SealProtocol for SuiSealProtocol {
                 .map_err(|e: SuiError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
             if !valid {
-                return Err(ProtocolError::PublishFailed(
+                return Err(Box::new(ProtocolError::PublishFailed(
                     "Event verification failed: commitment mismatch".to_string(),
-                ));
+                )));
             }
 
             // Mark seal as consumed with the block checkpoint

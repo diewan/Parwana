@@ -28,21 +28,25 @@ use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
 use uuid::Uuid;
 
-/// Convert CrossChainTransfer to CrossChainRegistryEntry for durable storage
-fn transfer_to_registry_entry(transfer: &CrossChainTransfer) -> CrossChainRegistryEntry {
-    CrossChainRegistryEntry {
+/// Convert CrossChainTransfer to HashEntry for durable storage
+fn transfer_to_registry_entry(transfer: &CrossChainTransfer) -> csv_protocol::cross_chain::HashEntry {
+    // Encode chain-specific seal data into the id field
+    // For Bitcoin: tx_id + output_index
+    // For other chains: tx_hash
+    let mut source_seal_id = transfer.lock_tx_hash.clone();
+    source_seal_id.extend_from_slice(&transfer.lock_output_index.to_le_bytes());
+
+    csv_protocol::cross_chain::HashEntry {
         sanad_id: transfer.sanad_id,
         source_chain: ChainId::new(&transfer.source_chain),
         source_seal: SealPoint {
-            chain_id: ChainId::new(&transfer.source_chain),
-            tx_id: transfer.lock_tx_hash.clone(),
-            output_index: transfer.lock_output_index,
+            id: source_seal_id,
+            nonce: None,
         },
         destination_chain: ChainId::new(&transfer.destination_chain),
         destination_seal: SealPoint {
-            chain_id: ChainId::new(&transfer.destination_chain),
-            tx_id: vec![], // Will be filled after mint
-            output_index: 0,
+            id: vec![], // Will be filled after mint
+            nonce: None,
         },
         lock_tx_hash: transfer.sanad_id, // Using sanad_id as placeholder
         mint_tx_hash: transfer.sanad_id, // Will be updated after mint
@@ -53,14 +57,22 @@ fn transfer_to_registry_entry(transfer: &CrossChainTransfer) -> CrossChainRegist
     }
 }
 
-/// Convert CrossChainRegistryEntry back to CrossChainTransfer for runtime use
-fn registry_entry_to_transfer(entry: &CrossChainRegistryEntry, transfer_id: String) -> CrossChainTransfer {
+/// Convert HashEntry back to CrossChainTransfer for runtime use
+fn registry_entry_to_transfer(entry: &csv_protocol::cross_chain::HashEntry, transfer_id: String) -> CrossChainTransfer {
+    // Decode output_index from the seal id (last 8 bytes)
+    let output_index = if entry.source_seal.id.len() > 8 {
+        let last_8_bytes = &entry.source_seal.id[entry.source_seal.id.len() - 8..];
+        u64::from_le_bytes(last_8_bytes.try_into().unwrap_or([0u8; 8]))
+    } else {
+        0
+    };
+
     CrossChainTransfer {
         id: transfer_id,
         source_chain: entry.source_chain.to_string(),
         destination_chain: entry.destination_chain.to_string(),
         lock_tx_hash: entry.lock_tx_hash.as_bytes().to_vec(),
-        lock_output_index: entry.source_seal.output_index,
+        lock_output_index: output_index as u32,
         sanad_id: entry.sanad_id,
         transition_id: vec![], // Not stored in registry entry
     }
@@ -144,7 +156,7 @@ impl TransferCoordinator {
     pub fn with_verifier(
         replay_db: Box<dyn ReplayDatabase>,
         event_bus: EventBus,
-        verifier: CanonicalVerifierImpl,
+        _verifier: CanonicalVerifierImpl,
     ) -> Self {
         Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
     }
@@ -201,7 +213,7 @@ impl TransferCoordinator {
     ///
     /// Returns `TransferCoordinatorError::NoLeaseBackend` if no lease backend is configured.
     /// Returns `TransferCoordinatorError::LeaseViolation` if this coordinator does not own the lease.
-    fn assert_single_active_coordinator(
+    async fn assert_single_active_coordinator(
         &self,
         transfer_id: &str,
     ) -> Result<(), TransferCoordinatorError> {
@@ -334,9 +346,19 @@ impl TransferCoordinator {
                     }
 
                     self.event_bus
-                        .emit(TransferEvent::ReplayDetected {
-                            transfer_id: transfer.id.clone(),
-                        });
+                        .emit(TransferEvent::ReplayDetected(
+                            crate::event_bus::TransferContext {
+                                transfer_id: transfer.id.clone(),
+                                replay_id: Some(replay_id.clone()),
+                                proof_hash: None,
+                                coordinator_id: self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                                lease_id: None,
+                                source_chain: transfer.source_chain.clone(),
+                                dest_chain: transfer.destination_chain.clone(),
+                                finality_state: crate::event_bus::FinalityState::NotChecked,
+                                recovery_attempt: 0,
+                            }
+                        ));
                     return Err(TransferCoordinatorError::ReplayDetected(replay_id));
                 }
                 ReplayDbError::Storage(msg) => {
@@ -444,9 +466,19 @@ impl TransferCoordinator {
         }
 
         self.event_bus
-            .emit(TransferEvent::Locking {
-                transfer_id: transfer.id.clone(),
-            });
+            .emit(TransferEvent::Locking(
+                crate::event_bus::TransferContext {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: None,
+                    proof_hash: None,
+                    coordinator_id: self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    lease_id: None,
+                    source_chain: transfer.source_chain.clone(),
+                    dest_chain: transfer.destination_chain.clone(),
+                    finality_state: crate::event_bus::FinalityState::NotChecked,
+                    recovery_attempt: 0,
+                }
+            ));
 
         // Check circuit breaker before attempting RPC calls
         {
@@ -560,9 +592,19 @@ impl TransferCoordinator {
         }
 
         self.event_bus
-            .emit(TransferEvent::AwaitingFinality {
-                transfer_id: transfer.id.clone(),
-            });
+            .emit(TransferEvent::AwaitingFinality(
+                crate::event_bus::TransferContext {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: Some(replay_id.clone()),
+                    proof_hash: None,
+                    coordinator_id: self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    lease_id: None,
+                    source_chain: transfer.source_chain.clone(),
+                    dest_chain: transfer.destination_chain.clone(),
+                    finality_state: crate::event_bus::FinalityState::Awaiting,
+                    recovery_attempt: 0,
+                }
+            ));
 
         // Use runtime policy for finality depth, not adapter's local policy
         let _required_finality = runtime_ctx
@@ -633,9 +675,19 @@ impl TransferCoordinator {
         }
 
         self.event_bus
-            .emit(TransferEvent::BuildingProof {
-                transfer_id: transfer.id.clone(),
-            });
+            .emit(TransferEvent::BuildingProof(
+                crate::event_bus::TransferContext {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: Some(replay_id.clone()),
+                    proof_hash: None,
+                    coordinator_id: self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    lease_id: None,
+                    source_chain: transfer.source_chain.clone(),
+                    dest_chain: transfer.destination_chain.clone(),
+                    finality_state: crate::event_bus::FinalityState::NotChecked,
+                    recovery_attempt: 0,
+                }
+            ));
 
         // Build the proof bundle using the source chain adapter
         let proof_bundle = adapter_registry
@@ -696,9 +748,19 @@ impl TransferCoordinator {
                 }
 
                 self.event_bus
-                    .emit(TransferEvent::ProofVerified {
-                        transfer_id: transfer.id.clone(),
-                    });
+                    .emit(TransferEvent::ProofVerified(
+                        crate::event_bus::TransferContext {
+                            transfer_id: transfer.id.clone(),
+                            replay_id: Some(replay_id.clone()),
+                            proof_hash: None,
+                            coordinator_id: self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                            lease_id: None,
+                            source_chain: transfer.source_chain.clone(),
+                            dest_chain: transfer.destination_chain.clone(),
+                            finality_state: crate::event_bus::FinalityState::NotChecked,
+                            recovery_attempt: 0,
+                        }
+                    ));
 
                 // Record phase entry: BuildingProof (Completed)
                 self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
@@ -889,10 +951,19 @@ impl TransferCoordinator {
         }
 
         self.event_bus
-            .emit(TransferEvent::Complete {
-                transfer_id: transfer.id.clone(),
-                mint_tx_hash: mint_result.tx_hash.clone(),
-            });
+            .emit(TransferEvent::Complete(
+                crate::event_bus::TransferContext {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: None,
+                    proof_hash: None,
+                    coordinator_id: self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    lease_id: None,
+                    source_chain: transfer.source_chain.clone(),
+                    dest_chain: transfer.destination_chain.clone(),
+                    finality_state: crate::event_bus::FinalityState::Confirmed,
+                    recovery_attempt: 0,
+                }
+            ));
 
         // Create final checkpoint after completion
         self.checkpoint_manager
@@ -1181,7 +1252,7 @@ impl TransferCoordinator {
     pub async fn execute_from_proof(
         &self,
         transfer: CrossChainTransfer,
-        proof_bundle: Vec<u8>,
+        _proof_bundle: Vec<u8>,
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
@@ -1213,7 +1284,7 @@ impl TransferCoordinator {
         &self,
         transfer_id: &str,
         mint_tx_hash: &str,
-        adapter_registry: &dyn AdapterRegistry,
+        _adapter_registry: &dyn AdapterRegistry,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         tracing::info!(
             "Executing transfer {} from mint phase (confirming mint transaction {})",
@@ -1238,14 +1309,14 @@ impl TransferCoordinator {
     /// The number of transfers that were successfully resumed.
     pub async fn resume_transfers(
         &self,
-        adapter_registry: &dyn AdapterRegistry,
+        _adapter_registry: &dyn AdapterRegistry,
     ) -> Result<usize, TransferCoordinatorError> {
         let incomplete = self
             .execution_journal
             .incomplete_transfers()
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
-        let mut resumed = 0;
+        let resumed = 0;
 
         for entry in incomplete {
             tracing::info!(

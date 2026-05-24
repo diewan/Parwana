@@ -3,8 +3,35 @@
 //! This module provides a comprehensive error taxonomy for the Aptos adapter,
 //! with chain-specific error variants and recovery guidance.
 
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
+
+// Local implementations (mcp module removed during migration)
+#[derive(Debug, Clone)]
+pub enum FixAction {
+    Retry { backoff_secs: u64 },
+    CheckState { check: String },
+    SwitchEndpoint { endpoint: String },
+}
+
+pub trait HasErrorSuggestion {
+    fn error_code(&self) -> u32;
+    fn fix_action(&self) -> Option<FixAction>;
+    fn description(&self) -> String;
+    fn suggested_fix(&self) -> String;
+    fn docs_url(&self) -> String;
+}
+
+mod error_codes {
+    pub const APTOS_STATE_PROOF_FAILED: u32 = 2001;
+    pub const APTOS_EVENT_PROOF_FAILED: u32 = 2002;
+    pub const APTOS_RESOURCE_USED: u32 = 2003;
+    pub const APTOS_TRANSACTION_FAILED: u32 = 2004;
+    pub const APTOS_RPC_ERROR: u32 = 2005;
+
+    pub fn docs_url(code: u32) -> String {
+        format!("https://docs.csv-protocol.io/errors/{}", code)
+    }
+}
 
 /// Comprehensive error types for the Aptos adapter.
 ///

@@ -57,6 +57,14 @@ pub enum ProtocolError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// Publish failed
+    #[error("Publish failed: {0}")]
+    PublishFailed(String),
+
+    /// Network error
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
     /// Generic error with message
     #[error("{0}")]
     Generic(String),

@@ -21,7 +21,8 @@ use tokio::runtime::Handle;
 use csv_hash::Hash;
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::commitment::Commitment;
-use csv_protocol::dag::DAGSegment;
+// DAGSegment removed during migration - using placeholder
+// use csv_protocol::dag::DAGSegment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
 use csv_proof::proof::{FinalityProof, ProofBundle};
@@ -742,13 +743,15 @@ impl SealProtocol for AptosSealProtocol {
             CoreCommitAnchor::new(anchor.event_handle.to_vec(), anchor.version, vec![])
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?;
 
-        let inclusion_proof = csv_core::InclusionProof::new(
-            inclusion.transaction_proof,
-            Hash::zero(),
-            inclusion.version,
-            0,
-        )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+        let inclusion_proof = csv_protocol::cross_chain::InclusionProof::Aptos(
+            csv_protocol::cross_chain::AptosLedgerProof {
+                version: inclusion.version,
+                transaction_proof: inclusion.transaction_proof,
+                ledger_info: inclusion.ledger_info,
+                events: inclusion.events,
+                success: true,
+            }
+        );
 
         let finality_proof = FinalityProof::new(vec![], finality.version, finality.is_certified)
             .map_err(|e| ProtocolError::Generic(e.to_string()))?;
@@ -810,8 +813,8 @@ impl SealProtocol for AptosSealProtocol {
         self.domain_separator
     }
 
-    fn signature_scheme(&self) -> csv_core::SignatureScheme {
-        csv_core::SignatureScheme::Ed25519
+    fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+        csv_protocol::signature::SignatureScheme::Ed25519
     }
 }
 
