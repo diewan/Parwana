@@ -30,3 +30,5 @@ required-features = ["rocksdb"]
 default = ["rocksdb"]
 rocksdb = ["dep:rocksdb"]
 postgres = ["dep:sqlx"]
+[lints]
+workspace = true

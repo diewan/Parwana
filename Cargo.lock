@@ -2753,6 +2753,7 @@ dependencies = [
  "csv-core",
  "csv-hash",
  "csv-keys",
+ "csv-protocol",
  "csv-schema",
  "csv-sdk",
  "csv-store",
@@ -2800,6 +2801,9 @@ dependencies = [
 name = "csv-contract-bindings"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "csv-codec",
+ "csv-hash",
  "hex",
  "serde",
  "serde_json",
@@ -2816,23 +2820,19 @@ dependencies = [
  "bloomfilter",
  "chrono",
  "ciborium",
- "crc32fast",
  "csv-codec",
  "csv-content",
+ "csv-contract-bindings",
  "csv-hash",
  "csv-observability",
  "csv-proof",
  "csv-protocol",
- "curve25519-dalek",
  "ed25519-dalek",
  "hex",
  "lazy_static",
  "log",
- "pqcrypto-dilithium",
- "pqcrypto-traits",
  "proptest",
  "rand 0.8.6",
- "rand_core 0.6.4",
  "serde",
  "serde_json",
  "sha2",
@@ -2976,6 +2976,7 @@ dependencies = [
  "hex",
  "log",
  "serde",
+ "sha2",
  "thiserror 1.0.69",
 ]
 
@@ -2984,6 +2985,8 @@ name = "csv-protocol"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
+ "ciborium",
  "csv-codec",
  "csv-hash",
  "csv-proof",
@@ -2992,9 +2995,12 @@ dependencies = [
  "log",
  "pqcrypto-dilithium",
  "pqcrypto-traits",
+ "rand 0.8.6",
  "secp256k1 0.28.2",
  "serde",
  "serde_json",
+ "sha2",
+ "sha3 0.10.9",
  "thiserror 1.0.69",
 ]
 
@@ -3008,6 +3014,7 @@ dependencies = [
  "csv-core",
  "csv-hash",
  "csv-proof",
+ "csv-protocol",
  "csv-storage",
  "csv-verifier",
  "hex",
@@ -3186,7 +3193,6 @@ name = "csv-testkit"
 version = "0.1.0"
 dependencies = [
  "csv-codec",
- "csv-core",
  "csv-hash",
  "csv-proof",
  "csv-protocol",

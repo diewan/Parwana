@@ -26,6 +26,10 @@ pub mod seal;
 pub mod commitment;
 pub mod proof;
 pub mod proof_verification;
+pub mod lease;
+pub mod failure_domains;
+pub mod deterministic_recovery;
+pub mod seal_protocol;
 
 // State machine modules
 pub mod state_machine;
@@ -61,7 +65,7 @@ pub use error::{ProtocolError, Result as ProtocolResult};
 pub use replay::{ReplayKey, ReplayEntry, ReplayRegistry, ReplayRegistryBackend};
 
 // Re-export finality types
-pub use finality::{FinalityType, FinalityRequirement, FinalityProof, ChainCapabilities, Capability};
+pub use finality::{FinalityType, FinalityRequirement, FinalityProof, ChainCapabilities};
 
 // Re-export signature types
 pub use signature::{Signature, SignatureScheme, verify_signatures, parse_signatures_from_bundle, parse_signatures_from_bytes};
@@ -95,3 +99,12 @@ pub use proof::{InclusionProof, ProofBundle};
 
 // Re-export transfer state types
 pub use transfer_state::TransferStage;
+
+// Re-export lease types
+pub use lease::{LeaseId, Lease, LeaseManager, LeaseError, now_secs};
+
+// Re-export verification types
+pub use verified::{
+    VerificationAssurance, VerificationFailure, VerificationResult, VerifiedComponents,
+    InclusionStrength, FinalityStrength,
+};

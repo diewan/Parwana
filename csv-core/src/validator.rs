@@ -77,9 +77,6 @@ use csv_hash::Hash;
 use csv_hash::nullifier::{ChainId, SealConsumption, SealNullifier, SealStatus};
 use crate::state_store::InMemoryStateStore;
 
-#[cfg(feature = "experimental")]
-use crate::vm::{AluVmAdapter, DeterministicVM, VMInputs};
-
 /// Detailed validation report.
 #[derive(Debug)]
 pub struct ValidationReport {
@@ -110,9 +107,6 @@ pub struct ConsignmentValidator {
     seal_registry: SealNullifier,
     /// Validation report being built
     report: ValidationReport,
-    /// VM for executing validation scripts (AluVM) - Phase 5
-    #[cfg(feature = "experimental")]
-    vm: AluVmAdapter,
 }
 
 impl ConsignmentValidator {
@@ -126,23 +120,6 @@ impl ConsignmentValidator {
                 steps: Vec::new(),
                 summary: String::new(),
             },
-            #[cfg(feature = "experimental")]
-            vm: AluVmAdapter::default_(),
-        }
-    }
-
-    /// Create a new validator with custom VM cycle limit.
-    #[cfg(feature = "experimental")]
-    pub fn with_vm_cycles(max_cycles: u64) -> Self {
-        Self {
-            store: InMemoryStateStore::new(),
-            seal_registry: SealNullifier::new(),
-            report: ValidationReport {
-                passed: true,
-                steps: Vec::new(),
-                summary: String::new(),
-            },
-            vm: AluVmAdapter::new(max_cycles),
         }
     }
 
@@ -351,7 +328,6 @@ impl ConsignmentValidator {
         // 1. Each transition's validation script is non-empty
         // 2. Each transition's input references point to valid commitments
         // 3. Seal assignments are consistent with transition outputs
-        // 4. AluVM executes validation scripts correctly (Phase 5) - experimental feature
         let mut all_valid = true;
         let mut details = Vec::new();
 
@@ -384,31 +360,6 @@ impl ConsignmentValidator {
                 }
             }
 
-            // Phase 5: Execute validation script using AluVM (experimental feature)
-            #[cfg(feature = "experimental")]
-            {
-                let vm_inputs = self.build_vm_inputs(transition, consignment);
-                let signatures: Vec<Vec<u8>> = transition.signatures.clone();
-
-                match self.vm.execute(
-                    &transition.validation_script,
-                    vm_inputs.clone(),
-                    &signatures,
-                ) {
-                    Ok(outputs) => {
-                        // Validate outputs are consistent with inputs
-                        if let Err(e) = self.vm.validate_outputs(&vm_inputs, &outputs) {
-                            all_valid = false;
-                            details.push(format!("Transition {} VM validation failed: {}", i, e));
-                        }
-                    }
-                    Err(e) => {
-                        all_valid = false;
-                        details.push(format!("Transition {} VM execution failed: {}", i, e));
-                    }
-                }
-            }
-
             // Track transition outputs as available for subsequent transitions
             available_commitments.insert(transition.hash());
         }
@@ -426,22 +377,11 @@ impl ConsignmentValidator {
             name: "State Transition Validation".to_string(),
             passed: all_valid,
             details: if all_valid {
-                #[cfg(feature = "experimental")]
-                {
-                    format!(
-                        "Validated {} transitions, {} commitments tracked, AluVM executed",
-                        consignment.transitions.len(),
-                        available_commitments.len(),
-                    )
-                }
-                #[cfg(not(feature = "experimental"))]
-                {
-                    format!(
-                        "Validated {} transitions, {} commitments tracked",
-                        consignment.transitions.len(),
-                        available_commitments.len(),
-                    )
-                }
+                format!(
+                    "Validated {} transitions, {} commitments tracked",
+                    consignment.transitions.len(),
+                    available_commitments.len(),
+                )
             } else {
                 details.join("; ")
             },
@@ -450,58 +390,6 @@ impl ConsignmentValidator {
         if !all_valid {
             self.report.passed = false;
         }
-    }
-
-    /// Build VM inputs for a transition (experimental feature).
-    #[cfg(feature = "experimental")]
-    fn build_vm_inputs(
-        &self,
-        transition: &crate::transition::Transition,
-        consignment: &Consignment,
-    ) -> VMInputs {
-        use csv_hash::seal::SealPoint;
-        use crate::state::{GlobalState, Metadata, OwnedState};
-
-        // Convert transition inputs to owned states
-        // Note: StateRef doesn't contain seal info, so we create placeholder seals
-        // In production, these would be resolved from the state store
-        let owned_inputs: Vec<OwnedState> = transition
-            .owned_inputs
-            .iter()
-            .enumerate()
-            .map(|(i, input)| {
-                // Create a placeholder seal from the commitment hash
-                let seal_ref = SealPoint::new(
-                    input.commitment.as_bytes().to_vec(),
-                    Some(input.output_index as u64),
-                )
-                .unwrap_or_else(|_| SealPoint::new(vec![0u8; 16], Some(0)).unwrap());
-
-                OwnedState::from_hash(i as u16, seal_ref, input.commitment)
-            })
-            .collect();
-
-        // Convert global state updates to global state
-        let global_state: Vec<GlobalState> = transition
-            .global_updates
-            .iter()
-            .enumerate()
-            .map(|(i, gs)| GlobalState::new(i as u16, gs.data.clone()))
-            .collect();
-
-        // Build metadata from transition
-        let metadata: Vec<Metadata> = transition
-            .metadata
-            .iter()
-            .map(|m| Metadata::new(m.key.clone(), m.value.clone()))
-            .collect();
-
-        VMInputs::new(
-            owned_inputs,
-            global_state,
-            metadata,
-            consignment.genesis.contract_id.as_bytes().to_vec(),
-        )
     }
 
     /// Generate final summary.

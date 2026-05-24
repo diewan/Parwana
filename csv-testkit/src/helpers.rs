@@ -2,7 +2,7 @@
 //!
 //! This module provides helper functions and builders for testing.
 
-use csv_core::signature::SignatureScheme;
+use csv_protocol::signature::SignatureScheme;
 use csv_verifier::{CanonicalVerifierImpl, VerificationContext};
 
 /// Test context for integration tests

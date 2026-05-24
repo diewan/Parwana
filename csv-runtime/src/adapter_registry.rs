@@ -5,8 +5,8 @@
 
 #![allow(missing_docs)]
 
-use csv_core::chain_config::ChainCapabilities;
-use csv_core::Hash;
+use csv_protocol::finality::ChainCapabilities;
+use csv_hash::Hash;
 use csv_proof::proof::ProofBundle;
 
 /// Cross-chain transfer data passed to adapters.
@@ -314,7 +314,7 @@ mod tests {
             destination_chain: "mock-chain".to_string(),
             lock_tx_hash: vec![0u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([1u8; 32]),
+            sanad_id: csv_hash::Hash::new([1u8; 32]),
             transition_id: vec![0u8; 32],
         };
 

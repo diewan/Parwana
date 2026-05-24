@@ -4,7 +4,7 @@
 //! as single-use seals. When a seal is consumed, the PDA account is closed, transferring
 //! lamports to the destination, making the seal cryptographically unspendable.
 
-use csv_core::seal_protocol::SealProtocol;
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_core::{
     Hash, Result, dag::DAGSegment, error::ProtocolError, proof::ProofBundle,
     signature::SignatureScheme,

@@ -18,13 +18,15 @@ pub mod policy;
 pub mod state;
 pub mod abstraction;
 pub mod capabilities;
+pub mod chain_specific;
 
 // Re-exports
 pub use monitor::FinalityMonitor;
 pub use policy::{ChainFinalityPolicy, FinalityThreshold};
 pub use state::{FinalityState, FinalityStatus};
 pub use abstraction::{FinalityType as AbstractionFinalityType, FinalityRequirement};
-pub use capabilities::{ChainCapabilities, Capability};
+pub use capabilities::ChainCapabilities;
+pub use chain_specific::{SolanaCommitmentGrade, EthereumFinalityStage};
 
 /// Finality type enum for chain-specific finality mechanisms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

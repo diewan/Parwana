@@ -85,3 +85,7 @@ dioxus-desktop = "0.7"
 spl-token-2022-interface = { path = "third_party/spl-token-2022-interface" }
 
 [workspace.lints]
+# clippy restrictions (workspace-wide) — per AUDIT.md §T3.2
+# Tests, build scripts, and generator tools may opt-out with #[allow(..)]
+clippy.expect_used = "deny"
+clippy.unwrap_used = "deny"

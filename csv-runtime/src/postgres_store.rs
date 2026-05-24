@@ -17,9 +17,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::event_envelope::{AggregateSnapshot, EventFilter, RuntimeEventEnvelope, StreamPosition};
 use crate::lease::TransferLease;
 use csv_core::replay_record::GlobalReplayRecord;
-use csv_core::sanad::SanadId;
-use csv_core::Hash;
-use csv_core::protocol_version::ChainId;
+use csv_protocol::sanad::SanadId;
+use csv_hash::Hash;
+use csv_hash::chain_id::ChainId;
 use uuid::Uuid;
 
 /// PostgreSQL-backed lease coordination store.
@@ -266,7 +266,7 @@ impl PostgresEventStore {
     }
 
     /// Build the aggregate ID key for database queries.
-    fn aggregate_key(&self, aggregate_id: &csv_core::SanadId) -> Vec<u8> {
+    fn aggregate_key(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Vec<u8> {
         aggregate_id.as_bytes().to_vec()
     }
 }
@@ -293,7 +293,7 @@ impl crate::event_store::EventStore for PostgresEventStore {
 
     fn get_events(
         &self,
-        _aggregate_id: &csv_core::SanadId,
+        _aggregate_id: &csv_protocol::sanad::SanadId,
         _filter: Option<&EventFilter>,
     ) -> Result<Vec<RuntimeEventEnvelope>, crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
@@ -303,7 +303,7 @@ impl crate::event_store::EventStore for PostgresEventStore {
 
     fn get_latest_version(
         &self,
-        _aggregate_id: &csv_core::SanadId,
+        _aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
             "PostgresEventStore requires async operations; use the async wrapper".to_string(),
@@ -318,7 +318,7 @@ impl crate::event_store::EventStore for PostgresEventStore {
 
     fn load_snapshot(
         &self,
-        _aggregate_id: &csv_core::SanadId,
+        _aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
             "PostgresEventStore requires async operations; use the async wrapper".to_string(),
@@ -327,7 +327,7 @@ impl crate::event_store::EventStore for PostgresEventStore {
 
     fn prune_snapshots_before(
         &self,
-        _aggregate_id: &csv_core::SanadId,
+        _aggregate_id: &csv_protocol::sanad::SanadId,
         _keep_after_version: u64,
     ) -> Result<usize, crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
@@ -353,14 +353,14 @@ impl crate::event_store::EventStore for PostgresEventStore {
 
     fn get_position(
         &self,
-        _aggregate_id: &csv_core::SanadId,
+        _aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
             "PostgresEventStore requires async operations; use the async wrapper".to_string(),
         ))
     }
 
-    fn list_aggregates(&self) -> Result<Vec<csv_core::SanadId>, crate::event_store::EventStoreError> {
+    fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
             "PostgresEventStore requires async operations; use the async wrapper".to_string(),
         ))
@@ -372,7 +372,7 @@ impl crate::event_store::EventStore for PostgresEventStore {
         ))
     }
 
-    fn clear_aggregate(&self, _aggregate_id: &csv_core::SanadId) -> Result<(), crate::event_store::EventStoreError> {
+    fn clear_aggregate(&self, _aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), crate::event_store::EventStoreError> {
         Err(crate::event_store::EventStoreError::Io(
             "PostgresEventStore requires async operations; use the async wrapper".to_string(),
         ))
@@ -513,7 +513,7 @@ impl AsyncPostgresEventStore {
     /// Get all events for an aggregate, optionally filtered.
     pub async fn get_events(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
     ) -> Result<Vec<RuntimeEventEnvelope>, crate::event_store::EventStoreError> {
         let mut query = sqlx::query_as::<_, (Uuid, Vec<u8>, String, i64, Option<Uuid>, Uuid, String, chrono::DateTime<chrono::Utc>, Uuid)>(
@@ -565,7 +565,7 @@ impl AsyncPostgresEventStore {
     /// Get the latest version for an aggregate.
     pub async fn get_latest_version(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, crate::event_store::EventStoreError> {
         let version: Option<i64> = sqlx::query_scalar(
             r#"
@@ -603,7 +603,7 @@ impl AsyncPostgresEventStore {
     /// Load the latest snapshot for an aggregate.
     pub async fn load_snapshot(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, crate::event_store::EventStoreError> {
         let row: Option<(Vec<u8>, i64, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
@@ -631,7 +631,7 @@ impl AsyncPostgresEventStore {
     /// Delete snapshots older than the given version.
     pub async fn prune_snapshots_before(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, crate::event_store::EventStoreError> {
         let result = sqlx::query(
@@ -713,7 +713,7 @@ impl AsyncPostgresEventStore {
     /// Get the current stream position for an aggregate.
     pub async fn get_position(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, crate::event_store::EventStoreError> {
         let row: Option<(Vec<u8>, i64, Option<Uuid>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
@@ -739,7 +739,7 @@ impl AsyncPostgresEventStore {
     }
 
     /// Get all aggregates that have events in the store.
-    pub async fn list_aggregates(&self) -> Result<Vec<csv_core::SanadId>, crate::event_store::EventStoreError> {
+    pub async fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, crate::event_store::EventStoreError> {
         let rows: Vec<Vec<u8>> = sqlx::query_scalar(
             r#"
             SELECT DISTINCT aggregate_id FROM runtime_events ORDER BY aggregate_id
@@ -774,7 +774,7 @@ impl AsyncPostgresEventStore {
     }
 
     /// Clear all events and snapshots for an aggregate.
-    pub async fn clear_aggregate(&self, aggregate_id: &csv_core::SanadId) -> Result<(), crate::event_store::EventStoreError> {
+    pub async fn clear_aggregate(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), crate::event_store::EventStoreError> {
         let mut tx = self.pool.begin().await.map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
 
         sqlx::query("DELETE FROM runtime_events WHERE aggregate_id = $1")

@@ -79,9 +79,12 @@ impl ReorgDetector {
                             .unwrap_or_default()
                             .as_secs();
                         let csv_event = CsvEvent::reorg_detected(
-                            chain.to_string(),
-                            *last_hash,
-                            hash,
+                            &chain.to_string(),
+                            *last_height,
+                            "",  // tx_hash - not available in this context
+                            timestamp,
+                            *last_height,
+                            height,
                             depth,
                         );
                         if let Ok(mut guard) = registry.lock() {
@@ -108,9 +111,12 @@ impl ReorgDetector {
                             .unwrap_or_default()
                             .as_secs();
                         let csv_event = CsvEvent::reorg_detected(
-                            chain.to_string(),
-                            *last_hash,
-                            hash,
+                            &chain.to_string(),
+                            *last_height,
+                            "",  // tx_hash - not available in this context
+                            timestamp,
+                            *last_height,
+                            height,
                             0,
                         );
                         if let Ok(mut guard) = registry.lock() {

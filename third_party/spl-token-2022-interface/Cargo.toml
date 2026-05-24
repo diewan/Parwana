@@ -10,7 +10,7 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
+edition = "2024"
 name = "spl-token-2022-interface"
 version = "2.1.0"
 authors = ["Anza Maintainers <maintainers@anza.xyz>"]

@@ -27,12 +27,12 @@
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/client-side-validation/csv-adapter"
+    "url": "https://github.com/Diewan/csv-adapter"
   },
   "bugs": {
-    "url": "https://github.com/client-side-validation/csv-adapter/issues"
+    "url": "https://github.com/Diewan/csv-adapter/issues"
   },
-  "homepage": "https://github.com/client-side-validation/csv-adapter",
+  "homepage": "https://github.com/Diewan/csv-adapter",
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.3.0",

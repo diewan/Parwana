@@ -39,6 +39,8 @@ pub mod proof_validation;
 pub mod proof;
 // pub mod proof_pipeline;  // REMOVED: verification centralized in csv-verifier per implementation.md
 pub mod proof_material;
+pub mod commitment_chain;
+pub mod commitments_ext;
 
 // Stub modules for protocol types to break cyclic dependency
 pub mod chain_config;

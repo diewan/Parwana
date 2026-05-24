@@ -55,7 +55,7 @@ pub trait EventStore: Send + Sync {
     /// Returns events in version order (ascending).
     fn get_events(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError>;
 
@@ -64,7 +64,7 @@ pub trait EventStore: Send + Sync {
     /// Returns `Ok(0)` if no events exist for the aggregate.
     fn get_latest_version(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, EventStoreError>;
 
     /// Save an aggregate snapshot.
@@ -73,13 +73,13 @@ pub trait EventStore: Send + Sync {
     /// Load the latest snapshot for an aggregate.
     fn load_snapshot(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, EventStoreError>;
 
     /// Delete snapshots older than the given version.
     fn prune_snapshots_before(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, EventStoreError>;
 
@@ -98,17 +98,17 @@ pub trait EventStore: Send + Sync {
     /// Get the current stream position for an aggregate.
     fn get_position(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, EventStoreError>;
 
     /// Get all aggregates that have events in the store.
-    fn list_aggregates(&self) -> Result<Vec<csv_core::SanadId>, EventStoreError>;
+    fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, EventStoreError>;
 
     /// Count the total number of events in the store.
     fn event_count(&self) -> Result<usize, EventStoreError>;
 
     /// Clear all events and snapshots for an aggregate (used during rollback).
-    fn clear_aggregate(&self, aggregate_id: &csv_core::SanadId) -> Result<(), EventStoreError>;
+    fn clear_aggregate(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), EventStoreError>;
 }
 
 /// In-memory event store for non-persistent deployments and tests.
@@ -118,11 +118,11 @@ pub trait EventStore: Send + Sync {
 /// is not required.
 pub struct InMemoryEventStore {
     /// Events indexed by aggregate ID.
-    events: std::sync::Mutex<HashMap<csv_core::SanadId, Vec<RuntimeEventEnvelope>>>,
+    events: std::sync::Mutex<HashMap<csv_protocol::sanad::SanadId, Vec<RuntimeEventEnvelope>>>,
     /// Snapshots indexed by aggregate ID.
-    snapshots: std::sync::Mutex<HashMap<csv_core::SanadId, AggregateSnapshot>>,
+    snapshots: std::sync::Mutex<HashMap<csv_protocol::sanad::SanadId, AggregateSnapshot>>,
     /// Stream positions indexed by aggregate ID.
-    positions: std::sync::Mutex<HashMap<csv_core::SanadId, StreamPosition>>,
+    positions: std::sync::Mutex<HashMap<csv_protocol::sanad::SanadId, StreamPosition>>,
 }
 
 impl InMemoryEventStore {
@@ -138,7 +138,7 @@ impl InMemoryEventStore {
     /// Get all events for an aggregate (internal, no locking).
     fn get_events_locked(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
     ) -> Vec<RuntimeEventEnvelope> {
         let guard = self.events.lock().unwrap();
@@ -236,7 +236,7 @@ impl EventStore for InMemoryEventStore {
 
     fn get_events(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError> {
         Ok(self.get_events_locked(aggregate_id, filter))
@@ -244,7 +244,7 @@ impl EventStore for InMemoryEventStore {
 
     fn get_latest_version(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, EventStoreError> {
         let guard = self.events.lock().map_err(|e| EventStoreError::LockError(e.to_string()))?;
         Ok(guard
@@ -265,7 +265,7 @@ impl EventStore for InMemoryEventStore {
 
     fn load_snapshot(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, EventStoreError> {
         let guard = self
             .snapshots
@@ -276,7 +276,7 @@ impl EventStore for InMemoryEventStore {
 
     fn prune_snapshots_before(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, EventStoreError> {
         let guard = self
@@ -319,7 +319,7 @@ impl EventStore for InMemoryEventStore {
 
     fn get_position(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, EventStoreError> {
         let guard = self
             .positions
@@ -328,7 +328,7 @@ impl EventStore for InMemoryEventStore {
         Ok(guard.get(aggregate_id).cloned())
     }
 
-    fn list_aggregates(&self) -> Result<Vec<csv_core::SanadId>, EventStoreError> {
+    fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, EventStoreError> {
         let guard = self.events.lock().map_err(|e| EventStoreError::LockError(e.to_string()))?;
         Ok(guard.keys().cloned().collect())
     }
@@ -338,7 +338,7 @@ impl EventStore for InMemoryEventStore {
         Ok(guard.values().map(|v| v.len()).sum())
     }
 
-    fn clear_aggregate(&self, aggregate_id: &csv_core::SanadId) -> Result<(), EventStoreError> {
+    fn clear_aggregate(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), EventStoreError> {
         let mut events_guard = self
             .events
             .lock()
@@ -389,17 +389,17 @@ impl RocksDbEventStore {
 
     /// Build a key for storing an event.
     /// Uses raw bytes for aggregate ID to avoid serde_json dependency.
-    fn event_key(aggregate_id: &csv_core::SanadId, version: u64) -> String {
+    fn event_key(aggregate_id: &csv_protocol::sanad::SanadId, version: u64) -> String {
         format!("{}{}:{:x}", Self::EVENTS_PREFIX, hex::encode(aggregate_id.as_bytes()), version)
     }
 
     /// Build a key for storing a snapshot.
-    fn snapshot_key(aggregate_id: &csv_core::SanadId) -> String {
+    fn snapshot_key(aggregate_id: &csv_protocol::sanad::SanadId) -> String {
         format!("{}{}", Self::SNAPSHOTS_PREFIX, hex::encode(aggregate_id.as_bytes()))
     }
 
     /// Build a key for storing a position.
-    fn position_key(aggregate_id: &csv_core::SanadId) -> String {
+    fn position_key(aggregate_id: &csv_protocol::sanad::SanadId) -> String {
         format!("{}{}", Self::POSITIONS_PREFIX, hex::encode(aggregate_id.as_bytes()))
     }
 }
@@ -430,7 +430,7 @@ impl EventStore for RocksDbEventStore {
 
     fn get_events(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError> {
         let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, aggregate_id);
@@ -472,7 +472,7 @@ impl EventStore for RocksDbEventStore {
 
     fn get_latest_version(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, EventStoreError> {
         // Iterate all events for this aggregate and find the max version
         let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, aggregate_id);
@@ -502,7 +502,7 @@ impl EventStore for RocksDbEventStore {
 
     fn load_snapshot(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, EventStoreError> {
         let key = Self::snapshot_key(aggregate_id);
         match self.db.get(key) {
@@ -518,7 +518,7 @@ impl EventStore for RocksDbEventStore {
 
     fn prune_snapshots_before(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, EventStoreError> {
         let key = Self::snapshot_key(aggregate_id);
@@ -570,7 +570,7 @@ impl EventStore for RocksDbEventStore {
 
     fn get_position(
         &self,
-        aggregate_id: &csv_core::SanadId,
+        aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, EventStoreError> {
         let key = Self::position_key(aggregate_id);
         match self.db.get(key) {
@@ -584,7 +584,7 @@ impl EventStore for RocksDbEventStore {
         }
     }
 
-    fn list_aggregates(&self) -> Result<Vec<csv_core::SanadId>, EventStoreError> {
+    fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, EventStoreError> {
         let mut aggregates = std::collections::HashSet::new();
         let prefix = Self::EVENTS_PREFIX;
 
@@ -600,7 +600,7 @@ impl EventStore for RocksDbEventStore {
                         if bytes.len() == 32 {
                             let mut array = [0u8; 32];
                             array.copy_from_slice(&bytes);
-                            aggregates.insert(csv_core::SanadId::new(array));
+                            aggregates.insert(csv_protocol::sanad::SanadId::new(array));
                         }
                     }
                 }
@@ -619,7 +619,7 @@ impl EventStore for RocksDbEventStore {
         Ok(count)
     }
 
-    fn clear_aggregate(&self, aggregate_id: &csv_core::SanadId) -> Result<(), EventStoreError> {
+    fn clear_aggregate(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), EventStoreError> {
         // Delete all events for this aggregate
         let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, aggregate_id);
         for item in self.db.prefix_iterator(prefix.as_bytes()) {

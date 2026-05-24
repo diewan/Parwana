@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// Re-export TransferStage from csv-core (protocol-level type)
-pub use csv_core::transfer_stage::TransferStage;
+// Re-export TransferStage from csv-protocol (protocol-level type)
+pub use csv_protocol::transfer_state::TransferStage;
 
 /// Unique identifier for a recovery checkpoint
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_replay_checkpoint() {
-        let replay_id = csv_hash::ReplayIdHash(csv_core::Hash::new([1u8; 32]));
+        let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([1u8; 32]));
         let checkpoint = ReplayCheckpoint::new(
             vec![replay_id.clone()],
             vec![],

@@ -2,7 +2,7 @@
 
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use csv_proof::proof::ProofBundle;
-use csv_core::signature::SignatureScheme;
+use csv_protocol::signature::SignatureScheme;
 
 /// Simulated Byzantine RPC behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

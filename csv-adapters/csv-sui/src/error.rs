@@ -271,7 +271,7 @@ impl HasErrorSuggestion for SuiError {
                 what: "Check Sui adapter configuration documentation".to_string(),
             }),
             SuiError::FeatureNotEnabled(_) => Some(FixAction::CheckState {
-                url: "https://github.com/client-side-validation/csv-adapter".to_string(),
+                url: "https://github.com/Diewan/csv-adapter".to_string(),
                 what: "Enable required feature in Cargo.toml".to_string(),
             }),
             SuiError::CoreError(e) => e.fix_action(),

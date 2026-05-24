@@ -9,7 +9,7 @@
 //! - ChainSanadOps: Sanad management operations
 
 use async_trait::async_trait;
-use csv_core::seal_protocol::SealProtocol;
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_core::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,

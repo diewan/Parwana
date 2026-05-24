@@ -19,7 +19,7 @@ use crate::runtime_mode::RuntimeMode;
 /// Adapters receive policy via RuntimeExecutionContext and MUST NOT
 /// override or ignore these policies.
 ///
-/// Finality depths are sourced from [`csv_core::FinalityDepths`] as defaults,
+/// Finality depths are sourced from [`csv_protocol::finality::capabilities::FinalityDepths`] as defaults,
 /// but may be overridden per-chain at runtime.
 #[derive(Debug, Clone)]
 pub struct RuntimePolicy {
@@ -43,12 +43,12 @@ pub struct RuntimePolicy {
 }
 
 impl RuntimePolicy {
-    /// Create a new runtime policy with default values sourced from csv-core.
+    /// Create a new runtime policy with default values sourced from csv-protocol.
     pub fn new() -> Self {
-        let core_depths = csv_core::FinalityDepths::defaults();
+        let core_depths = csv_protocol::finality::capabilities::FinalityDepths::defaults();
         let mut finality_depths = std::collections::HashMap::new();
 
-        // Populate from csv-core protocol defaults
+        // Populate from csv-protocol protocol defaults
         if let Some(d) = core_depths.for_chain("bitcoin") {
             finality_depths.insert("bitcoin".to_string(), d);
         }
@@ -105,7 +105,7 @@ impl RuntimePolicy {
         self.finality_depths
             .get(chain_id)
             .copied()
-            .or_else(|| csv_core::FinalityDepths::defaults().for_chain(chain_id))
+            .or_else(|| csv_protocol::finality::capabilities::FinalityDepths::defaults().for_chain(chain_id))
             .or(Some(1))
     }
 
@@ -172,16 +172,16 @@ mod tests {
     }
 
     #[test]
-    fn test_finality_depths_from_csv_core() {
-        // Verify that runtime policy sources defaults from csv-core
-        let core_depths = csv_core::FinalityDepths::defaults();
+    fn test_finality_depths_from_csv_protocol() {
+        // Verify that runtime policy sources defaults from csv-protocol
+        let core_depths = csv_protocol::finality::capabilities::FinalityDepths::defaults();
         let policy = RuntimePolicy::new();
         assert_eq!(policy.finality_depth_for_chain("bitcoin"), core_depths.for_chain("bitcoin"));
         assert_eq!(policy.finality_depth_for_chain("ethereum"), core_depths.for_chain("ethereum"));
     }
 
     #[test]
-    fn test_finality_depth_fallback_to_csv_core() {
+    fn test_finality_depth_fallback_to_csv_protocol() {
         let mut policy = RuntimePolicy::new();
         // Remove bitcoin from runtime policy
         policy.finality_depths.remove("bitcoin");

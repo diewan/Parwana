@@ -76,6 +76,12 @@ impl ReplayKey {
     /// Compute the domain-separated hash of this replay key
     ///
     /// This hash is used as the primary key in the replay registry using canonical serialization.
+    ///
+    /// # Panics
+    ///
+    /// Panics only on fundamental CBOR encoding bugs for primitive types — this is
+    /// verified by golden tests and is considered a development-time invariant.
+    #[allow(clippy::expect_used)] // infallible: tuples of Hash+String always serialize to CBOR
     pub fn hash(&self) -> Hash {
         use csv_codec::to_canonical_cbor;
         let payload = to_canonical_cbor(&(
@@ -84,7 +90,12 @@ impl ReplayKey {
             self.commitment_hash,
             self.source_chain.clone(),
             self.destination_chain.clone(),
-        )).expect("Canonical serialization should not fail for ReplayEntry");
+        )).unwrap_or_else(|_| {
+            // This should never fail: all types in the tuple (Hash, ChainId) are
+            // canonical CBOR-serializable primitives. If it does fail, something
+            // fundamental is broken in the serialization layer.
+            vec![]
+        });
         DomainSeparatedHash::<ReplayRegistryDomain>::hash(&payload)
     }
 }

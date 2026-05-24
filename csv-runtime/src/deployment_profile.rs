@@ -6,7 +6,7 @@
 //! `VerificationAssurance` is a display-only signal; production gating
 //! must use `VerificationResult::meets_chain_thresholds` with `ChainCapabilities`.
 
-use csv_core::{FinalityStrength, InclusionStrength};
+use csv_protocol::verified::{FinalityStrength, InclusionStrength};
 
 /// Deployment environment profiles.
 ///

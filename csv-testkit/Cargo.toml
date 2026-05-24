@@ -5,7 +5,6 @@ edition = "2024"
 description = "CSV Testkit - Testing utilities and shared fixtures"
 
 [dependencies]
-csv-core = { path = "../csv-core" }
 csv-protocol = { path = "../csv-protocol" }
 csv-hash = { path = "../csv-hash" }
 csv-codec = { path = "../csv-codec" }

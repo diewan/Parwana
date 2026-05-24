@@ -1,12 +1,13 @@
 [package]
 name = "csv-runtime"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "CSV Protocol runtime orchestration engine"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
 csv-core = { path = "../csv-core" }
+csv-protocol = { path = "../csv-protocol" }
 csv-verifier = { path = "../csv-verifier" }
 csv-proof = { path = "../csv-proof" }
 csv-hash = { path = "../csv-hash" }
@@ -41,3 +42,6 @@ serde = []
 [dependencies.rocksdb]
 version = "0.22"
 optional = true
+
+[lints]
+workspace = true

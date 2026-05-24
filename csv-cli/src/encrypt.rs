@@ -37,10 +37,11 @@ pub struct EncryptedState {
 /// Encrypt plaintext JSON into an EncryptedState.
 pub fn encrypt(plaintext: &[u8], passphrase: &str) -> anyhow::Result<EncryptedState> {
     let salt = generate_salt();
-    let key = derive_key(passphrase, &salt);
+    let key = derive_key(passphrase, &salt)?;
     let nonce = generate_nonce();
 
-    let cipher = Aes256Gcm::new_from_slice(&key).expect("valid key");
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("Invalid key for AES-256-GCM: {}", e))?;
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
         .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
@@ -77,8 +78,9 @@ pub fn decrypt(encrypted: &EncryptedState, passphrase: &str) -> anyhow::Result<V
         .decode(&encrypted.d)
         .map_err(|e| anyhow::anyhow!("Invalid ciphertext encoding: {}", e))?;
 
-    let key = derive_key(passphrase, &salt);
-    let cipher = Aes256Gcm::new_from_slice(&key).expect("valid key");
+    let key = derive_key(passphrase, &salt)?;
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("Invalid key for AES-256-GCM: {}", e))?;
     let plaintext = cipher
         .decrypt(&nonce, ciphertext.as_ref())
         .map_err(|_| anyhow::anyhow!("Decryption failed - wrong passphrase or corrupted data"))?;
@@ -101,7 +103,7 @@ fn generate_nonce() -> GenericArray<u8, <Aes256Gcm as AeadCore>::NonceSize> {
 }
 
 /// Derive a 32-byte encryption key from passphrase using Argon2id.
-fn derive_key(passphrase: &str, salt: &[u8]) -> [u8; 32] {
+fn derive_key(passphrase: &str, salt: &[u8]) -> anyhow::Result<[u8; 32]> {
     let argon2 = Argon2::new(
         Algorithm::Argon2id,
         Version::V0x13,
@@ -111,21 +113,22 @@ fn derive_key(passphrase: &str, salt: &[u8]) -> [u8; 32] {
             4,        // 4 lanes (parallelism)
             Some(32), // 32-byte hash output
         )
-        .expect("valid params"),
+        .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {}", e))?,
     );
 
-    let salt_str = SaltString::encode_b64(salt).expect("salt encodes to b64");
+    let salt_str = SaltString::encode_b64(salt)
+        .map_err(|e| anyhow::anyhow!("Failed to encode salt to base64: {}", e))?;
     let hash = argon2
         .hash_password(passphrase.as_bytes(), &salt_str)
-        .expect("Argon2id hashing succeeded");
+        .map_err(|e| anyhow::anyhow!("Argon2id hashing failed: {}", e))?;
 
     let mut key = [0u8; 32];
     if let Some(ref hash_bytes) = hash.hash {
         key.copy_from_slice(hash_bytes.as_ref());
     } else {
-        panic!("Argon2id should always produce a hash");
+        return Err(anyhow::anyhow!("Argon2id should always produce a hash"));
     }
-    key
+    Ok(key)
 }
 
 /// Check if a state file is encrypted.

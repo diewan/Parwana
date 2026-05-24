@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-use csv_core::Hash;
-use csv_core::lease::LeaseManager;
+use csv_hash::Hash;
+use csv_protocol::lease::LeaseManager;
 
 use crate::config::{Chain, Config};
 use crate::output;

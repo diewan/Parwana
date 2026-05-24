@@ -26,7 +26,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use csv_core::SanadId as TransferId;
+use csv_protocol::sanad::SanadId as TransferId;
 
 /// Unique event type identifier.
 ///

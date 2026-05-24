@@ -5,7 +5,7 @@
 use thiserror::Error;
 
 use crate::failure_domain::FailureDomain;
-use csv_core::verified::VerificationFailure;
+use csv_protocol::verified::VerificationFailure;
 
 /// Runtime errors that can occur during transfer execution
 #[derive(Error, Debug)]
@@ -49,12 +49,12 @@ pub enum RuntimeError {
     /// Finality not met for chain
     #[error("Finality not met for chain {chain}")]
     FinalityNotMet {
-        chain: csv_core::mcp::ChainId,
+        chain: csv_hash::chain_id::ChainId,
     },
 
     /// No policy registered for chain
     #[error("No finality policy registered for chain {0}")]
-    NoPolicyForChain(csv_core::mcp::ChainId),
+    NoPolicyForChain(csv_hash::chain_id::ChainId),
 }
 
 impl RuntimeError {
@@ -122,6 +122,18 @@ pub enum TransferCoordinatorError {
     /// Runtime error
     #[error("Runtime error: {0}")]
     RuntimeError(String),
+
+    /// Transfer not found in journal
+    #[error("Transfer not found")]
+    NotFound,
+
+    /// Transfer already complete
+    #[error("Transfer already complete")]
+    AlreadyComplete,
+
+    /// Transfer already rolled back
+    #[error("Transfer already rolled back")]
+    AlreadyRolledBack,
 }
 
 impl TransferCoordinatorError {
@@ -139,6 +151,9 @@ impl TransferCoordinatorError {
             TransferCoordinatorError::MintFailed(_) => FailureDomain::Rpc,
             TransferCoordinatorError::ReplayDbError(_) => FailureDomain::Storage,
             TransferCoordinatorError::RuntimeError(_) => FailureDomain::Consensus,
+            TransferCoordinatorError::NotFound => FailureDomain::Storage,
+            TransferCoordinatorError::AlreadyComplete => FailureDomain::Consensus,
+            TransferCoordinatorError::AlreadyRolledBack => FailureDomain::Consensus,
         }
     }
 }

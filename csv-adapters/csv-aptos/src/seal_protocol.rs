@@ -435,7 +435,7 @@ impl SealProtocol for AptosSealProtocol {
     type InclusionProof = AptosInclusionProof;
     type FinalityProof = AptosFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> CoreResult<Self::CommitAnchor> {
+    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
         log::debug!(
             "Publishing commitment via seal {}",
             format_address(seal.account_address)
@@ -525,7 +525,7 @@ impl SealProtocol for AptosSealProtocol {
         }
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> CoreResult<Self::InclusionProof> {
+    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
         log::debug!(
             "Verifying inclusion for anchor at version {}",
             anchor.version
@@ -615,7 +615,7 @@ impl SealProtocol for AptosSealProtocol {
         ))
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> CoreResult<Self::FinalityProof> {
+    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
         log::debug!(
             "Verifying finality for anchor at version {}",
             anchor.version
@@ -644,7 +644,7 @@ impl SealProtocol for AptosSealProtocol {
         Ok(AptosFinalityProof::new(anchor.version, is_certified))
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> CoreResult<()> {
+    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that an Aptos resource cannot be consumed more than once
         // by checking both local registry and on-chain resource state
@@ -698,7 +698,7 @@ impl SealProtocol for AptosSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, _value: Option<u64>) -> CoreResult<Self::SealPoint> {
+    fn create_seal(&self, _value: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(b"aptos-seal");
@@ -731,8 +731,8 @@ impl SealProtocol for AptosSealProtocol {
     fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        transition_dag: DAGSegment,
-    ) -> CoreResult<ProofBundle> {
+        transition_dag: Vec<u8>,
+    ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
         let seal_ref = CoreSealPoint::new(anchor.event_handle.to_vec(), Some(anchor.version))
@@ -753,15 +753,12 @@ impl SealProtocol for AptosSealProtocol {
         let finality_proof = FinalityProof::new(vec![], finality.version, finality.is_certified)
             .map_err(|e| ProtocolError::Generic(e.to_string()))?;
 
-        // Extract signatures from DAG nodes before moving transition_dag
-        let signatures: Vec<Vec<u8>> = transition_dag
-            .nodes
-            .iter()
-            .flat_map(|node| node.signatures.clone())
-            .collect();
+        // Since transition_dag is now Vec<u8>, pass it directly
+        // Signatures would need to be extracted from the DAG bytes if needed
+        let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
         ProofBundle::new(
-            transition_dag.clone(),
+            transition_dag,
             signatures,
             seal_ref,
             anchor_ref,
@@ -771,7 +768,7 @@ impl SealProtocol for AptosSealProtocol {
         .map_err(|e| ProtocolError::Generic(e.to_string()))
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> CoreResult<()> {
+    fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
         log::warn!(
             "Rollback requested for anchor at version {}",
             anchor.version

@@ -18,3 +18,6 @@ csv-codec = { path = "../csv-codec" }
 [features]
 default = []
 std = ["bloomfilter"]
+
+[lints]
+workspace = true

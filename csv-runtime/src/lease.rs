@@ -1,19 +1,23 @@
-//! Transfer lease primitives for runtime ownership.
+//! Lease management for CSV protocol
 //!
-//! This module provides the lease-based execution model that ensures exactly
-//! one runtime instance can advance a transfer's state at any time.
+//! This module provides two lease systems:
 //!
-//! # Design
+//! 1. **User-facing leases** (`UserLease`, `UserLeaseManager`): Time-bound authorizations
+//!    that users must acquire before initiating cross-chain transfers. These prevent
+//!    concurrent transfer attempts on the same sanad.
 //!
-//! Every transfer must have exactly one active runtime authority. The lease
-//! system prevents:
-//! - Two runtimes from both advancing state
-//! - Explorer reprocessors from triggering duplicate transitions
-//! - Retry workers from racing rollback workers
-//! - HA deployments from creating split-brain progression
-//! - Kubernetes restarts from creating split-brain progression
+//! 2. **Runtime leases** (`TransferLease`, `RuntimeId`): Runtime-level coordination
+//!    for HA deployments that ensures exactly one runtime instance can advance a
+//!    transfer's state at any time.
 //!
-//! # Lifecycle
+//! # User-Facing Lease Lifecycle
+//!
+//! 1. **Acquire**: User acquires a lease for a sanad via CLI/SDK
+//! 2. **Transfer**: User presents lease token when initiating transfer
+//! 3. **Validate**: Runtime validates the lease before executing transfer
+//! 4. **Expire**: Lease expires after TTL, allowing re-acquisition
+//!
+//! # Runtime Lease Lifecycle
 //!
 //! 1. **Acquire**: A runtime instance acquires a lease for a transfer
 //! 2. **Execute**: The runtime performs mutating operations under the lease
@@ -22,17 +26,17 @@
 //!
 //! # Invariants
 //!
+//! - User leases are stored in persistent storage (csv-runtime authority)
+//! - Runtime leases are in-memory for HA coordination
 //! - Only the lease owner may perform mutating operations
-//! - Lease ownership is verified before every state transition
-//! - Stale leases (expired) can be forcibly released by any runtime
-//! - Epoch counter prevents stale lease adoption after release/reacquire
+//! - Stale leases (expired) can be forcibly released
 
 use core::fmt::Debug;
 use std::time::SystemTime;
 
 use uuid::Uuid;
 
-use csv_core::SanadId as TransferId;
+use csv_protocol::sanad::SanadId as TransferId;
 
 /// Runtime instance identifier.
 ///

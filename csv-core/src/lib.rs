@@ -1,5 +1,11 @@
 //! CSV Core — Client-Side Validation for Cross-Chain Sanads
 //!
+//! # Warning: Legacy Compatibility Shim
+//!
+//! This crate is being refactored into smaller crates (`csv-protocol`, `csv-hash`,
+//! `csv-proof`, `csv-codec`). New code should import from those crates directly.
+//! See `AGENTS.md` and `development/csv_migration_plan.md` for the migration plan.
+//!
 //! This crate provides the foundational types and traits for the CSV protocol:
 //!
 //! - **[`Sanad`]** — A verifiable, single-use digital sanad (deed) that can be
@@ -36,7 +42,7 @@
 //!
 //! The canonical protocol types (chain IDs, transfer status, error codes,
 //! capability flags) live in [`protocol_version`]. These types MUST be mirrored
-//! across all protocol consumers: CLI, TypeScript SDK, MCP server, Explorer, Wallet.
+//! across all protocol consumers: CLI, TypeScript SDK, MCP server, Explorer.
 //!
 //! ## Stability
 //!
@@ -71,6 +77,7 @@
 #![allow(unused_mut)]
 #![allow(clippy::implicit_saturating_sub)]
 #![allow(unexpected_cfgs)]
+#![allow(clippy::expect_used)] // Legacy shim: infallible canonical serialization
 
 extern crate alloc;
 
@@ -98,6 +105,9 @@ pub mod commitments_ext;
 
 // Recovery engine (Phase 2)
 pub mod recovery_engine;
+
+// Replay record types (compatibility shim for csv-runtime)
+pub mod replay_record;
 
 
 // Compatibility modules (types live in csv-hash / csv-proof / csv-protocol)
@@ -158,10 +168,6 @@ pub mod consignment;
 pub mod genesis;
 pub mod state;
 pub mod transition;
-
-// Deterministic VM (Phase 3) - MOVED: should be separate crate per implementation.md
-#[cfg(feature = "experimental")]
-pub mod vm;
 
 // DAG types — canonical definitions in csv-hash
 pub mod dag;
@@ -260,14 +266,6 @@ pub mod chain_config;
 // Multi-dimensional verification result types (Phase 1)
 pub mod verified;
 
-// RGB protocol compatibility (Sprint 5) - 🧪 EXPERIMENTAL
-#[cfg(feature = "experimental")]
-pub mod rgb;
-
-// Tapret verification (Sprint 0.5) - MOVED: chain-specific, should be in csv-bitcoin adapter
-// #[cfg(feature = "tapret")]
-// pub mod tapret_verify;
-
 // ZK proof infrastructure (Phase 5)
 pub mod zk_proof;
 
@@ -321,7 +319,7 @@ pub use events::{
 // Cross-chain transfer
 pub use cross_chain::{
     CrossChainHashAlgorithm, CrossChainLockEvent, CrossChainRegistry, CrossChainRegistryEntry,
-    CrossChainTransferProof, StandardTransferVerifier, CrossChainDomain,
+    CrossChainTransferProof, TransferVerifier, CrossChainDomain,
 };
 
 // Transfer stage (protocol lifecycle)

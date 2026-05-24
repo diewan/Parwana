@@ -3,6 +3,8 @@
 //! This module provides a test suite that all ReplayDatabase implementations
 //! must pass to ensure consistent behavior across different backends.
 
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
+use csv_hash::SanadId;
 use csv_storage::{InMemoryReplayDb, ReplayDatabase, ReplayDbError};
 use csv_proof::proof::ReplayId;
 
@@ -74,11 +76,58 @@ async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
     // Test 10: mark_rolled_back fails for non-Pending entries
     let result = db.mark_rolled_back(&replay_id3).await;
     assert!(result.is_err());
+
+    // Test 11: store_transfer_entry and load_all_transfers
+    let sanad_id = SanadId::new([1u8; 32]);
+    let entry = CrossChainRegistryEntry {
+        sanad_id: sanad_id.clone(),
+        chain_id: "test-chain".to_string(),
+        block_height: 100,
+        tx_hash: vec![1, 2, 3, 4],
+    };
+    db.store_transfer_entry(&entry).await.unwrap();
+
+    let transfers = db.load_all_transfers().await.unwrap();
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].sanad_id, sanad_id);
 }
 
 #[tokio::test]
 async fn test_in_memory_replay_database_conformance() {
     let db = InMemoryReplayDb::new();
+    test_replay_database_conformance(&db).await;
+}
+
+#[cfg(feature = "rocksdb")]
+#[tokio::test]
+async fn test_rocksdb_replay_database_conformance() {
+    use csv_storage::backends::rocksdb::RocksDbReplayDb;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let db_path = temp_dir.path().join("test_replay_db");
+    
+    let db = RocksDbReplayDb::open(&db_path).expect("Failed to open RocksDB");
+    test_replay_database_conformance(&db).await;
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+#[ignore] // Requires PostgreSQL instance - run with: cargo test --features postgres -- --ignored
+async fn test_postgres_replay_database_conformance() {
+    use csv_storage::backends::postgres::PostgresReplayDb;
+    use std::env;
+
+    // Get PostgreSQL connection string from environment
+    let database_url = env::var("TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://localhost:5432/csv_test".to_string());
+
+    let db = PostgresReplayDb::connect(&database_url).await
+        .expect("Failed to connect to PostgreSQL");
+
+    // Run migrations
+    db.run_migrations().await.expect("Failed to run migrations");
+
     test_replay_database_conformance(&db).await;
 }
 

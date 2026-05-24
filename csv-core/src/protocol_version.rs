@@ -529,74 +529,10 @@ impl Default for Capabilities {
 /// | Aptos      | 5             | Quick finality with BFT consensus  |
 /// | Sui        | 15            | Similar to Ethereum                |
 /// | Celestia   | 100           | DA chain, high finality threshold  |
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FinalityDepths {
-    /// Bitcoin mainnet/testnet confirmations required
-    pub bitcoin: u64,
-    /// Ethereum mainnet/testnet confirmations required
-    pub ethereum: u64,
-    /// Solana mainnet/devnet confirmations required
-    pub solana: u64,
-    /// Aptos mainnet/testnet confirmations required
-    pub aptos: u64,
-    /// Sui mainnet/testnet confirmations required
-    pub sui: u64,
-    /// Celestia mainnet/testnet confirmations required
-    pub celestia: u64,
-}
-
-impl FinalityDepths {
-    /// Default finality depths for all supported chains.
-    pub const fn defaults() -> Self {
-        Self {
-            bitcoin: 6,
-            ethereum: 15,
-            solana: 32,
-            aptos: 5,
-            sui: 15,
-            celestia: 100,
-        }
-    }
-
-    /// Get the finality depth for a chain by ID.
-    pub fn for_chain(&self, chain_id: &str) -> Option<u64> {
-        match chain_id {
-            "bitcoin" => Some(self.bitcoin),
-            "ethereum" => Some(self.ethereum),
-            "solana" => Some(self.solana),
-            "aptos" => Some(self.aptos),
-            "sui" => Some(self.sui),
-            "celestia" => Some(self.celestia),
-            _ => None,
-        }
-    }
-
-    /// Get the finality depth for a chain, falling back to a default.
-    pub fn for_chain_or_default(&self, chain_id: &str, fallback: u64) -> u64 {
-        self.for_chain(chain_id).unwrap_or(fallback)
-    }
-
-    /// Check if a chain has a configured finality depth.
-    pub fn has_depth(&self, chain_id: &str) -> bool {
-        self.for_chain(chain_id).is_some()
-    }
-}
-
-impl Default for FinalityDepths {
-    fn default() -> Self {
-        Self::defaults()
-    }
-}
-
-impl std::fmt::Display for FinalityDepths {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "FinalityDepths {{ bitcoin: {}, ethereum: {}, solana: {}, aptos: {}, sui: {}, celestia: {} }}",
-            self.bitcoin, self.ethereum, self.solana, self.aptos, self.sui, self.celestia
-        )
-    }
-}
+///
+/// **DEPRECATED**: This type has been moved to csv-protocol.
+/// Please use `csv_protocol::finality::capabilities::FinalityDepths` instead.
+pub use csv_protocol::finality::capabilities::FinalityDepths;
 
 #[cfg(test)]
 mod finality_tests {

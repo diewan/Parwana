@@ -21,7 +21,7 @@ use csv_core::proof::{FinalityProof, ProofBundle};
 #[cfg(feature = "rpc")]
 type SignedTransaction = (Vec<u8>, Vec<u8>, Vec<u8>);
 use csv_core::Hash;
-use csv_core::seal_protocol::SealProtocol;
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_core::commitment::Commitment;
 use csv_core::seal::{CommitAnchor as CoreCommitAnchor, SealPoint as CoreSealPoint};
 

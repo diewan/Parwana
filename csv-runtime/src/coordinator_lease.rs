@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 
-use csv_core::cross_chain::CrossChainTransferProof;
+use csv_protocol::cross_chain::CrossChainTransferProof;
 
 use crate::error::RuntimeError;
 use csv_storage::{ReplayDatabase, ReplayDbError};

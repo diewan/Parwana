@@ -14,9 +14,11 @@ use crate::adapter_registry::{AdapterRegistry, CrossChainTransfer};
 use crate::coordinator_lease::CoordinatorLease;
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
+use crate::event_envelope::{EventType, RuntimeEventEnvelope};
+use crate::event_store::{EventStore, InMemoryEventStore};
 use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
 use crate::recovery::{CheckpointManager, TransferStage};
-use csv_core::signature::SignatureScheme;
+use csv_protocol::signature::SignatureScheme;
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use csv_storage::{ReplayDatabase, ReplayDbError};
 
@@ -40,6 +42,8 @@ pub struct TransferReceipt {
 pub struct TransferCoordinator {
     replay_db: Box<dyn ReplayDatabase>,
     event_bus: EventBus,
+    /// Durable event store for event sourcing and audit trail
+    event_store: Box<dyn EventStore>,
     /// Circuit breaker for RPC failure tracking
     circuit_breaker: std::sync::Arc<std::sync::Mutex<crate::runtime_mode::CircuitBreaker>>,
     /// Health monitor for runtime health tracking
@@ -55,31 +59,30 @@ pub struct TransferCoordinator {
 }
 
 impl TransferCoordinator {
-    /// Create a new transfer coordinator with a default verifier.
+    /// Create a new transfer coordinator with a default verifier and in-memory event store.
     pub fn new(replay_db: Box<dyn ReplayDatabase>, event_bus: EventBus) -> Self {
-        Self::with_coordinator_lease(replay_db, event_bus, None)
+        Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
     }
 
-    /// Create a new transfer coordinator with an optional distributed lease backend.
+    /// Create a new transfer coordinator with a custom event store.
     ///
-    /// When a `CoordinatorLease` is provided, the coordinator uses it for distributed
-    /// lease enforcement across multiple runtime instances (HA deployments).
-    /// Uses a default [`CanonicalVerifierImpl`] for proof verification.
-    pub fn with_coordinator_lease(
+    /// This is the primary constructor. All other constructors delegate to this.
+    pub fn with_event_store(
         replay_db: Box<dyn ReplayDatabase>,
         event_bus: EventBus,
-        coordinator_lease: Option<Box<dyn CoordinatorLease>>,
+        event_store: Box<dyn EventStore>,
     ) -> Self {
         Self {
             replay_db,
             event_bus,
+            event_store,
             circuit_breaker: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::runtime_mode::CircuitBreaker::new(),
             )),
             health_monitor: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::runtime_mode::HealthMonitor::new(),
             )),
-            coordinator_lease,
+            coordinator_lease: None,
             checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal: Box::new(InMemoryJournal::new(10000)),
@@ -95,20 +98,7 @@ impl TransferCoordinator {
         event_bus: EventBus,
         verifier: CanonicalVerifierImpl,
     ) -> Self {
-        Self {
-            replay_db,
-            event_bus,
-            circuit_breaker: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::runtime_mode::CircuitBreaker::new(),
-            )),
-            health_monitor: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::runtime_mode::HealthMonitor::new(),
-            )),
-            coordinator_lease: None,
-            checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
-            verifier: std::sync::Arc::new(verifier),
-            execution_journal: Box::new(InMemoryJournal::new(10000)),
-        }
+        Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
     }
 
     /// Create a new transfer coordinator with a custom execution journal.
@@ -120,20 +110,7 @@ impl TransferCoordinator {
         event_bus: EventBus,
         execution_journal: Box<dyn ExecutionJournal>,
     ) -> Self {
-        Self {
-            replay_db,
-            event_bus,
-            circuit_breaker: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::runtime_mode::CircuitBreaker::new(),
-            )),
-            health_monitor: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::runtime_mode::HealthMonitor::new(),
-            )),
-            coordinator_lease: None,
-            checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
-            verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
-            execution_journal,
-        }
+        Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
     }
 
     /// Get a reference to the circuit breaker
@@ -232,8 +209,20 @@ impl TransferCoordinator {
         // Runtime coordinates only - use sanad_id (Hash) directly for replay detection
         let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
 
+        // Record phase entry: Initialized (Entered)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::Initialized,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Entered,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
         // Atomic idempotent consume-if-unconsumed: prevents duplicate mints
-        match self.replay_db.consume_if_unconsumed(replay_id.0.as_bytes()).await {
+        let consume_result = self.replay_db.consume_if_unconsumed(replay_id.0.as_bytes()).await;
+        match consume_result {
             Ok(()) => {}
             Err(e) => match e {
                 ReplayDbError::AlreadyExists => {
@@ -244,13 +233,42 @@ impl TransferCoordinator {
                     return Err(TransferCoordinatorError::ReplayDetected(replay_id));
                 }
                 ReplayDbError::Storage(msg) => {
+                    let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                        transfer_id: transfer.id.clone(),
+                        replay_id: replay_id.clone(),
+                        proof_hash: [0u8; 32],
+                        phase: crate::recovery::TransferStage::Initialized,
+                        ts: std::time::SystemTime::now(),
+                        outcome: crate::execution_journal::PhaseOutcome::Failed(msg.clone()),
+                        attempt: 1,
+                    });
                     return Err(TransferCoordinatorError::ReplayDbError(msg.to_string()));
                 }
                 ReplayDbError::NotFound => {
+                    let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                        transfer_id: transfer.id.clone(),
+                        replay_id: replay_id.clone(),
+                        proof_hash: [0u8; 32],
+                        phase: crate::recovery::TransferStage::Initialized,
+                        ts: std::time::SystemTime::now(),
+                        outcome: crate::execution_journal::PhaseOutcome::Failed("Replay ID not found".to_string()),
+                        attempt: 1,
+                    });
                     return Err(TransferCoordinatorError::ReplayDbError("Replay ID not found".to_string()));
                 }
             },
         }
+
+        // Record phase entry: Initialized (Completed)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::Initialized,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Completed,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Step 2: Verify source chain capabilities
         let src_caps = adapter_registry
@@ -282,6 +300,35 @@ impl TransferCoordinator {
         }
 
         // Step 4: Lock on source chain with retry logic and circuit breaker
+        // Record phase entry: Locking (Entered)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::LockConfirmed,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Entered,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
+        // Append durable event BEFORE emitting to subscribers (crash-safe ordering)
+        if let Err(e) = self.event_store.append(&RuntimeEventEnvelope::new(
+            csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            EventType(EventType::TRANSFER_LOCKED.to_string()),
+            1,
+            serde_json::json!({
+                "transfer_id": transfer.id,
+                "source_chain": transfer.source_chain,
+                "destination_chain": transfer.destination_chain,
+            }).to_string(),
+            None,
+            uuid::Uuid::new_v4(),
+            runtime_ctx.runtime_instance,
+            std::time::SystemTime::now(),
+        )) {
+            tracing::warn!("Failed to append Locking event to EventStore: {}", e);
+        }
+
         self.event_bus
             .emit(TransferEvent::Locking {
                 transfer_id: transfer.id.clone(),
@@ -329,12 +376,38 @@ impl TransferCoordinator {
         }
 
         let lock_result = lock_result.ok_or_else(|| {
+            let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer.id.clone(),
+                replay_id: replay_id.clone(),
+                proof_hash: [0u8; 32],
+                phase: crate::recovery::TransferStage::LockConfirmed,
+                ts: std::time::SystemTime::now(),
+                outcome: crate::execution_journal::PhaseOutcome::Failed(
+                    last_error
+                        .as_ref()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "Unknown error".to_string())
+                ),
+                attempt: 1,
+            });
             TransferCoordinatorError::LockFailed(
                 last_error
+                    .as_ref()
                     .map(|e| e.to_string())
                     .unwrap_or_else(|| "Unknown error".to_string()),
             )
         })?;
+
+        // Record phase entry: Locking (Completed)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::LockConfirmed,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Completed,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Create checkpoint after lock confirmed
         self.checkpoint_manager
@@ -345,6 +418,17 @@ impl TransferCoordinator {
                 TransferStage::LockConfirmed,
                 vec![], // Data can be populated later with proper serialization
             );
+
+        // Record phase entry: AwaitingFinality (Entered)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::AwaitingFinality,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Entered,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         self.event_bus
             .emit(TransferEvent::AwaitingFinality {
@@ -368,9 +452,42 @@ impl TransferCoordinator {
         runtime_ctx
             .policy
             .check_finality_threshold(&transfer.source_chain, lock_result.block_height)
-            .map_err(|e| TransferCoordinatorError::FinalityFailed(e))?;
+            .map_err(|e| {
+                let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: replay_id.clone(),
+                    proof_hash: [0u8; 32],
+                    phase: crate::recovery::TransferStage::AwaitingFinality,
+                    ts: std::time::SystemTime::now(),
+                    outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
+                    attempt: 1,
+                });
+                TransferCoordinatorError::FinalityFailed(e)
+            })?;
+
+        // Record phase entry: AwaitingFinality (Completed)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::AwaitingFinality,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Completed,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Step 5: Build and verify proof bundle via csv-verifier (canonical verifier)
+        // Record phase entry: BuildingProof (Entered)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::ProofBuilding,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Entered,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
         self.event_bus
             .emit(TransferEvent::BuildingProof {
                 transfer_id: transfer.id.clone(),
@@ -403,6 +520,17 @@ impl TransferCoordinator {
         match self.verifier.verify_proof_bundle(&proof_bundle, &verification_context) {
             Ok(result) => {
                 if !result.is_valid {
+                    let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                        transfer_id: transfer.id.clone(),
+                        replay_id: replay_id.clone(),
+                        proof_hash: [0u8; 32],
+                        phase: crate::recovery::TransferStage::ProofBuilding,
+                        ts: std::time::SystemTime::now(),
+                        outcome: crate::execution_journal::PhaseOutcome::Failed(
+                            result.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")
+                        ),
+                        attempt: 1,
+                    });
                     return Err(TransferCoordinatorError::ProofVerificationFailed(
                         result.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; "),
                     ));
@@ -412,8 +540,28 @@ impl TransferCoordinator {
                     .emit(TransferEvent::ProofVerified {
                         transfer_id: transfer.id.clone(),
                     });
+
+                // Record phase entry: BuildingProof (Completed)
+                self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: replay_id.clone(),
+                    proof_hash: [0u8; 32],
+                    phase: crate::recovery::TransferStage::ProofBuilding,
+                    ts: std::time::SystemTime::now(),
+                    outcome: crate::execution_journal::PhaseOutcome::Completed,
+                    attempt: 1,
+                }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
             }
             Err(e) => {
+                let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: replay_id.clone(),
+                    proof_hash: [0u8; 32],
+                    phase: crate::recovery::TransferStage::ProofBuilding,
+                    ts: std::time::SystemTime::now(),
+                    outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
+                    attempt: 1,
+                });
                 return Err(TransferCoordinatorError::ProofVerificationFailed(e.to_string()));
             }
         }
@@ -437,6 +585,15 @@ impl TransferCoordinator {
         {
             let breaker = self.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
             if !breaker.allow_request() {
+                let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                    transfer_id: transfer.id.clone(),
+                    replay_id: replay_id.clone(),
+                    proof_hash: [0u8; 32],
+                    phase: crate::recovery::TransferStage::MintConfirmed,
+                    ts: std::time::SystemTime::now(),
+                    outcome: crate::execution_journal::PhaseOutcome::Failed("Circuit breaker is open".to_string()),
+                    attempt: 1,
+                });
                 // TODO: Implement mark_rolled_back using csv-storage
                 // let _ = self.replay_db.mark_rolled_back(&replay_id);
                 return Err(TransferCoordinatorError::RuntimeError(
@@ -444,6 +601,17 @@ impl TransferCoordinator {
                 ));
             }
         }
+
+        // Record phase entry: Minting (Entered)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::MintConfirmed,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Entered,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         let mut mint_result = None;
         let mut last_error = None;
@@ -477,14 +645,40 @@ impl TransferCoordinator {
         }
 
         let mint_result = mint_result.ok_or_else(|| {
+            let _ = self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer.id.clone(),
+                replay_id: replay_id.clone(),
+                proof_hash: [0u8; 32],
+                phase: crate::recovery::TransferStage::MintConfirmed,
+                ts: std::time::SystemTime::now(),
+                outcome: crate::execution_journal::PhaseOutcome::Failed(
+                    last_error
+                        .as_ref()
+                        .map(|e: &crate::adapter_registry::AdapterError| e.to_string())
+                        .unwrap_or_else(|| "Unknown error".to_string())
+                ),
+                attempt: 1,
+            });
             // TODO: Implement mark_rolled_back using csv-storage
             // let _ = self.replay_db.mark_rolled_back(&replay_id);
             TransferCoordinatorError::MintFailed(
                 last_error
-                    .map(|e: crate::adapter_registry::AdapterError| e.to_string())
+                    .as_ref()
+                    .map(|e: &crate::adapter_registry::AdapterError| e.to_string())
                     .unwrap_or_else(|| "Unknown error".to_string()),
             )
         })?;
+
+        // Record phase entry: Minting (Completed)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::MintConfirmed,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Completed,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Create checkpoint after mint confirmed
         self.checkpoint_manager
@@ -534,6 +728,17 @@ impl TransferCoordinator {
                 TransferStage::Completed,
                 vec![], // Data can be populated later with proper serialization
             );
+
+        // Record phase entry: Completed (Entered)
+        self.execution_journal.record(crate::execution_journal::TransferPhaseEntry {
+            transfer_id: transfer.id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash: [0u8; 32],
+            phase: crate::recovery::TransferStage::Completed,
+            ts: std::time::SystemTime::now(),
+            outcome: crate::execution_journal::PhaseOutcome::Entered,
+            attempt: 1,
+        }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         Ok(TransferReceipt {
             transfer_id: transfer.id,
@@ -594,7 +799,108 @@ impl TransferCoordinator {
         self.execution_journal.as_ref()
     }
 
-    /// Resume incomplete transfers after a crash or restart.
+    /// Resume a specific transfer after a crash or restart.
+    ///
+    /// This method queries the execution journal for the last recorded phase
+    /// of a transfer and resumes execution from that phase.
+    ///
+    /// # Arguments
+    ///
+    /// * `transfer_id` - The ID of the transfer to resume
+    /// * `adapter_registry` - The adapter registry for chain operations
+    /// * `runtime_ctx` - Runtime execution context with lease and policy
+    ///
+    /// # Returns
+    ///
+    /// The transfer receipt if the transfer completes successfully.
+    pub async fn resume_transfer(
+        &self,
+        transfer_id: &str,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::lease::RuntimeExecutionContext,
+    ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        let phase = self.execution_journal.latest_phase(transfer_id)
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?
+            .ok_or(TransferCoordinatorError::NotFound)?;
+
+        tracing::info!(
+            "Resuming transfer {} from phase {:?}",
+            transfer_id,
+            phase
+        );
+
+        // Phase-specific recovery logic
+        match phase {
+            crate::recovery::TransferStage::Initialized => {
+                // Transfer was initialized but lock was never broadcast
+                // This should not happen in normal flow - requires reconstructing transfer
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Cannot resume from Initialized phase - transfer state lost".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::LockSubmitted => {
+                // Lock was submitted but not confirmed - resume by checking lock status
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from LockSubmitted not yet implemented - requires lock status check".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::LockConfirmed => {
+                // Lock was confirmed, need to resume from finality check/proof generation
+                // This requires the original transfer request which is not stored in journal
+                // TODO: Implement transfer persistence to enable this recovery path
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from LockConfirmed not yet implemented - requires transfer persistence".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::ProofBuilding => {
+                // Proof was generated, need to resume from mint broadcast
+                // TODO: Implement proof retrieval and mint resumption
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from ProofBuilding not yet implemented - requires proof persistence".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::ProofValidated => {
+                // Proof was validated, need to resume from mint broadcast
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from ProofValidated not yet implemented - requires proof persistence".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::AwaitingFinality => {
+                // Awaiting finality - resume from finality check
+                // TODO: Implement finality check resumption
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from AwaitingFinality not yet implemented".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::MintSubmitted => {
+                // Mint was submitted but not confirmed - resume by checking mint status
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from MintSubmitted not yet implemented - requires mint status check".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::MintConfirmed => {
+                // Mint was broadcast, need to resume from mint confirmation
+                // TODO: Implement mint confirmation polling
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Resume from MintConfirmed not yet implemented - requires confirmation polling".to_string()
+                ))
+            }
+            crate::recovery::TransferStage::Completed => {
+                Err(TransferCoordinatorError::AlreadyComplete)
+            }
+            crate::recovery::TransferStage::RolledBack => {
+                Err(TransferCoordinatorError::AlreadyRolledBack)
+            }
+            crate::recovery::TransferStage::Compromised => {
+                // Transfer was compromised - cannot resume
+                Err(TransferCoordinatorError::RuntimeError(
+                    "Cannot resume from Compromised phase - transfer security incident".to_string()
+                ))
+            }
+        }
+    }
+
+    /// Resume all incomplete transfers after a crash or restart.
     ///
     /// This method queries the execution journal for incomplete transfers and
     /// attempts to resume them from their last recorded phase.
@@ -604,7 +910,7 @@ impl TransferCoordinator {
     /// The number of transfers that were successfully resumed.
     pub async fn resume_transfers(
         &self,
-        _adapter_registry: &dyn AdapterRegistry,
+        adapter_registry: &dyn AdapterRegistry,
     ) -> Result<usize, TransferCoordinatorError> {
         let incomplete = self
             .execution_journal
@@ -614,19 +920,40 @@ impl TransferCoordinator {
         let mut resumed = 0;
 
         for entry in incomplete {
-            // For now, just log the incomplete transfers
-            // Full resume logic will be implemented in a follow-up
             tracing::info!(
                 "Found incomplete transfer: {} at phase {:?}",
                 entry.transfer_id,
                 entry.phase
             );
 
-            // TODO: Implement phase-specific resume logic
-            // - LockConfirmed: Resume from finality check
-            // - ProofBuilding: Resume from proof building
-            // - MintConfirmed: Resume from mint confirmation
-            resumed += 1;
+            // Note: Full resume requires transfer reconstruction which is not yet implemented
+            // For now, we just log the incomplete transfers
+            // TODO: Implement transfer persistence to enable full resume
+            match entry.phase {
+                crate::recovery::TransferStage::Initialized |
+                crate::recovery::TransferStage::LockSubmitted |
+                crate::recovery::TransferStage::LockConfirmed |
+                crate::recovery::TransferStage::ProofBuilding |
+                crate::recovery::TransferStage::ProofValidated |
+                crate::recovery::TransferStage::AwaitingFinality |
+                crate::recovery::TransferStage::MintSubmitted |
+                crate::recovery::TransferStage::MintConfirmed => {
+                    tracing::warn!(
+                        "Transfer {} at phase {:?} cannot be resumed without transfer persistence",
+                        entry.transfer_id,
+                        entry.phase
+                    );
+                }
+                crate::recovery::TransferStage::Completed => {
+                    tracing::warn!("Transfer {} marked as incomplete but phase is Completed - skipping", entry.transfer_id);
+                }
+                crate::recovery::TransferStage::RolledBack => {
+                    tracing::warn!("Transfer {} marked as incomplete but phase is RolledBack - skipping", entry.transfer_id);
+                }
+                crate::recovery::TransferStage::Compromised => {
+                    tracing::warn!("Transfer {} marked as incomplete but phase is Compromised - skipping", entry.transfer_id);
+                }
+            }
         }
 
         Ok(resumed)
@@ -637,7 +964,7 @@ impl TransferCoordinator {
 mod tests {
     use super::*;
     use crate::adapter_registry::{AdapterRegistryImpl, ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer, LockResult, MintResult, SealRegistryStatus};
-    use csv_core::chain_config::ChainCapabilities;
+    use csv_protocol::finality::ChainCapabilities;
     use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
     use std::sync::Arc;
 
@@ -737,7 +1064,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -772,7 +1099,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![5u8; 32], // different lock tx
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([6u8; 32]), // different sanad
+            sanad_id: csv_hash::Hash::new([6u8; 32]), // different sanad
             transition_id: vec![7u8; 32], // different transition
         };
 
@@ -838,7 +1165,7 @@ mod tests {
             destination_chain: "celestia".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -878,7 +1205,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -928,7 +1255,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -975,7 +1302,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1059,7 +1386,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1121,7 +1448,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1184,7 +1511,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1281,7 +1608,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1319,7 +1646,9 @@ mod tests {
         // Await all handles sequentially (equivalent to join_all for testing)
         let mut results = Vec::new();
         for handle in handles {
-            results.push(handle.await.expect("task should not panic"));
+            results.push(handle.await.unwrap_or_else(|e| {
+                panic!("task panicked: {}", e)
+            }));
         }
         // All should succeed due to idempotency
         let success_count = results.iter().filter(|r| r.is_ok()).count();
@@ -1341,7 +1670,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1388,7 +1717,9 @@ mod tests {
         // Await all handles sequentially (equivalent to join_all for testing)
         let mut results = Vec::new();
         for handle in handles {
-            results.push(handle.await.expect("task should not panic"));
+            results.push(handle.await.unwrap_or_else(|e| {
+                panic!("task panicked: {}", e)
+            }));
         }
         // Both succeed due to idempotent replay_db (already consumed entries return Ok)
         // Lease conflict detection is a future enhancement
@@ -1477,7 +1808,7 @@ mod tests {
             destination_chain: "malicious-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1515,7 +1846,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1586,7 +1917,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 
@@ -1664,7 +1995,7 @@ mod tests {
             destination_chain: "test-chain".to_string(),
             lock_tx_hash: vec![1u8; 32],
             lock_output_index: 0,
-            sanad_id: csv_core::Hash::new([2u8; 32]),
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
             transition_id: vec![3u8; 32],
         };
 

@@ -2,7 +2,7 @@
 
 #![allow(missing_docs)]
 
-use csv_core::verified::VerificationAssurance;
+use csv_protocol::verified::VerificationAssurance;
 use std::string::String;
 
 /// Structured events emitted during transfer execution

@@ -2,7 +2,7 @@
 
 use csv_testkit::{AdversarialConfig, AdversarialRunner, ByzantineBehavior, TestProofBundle};
 use csv_verifier::{CanonicalVerifier, VerificationContext};
-use csv_core::signature::SignatureScheme;
+use csv_protocol::signature::SignatureScheme;
 
 #[test]
 fn adversarial_runner_rejects_minimal_fixture_via_canonical_verifier() {

@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use csv_core::transfer_stage::TransferStage;
+use csv_protocol::transfer_state::TransferStage;
 
 /// Outcome of a transfer phase execution
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_journal_records_entries() {
         let journal = InMemoryJournal::new(1000);
-        let replay_id = csv_hash::ReplayIdHash(csv_core::Hash::new([1u8; 32]));
+        let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([1u8; 32]));
         let proof_hash = [0u8; 32];
 
         journal
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn test_journal_incomplete_transfers() {
         let journal = InMemoryJournal::new(1000);
-        let replay_id = csv_hash::ReplayIdHash(csv_core::Hash::new([1u8; 32]));
+        let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([1u8; 32]));
         let proof_hash = [0u8; 32];
 
         // Complete transfer
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn test_journal_capacity_enforcement() {
         let journal = InMemoryJournal::new(5);
-        let replay_id = csv_hash::ReplayIdHash(csv_core::Hash::new([1u8; 32]));
+        let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([1u8; 32]));
         let proof_hash = [0u8; 32];
 
         // Fill beyond capacity
