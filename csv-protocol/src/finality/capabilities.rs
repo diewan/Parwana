@@ -132,7 +132,121 @@ pub struct ChainCapabilities {
     pub chain_role: ChainRole,
 }
 
+/// Runtime capability requirements for a protocol operation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityRequirements {
+    /// Human-readable operation name for diagnostics.
+    pub operation: String,
+    /// Operation requires a settlement chain.
+    pub require_settlement: bool,
+    /// Operation requires light-client proof support.
+    pub require_light_client_proofs: bool,
+    /// Operation requires state proof support.
+    pub require_state_proofs: bool,
+    /// Operation requires transaction inclusion proof support.
+    pub require_transaction_inclusion_proofs: bool,
+    /// Operation requires offline verification support.
+    pub require_offline_verification: bool,
+    /// Operation requires ZK proof support.
+    pub require_zk_proofs: bool,
+    /// Minimum finality depth accepted by the planner.
+    pub min_finality_depth: u64,
+}
+
+impl CapabilityRequirements {
+    /// Requirements for a chain used as a cross-chain transfer source.
+    pub fn cross_chain_source() -> Self {
+        Self {
+            operation: "cross_chain_source".to_string(),
+            require_settlement: true,
+            require_light_client_proofs: false,
+            require_state_proofs: false,
+            require_transaction_inclusion_proofs: true,
+            require_offline_verification: false,
+            require_zk_proofs: false,
+            min_finality_depth: 1,
+        }
+    }
+
+    /// Requirements for a chain used as a cross-chain transfer destination.
+    pub fn cross_chain_destination() -> Self {
+        Self {
+            operation: "cross_chain_destination".to_string(),
+            require_settlement: true,
+            require_light_client_proofs: false,
+            require_state_proofs: false,
+            require_transaction_inclusion_proofs: false,
+            require_offline_verification: false,
+            require_zk_proofs: false,
+            min_finality_depth: 1,
+        }
+    }
+}
+
+/// Result of checking advertised chain capabilities against operation requirements.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityPlan {
+    /// Operation being planned.
+    pub operation: String,
+    /// Whether all requirements were satisfied.
+    pub satisfied: bool,
+    /// Missing requirement names.
+    pub missing: Vec<String>,
+}
+
+impl CapabilityPlan {
+    /// Return `Ok(())` if requirements are satisfied, otherwise return a compact diagnostic.
+    pub fn ensure_satisfied(&self) -> Result<(), String> {
+        if self.satisfied {
+            return Ok(());
+        }
+        Err(format!(
+            "Capability requirements for {} not satisfied: {}",
+            self.operation,
+            self.missing.join(", ")
+        ))
+    }
+}
+
 impl ChainCapabilities {
+    /// Plan whether this chain can satisfy a runtime operation.
+    pub fn plan_for(&self, requirements: &CapabilityRequirements) -> CapabilityPlan {
+        let mut missing = Vec::new();
+
+        if requirements.require_settlement && !matches!(self.chain_role, ChainRole::Settlement) {
+            missing.push("settlement_role".to_string());
+        }
+        if requirements.require_light_client_proofs && !self.supports_light_client_proofs {
+            missing.push("light_client_proofs".to_string());
+        }
+        if requirements.require_state_proofs && !self.supports_state_proofs {
+            missing.push("state_proofs".to_string());
+        }
+        if requirements.require_transaction_inclusion_proofs
+            && !self.supports_transaction_inclusion_proofs
+        {
+            missing.push("transaction_inclusion_proofs".to_string());
+        }
+        if requirements.require_offline_verification && !self.supports_offline_verification {
+            missing.push("offline_verification".to_string());
+        }
+        if requirements.require_zk_proofs && !self.supports_zk_proofs {
+            missing.push("zk_proofs".to_string());
+        }
+        if self.finality_depth < requirements.min_finality_depth {
+            missing.push(format!(
+                "finality_depth({}<{})",
+                self.finality_depth, requirements.min_finality_depth
+            ));
+        }
+
+        CapabilityPlan {
+            operation: requirements.operation.clone(),
+            satisfied: missing.is_empty(),
+            missing,
+        }
+    }
+
     /// Returns true if the observed inclusion strength meets this chain's minimum.
     pub fn inclusion_threshold_met(&self, observed: &InclusionStrength) -> bool {
         match self.proof_model {
@@ -506,5 +620,35 @@ impl ChainCapabilityRegistry {
             .filter(|(_, c)| c.capabilities().has_capability(capability))
             .map(|(id, _)| id.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settlement_source_plan_accepts_bitcoin() {
+        let plan =
+            ChainCapabilities::bitcoin().plan_for(&CapabilityRequirements::cross_chain_source());
+        assert!(plan.ensure_satisfied().is_ok());
+    }
+
+    #[test]
+    fn settlement_source_plan_rejects_da_only_chain() {
+        let plan =
+            ChainCapabilities::celestia().plan_for(&CapabilityRequirements::cross_chain_source());
+        assert!(!plan.satisfied);
+        assert!(plan.missing.contains(&"settlement_role".to_string()));
+    }
+
+    #[test]
+    fn plan_reports_missing_zk_support() {
+        let mut requirements = CapabilityRequirements::cross_chain_source();
+        requirements.require_zk_proofs = true;
+
+        let plan = ChainCapabilities::bitcoin().plan_for(&requirements);
+        assert!(!plan.satisfied);
+        assert!(plan.missing.contains(&"zk_proofs".to_string()));
     }
 }

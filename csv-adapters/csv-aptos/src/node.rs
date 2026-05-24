@@ -14,6 +14,8 @@ use crate::rpc::{
     BoxFuture,
 };
 
+type RpcResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 /// Real Aptos RPC client using REST API
 pub struct AptosNode {
     client: Client,
@@ -30,18 +32,14 @@ impl AptosNode {
     }
 
     /// Make a GET request to the Aptos REST API
-    async fn get(&self, path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get(&self, path: &str) -> RpcResult<Value> {
         let url = format!("{}/v1{}", self.rpc_url, path);
         let response: Value = self.client.get(&url).send().await?.json().await?;
         Ok(response)
     }
 
     /// Make a POST request to the Aptos REST API
-    async fn post(
-        &self,
-        path: &str,
-        body: &Value,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn post(&self, path: &str, body: &Value) -> RpcResult<Value> {
         let url = format!("{}/v1{}", self.rpc_url, path);
         let response: Value = self
             .client
@@ -54,65 +52,108 @@ impl AptosNode {
         Ok(response)
     }
 
-    /// Parse hex string to 32-byte array
-    fn parse_hex_bytes(hex_str: &str) -> [u8; 32] {
+    fn missing_field(field: &str) -> Box<dyn std::error::Error + Send + Sync> {
+        format!(
+            "Malformed Aptos RPC response: missing or invalid `{}`",
+            field
+        )
+        .into()
+    }
+
+    fn required_field<'a>(value: &'a Value, field: &str) -> RpcResult<&'a Value> {
+        value.get(field).ok_or_else(|| Self::missing_field(field))
+    }
+
+    fn required_str<'a>(value: &'a Value, field: &str) -> RpcResult<&'a str> {
+        Self::required_field(value, field)?
+            .as_str()
+            .ok_or_else(|| Self::missing_field(field))
+    }
+
+    fn required_bool(value: &Value, field: &str) -> RpcResult<bool> {
+        Self::required_field(value, field)?
+            .as_bool()
+            .ok_or_else(|| Self::missing_field(field))
+    }
+
+    /// Parse hex string to 32-byte array.
+    fn parse_hex_bytes(field: &str, hex_str: &str) -> RpcResult<[u8; 32]> {
         let hex = hex_str.trim_start_matches("0x");
-        if let Ok(bytes) = hex::decode(hex) {
-            let mut result = [0u8; 32];
-            let copy_len = bytes.len().min(32);
-            result[..copy_len].copy_from_slice(&bytes[..copy_len]);
-            result
-        } else {
-            [0u8; 32]
+        let bytes = hex::decode(hex).map_err(|e| {
+            format!(
+                "Malformed Aptos RPC response: invalid `{}` hex: {}",
+                field, e
+            )
+        })?;
+        let result = bytes.try_into().map_err(|bytes: Vec<u8>| {
+            format!(
+                "Malformed Aptos RPC response: `{}` must be 32 bytes, got {}",
+                field,
+                bytes.len()
+            )
+        })?;
+        Ok(result)
+    }
+
+    fn required_hex_bytes(value: &Value, field: &str) -> RpcResult<[u8; 32]> {
+        Self::parse_hex_bytes(field, Self::required_str(value, field)?)
+    }
+
+    fn optional_hex_bytes(value: &Value, field: &str) -> RpcResult<Option<[u8; 32]>> {
+        match value.get(field).and_then(Value::as_str) {
+            Some(hex) => Self::parse_hex_bytes(field, hex).map(Some),
+            None => Ok(None),
         }
     }
 
-    /// Parse optional hex string to 32-byte array
-    fn parse_opt_hex_bytes(hex_str: Option<&str>) -> Option<[u8; 32]> {
-        hex_str.map(Self::parse_hex_bytes)
+    /// Parse u64 from string (Aptos returns numbers as strings)
+    fn parse_u64(value: &Value, field: &str) -> RpcResult<u64> {
+        if let Some(number) = value.as_u64() {
+            return Ok(number);
+        }
+
+        let string = value.as_str().ok_or_else(|| Self::missing_field(field))?;
+        string.parse::<u64>().map_err(|e| {
+            format!(
+                "Malformed Aptos RPC response: invalid `{}` integer: {}",
+                field, e
+            )
+            .into()
+        })
     }
 
-    /// Parse u64 from string (Aptos returns numbers as strings)
-    fn parse_u64(value: &Value) -> u64 {
-        value.as_u64().unwrap_or_default()
+    fn required_u64(value: &Value, field: &str) -> RpcResult<u64> {
+        Self::parse_u64(Self::required_field(value, field)?, field)
     }
 
     /// Parse a transaction from API response
-    fn parse_transaction(result: &Value) -> AptosTransaction {
-        let hash = Self::parse_hex_bytes(result["hash"].as_str().unwrap_or(""));
-        let version = Self::parse_u64(&result["version"]);
-        let success = result["success"].as_bool().unwrap_or(false);
-        let vm_status = result["vm_status"].as_str().unwrap_or("").to_string();
-        let epoch = Self::parse_u64(&result["epoch"]);
-        let round = Self::parse_u64(&result["round"]);
-        let gas_used = Self::parse_u64(&result["gas_used"]);
-        let cumulative_gas_used = Self::parse_u64(&result["cumulative_gas_used"]);
+    fn parse_transaction(result: &Value) -> RpcResult<AptosTransaction> {
+        let hash = Self::required_hex_bytes(result, "hash")?;
+        let version = Self::required_u64(result, "version")?;
+        let success = Self::required_bool(result, "success")?;
+        let vm_status = Self::required_str(result, "vm_status")?.to_string();
+        let epoch = Self::required_u64(result, "epoch")?;
+        let round = Self::required_u64(result, "round")?;
+        let gas_used = Self::required_u64(result, "gas_used")?;
+        let cumulative_gas_used = Self::required_u64(result, "cumulative_gas_used")?;
 
         // Parse state hashes
-        let state_change_hash =
-            Self::parse_hex_bytes(result["state_change_hash"].as_str().unwrap_or(""));
-        let event_root_hash =
-            Self::parse_hex_bytes(result["event_root_hash"].as_str().unwrap_or(""));
-        let state_checkpoint_hash =
-            Self::parse_opt_hex_bytes(result["state_checkpoint_hash"].as_str());
+        let state_change_hash = Self::required_hex_bytes(result, "state_change_hash")?;
+        let event_root_hash = Self::required_hex_bytes(result, "event_root_hash")?;
+        let state_checkpoint_hash = Self::optional_hex_bytes(result, "state_checkpoint_hash")?;
 
         // Parse events
-        let events = result["events"]
+        let events = Self::required_field(result, "events")?
             .as_array()
-            .map(|arr| arr.iter().map(Self::parse_event).collect())
-            .unwrap_or_default();
+            .ok_or_else(|| Self::missing_field("events"))?
+            .iter()
+            .map(Self::parse_event)
+            .collect::<RpcResult<Vec<_>>>()?;
 
         // Parse payload
-        let payload = result["payload"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let payload = serde_json::to_vec(Self::required_field(result, "payload")?)?;
 
-        AptosTransaction {
+        Ok(AptosTransaction {
             version,
             hash,
             state_change_hash,
@@ -126,29 +167,30 @@ impl AptosNode {
             vm_status,
             gas_used,
             cumulative_gas_used,
-        }
+        })
     }
 
     /// Parse an event from API response
-    fn parse_event(value: &Value) -> AptosEvent {
-        let guid = &value["guid"];
-        let event_sequence_number = Self::parse_u64(&guid["creation_number"]);
-        let key = guid["id"]["creation_num"]
-            .as_str()
-            .unwrap_or("")
+    fn parse_event(value: &Value) -> RpcResult<AptosEvent> {
+        let guid = Self::required_field(value, "guid")?;
+        let event_sequence_number = Self::parse_u64(
+            Self::required_field(guid, "creation_number")?,
+            "guid.creation_number",
+        )?;
+        let key = Self::required_field(guid, "id")?
+            .get("creation_num")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Self::missing_field("guid.id.creation_num"))?
             .to_string();
-        let data = value["data"]
-            .as_object()
-            .map(|obj| serde_json::to_vec(obj).unwrap_or_default())
-            .unwrap_or_default();
-        let transaction_version = Self::parse_u64(&value["version"]);
+        let data = serde_json::to_vec(Self::required_field(value, "data")?)?;
+        let transaction_version = Self::required_u64(value, "version")?;
 
-        AptosEvent {
+        Ok(AptosEvent {
             event_sequence_number,
             key,
             data,
             transaction_version,
-        }
+        })
     }
 }
 
@@ -159,15 +201,16 @@ impl AptosRpc for AptosNode {
         Box::pin(async move {
             let result = self.get("/").await?;
             Ok(AptosLedgerInfo {
-                chain_id: Self::parse_u64(&result["chain_id"]),
-                epoch: Self::parse_u64(&result["epoch"]),
-                ledger_version: Self::parse_u64(&result["ledger_version"]),
-                oldest_ledger_version: Self::parse_u64(&result["oldest_ledger_version"]),
-                ledger_timestamp: Self::parse_u64(&result["ledger_timestamp"]),
-                oldest_transaction_timestamp: Self::parse_u64(
-                    &result["oldest_transaction_timestamp"],
-                ),
-                epoch_start_timestamp: Self::parse_u64(&result["epoch_start_timestamp"]),
+                chain_id: Self::required_u64(&result, "chain_id")?,
+                epoch: Self::required_u64(&result, "epoch")?,
+                ledger_version: Self::required_u64(&result, "ledger_version")?,
+                oldest_ledger_version: Self::required_u64(&result, "oldest_ledger_version")?,
+                ledger_timestamp: Self::required_u64(&result, "ledger_timestamp")?,
+                oldest_transaction_timestamp: Self::required_u64(
+                    &result,
+                    "oldest_transaction_timestamp",
+                )?,
+                epoch_start_timestamp: Self::required_u64(&result, "epoch_start_timestamp")?,
             })
         })
     }
@@ -187,7 +230,7 @@ impl AptosRpc for AptosNode {
         Box::pin(async move {
             let addr_str = format_address(address);
             let result = self.get(&format!("/accounts/{}", addr_str)).await?;
-            Ok(Self::parse_u64(&result["sequence_number"]))
+            Ok(Self::required_u64(&result, "sequence_number")?)
         })
     }
 
@@ -212,7 +255,7 @@ impl AptosRpc for AptosNode {
                 return Ok(None);
             }
 
-            let data_bytes = serde_json::to_vec(&result["data"]).unwrap_or_default();
+            let data_bytes = serde_json::to_vec(Self::required_field(&result, "data")?)?;
             Ok(Some(AptosResource { data: data_bytes }))
         })
     }
@@ -227,7 +270,7 @@ impl AptosRpc for AptosNode {
             if result.get("hash").is_none() {
                 return Ok(None);
             }
-            Ok(Some(Self::parse_transaction(&result)))
+            Ok(Some(Self::parse_transaction(&result)?))
         })
     }
 
@@ -245,11 +288,13 @@ impl AptosRpc for AptosNode {
                 ))
                 .await?;
 
-            if let Some(txs) = result.as_array() {
-                Ok(txs.iter().map(Self::parse_transaction).collect())
-            } else {
-                Ok(vec![])
-            }
+            let txs = result
+                .as_array()
+                .ok_or_else(|| Self::missing_field("transactions"))?
+                .iter()
+                .map(Self::parse_transaction)
+                .collect::<RpcResult<Vec<_>>>()?;
+            Ok(txs)
         })
     }
 
@@ -263,11 +308,13 @@ impl AptosRpc for AptosNode {
             let result = self
                 .get(&format!("/events?handle={}&limit={}", event_handle, limit))
                 .await?;
-            if let Some(events) = result.as_array() {
-                Ok(events.iter().map(Self::parse_event).collect())
-            } else {
-                Ok(vec![])
-            }
+            let events = result
+                .as_array()
+                .ok_or_else(|| Self::missing_field("events"))?
+                .iter()
+                .map(Self::parse_event)
+                .collect::<RpcResult<Vec<_>>>()?;
+            Ok(events)
         })
     }
 
@@ -287,7 +334,7 @@ impl AptosRpc for AptosNode {
         Box::pin(async move {
             let result = self.post("/transactions", &signed_tx_json).await?;
             if let Some(hash_hex) = result.get("hash").and_then(|h| h.as_str()) {
-                Ok(Self::parse_hex_bytes(hash_hex))
+                Ok(Self::parse_hex_bytes("hash", hash_hex)?)
             } else if let Some(error) = result.get("error_code") {
                 Err(format!(
                     "Aptos transaction submission failed: {} - {:?}",
@@ -321,7 +368,7 @@ impl AptosRpc for AptosNode {
                     .await
                 {
                     if result.get("hash").is_some() {
-                        let tx = Self::parse_transaction(&result);
+                        let tx = Self::parse_transaction(&result)?;
                         if tx.success {
                             return Ok(tx);
                         } else {
@@ -343,9 +390,12 @@ impl AptosRpc for AptosNode {
         Box::pin(async move {
             let tx = self.get_transaction(version).await?;
             if let Some(tx) = tx {
+                let block_hash = tx.state_checkpoint_hash.ok_or_else(|| {
+                    Self::missing_field("state_checkpoint_hash for block derivation")
+                })?;
                 Ok(Some(AptosBlockInfo {
                     version: tx.version,
-                    block_hash: tx.state_checkpoint_hash.unwrap_or([0u8; 32]),
+                    block_hash,
                     epoch: tx.epoch,
                     round: tx.round,
                     timestamp_usecs: 0,
@@ -371,11 +421,13 @@ impl AptosRpc for AptosNode {
                 ))
                 .await?;
 
-            if let Some(events) = result.as_array() {
-                Ok(events.iter().map(Self::parse_event).collect())
-            } else {
-                Ok(vec![])
-            }
+            let events = result
+                .as_array()
+                .ok_or_else(|| Self::missing_field("events"))?
+                .iter()
+                .map(Self::parse_event)
+                .collect::<RpcResult<Vec<_>>>()?;
+            Ok(events)
         })
     }
 
@@ -410,12 +462,11 @@ impl AptosRpc for AptosNode {
         sequence_number: u64,
     ) -> BoxFuture<'_, Result<bool, Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            let sender = self.sender_address().await?;
-            let current_seq = self.get_account_sequence_number(sender).await?;
-            if current_seq < sequence_number {
-                return Ok(false);
-            }
-            Ok(true)
+            Err(format!(
+                "CapabilityUnavailable: Aptos checkpoint signature verification is not implemented for sequence {}",
+                sequence_number
+            )
+            .into())
         })
     }
 
@@ -425,5 +476,68 @@ impl AptosRpc for AptosNode {
 
     fn clone_boxed(&self) -> Box<dyn AptosRpc> {
         Box::new(AptosNode::new(&self.rpc_url))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn hex32(byte: u8) -> String {
+        format!("0x{}", hex::encode([byte; 32]))
+    }
+
+    #[test]
+    fn parse_hex_bytes_rejects_short_values() {
+        let err = AptosNode::parse_hex_bytes("hash", "0x1234").unwrap_err();
+        assert!(err.to_string().contains("must be 32 bytes"));
+    }
+
+    #[test]
+    fn parse_u64_accepts_aptos_string_numbers() {
+        let value = json!("42");
+        assert_eq!(AptosNode::parse_u64(&value, "version").unwrap(), 42);
+    }
+
+    #[test]
+    fn parse_transaction_rejects_missing_cryptographic_fields() {
+        let tx = json!({
+            "hash": hex32(1),
+            "version": "1",
+            "success": true,
+            "vm_status": "Executed",
+            "epoch": "1",
+            "round": "1",
+            "gas_used": "1",
+            "cumulative_gas_used": "1",
+            "event_root_hash": hex32(3),
+            "events": [],
+            "payload": {}
+        });
+
+        let err = AptosNode::parse_transaction(&tx).unwrap_err();
+        assert!(err.to_string().contains("state_change_hash"));
+    }
+
+    #[test]
+    fn parse_transaction_rejects_truncated_hashes() {
+        let tx = json!({
+            "hash": "0x1234",
+            "version": "1",
+            "success": true,
+            "vm_status": "Executed",
+            "epoch": "1",
+            "round": "1",
+            "gas_used": "1",
+            "cumulative_gas_used": "1",
+            "state_change_hash": hex32(2),
+            "event_root_hash": hex32(3),
+            "events": [],
+            "payload": {}
+        });
+
+        let err = AptosNode::parse_transaction(&tx).unwrap_err();
+        assert!(err.to_string().contains("hash"));
     }
 }

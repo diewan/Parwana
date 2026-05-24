@@ -212,23 +212,38 @@ impl TransferLease {
 impl RuntimeExecutionContext {
     /// Create a new execution context with policy.
     ///
-    /// # Panics
-    ///
-    /// Panics if the lease is not valid for the given runtime instance.
+    /// Ownership and expiry are validated by runtime entrypoints. Prefer
+    /// [`RuntimeExecutionContext::try_new`] when constructing contexts from
+    /// untrusted input.
     pub fn new(
         lease: TransferLease,
         runtime_instance: RuntimeId,
         policy: crate::policy::RuntimePolicy,
     ) -> Self {
-        assert!(
-            lease.is_owned_by(runtime_instance),
-            "lease not owned by runtime instance"
-        );
         Self {
             lease,
             runtime_instance,
             policy,
         }
+    }
+
+    /// Create a new execution context and reject stale lease ownership.
+    pub fn try_new(
+        lease: TransferLease,
+        runtime_instance: RuntimeId,
+        policy: crate::policy::RuntimePolicy,
+    ) -> Result<Self, LeaseValidationError> {
+        if lease.is_stale_for(runtime_instance) {
+            return Err(LeaseValidationError::Stale {
+                transfer_id: lease.transfer_id.clone(),
+                owner: lease.owner_runtime_id,
+            });
+        }
+        Ok(Self {
+            lease,
+            runtime_instance,
+            policy,
+        })
     }
 
     /// Validate the execution context against the current time.

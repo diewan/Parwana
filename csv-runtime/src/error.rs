@@ -117,6 +117,10 @@ pub enum TransferCoordinatorError {
     #[error("Runtime error: {0}")]
     RuntimeError(String),
 
+    /// Admission control rejected the transfer before state mutation
+    #[error("Admission rejected: {0}")]
+    AdmissionRejected(String),
+
     /// Invalid transaction hash bytes
     #[error("Invalid transaction hash: {0}")]
     InvalidTxHash(String),
@@ -160,6 +164,7 @@ impl TransferCoordinatorError {
             TransferCoordinatorError::NotFound => FailureDomain::Storage,
             TransferCoordinatorError::ReplayDbError(_) => FailureDomain::Storage,
             TransferCoordinatorError::RuntimeError(_) => FailureDomain::Consensus,
+            TransferCoordinatorError::AdmissionRejected(_) => FailureDomain::Congestion,
             TransferCoordinatorError::InvalidTxHash(_) => FailureDomain::Consensus,
             TransferCoordinatorError::FinalityFailed(_) => FailureDomain::Finality,
             TransferCoordinatorError::ProofBuildFailed(_) => FailureDomain::Verification,
@@ -168,6 +173,12 @@ impl TransferCoordinatorError {
             TransferCoordinatorError::AlreadyComplete => FailureDomain::Consensus,
             TransferCoordinatorError::AlreadyRolledBack => FailureDomain::Consensus,
         }
+    }
+}
+
+impl From<crate::admission::AdmissionError> for TransferCoordinatorError {
+    fn from(e: crate::admission::AdmissionError) -> Self {
+        TransferCoordinatorError::AdmissionRejected(e.to_string())
     }
 }
 

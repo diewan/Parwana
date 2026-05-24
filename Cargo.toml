@@ -21,6 +21,7 @@ members = [
     "csv-store",
     "csv-p2p",
     "csv-observability",
+    "csv-architecture",
     # Explorer sub-crates (optional local checkout)
     # "csv-explorer/shared",
     # "csv-explorer/storage",

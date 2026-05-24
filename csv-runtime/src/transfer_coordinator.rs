@@ -9,6 +9,7 @@
 #![allow(missing_docs)]
 
 use crate::adapter_registry::{AdapterRegistry, CrossChainTransfer};
+use crate::admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
 use crate::coordinator_lease::{CoordinatorId, CoordinatorLease};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
@@ -18,6 +19,7 @@ use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
 use crate::recovery::{CheckpointManager, TransferStage};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
+use csv_protocol::finality::CapabilityRequirements;
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use uuid::Uuid;
@@ -175,6 +177,8 @@ pub struct TransferCoordinator {
     verifier: std::sync::Arc<CanonicalVerifierImpl>,
     /// Execution journal for crash-safe phase tracking
     execution_journal: Box<dyn ExecutionJournal>,
+    /// Admission controller for bounded runtime work
+    admission_controller: AdmissionController,
 }
 
 impl TransferCoordinator {
@@ -209,6 +213,7 @@ impl TransferCoordinator {
             ),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal: Box::new(InMemoryJournal::new(10000)),
+            admission_controller: AdmissionController::default(),
         }
     }
 
@@ -251,7 +256,19 @@ impl TransferCoordinator {
             ),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal,
+            admission_controller: AdmissionController::default(),
         }
+    }
+
+    /// Override runtime admission limits.
+    pub fn with_admission_limits(mut self, limits: AdmissionLimits) -> Self {
+        self.admission_controller = AdmissionController::new(limits);
+        self
+    }
+
+    /// Return the current admission pressure snapshot.
+    pub fn admission_snapshot(&self) -> AdmissionSnapshot {
+        self.admission_controller.snapshot()
     }
 
     /// Get a reference to the circuit breaker
@@ -362,6 +379,10 @@ impl TransferCoordinator {
                 "Lease is expired".to_string(),
             ));
         }
+
+        let _admission_permit = self
+            .admission_controller
+            .acquire_transfer(&transfer.source_chain, &transfer.destination_chain)?;
 
         // Enforce runtime policy: check if RPC fallback is allowed
         if !runtime_ctx.policy.allow_rpc_fallback {
@@ -508,6 +529,15 @@ impl TransferCoordinator {
                 transfer.source_chain
             )));
         }
+        src_caps
+            .plan_for(&CapabilityRequirements::cross_chain_source())
+            .ensure_satisfied()
+            .map_err(|e| {
+                TransferCoordinatorError::UnsupportedOperation(format!(
+                    "{} source capability negotiation failed: {}",
+                    transfer.source_chain, e
+                ))
+            })?;
 
         // Step 3: Verify destination chain capabilities
         let dst_caps = adapter_registry
@@ -522,6 +552,15 @@ impl TransferCoordinator {
                 transfer.destination_chain
             )));
         }
+        dst_caps
+            .plan_for(&CapabilityRequirements::cross_chain_destination())
+            .ensure_satisfied()
+            .map_err(|e| {
+                TransferCoordinatorError::UnsupportedOperation(format!(
+                    "{} destination capability negotiation failed: {}",
+                    transfer.destination_chain, e
+                ))
+            })?;
 
         // Step 4: Lock on source chain with retry logic and circuit breaker
         // Record phase entry: Locking (Entered)

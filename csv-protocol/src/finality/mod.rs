@@ -22,7 +22,7 @@ pub mod state;
 
 // Re-exports
 pub use abstraction::{FinalityRequirement, FinalityType as AbstractionFinalityType};
-pub use capabilities::ChainCapabilities;
+pub use capabilities::{CapabilityPlan, CapabilityRequirements, ChainCapabilities};
 pub use chain_specific::{EthereumFinalityStage, SolanaCommitmentGrade};
 pub use monitor::FinalityMonitor;
 pub use policy::{ChainFinalityPolicy, FinalityThreshold};

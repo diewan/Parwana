@@ -68,7 +68,9 @@ pub use proofs::{
 #[cfg(test)]
 pub use rpc::MockAptosRpc;
 pub use rpc::{
-    AptosBlockInfo, AptosEvent, AptosLedgerInfo, AptosResource, AptosRpc, AptosTransaction,
+    AptosAccountReader, AptosBlockInfo, AptosCheckpointVerifier, AptosEvent, AptosEventReader,
+    AptosLedgerInfo, AptosLedgerReader, AptosModulePublisher, AptosResource, AptosRpc,
+    AptosSignerIdentity, AptosTransaction, AptosTransactionReader, AptosTransactionSubmitter,
 };
 pub use seal::{SealRecord, SealRegistry, SealStore};
 pub use types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, AptosSealPoint};

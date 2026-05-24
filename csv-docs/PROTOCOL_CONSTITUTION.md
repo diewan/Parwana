@@ -23,6 +23,7 @@ All protocol data that participates in cryptographic operations (hashing, signin
 **Rule:** Raw `serde_json` serialization is FORBIDDEN in any hashing path, proof encoding, or cryptographic context.
 
 **Approved functions:**
+
 - `to_canonical_cbor<T: Serialize>(value: &T) -> Result<Vec<u8>, ProtocolError>` — Serialize to canonical CBOR
 - `from_canonical_cbor<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ProtocolError>` — Deserialize from canonical CBOR
 - `canonical_hash<T: Serialize>(domain: &str, value: &T) -> Result<Hash, ProtocolError>` — Hash via canonical CBOR + tagged SHA-256
@@ -58,11 +59,13 @@ All protocol hashing MUST use BIP-340 style tagged SHA-256 via `csv_tagged_hash`
 **Rule:** Direct calls to `sha2::Sha256`, `sha3::Sha3`, `blake3`, `keccak256`, or any other hash function are FORBIDDEN in protocol code. All hashing MUST go through `csv_tagged_hash`.
 
 **Function signature:**
+
 ```rust
 pub fn csv_tagged_hash(name: &str, data: &[u8]) -> [u8; 32]
 ```
 
 **Implementation:**
+
 ```
 csv_tagged_hash(name, data) = SHA256( SHA256("csv." + name) || SHA256("csv." + name) || data )
 ```
@@ -172,6 +175,7 @@ csv-core/tests/golden/
 ```
 
 These fixtures are:
+
 - Generated from a known-good runtime build
 - Signed with a release key
 - Validated in CI via `csv-core/tests/golden/mod.rs`
@@ -232,6 +236,7 @@ P' = csv_tagged_hash("csv.stealth.addr.v1", R || scan_pk)
 ```
 
 Where:
+
 - `R` = sender's ephemeral public point
 - `scan_pk` = recipient's scan public key
 - `P'` = derived stealth address
@@ -262,6 +267,7 @@ impl ReplayId {
 ```
 
 The `ReplayId` is computed as:
+
 ```
 ReplayId = csv_tagged_hash("csv.replay-id.v1", canonical_cbor(ReplayIdInputs))
 ```
@@ -477,6 +483,7 @@ pub struct MpcProof {
 ### 11.2 Verification
 
 MPC proofs are verified by:
+
 1. Checking `participant_count >= threshold`
 2. Verifying `verification_hash = csv_tagged_hash("csv.mpc.proof", proof_data)`
 3. Checking the proof against the known MPC protocol specification

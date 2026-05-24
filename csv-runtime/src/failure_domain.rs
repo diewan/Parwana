@@ -25,12 +25,17 @@ pub enum FailureDomain {
     Consensus,
     /// Serialization/deserialization failure
     Serialization,
+    /// Runtime admission or congestion pressure
+    Congestion,
 }
 
 impl FailureDomain {
     /// Returns true if this failure domain is transient and may be retried
     pub fn is_transient(&self) -> bool {
-        matches!(self, FailureDomain::Rpc | FailureDomain::Storage)
+        matches!(
+            self,
+            FailureDomain::Rpc | FailureDomain::Storage | FailureDomain::Congestion
+        )
     }
 
     /// Returns true if this failure domain requires operator intervention
@@ -60,6 +65,7 @@ impl fmt::Display for FailureDomain {
             FailureDomain::Finality => write!(f, "Finality"),
             FailureDomain::Consensus => write!(f, "Consensus"),
             FailureDomain::Serialization => write!(f, "Serialization"),
+            FailureDomain::Congestion => write!(f, "Congestion"),
         }
     }
 }

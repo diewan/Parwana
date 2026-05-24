@@ -77,7 +77,7 @@ impl CheckpointVerifier {
         // Check timeout
         let start = std::time::Instant::now();
 
-        let block = {
+        let result = {
             let rpc = rpc.clone_boxed();
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -85,38 +85,33 @@ impl CheckpointVerifier {
                 .map_err(|e| {
                     AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
                 })?;
-            rt.block_on(async { rpc.get_block_by_version(version).await })
+            rt.block_on(async {
+                let block = rpc.get_block_by_version(version).await?;
+                let is_certified = if self.config.require_certified {
+                    required_signatures > 0 && rpc.verify_checkpoint(version).await?
+                } else {
+                    block.is_some()
+                };
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>((block, is_certified))
+            })
         };
 
-        let block = block.map_err(|e| {
+        let (block, is_certified) = result.map_err(|e| {
             if start.elapsed().as_millis() > self.config.timeout_ms as u128 {
                 AptosError::timeout(&format!("version_{}", version), self.config.timeout_ms)
             } else {
-                AptosError::CheckpointFailed(format!("Failed to get block: {}", e))
+                AptosError::CheckpointFailed(format!("Failed to verify checkpoint: {}", e))
             }
         })?;
 
         match block {
-            Some(block) => {
-                // In production: verify block header signatures
-                // The block should have 2f+1 validator signatures
-                let is_certified = if self.config.require_certified {
-                    // Check if the round indicates certification
-                    // Aptos blocks are certified when they have 2f+1 signatures
-                    required_signatures > 0 && block.round > 0
-                } else {
-                    // Just check block exists
-                    true
-                };
-
-                Ok(CheckpointInfo {
-                    version,
-                    epoch: block.epoch,
-                    round: block.round,
-                    signatures_count: required_signatures,
-                    is_certified,
-                })
-            }
+            Some(block) => Ok(CheckpointInfo {
+                version,
+                epoch: block.epoch,
+                round: block.round,
+                signatures_count: if is_certified { required_signatures } else { 0 },
+                is_certified,
+            }),
             None => Err(AptosError::CheckpointFailed(format!(
                 "Block containing version {} not found",
                 version
@@ -144,14 +139,15 @@ impl CheckpointVerifier {
 
         match block {
             Some(block) => {
-                // In production: verify block header signatures
-                // The block should have 2f+1 validator signatures
                 let is_certified = if self.config.require_certified {
-                    // Check if the round indicates certification
-                    // Aptos blocks are certified when they have 2f+1 signatures
-                    required_signatures > 0 && block.round > 0
+                    required_signatures > 0
+                        && rpc.verify_checkpoint(version).await.map_err(|e| {
+                            AptosError::CheckpointFailed(format!(
+                                "Failed to verify checkpoint: {}",
+                                e
+                            ))
+                        })?
                 } else {
-                    // Just check block exists
                     true
                 };
 
@@ -159,7 +155,7 @@ impl CheckpointVerifier {
                     version,
                     epoch: block.epoch,
                     round: block.round,
-                    signatures_count: required_signatures,
+                    signatures_count: if is_certified { required_signatures } else { 0 },
                     is_certified,
                 })
             }

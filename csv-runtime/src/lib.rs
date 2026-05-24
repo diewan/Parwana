@@ -23,6 +23,7 @@
 #![warn(missing_docs)]
 
 pub mod adapter_registry;
+pub mod admission;
 pub mod config;
 pub mod coordinator_lease;
 pub mod error;
@@ -40,7 +41,13 @@ pub mod runtime_mode;
 pub mod transfer_coordinator;
 
 // Re-exports (orchestration only)
-pub use adapter_registry::{AdapterRegistryImpl, ChainAdapter};
+pub use adapter_registry::{
+    AdapterRegistryImpl, ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,
+    ChainProofPort, ChainReadPort, ChainSealRegistryPort,
+};
+pub use admission::{
+    AdmissionController, AdmissionError, AdmissionLimits, AdmissionPermit, AdmissionSnapshot,
+};
 pub use config::{
     CircuitBreakerConfig, ConfigValidationError, LeaseConfig, OperationalConfig, RetryConfig,
     RpcConfig, TimeoutConfig,
