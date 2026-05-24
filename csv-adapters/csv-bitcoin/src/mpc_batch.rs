@@ -27,7 +27,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use csv_protocol::commit_mux::{CommitMux, MuxLeaf, MuxProof};
+use csv_hash::commit_mux::{CommitMux, MuxLeaf, MuxProof};
 use csv_hash::Hash;
 
 use crate::error::{BitcoinError, BitcoinResult};
@@ -238,14 +238,14 @@ pub trait MpcTreeExt {
     fn merkle_branch(
         &self,
         leaf_index: usize,
-    ) -> Option<Vec<csv_protocol::commit_mux::MerkleBranchNode>>;
+    ) -> Option<Vec<csv_hash::commit_mux::MerkleBranchNode>>;
 }
 
 impl MpcTreeExt for CommitMux {
     fn merkle_branch(
         &self,
         leaf_index: usize,
-    ) -> Option<Vec<csv_protocol::commit_mux::MerkleBranchNode>> {
+    ) -> Option<Vec<csv_hash::commit_mux::MerkleBranchNode>> {
         if leaf_index >= self.leaves.len() {
             return None;
         }
@@ -274,13 +274,13 @@ impl MpcTreeExt for CommitMux {
                     let pair_start_index = next_level.len() * 2;
                     if current_index == pair_start_index {
                         // Target is left, sibling is sanad
-                        branch.push(csv_protocol::commit_mux::MerkleBranchNode {
+                        branch.push(csv_hash::commit_mux::MerkleBranchNode {
                             hash: sanad,
                             is_left: false,
                         });
                     } else if current_index == pair_start_index + 1 {
                         // Target is sanad, sibling is left
-                        branch.push(csv_protocol::commit_mux::MerkleBranchNode {
+                        branch.push(csv_hash::commit_mux::MerkleBranchNode {
                             hash: left,
                             is_left: true,
                         });

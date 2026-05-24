@@ -2816,39 +2816,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "csv-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bincode",
- "bloomfilter",
- "chrono",
- "ciborium",
- "csv-codec",
- "csv-content",
- "csv-contract-bindings",
- "csv-hash",
- "csv-observability",
- "csv-proof",
- "csv-protocol",
- "ed25519-dalek",
- "hex",
- "lazy_static",
- "log",
- "proptest",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sha2",
- "sha3 0.10.9",
- "spin",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "csv-ethereum"
 version = "0.1.0"
 dependencies = [
@@ -2866,6 +2833,8 @@ dependencies = [
  "ark-serialize 0.4.2",
  "ark-snark",
  "async-trait",
+ "base64 0.22.1",
+ "csv-codec",
  "csv-hash",
  "csv-proof",
  "csv-protocol",
@@ -2996,6 +2965,7 @@ dependencies = [
  "csv-proof",
  "ed25519-dalek",
  "hex",
+ "lazy_static",
  "log",
  "pqcrypto-dilithium",
  "pqcrypto-traits",
@@ -3095,6 +3065,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "bs58",
+ "csv-codec",
  "csv-hash",
  "csv-proof",
  "csv-protocol",
@@ -4306,9 +4277,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "hex-conservative"

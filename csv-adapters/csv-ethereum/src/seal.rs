@@ -1,22 +1,15 @@
 #![allow(dead_code)]
 //! Ethereum seal management
 //!
-//! Provides persistent tracking of used storage slot seals to prevent replay.
-//! Seals are persisted in SQLite when a SqliteSealStore is attached.
+//! Provides in-memory tracking of used storage slot seals to prevent replay.
 
 use crate::error::{EthereumError, EthereumResult};
 use crate::types::EthereumSealPoint;
-#[cfg(feature = "rpc")]
-use csv_protocol::Hash;
-#[cfg(feature = "rpc")]
-use csv_protocol::SealStore;
-use csv_protocol::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
-#[cfg(feature = "rpc")]
-use csv_store::SqliteSealStore;
+use csv_protocol::invariants::BoundedQueue;
 use std::collections::HashSet;
-#[cfg(feature = "rpc")]
-use std::sync::Arc;
 use std::sync::Mutex;
+
+const MAX_SEAL_NULLIFIER_SIZE: usize = 1024;
 
 fn lock_poisoned() -> EthereumError {
     EthereumError::SlotUsed("Lock poisoned".to_string())
@@ -24,16 +17,12 @@ fn lock_poisoned() -> EthereumError {
 
 /// Registry for tracking used storage slot seals (prevents replay)
 ///
-/// Maintains an in-memory cache for fast lookups with optional
-/// SQLite backing for persistence across restarts.
+/// Maintains an in-memory cache for fast lookups.
 pub struct SealRegistry {
     /// Set of used seal identifiers (contract_address + slot_index)
     used_seals: Mutex<HashSet<Vec<u8>>>,
     /// Bounded queue for rate limiting
     seal_queue: Mutex<BoundedQueue<Vec<u8>>>,
-    /// Optional persistent store
-    #[cfg(feature = "rpc")]
-    store: Option<Arc<Mutex<SqliteSealStore>>>,
     /// Maximum size of the registry
     max_size: usize,
 }
@@ -49,20 +38,7 @@ impl SealRegistry {
         Self {
             used_seals: Mutex::new(HashSet::new()),
             seal_queue: Mutex::new(BoundedQueue::new(max_size)),
-            #[cfg(feature = "rpc")]
-            store: None,
             max_size,
-        }
-    }
-
-    /// Create a new seal registry with SQLite persistence
-    #[cfg(feature = "rpc")]
-    pub fn new_with_store(store: SqliteSealStore) -> Self {
-        Self {
-            used_seals: Mutex::new(HashSet::new()),
-            seal_queue: Mutex::new(BoundedQueue::new(MAX_SEAL_NULLIFIER_SIZE)),
-            store: Some(Arc::new(Mutex::new(store))),
-            max_size: MAX_SEAL_NULLIFIER_SIZE,
         }
     }
 
@@ -72,24 +48,6 @@ impl SealRegistry {
         key.extend_from_slice(&seal.contract_address);
         key.extend_from_slice(&seal.slot_index.to_le_bytes());
         key
-    }
-
-    /// Load existing seals from store into cache
-    #[cfg(feature = "rpc")]
-    pub fn load_cache(&self) -> EthereumResult<()> {
-        if let Some(store) = &self.store {
-            let store = store.lock().map_err(|_| lock_poisoned())?;
-            let seals = store
-                .get_seals("ethereum")
-                .map_err(|e| EthereumError::SlotUsed(format!("Failed to load seals: {}", e)))?;
-            drop(store);
-
-            let mut cache = self.used_seals.lock().map_err(|_| lock_poisoned())?;
-            for seal in seals {
-                cache.insert(seal.seal_id);
-            }
-        }
-        Ok(())
     }
 
     /// Check if a seal has been used
@@ -130,45 +88,14 @@ impl SealRegistry {
             queue.push(key);
         }
 
-        #[cfg(feature = "rpc")]
-        if let Some(store) = &self.store {
-            let seal_id = self.build_seal_id_bytes(seal);
-            let commitment_hash = Hash::new(seal.seal_id);
-            let record = csv_protocol::SealRecord {
-                chain: "ethereum".to_string(),
-                seal_id,
-                consumed_at_height: seal.slot_index,
-                commitment_hash,
-                recorded_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            };
-
-            let mut guard = store.lock().map_err(|_| lock_poisoned())?;
-            guard
-                .save_seal(&record)
-                .map_err(|e| EthereumError::SlotUsed(format!("Failed to persist seal: {}", e)))?;
-        }
-
         Ok(())
     }
 
     /// Clear a seal from the registry (for reorg rollback)
     pub fn clear_seal(&self, seal: &EthereumSealPoint) {
-        {
-            let mut cache = self.used_seals.lock().unwrap_or_else(|e| e.into_inner());
-            let key = Self::seal_key(seal);
-            cache.remove(&key);
-        }
-
-        #[cfg(feature = "rpc")]
-        if let Some(store) = &self.store {
-            let seal_id = self.build_seal_id_bytes(seal);
-            if let Ok(mut guard) = store.lock() {
-                let _ = guard.remove_seal("ethereum", &seal_id);
-            }
-        }
+        let mut cache = self.used_seals.lock().unwrap_or_else(|e| e.into_inner());
+        let key = Self::seal_key(seal);
+        cache.remove(&key);
     }
 
     /// Get all used seals
@@ -189,13 +116,6 @@ impl SealRegistry {
                 }
             })
             .collect()
-    }
-
-    fn build_seal_id_bytes(&self, seal: &EthereumSealPoint) -> Vec<u8> {
-        let mut id = Vec::with_capacity(28);
-        id.extend_from_slice(&seal.contract_address);
-        id.extend_from_slice(&seal.slot_index.to_le_bytes());
-        id
     }
 
     /// Get the current number of used seals

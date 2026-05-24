@@ -203,7 +203,7 @@ pub mod real_rpc {
         pub fn publish_commitment(
             &self,
             _outpoint: OutPoint,
-            _commitment: csv_core::Hash,
+            _commitment: csv_hash::Hash,
         ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             // This method requires adapter-level integration with tx_builder and wallet.
             // The full flow is demonstrated in the signet_real_tx_demo example

@@ -4,7 +4,6 @@
 //! must pass to ensure consistent behavior across different backends.
 
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
-use csv_hash::SanadId;
 use csv_storage::{InMemoryReplayDb, ReplayDatabase, ReplayDbError};
 use csv_proof::proof::ReplayId;
 
@@ -78,12 +77,22 @@ async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
     assert!(result.is_err());
 
     // Test 11: store_transfer_entry and load_all_transfers
-    let sanad_id = SanadId::new([1u8; 32]);
+    let sanad_id = csv_hash::Hash::new([1u8; 32]);
     let entry = CrossChainRegistryEntry {
-        sanad_id: sanad_id.clone(),
-        chain_id: "test-chain".to_string(),
-        block_height: 100,
-        tx_hash: vec![1, 2, 3, 4],
+        sanad_id,
+        source_chain: csv_hash::chain_id::ChainId::new("bitcoin"),
+        source_seal: csv_hash::seal::SealPoint {
+            id: vec![1, 2, 3, 4],
+            nonce: None,
+        },
+        destination_chain: csv_hash::chain_id::ChainId::new("ethereum"),
+        destination_seal: csv_hash::seal::SealPoint {
+            id: vec![],
+            nonce: None,
+        },
+        lock_tx_hash: csv_hash::Hash::new([2u8; 32]),
+        mint_tx_hash: csv_hash::Hash::new([3u8; 32]),
+        timestamp: 1234567890,
     };
     db.store_transfer_entry(&entry).await.unwrap();
 

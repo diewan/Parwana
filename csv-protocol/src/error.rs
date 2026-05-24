@@ -68,10 +68,31 @@ pub enum ProtocolError {
     /// Generic error with message
     #[error("{0}")]
     Generic(String),
+
+    /// Unsupported protocol version
+    #[error("Unsupported protocol version: found {found}, max supported {max_supported}")]
+    UnsupportedVersion {
+        found: u16,
+        max_supported: u16,
+    },
+
+    /// Malformed envelope
+    #[error("Malformed envelope")]
+    MalformedEnvelope,
+
+    /// Reorg invalid
+    #[error("Reorg invalid: {0}")]
+    ReorgInvalid(String),
 }
 
 impl From<csv_codec::CodecError> for ProtocolError {
     fn from(err: csv_codec::CodecError) -> Self {
+        ProtocolError::CodecError(err.to_string())
+    }
+}
+
+impl From<csv_hash::canonical::CanonicalError> for ProtocolError {
+    fn from(err: csv_hash::canonical::CanonicalError) -> Self {
         ProtocolError::CodecError(err.to_string())
     }
 }

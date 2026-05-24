@@ -23,12 +23,14 @@ csv-protocol = { path = "../../csv-protocol" }
 csv-hash = { path = "../../csv-hash" }
 csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
+csv-codec = { path = "../../csv-codec" }
 csv-store = { path = "../../csv-store", optional = true }
 async-trait.workspace = true
 rand = "0.8"
 serde = { workspace = true, features = ["derive"] }
 thiserror = "1.0"
 hex = "0.4.3"
+base64 = "0.22"
 sha2 = "0.10"
 sha3 = "0.10"
 tiny-keccak = { version = "2.0", features = ["keccak"] }

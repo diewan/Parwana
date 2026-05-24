@@ -363,7 +363,7 @@ impl BitcoinSealProtocol {
     }
 
     /// Verify a UTXO is unspent
-    fn verify_utxo_unspent(&self, seal: &BitcoinSealPoint) -> BitcoinResult<()> {
+    fn verify_utxo_unspent(&self, seal: &BitcoinSealPoint) -> BitcoinResult<(), Box<dyn std::error::Error>> {
         if let Some(rpc) = &self.rpc {
             let unspent = rpc
                 .is_utxo_unspent(seal.txid, seal.vout)
@@ -455,7 +455,7 @@ impl SealProtocol for BitcoinSealProtocol {
     type InclusionProof = BitcoinInclusionProof;
     type FinalityProof = BitcoinFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> CoreResult<Self::CommitAnchor> {
+    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
         self.verify_utxo_unspent(&seal)
             .map_err(ProtocolError::from)?;
 
@@ -519,7 +519,7 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(BitcoinCommitAnchor::new(txid, 0, current_height))
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> CoreResult<Self::InclusionProof> {
+    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<_, Box<dyn std::error::Error>>Self::InclusionProof> {
         // If we have an RPC client, fetch real Merkle proof from the blockchain
         if let Some(rpc) = &self.rpc {
             // Get the block containing the anchor transaction
@@ -543,7 +543,7 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(proof)
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> CoreResult<Self::FinalityProof> {
+    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<_, Box<dyn std::error::Error>>Self::FinalityProof> {
         let current_height = self.get_current_height();
 
         if anchor.block_height == 0 {
@@ -565,7 +565,7 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(proof)
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> CoreResult<()> {
+    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<_, Box<dyn std::error::Error>>()> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a UTXO cannot be spent more than once
         // by checking both local registry and on-chain UTXO set
@@ -612,7 +612,7 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, value: Option<u64>) -> CoreResult<Self::SealPoint> {
+    fn create_seal(&self, value: Option<u64>) -> Result<_, Box<dyn std::error::Error>>Self::SealPoint> {
         let value_sat = value.unwrap_or(100_000);
         let (seal_ref, _path) = self.derive_next_seal(value_sat)?;
         Ok(seal_ref)
@@ -641,7 +641,7 @@ impl SealProtocol for BitcoinSealProtocol {
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: DAGSegment,
-    ) -> CoreResult<ProofBundle> {
+    ) -> Result<_, Box<dyn std::error::Error>>ProofBundle> {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
 
@@ -655,7 +655,7 @@ impl SealProtocol for BitcoinSealProtocol {
         proof_bytes.extend_from_slice(&inclusion.block_hash);
         proof_bytes.extend_from_slice(&inclusion.tx_index.to_le_bytes());
 
-        let inclusion_proof = csv_core::InclusionProof::new(
+        let inclusion_proof = csv_proof::proof::InclusionProof::new(
             proof_bytes,
             Hash::new(inclusion.block_hash),
             inclusion.tx_index as u64,
@@ -681,7 +681,7 @@ impl SealProtocol for BitcoinSealProtocol {
         .map_err(|e| ProtocolError::Generic(e.to_string()))
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> CoreResult<()> {
+    fn rollback(&self, anchor: Self::CommitAnchor) -> Result<_, Box<dyn std::error::Error>>()> {
         let current_height = self.get_current_height();
         if anchor.block_height > current_height {
             return Err(ProtocolError::ReorgInvalid(format!(
@@ -708,8 +708,8 @@ impl SealProtocol for BitcoinSealProtocol {
         self.domain_separator
     }
 
-    fn signature_scheme(&self) -> csv_core::SignatureScheme {
-        csv_core::SignatureScheme::Secp256k1
+    fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+        csv_protocol::signature::SignatureScheme::Secp256k1
     }
 }
 

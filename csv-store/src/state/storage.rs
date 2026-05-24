@@ -101,7 +101,7 @@ impl StateStorage {
     pub fn with_defaults(mut self) -> Self {
         self.chains = Self::default_chains();
         self.faucets = Self::default_faucets();
-        self.selected_chain = Some(csv_core::builtin::BITCOIN.clone());
+        self.selected_chain = Some(ChainId::new("bitcoin"));
         self.selected_network = Some(Network::Test);
         self
     }
@@ -111,11 +111,11 @@ impl StateStorage {
         let mut chains = HashMap::new();
 
         for chain in [
-            csv_core::builtin::BITCOIN.clone(),
-            csv_core::builtin::ETHEREUM.clone(),
-            csv_core::builtin::SUI.clone(),
-            csv_core::builtin::APTOS.clone(),
-            csv_core::builtin::SOLANA.clone(),
+            ChainId::new("bitcoin"),
+            ChainId::new("ethereum"),
+            ChainId::new("sui"),
+            ChainId::new("aptos"),
+            ChainId::new("solana"),
         ] {
             chains.insert(
                 chain.clone(),
@@ -131,11 +131,11 @@ impl StateStorage {
         let mut faucets = HashMap::new();
 
         for chain in [
-            csv_core::builtin::BITCOIN.clone(),
-            csv_core::builtin::ETHEREUM.clone(),
-            csv_core::builtin::SUI.clone(),
-            csv_core::builtin::APTOS.clone(),
-            csv_core::builtin::SOLANA.clone(),
+            ChainId::new("bitcoin"),
+            ChainId::new("ethereum"),
+            ChainId::new("sui"),
+            ChainId::new("aptos"),
+            ChainId::new("solana"),
         ] {
             if let Some(config) = FaucetConfig::default_for(&chain, &Network::Test) {
                 faucets.insert(chain, config);

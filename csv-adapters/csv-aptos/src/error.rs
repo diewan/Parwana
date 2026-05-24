@@ -8,8 +8,8 @@ use thiserror::Error;
 // Local implementations (mcp module removed during migration)
 #[derive(Debug, Clone)]
 pub enum FixAction {
-    Retry { backoff_secs: u64 },
-    CheckState { check: String },
+    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
+    CheckState { check: String, url: String, what: String },
     SwitchEndpoint { endpoint: String },
 }
 
@@ -27,6 +27,7 @@ mod error_codes {
     pub const APTOS_RESOURCE_USED: u32 = 2003;
     pub const APTOS_TRANSACTION_FAILED: u32 = 2004;
     pub const APTOS_RPC_ERROR: u32 = 2005;
+    pub const APTOS_CHECKPOINT_FAILED: u32 = 2006;
 
     pub fn docs_url(code: u32) -> String {
         format!("https://docs.csv-protocol.io/errors/{}", code)
@@ -132,20 +133,20 @@ impl AptosError {
 }
 
 impl HasErrorSuggestion for AptosError {
-    fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> u32 {
         match self {
-            AptosError::RpcError(_) => error_codes::APT_RPC_ERROR,
-            AptosError::ResourceUsed(_) => error_codes::APT_RESOURCE_USED,
-            AptosError::StateProofFailed(_) => error_codes::APT_STATE_PROOF_FAILED,
-            AptosError::EventProofFailed(_) => error_codes::APT_EVENT_PROOF_FAILED,
-            AptosError::CheckpointFailed(_) => error_codes::APT_CHECKPOINT_FAILED,
-            AptosError::TransactionFailed(_) => error_codes::APT_TRANSACTION_FAILED,
-            AptosError::SerializationError(_) => error_codes::APT_SERIALIZATION_ERROR,
-            AptosError::ConfirmationTimeout { .. } => error_codes::APT_CONFIRMATION_TIMEOUT,
-            AptosError::ReorgDetected { .. } => error_codes::APT_REORG_DETECTED,
-            AptosError::NetworkMismatch { .. } => error_codes::APT_NETWORK_MISMATCH,
-            AptosError::FeatureNotEnabled(_) => "APT_FEATURE_NOT_ENABLED",
-            AptosError::CoreError(e) => e.error_code(),
+            AptosError::RpcError(_) => error_codes::APTOS_RPC_ERROR,
+            AptosError::ResourceUsed(_) => error_codes::APTOS_RESOURCE_USED,
+            AptosError::StateProofFailed(_) => error_codes::APTOS_STATE_PROOF_FAILED,
+            AptosError::EventProofFailed(_) => error_codes::APTOS_EVENT_PROOF_FAILED,
+            AptosError::CheckpointFailed(_) => error_codes::APTOS_CHECKPOINT_FAILED,
+            AptosError::TransactionFailed(_) => error_codes::APTOS_TRANSACTION_FAILED,
+            AptosError::SerializationError(_) => 2007,
+            AptosError::ConfirmationTimeout { .. } => 2008,
+            AptosError::ReorgDetected { .. } => 2009,
+            AptosError::NetworkMismatch { .. } => 2010,
+            AptosError::FeatureNotEnabled(_) => 2011,
+            AptosError::CoreError(_) => 1,
         }
     }
 
@@ -238,55 +239,45 @@ impl HasErrorSuggestion for AptosError {
                     feature, feature
                 )
             }
-            AptosError::CoreError(e) => e.suggested_fix(),
+            AptosError::CoreError(e) => format!("Core error: {}", e),
         }
     }
 
     fn docs_url(&self) -> String {
-        match self {
-            AptosError::CoreError(e) => e.docs_url(),
-            _ => error_codes::docs_url(self.error_code()),
-        }
+        error_codes::docs_url(self.error_code())
     }
 
     fn fix_action(&self) -> Option<FixAction> {
         match self {
             AptosError::RpcError(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
-                    "rpc_endpoint".to_string(),
-                    "https://fullnode.mainnet.aptoslabs.com".to_string(),
-                )]),
+                backoff_secs: 5,
+                parameter_changes: vec!["rpc_endpoint".to_string()],
             }),
             AptosError::ConfirmationTimeout { .. } => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
-                    "wait_seconds".to_string(),
-                    "30".to_string(),
-                )]),
+                backoff_secs: 30,
+                parameter_changes: vec!["wait_seconds".to_string()],
             }),
             AptosError::TransactionFailed(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([
-                    ("check_gas".to_string(), "true".to_string()),
-                    ("dry_run_first".to_string(), "true".to_string()),
-                    ("update_sequence".to_string(), "true".to_string()),
-                ]),
+                backoff_secs: 10,
+                parameter_changes: vec!["check_gas".to_string(), "dry_run_first".to_string()],
             }),
             AptosError::ReorgDetected { .. } => Some(FixAction::CheckState {
+                check: "chain state".to_string(),
                 url: "https://explorer.aptoslabs.com".to_string(),
                 what: "Check current Aptos ledger version".to_string(),
             }),
             AptosError::StateProofFailed(_) | AptosError::EventProofFailed(_) => {
                 Some(FixAction::Retry {
-                    parameter_changes: std::collections::HashMap::from([(
-                        "rpc_endpoint".to_string(),
-                        "try_alternative".to_string(),
-                    )]),
+                    backoff_secs: 5,
+                    parameter_changes: vec!["rpc_endpoint".to_string()],
                 })
             }
             AptosError::FeatureNotEnabled(_) => Some(FixAction::CheckState {
+                check: "feature flags".to_string(),
                 url: "https://github.com/Diewan/csv-adapter".to_string(),
                 what: "Enable required feature in Cargo.toml".to_string(),
             }),
-            AptosError::CoreError(e) => e.fix_action(),
+            AptosError::CoreError(_) => None,
             _ => None,
         }
     }

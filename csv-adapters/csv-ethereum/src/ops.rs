@@ -17,10 +17,10 @@ use csv_protocol::backend::{
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
 
-use csv_protocol::SealProtocol;
+use csv_protocol::seal_protocol::SealProtocol;
 #[cfg(feature = "rpc")]
 use csv_protocol::backend::SanadOperation;
-use csv_protocol::Hash;
+use csv_hash::Hash;
 use csv_protocol::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};

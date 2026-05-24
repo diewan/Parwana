@@ -19,13 +19,13 @@
 //! - Verifiable: Anyone can verify without trusting Bitcoin RPC
 
 use bitcoin::hashes::Hash as BitcoinHash;
-use csv_protocol::protocol_version::builtin;
+
 use csv_hash::seal::SealPoint;
 #[cfg(test)]
 use csv_hash::Hash;
 #[cfg(test)]
-use csv_proof::zk_proof::{VerifierKey, ZkPublicInputs};
-use csv_proof::zk_proof::{
+
+
     ChainWitness, ProofSystem, ZkError, ZkProver, ZkSealProof,
 };
 

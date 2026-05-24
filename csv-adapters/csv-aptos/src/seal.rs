@@ -29,15 +29,13 @@ impl<T> BoundedQueue<T> {
 
     pub fn push(&mut self, item: T) -> Option<T> {
         if self.items.len() >= self.capacity {
-            self.items.remove(0)
+            let removed = self.items.remove(0);
+            self.items.push(item);
+            Some(removed)
         } else {
-            None
-        }
-        .and_then(|_| {
             self.items.push(item);
             None
-        });
-        None
+        }
     }
 
     pub fn len(&self) -> usize {

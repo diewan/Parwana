@@ -5,7 +5,7 @@
 //! gas estimation, fee calculation, and RPC broadcasting per audit requirements.
 
 use crate::error::EthereumError;
-use crate::rpc::EthereumRpcClient;
+
 use csv_hash::Hash;
 use ethers::{
     abi::AbiEncode,
@@ -58,7 +58,7 @@ pub async fn mint_sanad(
         .map_err(|e| EthereumError::InvalidInput(format!("Invalid private key: {}", e)))?;
     
     // Create RPC client
-    let provider = Provider::<Http>::try_from(rpc_url)
+    let provider: Provider<Http> = Provider::<Http>::try_from(rpc_url)
         .map_err(|e| EthereumError::RpcError(format!("Failed to create RPC client: {}", e)))?;
     
     // Get current nonce
@@ -68,7 +68,7 @@ pub async fn mint_sanad(
         .map_err(|e| EthereumError::RpcError(format!("Failed to get nonce: {}", e)))?;
     
     // Get current gas price
-    let gas_price = provider
+    let gas_price: U256 = provider
         .get_gas_price()
         .await
         .map_err(|e| EthereumError::RpcError(format!("Failed to get gas price: {}", e)))?;
@@ -83,13 +83,13 @@ pub async fn mint_sanad(
         &commitment,
         &commitment, // state_root (same as commitment for now)
         source_chain,
-        &source_seal_ref.as_ref().to_vec(),
+        source_seal_ref.as_ref(),
         H256::zero(), // proof_root (zero for now)
         U256::zero(), // leaf_position (zero for now)
     );
     
     // Build transaction
-    let tx = Eip1559TransactionRequest::new()
+    let tx = ethers::types::transaction::eip2718::Eip1559TransactionRequest::new()
         .to(contract_addr)
         .data(call_data)
         .from(wallet.address())
@@ -98,7 +98,7 @@ pub async fn mint_sanad(
         .gas(U64::from(DEFAULT_GAS_LIMIT));
     
     // Estimate gas
-    let estimated_gas = provider
+    let estimated_gas: U256 = provider
         .estimate_gas(&tx.clone().into(), None)
         .await
         .map_err(|e| EthereumError::RpcError(format!("Gas estimation failed: {}", e)))?;
@@ -120,7 +120,7 @@ pub async fn mint_sanad(
         .map_err(|e| EthereumError::TransactionError(format!("Failed to RLP encode transaction: {}", e)))?;
     
     // Broadcast transaction
-    let tx_hash = provider
+    let tx_hash: H256 = provider
         .send_raw_transaction(&raw_tx)
         .await
         .map_err(|e| EthereumError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;

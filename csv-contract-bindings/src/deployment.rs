@@ -221,24 +221,31 @@ impl Create2Deployer {
 /// Deployment errors.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum DeploymentError {
+    /// Contract already deployed at this address
     #[error("Contract already deployed at this address")]
     AlreadyDeployed,
 
+    /// Serialization error
     #[error("Serialization error: {0}")]
     SerializationError(String),
 
+    /// Deserialization error
     #[error("Deserialization error: {0}")]
     DeserializationError(String),
 
+    /// Invalid bytecode
     #[error("Invalid bytecode")]
     InvalidBytecode,
 
+    /// Invalid constructor parameters
     #[error("Invalid constructor parameters")]
     InvalidConstructorParams,
 
+    /// Deployment failed
     #[error("Deployment failed: {0}")]
     DeploymentFailed(String),
 
+    /// Checksum mismatch
     #[error("Checksum mismatch")]
     ChecksumMismatch,
 }

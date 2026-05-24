@@ -3,12 +3,12 @@
 use crate::error::{BitcoinError, BitcoinResult};
 use crate::types::BitcoinSealPoint;
 use crate::wallet::Bip86Path;
-use csv_protocol::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
+
 
 #[cfg(feature = "rpc")]
-use csv_protocol::store::SanadStore;
+
 #[cfg(feature = "rpc")]
-use csv_store::SqliteSealStore;
+
 
 /// Registry for tracking used seals (prevents replay)
 pub struct SealRegistry {
@@ -94,11 +94,11 @@ impl SealRegistry {
 
         // Then persist if storage is configured
         if let Some(ref mut storage) = self.storage {
-            let record = csv_core::SealRecord {
+            let record = csv_store::state::SealRecord {
                 chain: "bitcoin".to_string(),
                 seal_id: seal.to_vec(),
                 consumed_at_height: height,
-                commitment_hash: csv_core::Hash::new([0u8; 32]), // Placeholder
+                commitment_hash: csv_hash::Hash::new([0u8; 32]), // Placeholder
                 recorded_at: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()

@@ -6,9 +6,9 @@
 
 use bitcoin::hashes::{Hash as BitcoinHash, sha256d};
 use csv_hash::Hash;
-use csv_protocol::protocol_version::builtin;
+
 use csv_hash::seal::SealPoint;
-use csv_proof::zk_proof::{ProofSystem, VerifierKey, ZkPublicInputs, ZkSealProof};
+
 
 /// Input to the SP1 Bitcoin SPV guest program
 #[derive(Debug, Clone, PartialEq, Eq)]

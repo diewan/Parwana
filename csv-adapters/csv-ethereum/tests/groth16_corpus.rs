@@ -5,7 +5,7 @@
 //! feature is enabled.
 
 #[cfg(feature = "real-groth16")]
-use csv_core::Hash;
+use csv_hash::Hash;
 #[cfg(feature = "real-groth16")]
 use csv_core::protocol_version::builtin;
 #[cfg(feature = "real-groth16")]

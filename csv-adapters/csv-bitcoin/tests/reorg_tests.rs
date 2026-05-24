@@ -4,7 +4,7 @@
 //! at various depths. A reorg is when the longest chain rule causes the protocol to
 //! abandon previously confirmed blocks.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Simulates a 1-block reorg: the proof was built on a block that got reorganized out.
 #[test]

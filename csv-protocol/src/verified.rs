@@ -133,4 +133,34 @@ impl VerificationResult {
             error: Some(error),
         }
     }
+
+    /// Check each component against the per-chain minimums declared in
+    /// ChainCapabilities. This is the production mint authorization gate.
+    /// Do NOT replace this with a scalar enum comparison.
+    pub fn meets_chain_thresholds(
+        &self,
+        caps: &crate::finality::capabilities::ChainCapabilities,
+    ) -> Result<(), VerificationFailure> {
+        if !self.valid {
+            return Err(self.error.clone().unwrap_or(
+                VerificationFailure::InvalidMerklePath
+            ));
+        }
+        // Check inclusion independently of finality
+        if !caps.inclusion_threshold_met(&self.verified_components.inclusion) {
+            return Err(VerificationFailure::InvalidMerklePath);
+        }
+        // Check finality independently of inclusion
+        if !caps.finality_threshold_met(&self.verified_components.finality) {
+            return Err(VerificationFailure::FinalityNotReached {
+                required: caps.finality_depth,
+                actual: match self.verified_components.finality {
+                    FinalityStrength::Probabilistic { confirmations } => confirmations,
+                    FinalityStrength::Deterministic => caps.finality_depth,
+                    FinalityStrength::None => 0,
+                },
+            });
+        }
+        Ok(())
+    }
 }

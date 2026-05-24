@@ -751,19 +751,17 @@ impl EventIndexerRegistry {
 
 /// Structured JSON event formatter
 pub struct JsonEventFormatter {
-    /// Pretty print JSON output
-    pretty: bool,
 }
 
 impl JsonEventFormatter {
     /// Create a new JSON formatter
     pub fn new() -> Self {
-        Self { pretty: false }
+        Self { }
     }
 
     /// Create a new JSON formatter with pretty printing
     pub fn pretty() -> Self {
-        Self { pretty: true }
+        Self { }
     }
 
     /// Format a single event as CBOR (canonical serialization per AGENTS.md)

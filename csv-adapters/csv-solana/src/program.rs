@@ -48,8 +48,8 @@ impl SolanaProgram {
         &self,
         seal_account: Pubkey,
         authority: Pubkey,
-        sanad_id: csv_core::Hash,
-        commitment: csv_core::Hash,
+        sanad_id: csv_hash::Hash,
+        commitment: csv_hash::Hash,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::CreateSanad {
             sanad_id,
@@ -76,8 +76,8 @@ impl SolanaProgram {
         &self,
         anchor_account: Pubkey,
         authority: Pubkey,
-        commitment: csv_core::Hash,
-        sanad_id: csv_core::Hash,
+        commitment: csv_hash::Hash,
+        sanad_id: csv_hash::Hash,
         metadata: Vec<u8>,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::PublishCommitment {
@@ -105,7 +105,7 @@ impl SolanaProgram {
         &self,
         seal_account: Pubkey,
         authority: Pubkey,
-        sanad_id: csv_core::Hash,
+        sanad_id: csv_hash::Hash,
         new_owner: Pubkey,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::ConsumeSeal {
@@ -135,7 +135,7 @@ impl SolanaProgram {
         sanad_account: Pubkey,
         from_owner: Pubkey,
         to_owner: Pubkey,
-        sanad_id: csv_core::Hash,
+        sanad_id: csv_hash::Hash,
         destination_chain: String,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::TransferSanad {

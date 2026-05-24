@@ -23,6 +23,7 @@ csv-protocol = { path = "../../csv-protocol" }
 csv-hash = { path = "../../csv-hash" }
 csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
+csv-codec = { path = "../../csv-codec" }
 csv-store = { path = "../../csv-store", optional = true }
 solana-sdk = "3.0"
 solana-program = "3.0"

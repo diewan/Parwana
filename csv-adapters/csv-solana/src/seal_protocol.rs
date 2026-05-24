@@ -6,9 +6,11 @@
 
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::{
-    Hash, Result, dag::DAGSegment, error::ProtocolError, proof::ProofBundle,
+    error::ProtocolError,
     signature::SignatureScheme,
 };
+use csv_hash::Hash;
+use csv_proof::proof::ProofBundle;
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
 use solana_system_interface::instruction as system_instruction;
@@ -190,7 +192,7 @@ impl SealProtocol for SolanaSealProtocol {
     type FinalityProof = SolanaFinalityProof;
 
     /// Create a new seal account (PDA) for a sanad
-    fn create_seal(&self, amount: Option<u64>) -> Result<Self::SealPoint> {
+    fn create_seal(&self, amount: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         let wallet = self
             .wallet
             .as_ref()
@@ -255,7 +257,7 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Publish a commitment to the seal account
-    fn publish(&self, hash: Hash, seal_point: Self::SealPoint) -> Result<Self::CommitAnchor> {
+    fn publish(&self, hash: Hash, seal_point: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
         let rpc = self.check_rpc()?;
         let wallet = self
             .wallet
@@ -341,7 +343,7 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Verify inclusion by checking the transaction is in a block
-    fn verify_inclusion(&self, anchor_ref: Self::CommitAnchor) -> Result<Self::InclusionProof> {
+    fn verify_inclusion(&self, anchor_ref: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
         let _rpc = self.check_rpc()?;
 
         // In production, this would:
@@ -375,7 +377,7 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Verify finality by checking block depth
-    fn verify_finality(&self, anchor_ref: Self::CommitAnchor) -> Result<Self::FinalityProof> {
+    fn verify_finality(&self, anchor_ref: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
         let _rpc = self.check_rpc()?;
 
         // Solana has deterministic finality after ~32 slots (12-16 seconds)
@@ -404,7 +406,7 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Enforce seal by closing the account (consuming it)
-    fn enforce_seal(&self, seal_point: Self::SealPoint) -> Result<()> {
+    fn enforce_seal(&self, seal_point: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a PDA account cannot be consumed more than once
         // by checking both local registry and on-chain account state
@@ -412,10 +414,10 @@ impl SealProtocol for SolanaSealProtocol {
         // Step 1: Check local registry (fast path)
         if let Ok(seals) = self.active_seals.lock() {
             if !seals.iter().any(|s| s.account == seal_point.account) {
-                return Err(ProtocolError::SealReplay(format!(
+                return Err(Box::new(ProtocolError::SealReplay(format!(
                     "PDA account {:?} not found in active seals",
                     seal_point.account
-                )));
+                ))));
             }
         }
 
@@ -434,10 +436,10 @@ impl SealProtocol for SolanaSealProtocol {
 
             // If account doesn't exist or has zero lamports, it's already been consumed
             if account.lamports == 0 {
-                return Err(ProtocolError::SealReplay(format!(
+                return Err(Box::new(ProtocolError::SealReplay(format!(
                     "PDA account {:?} already consumed on-chain (zero lamports)",
                     seal_point.account
-                )));
+                ))));
             }
         }
 
@@ -482,8 +484,8 @@ impl SealProtocol for SolanaSealProtocol {
     fn build_proof_bundle(
         &self,
         anchor_ref: Self::CommitAnchor,
-        segment: DAGSegment,
-    ) -> Result<ProofBundle> {
+        segment: Vec<u8>,
+    ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
         let solana_inclusion = self.verify_inclusion(anchor_ref.clone())?;
         let solana_finality = self.verify_finality(anchor_ref.clone())?;
 
@@ -543,9 +545,11 @@ impl SealProtocol for SolanaSealProtocol {
         };
 
         // Create a complete proof bundle
+        let dag_segment: csv_proof::dag::DAGSegment = csv_codec::from_canonical_cbor(&segment)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
         let bundle = unsafe {
             csv_protocol::proof::ProofBundle::new_unchecked(
-                segment,
+                dag_segment,
                 vec![anchor_ref.signature.as_ref().to_vec()],
                 seal_ref,
                 core_anchor_ref,
@@ -558,7 +562,7 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Handle rollback for reorgs
-    fn rollback(&self, anchor_ref: Self::CommitAnchor) -> Result<()> {
+    fn rollback(&self, anchor_ref: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
         // Solana has very rare reorgs due to deterministic finality
         // But we still need to handle them
 

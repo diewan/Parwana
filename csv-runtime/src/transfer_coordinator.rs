@@ -199,26 +199,6 @@ impl TransferCoordinator {
         self.health_monitor.clone()
     }
 
-    /// Assert that exactly one coordinator is active for the given transfer.
-    ///
-    /// This invariant ensures that no two coordinators can simultaneously operate
-    /// on the same transfer, preventing race conditions and double-execution.
-    fn assert_single_active_coordinator(&self, transfer_id: &str) -> Result<(), TransferCoordinatorError> {
-        let lease = self.coordinator_lease
-            .as_ref()
-            .ok_or(TransferCoordinatorError::NoLeaseBackend)?
-            .get_active_lease(transfer_id)?;
-
-        if lease.owner_runtime_id != self.runtime_id {
-            return Err(TransferCoordinatorError::LeaseViolation(
-                format!("Coordinator {} does not own lease for {}",
-                    self.runtime_id, transfer_id)
-            ));
-        }
-
-        Ok(())
-    }
-
     /// Record a health check result
     pub fn record_health_check(&self, check: crate::runtime_mode::HealthCheck) {
         self.health_monitor.lock().unwrap().record_check(check);
@@ -285,7 +265,7 @@ impl TransferCoordinator {
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
-        self.assert_single_active_coordinator(&transfer.id)?;
+        self.assert_single_active_coordinator(&transfer.id).await?;
 
         // Validate that the runtime instance matches the lease owner.
         // This prevents any runtime from executing a transfer with a valid lease
@@ -1081,7 +1061,7 @@ impl TransferCoordinator {
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
-        self.assert_single_active_coordinator(transfer_id)?;
+        self.assert_single_active_coordinator(transfer_id).await?;
 
         let phase = self.execution_journal.latest_phase(transfer_id)
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?
@@ -1237,7 +1217,7 @@ impl TransferCoordinator {
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
-        self.assert_single_active_coordinator(&transfer.id)?;
+        self.assert_single_active_coordinator(&transfer.id).await?;
 
         tracing::info!(
             "Executing transfer {} from lock phase (skipping lock broadcast)",
@@ -1272,7 +1252,7 @@ impl TransferCoordinator {
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
-        self.assert_single_active_coordinator(&transfer.id)?;
+        self.assert_single_active_coordinator(&transfer.id).await?;
 
         tracing::info!(
             "Executing transfer {} from proof phase (skipping proof generation)",
@@ -1305,7 +1285,7 @@ impl TransferCoordinator {
         _adapter_registry: &dyn AdapterRegistry,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
-        self.assert_single_active_coordinator(transfer_id)?;
+        self.assert_single_active_coordinator(transfer_id).await?;
 
         tracing::info!(
             "Executing transfer {} from mint phase (confirming mint transaction {})",

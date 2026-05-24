@@ -1,7 +1,45 @@
 //! Bitcoin adapter error types
 
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
+
+// Local implementations (mcp module removed during migration)
+#[derive(Debug, Clone)]
+pub enum FixAction {
+    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
+    CheckState { check: String, url: String, what: String },
+    SwitchEndpoint { endpoint: String },
+}
+
+pub trait HasErrorSuggestion {
+    fn error_code(&self) -> u32;
+    fn fix_action(&self) -> Option<FixAction>;
+    fn description(&self) -> String;
+    fn suggested_fix(&self) -> String;
+    fn docs_url(&self) -> String;
+}
+
+mod error_codes {
+    pub const BITCOIN_RPC_ERROR: u32 = 3001;
+    pub const BITCOIN_TX_NOT_FOUND: u32 = 3002;
+    pub const BITCOIN_UTXO_SPENT: u32 = 3003;
+    pub const BITCOIN_MERKLE_PROOF: u32 = 3004;
+    pub const BITCOIN_REORG: u32 = 3005;
+    pub const BITCOIN_REGISTRY_FULL: u32 = 3006;
+    pub const BITCOIN_INSUFFICIENT_CONFIRMATIONS: u32 = 3007;
+    pub const BITCOIN_INSUFFICIENT_FUNDS: u32 = 3008;
+    pub const BTC_RPC_ERROR: u32 = 3001;
+    pub const BTC_TRANSACTION_NOT_FOUND: u32 = 3002;
+    pub const BTC_UTXO_SPENT: u32 = 3003;
+    pub const BTC_INVALID_MERKLE_PROOF: u32 = 3004;
+    pub const BTC_REGISTRY_FULL: u32 = 3006;
+    pub const BTC_REORG_DETECTED: u32 = 3005;
+    pub const BTC_INSUFFICIENT_CONFIRMATIONS: u32 = 3007;
+    pub const BTC_INSUFFICIENT_FUNDS: u32 = 3008;
+
+    pub fn docs_url(code: u32) -> String {
+        format!("https://docs.csv-protocol.io/errors/{}", code)
+    }
+}
 
 /// Bitcoin adapter specific errors
 #[derive(Error, Debug)]
@@ -56,36 +94,36 @@ pub enum BitcoinError {
 
     /// Wrapper for core adapter errors
     #[error(transparent)]
-    CoreError(#[from] csv_core::ProtocolError),
+    CoreError(#[from] csv_protocol::error::ProtocolError),
 }
 
-impl From<BitcoinError> for csv_core::ProtocolError {
+impl From<BitcoinError> for csv_protocol::error::ProtocolError {
     fn from(err: BitcoinError) -> Self {
         match err {
             BitcoinError::CoreError(e) => e,
-            BitcoinError::RpcError(msg) => csv_core::ProtocolError::NetworkError(msg),
-            BitcoinError::TransactionNotFound(msg) => csv_core::ProtocolError::Generic(msg),
-            BitcoinError::UTXOSpent(msg) => csv_core::ProtocolError::InvalidSeal(msg),
+            BitcoinError::RpcError(msg) => csv_protocol::error::ProtocolError::NetworkError(msg),
+            BitcoinError::TransactionNotFound(msg) => csv_protocol::error::ProtocolError::Generic(msg),
+            BitcoinError::UTXOSpent(msg) => csv_protocol::error::ProtocolError::InvalidSeal(msg),
             BitcoinError::InvalidMerkleProof(msg) => {
-                csv_core::ProtocolError::InclusionProofFailed(msg)
+                csv_protocol::error::ProtocolError::InclusionProofFailed(msg)
             }
-            BitcoinError::RegistryFull(msg) => csv_core::ProtocolError::Generic(msg),
-            BitcoinError::ReorgDetected { height, depth } => csv_core::ProtocolError::ReorgInvalid(
+            BitcoinError::RegistryFull(msg) => csv_protocol::error::ProtocolError::Generic(msg),
+            BitcoinError::ReorgDetected { height, depth } => csv_protocol::error::ProtocolError::ReorgInvalid(
                 format!("Reorg at height {}, depth {}", height, depth),
             ),
             BitcoinError::InsufficientConfirmations { got, need } => {
-                csv_core::ProtocolError::FinalityNotReached(format!(
+                csv_protocol::error::ProtocolError::FinalityNotReached(format!(
                     "Got {} confirmations, need {}",
                     got, need
                 ))
             }
-            BitcoinError::InvalidInput(msg) => csv_core::ProtocolError::InvalidInput(msg),
+            BitcoinError::InvalidInput(msg) => csv_protocol::error::ProtocolError::InvalidInput(msg),
             BitcoinError::MpcError(msg) => {
-                csv_core::ProtocolError::Generic(format!("MPC: {}", msg))
+                csv_protocol::error::ProtocolError::Generic(format!("MPC: {}", msg))
             }
-            BitcoinError::StorageError(msg) => csv_core::ProtocolError::StorageError(msg),
-            BitcoinError::TransactionError(msg) => csv_core::ProtocolError::Generic(msg),
-            BitcoinError::InsufficientFunds(msg) => csv_core::ProtocolError::Generic(msg),
+            BitcoinError::StorageError(msg) => csv_protocol::error::ProtocolError::StorageError(msg),
+            BitcoinError::TransactionError(msg) => csv_protocol::error::ProtocolError::Generic(msg),
+            BitcoinError::InsufficientFunds(msg) => csv_protocol::error::ProtocolError::Generic(msg),
         }
     }
 }

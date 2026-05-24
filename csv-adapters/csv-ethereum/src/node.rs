@@ -12,7 +12,7 @@ mod real_rpc_impl {
         signers::local::PrivateKeySigner,
     };
     use async_trait::async_trait;
-    use csv_store::SqliteSealStore;
+    
     use serde_json::json;
 
     use crate::rpc::{
@@ -38,7 +38,6 @@ mod real_rpc_impl {
         csv_seal_address: Address,
         signer: Option<PrivateKeySigner>,
         chain_id: Option<u64>,
-        seal_store: Option<SqliteSealStore>,
     }
 
     impl EthereumNode {
@@ -55,7 +54,6 @@ mod real_rpc_impl {
                 csv_seal_address: Address::from(csv_seal_address),
                 signer: None,
                 chain_id: Some(chain_id),
-                seal_store: None,
             })
         }
 
@@ -112,12 +110,6 @@ mod real_rpc_impl {
                 .map_err(|e| AlloyRpcError::Rpc(format!("Invalid private key: {}", e)))?;
             self.signer = Some(signer);
             Ok(self)
-        }
-
-        /// Attach a persistent seal store for recording consumption events
-        pub fn with_seal_store(mut self, store: SqliteSealStore) -> Self {
-            self.seal_store = Some(store);
-            self
         }
 
         /// Make a JSON-RPC call to the Ethereum node
@@ -442,7 +434,6 @@ mod real_rpc_impl {
                 csv_seal_address: self.csv_seal_address,
                 signer: self.signer.clone(),
                 chain_id: self.chain_id,
-                seal_store: None, // SqliteSealStore doesn't implement Clone
             })
         }
 

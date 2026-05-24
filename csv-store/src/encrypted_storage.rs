@@ -7,7 +7,6 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, AeadCore, KeyInit, OsRng},
 };
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -45,59 +44,6 @@ pub enum EncryptedStorageError {
 impl From<EncryptedStorageError> for StorageError {
     fn from(e: EncryptedStorageError) -> Self {
         StorageError::SerializeError(e.to_string())
-    }
-}
-
-impl HasErrorSuggestion for EncryptedStorageError {
-    fn error_code(&self) -> &'static str {
-        error_codes::WALLET_BROWSER_STORAGE
-    }
-
-    fn description(&self) -> String {
-        self.to_string()
-    }
-
-    fn suggested_fix(&self) -> String {
-        match self {
-            EncryptedStorageError::CryptoError(_) => "Encryption/decryption failed. \
-                 Check: 1) Browser supports WebCrypto API, \
-                 2) Storage key hasn't been corrupted. \
-                 You may need to re-import your wallet."
-                .to_string(),
-            EncryptedStorageError::IntegrityError(_) => "Data integrity check failed. \
-                 This could indicate tampering or storage corruption. \
-                 Do not proceed with transactions - verify your system security."
-                .to_string(),
-            EncryptedStorageError::BrowserError(_) => "IndexedDB error. Check: \
-                 1) Browser storage is enabled, \
-                 2) Not in private/incognito mode, \
-                 3) Storage quota available."
-                .to_string(),
-            EncryptedStorageError::SerializeError(_) => "Data serialization failed. \
-                 Ensure data format is valid."
-                .to_string(),
-            EncryptedStorageError::NotFound(key) => {
-                format!("Item '{}' not found in encrypted storage.", key)
-            }
-        }
-    }
-
-    fn docs_url(&self) -> String {
-        error_codes::docs_url(self.error_code())
-    }
-
-    fn fix_action(&self) -> Option<FixAction> {
-        match self {
-            EncryptedStorageError::CryptoError(_) => Some(FixAction::CheckState {
-                url: "https://docs.csv.dev/wallet/encrypted-storage".to_string(),
-                what: "Verify WebCrypto API is available".to_string(),
-            }),
-            EncryptedStorageError::IntegrityError(_) => Some(FixAction::CheckState {
-                url: "https://docs.csv.dev/wallet/security".to_string(),
-                what: "SECURITY WARNING: Verify system integrity".to_string(),
-            }),
-            _ => None,
-        }
     }
 }
 

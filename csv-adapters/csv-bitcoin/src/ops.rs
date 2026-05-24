@@ -943,7 +943,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
 
         // Parse the destination chain to ensure it's valid
         let _destination = destination_chain
-            .parse::<csv_core::ChainId>()
+            .parse::<csv_hash::chain_id::ChainId>()
             .map_err(|_| {
                 ChainOpError::InvalidInput(format!(
                     "Invalid destination chain: {}",
@@ -1302,7 +1302,7 @@ impl BitcoinBackend {
     /// If no batcher is configured, returns error - use direct broadcast instead.
     pub fn queue_commitment(
         &self,
-        commitment: csv_core::Hash,
+        commitment: csv_hash::Hash,
         seal: crate::types::BitcoinSealPoint,
         request_id: String,
     ) -> ChainOpResult<bool> {
@@ -1373,7 +1373,7 @@ impl BitcoinBackend {
     /// Build a transaction to publish an MPC root via tapret
     async fn build_mpc_publication_transaction(
         &self,
-        mpc_root: &csv_core::Hash,
+        mpc_root: &csv_hash::Hash,
     ) -> ChainOpResult<bitcoin::Transaction> {
         use crate::tapret::TapretCommitment;
         use bitcoin::{ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
@@ -1381,7 +1381,7 @@ impl BitcoinBackend {
         // Build tapret commitment with MPC root
         let mut protocol_id = [0u8; 32];
         protocol_id.copy_from_slice(&mpc_root.as_bytes()[..32]);
-        let commitment = csv_core::Hash::default();
+        let commitment = csv_hash::Hash::default();
         let tapret = TapretCommitment::new(protocol_id, commitment);
 
         let fee_rate = 10u64;

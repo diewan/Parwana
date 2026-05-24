@@ -7,7 +7,7 @@ use csv_proof::proof::ReplayId;
 use sqlx::PgPool;
 
 use crate::errors::ReplayDbError;
-use crate::traits::{ReplayDatabase, ReplayEntryState};
+use crate::traits::ReplayDatabase;
 
 /// PostgreSQL-backed replay database (multi-coordinator CAS).
 pub struct PostgresReplayDb {

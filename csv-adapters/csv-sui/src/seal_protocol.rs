@@ -13,7 +13,6 @@
 
 use std::sync::Mutex;
 
-use csv_hash::dag::DAGSegment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
 use csv_proof::proof::{FinalityProof, ProofBundle};
@@ -532,7 +531,7 @@ impl SealProtocol for SuiSealProtocol {
     type InclusionProof = SuiInclusionProof;
     type FinalityProof = SuiFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> std::result::Result<Self::CommitAnchor, Box<(dyn std::error::Error + 'static)>> {
+    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Publishing commitment via seal object {}",
             format_object_id(seal.object_id)
@@ -625,7 +624,7 @@ impl SealProtocol for SuiSealProtocol {
         }
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::InclusionProof, Box<(dyn std::error::Error + 'static)>> {
+    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Verifying inclusion for anchor at checkpoint {}",
             anchor.checkpoint
@@ -720,7 +719,7 @@ impl SealProtocol for SuiSealProtocol {
         ))
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::FinalityProof, Box<(dyn std::error::Error + 'static)>> {
+    fn verify_finality(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Verifying finality for anchor at checkpoint {}",
             anchor.checkpoint
@@ -745,7 +744,7 @@ impl SealProtocol for SuiSealProtocol {
         Ok(SuiFinalityProof::new(anchor.checkpoint, is_certified))
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> std::result::Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn enforce_seal(&self, seal: Self::SealPoint) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a Sui object cannot be consumed more than once
         // by checking both local registry and on-chain object state
@@ -798,7 +797,7 @@ impl SealProtocol for SuiSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, _value: Option<u64>) -> std::result::Result<Self::SealPoint, Box<(dyn std::error::Error + 'static)>> {
+    fn create_seal(&self, _value: Option<u64>) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         use sha2::{Digest, Sha256};
         // Use timestamp-based nonce for replay resistance
         let nonce = std::time::SystemTime::now()
@@ -837,7 +836,7 @@ impl SealProtocol for SuiSealProtocol {
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>,
-    ) -> std::result::Result<ProofBundle, Box<(dyn std::error::Error + 'static)>> {
+    ) -> std::result::Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
 
@@ -891,7 +890,7 @@ impl SealProtocol for SuiSealProtocol {
         })
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> std::result::Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn rollback(&self, anchor: Self::CommitAnchor) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
         log::warn!(
             "Rollback requested for anchor at checkpoint {}",
             anchor.checkpoint

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use csv_hash::{DomainSeparatedHash, GenesisDomain};
 use csv_hash::Hash;
-use csv_protocol::state::{GlobalState, Metadata, OwnedState};
+use crate::state::{GlobalState, Metadata, OwnedState};
 
 /// Contract genesis
 ///

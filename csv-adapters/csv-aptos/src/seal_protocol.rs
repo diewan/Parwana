@@ -489,9 +489,9 @@ impl SealProtocol for AptosSealProtocol {
             .map_err(|e: AptosError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
             if !valid {
-                return Err(ProtocolError::PublishFailed(
+                return Err(Box::new(ProtocolError::PublishFailed(
                     "Event verification failed: commitment mismatch".to_string(),
-                ));
+                )) as Box<dyn std::error::Error>);
             }
 
             // Mark seal as consumed with the transaction version
@@ -570,10 +570,10 @@ impl SealProtocol for AptosSealProtocol {
 
         // Verify transaction succeeded
         if !tx.success {
-            return Err(ProtocolError::InclusionProofFailed(format!(
+            return Err(Box::new(ProtocolError::InclusionProofFailed(format!(
                 "Transaction at version {} failed: {}",
                 anchor.version, tx.vm_status
-            )));
+            ))) as Box<dyn std::error::Error>);
         }
 
         // Fetch ledger info to verify the transaction is part of the ledger
@@ -599,10 +599,10 @@ impl SealProtocol for AptosSealProtocol {
 
         // Verify the transaction version is within the ledger
         if tx.version > ledger_info.ledger_version {
-            return Err(ProtocolError::InclusionProofFailed(format!(
+            return Err(Box::new(ProtocolError::InclusionProofFailed(format!(
                 "Transaction version {} exceeds latest ledger version {}",
                 tx.version, ledger_info.ledger_version
-            )));
+            ))) as Box<dyn std::error::Error>);
         }
 
         // Build inclusion proof with real transaction and ledger data
@@ -611,8 +611,10 @@ impl SealProtocol for AptosSealProtocol {
 
         Ok(AptosInclusionProof::new(
             transaction_proof,
-            ledger_proof,
+            ledger_proof.clone(),
             anchor.version,
+            ledger_proof, // ledger_info
+            vec![], // events
         ))
     }
 
@@ -653,10 +655,10 @@ impl SealProtocol for AptosSealProtocol {
         // Step 1: Check local registry (fast path)
         let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
         if registry.is_seal_used(&seal) {
-            return Err(ProtocolError::SealReplay(format!(
+            return Err(Box::new(ProtocolError::SealReplay(format!(
                 "Resource already consumed at {} in local registry",
                 format_address(seal.account_address)
-            )));
+            ))) as Box<dyn std::error::Error>);
         }
         drop(registry);
 
@@ -681,10 +683,10 @@ impl SealProtocol for AptosSealProtocol {
                     })?;
 
                 if !resource_exists {
-                    return Err(ProtocolError::SealReplay(format!(
+                    return Err(Box::new(ProtocolError::SealReplay(format!(
                         "Resource already consumed on-chain at {}",
                         format_address(seal.account_address)
-                    )));
+                    ))) as Box<dyn std::error::Error>);
                 }
             }
         }
@@ -737,38 +739,47 @@ impl SealProtocol for AptosSealProtocol {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
         let seal_ref = CoreSealPoint::new(anchor.event_handle.to_vec(), Some(anchor.version))
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
 
         let anchor_ref =
             CoreCommitAnchor::new(anchor.event_handle.to_vec(), anchor.version, vec![])
-                .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
 
-        let inclusion_proof = csv_protocol::cross_chain::InclusionProof::Aptos(
-            csv_protocol::cross_chain::AptosLedgerProof {
-                version: inclusion.version,
-                transaction_proof: inclusion.transaction_proof,
-                ledger_info: inclusion.ledger_info,
-                events: inclusion.events,
-                success: true,
-            }
-        );
+        // Use csv_proof::InclusionProof (struct) instead of csv_protocol::cross_chain::InclusionProof (enum)
+        let inclusion_proof = csv_proof::proof::InclusionProof::new(
+            inclusion.transaction_proof.clone(),
+            csv_hash::Hash::zero(), // block_hash - would need to extract from proof
+            inclusion.version,
+            0, // leaf_index
+        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
 
         let finality_proof = FinalityProof::new(vec![], finality.version, finality.is_certified)
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
 
-        // Since transition_dag is now Vec<u8>, pass it directly
+        // Convert Vec<u8> to DAGSegment for ProofBundle
+        use csv_hash::dag::{DAGSegment, DAGNode};
+        let dag_segment = DAGSegment {
+            nodes: vec![DAGNode {
+                node_id: csv_hash::Hash::zero(),
+                bytecode: transition_dag.clone(),
+                signatures: vec![],
+                witnesses: vec![],
+                parents: vec![],
+            }],
+            root_commitment: csv_hash::Hash::zero(),
+        };
+
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        ProofBundle::new(
-            transition_dag,
+        Ok(ProofBundle::new(
+            dag_segment,
             signatures,
             seal_ref,
             anchor_ref,
             inclusion_proof,
             finality_proof,
-        )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))
+        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?)
     }
 
     fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
@@ -788,10 +799,10 @@ impl SealProtocol for AptosSealProtocol {
 
         // If anchor version is beyond current tip, rollback
         if anchor.version > current_version {
-            return Err(ProtocolError::ReorgInvalid(format!(
+            return Err(Box::new(ProtocolError::ReorgInvalid(format!(
                 "Anchor version {} beyond current tip {}",
                 anchor.version, current_version
-            )));
+            ))) as Box<dyn std::error::Error>);
         }
 
         // If anchor version is before current tip, the transaction may have been reorged out

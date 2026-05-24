@@ -4,7 +4,7 @@
 //! Solana uses Proof of History (PoH) combined with Tower BFT, which makes reorgs
 //! different from both Bitcoin and Ethereum.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Simulates an optimistic confirmation rollback.
 ///

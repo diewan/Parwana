@@ -13,8 +13,7 @@ members = [
     "csv-storage",
     "csv-testkit",
     "csv-contract-bindings",
-    # Legacy crates (to be refactored/deprecated)
-    "csv-core",
+    # Runtime crates
     "csv-runtime",
     "csv-sdk",
     "csv-cli",

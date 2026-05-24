@@ -42,7 +42,7 @@
 //! here could allow fraudulent proofs to be accepted, leading to
 //! unauthorized state transitions or double-spends.
 
-use csv_protocol::error::{ProtocolError, Result as ProtocolResult};
+use csv_protocol::error::ProtocolError;
 use csv_protocol::verification::VerificationLevel;
 use csv_proof::proof::ProofBundle;
 use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};

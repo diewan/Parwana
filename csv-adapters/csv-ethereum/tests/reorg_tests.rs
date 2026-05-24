@@ -4,7 +4,7 @@
 //! Ethereum uses a proof-of-stake consensus model with finality slots, making reorgs
 //! different from Bitcoin's PoW reorgs.
 
-use csv_core::Hash;
+use csv_hash::Hash;
 
 /// Simulates a finalized vs non-finalized block mismatch.
 ///

@@ -1,7 +1,47 @@
 //! Error types for Solana adapter
 
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
+
+// Local implementations (mcp module removed during migration)
+#[derive(Debug, Clone)]
+pub enum FixAction {
+    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
+    CheckState { check: String, url: String, what: String },
+    SwitchEndpoint { endpoint: String },
+}
+
+pub trait HasErrorSuggestion {
+    fn error_code(&self) -> u32;
+    fn fix_action(&self) -> Option<FixAction>;
+    fn description(&self) -> String;
+    fn suggested_fix(&self) -> String;
+    fn docs_url(&self) -> String;
+}
+
+mod error_codes {
+    pub const SOLANA_RPC_ERROR: u32 = 4001;
+    pub const SOLANA_TX_ERROR: u32 = 4002;
+    pub const SOLANA_ACCOUNT_NOT_FOUND: u32 = 4003;
+    pub const SOLANA_TIMEOUT: u32 = 4004;
+    pub const SOL_INVALID_PROGRAM_ID: u32 = 4005;
+    pub const SOL_INVALID_INSTRUCTION: u32 = 4006;
+    pub const SOL_INSUFFICIENT_FUNDS: u32 = 4007;
+    pub const SOL_NETWORK_ERROR: u32 = 4008;
+    pub const SOL_SERIALIZATION_ERROR: u32 = 4009;
+    pub const SOL_DESERIALIZATION_ERROR: u32 = 4010;
+    pub const SOL_KEYPAIR_ERROR: u32 = 4011;
+    pub const SOL_WALLET_ERROR: u32 = 4012;
+    pub const SOL_COMMITMENT_ERROR: u32 = 4013;
+    pub const SOL_SEAL_CREATION_ERROR: u32 = 4014;
+    pub const SOL_ANCHOR_CREATION_ERROR: u32 = 4015;
+    pub const SOL_PROOF_GENERATION_ERROR: u32 = 4016;
+    pub const SOL_INVALID_INPUT: u32 = 4017;
+    pub const SOL_UNSUPPORTED_OPERATION: u32 = 4018;
+
+    pub fn docs_url(code: u32) -> String {
+        format!("https://docs.csv-protocol.io/errors/{}", code)
+    }
+}
 
 /// Solana-specific errors
 #[derive(Debug, Error)]
@@ -133,11 +173,11 @@ impl SolanaError {
 }
 
 impl HasErrorSuggestion for SolanaError {
-    fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> u32 {
         match self {
-            SolanaError::Rpc(_) => error_codes::SOL_RPC_ERROR,
-            SolanaError::Transaction(_) => error_codes::SOL_TRANSACTION_ERROR,
-            SolanaError::AccountNotFound(_) => error_codes::SOL_ACCOUNT_NOT_FOUND,
+            SolanaError::Rpc(_) => error_codes::SOLANA_RPC_ERROR,
+            SolanaError::Transaction(_) => error_codes::SOLANA_TX_ERROR,
+            SolanaError::AccountNotFound(_) => error_codes::SOLANA_ACCOUNT_NOT_FOUND,
             SolanaError::InvalidProgramId(_) => error_codes::SOL_INVALID_PROGRAM_ID,
             SolanaError::InvalidInstruction(_) => error_codes::SOL_INVALID_INSTRUCTION,
             SolanaError::InsufficientFunds { .. } => error_codes::SOL_INSUFFICIENT_FUNDS,
@@ -152,8 +192,8 @@ impl HasErrorSuggestion for SolanaError {
             SolanaError::ProofGeneration(_) => error_codes::SOL_PROOF_GENERATION_ERROR,
             SolanaError::InvalidInput(_) => error_codes::SOL_INVALID_INPUT,
             SolanaError::UnsupportedOperation(_) => error_codes::SOL_UNSUPPORTED_OPERATION,
-            SolanaError::TransactionFailed(_) => error_codes::SOL_TRANSACTION_ERROR,
-            SolanaError::Timeout(_) => error_codes::SOL_NETWORK_ERROR,
+            SolanaError::TransactionFailed(_) => error_codes::SOLANA_TX_ERROR,
+            SolanaError::Timeout(_) => error_codes::SOLANA_TIMEOUT,
         }
     }
 
@@ -284,31 +324,29 @@ impl HasErrorSuggestion for SolanaError {
     fn fix_action(&self) -> Option<FixAction> {
         match self {
             SolanaError::Rpc(_) | SolanaError::Network(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
-                    "rpc_endpoint".to_string(),
-                    "https://api.mainnet-beta.solana.com".to_string(),
-                )]),
+                backoff_secs: 5,
+                parameter_changes: vec!["rpc_endpoint".to_string()],
             }),
             SolanaError::InsufficientFunds {
                 required,
                 available,
             } => {
                 let need = required.saturating_sub(*available);
-                Some(FixAction::FundFromFaucet {
+                Some(FixAction::CheckState {
+                    check: "insufficient funds".to_string(),
                     url: "https://faucet.solana.com".to_string(),
-                    amount: format!("{} lamports ({} SOL)", need, need as f64 / 1e9),
+                    what: format!("Need {} lamports ({} SOL)", need, need as f64 / 1e9),
                 })
             }
-            SolanaError::AccountNotFound(_) => Some(FixAction::FundFromFaucet {
+            SolanaError::AccountNotFound(_) => Some(FixAction::CheckState {
+                check: "account not found".to_string(),
                 url: "https://faucet.solana.com".to_string(),
-                amount: "0.001 SOL (rent-exempt minimum)".to_string(),
+                what: "Fund account with 0.001 SOL (rent-exempt minimum)".to_string(),
             }),
             SolanaError::Transaction(_) | SolanaError::InvalidInstruction(_) => {
                 Some(FixAction::Retry {
-                    parameter_changes: std::collections::HashMap::from([
-                        ("simulate_first".to_string(), "true".to_string()),
-                        ("check_program".to_string(), "true".to_string()),
-                    ]),
+                    backoff_secs: 10,
+                    parameter_changes: vec!["simulate_first".to_string(), "check_program".to_string()],
                 })
             }
             _ => None,

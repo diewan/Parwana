@@ -1,7 +1,38 @@
 //! Ethereum adapter error types
 
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
+
+// Local implementations (mcp module removed during migration)
+#[derive(Debug, Clone)]
+pub enum FixAction {
+    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
+    CheckState { check: String, url: String, what: String },
+    SwitchEndpoint { endpoint: String },
+    WaitForConfirmations { confirmations: u64 },
+}
+
+pub trait HasErrorSuggestion {
+    fn error_code(&self) -> u32;
+    fn fix_action(&self) -> Option<FixAction>;
+    fn description(&self) -> String;
+    fn suggested_fix(&self) -> String;
+    fn docs_url(&self) -> String;
+}
+
+mod error_codes {
+    pub const ETH_RPC_ERROR: u32 = 5001;
+    pub const ETH_SLOT_USED: u32 = 5002;
+    pub const ETH_INVALID_RECEIPT_PROOF: u32 = 5003;
+    pub const ETH_REORG_DETECTED: u32 = 5004;
+    pub const ETH_INSUFFICIENT_CONFIRMATIONS: u32 = 5005;
+    pub const ETH_WALLET_ERROR: u32 = 5006;
+    pub const ETH_CONFIG_ERROR: u32 = 5007;
+    pub const ETH_DEPLOYMENT_ERROR: u32 = 5008;
+
+    pub fn docs_url(code: u32) -> String {
+        format!("https://docs.csv-protocol.io/errors/{}", code)
+    }
+}
 
 /// Ethereum adapter specific errors
 #[derive(Error, Debug)]
@@ -38,6 +69,14 @@ pub enum EthereumError {
     #[error("Deployment error: {0}")]
     DeploymentError(String),
 
+    /// Invalid input
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    /// Transaction error
+    #[error("Transaction error: {0}")]
+    TransactionError(String),
+
     /// Wrapper for core adapter errors
     #[error(transparent)]
     CoreError(#[from] csv_protocol::ProtocolError),
@@ -55,13 +94,15 @@ impl EthereumError {
             EthereumError::DeploymentError(_) => false,
             EthereumError::SlotUsed(_) => false,
             EthereumError::InvalidReceiptProof(_) => false,
+            EthereumError::InvalidInput(_) => false,
+            EthereumError::TransactionError(_) => false,
             EthereumError::CoreError(_) => false,
         }
     }
 }
 
 impl HasErrorSuggestion for EthereumError {
-    fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> u32 {
         match self {
             EthereumError::RpcError(_) => error_codes::ETH_RPC_ERROR,
             EthereumError::SlotUsed(_) => error_codes::ETH_SLOT_USED,
@@ -73,7 +114,9 @@ impl HasErrorSuggestion for EthereumError {
             EthereumError::WalletError(_) => error_codes::ETH_WALLET_ERROR,
             EthereumError::ConfigError(_) => error_codes::ETH_CONFIG_ERROR,
             EthereumError::DeploymentError(_) => error_codes::ETH_DEPLOYMENT_ERROR,
-            EthereumError::CoreError(e) => e.error_code(),
+            EthereumError::CoreError(_) => 1,
+            EthereumError::InvalidInput(_) => 2,
+            EthereumError::TransactionError(_) => 3,
         }
     }
 
@@ -122,46 +165,39 @@ impl HasErrorSuggestion for EthereumError {
                     (need - got) * 12
                 )
             }
-            EthereumError::CoreError(e) => e.suggested_fix(),
+            EthereumError::CoreError(_) => "See protocol error documentation".to_string(),
             _ => "See documentation for this error type.".to_string(),
         }
     }
 
     fn docs_url(&self) -> String {
-        match self {
-            EthereumError::CoreError(e) => e.docs_url(),
-            _ => error_codes::docs_url(self.error_code()),
-        }
+        error_codes::docs_url(self.error_code())
     }
 
     fn fix_action(&self) -> Option<FixAction> {
         match self {
             EthereumError::RpcError(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([
-                    (
-                        "rpc_endpoint".to_string(),
-                        "https://ethereum-rpc.publicnode.com".to_string(),
-                    ),
-                    ("network".to_string(), "mainnet".to_string()),
-                ]),
+                backoff_secs: 5,
+                parameter_changes: vec![
+                    "rpc_endpoint=https://ethereum-rpc.publicnode.com".to_string(),
+                    "network=mainnet".to_string(),
+                ],
             }),
             EthereumError::InsufficientConfirmations { need, .. } => {
                 Some(FixAction::WaitForConfirmations {
-                    confirmations: *need as u32,
-                    estimated_seconds: *need * 12,
+                    confirmations: *need,
                 })
             }
             EthereumError::ReorgDetected { .. } => Some(FixAction::CheckState {
+                check: "reorg_detected".to_string(),
                 url: "https://etherscan.io".to_string(),
                 what: "Check current Ethereum chain tip".to_string(),
             }),
             EthereumError::SlotUsed(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
-                    "increment_slot".to_string(),
-                    "true".to_string(),
-                )]),
+                backoff_secs: 5,
+                parameter_changes: vec!["increment_slot=true".to_string()],
             }),
-            EthereumError::CoreError(e) => e.fix_action(),
+            EthereumError::CoreError(_) => None,
             _ => None,
         }
     }
@@ -188,8 +224,10 @@ impl From<EthereumError> for csv_protocol::ProtocolError {
             EthereumError::WalletError(msg) => {
                 csv_protocol::ProtocolError::Generic(format!("Wallet error: {}", msg))
             }
-            EthereumError::ConfigError(msg) => csv_protocol::ProtocolError::InvalidConfig(msg),
+            EthereumError::ConfigError(msg) => csv_protocol::ProtocolError::InvalidInput(msg),
             EthereumError::DeploymentError(msg) => csv_protocol::ProtocolError::PublishFailed(msg),
+            EthereumError::InvalidInput(msg) => csv_protocol::ProtocolError::InvalidInput(msg),
+            EthereumError::TransactionError(msg) => csv_protocol::ProtocolError::NetworkError(msg),
         }
     }
 }
