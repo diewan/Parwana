@@ -555,16 +555,18 @@ impl SealProtocol for SolanaSealProtocol {
         // Create a complete proof bundle
         let dag_segment: csv_proof::dag::DAGSegment = csv_codec::from_canonical_cbor(&segment)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        let bundle = unsafe {
-            csv_protocol::proof::ProofBundle::new_unchecked(
-                dag_segment,
-                vec![anchor_ref.signature.as_ref().to_vec()],
-                seal_ref,
-                core_anchor_ref,
-                inclusion_proof,
-                finality_proof,
-            )
-        };
+        let bundle = csv_protocol::proof::ProofBundle::with_signature_scheme(
+            csv_proof::SignatureScheme::Ed25519,
+            dag_segment,
+            vec![anchor_ref.signature.as_ref().to_vec()],
+            seal_ref,
+            core_anchor_ref,
+            inclusion_proof,
+            finality_proof,
+        )
+        .map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+        })?;
 
         Ok(bundle)
     }

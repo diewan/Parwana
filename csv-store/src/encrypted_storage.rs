@@ -152,7 +152,7 @@ impl EncryptedStorageManager {
         use pbkdf2::pbkdf2_hmac;
 
         let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, 100_000, &mut key);
+        pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, 600_000, &mut key);
         Ok(key)
     }
 

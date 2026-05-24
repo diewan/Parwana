@@ -154,11 +154,11 @@ impl BrowserKeystore {
         passphrase: &Passphrase,
     ) -> Result<(), BrowserKeystoreError> {
         // Derive encryption key from passphrase
-        let salt = Self::generate_salt();
+        let salt = Self::generate_salt()?;
         let derived_key = Self::derive_key(passphrase, &salt);
 
         // Encrypt the secret key
-        let nonce_bytes = Self::generate_nonce();
+        let nonce_bytes = Self::generate_nonce()?;
         let cipher = Aes256Gcm::new_from_slice(&derived_key)
             .map_err(|e| BrowserKeystoreError::Crypto(e.to_string()))?;
 
@@ -299,17 +299,19 @@ impl BrowserKeystore {
     }
 
     /// Generate random salt.
-    fn generate_salt() -> [u8; 32] {
+    fn generate_salt() -> Result<[u8; 32], BrowserKeystoreError> {
         let mut salt = [0u8; 32];
-        getrandom::getrandom(&mut salt).expect("RNG failed");
-        salt
+        getrandom::getrandom(&mut salt)
+            .map_err(|_| BrowserKeystoreError::Crypto("RNG unavailable".to_string()))?;
+        Ok(salt)
     }
 
     /// Generate random nonce.
-    fn generate_nonce() -> [u8; 12] {
+    fn generate_nonce() -> Result<[u8; 12], BrowserKeystoreError> {
         let mut nonce = [0u8; 12];
-        getrandom::getrandom(&mut nonce).expect("RNG failed");
-        nonce
+        getrandom::getrandom(&mut nonce)
+            .map_err(|_| BrowserKeystoreError::Crypto("RNG unavailable".to_string()))?;
+        Ok(nonce)
     }
 
     /// Derive encryption key using PBKDF2.
@@ -321,7 +323,7 @@ impl BrowserKeystore {
         pbkdf2_hmac::<Sha256>(
             passphrase.as_bytes(),
             salt,
-            100_000, // iterations
+            600_000, // iterations
             &mut key,
         );
         key

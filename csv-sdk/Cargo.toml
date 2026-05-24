@@ -84,7 +84,7 @@ default = ["std", "tokio", "native"]
 std = []
 
 # Chain features
-bitcoin = ["dep:csv-bitcoin", "dep:bitcoin"]
+bitcoin = ["dep:csv-bitcoin", "dep:bitcoin", "csv-bitcoin/signet-rest"]
 ethereum = ["dep:csv-ethereum", "csv-ethereum/rpc"]
 sui = ["dep:csv-sui", "csv-sui/rpc"]
 aptos = ["dep:csv-aptos", "csv-aptos/rpc"]

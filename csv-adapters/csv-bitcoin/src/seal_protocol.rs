@@ -683,7 +683,8 @@ impl SealProtocol for BitcoinSealProtocol {
         )
         .map_err(|e| ProtocolError::Generic(e.to_string()))?;
 
-        Ok(ProofBundle::new(
+        Ok(ProofBundle::with_signature_scheme(
+            csv_proof::SignatureScheme::Secp256k1,
             csv_hash::dag::DAGSegment::new(vec![], csv_hash::Hash::new([0u8; 32])),
             vec![],
             seal_ref,

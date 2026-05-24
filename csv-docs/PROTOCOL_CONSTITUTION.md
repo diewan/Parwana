@@ -112,6 +112,7 @@ A `ProofBundle` is the canonical container for off-chain verification data:
 ```rust
 pub struct ProofBundle {
     pub version: u32,
+    pub signature_scheme: SignatureScheme,
     pub protocol_id: Hash,
     pub source_chain: String,
     pub source_txid: Hash,
@@ -124,6 +125,8 @@ pub struct ProofBundle {
     pub phase: ProofPhase,
 }
 ```
+
+`signature_scheme` is consensus-relevant metadata. Verifiers MUST reject a bundle if this field does not match the source chain adapter's configured scheme.
 
 ### 4.2 Proof Lifecycle
 
@@ -269,11 +272,15 @@ Where `ReplayIdInputs` is a struct containing all six fields above.
 
 The `ReplayRegistry` is an append-only database of seen `ReplayId`s:
 
-- **Insert:** `registry.insert(replay_id) -> Result<(), ProtocolError>`
+- **Insert/CAS:** `registry.insert_if_absent(replay_id) -> Result<(), ProtocolError>`
+- **Consume:** `registry.confirm_consumed(replay_id) -> Result<(), ProtocolError>`
+- **Rollback:** `registry.mark_rolled_back(replay_id) -> Result<(), ProtocolError>`
 - **Check:** `registry.contains(replay_id) -> bool`
 - **Persistence:** Registry state is persisted across process restarts
 
 **Rule:** A transfer with a `ReplayId` already present in the registry MUST be rejected as a replay attack.
+
+Runtime transfer registry entries MUST preserve `transition_id`, source lock transaction hash, destination mint transaction hash after confirmation, and canonical CBOR checkpoint data sufficient for deterministic recovery.
 
 ### 6.3 Nullifiers
 

@@ -11,6 +11,7 @@ csv-verifier = { path = "../csv-verifier" }
 csv-proof = { path = "../csv-proof" }
 csv-hash = { path = "../csv-hash" }
 csv-storage = { path = "../csv-storage" }
+csv-codec = { path = "../csv-codec" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tracing = "0.1"

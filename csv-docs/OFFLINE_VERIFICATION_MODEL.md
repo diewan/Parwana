@@ -47,6 +47,7 @@ A valid offline verification requires the following components to be present and
 - **`inclusion`**: Merkle/MPT/checkpoint proof linking the commitment to an L1 block
 - **`finality`**: Chain-specific finality evidence (see above)
 - **`replay_checked`**: Confirmation that `ReplayId` is not in the local replay database
+- **`signature_scheme`**: The proof bundle's declared signature scheme; offline verifiers must compare it with the source chain's expected scheme before signature verification
 - **`ownership_signature`**: Signature proving ownership of the seal, verified using the scheme derived from chain configuration
 
 Implementers must ensure all four components are verified before accepting a proof bundle as valid.

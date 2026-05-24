@@ -8,10 +8,11 @@
 use csv_hash::Hash;
 use csv_proof::proof::ProofBundle;
 use csv_protocol::finality::ChainCapabilities;
+use csv_protocol::signature::SignatureScheme;
 
 /// Cross-chain transfer data passed to adapters.
 /// This type should eventually live in csv-core.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CrossChainTransfer {
     /// Unique transfer ID
     pub id: String,
@@ -81,6 +82,10 @@ pub trait AdapterRegistry: Send + Sync {
         chain_id: &str,
         seal_id: &[u8],
     ) -> Result<SealRegistryStatus, AdapterError>;
+
+    fn signature_scheme(&self, chain_id: &str) -> Option<SignatureScheme>;
+
+    async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError>;
 
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError>;
 
@@ -188,6 +193,21 @@ impl AdapterRegistry for AdapterRegistryImpl {
         adapter.check_seal_registry(seal_id).await
     }
 
+    fn signature_scheme(&self, chain_id: &str) -> Option<SignatureScheme> {
+        self.adapters.get(chain_id).map(|a| a.signature_scheme())
+    }
+
+    async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        let adapter = self
+            .adapters
+            .get(chain_id)
+            .ok_or(AdapterError::Generic(format!(
+                "Adapter not found for chain: {}",
+                chain_id
+            )))?;
+        adapter.confirm_tx(tx_hash).await
+    }
+
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError> {
         let adapter = self
             .adapters
@@ -220,6 +240,9 @@ impl AdapterRegistry for AdapterRegistryImpl {
 pub trait ChainAdapter: Send + Sync {
     fn chain_id(&self) -> &str;
     fn capabilities(&self) -> ChainCapabilities;
+    fn signature_scheme(&self) -> SignatureScheme {
+        SignatureScheme::Secp256k1
+    }
 
     async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError>;
     async fn mint_sanad(
@@ -233,6 +256,12 @@ pub trait ChainAdapter: Send + Sync {
     ) -> Result<ProofBundle, AdapterError>;
     async fn check_seal_registry(&self, seal_id: &[u8])
     -> Result<SealRegistryStatus, AdapterError>;
+    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        Err(AdapterError::Generic(format!(
+            "confirm_tx is not implemented for transaction {}",
+            tx_hash
+        )))
+    }
     async fn get_balance(&self, address: &str) -> Result<String, AdapterError>;
 }
 

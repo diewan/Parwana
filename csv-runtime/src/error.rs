@@ -117,6 +117,10 @@ pub enum TransferCoordinatorError {
     #[error("Runtime error: {0}")]
     RuntimeError(String),
 
+    /// Invalid transaction hash bytes
+    #[error("Invalid transaction hash: {0}")]
+    InvalidTxHash(String),
+
     /// Finality verification failed
     #[error("Finality verification failed: {0}")]
     FinalityFailed(String),
@@ -156,6 +160,7 @@ impl TransferCoordinatorError {
             TransferCoordinatorError::NotFound => FailureDomain::Storage,
             TransferCoordinatorError::ReplayDbError(_) => FailureDomain::Storage,
             TransferCoordinatorError::RuntimeError(_) => FailureDomain::Consensus,
+            TransferCoordinatorError::InvalidTxHash(_) => FailureDomain::Consensus,
             TransferCoordinatorError::FinalityFailed(_) => FailureDomain::Finality,
             TransferCoordinatorError::ProofBuildFailed(_) => FailureDomain::Verification,
             TransferCoordinatorError::ProofVerificationFailed(_) => FailureDomain::Verification,

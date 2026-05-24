@@ -86,6 +86,10 @@ csv-sdk (public facade)
 - All documentation is in `csv-docs/` (not `docs/`).
 - Finality is NEVER optional — all runtime modes enforce strict finality.
 - CLI holds NO protocol authority state (leases, transfers) — all delegated to csv-runtime.
+- Proof bundles carry their signature scheme, and `csv-runtime` rejects bundles whose scheme does not match the source chain adapter.
+- Runtime transfer recovery persists `transition_id`, lock/mint transaction hashes, and non-empty canonical CBOR checkpoints.
+- Nullifier/replay retention is 7 days by default; replay records are state-transitioned (`Pending`, `Consumed`, `RolledBack`) rather than silently deleted.
+- Browser keystore/storage PBKDF2-SHA256 derivation uses 600,000 iterations for newly written encrypted material.
 
 ## License
 

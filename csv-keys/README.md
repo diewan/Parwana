@@ -17,6 +17,11 @@ Secure key storage for the CSV Protocol with BIP-39/BIP-44 support.
 - Memory-based
 - Browser storage (WASM)
 
+## Security Notes
+
+- Browser keystore PBKDF2-SHA256 derivation uses 600,000 iterations for newly written keys.
+- WASM random salt/nonce generation returns a crypto error when browser RNG is unavailable instead of panicking.
+
 ## License
 
 MIT OR Apache-2.0

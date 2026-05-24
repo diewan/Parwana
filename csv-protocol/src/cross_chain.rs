@@ -456,6 +456,8 @@ pub struct HashEntry {
     pub destination_seal: SealPoint,
     /// Lock transaction hash on source chain
     pub lock_tx_hash: Hash,
+    /// State transition identifier bound to this transfer.
+    pub transition_id: Vec<u8>,
     /// Mint transaction hash on destination chain
     pub mint_tx_hash: Hash,
     /// Unix timestamp of the transfer

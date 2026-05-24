@@ -793,7 +793,8 @@ impl SealProtocol for AptosSealProtocol {
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        ProofBundle::new(
+        ProofBundle::with_signature_scheme(
+            csv_proof::SignatureScheme::Ed25519,
             dag_segment,
             signatures,
             seal_ref,

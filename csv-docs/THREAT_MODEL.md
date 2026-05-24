@@ -155,8 +155,22 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Mitigation:**
 
 - Signature verification using chain-specific schemes (Secp256k1, Ed25519)
+- `ProofBundle.signature_scheme` is checked against the source chain adapter before verification, preventing Secp256k1 fallback on Ed25519 chains
 - Ownership proofs include the signer's public key
 - `csv-core/src/signature.rs` validates signature scheme matches chain
+
+### 4.7 Crash During Mint Completion
+
+**Threat:** Runtime crashes after destination mint submission or confirmation but before local persistence is complete.
+
+**Impact:** Replay state and transfer registry diverge, causing stuck transfers or lost recovery context.
+
+**Mitigation:**
+
+- Mint submission stores the destination transaction hash before confirmation recovery
+- Confirmed mints promote replay state to `Consumed` and persist the completed transfer entry
+- Failed mint paths mark replay state `RolledBack`
+- Recovery checkpoints carry canonical CBOR payloads rather than empty placeholders
 
 ### 4.6 Sanad Consumption
 

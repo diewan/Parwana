@@ -54,6 +54,7 @@ use crate::Hash;
 pub use crate::chain_id::ChainId;
 use crate::sanad::SanadId;
 use crate::seal::SealPoint;
+#[allow(unused_imports)]
 use crate::{DomainSeparatedHash, ReplayRegistryDomain};
 
 /// A seal consumption event recording when and where a seal was used.

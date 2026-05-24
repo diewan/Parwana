@@ -28,7 +28,7 @@ impl AdapterRegistry for MockAdapterRegistry {
         _transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
         Ok(LockResult {
-            tx_hash: "test_lock_tx".to_string(),
+            tx_hash: hex::encode([0x11u8; 32]),
             block_height: 100,
         })
     }
@@ -40,7 +40,21 @@ impl AdapterRegistry for MockAdapterRegistry {
         _proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
         Ok(MintResult {
-            tx_hash: "test_mint_tx".to_string(),
+            tx_hash: hex::encode([0x22u8; 32]),
+            block_height: 200,
+        })
+    }
+
+    fn signature_scheme(
+        &self,
+        _chain_id: &str,
+    ) -> Option<csv_protocol::signature::SignatureScheme> {
+        Some(csv_protocol::signature::SignatureScheme::Secp256k1)
+    }
+
+    async fn confirm_tx(&self, _chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        Ok(MintResult {
+            tx_hash: tx_hash.to_string(),
             block_height: 200,
         })
     }

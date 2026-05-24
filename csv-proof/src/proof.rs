@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
 use crate::provenance::ProofProvenance;
+use crate::signature::SignatureScheme;
 use csv_hash::Hash;
 use csv_hash::HashDomain;
 use csv_hash::canonical::to_canonical_cbor;
@@ -178,6 +179,8 @@ pub struct ProofBundle {
     pub transition_dag: DAGSegment,
     /// Authorizing signatures
     pub signatures: Vec<Vec<u8>>,
+    /// Signature scheme required to verify the authorizing signatures.
+    pub signature_scheme: SignatureScheme,
     /// Seal reference
     pub seal_ref: SealPoint,
     /// Anchor reference
@@ -216,8 +219,30 @@ impl ProofBundle {
         inclusion_proof: InclusionProof,
         finality_proof: FinalityProof,
     ) -> Result<Self, &'static str> {
-        Self::with_certification(
+        Self::with_signature_scheme(
+            SignatureScheme::Secp256k1,
+            transition_dag,
+            signatures,
+            seal_ref,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+        )
+    }
+
+    /// Create a new proof bundle with an explicit signature scheme.
+    pub fn with_signature_scheme(
+        signature_scheme: SignatureScheme,
+        transition_dag: DAGSegment,
+        signatures: Vec<Vec<u8>>,
+        seal_ref: SealPoint,
+        anchor_ref: CommitAnchor,
+        inclusion_proof: InclusionProof,
+        finality_proof: FinalityProof,
+    ) -> Result<Self, &'static str> {
+        Self::with_certification_and_signature_scheme(
             Self::CURRENT_VERSION,
+            signature_scheme,
             transition_dag,
             signatures,
             seal_ref,
@@ -290,6 +315,33 @@ impl ProofBundle {
         provenance: Option<crate::provenance::ProofProvenance>,
         certification: Option<crate::certification::ProofCertification>,
     ) -> Result<Self, &'static str> {
+        Self::with_certification_and_signature_scheme(
+            version,
+            SignatureScheme::Secp256k1,
+            transition_dag,
+            signatures,
+            seal_ref,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+            provenance,
+            certification,
+        )
+    }
+
+    /// Create a new proof bundle with certification and an explicit signature scheme.
+    pub fn with_certification_and_signature_scheme(
+        version: u32,
+        signature_scheme: SignatureScheme,
+        transition_dag: DAGSegment,
+        signatures: Vec<Vec<u8>>,
+        seal_ref: SealPoint,
+        anchor_ref: CommitAnchor,
+        inclusion_proof: InclusionProof,
+        finality_proof: FinalityProof,
+        provenance: Option<crate::provenance::ProofProvenance>,
+        certification: Option<crate::certification::ProofCertification>,
+    ) -> Result<Self, &'static str> {
         // Validate total signature size
         let total_sig_size: usize = signatures.iter().map(|s: &Vec<u8>| s.len()).sum();
         if total_sig_size > MAX_SIGNATURES_TOTAL_SIZE {
@@ -299,6 +351,7 @@ impl ProofBundle {
             version,
             transition_dag,
             signatures,
+            signature_scheme,
             seal_ref,
             anchor_ref,
             inclusion_proof,
@@ -357,6 +410,7 @@ impl ProofBundle {
             version: Self::CURRENT_VERSION,
             transition_dag,
             signatures,
+            signature_scheme: SignatureScheme::Secp256k1,
             seal_ref,
             anchor_ref,
             inclusion_proof,
@@ -417,6 +471,24 @@ mod tests {
         let bytes = bundle.to_bytes().unwrap();
         let restored = ProofBundle::from_bytes(&bytes).unwrap();
         assert_eq!(bundle, restored);
+        assert_eq!(restored.signature_scheme, SignatureScheme::Secp256k1);
+    }
+
+    #[test]
+    fn test_proof_bundle_preserves_explicit_signature_scheme() {
+        let bundle = ProofBundle::with_signature_scheme(
+            SignatureScheme::Ed25519,
+            DAGSegment::new(vec![], Hash::zero()),
+            vec![vec![0xAB; 64]],
+            SealPoint::new(vec![1, 2, 3], Some(42)).unwrap(),
+            CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
+            InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
+            FinalityProof::new(vec![], 6, false).unwrap(),
+        )
+        .unwrap();
+
+        let restored = ProofBundle::from_bytes(&bundle.to_bytes().unwrap()).unwrap();
+        assert_eq!(restored.signature_scheme, SignatureScheme::Ed25519);
     }
 
     #[test]

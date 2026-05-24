@@ -38,7 +38,7 @@ use csv_hash::{DomainSeparatedHash, HashDomain, ReplayRegistryDomain, tagged_has
 pub const REPLAY_CONSTITUTION_VERSION: u32 = 1;
 
 /// Nullifier expiry time in seconds (default: 24 hours).
-pub const NULLIFIER_EXPIRY_SECONDS: u64 = 86400;
+pub const NULLIFIER_EXPIRY_SECONDS: u64 = 604_800;
 
 /// Replay key that uniquely identifies a proof for replay detection
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

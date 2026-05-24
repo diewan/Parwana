@@ -39,7 +39,9 @@
 
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
+#[cfg(feature = "sqlite")]
 use csv_hash::seal::SealPoint;
+#[cfg(feature = "sqlite")]
 use csv_protocol::cross_chain::{CrossChainRegistry, CrossChainRegistryEntry};
 
 use crate::CsvError;

@@ -897,7 +897,8 @@ impl SealProtocol for SuiSealProtocol {
             .flat_map(|node| node.signatures.clone())
             .collect();
 
-        ProofBundle::new(
+        ProofBundle::with_signature_scheme(
+            csv_proof::SignatureScheme::Ed25519,
             dag_segment,
             signatures,
             seal_ref,

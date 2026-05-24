@@ -297,7 +297,7 @@ pub mod error_codes {
     /// CSV proof verification failed.
     pub const CSV_PROOF_VERIFICATION_FAILED: &str = "CSV_009";
     /// CSV wallet error.
-    pub const CSV_WALLET_ERROR: &str = "CSV_009";
+    pub const CSV_WALLET_ERROR: &str = "CSV_019";
     /// CSV network error.
     pub const CSV_NETWORK_ERROR: &str = "CSV_010";
     /// CSV serialization error.

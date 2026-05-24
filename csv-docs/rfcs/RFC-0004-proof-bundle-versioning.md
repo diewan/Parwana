@@ -49,6 +49,7 @@ impl ProtocolVersion {
 ```rust
 pub struct ProofBundle {
     pub version: ProtocolVersion,
+    pub signature_scheme: SignatureScheme,
     // ... other fields
 }
 
@@ -93,6 +94,7 @@ impl ProofBundle {
 - Update `ProofBundle.version` to use `ProtocolVersion`
 - Add `validate_version()` method
 - Add version compatibility checks in verifier
+- Require proof bundles to serialize the signature scheme used for authorizing signatures and reject mismatches against the source chain adapter
 
 ### New Module: `csv-core/src/version_registry.rs`
 

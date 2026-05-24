@@ -16,7 +16,7 @@ Canonical replay semantics for testnet and production. Adapters MUST NOT overrid
 2. `ReplayRegistry::check` — reject if already `Consumed` or `Pending` (CAS).
 3. Execute verification and finality gates.
 4. `ReplayRegistry::insert_if_absent` — atomic CAS before mint.
-5. On rollback/reorg: transition replay record to `Invalidated`, never delete silently.
+5. On rollback/reorg: transition replay record to `RolledBack` or the protocol-level invalidated state, never delete silently.
 
 ## Invalidation Rules
 
@@ -25,6 +25,12 @@ Canonical replay semantics for testnet and production. Adapters MUST NOT overrid
 | Deep reorg on source | `Invalidated` | `RolledBack` |
 | Proof mutation detected | `Rejected` | `Compromised` |
 | Duplicate mint attempt | `Consumed` (unchanged) | Hard error |
+
+Runtime storage backends expose the concrete replay states `Pending`, `Consumed`, and `RolledBack`. A failed mint path after replay insertion MUST call `mark_rolled_back`; a confirmed mint MUST call `confirm_consumed` and persist the completed transfer entry.
+
+## Retention
+
+Nullifier and replay protection records MUST remain queryable long enough for congested multi-hop transfers and delayed finality. The default expiry is 604,800 seconds (7 days).
 
 ## Cross-Chain Replay
 

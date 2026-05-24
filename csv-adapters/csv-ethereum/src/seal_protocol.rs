@@ -525,7 +525,8 @@ impl SealProtocol for EthereumSealProtocol {
             .flat_map(|node| node.signatures.clone())
             .collect();
 
-        ProofBundle::new(
+        ProofBundle::with_signature_scheme(
+            csv_proof::SignatureScheme::Secp256k1,
             dag_segment,
             signatures,
             seal_ref,

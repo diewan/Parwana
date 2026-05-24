@@ -299,30 +299,28 @@ if !replay_db.contains(&replay_id) {
 
 ---
 
-## Invariant 10: Signature Scheme MUST Be Derived From Chain, Not Payload
+## Invariant 10: Signature Scheme MUST Match the Source Chain
 
-**Rule:** The scheme used to verify ownership MUST be derived from `CrossChainHashAlgorithm::for_chain(&source_chain)`, NOT from the `scheme` field inside the proof payload. A malicious actor can omit or forge the payload field.
+**Rule:** Each `ProofBundle` MUST carry the signature scheme used to produce its authorizing signatures. Runtime verification MUST compare that bundle scheme against the source chain adapter's configured scheme and reject any mismatch before cryptographic verification.
 
 **Prohibited:**
 
-- Never trust the `scheme` field in proof payloads for signature verification
-- Never allow the sender to specify which signature scheme to use
-- Never skip scheme derivation from chain configuration
+- Never hardcode `SignatureScheme::Secp256k1` in a generic verification path
+- Never accept a bundle whose scheme disagrees with the source chain adapter
+- Never infer a default scheme when the proof bundle has explicit scheme metadata
 
 **Correct Pattern:**
 
 ```rust
-// CORRECT: Derive scheme from chain configuration
-let expected_scheme = CrossChainHashAlgorithm::for_chain(&source_chain);
-let verifier = SignatureVerifier::new(expected_scheme);
-verifier.verify_ownership(&proof.ownership_signature, &public_key)?;
-
-// PROHIBITED: Trust payload field
-let verifier = SignatureVerifier::new(proof.scheme); // Malicious sender can forge this
-verifier.verify_ownership(&proof.ownership_signature, &public_key)?;
+let bundle_scheme = proof_bundle.signature_scheme;
+let expected_scheme = adapter_registry.signature_scheme(&source_chain)?;
+if bundle_scheme != expected_scheme {
+    return Err(Error::SignatureSchemeMismatch);
+}
+verifier.verify_proof_bundle(&proof_bundle, expected_scheme)?;
 ```
 
-**Security Impact:** A malicious actor can omit the signature scheme field or specify a weak scheme, bypassing verification entirely.
+**Security Impact:** Verifying Ed25519 chains (Solana, Aptos, Sui) under Secp256k1 causes proofs to pass or fail for the wrong cryptographic reason and can create silent cross-chain verification failures.
 
 ---
 
@@ -441,7 +439,7 @@ When reviewing code changes, verify:
 - [ ] `default_verifier_registry()` absent from non-test scope
 - [ ] `VerificationResult::meets_chain_thresholds()` used for mint gate
 - [ ] `ReplayDatabase::insert_if_absent()` called with CAS before mint
-- [ ] Signature scheme derived from chain, not payload
+- [ ] Proof bundle signature scheme matches the source chain adapter
 
 **Violations of any of these invariants must block the PR.**
 

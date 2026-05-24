@@ -785,6 +785,7 @@ impl ChainRuntime {
             version: 1,
             transition_dag: csv_hash::dag::DAGSegment::new(vec![], proof.block_hash),
             signatures: vec![],
+            signature_scheme: csv_proof::SignatureScheme::Secp256k1,
             seal_ref: csv_hash::seal::SealPoint::new(vec![], None)
                 .map_err(|e| CsvError::P2PError(format!("Failed to create seal ref: {}", e)))?,
             anchor_ref: csv_hash::seal::CommitAnchor::new(

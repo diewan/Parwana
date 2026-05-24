@@ -18,28 +18,77 @@ use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
 use crate::recovery::{CheckpointManager, TransferStage};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
-use csv_protocol::signature::SignatureScheme;
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use uuid::Uuid;
 
 const LOCK_OUTPUT_INDEX_BYTES: usize = std::mem::size_of::<u32>();
+const EVENT_VERSION_LOCKED: u64 = 1;
+const EVENT_VERSION_AWAITING_FINALITY: u64 = 2;
+const EVENT_VERSION_PROOF_BUILT: u64 = 3;
+const EVENT_VERSION_PROOF_VERIFIED: u64 = 4;
+const EVENT_VERSION_COMPLETE: u64 = 5;
+const EVENT_VERSION_REPLAY_DETECTED: u64 = 1;
 
-fn hash_from_tx_bytes(tx_hash: &[u8]) -> csv_hash::Hash {
-    csv_hash::Hash::try_from(tx_hash).unwrap_or_else(|_| csv_hash::Hash::sha256(tx_hash))
+fn hash_from_tx_bytes(tx_hash: &[u8]) -> Result<csv_hash::Hash, TransferCoordinatorError> {
+    csv_hash::Hash::try_from(tx_hash).map_err(|_| {
+        TransferCoordinatorError::InvalidTxHash(format!("expected 32 bytes, got {}", tx_hash.len()))
+    })
+}
+
+fn hash_from_tx_str(tx_hash: &str) -> Result<csv_hash::Hash, TransferCoordinatorError> {
+    let normalized = tx_hash.strip_prefix("0x").unwrap_or(tx_hash);
+    let bytes = hex::decode(normalized).map_err(|e| {
+        TransferCoordinatorError::InvalidTxHash(format!("transaction hash is not hex: {}", e))
+    })?;
+    hash_from_tx_bytes(&bytes)
+}
+
+fn runtime_signature_scheme(
+    scheme: csv_proof::SignatureScheme,
+) -> Result<csv_protocol::signature::SignatureScheme, TransferCoordinatorError> {
+    match scheme {
+        csv_proof::SignatureScheme::Ed25519 => {
+            Ok(csv_protocol::signature::SignatureScheme::Ed25519)
+        }
+        csv_proof::SignatureScheme::Secp256k1 => {
+            Ok(csv_protocol::signature::SignatureScheme::Secp256k1)
+        }
+        csv_proof::SignatureScheme::BLS => Err(TransferCoordinatorError::ProofVerificationFailed(
+            "BLS proof bundle signatures are not supported by the runtime verifier".to_string(),
+        )),
+    }
+}
+
+fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_proof::proof::ReplayId {
+    csv_proof::proof::ReplayId {
+        version: csv_proof::proof::ReplayId::CURRENT_VERSION,
+        id: *replay_id.0.as_bytes(),
+    }
+}
+
+fn checkpoint_transfer_data(
+    transfer: &CrossChainTransfer,
+) -> Result<Vec<u8>, TransferCoordinatorError> {
+    csv_codec::to_canonical_cbor(transfer).map_err(|e| {
+        TransferCoordinatorError::RuntimeError(format!(
+            "Failed to serialize transfer checkpoint: {}",
+            e
+        ))
+    })
 }
 
 /// Convert CrossChainTransfer to HashEntry for durable storage
 fn transfer_to_registry_entry(
     transfer: &CrossChainTransfer,
-) -> csv_protocol::cross_chain::HashEntry {
+) -> Result<csv_protocol::cross_chain::HashEntry, TransferCoordinatorError> {
     // Encode chain-specific seal data into the id field
     // For Bitcoin: tx_id + output_index
     // For other chains: tx_hash
     let mut source_seal_id = transfer.lock_tx_hash.clone();
     source_seal_id.extend_from_slice(&transfer.lock_output_index.to_le_bytes());
 
-    csv_protocol::cross_chain::HashEntry {
+    Ok(csv_protocol::cross_chain::HashEntry {
         sanad_id: transfer.sanad_id,
         source_chain: ChainId::new(&transfer.source_chain),
         source_seal: SealPoint {
@@ -51,13 +100,14 @@ fn transfer_to_registry_entry(
             id: vec![], // Will be filled after mint
             nonce: None,
         },
-        lock_tx_hash: hash_from_tx_bytes(&transfer.lock_tx_hash),
+        lock_tx_hash: hash_from_tx_bytes(&transfer.lock_tx_hash)?,
+        transition_id: transfer.transition_id.clone(),
         mint_tx_hash: csv_hash::Hash::zero(), // Will be updated after mint
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
-    }
+    })
 }
 
 /// Convert HashEntry back to CrossChainTransfer for runtime use
@@ -85,7 +135,7 @@ fn registry_entry_to_transfer(
         lock_tx_hash,
         lock_output_index: output_index,
         sanad_id: entry.sanad_id,
-        transition_id: vec![], // Not stored in registry entry
+        transition_id: entry.transition_id.clone(),
     }
 }
 
@@ -352,7 +402,7 @@ impl TransferCoordinator {
                             crate::event_envelope::EventType::from_static(
                                 crate::event_envelope::EventType::TRANSFER_REPLAY_DETECTED,
                             ),
-                            1, // version
+                            EVENT_VERSION_REPLAY_DETECTED,
                             serde_json::json!({
                                 "transfer_id": transfer.id,
                                 "replay_id": replay_id,
@@ -437,10 +487,12 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Persist transfer entry to durable storage for crash recovery
-        let registry_entry = transfer_to_registry_entry(&transfer);
+        let registry_entry = transfer_to_registry_entry(&transfer)?;
         if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
-            tracing::warn!("Failed to persist transfer entry: {}", e);
-            // Non-fatal: continue with transfer, but recovery may fail after crash
+            return Err(TransferCoordinatorError::RuntimeError(format!(
+                "Failed to persist transfer entry: {}",
+                e
+            )));
         }
 
         // Step 2: Verify source chain capabilities
@@ -489,7 +541,7 @@ impl TransferCoordinator {
         if let Err(e) = self.event_store.append(&RuntimeEventEnvelope::new(
             csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             EventType(EventType::TRANSFER_LOCKED.to_string()),
-            1,
+            EVENT_VERSION_LOCKED,
             serde_json::json!({
                 "transfer_id": transfer.id,
                 "source_chain": transfer.source_chain,
@@ -610,7 +662,7 @@ impl TransferCoordinator {
             .create_recovery_checkpoint(
                 transfer.id.clone(),
                 TransferStage::LockConfirmed,
-                vec![], // Data can be populated later with proper serialization
+                checkpoint_transfer_data(&transfer)?,
             );
 
         // Record phase entry: AwaitingFinality (Entered)
@@ -633,7 +685,7 @@ impl TransferCoordinator {
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_FINALITY_AWAITED,
                 ),
-                2, // version
+                EVENT_VERSION_AWAITING_FINALITY,
                 serde_json::json!({
                     "transfer_id": transfer.id,
                 })
@@ -733,7 +785,7 @@ impl TransferCoordinator {
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_PROOF_BUILT,
                 ),
-                3, // version
+                EVENT_VERSION_PROOF_BUILT,
                 serde_json::json!({
                     "transfer_id": transfer.id,
                 })
@@ -772,8 +824,31 @@ impl TransferCoordinator {
                 TransferCoordinatorError::ProofBuildFailed(e.to_string())
             })?;
 
-        // Verify the proof bundle using the canonical verifier
-        let signature_scheme = SignatureScheme::Secp256k1; // Default; adapters should provide scheme
+        // Verify the proof bundle using the canonical verifier.
+        let signature_scheme = runtime_signature_scheme(proof_bundle.signature_scheme)?;
+        if let Some(expected_scheme) = adapter_registry.signature_scheme(&transfer.source_chain) {
+            if expected_scheme != signature_scheme {
+                return Err(TransferCoordinatorError::ProofVerificationFailed(format!(
+                    "Proof bundle signature scheme {:?} does not match source chain {} scheme {:?}",
+                    signature_scheme, transfer.source_chain, expected_scheme
+                )));
+            }
+        }
+
+        let seal_status = adapter_registry
+            .check_seal_registry(&transfer.source_chain, &proof_bundle.seal_ref.id)
+            .await
+            .map_err(|e| {
+                TransferCoordinatorError::ProofVerificationFailed(format!(
+                    "Seal registry check failed: {}",
+                    e
+                ))
+            })?;
+        let seal_is_consumed = matches!(
+            seal_status,
+            crate::adapter_registry::SealRegistryStatus::Consumed
+        );
+        let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
 
         let required_confirmations = runtime_ctx
             .policy
@@ -784,7 +859,9 @@ impl TransferCoordinator {
             signature_scheme,
             required_confirmations,
             current_block_height: Some(lock_result.block_height + required_confirmations),
-            seal_registry: None, // Seal registry check is handled by replay_db
+            seal_registry: Some(Box::new(move |seal_id: &[u8]| {
+                seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
+            })),
             chain_data: None,
         };
 
@@ -829,7 +906,7 @@ impl TransferCoordinator {
                         crate::event_envelope::EventType::from_static(
                             crate::event_envelope::EventType::TRANSFER_PROOF_VERIFIED,
                         ),
-                        4, // version
+                        EVENT_VERSION_PROOF_VERIFIED,
                         serde_json::json!({
                             "transfer_id": transfer.id,
                         })
@@ -910,11 +987,12 @@ impl TransferCoordinator {
 
         // Check circuit breaker before attempting RPC calls
         {
-            let breaker = self
+            let allow_request = self
                 .circuit_breaker
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if !breaker.allow_request() {
+                .unwrap_or_else(|e| e.into_inner())
+                .allow_request();
+            if !allow_request {
                 let _ =
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
@@ -928,8 +1006,8 @@ impl TransferCoordinator {
                             ),
                             attempt: 1,
                         });
-                // TODO: Implement mark_rolled_back using csv-storage
-                // let _ = self.replay_db.mark_rolled_back(&replay_id);
+                let typed_replay_id = replay_id_from_hash(replay_id);
+                let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
                 return Err(TransferCoordinatorError::RuntimeError(
                     "Circuit breaker is open - RPC calls blocked".to_string(),
                 ));
@@ -980,32 +1058,52 @@ impl TransferCoordinator {
             }
         }
 
-        let mint_result = mint_result.ok_or_else(|| {
-            let _ = self
-                .execution_journal
-                .record(crate::execution_journal::TransferPhaseEntry {
-                    transfer_id: transfer.id.clone(),
-                    replay_id,
-                    proof_hash: [0u8; 32],
-                    phase: crate::recovery::TransferStage::MintConfirmed,
-                    ts: std::time::SystemTime::now(),
-                    outcome: crate::execution_journal::PhaseOutcome::Failed(
-                        last_error
-                            .as_ref()
-                            .map(|e: &crate::adapter_registry::AdapterError| e.to_string())
-                            .unwrap_or_else(|| "Unknown error".to_string()),
-                    ),
-                    attempt: 1,
-                });
-            // TODO: Implement mark_rolled_back using csv-storage
-            // let _ = self.replay_db.mark_rolled_back(&replay_id);
-            TransferCoordinatorError::MintFailed(
-                last_error
+        let mint_result = match mint_result {
+            Some(result) => result,
+            None => {
+                let error = last_error
                     .as_ref()
                     .map(|e: &crate::adapter_registry::AdapterError| e.to_string())
-                    .unwrap_or_else(|| "Unknown error".to_string()),
-            )
-        })?;
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                let _ =
+                    self.execution_journal
+                        .record(crate::execution_journal::TransferPhaseEntry {
+                            transfer_id: transfer.id.clone(),
+                            replay_id,
+                            proof_hash: [0u8; 32],
+                            phase: crate::recovery::TransferStage::MintConfirmed,
+                            ts: std::time::SystemTime::now(),
+                            outcome: crate::execution_journal::PhaseOutcome::Failed(error.clone()),
+                            attempt: 1,
+                        });
+                let typed_replay_id = replay_id_from_hash(replay_id);
+                let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
+                return Err(TransferCoordinatorError::MintFailed(error));
+            }
+        };
+
+        let mut submitted_registry_entry = transfer_to_registry_entry(&transfer)?;
+        submitted_registry_entry.mint_tx_hash = hash_from_tx_str(&mint_result.tx_hash)?;
+        self.replay_db
+            .store_transfer_entry(&submitted_registry_entry)
+            .await
+            .map_err(|e| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to persist submitted mint transaction: {}",
+                    e
+                ))
+            })?;
+        self.execution_journal
+            .record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer.id.clone(),
+                replay_id,
+                proof_hash: [0u8; 32],
+                phase: crate::recovery::TransferStage::MintSubmitted,
+                ts: std::time::SystemTime::now(),
+                outcome: crate::execution_journal::PhaseOutcome::Completed,
+                attempt: 1,
+            })
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Record phase entry: Minting (Completed)
         self.execution_journal
@@ -1027,7 +1125,7 @@ impl TransferCoordinator {
             .create_recovery_checkpoint(
                 transfer.id.clone(),
                 TransferStage::MintConfirmed,
-                vec![], // Data can be populated later with proper serialization
+                checkpoint_transfer_data(&transfer)?,
             );
 
         // Promote replay entry Pending → Consumed after mint confirms on-chain
@@ -1036,22 +1134,17 @@ impl TransferCoordinator {
             .await
             .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
 
-        // Persist the full transfer entry for recovery and audit.
-        // Runtime coordinates only - use CrossChainTransfer for tracking
-        let _registry_entry = CrossChainTransfer {
-            id: transfer.id.clone(),
-            source_chain: transfer.source_chain.clone(),
-            destination_chain: transfer.destination_chain.clone(),
-            lock_tx_hash: transfer.lock_tx_hash.clone(),
-            lock_output_index: transfer.lock_output_index,
-            sanad_id: transfer.sanad_id,
-            transition_id: transfer.transition_id.clone(),
-        };
-
-        // TODO: Implement transfer persistence using csv-storage TransferStore trait
-        // if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
-        //     tracing::warn!("Failed to persist transfer entry: {}", e);
-        // }
+        let mut registry_entry = transfer_to_registry_entry(&transfer)?;
+        registry_entry.mint_tx_hash = hash_from_tx_str(&mint_result.tx_hash)?;
+        self.replay_db
+            .store_transfer_entry(&registry_entry)
+            .await
+            .map_err(|e| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to persist confirmed transfer: {}",
+                    e
+                ))
+            })?;
 
         // Append Complete event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
@@ -1060,7 +1153,7 @@ impl TransferCoordinator {
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_COMPLETE,
                 ),
-                5, // version
+                EVENT_VERSION_COMPLETE,
                 serde_json::json!({
                     "transfer_id": transfer.id,
                     "mint_tx_hash": mint_result.tx_hash,
@@ -1098,7 +1191,7 @@ impl TransferCoordinator {
             .create_recovery_checkpoint(
                 transfer.id.clone(),
                 TransferStage::Completed,
-                vec![], // Data can be populated later with proper serialization
+                checkpoint_transfer_data(&transfer)?,
             );
 
         // Record phase entry: Completed (Entered)
@@ -1317,13 +1410,18 @@ impl TransferCoordinator {
                 }
             }
             crate::recovery::TransferStage::MintSubmitted => {
-                // Mint was submitted but not confirmed - resume by checking mint status
-                tracing::warn!(
-                    "Resume from MintSubmitted requires mint tx hash - not yet implemented"
-                );
-                Err(TransferCoordinatorError::RuntimeError(
-                    "Resume from MintSubmitted not yet implemented - requires mint tx hash persistence".to_string()
-                ))
+                let entry = transfers
+                    .iter()
+                    .find(|entry| hex::encode(entry.sanad_id.as_bytes()) == transfer_id)
+                    .ok_or(TransferCoordinatorError::NotFound)?;
+                if entry.mint_tx_hash == csv_hash::Hash::zero() {
+                    return Err(TransferCoordinatorError::RuntimeError(
+                        "Cannot resume from MintSubmitted phase - mint tx hash missing".to_string(),
+                    ));
+                }
+                let mint_tx_hash = hex::encode(entry.mint_tx_hash.as_bytes());
+                self.execute_from_mint(transfer_id, &mint_tx_hash, adapter_registry)
+                    .await
             }
             crate::recovery::TransferStage::MintConfirmed => {
                 // Mint was confirmed - transfer should be complete
@@ -1434,7 +1532,7 @@ impl TransferCoordinator {
         &self,
         transfer_id: &str,
         mint_tx_hash: &str,
-        _adapter_registry: &dyn AdapterRegistry,
+        adapter_registry: &dyn AdapterRegistry,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
         self.assert_single_active_coordinator(transfer_id).await?;
@@ -1445,12 +1543,62 @@ impl TransferCoordinator {
             mint_tx_hash
         );
 
-        // TODO: Implement mint confirmation polling
-        // For now, return a placeholder receipt
-        Err(TransferCoordinatorError::RuntimeError(
-            "execute_from_mint not yet implemented - requires mint confirmation polling"
-                .to_string(),
-        ))
+        let transfers = self.replay_db.load_all_transfers().await.map_err(|e| {
+            TransferCoordinatorError::RuntimeError(format!("Failed to load transfers: {}", e))
+        })?;
+
+        let transfer = transfers
+            .iter()
+            .find(|entry| hex::encode(entry.sanad_id.as_bytes()) == transfer_id)
+            .map(|entry| registry_entry_to_transfer(entry, transfer_id.to_string()))
+            .ok_or(TransferCoordinatorError::NotFound)?;
+
+        let mint_result = adapter_registry
+            .confirm_tx(&transfer.destination_chain, mint_tx_hash)
+            .await
+            .map_err(|e| TransferCoordinatorError::RuntimeError(e.to_string()))?;
+
+        let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
+        self.replay_db
+            .confirm_consumed(replay_id.0.as_bytes())
+            .await
+            .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
+
+        let mut registry_entry = transfer_to_registry_entry(&transfer)?;
+        registry_entry.mint_tx_hash = hash_from_tx_str(&mint_result.tx_hash)?;
+        self.replay_db
+            .store_transfer_entry(&registry_entry)
+            .await
+            .map_err(|e| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to persist confirmed transfer: {}",
+                    e
+                ))
+            })?;
+
+        self.event_bus
+            .emit(TransferEvent::Complete(crate::event_bus::TransferContext {
+                transfer_id: transfer.id.clone(),
+                replay_id: Some(replay_id),
+                proof_hash: None,
+                coordinator_id: self
+                    .runtime_id
+                    .0
+                    .parse()
+                    .unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                lease_id: None,
+                source_chain: transfer.source_chain.clone(),
+                dest_chain: transfer.destination_chain.clone(),
+                finality_state: crate::event_bus::FinalityState::Confirmed,
+                recovery_attempt: 0,
+            }));
+
+        Ok(TransferReceipt {
+            transfer_id: transfer.id,
+            replay_id,
+            lock_tx_hash: hex::encode(transfer.lock_tx_hash),
+            mint_tx_hash: mint_result.tx_hash,
+        })
     }
 
     /// Resume all incomplete transfers after a crash or restart.
@@ -1554,7 +1702,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let entry = transfer_to_registry_entry(&transfer);
+        let entry = transfer_to_registry_entry(&transfer).unwrap();
         let restored = registry_entry_to_transfer(&entry, transfer.id.clone());
 
         assert_eq!(restored.id, transfer.id);
@@ -1563,6 +1711,25 @@ mod tests {
         assert_eq!(restored.lock_tx_hash, transfer.lock_tx_hash);
         assert_eq!(restored.lock_output_index, transfer.lock_output_index);
         assert_eq!(restored.sanad_id, transfer.sanad_id);
+        assert_eq!(restored.transition_id, transfer.transition_id);
+    }
+
+    #[test]
+    fn test_registry_entry_rejects_malformed_lock_tx_hash() {
+        let transfer = CrossChainTransfer {
+            id: "bad-hash".to_string(),
+            source_chain: "bitcoin".to_string(),
+            destination_chain: "ethereum".to_string(),
+            lock_tx_hash: vec![0xAB; 31],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
+
+        assert!(matches!(
+            transfer_to_registry_entry(&transfer),
+            Err(TransferCoordinatorError::InvalidTxHash(_))
+        ));
     }
 
     #[async_trait::async_trait]
@@ -1580,7 +1747,7 @@ mod tests {
             _transfer: &CrossChainTransfer,
         ) -> Result<LockResult, crate::adapter_registry::AdapterError> {
             Ok(LockResult {
-                tx_hash: "0xlock".to_string(),
+                tx_hash: hex::encode([0x11u8; 32]),
                 block_height: 100,
             })
         }
@@ -1591,7 +1758,7 @@ mod tests {
             _proof_bundle: &[u8],
         ) -> Result<MintResult, crate::adapter_registry::AdapterError> {
             Ok(MintResult {
-                tx_hash: "0xmint".to_string(),
+                tx_hash: hex::encode([0x22u8; 32]),
                 block_height: 200,
             })
         }
@@ -2447,7 +2614,7 @@ mod tests {
                 _transfer: &CrossChainTransfer,
             ) -> Result<LockResult, crate::adapter_registry::AdapterError> {
                 Ok(LockResult {
-                    tx_hash: "0xlock".to_string(),
+                    tx_hash: hex::encode([0x11u8; 32]),
                     block_height: 100,
                 })
             }

@@ -310,7 +310,8 @@ where
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        csv_protocol::proof::ProofBundle::new(
+        csv_protocol::proof::ProofBundle::with_signature_scheme(
+            csv_proof::SignatureScheme::Secp256k1,
             dag_segment,
             signatures,
             seal_ref,
