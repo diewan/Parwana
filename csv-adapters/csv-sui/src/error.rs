@@ -3,8 +3,40 @@
 //! This module provides a comprehensive error taxonomy for the Sui adapter,
 //! with chain-specific error variants and recovery guidance.
 
-use csv_protocol::mcp::{FixAction, HasErrorSuggestion, error_codes};
 use thiserror::Error;
+
+// Local implementations (mcp module removed during migration)
+#[derive(Debug, Clone)]
+pub enum FixAction {
+    Retry { backoff_secs: u64 },
+    CheckState { check: String },
+    SwitchEndpoint { endpoint: String },
+}
+
+pub trait HasErrorSuggestion {
+    fn error_code(&self) -> u32;
+    fn fix_action(&self) -> Option<FixAction>;
+    fn description(&self) -> String;
+    fn suggested_fix(&self) -> String;
+    fn docs_url(&self) -> String;
+}
+
+mod error_codes {
+    pub const SUI_CHECKPOINT_FAILED: u32 = 1001;
+    pub const SUI_TRANSACTION_FAILED: u32 = 1002;
+    pub const SUI_SERIALIZATION_ERROR: u32 = 1003;
+    pub const SUI_CONFIRMATION_TIMEOUT: u32 = 1004;
+    pub const SUI_REORG_DETECTED: u32 = 1005;
+    pub const SUI_NETWORK_MISMATCH: u32 = 1006;
+    pub const SUI_RPC_ERROR: u32 = 1007;
+    pub const SUI_OBJECT_USED: u32 = 1008;
+    pub const SUI_STATE_PROOF_FAILED: u32 = 1009;
+    pub const SUI_EVENT_PROOF_FAILED: u32 = 1010;
+
+    pub fn docs_url(code: u32) -> String {
+        format!("https://docs.csv-protocol.io/errors/{}", code)
+    }
+}
 
 /// Comprehensive error types for the Sui adapter.
 ///
@@ -111,7 +143,7 @@ impl SuiError {
 }
 
 impl HasErrorSuggestion for SuiError {
-    fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> u32 {
         match self {
             SuiError::RpcError(_) => error_codes::SUI_RPC_ERROR,
             SuiError::ObjectUsed(_) => error_codes::SUI_OBJECT_USED,
@@ -123,9 +155,9 @@ impl HasErrorSuggestion for SuiError {
             SuiError::ConfirmationTimeout { .. } => error_codes::SUI_CONFIRMATION_TIMEOUT,
             SuiError::ReorgDetected { .. } => error_codes::SUI_REORG_DETECTED,
             SuiError::NetworkMismatch { .. } => error_codes::SUI_NETWORK_MISMATCH,
-            SuiError::ConfigurationError(_) => "SUI_CONFIGURATION_ERROR",
-            SuiError::FeatureNotEnabled(_) => "SUI_FEATURE_NOT_ENABLED",
-            SuiError::CoreError(e) => e.error_code(),
+            SuiError::ConfigurationError(_) => 2001,
+            SuiError::FeatureNotEnabled(_) => 2002,
+            SuiError::CoreError(_) => 0,
         }
     }
 
@@ -223,58 +255,35 @@ impl HasErrorSuggestion for SuiError {
                     feature, feature
                 )
             }
-            SuiError::CoreError(e) => e.suggested_fix(),
+            SuiError::CoreError(_) => "See protocol error documentation".to_string(),
         }
     }
 
     fn docs_url(&self) -> String {
         match self {
-            SuiError::CoreError(e) => e.docs_url(),
+            SuiError::CoreError(_) => "https://docs.csv-protocol.io/errors/protocol".to_string(),
             _ => error_codes::docs_url(self.error_code()),
         }
     }
 
     fn fix_action(&self) -> Option<FixAction> {
         match self {
-            SuiError::RpcError(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
-                    "rpc_endpoint".to_string(),
-                    "https://fullnode.mainnet.sui.io".to_string(),
-                )]),
-            }),
-            SuiError::ConfirmationTimeout { .. } => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([(
-                    "wait_seconds".to_string(),
-                    "30".to_string(),
-                )]),
-            }),
-            SuiError::TransactionFailed(_) => Some(FixAction::Retry {
-                parameter_changes: std::collections::HashMap::from([
-                    ("check_gas".to_string(), "true".to_string()),
-                    ("dry_run_first".to_string(), "true".to_string()),
-                ]),
-            }),
+            SuiError::RpcError(_) => Some(FixAction::Retry { backoff_secs: 5 }),
+            SuiError::ConfirmationTimeout { .. } => Some(FixAction::Retry { backoff_secs: 10 }),
+            SuiError::TransactionFailed(_) => Some(FixAction::Retry { backoff_secs: 5 }),
             SuiError::ReorgDetected { .. } => Some(FixAction::CheckState {
-                url: "https://suiscan.xyz".to_string(),
-                what: "Check current Sui checkpoint".to_string(),
+                check: "Check current Sui checkpoint".to_string(),
             }),
             SuiError::StateProofFailed(_) | SuiError::EventProofFailed(_) => {
-                Some(FixAction::Retry {
-                    parameter_changes: std::collections::HashMap::from([(
-                        "rpc_endpoint".to_string(),
-                        "try_alternative".to_string(),
-                    )]),
-                })
+                Some(FixAction::Retry { backoff_secs: 5 })
             }
             SuiError::ConfigurationError(_) => Some(FixAction::CheckState {
-                url: "https://docs.sui.io".to_string(),
-                what: "Check Sui adapter configuration documentation".to_string(),
+                check: "Check Sui adapter configuration documentation".to_string(),
             }),
             SuiError::FeatureNotEnabled(_) => Some(FixAction::CheckState {
-                url: "https://github.com/Diewan/csv-adapter".to_string(),
-                what: "Enable required feature in Cargo.toml".to_string(),
+                check: "Enable required feature in Cargo.toml".to_string(),
             }),
-            SuiError::CoreError(e) => e.fix_action(),
+            SuiError::CoreError(_) => None,
             _ => None,
         }
     }
@@ -291,25 +300,25 @@ impl From<SuiError> for csv_protocol::ProtocolError {
         match err {
             SuiError::CoreError(e) => e,
             SuiError::RpcError(msg) | SuiError::TransactionFailed(msg) => {
-                csv_protocol::ProtocolError::NetworkError(msg)
+                csv_protocol::ProtocolError::Generic(msg)
             }
             SuiError::ObjectUsed(msg) => csv_protocol::ProtocolError::InvalidSeal(msg),
             SuiError::StateProofFailed(msg) | SuiError::EventProofFailed(msg) => {
                 csv_protocol::ProtocolError::InclusionProofFailed(msg)
             }
-            SuiError::CheckpointFailed(msg) => csv_protocol::ProtocolError::NetworkError(msg),
+            SuiError::CheckpointFailed(msg) => csv_protocol::ProtocolError::Generic(msg),
             SuiError::SerializationError(msg) => csv_protocol::ProtocolError::InvalidSeal(msg),
             SuiError::ConfirmationTimeout {
                 tx_digest,
                 timeout_ms,
-            } => csv_protocol::ProtocolError::NetworkError(format!(
+            } => csv_protocol::ProtocolError::Generic(format!(
                 "Timeout waiting for tx {} after {}ms",
                 tx_digest, timeout_ms
             )),
             SuiError::ReorgDetected { checkpoint } => {
-                csv_protocol::ProtocolError::ReorgInvalid(format!("Reorg at checkpoint {}", checkpoint))
+                csv_protocol::ProtocolError::ReplayDetected(format!("Reorg at checkpoint {}", checkpoint))
             }
-            sui_err => csv_protocol::ProtocolError::NetworkError(format!("{}", sui_err)),
+            sui_err => csv_protocol::ProtocolError::Generic(format!("{}", sui_err)),
         }
     }
 }

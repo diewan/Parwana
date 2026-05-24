@@ -4,37 +4,72 @@
 
 use csv_protocol::verified::VerificationAssurance;
 use std::string::String;
+use uuid::Uuid;
+use csv_hash::ReplayIdHash;
+
+/// Forensic context for transfer events
+///
+/// Contains all debugging information needed for forensic analysis
+/// of transfer execution and failures.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferContext {
+    /// Transfer identifier
+    pub transfer_id: String,
+    /// Replay ID (if available)
+    pub replay_id: Option<ReplayIdHash>,
+    /// Proof hash (if available)
+    pub proof_hash: Option<[u8; 32]>,
+    /// Coordinator instance identifier
+    pub coordinator_id: Uuid,
+    /// Lease identifier (if available)
+    pub lease_id: Option<Uuid>,
+    /// Source chain
+    pub source_chain: String,
+    /// Destination chain
+    pub dest_chain: String,
+    /// Finality state
+    pub finality_state: FinalityState,
+    /// Recovery attempt count
+    pub recovery_attempt: u32,
+}
+
+/// Finality state for forensic tracking
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FinalityState {
+    /// Finality not yet checked
+    NotChecked,
+    /// Awaiting finality
+    Awaiting,
+    /// Finality confirmed
+    Confirmed,
+    /// Finality failed
+    Failed(String),
+}
 
 /// Structured events emitted during transfer execution
 #[derive(Debug, Clone)]
 pub enum TransferEvent {
     /// Transfer is being locked on source chain
-    Locking { transfer_id: String },
+    Locking(TransferContext),
     /// Waiting for chain finality
-    AwaitingFinality { transfer_id: String },
+    AwaitingFinality(TransferContext),
     /// Building inclusion proof
-    BuildingProof { transfer_id: String },
+    BuildingProof(TransferContext),
     /// Proof verified by canonical verifier
-    ProofVerified { transfer_id: String },
+    ProofVerified(TransferContext),
     /// Proof is ready for verification
-    ProofReady { transfer_id: String },
+    ProofReady(TransferContext),
     /// Minting on destination chain
-    Minting { transfer_id: String },
+    Minting(TransferContext),
     /// Transfer complete with mint tx hash
-    Complete {
-        transfer_id: String,
-        mint_tx_hash: String,
-    },
+    Complete(TransferContext),
     /// Rollback was triggered
-    RollbackTriggered {
-        transfer_id: String,
-        reason: String,
-    },
+    RollbackTriggered { ctx: TransferContext, reason: String },
     /// Replay was detected
-    ReplayDetected { transfer_id: String },
+    ReplayDetected(TransferContext),
     /// Verification assurance was downgraded
     VerificationDowngraded {
-        transfer_id: String,
+        ctx: TransferContext,
         from: VerificationAssurance,
     },
 }

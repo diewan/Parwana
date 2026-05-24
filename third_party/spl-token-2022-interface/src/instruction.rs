@@ -917,7 +917,7 @@ impl<'a> TokenInstruction<'a> {
             Self::Revoke => buf.push(5),
             Self::SetAuthority {
                 authority_type,
-                ref new_authority,
+                new_authority,
             } => {
                 buf.push(6);
                 buf.push(authority_type.into());

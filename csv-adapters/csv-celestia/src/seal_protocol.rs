@@ -1,6 +1,6 @@
 //! Celestia Seal Protocol Implementation
 //!
-//! This module implements the `SealProtocol` trait from `csv_core` for the
+//! This module implements the `SealProtocol` trait from `csv_protocol` for the
 //! Celestia Data Availability layer. It provides:
 //!
 //! - **Single-use seals** via proof consumption on Celestia
@@ -21,7 +21,7 @@
 //! 3. Seal is now "consumed" (cannot publish different commitment there)
 //! ```
 
-use csv_protocol::dag::DAGSegment;
+use csv_hash::dag::DAGSegment;
 use csv_protocol::error::Result as CoreResult;
 use csv_hash::Hash;
 use csv_proof::proof::ProofBundle;
@@ -110,15 +110,16 @@ where
     type InclusionProof = CommitmentProof;
     type FinalityProof = CelestiaFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> CoreResult<Self::CommitAnchor> {
+    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> std::result::Result<Self::CommitAnchor, Box<(dyn std::error::Error + 'static)>> {
         // This is a synchronous wrapper around async code
         // In production, this should be properly async
 
         // Check that seal hasn't been consumed
         if !seal.is_valid() {
-            return Err(csv_protocol::error::ProtocolError::InvalidSeal(
-                "Seal already consumed".to_string(),
-            ));
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Seal already consumed",
+            )));
         }
 
         // The commitment becomes the blob commitment
@@ -138,7 +139,7 @@ where
         Ok(anchor)
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::InclusionProof, Box<(dyn std::error::Error + 'static)>> {
         // In production, this would verify the inclusion proof from Celestia
         // Create a minimal commitment proof for testing
         let proof = CommitmentProof::new(
@@ -153,7 +154,7 @@ where
         Ok(proof)
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    fn verify_finality(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::FinalityProof, Box<(dyn std::error::Error + 'static)>> {
         // Tendermint has deterministic finality
         let proof = CelestiaFinalityProof::new(
             anchor.height,
@@ -165,19 +166,20 @@ where
         Ok(proof)
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
+    fn enforce_seal(&self, seal: Self::SealPoint) -> std::result::Result<(), Box<(dyn std::error::Error + 'static)>> {
         // Verify seal hasn't been consumed
         if !seal.is_valid() {
-            return Err(csv_protocol::error::ProtocolError::InvalidSeal(
-                "Seal has been consumed".to_string(),
-            ));
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Seal has been consumed",
+            )));
         }
 
         // In production, this would query DA to double-check
         Ok(())
     }
 
-    fn create_seal(&self, value: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    fn create_seal(&self, value: Option<u64>) -> std::result::Result<Self::SealPoint, Box<(dyn std::error::Error + 'static)>> {
         // Create a new seal at the next available height
         // In production, this would query for the latest height
         let height = value.unwrap_or(1); // Use value as height hint
@@ -223,14 +225,17 @@ where
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>,
-    ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
+    ) -> std::result::Result<ProofBundle, Box<(dyn std::error::Error + 'static)>> {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
 
         let seal_ref =
             csv_hash::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height))
                 .map_err(|e| {
-                    csv_protocol::error::ProtocolError::InvalidSeal(format!("Invalid seal: {}", e))
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Invalid seal: {}", e),
+                    )) as Box<dyn std::error::Error>
                 })?;
 
         let anchor_ref = csv_hash::seal::CommitAnchor::new(
@@ -239,7 +244,10 @@ where
             anchor.commitment.as_bytes().to_vec(),
         )
         .map_err(|e| {
-            csv_protocol::error::ProtocolError::InvalidSeal(format!("Invalid anchor: {}", e))
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid anchor: {}", e),
+            )) as Box<dyn std::error::Error>
         })?;
 
         // Construct proof bytes from row_proof and data_proof
@@ -258,10 +266,10 @@ where
             inclusion.row_index as u64,
         )
         .map_err(|e| {
-            csv_protocol::error::ProtocolError::InclusionProofFailed(format!(
-                "Invalid inclusion proof: {}",
-                e
-            ))
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid inclusion proof: {}", e),
+            )) as Box<dyn std::error::Error>
         })?;
 
         let finality_proof = csv_protocol::proof::FinalityProof::new(
@@ -270,18 +278,26 @@ where
             !finality.quorum_signatures.is_empty(),
         )
         .map_err(|e| {
-            csv_protocol::error::ProtocolError::FinalityNotReached(format!(
-                "Invalid finality proof: {}",
-                e
-            ))
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid finality proof: {}", e),
+            )) as Box<dyn std::error::Error>
         })?;
 
-        // Since transition_dag is now Vec<u8>, pass it directly
+        // Deserialize transition_dag from Vec<u8> to DAGSegment
+        let dag_segment: csv_hash::dag::DAGSegment = csv_codec::from_canonical_cbor(&transition_dag)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Failed to deserialize DAG: {}", e),
+                )) as Box<dyn std::error::Error>
+            })?;
+
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
         csv_protocol::proof::ProofBundle::new(
-            transition_dag,
+            dag_segment,
             signatures,
             seal_ref,
             anchor_ref,
@@ -289,11 +305,14 @@ where
             finality_proof,
         )
         .map_err(|e| {
-            csv_protocol::error::ProtocolError::Generic(format!("Failed to build proof bundle: {}", e))
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Failed to build proof bundle: {}", e),
+            )) as Box<dyn std::error::Error>
         })
     }
 
-    fn rollback(&self, _anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
+    fn rollback(&self, _anchor: Self::CommitAnchor) -> std::result::Result<(), Box<(dyn std::error::Error + 'static)>> {
         // Handle rollback for a specific anchor due to chain reorganization
         // In production, this would:
         // 1. Verify the anchor is no longer in the canonical chain

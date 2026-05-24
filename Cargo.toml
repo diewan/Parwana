@@ -89,3 +89,4 @@ spl-token-2022-interface = { path = "third_party/spl-token-2022-interface" }
 # Tests, build scripts, and generator tools may opt-out with #[allow(..)]
 clippy.expect_used = "deny"
 clippy.unwrap_used = "deny"
+clippy.panic = "deny"

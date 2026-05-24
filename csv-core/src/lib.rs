@@ -146,7 +146,7 @@ pub mod canonical {
     };
     pub use csv_hash::canonical::cbor_tags;
 }
-pub mod replay_registry;
+// pub mod replay_registry; // Moved to csv-hash during migration
 pub mod proof_pipeline;
 
 // pub mod rpc;
@@ -185,8 +185,8 @@ pub mod failure_domains;
 pub mod deterministic_recovery;
 
 // Phase 6: Replay protection and finality
-pub mod replay_constitution;
-pub mod finality;
+// pub mod replay_constitution; // Moved to csv-protocol during migration
+// pub mod finality; // Moved to csv-protocol during migration
 pub mod chain_capabilities;
 
 // Re-exports for convenience
@@ -195,8 +195,8 @@ pub use abi_constitution::*;
 pub use deployment::*;
 pub use failure_domains::*;
 pub use deterministic_recovery::*;
-pub use replay_constitution::*;
-pub use finality::*;
+// pub use replay_constitution::*; // Moved to csv-protocol during migration
+// pub use finality::*; // Moved to csv-protocol during migration
 pub use chain_capabilities::*;
 
 // Trust package re-exports
@@ -214,13 +214,13 @@ pub mod config_validation;
 pub mod runtime_health;
 
 /// Restart-safe finality anchoring — canonical chain snapshot persistence.
-pub mod finality_anchor;
+// pub mod finality_anchor; // Moved to csv-protocol during migration
 
 /// Protocol version compatibility matrix for version negotiation.
 pub mod compatibility;
 
 /// Chain-specific finality grades (SolanaCommitmentGrade, EthereumFinalityStage).
-pub mod chain_specific;
+// pub mod chain_specific; // Moved to csv-protocol during migration
 
 /// Data authority tags — prevent explorer-authoritative state interpretation.
 pub mod data_authority;
@@ -376,14 +376,6 @@ pub use store::InMemorySealStore;
 /// Experimental module — feature-gated behind `experimental`.
 /// These APIs may change or be removed without notice.
 #[cfg(feature = "experimental")]
-
-// ===========================================================================
-// Re-exports: Phase 3 (Atomic Swap / HTLSE) - DELETED
-// ===========================================================================
-
-// ===========================================================================
-// Re-exports: Phase 3 (Stealth Addresses) - DELETED
-// ===========================================================================
 
 // ===========================================================================
 // Re-exports: Phase 3 (Pedersen Commitments) - feature-gated

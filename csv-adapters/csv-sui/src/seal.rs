@@ -9,7 +9,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{SuiError, SuiResult};
 use crate::types::SuiSealPoint;
-use csv_protocol::hardening::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
+
+// Local implementation of BoundedQueue (hardening module removed during migration)
+const MAX_SEAL_NULLIFIER_SIZE: usize = 10000;
+
+#[derive(Clone, Debug)]
+struct BoundedQueue<T> {
+    queue: std::collections::VecDeque<T>,
+    max_size: usize,
+}
+
+impl<T> BoundedQueue<T> {
+    fn new(max_size: usize) -> Self {
+        Self {
+            queue: std::collections::VecDeque::new(),
+            max_size,
+        }
+    }
+
+    fn push(&mut self, item: T) {
+        if self.queue.len() >= self.max_size {
+            self.queue.pop_front();
+        }
+        self.queue.push_back(item);
+    }
+}
 
 /// A persisted seal record that can be serialized.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

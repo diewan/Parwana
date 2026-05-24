@@ -11,18 +11,60 @@
 
 
 use crate::adapter_registry::{AdapterRegistry, CrossChainTransfer};
-use crate::coordinator_lease::CoordinatorLease;
+use crate::coordinator_lease::{CoordinatorLease, CoordinatorId};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
 use crate::event_envelope::{EventType, RuntimeEventEnvelope};
 use crate::event_store::{EventStore, InMemoryEventStore};
 use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
 use crate::recovery::{CheckpointManager, TransferStage};
+use csv_protocol::cross_chain::CrossChainRegistryEntry;
 use csv_protocol::signature::SignatureScheme;
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use csv_hash::chain_id::ChainId;
+use csv_hash::seal::SealPoint;
+use uuid::Uuid;
+
+/// Convert CrossChainTransfer to CrossChainRegistryEntry for durable storage
+fn transfer_to_registry_entry(transfer: &CrossChainTransfer) -> CrossChainRegistryEntry {
+    CrossChainRegistryEntry {
+        sanad_id: transfer.sanad_id,
+        source_chain: ChainId::new(&transfer.source_chain),
+        source_seal: SealPoint {
+            chain_id: ChainId::new(&transfer.source_chain),
+            tx_id: transfer.lock_tx_hash.clone(),
+            output_index: transfer.lock_output_index,
+        },
+        destination_chain: ChainId::new(&transfer.destination_chain),
+        destination_seal: SealPoint {
+            chain_id: ChainId::new(&transfer.destination_chain),
+            tx_id: vec![], // Will be filled after mint
+            output_index: 0,
+        },
+        lock_tx_hash: transfer.sanad_id, // Using sanad_id as placeholder
+        mint_tx_hash: transfer.sanad_id, // Will be updated after mint
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    }
+}
+
+/// Convert CrossChainRegistryEntry back to CrossChainTransfer for runtime use
+fn registry_entry_to_transfer(entry: &CrossChainRegistryEntry, transfer_id: String) -> CrossChainTransfer {
+    CrossChainTransfer {
+        id: transfer_id,
+        source_chain: entry.source_chain.to_string(),
+        destination_chain: entry.destination_chain.to_string(),
+        lock_tx_hash: entry.lock_tx_hash.as_bytes().to_vec(),
+        lock_output_index: entry.source_seal.output_index,
+        sanad_id: entry.sanad_id,
+        transition_id: vec![], // Not stored in registry entry
+    }
+}
 
 /// Receipt returned after a successful transfer
 #[derive(Debug, Clone)]
@@ -52,15 +94,14 @@ pub struct TransferCoordinator {
     health_monitor: std::sync::Arc<std::sync::Mutex<crate::runtime_mode::HealthMonitor>>,
     /// Optional distributed lease backend for HA deployments
     coordinator_lease: Option<Box<dyn CoordinatorLease>>,
+    /// Runtime instance identifier (for lease ownership verification)
+    runtime_id: CoordinatorId,
     /// Checkpoint manager for deterministic recovery
     checkpoint_manager: std::sync::Arc<std::sync::Mutex<CheckpointManager>>,
     /// Canonical verifier for proof verification (single source of truth)
     verifier: std::sync::Arc<CanonicalVerifierImpl>,
     /// Execution journal for crash-safe phase tracking
     execution_journal: Box<dyn ExecutionJournal>,
-    /// In-memory transfer cache for same-session recovery
-    /// TODO: Replace with durable TransferStore once csv-storage backends implement it
-    pub transfer_cache: Mutex<HashMap<String, CrossChainTransfer>>,
 }
 
 impl TransferCoordinator {
@@ -77,6 +118,7 @@ impl TransferCoordinator {
         event_bus: EventBus,
         event_store: Box<dyn EventStore>,
     ) -> Self {
+        let runtime_id = CoordinatorId(Uuid::new_v4().to_string());
         Self {
             replay_db,
             event_bus,
@@ -88,10 +130,10 @@ impl TransferCoordinator {
                 crate::runtime_mode::HealthMonitor::new(),
             )),
             coordinator_lease: None,
+            runtime_id,
             checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal: Box::new(InMemoryJournal::new(10000)),
-            transfer_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -116,6 +158,7 @@ impl TransferCoordinator {
         event_bus: EventBus,
         execution_journal: Box<dyn ExecutionJournal>,
     ) -> Self {
+        let runtime_id = CoordinatorId(Uuid::new_v4().to_string());
         Self {
             replay_db,
             event_bus,
@@ -127,10 +170,10 @@ impl TransferCoordinator {
                 crate::runtime_mode::HealthMonitor::new(),
             )),
             coordinator_lease: None,
+            runtime_id,
             checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal,
-            transfer_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -146,10 +189,37 @@ impl TransferCoordinator {
 
     /// Record a health check result
     pub fn record_health_check(&self, check: crate::runtime_mode::HealthCheck) {
-        self.health_monitor
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .record_check(check);
+        self.health_monitor.lock().unwrap().record_check(check);
+    }
+
+    /// Assert that this coordinator owns the lease for the given transfer.
+    ///
+    /// This invariant ensures exactly one coordinator is active for each transfer,
+    /// preventing split-brain double-mints in HA deployments.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TransferCoordinatorError::NoLeaseBackend` if no lease backend is configured.
+    /// Returns `TransferCoordinatorError::LeaseViolation` if this coordinator does not own the lease.
+    fn assert_single_active_coordinator(
+        &self,
+        transfer_id: &str,
+    ) -> Result<(), TransferCoordinatorError> {
+        let lease = self.coordinator_lease
+            .as_ref()
+            .ok_or(TransferCoordinatorError::NoLeaseBackend)?;
+
+        // Check if this coordinator holds the lease
+        let is_held = lease.is_held_by(&self.runtime_id).await;
+        
+        if !is_held {
+            return Err(TransferCoordinatorError::LeaseViolation(
+                format!("Coordinator {} does not own lease for transfer {}",
+                    self.runtime_id.0, transfer_id)
+            ));
+        }
+
+        Ok(())
     }
 
     /// Get the current health status
@@ -247,6 +317,22 @@ impl TransferCoordinator {
             Ok(()) => {}
             Err(e) => match e {
                 ReplayDbError::AlreadyExists => {
+                    // Append ReplayDetected event to EventStore (durable write FIRST)
+                    if let Err(e) = self.event_store.append(&crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+                        csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                        crate::event_envelope::EventType::from_static(crate::event_envelope::EventType::TRANSFER_REPLAY_DETECTED),
+                        1, // version
+                        serde_json::json!({
+                            "transfer_id": transfer.id,
+                            "replay_id": replay_id,
+                        }).to_string(),
+                        None,
+                        runtime_ctx.runtime_instance,
+                        std::time::SystemTime::now(),
+                    )) {
+                        tracing::warn!("Failed to append ReplayDetected event to EventStore: {}", e);
+                    }
+
                     self.event_bus
                         .emit(TransferEvent::ReplayDetected {
                             transfer_id: transfer.id.clone(),
@@ -291,17 +377,12 @@ impl TransferCoordinator {
             attempt: 1,
         }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
-        // Cache transfer for same-session recovery
-        let transfer_entry = CrossChainTransfer {
-            id: transfer.id.clone(),
-            source_chain: transfer.source_chain.clone(),
-            destination_chain: transfer.destination_chain.clone(),
-            lock_tx_hash: transfer.lock_tx_hash.clone(),
-            lock_output_index: transfer.lock_output_index,
-            sanad_id: transfer.sanad_id,
-            transition_id: transfer.transition_id.clone(),
-        };
-        self.transfer_cache.lock().unwrap().insert(transfer.id.clone(), transfer_entry);
+        // Persist transfer entry to durable storage for crash recovery
+        let registry_entry = transfer_to_registry_entry(&transfer);
+        if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
+            tracing::warn!("Failed to persist transfer entry: {}", e);
+            // Non-fatal: continue with transfer, but recovery may fail after crash
+        }
 
         // Step 2: Verify source chain capabilities
         let src_caps = adapter_registry
@@ -463,6 +544,21 @@ impl TransferCoordinator {
             attempt: 1,
         }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
+        // Append AwaitingFinality event to EventStore (durable write FIRST)
+        if let Err(e) = self.event_store.append(&crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+            csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+            crate::event_envelope::EventType::from_static(crate::event_envelope::EventType::TRANSFER_FINALITY_AWAITED),
+            2, // version
+            serde_json::json!({
+                "transfer_id": transfer.id,
+            }).to_string(),
+            None,
+            runtime_ctx.runtime_instance,
+            std::time::SystemTime::now(),
+        )) {
+            tracing::warn!("Failed to append AwaitingFinality event to EventStore: {}", e);
+        }
+
         self.event_bus
             .emit(TransferEvent::AwaitingFinality {
                 transfer_id: transfer.id.clone(),
@@ -521,6 +617,21 @@ impl TransferCoordinator {
             attempt: 1,
         }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
+        // Append BuildingProof event to EventStore (durable write FIRST)
+        if let Err(e) = self.event_store.append(&crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+            csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+            crate::event_envelope::EventType::from_static(crate::event_envelope::EventType::TRANSFER_PROOF_BUILT),
+            3, // version
+            serde_json::json!({
+                "transfer_id": transfer.id,
+            }).to_string(),
+            None,
+            runtime_ctx.runtime_instance,
+            std::time::SystemTime::now(),
+        )) {
+            tracing::warn!("Failed to append BuildingProof event to EventStore: {}", e);
+        }
+
         self.event_bus
             .emit(TransferEvent::BuildingProof {
                 transfer_id: transfer.id.clone(),
@@ -569,6 +680,21 @@ impl TransferCoordinator {
                     ));
                 }
                 // Proof verified successfully
+                // Append ProofVerified event to EventStore (durable write FIRST)
+                if let Err(e) = self.event_store.append(&crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+                    csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                    crate::event_envelope::EventType::from_static(crate::event_envelope::EventType::TRANSFER_PROOF_VERIFIED),
+                    4, // version
+                    serde_json::json!({
+                        "transfer_id": transfer.id,
+                    }).to_string(),
+                    None,
+                    runtime_ctx.runtime_instance,
+                    std::time::SystemTime::now(),
+                )) {
+                    tracing::warn!("Failed to append ProofVerified event to EventStore: {}", e);
+                }
+
                 self.event_bus
                     .emit(TransferEvent::ProofVerified {
                         transfer_id: transfer.id.clone(),
@@ -746,6 +872,22 @@ impl TransferCoordinator {
         //     tracing::warn!("Failed to persist transfer entry: {}", e);
         // }
 
+        // Append Complete event to EventStore (durable write FIRST)
+        if let Err(e) = self.event_store.append(&crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+            csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+            crate::event_envelope::EventType::from_static(crate::event_envelope::EventType::TRANSFER_COMPLETE),
+            5, // version
+            serde_json::json!({
+                "transfer_id": transfer.id,
+                "mint_tx_hash": mint_result.tx_hash,
+            }).to_string(),
+            None,
+            runtime_ctx.runtime_instance,
+            std::time::SystemTime::now(),
+        )) {
+            tracing::warn!("Failed to append Complete event to EventStore: {}", e);
+        }
+
         self.event_bus
             .emit(TransferEvent::Complete {
                 transfer_id: transfer.id.clone(),
@@ -790,14 +932,20 @@ impl TransferCoordinator {
     ///
     /// Called at startup to rebuild the in-memory session index from durable storage.
     /// Returns an empty vec if no entries exist.
-    /// TODO: Implement using csv-storage TransferStore trait
     pub async fn load_all_transfers(&self) -> Result<Vec<CrossChainTransfer>, TransferCoordinatorError> {
-        // TODO: Implement using csv-storage TransferStore trait
-        // self.replay_db
-        //     .load_all_transfers()
-        //     .await
-        //     .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))
-        Ok(Vec::new())
+        let registry_entries = self.replay_db.load_all_transfers().await
+            .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
+        
+        // Convert registry entries to runtime transfer objects
+        // Note: transfer_id is not stored in registry, so we use sanad_id hex as transfer_id
+        let transfers = registry_entries.into_iter()
+            .map(|entry| {
+                let transfer_id = hex::encode(entry.sanad_id.as_bytes());
+                registry_entry_to_transfer(&entry, transfer_id)
+            })
+            .collect();
+        
+        Ok(transfers)
     }
 
     /// Set the distributed coordinator lease backend.
@@ -862,8 +1010,20 @@ impl TransferCoordinator {
             phase
         );
 
-        // Try to retrieve transfer from cache for same-session recovery
-        let cached_transfer = self.transfer_cache.lock().unwrap().get(transfer_id).cloned();
+        // Try to retrieve transfer from durable storage
+        let transfers = self.replay_db.load_all_transfers().await
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Failed to load transfers: {}", e)))?;
+        
+        // Find the transfer by sanad_id
+        // Note: Currently we can only look up by sanad_id, not by transfer_id
+        // This is a limitation of the current ReplayDatabase trait
+        // For now, we'll return an error if we can't find the transfer
+        let cached_transfer = transfers.iter()
+            .find(|entry| {
+                // Try to match transfer_id against sanad_id hex encoding
+                hex::encode(entry.sanad_id.as_bytes()) == transfer_id
+            })
+            .map(|entry| registry_entry_to_transfer(entry, transfer_id.to_string()));
 
         // Phase-specific recovery logic
         match phase {

@@ -836,7 +836,7 @@ impl ChainSanadOps for SuiBackend {
     ) -> ChainOpResult<SanadOperationResult> {
         // Parse the destination chain to ensure it's valid
         let _destination = destination_chain
-            .parse::<csv_core::ChainId>()
+            .parse::<csv_hash::ChainId>()
             .map_err(|_| {
                 ChainOpError::InvalidInput(format!(
                     "Invalid destination chain: {}",
@@ -920,7 +920,7 @@ impl ChainSanadOps for SuiBackend {
 
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),
-            operation: csv_core::backend::SanadOperation::Lock,
+            operation: csv_protocol::backend::SanadOperation::Lock,
             transaction_hash: format!("0x{}", hex::encode(digest)),
             block_height: checkpoint,
             chain_id: "sui".to_string(),
@@ -940,7 +940,7 @@ impl ChainSanadOps for SuiBackend {
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         // Parse the source chain to ensure it's valid
-        let _source = source_chain.parse::<csv_core::ChainId>().map_err(|_| {
+        let _source = source_chain.parse::<csv_hash::ChainId>().map_err(|_| {
             ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
         })?;
 
@@ -1021,7 +1021,7 @@ impl ChainSanadOps for SuiBackend {
 
         Ok(SanadOperationResult {
             sanad_id: source_sanad_id.clone(),
-            operation: csv_core::backend::SanadOperation::Mint,
+            operation: csv_protocol::backend::SanadOperation::Mint,
             transaction_hash: format!("0x{}", hex::encode(digest)),
             block_height: checkpoint,
             chain_id: "sui".to_string(),

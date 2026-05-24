@@ -99,6 +99,26 @@ pub enum TransferCoordinatorError {
     #[error("Lock failed: {0}")]
     LockFailed(String),
 
+    /// No lease backend configured
+    #[error("No lease backend configured")]
+    NoLeaseBackend,
+
+    /// Lease violation - coordinator does not own the lease
+    #[error("Lease violation: {0}")]
+    LeaseViolation(String),
+
+    /// Transfer not found
+    #[error("Transfer not found")]
+    NotFound,
+
+    /// Replay database error
+    #[error("Replay database error: {0}")]
+    ReplayDbError(String),
+
+    /// Runtime error
+    #[error("Runtime error: {0}")]
+    RuntimeError(String),
+
     /// Finality verification failed
     #[error("Finality verification failed: {0}")]
     FinalityFailed(String),

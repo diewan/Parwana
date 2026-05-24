@@ -81,13 +81,13 @@ impl CelestiaSealPoint {
     }
 
     /// Convert to core SealPoint
-    pub fn to_core_seal(&self) -> csv_core::seal::SealPoint {
-        csv_core::seal::SealPoint::new(self.proof_id.to_bytes().to_vec(), Some(self.height))
+    pub fn to_core_seal(&self) -> csv_hash::seal::SealPoint {
+        csv_hash::seal::SealPoint::new(self.proof_id.to_bytes().to_vec(), Some(self.height))
             .unwrap_or_else(|_| {
                 // SAFETY: We're falling back to unchecked creation only when the safe API fails,
                 // and the data is derived from valid internal state.
                 unsafe {
-                    csv_core::seal::SealPoint::new_unchecked(
+                    csv_hash::seal::SealPoint::new_unchecked(
                         self.proof_id.to_bytes().to_vec(),
                         Some(self.height),
                     )
@@ -163,13 +163,13 @@ impl CelestiaAnchor {
     }
 
     /// Convert to core CommitAnchor
-    pub fn to_core_anchor(&self) -> csv_core::seal::CommitAnchor {
+    pub fn to_core_anchor(&self) -> csv_hash::seal::CommitAnchor {
         let anchor_id = self.proof_id().to_bytes().to_vec();
         let metadata = serde_json::to_vec(&self.location).unwrap_or_default();
 
-        csv_core::seal::CommitAnchor::new(anchor_id.clone(), self.height, metadata.clone())
+        csv_hash::seal::CommitAnchor::new(anchor_id.clone(), self.height, metadata.clone())
             .unwrap_or_else(|_| unsafe {
-                csv_core::seal::CommitAnchor::new_unchecked(anchor_id, self.height, metadata)
+                csv_hash::seal::CommitAnchor::new_unchecked(anchor_id, self.height, metadata)
             })
     }
 
@@ -268,10 +268,10 @@ impl CelestiaFinalityProof {
     }
 
     /// Convert to core FinalityProof
-    pub fn to_core_finality(&self) -> csv_core::proof::FinalityProof {
+    pub fn to_core_finality(&self) -> csv_protocol::proof::FinalityProof {
         let finality_data = serde_json::to_vec(&self).unwrap_or_default();
 
-        csv_core::proof::FinalityProof::new(
+        csv_protocol::proof::FinalityProof::new(
             finality_data.clone(),
             self.quorum_signatures.len() as u64,
             true, // Tendermint has deterministic finality
@@ -280,7 +280,7 @@ impl CelestiaFinalityProof {
             // SAFETY: We're falling back to unchecked creation only when the safe API fails,
             // and the data is derived from valid internal state.
             unsafe {
-                csv_core::proof::FinalityProof::new_unchecked(
+                csv_protocol::proof::FinalityProof::new_unchecked(
                     finality_data,
                     self.quorum_signatures.len() as u64,
                     true,

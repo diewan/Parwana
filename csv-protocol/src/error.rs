@@ -17,6 +17,10 @@ pub enum ProtocolError {
     #[error("Seal replay detected: {0}")]
     SealReplay(String),
 
+    /// Invalid seal
+    #[error("Invalid seal: {0}")]
+    InvalidSeal(String),
+
     /// Finality error
     #[error("Finality error: {0}")]
     FinalityError(String),

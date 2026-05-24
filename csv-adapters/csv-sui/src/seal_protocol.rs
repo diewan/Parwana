@@ -13,10 +13,11 @@
 
 use std::sync::Mutex;
 
-use csv_protocol::dag::DAGSegment;
+use csv_hash::dag::DAGSegment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
 use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_codec;
 
 #[cfg(feature = "rpc")]
 type SignedTransaction = (Vec<u8>, Vec<u8>, Vec<u8>);
@@ -531,7 +532,7 @@ impl SealProtocol for SuiSealProtocol {
     type InclusionProof = SuiInclusionProof;
     type FinalityProof = SuiFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> CoreResult<Self::CommitAnchor> {
+    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> std::result::Result<Self::CommitAnchor, Box<(dyn std::error::Error + 'static)>> {
         log::debug!(
             "Publishing commitment via seal object {}",
             format_object_id(seal.object_id)
@@ -624,7 +625,7 @@ impl SealProtocol for SuiSealProtocol {
         }
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> CoreResult<Self::InclusionProof> {
+    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::InclusionProof, Box<(dyn std::error::Error + 'static)>> {
         log::debug!(
             "Verifying inclusion for anchor at checkpoint {}",
             anchor.checkpoint
@@ -665,10 +666,10 @@ impl SealProtocol for SuiSealProtocol {
                 })?;
 
             if !is_certified.is_certified {
-                return Err(ProtocolError::InclusionProofFailed(format!(
-                    "Checkpoint {} is not yet certified",
-                    anchor.checkpoint
-                )));
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Checkpoint {} is not yet certified", anchor.checkpoint),
+                )) as Box<dyn std::error::Error>);
             }
         }
 
@@ -706,10 +707,10 @@ impl SealProtocol for SuiSealProtocol {
             })?;
 
         if object_proof.len() <= 72 {
-            return Err(ProtocolError::InclusionProofFailed(
-                "Sui transaction effects do not contain object changes for inclusion proof"
-                    .to_string(),
-            ));
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Sui transaction effects do not contain object changes for inclusion proof".to_string(),
+            )) as Box<dyn std::error::Error>);
         }
 
         Ok(SuiInclusionProof::new(
@@ -719,7 +720,7 @@ impl SealProtocol for SuiSealProtocol {
         ))
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> CoreResult<Self::FinalityProof> {
+    fn verify_finality(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::FinalityProof, Box<(dyn std::error::Error + 'static)>> {
         log::debug!(
             "Verifying finality for anchor at checkpoint {}",
             anchor.checkpoint
@@ -744,7 +745,7 @@ impl SealProtocol for SuiSealProtocol {
         Ok(SuiFinalityProof::new(anchor.checkpoint, is_certified))
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> CoreResult<()> {
+    fn enforce_seal(&self, seal: Self::SealPoint) -> std::result::Result<(), Box<(dyn std::error::Error + 'static)>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a Sui object cannot be consumed more than once
         // by checking both local registry and on-chain object state
@@ -752,10 +753,10 @@ impl SealProtocol for SuiSealProtocol {
         // Step 1: Check local registry (fast path)
         let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
         if registry.is_seal_used(&seal) {
-            return Err(ProtocolError::SealReplay(format!(
-                "Object {} already consumed in local registry",
-                format_object_id(seal.object_id)
-            )));
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Object {} already consumed in local registry", format_object_id(seal.object_id)),
+            )) as Box<dyn std::error::Error>);
         }
         drop(registry);
 
@@ -779,10 +780,10 @@ impl SealProtocol for SuiSealProtocol {
                     })?;
 
                 if object_exists.is_none() {
-                    return Err(ProtocolError::SealReplay(format!(
-                        "Object {} already consumed on-chain (deleted)",
-                        format_object_id(seal.object_id)
-                    )));
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Object {} already consumed on-chain (deleted)", format_object_id(seal.object_id)),
+                    )) as Box<dyn std::error::Error>);
                 }
             }
         }
@@ -797,7 +798,7 @@ impl SealProtocol for SuiSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, _value: Option<u64>) -> CoreResult<Self::SealPoint> {
+    fn create_seal(&self, _value: Option<u64>) -> std::result::Result<Self::SealPoint, Box<(dyn std::error::Error + 'static)>> {
         use sha2::{Digest, Sha256};
         // Use timestamp-based nonce for replay resistance
         let nonce = std::time::SystemTime::now()
@@ -835,8 +836,8 @@ impl SealProtocol for SuiSealProtocol {
     fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        transition_dag: DAGSegment,
-    ) -> CoreResult<ProofBundle> {
+        transition_dag: Vec<u8>,
+    ) -> std::result::Result<ProofBundle, Box<(dyn std::error::Error + 'static)>> {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
 
@@ -847,7 +848,7 @@ impl SealProtocol for SuiSealProtocol {
             CoreCommitAnchor::new(anchor.object_id.to_vec(), anchor.checkpoint, vec![])
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?;
 
-        let inclusion_proof = csv_core::proof::InclusionProof::new(
+        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
             inclusion.object_proof,
             Hash::new(inclusion.checkpoint_hash),
             inclusion.checkpoint_number,
@@ -858,25 +859,39 @@ impl SealProtocol for SuiSealProtocol {
         let finality_proof = FinalityProof::new(vec![], finality.checkpoint, finality.is_certified)
             .map_err(|e| ProtocolError::Generic(e.to_string()))?;
 
+        // Deserialize transition_dag from Vec<u8> to DAGSegment
+        let dag_segment: csv_hash::dag::DAGSegment = csv_codec::from_canonical_cbor(&transition_dag)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Failed to deserialize DAG: {}", e),
+                )) as Box<dyn std::error::Error>
+            })?;
+
         // Extract signatures from DAG nodes
-        let signatures: Vec<Vec<u8>> = transition_dag
+        let signatures: Vec<Vec<u8>> = dag_segment
             .nodes
             .iter()
             .flat_map(|node| node.signatures.clone())
             .collect();
 
         ProofBundle::new(
-            transition_dag.clone(),
+            dag_segment,
             signatures,
             seal_ref,
             anchor_ref,
             inclusion_proof,
             finality_proof,
         )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Failed to build proof bundle: {}", e),
+            )) as Box<dyn std::error::Error>
+        })
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> CoreResult<()> {
+    fn rollback(&self, anchor: Self::CommitAnchor) -> std::result::Result<(), Box<(dyn std::error::Error + 'static)>> {
         log::warn!(
             "Rollback requested for anchor at checkpoint {}",
             anchor.checkpoint
@@ -887,14 +902,19 @@ impl SealProtocol for SuiSealProtocol {
                     .await
                     .map_err(|e| SuiError::RpcError(e.to_string()))
             })
-            .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error>
+            })?;
 
         // If anchor checkpoint is beyond current tip, rollback
         if anchor.checkpoint > current_checkpoint {
-            return Err(ProtocolError::ReorgInvalid(format!(
-                "Anchor checkpoint {} beyond current tip {}",
-                anchor.checkpoint, current_checkpoint
-            )));
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Anchor checkpoint {} beyond current tip {}", anchor.checkpoint, current_checkpoint),
+            )) as Box<dyn std::error::Error>);
         }
 
         // If anchor checkpoint is before current tip, the transaction may have been reorged out
@@ -916,8 +936,8 @@ impl SealProtocol for SuiSealProtocol {
         self.domain_separator
     }
 
-    fn signature_scheme(&self) -> csv_core::SignatureScheme {
-        csv_core::SignatureScheme::Ed25519
+    fn signature_scheme(&self) -> csv_protocol::SignatureScheme {
+        csv_protocol::SignatureScheme::Ed25519
     }
 }
 
