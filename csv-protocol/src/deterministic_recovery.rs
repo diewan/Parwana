@@ -17,8 +17,8 @@
 //! - Timestamp and sequence number
 //! - Checksum for integrity verification
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Checkpoint version.
@@ -39,8 +39,18 @@ pub struct RuntimeCheckpoint {
     pub transfers: BTreeMap<String, TransferState>,
     /// Cross-chain registry state
     pub registry_state: RegistryState,
-    /// Checkpoint checksum (SHA-256 of canonical CBOR)
+    /// Checkpoint checksum (SHA-256 of canonical checkpoint payload)
     pub checksum: Hash,
+}
+
+#[derive(Serialize)]
+struct CheckpointChecksumPayload<'a> {
+    version: u32,
+    sequence: u64,
+    timestamp: u64,
+    leases: &'a BTreeMap<String, LeaseState>,
+    transfers: &'a BTreeMap<String, TransferState>,
+    registry_state: &'a RegistryState,
 }
 
 impl RuntimeCheckpoint {
@@ -52,7 +62,7 @@ impl RuntimeCheckpoint {
         registry_state: RegistryState,
     ) -> Result<Self, RecoveryError> {
         let timestamp = chrono::Utc::now().timestamp() as u64;
-        
+
         let mut checkpoint = Self {
             version: CHECKPOINT_VERSION,
             sequence,
@@ -62,12 +72,27 @@ impl RuntimeCheckpoint {
             registry_state,
             checksum: Hash::zero(),
         };
-        
-        // Compute checksum after serialization
-        let cbor = checkpoint.to_canonical_cbor()?;
-        checkpoint.checksum = Hash::sha256(&cbor);
-        
+
+        checkpoint.checksum = checkpoint.compute_checksum()?;
+
         Ok(checkpoint)
+    }
+
+    fn checksum_payload(&self) -> CheckpointChecksumPayload<'_> {
+        CheckpointChecksumPayload {
+            version: self.version,
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            leases: &self.leases,
+            transfers: &self.transfers,
+            registry_state: &self.registry_state,
+        }
+    }
+
+    fn compute_checksum(&self) -> Result<Hash, RecoveryError> {
+        let cbor = csv_codec::to_canonical_cbor(&self.checksum_payload())
+            .map_err(|e| RecoveryError::SerializationError(e.to_string()))?;
+        Ok(Hash::sha256(&cbor))
     }
 
     /// Serialize the checkpoint to canonical CBOR.
@@ -80,24 +105,19 @@ impl RuntimeCheckpoint {
     pub fn from_canonical_cbor(bytes: &[u8]) -> Result<Self, RecoveryError> {
         let checkpoint: Self = csv_codec::from_canonical_cbor(bytes)
             .map_err(|e| RecoveryError::DeserializationError(e.to_string()))?;
-        
-        // Verify checksum
-        let cbor = checkpoint.to_canonical_cbor()?;
-        let computed_checksum = Hash::sha256(&cbor);
+
+        let computed_checksum = checkpoint.compute_checksum()?;
         if computed_checksum != checkpoint.checksum {
             return Err(RecoveryError::ChecksumMismatch);
         }
-        
+
         Ok(checkpoint)
     }
 
     /// Verify the checkpoint integrity.
     pub fn verify(&self) -> bool {
-        match self.to_canonical_cbor() {
-            Ok(cbor) => {
-                let computed_checksum = Hash::sha256(&cbor);
-                computed_checksum == self.checksum
-            }
+        match self.compute_checksum() {
+            Ok(computed_checksum) => computed_checksum == self.checksum,
             Err(_) => false,
         }
     }
@@ -204,16 +224,12 @@ impl CheckpointManager {
         registry_state: RegistryState,
     ) -> Result<RuntimeCheckpoint, RecoveryError> {
         self.last_sequence += 1;
-        let checkpoint = RuntimeCheckpoint::new(
-            self.last_sequence,
-            leases,
-            transfers,
-            registry_state,
-        )?;
-        
+        let checkpoint =
+            RuntimeCheckpoint::new(self.last_sequence, leases, transfers, registry_state)?;
+
         // Store checkpoint
         self.storage.store(&checkpoint)?;
-        
+
         Ok(checkpoint)
     }
 
@@ -227,11 +243,11 @@ impl CheckpointManager {
         let checkpoint = self
             .load_latest()?
             .ok_or(RecoveryError::NoCheckpointFound)?;
-        
+
         if !checkpoint.verify() {
             return Err(RecoveryError::CheckpointCorrupted);
         }
-        
+
         Ok(RecoveryState {
             checkpoint,
             recovered_at: chrono::Utc::now().timestamp() as u64,
@@ -253,13 +269,13 @@ pub struct RecoveryState {
 pub enum CheckpointStorage {
     /// In-memory storage (for testing)
     Memory(std::sync::Arc<std::sync::Mutex<Vec<RuntimeCheckpoint>>>),
-    
+
     /// File-based storage
     File {
         /// Directory for checkpoint files
         directory: String,
     },
-    
+
     /// Database storage
     Database {
         /// Connection string
@@ -272,17 +288,15 @@ impl CheckpointStorage {
     pub fn store(&self, checkpoint: &RuntimeCheckpoint) -> Result<(), RecoveryError> {
         match self {
             CheckpointStorage::Memory(checkpoints) => {
-                let mut checkpoints = checkpoints.lock().unwrap();
-                checkpoints.push(checkpoint.clone());
+                checkpoints
+                    .lock()
+                    .map_err(|e| RecoveryError::StorageError(e.to_string()))?
+                    .push(checkpoint.clone());
                 Ok(())
             }
             CheckpointStorage::File { directory } => {
                 // In production, write to file
-                let filename = format!(
-                    "{}/checkpoint_{:010}.cbor",
-                    directory,
-                    checkpoint.sequence
-                );
+                let filename = format!("{}/checkpoint_{:010}.cbor", directory, checkpoint.sequence);
                 let cbor = checkpoint.to_canonical_cbor()?;
                 std::fs::write(filename, cbor)
                     .map_err(|e| RecoveryError::StorageError(e.to_string()))?;
@@ -299,40 +313,43 @@ impl CheckpointStorage {
     pub fn load_latest(&self) -> Result<Option<RuntimeCheckpoint>, RecoveryError> {
         match self {
             CheckpointStorage::Memory(checkpoints) => {
-                let checkpoints = checkpoints.lock().unwrap();
+                let checkpoints = checkpoints
+                    .lock()
+                    .map_err(|e| RecoveryError::StorageError(e.to_string()))?;
                 Ok(checkpoints.last().cloned())
             }
             CheckpointStorage::File { directory } => {
                 // In production, read latest file from directory
                 let entries = std::fs::read_dir(directory)
                     .map_err(|e| RecoveryError::StorageError(e.to_string()))?;
-                
+
                 let mut latest: Option<RuntimeCheckpoint> = None;
                 let mut latest_seq = 0u64;
-                
+
                 for entry in entries {
                     let entry = entry.map_err(|e| RecoveryError::StorageError(e.to_string()))?;
-                    if let Ok(name) = entry.file_name().into_string() {
-                        if name.starts_with("checkpoint_") && name.ends_with(".cbor") {
-                            let seq_str: String = name
-                                .strip_prefix("checkpoint_")
-                                .and_then(|s| s.strip_suffix(".cbor"))
-                                .unwrap_or("0")
-                                .to_string();
-                            if let Ok(seq) = seq_str.parse::<u64>() {
-                                if seq > latest_seq {
-                                    let path = entry.path();
-                                    let cbor = std::fs::read(&path)
-                                        .map_err(|e| RecoveryError::StorageError(e.to_string()))?;
-                                    let checkpoint = RuntimeCheckpoint::from_canonical_cbor(&cbor)?;
-                                    latest_seq = seq;
-                                    latest = Some(checkpoint);
-                                }
-                            }
+                    if let Ok(name) = entry.file_name().into_string()
+                        && name.starts_with("checkpoint_")
+                        && name.ends_with(".cbor")
+                    {
+                        let seq_str: String = name
+                            .strip_prefix("checkpoint_")
+                            .and_then(|s| s.strip_suffix(".cbor"))
+                            .unwrap_or("0")
+                            .to_string();
+                        if let Ok(seq) = seq_str.parse::<u64>()
+                            && seq > latest_seq
+                        {
+                            let path = entry.path();
+                            let cbor = std::fs::read(&path)
+                                .map_err(|e| RecoveryError::StorageError(e.to_string()))?;
+                            let checkpoint = RuntimeCheckpoint::from_canonical_cbor(&cbor)?;
+                            latest_seq = seq;
+                            latest = Some(checkpoint);
                         }
                     }
                 }
-                
+
                 Ok(latest)
             }
             CheckpointStorage::Database { .. } => {
@@ -375,7 +392,7 @@ impl LeaseRecovery {
     /// Recover active leases from checkpoint.
     pub fn recover_leases(checkpoint: &RuntimeCheckpoint) -> Vec<&LeaseState> {
         let now = chrono::Utc::now().timestamp() as u64;
-        
+
         checkpoint
             .leases
             .values()
@@ -399,9 +416,7 @@ impl TransferRecovery {
         checkpoint
             .transfers
             .values()
-            .filter(|transfer| {
-                matches!(transfer.status.as_str(), "locked" | "pending")
-            })
+            .filter(|transfer| matches!(transfer.status.as_str(), "locked" | "pending"))
             .collect()
     }
 
@@ -427,7 +442,7 @@ mod tests {
             transfer_count: 0,
             entries: BTreeMap::new(),
         };
-        
+
         let checkpoint = RuntimeCheckpoint::new(1, leases, transfers, registry_state).unwrap();
         assert!(checkpoint.verify());
     }
@@ -440,31 +455,32 @@ mod tests {
             transfer_count: 0,
             entries: BTreeMap::new(),
         };
-        
+
         let checkpoint = RuntimeCheckpoint::new(1, leases, transfers, registry_state).unwrap();
         let cbor = checkpoint.to_canonical_cbor().unwrap();
         let restored = RuntimeCheckpoint::from_canonical_cbor(&cbor).unwrap();
-        
+
         assert_eq!(checkpoint.sequence, restored.sequence);
     }
 
     #[test]
     fn test_checkpoint_manager() {
-        let storage = CheckpointStorage::Memory(std::sync::Arc::new(std::sync::Mutex::new(
-            Vec::new(),
-        )));
+        let storage =
+            CheckpointStorage::Memory(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
         let mut manager = CheckpointManager::new(60, storage);
-        
+
         let leases = BTreeMap::new();
         let transfers = BTreeMap::new();
         let registry_state = RegistryState {
             transfer_count: 0,
             entries: BTreeMap::new(),
         };
-        
-        manager.create_checkpoint(leases, transfers, registry_state).unwrap();
+
+        manager
+            .create_checkpoint(leases, transfers, registry_state)
+            .unwrap();
         let recovered = manager.recover().unwrap();
-        
+
         assert_eq!(recovered.checkpoint.sequence, 1);
     }
 }

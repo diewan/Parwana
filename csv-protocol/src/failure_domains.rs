@@ -26,13 +26,13 @@ use std::time::Duration;
 pub enum FailureDomain {
     /// Transient failure - may resolve with retry
     Transient,
-    
+
     /// Permanent failure - requires manual intervention
     Permanent,
-    
+
     /// Recoverable failure - has deterministic recovery path
     Recoverable,
-    
+
     /// Catastrophic failure - system-level emergency
     Catastrophic,
 }
@@ -59,7 +59,7 @@ impl FailureDomain {
 pub enum RetryStrategy {
     /// No retry - failure is permanent
     NoRetry,
-    
+
     /// Exponential backoff retry
     ExponentialBackoff {
         /// Initial delay before first retry
@@ -71,10 +71,10 @@ pub enum RetryStrategy {
         /// Maximum number of retry attempts
         max_attempts: u32,
     },
-    
+
     /// Execute deterministic recovery procedure
     RecoveryProcedure,
-    
+
     /// Emergency shutdown required
     EmergencyShutdown,
 }
@@ -101,64 +101,48 @@ pub struct ClassifiedError {
 pub enum Component {
     /// Chain adapter (Bitcoin, Ethereum, etc.)
     ChainAdapter(String),
-    
+
     /// Runtime coordinator
     Runtime,
-    
+
     /// Verifier
     Verifier,
-    
+
     /// Storage layer
     Storage,
-    
+
     /// Network layer
     Network,
-    
+
     /// Cryptographic operations
     Crypto,
-    
+
     /// Contract interaction
     Contract,
-    
+
     /// Unknown component
     Unknown,
 }
 
 /// Additional error context.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ErrorContext {
     /// Chain ID if applicable
     pub chain_id: Option<String>,
-    
+
     /// Transaction hash if applicable
     pub tx_hash: Option<String>,
-    
+
     /// Block number if applicable
     pub block_number: Option<u64>,
-    
+
     /// Additional key-value context
     pub metadata: Vec<(String, String)>,
 }
 
-impl Default for ErrorContext {
-    fn default() -> Self {
-        Self {
-            chain_id: None,
-            tx_hash: None,
-            block_number: None,
-            metadata: Vec::new(),
-        }
-    }
-}
-
 impl ClassifiedError {
     /// Create a new classified error.
-    pub fn new(
-        code: String,
-        message: String,
-        domain: FailureDomain,
-        component: Component,
-    ) -> Self {
+    pub fn new(code: String, message: String, domain: FailureDomain, component: Component) -> Self {
         Self {
             code,
             message,
@@ -224,7 +208,7 @@ pub struct DefaultErrorClassifier;
 impl ErrorClassifier for DefaultErrorClassifier {
     fn classify(&self, error: &dyn std::error::Error) -> ClassifiedError {
         let error_str = error.to_string().to_lowercase();
-        
+
         let domain = if error_str.contains("timeout") || error_str.contains("network") {
             FailureDomain::Transient
         } else if error_str.contains("insufficient") || error_str.contains("invalid") {
@@ -307,7 +291,7 @@ mod tests {
     fn test_failure_domain_retry_strategy() {
         let strategy = FailureDomain::Transient.retry_strategy();
         assert!(matches!(strategy, RetryStrategy::ExponentialBackoff { .. }));
-        
+
         let strategy = FailureDomain::Permanent.retry_strategy();
         assert_eq!(strategy, RetryStrategy::NoRetry);
     }
@@ -320,7 +304,7 @@ mod tests {
             FailureDomain::Transient,
             Component::Runtime,
         );
-        
+
         assert!(error.is_retryable());
         assert!(!error.requires_emergency_shutdown());
     }
@@ -334,7 +318,7 @@ mod tests {
             FailureDomain::Transient,
             Component::Runtime,
         );
-        
+
         registry.record_error(&error);
         assert!(registry.get_stats(FailureDomain::Transient).is_some());
     }

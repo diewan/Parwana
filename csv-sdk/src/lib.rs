@@ -79,23 +79,23 @@ pub mod transfers;
 pub mod wallet;
 
 // Re-export core types from new modular crates (🔒 STABLE API only by default)
-pub use csv_hash::seal::{CommitAnchor, SealPoint};
+pub use csv_core::transition::Transition;
+pub use csv_hash::Hash;
 pub use csv_hash::commitment::Commitment;
+pub use csv_hash::dag::{DAGNode, DAGSegment};
+pub use csv_hash::sanad::SanadId;
+pub use csv_hash::seal::{CommitAnchor, SealPoint};
 pub use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
 pub use csv_protocol::error::ProtocolError;
 pub use csv_protocol::genesis::Genesis;
 pub use csv_protocol::seal_protocol::SealProtocol;
-pub use csv_protocol::state::{StateRef, OwnedState};
-pub use csv_core::transition::Transition;
-pub use csv_hash::dag::{DAGNode, DAGSegment};
-pub use csv_hash::Hash;
-pub use csv_hash::sanad::SanadId;
+pub use csv_protocol::state::{OwnedState, StateRef};
 
 // Re-export canonical protocol types (🔒 STABLE + 🟡 BETA)
+pub use csv_hash::chain_id::ChainId;
 pub use csv_protocol::version::{
     Capabilities, ErrorCode, PROTOCOL_VERSION, ProtocolVersion, SyncStatus, TransferStatus,
 };
-pub use csv_hash::chain_id::ChainId;
 
 // ===========================================================================
 // Experimental re-exports (feature-gated)
@@ -130,15 +130,15 @@ pub type Result<T> = core::result::Result<T, CsvError>;
 // This allows apps to access chain-specific types through csv-sdk,
 // respecting the Engineering Plan rule that apps must not import
 // csv-bitcoin/csv-ethereum/etc. directly.
+#[cfg(feature = "aptos")]
+pub use csv_aptos;
 #[cfg(feature = "bitcoin")]
 pub use csv_bitcoin;
 #[cfg(feature = "ethereum")]
 pub use csv_ethereum;
-#[cfg(feature = "sui")]
-pub use csv_sui;
-#[cfg(feature = "aptos")]
-pub use csv_aptos;
 #[cfg(feature = "solana")]
 pub use csv_solana;
+#[cfg(feature = "sui")]
+pub use csv_sui;
 
 // Note: TransferStatus is already re-exported from protocol_version module above

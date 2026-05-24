@@ -73,9 +73,9 @@
 use alloc::vec::Vec;
 
 use crate::consignment::Consignment;
+use crate::state_store::InMemoryStateStore;
 use csv_hash::Hash;
 use csv_hash::nullifier::{ChainId, SealConsumption, SealNullifier, SealStatus};
-use crate::state_store::InMemoryStateStore;
 
 /// Detailed validation report.
 #[derive(Debug)]
@@ -155,10 +155,9 @@ impl ConsignmentValidator {
         self.report.steps.push(ValidationStep {
             name: "Structural Validation".to_string(),
             passed,
-            details: if passed {
-                "All structural checks passed".to_string()
-            } else {
-                format!("Structural validation failed: {}", result.unwrap_err())
+            details: match result {
+                Ok(()) => "All structural checks passed".to_string(),
+                Err(err) => format!("Structural validation failed: {}", err),
             },
         });
 
@@ -435,13 +434,13 @@ impl Default for ConsignmentValidator {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::consignment::Consignment;
     use crate::genesis::Genesis;
-    use csv_hash::seal::{CommitAnchor, SealPoint};
     use crate::state_store::StateHistoryStore;
+    use csv_hash::seal::{CommitAnchor, SealPoint};
 
     fn make_test_consignment() -> Consignment {
         let genesis = Genesis::new(

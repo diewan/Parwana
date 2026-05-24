@@ -27,8 +27,8 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use csv_hash::commit_mux::{CommitMux, MuxLeaf, MuxProof};
 use csv_hash::Hash;
+use csv_hash::commit_mux::{CommitMux, MuxLeaf, MuxProof};
 
 use crate::error::{BitcoinError, BitcoinResult};
 use crate::types::BitcoinSealPoint;
@@ -251,8 +251,7 @@ impl MpcTreeExt for CommitMux {
         }
 
         // Collect all leaf hashes
-        let mut current_level: Vec<csv_hash::Hash> =
-            self.leaves.iter().map(|l| l.hash()).collect();
+        let mut current_level: Vec<csv_hash::Hash> = self.leaves.iter().map(|l| l.hash()).collect();
 
         let mut branch = Vec::new();
         let mut current_index = leaf_index;

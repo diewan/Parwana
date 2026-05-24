@@ -60,10 +60,7 @@ pub fn verify_merkle_proof(leaf: Hash, siblings: &[Hash], leaf_index: usize, roo
 ///
 /// # Returns
 /// A vector of booleans indicating whether each proof is valid
-pub fn verify_merkle_proofs_batch(
-    proofs: &[(Hash, Vec<Hash>, usize)],
-    root: Hash,
-) -> Vec<bool> {
+pub fn verify_merkle_proofs_batch(proofs: &[(Hash, Vec<Hash>, usize)], root: Hash) -> Vec<bool> {
     proofs
         .iter()
         .map(|(leaf, siblings, index)| verify_merkle_proof(*leaf, siblings, *index, root))

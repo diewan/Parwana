@@ -111,8 +111,7 @@ impl CommitmentTxBuilder {
         }
 
         // Build Tapret commitment output
-        let tapret =
-            TapretCommitment::new(self.protocol_id, csv_hash::Hash::new(commitment_hash));
+        let tapret = TapretCommitment::new(self.protocol_id, csv_hash::Hash::new(commitment_hash));
         let leaf_script = tapret.leaf_script();
 
         // Build Taproot tree with single tapret leaf at depth 0

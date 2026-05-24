@@ -3,7 +3,7 @@
 //! These tests enforce protocol invariants and MUST NEVER BREAK.
 //! Any change that breaks these tests requires an RFC and protocol version bump.
 
-use csv_hash::{Hash, HashDomain, DomainSeparatedHash};
+use csv_hash::{DomainSeparatedHash, Hash, HashDomain};
 use csv_protocol::transition::{State, is_legal_transition};
 
 // ===========================================================================
@@ -25,7 +25,10 @@ fn protocol_hashes_are_stable() {
     let hash_genesis = DomainSeparatedHash::<csv_hash::domains::GenesisDomain>::hash(data);
     let hash_schema = DomainSeparatedHash::<csv_hash::domains::SchemaDomain>::hash(data);
 
-    assert_ne!(hash_genesis, hash_schema, "Different domains must produce different hashes");
+    assert_ne!(
+        hash_genesis, hash_schema,
+        "Different domains must produce different hashes"
+    );
 
     // Test hash stability across multiple calls
     let expected = DomainSeparatedHash::<csv_hash::domains::ProofBundleDomain>::hash(data);
@@ -44,7 +47,7 @@ fn protocol_hashes_are_stable() {
 
 #[test]
 fn serialization_is_canonical() {
-    use csv_hash::canonical::{to_canonical_cbor, from_canonical_cbor};
+    use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 
     // Test that canonical serialization is deterministic
     let test_struct = CanonicalTestStruct {
@@ -57,10 +60,14 @@ fn serialization_is_canonical() {
     let bytes1 = to_canonical_cbor(&test_struct).expect("serialization should succeed");
     let bytes2 = to_canonical_cbor(&test_struct).expect("serialization should succeed");
 
-    assert_eq!(bytes1, bytes2, "Canonical serialization must be deterministic");
+    assert_eq!(
+        bytes1, bytes2,
+        "Canonical serialization must be deterministic"
+    );
 
     // Test roundtrip
-    let decoded: CanonicalTestStruct = from_canonical_cbor(&bytes1).expect("deserialization should succeed");
+    let decoded: CanonicalTestStruct =
+        from_canonical_cbor(&bytes1).expect("deserialization should succeed");
     assert_eq!(decoded.a, test_struct.a);
     assert_eq!(decoded.b, test_struct.b);
     assert_eq!(decoded.c, test_struct.c);
@@ -70,7 +77,10 @@ fn serialization_is_canonical() {
     let hash = Hash::sha256(b"test data");
     let hash_bytes1 = hash.to_vec();
     let hash_bytes2 = hash.to_vec();
-    assert_eq!(hash_bytes1, hash_bytes2, "Hash serialization must be deterministic");
+    assert_eq!(
+        hash_bytes1, hash_bytes2,
+        "Hash serialization must be deterministic"
+    );
 
     // Test that canonical CBOR produces consistent ordering for maps
     let map1 = serde_json::json!({"z": 1, "a": 2, "m": 3});
@@ -78,7 +88,10 @@ fn serialization_is_canonical() {
     // After canonical serialization, both should produce the same bytes
     let cbor1 = to_canonical_cbor(&map1).expect("serialization should succeed");
     let cbor2 = to_canonical_cbor(&map2).expect("serialization should succeed");
-    assert_eq!(cbor1, cbor2, "Canonical serialization must order map keys consistently");
+    assert_eq!(
+        cbor1, cbor2,
+        "Canonical serialization must order map keys consistently"
+    );
 }
 
 /// Helper struct for canonical serialization tests.
@@ -100,24 +113,38 @@ fn replay_is_impossible() {
     let data = b"replay test data";
 
     let hash_genesis = DomainSeparatedHash::<csv_hash::domains::GenesisDomain>::hash(data);
-    let hash_transfer = DomainSeparatedHash::<csv_hash::domains::TransferCommitmentDomain>::hash(data);
+    let hash_transfer =
+        DomainSeparatedHash::<csv_hash::domains::TransferCommitmentDomain>::hash(data);
     let hash_schema = DomainSeparatedHash::<csv_hash::domains::SchemaDomain>::hash(data);
     let hash_proof = DomainSeparatedHash::<csv_hash::domains::ProofBundleDomain>::hash(data);
     let hash_transition = DomainSeparatedHash::<csv_hash::domains::TransitionDomain>::hash(data);
 
     // All hashes must be unique for the same input
-    let hashes = [hash_genesis, hash_transfer, hash_schema, hash_proof, hash_transition];
+    let hashes = [
+        hash_genesis,
+        hash_transfer,
+        hash_schema,
+        hash_proof,
+        hash_transition,
+    ];
     for (i, hi) in hashes.iter().enumerate() {
         for (j, hj) in hashes.iter().enumerate() {
             if i != j {
-                assert_ne!(hi, hj, "Domain {} and {} must produce different hashes to prevent replay", i, j);
+                assert_ne!(
+                    hi, hj,
+                    "Domain {} and {} must produce different hashes to prevent replay",
+                    i, j
+                );
             }
         }
     }
 
     // Test that nullifier domain is distinct from all others
     let hash_replay = DomainSeparatedHash::<csv_hash::domains::ReplayRegistryDomain>::hash(data);
-    assert_ne!(hash_genesis, hash_replay, "Genesis and replay domains must be distinct");
+    assert_ne!(
+        hash_genesis, hash_replay,
+        "Genesis and replay domains must be distinct"
+    );
 }
 
 // ===========================================================================
@@ -129,48 +156,86 @@ fn forbidden_state_transitions_fail() {
     // Test that forbidden state transitions are rejected by the state machine
 
     // Legal transitions must succeed
-    assert!(is_legal_transition(State::Locked, State::AwaitingFinality),
-        "Locked -> AwaitingFinality must be legal");
-    assert!(is_legal_transition(State::AwaitingFinality, State::ProofBuilding),
-        "AwaitingFinality -> ProofBuilding must be legal");
-    assert!(is_legal_transition(State::ProofBuilding, State::ProofValidated),
-        "ProofBuilding -> ProofValidated must be legal");
-    assert!(is_legal_transition(State::ProofValidated, State::Minting),
-        "ProofValidated -> Minting must be legal");
-    assert!(is_legal_transition(State::Minting, State::Completed),
-        "Minting -> Completed must be legal");
+    assert!(
+        is_legal_transition(State::Locked, State::AwaitingFinality),
+        "Locked -> AwaitingFinality must be legal"
+    );
+    assert!(
+        is_legal_transition(State::AwaitingFinality, State::ProofBuilding),
+        "AwaitingFinality -> ProofBuilding must be legal"
+    );
+    assert!(
+        is_legal_transition(State::ProofBuilding, State::ProofValidated),
+        "ProofBuilding -> ProofValidated must be legal"
+    );
+    assert!(
+        is_legal_transition(State::ProofValidated, State::Minting),
+        "ProofValidated -> Minting must be legal"
+    );
+    assert!(
+        is_legal_transition(State::Minting, State::Completed),
+        "Minting -> Completed must be legal"
+    );
 
     // Emergency transitions from any state
-    assert!(is_legal_transition(State::Locked, State::RolledBack),
-        "Any -> RolledBack must be legal");
-    assert!(is_legal_transition(State::Completed, State::RolledBack),
-        "Completed -> RolledBack must be legal (reorg recovery)");
-    assert!(is_legal_transition(State::Locked, State::Compromised),
-        "Any -> Compromised must be legal");
-    assert!(is_legal_transition(State::Minting, State::Compromised),
-        "Minting -> Compromised must be legal");
+    assert!(
+        is_legal_transition(State::Locked, State::RolledBack),
+        "Any -> RolledBack must be legal"
+    );
+    assert!(
+        is_legal_transition(State::Completed, State::RolledBack),
+        "Completed -> RolledBack must be legal (reorg recovery)"
+    );
+    assert!(
+        is_legal_transition(State::Locked, State::Compromised),
+        "Any -> Compromised must be legal"
+    );
+    assert!(
+        is_legal_transition(State::Minting, State::Compromised),
+        "Minting -> Compromised must be legal"
+    );
 
     // Forbidden transitions must fail
-    assert!(!is_legal_transition(State::Locked, State::ProofBuilding),
-        "Locked -> ProofBuilding must be forbidden (skips AwaitingFinality)");
-    assert!(!is_legal_transition(State::Locked, State::Minting),
-        "Locked -> Minting must be forbidden (skips multiple states)");
-    assert!(!is_legal_transition(State::Locked, State::Completed),
-        "Locked -> Completed must be forbidden (skips entire pipeline)");
-    assert!(!is_legal_transition(State::AwaitingFinality, State::Completed),
-        "AwaitingFinality -> Completed must be forbidden");
-    assert!(!is_legal_transition(State::ProofValidated, State::AwaitingFinality),
-        "ProofValidated -> AwaitingFinality must be forbidden (no backward transitions)");
-    assert!(!is_legal_transition(State::Completed, State::Minting),
-        "Completed -> Minting must be forbidden (Completed is terminal)");
-    assert!(!is_legal_transition(State::Completed, State::ProofBuilding),
-        "Completed -> ProofBuilding must be forbidden");
-    assert!(!is_legal_transition(State::RolledBack, State::Completed),
-        "RolledBack -> Completed must be forbidden (requires re-sealing)");
-    assert!(!is_legal_transition(State::Compromised, State::Completed),
-        "Compromised -> Completed must be forbidden (requires investigation)");
-    assert!(!is_legal_transition(State::Completed, State::Completed),
-        "Completed -> Completed must be forbidden (no self-transition)");
+    assert!(
+        !is_legal_transition(State::Locked, State::ProofBuilding),
+        "Locked -> ProofBuilding must be forbidden (skips AwaitingFinality)"
+    );
+    assert!(
+        !is_legal_transition(State::Locked, State::Minting),
+        "Locked -> Minting must be forbidden (skips multiple states)"
+    );
+    assert!(
+        !is_legal_transition(State::Locked, State::Completed),
+        "Locked -> Completed must be forbidden (skips entire pipeline)"
+    );
+    assert!(
+        !is_legal_transition(State::AwaitingFinality, State::Completed),
+        "AwaitingFinality -> Completed must be forbidden"
+    );
+    assert!(
+        !is_legal_transition(State::ProofValidated, State::AwaitingFinality),
+        "ProofValidated -> AwaitingFinality must be forbidden (no backward transitions)"
+    );
+    assert!(
+        !is_legal_transition(State::Completed, State::Minting),
+        "Completed -> Minting must be forbidden (Completed is terminal)"
+    );
+    assert!(
+        !is_legal_transition(State::Completed, State::ProofBuilding),
+        "Completed -> ProofBuilding must be forbidden"
+    );
+    assert!(
+        !is_legal_transition(State::RolledBack, State::Completed),
+        "RolledBack -> Completed must be forbidden (requires re-sealing)"
+    );
+    assert!(
+        !is_legal_transition(State::Compromised, State::Completed),
+        "Compromised -> Completed must be forbidden (requires investigation)"
+    );
+    assert!(
+        !is_legal_transition(State::Completed, State::Completed),
+        "Completed -> Completed must be forbidden (no self-transition)"
+    );
 }
 
 // ===========================================================================
@@ -210,9 +275,11 @@ fn all_proofs_are_domain_separated() {
     for (i, hash_i) in hashes.iter().enumerate() {
         for (j, hash_j) in hashes.iter().enumerate() {
             if i != j {
-                assert_ne!(hash_i, hash_j,
+                assert_ne!(
+                    hash_i, hash_j,
                     "Hash domains at index {} and {} must produce different hashes (domain separation violation)",
-                    i, j);
+                    i, j
+                );
             }
         }
     }
@@ -222,8 +289,10 @@ fn all_proofs_are_domain_separated() {
     for domain in &domains {
         let hash1 = tagged_hash(*domain, data);
         let hash2 = tagged_hash(*domain, data2);
-        assert_ne!(hash1.hash, hash2.hash,
-            "Same domain with different data must produce different hashes");
+        assert_ne!(
+            hash1.hash, hash2.hash,
+            "Same domain with different data must produce different hashes"
+        );
     }
 }
 
@@ -244,12 +313,22 @@ fn hash_registry_domain_separation() {
     let nullifier_hash = tagged_hash(HashDomain::Nullifier, data);
     let merkle_hash = tagged_hash(HashDomain::MerkleCombine, data);
 
-    let hashes = [seal_hash.hash, commitment_hash.hash, sanad_id_hash.hash, nullifier_hash.hash, merkle_hash.hash];
+    let hashes = [
+        seal_hash.hash,
+        commitment_hash.hash,
+        sanad_id_hash.hash,
+        nullifier_hash.hash,
+        merkle_hash.hash,
+    ];
 
     for (i, hi) in hashes.iter().enumerate() {
         for (j, hj) in hashes.iter().enumerate() {
             if i != j {
-                assert_ne!(hi, hj, "Hash categories {} and {} must be domain-separated", i, j);
+                assert_ne!(
+                    hi, hj,
+                    "Hash categories {} and {} must be domain-separated",
+                    i, j
+                );
             }
         }
     }
@@ -270,20 +349,34 @@ fn protocol_constants_are_valid() {
     assert!(MAX_FINALITY_DATA > 0, "MAX_FINALITY_DATA must be positive");
 
     // MAX_SIGNATURES_TOTAL_SIZE must be positive
-    assert!(MAX_SIGNATURES_TOTAL_SIZE > 0, "MAX_SIGNATURES_TOTAL_SIZE must be positive");
+    assert!(
+        MAX_SIGNATURES_TOTAL_SIZE > 0,
+        "MAX_SIGNATURES_TOTAL_SIZE must be positive"
+    );
 
     // MAX_PROOF_BUNDLE_SIZE must be positive
-    assert!(MAX_PROOF_BUNDLE_SIZE > 0, "MAX_PROOF_BUNDLE_SIZE must be positive");
+    assert!(
+        MAX_PROOF_BUNDLE_SIZE > 0,
+        "MAX_PROOF_BUNDLE_SIZE must be positive"
+    );
 
     // MIN_REQUIRED_CONFIRMATIONS must be positive
-    assert!(MIN_REQUIRED_CONFIRMATIONS > 0, "MIN_REQUIRED_CONFIRMATIONS must be positive");
+    assert!(
+        MIN_REQUIRED_CONFIRMATIONS > 0,
+        "MIN_REQUIRED_CONFIRMATIONS must be positive"
+    );
 
     // MAX_PROOF_AGE_SECONDS must be positive
-    assert!(MAX_PROOF_AGE_SECONDS > 0, "MAX_PROOF_AGE_SECONDS must be positive");
+    assert!(
+        MAX_PROOF_AGE_SECONDS > 0,
+        "MAX_PROOF_AGE_SECONDS must be positive"
+    );
 
     // Protocol version must be non-empty
-    assert!(!csv_protocol::version::PROTOCOL_VERSION.is_empty(),
-        "Protocol version must be non-empty");
+    assert!(
+        !csv_protocol::version::PROTOCOL_VERSION.is_empty(),
+        "Protocol version must be non-empty"
+    );
 }
 
 // ===========================================================================
@@ -309,7 +402,11 @@ fn invariant_violations_are_distinct() {
     for (i, vi) in violations.iter().enumerate() {
         for (j, vj) in violations.iter().enumerate() {
             if i != j {
-                assert_ne!(vi, vj, "Invariant violations {} and {} must be distinct", i, j);
+                assert_ne!(
+                    vi, vj,
+                    "Invariant violations {} and {} must be distinct",
+                    i, j
+                );
             }
         }
     }
@@ -345,21 +442,45 @@ fn state_machine_completeness() {
     }
 
     // Terminal states must not have outgoing legal transitions (except to emergency states)
-    assert!(!is_legal_transition(State::Completed, State::AwaitingFinality));
+    assert!(!is_legal_transition(
+        State::Completed,
+        State::AwaitingFinality
+    ));
     assert!(!is_legal_transition(State::Completed, State::ProofBuilding));
-    assert!(!is_legal_transition(State::Completed, State::ProofValidated));
+    assert!(!is_legal_transition(
+        State::Completed,
+        State::ProofValidated
+    ));
     assert!(!is_legal_transition(State::Completed, State::Minting));
     assert!(!is_legal_transition(State::Completed, State::Completed));
 
-    assert!(!is_legal_transition(State::RolledBack, State::AwaitingFinality));
-    assert!(!is_legal_transition(State::RolledBack, State::ProofBuilding));
-    assert!(!is_legal_transition(State::RolledBack, State::ProofValidated));
+    assert!(!is_legal_transition(
+        State::RolledBack,
+        State::AwaitingFinality
+    ));
+    assert!(!is_legal_transition(
+        State::RolledBack,
+        State::ProofBuilding
+    ));
+    assert!(!is_legal_transition(
+        State::RolledBack,
+        State::ProofValidated
+    ));
     assert!(!is_legal_transition(State::RolledBack, State::Minting));
     assert!(!is_legal_transition(State::RolledBack, State::Completed));
 
-    assert!(!is_legal_transition(State::Compromised, State::AwaitingFinality));
-    assert!(!is_legal_transition(State::Compromised, State::ProofBuilding));
-    assert!(!is_legal_transition(State::Compromised, State::ProofValidated));
+    assert!(!is_legal_transition(
+        State::Compromised,
+        State::AwaitingFinality
+    ));
+    assert!(!is_legal_transition(
+        State::Compromised,
+        State::ProofBuilding
+    ));
+    assert!(!is_legal_transition(
+        State::Compromised,
+        State::ProofValidated
+    ));
     assert!(!is_legal_transition(State::Compromised, State::Minting));
     assert!(!is_legal_transition(State::Compromised, State::Completed));
 }
@@ -395,7 +516,11 @@ fn all_hash_domains_have_unique_tags() {
     for (i, hi) in seal_hashes.iter().enumerate() {
         for (j, hj) in seal_hashes.iter().enumerate() {
             if i != j {
-                assert_ne!(hi, hj, "Seal domains {} and {} must produce different hashes", i, j);
+                assert_ne!(
+                    hi, hj,
+                    "Seal domains {} and {} must produce different hashes",
+                    i, j
+                );
             }
         }
     }
@@ -423,7 +548,11 @@ fn all_hash_domains_have_unique_tags() {
     for (i, hi) in commitment_hashes.iter().enumerate() {
         for (j, hj) in commitment_hashes.iter().enumerate() {
             if i != j {
-                assert_ne!(hi, hj, "Commitment domains {} and {} must produce different hashes", i, j);
+                assert_ne!(
+                    hi, hj,
+                    "Commitment domains {} and {} must produce different hashes",
+                    i, j
+                );
             }
         }
     }

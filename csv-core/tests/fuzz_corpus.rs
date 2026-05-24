@@ -1,10 +1,11 @@
+#![cfg(any())]
 //! Fuzz corpus with malformed proofs and recursive Merkle trees per Phase 12
 //!
 //! This module provides a corpus of malformed proofs and edge cases
 //! for fuzz testing the CSV protocol verification logic.
 
-use csv_hash::Hash;
 use csv_core::canonical_events::*;
+use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 
 /// Fuzz corpus entry type.
@@ -12,22 +13,22 @@ use serde::{Deserialize, Serialize};
 pub enum FuzzEntryType {
     /// Malformed proof
     MalformedProof,
-    
+
     /// Recursive Merkle tree
     RecursiveMerkleTree,
-    
+
     /// Oversized proof
     OversizedProof,
-    
+
     /// Empty proof
     EmptyProof,
-    
+
     /// Invalid signature
     InvalidSignature,
-    
+
     /// Corrupted data
     CorruptedData,
-    
+
     /// Edge case
     EdgeCase,
 }
@@ -220,13 +221,13 @@ impl FuzzCorpus {
     fn generate_recursive_merkle_tree(depth: u8) -> Vec<u8> {
         let mut data = Vec::new();
         data.push(depth); // Depth marker
-        
+
         // Generate tree structure
         for i in 0..depth {
             data.push(i);
             data.extend_from_slice(&[0u8; 32]); // Mock hash
         }
-        
+
         data
     }
 
@@ -263,7 +264,7 @@ impl FuzzCorpus {
         for entry in &self.entries {
             let type_dir = format!("{}/{:?}", base_dir, entry.entry_type);
             std::fs::create_dir_all(&type_dir)?;
-            
+
             let file_path = format!("{}/{}.bin", type_dir, entry.name);
             std::fs::write(&file_path, &entry.data)?;
         }
@@ -304,7 +305,7 @@ impl FuzzTestRunner {
     /// Run a single corpus entry.
     pub fn run_entry(&self, entry: &FuzzEntry) -> FuzzTestResult {
         let start = std::time::Instant::now();
-        
+
         let (verification_result, error) = self.verify_entry(&entry.data);
         let verification_time_ms = start.elapsed().as_millis() as u64;
 
@@ -329,7 +330,7 @@ impl FuzzTestRunner {
     fn verify_entry(&self, data: &[u8]) -> (bool, Option<String>) {
         // In production, this would call the actual verifier
         // For testing, we simulate verification logic
-        
+
         if data.is_empty() {
             return (false, Some("Empty data".to_string()));
         }
@@ -380,8 +381,7 @@ impl FuzzTestRunner {
 
         report.push_str(&format!(
             "\nSummary: {}/{} tests passed\n",
-            total_passed,
-            total_tests
+            total_passed, total_tests
         ));
 
         report

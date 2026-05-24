@@ -73,10 +73,7 @@ pub fn cmd_acquire_lease(
     output::info(&format!("  Sanad ID: {}", sanad_id_hash));
     output::info(&format!("  Owner: {}", owner_addr));
     output::info(&format!("  TTL: {} seconds", lease.ttl_secs));
-    output::info(&format!(
-        "  Expires: {} seconds from now",
-        lease.ttl_secs
-    ));
+    output::info(&format!("  Expires: {} seconds from now", lease.ttl_secs));
     output::info(&format!(
         "  Lease ID: 0x{}",
         hex::encode(lease_id.as_bytes())

@@ -6,8 +6,8 @@
 //! - Managing the minting queue
 //! - Handling minting failures and rollbacks
 
-use serde::{Serialize, Deserialize};
-use crate::common::{ContractAddress, ContractAbi, FunctionSelector};
+use crate::common::{ContractAbi, ContractAddress, FunctionSelector};
+use serde::{Deserialize, Serialize};
 
 /// Mint contract ABI (Ethereum-compatible)
 pub const MINT_CONTRACT_ABI: &str = r#"[

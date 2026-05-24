@@ -17,7 +17,12 @@ pub struct ChainConfig {
 
 impl ChainConfig {
     /// Create a new chain configuration
-    pub fn new(chain_id: String, chain_name: String, block_time: u64, finality_threshold: u32) -> Self {
+    pub fn new(
+        chain_id: String,
+        chain_name: String,
+        block_time: u64,
+        finality_threshold: u32,
+    ) -> Self {
         Self {
             chain_id,
             chain_name,

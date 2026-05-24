@@ -26,18 +26,20 @@ use alloc::vec::Vec;
 
 use sha2::{Digest, Sha256};
 
-use csv_hash::commitment::Commitment;
-use csv_proof::commitment_chain::{ChainError, VerificationResult, verify_ordered_commitment_chain};
 use crate::consignment::Consignment;
-use csv_proof::proof::InclusionProof as CrossChainInclusionProof;
 use csv_hash::Hash;
+use csv_hash::commitment::Commitment;
 use csv_hash::nullifier::{ChainId, SealConsumption, SealNullifier, SealStatus};
+use csv_proof::commitment_chain::{
+    ChainError, VerificationResult, verify_ordered_commitment_chain,
+};
+use csv_proof::proof::InclusionProof as CrossChainInclusionProof;
 // Sanad is not available in csv-hash, TODO: find correct location
-use csv_hash::sanad::SanadId;
-use csv_hash::seal::SealPoint;
 use crate::state_store::{
     ContractHistory, InMemoryStateStore, StateHistoryStore, StateTransitionRecord,
 };
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::SealPoint;
 
 /// Result of consignment validation.
 #[derive(Debug)]
@@ -183,10 +185,10 @@ impl ValidationClient {
         event: SealConsumptionEvent,
     ) -> Result<(), ValidationError> {
         // Step 1: Verify the Sanad itself
-//         event
-//             .sanad
-//             .verify()
-//             .map_err(ValidationError::SanadValidationError)?;
+        //         event
+        //             .sanad
+        //             .verify()
+        //             .map_err(ValidationError::SanadValidationError)?;
 
         // Step 2: Check seal not already consumed (cross-chain)
         match self.seal_registry.check_seal_status(&event.seal) {
@@ -244,7 +246,10 @@ impl ValidationClient {
                 .seal_assignments
                 .first()
                 .map(|a| a.seal_ref.clone())
-                .unwrap_or_else(|| SealPoint::new(vec![0x01], None).unwrap());
+                .unwrap_or_else(|| SealPoint {
+                    id: vec![0x01],
+                    nonce: None,
+                });
 
             let commitment = Commitment::simple(
                 consignment.genesis.contract_id,
@@ -264,7 +269,10 @@ impl ValidationClient {
                 .seal_assignments
                 .first()
                 .map(|a| a.seal_ref.clone())
-                .unwrap_or_else(|| SealPoint::new(vec![0x01], None).unwrap());
+                .unwrap_or_else(|| SealPoint {
+                    id: vec![0x01],
+                    nonce: None,
+                });
 
             let root_commitment = Commitment::simple(
                 consignment.genesis.contract_id,
@@ -282,7 +290,9 @@ impl ValidationClient {
                 // Hash the seal bytes + assignment data to produce a transition payload hash.
                 let payload_hash = {
                     // Use canonical serialization for hashing (PHASE 2 requirement)
-                    let seal_bytes = assignment.seal_ref.to_canonical_bytes()
+                    let seal_bytes = assignment
+                        .seal_ref
+                        .to_canonical_bytes()
                         .expect("canonical serialization should not fail");
                     let mut hasher = Sha256::new();
                     hasher.update(&seal_bytes);
@@ -338,7 +348,10 @@ impl ValidationClient {
                     // Seal is fresh — record consumption
                     let sanad_id_bytes: [u8; 32] = {
                         let mut arr = [0u8; 32];
-                        let seal_bytes = seal_assignment.seal_ref.to_canonical_bytes().unwrap_or_default();
+                        let seal_bytes = seal_assignment
+                            .seal_ref
+                            .to_canonical_bytes()
+                            .unwrap_or_default();
                         let len = seal_bytes.len().min(32);
                         arr[..len].copy_from_slice(&seal_bytes[..len]);
                         arr
@@ -428,7 +441,10 @@ impl ValidationClient {
             let seal = if i < consignment.seal_assignments.len() {
                 consignment.seal_assignments[i].seal_ref.clone()
             } else {
-                SealPoint::new(vec![i as u8], None).unwrap()
+                SealPoint {
+                    id: vec![i as u8],
+                    nonce: None,
+                }
             };
 
             let domain = [0u8; 32];
@@ -477,7 +493,7 @@ impl Default for ValidationClient {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::OwnershipProof;

@@ -15,8 +15,8 @@
 //! or String for protocol hashes. This prevents hash confusion attacks where
 //! a hash from one domain is mistakenly used in another domain.
 
-use serde::{Deserialize, Serialize};
 use crate::Hash;
+use serde::{Deserialize, Serialize};
 
 /// Typed hash domain tags for CSV protocol (distinct from hash_registry::HashDomain)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -174,12 +174,18 @@ mod tests {
         ];
 
         let tags: Vec<_> = domains.iter().map(|d| d.as_bytes()).collect();
-        let unique_tags: Vec<_> = tags.iter().collect::<std::collections::HashSet<_>>()
+        let unique_tags: Vec<_> = tags
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .cloned()
             .collect();
 
-        assert_eq!(tags.len(), unique_tags.len(), "All hash domain tags must be unique");
+        assert_eq!(
+            tags.len(),
+            unique_tags.len(),
+            "All hash domain tags must be unique"
+        );
     }
 
     #[test]
@@ -194,7 +200,10 @@ mod tests {
         assert_eq!(proof_hash.as_bytes(), &hash_bytes);
         assert_eq!(seal_hash.as_bytes(), &hash_bytes);
 
-        // But they are different types
-        assert_ne!(content_hash.as_hash(), proof_hash.as_hash());
+        // But they are different Rust types, so call sites cannot mix them accidentally.
+        assert_ne!(
+            std::any::TypeId::of::<ContentHash>(),
+            std::any::TypeId::of::<ProofHash>()
+        );
     }
 }

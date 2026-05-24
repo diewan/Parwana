@@ -14,7 +14,6 @@ use std::vec::Vec;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
-use csv_proof::signature::{Signature, SignatureScheme};
 
 /// Hash algorithm used by the source chain's proof model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,11 +91,7 @@ impl CrossChainHashAlgorithm {
         use csv_hash::csv_tagged_hash;
 
         // Build domain tag: "csv-cross-chain-v1:{chain}:{domain}"
-        let tag = format!(
-            "csv-cross-chain-v1:{}:{}",
-            chain.as_str(),
-            domain.as_str()
-        );
+        let tag = format!("csv-cross-chain-v1:{}:{}", chain.as_str(), domain.as_str());
 
         // Apply the chain's native hash, then wrap with tagged_hash for domain separation
         let native_hash = self.raw_hash(bytes);
@@ -147,21 +142,6 @@ impl CrossChainDomain {
             Self::ProofBinding => "proof-binding",
             Self::FinalityAttestation => "finality-attestation",
         }
-    }
-}
-
-/// Return the canonical signature scheme for a given chain.
-fn signature_scheme_for_chain(chain: &ChainId) -> Result<SignatureScheme, CrossChainError> {
-    match chain.to_string().as_str() {
-        "bitcoin" => Ok(SignatureScheme::Secp256k1),
-        "ethereum" => Ok(SignatureScheme::Secp256k1),
-        "solana" => Ok(SignatureScheme::Ed25519),
-        "aptos" => Ok(SignatureScheme::Ed25519),
-        "sui" => Ok(SignatureScheme::Ed25519),
-        _ => Err(CrossChainError::UnsupportedChainPair(
-            chain.clone(),
-            chain.clone(),
-        )),
     }
 }
 
@@ -569,7 +549,7 @@ pub trait MintProvider {
 
 /// Default verifier implementation for cross-chain transfer proofs.
 pub struct StandardTransferVerifier {
-    registry: Hash, // TODO: integrate when available
+    _registry: Hash, // TODO: integrate when available
 }
 
 /// Cross-chain transfer registry entry.

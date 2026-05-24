@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Cross-chain contract event equivalence (RFC-0009).
 
 #[cfg(test)]

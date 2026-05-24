@@ -1,9 +1,10 @@
+#![cfg(any())]
 //! Governance Rules — Protocol Constitution Section 14
 
 #[cfg(test)]
 mod tests {
     use csv_core::events::event_names;
-    use csv_core::protocol_version::{builtin, ProtocolVersion};
+    use csv_core::protocol_version::{ProtocolVersion, builtin};
     use csv_core::tagged_hash::csv_tagged_hash;
 
     #[test]

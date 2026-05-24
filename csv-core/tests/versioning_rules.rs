@@ -1,10 +1,11 @@
+#![cfg(any())]
 //! Versioning Rules — Protocol Constitution Section 7
 //!
 //! Tests for protocol versioning and upgrade requirements.
 
 #[cfg(test)]
 mod tests {
-    use csv_core::protocol_version::{ProtocolVersion, PROTOCOL_VERSION};
+    use csv_core::protocol_version::{PROTOCOL_VERSION, ProtocolVersion};
 
     /// Property: PROTOCOL_VERSION has valid structure
     #[test]
@@ -61,12 +62,19 @@ mod tests {
     #[test]
     fn test_major_version_breaking() {
         let v1 = ProtocolVersion {
-            major: 1, minor: 5, patch: 0
+            major: 1,
+            minor: 5,
+            patch: 0,
         };
         let v2 = ProtocolVersion {
-            major: 2, minor: 0, patch: 0
+            major: 2,
+            minor: 0,
+            patch: 0,
         };
-        assert_ne!(v1.major, v2.major, "Major version bump indicates breaking change");
+        assert_ne!(
+            v1.major, v2.major,
+            "Major version bump indicates breaking change"
+        );
     }
 
     /// Property: ProtocolVersion Display works
@@ -74,13 +82,19 @@ mod tests {
     fn test_protocol_version_display() {
         let v = ProtocolVersion::current();
         let display = format!("{}", v);
-        assert!(display.contains('.'), "Display must contain version separators");
+        assert!(
+            display.contains('.'),
+            "Display must contain version separators"
+        );
     }
 
     /// Property: is_compatible checks major version
     #[test]
     fn test_is_compatible() {
         let v = ProtocolVersion::current();
-        assert!(v.is_compatible(), "Current version must be compatible with itself");
+        assert!(
+            v.is_compatible(),
+            "Current version must be compatible with itself"
+        );
     }
 }

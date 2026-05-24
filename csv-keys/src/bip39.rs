@@ -54,8 +54,12 @@ impl BitcoinNetwork {
 /// let xpub = derive_xpub(seed.as_bytes(), BitcoinNetwork::Testnet, 0).unwrap();
 /// assert!(xpub.starts_with("tpub"));
 /// ```
-pub fn derive_xpub(seed: &[u8; 64], network: BitcoinNetwork, account: u32) -> Result<String, String> {
-    use bitcoin::bip32::{Xpriv, Xpub, DerivationPath};
+pub fn derive_xpub(
+    seed: &[u8; 64],
+    network: BitcoinNetwork,
+    account: u32,
+) -> Result<String, String> {
+    use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 
     let btc_net = network.to_bitcoin_network();
 

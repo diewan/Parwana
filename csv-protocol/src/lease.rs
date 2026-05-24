@@ -27,9 +27,9 @@
 //! - Lease IDs are deterministically derived from lease parameters
 
 use core::fmt;
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
 use csv_hash::csv_tagged_hash;
+use serde::{Deserialize, Serialize};
 
 /// Unique lease identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -103,12 +103,7 @@ impl Lease {
 
     /// Return the remaining time-to-live in seconds
     pub fn remaining_secs(&self, now: u64) -> u64 {
-        let expires_at = self.expires_at();
-        if now >= expires_at {
-            0
-        } else {
-            expires_at - now
-        }
+        self.expires_at().saturating_sub(now)
     }
 }
 
@@ -166,18 +161,21 @@ impl LeaseManager {
             return Err(LeaseError::InvalidTtl);
         }
 
-        if let Some(existing) = self.leases.get(&sanad_id) {
-            if existing.is_valid_now() {
-                return Err(LeaseError::AlreadyLeased {
-                    owner: existing.owner,
-                    expires_at: existing.expires_at(),
-                });
-            }
+        if let Some(existing) = self.leases.get(&sanad_id)
+            && existing.is_valid_now()
+        {
+            return Err(LeaseError::AlreadyLeased {
+                owner: existing.owner,
+                expires_at: existing.expires_at(),
+            });
             // Expired lease — allow re-acquisition
         }
 
         let mut lease = Lease::new(sanad_id, owner, ttl_secs);
-        lease.id = LeaseId(Hash::new(csv_tagged_hash("csv.lease.id.v1", &lease.id.as_bytes()[..])));
+        lease.id = LeaseId(Hash::new(csv_tagged_hash(
+            "csv.lease.id.v1",
+            &lease.id.as_bytes()[..],
+        )));
 
         self.leases.insert(sanad_id, lease.clone());
         Ok(lease.id)

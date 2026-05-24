@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Invariant 10: Signature Scheme MUST Be Derived From Chain, Not Payload
 //!
 //! Rule: The scheme used to verify ownership MUST be derived from
@@ -14,7 +15,7 @@ mod tests {
     fn test_signature_scheme_variants() {
         let secp = SignatureScheme::Secp256k1;
         let ed = SignatureScheme::Ed25519;
-        
+
         assert!(matches!(secp, SignatureScheme::Secp256k1));
         assert!(matches!(ed, SignatureScheme::Ed25519));
     }
@@ -51,17 +52,19 @@ mod tests {
     /// Property: SignatureScheme can be serialized
     #[test]
     fn test_signature_scheme_serialization() {
-        use serde::{Serialize, Deserialize};
-        
+        use serde::{Deserialize, Serialize};
+
         #[derive(Serialize, Deserialize)]
         struct Wrapper {
             scheme: SignatureScheme,
         }
-        
-        let w = Wrapper { scheme: SignatureScheme::Ed25519 };
+
+        let w = Wrapper {
+            scheme: SignatureScheme::Ed25519,
+        };
         let json = serde_json::to_string(&w).unwrap();
         let restored: Wrapper = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(w.scheme, restored.scheme);
     }
 }

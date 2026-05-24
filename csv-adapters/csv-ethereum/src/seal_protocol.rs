@@ -8,15 +8,15 @@
 
 use std::sync::Mutex;
 
-use csv_hash::Hash;
-use csv_protocol::seal_protocol::SealProtocol;
-use csv_protocol::commitment::Commitment;
-use csv_protocol::error::ProtocolError;
-use csv_proof::proof::{FinalityProof, ProofBundle};
-use csv_protocol::seal::CommitAnchor as CoreCommitAnchor;
-use csv_protocol::seal::SealPoint as CoreSealPoint;
 #[cfg(feature = "rpc")]
 use crate::finality::FinalityCheckerTrait;
+use csv_hash::Hash;
+use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::commitment::Commitment;
+use csv_protocol::error::ProtocolError;
+use csv_protocol::seal::CommitAnchor as CoreCommitAnchor;
+use csv_protocol::seal::SealPoint as CoreSealPoint;
+use csv_protocol::seal_protocol::SealProtocol;
 
 use crate::config::EthereumConfig;
 use crate::error::{EthereumError, EthereumResult};
@@ -184,7 +184,11 @@ impl SealProtocol for EthereumSealProtocol {
     type InclusionProof = EthereumInclusionProof;
     type FinalityProof = EthereumFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
+    fn publish(
+        &self,
+        commitment: Hash,
+        seal: Self::SealPoint,
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
         self.verify_slot_available(&seal)
             .map_err(ProtocolError::from)?;
 
@@ -210,14 +214,22 @@ impl SealProtocol for EthereumSealProtocol {
             // Build, sign, and broadcast the transaction
             let tx_hash = handle
                 .block_on(publish(real_rpc, &seal, *commitment.as_bytes()))
-                .map_err(|e| Box::new(ProtocolError::PublishFailed(e.to_string())) as Box<dyn std::error::Error>)?;
+                .map_err(|e| {
+                    Box::new(ProtocolError::PublishFailed(e.to_string()))
+                        as Box<dyn std::error::Error>
+                })?;
 
             // Get the receipt and verify the SealUsed event
             let receipt = handle
                 .block_on(self.rpc.get_transaction_receipt(tx_hash))
-                .map_err(|e| Box::new(ProtocolError::NetworkError(e.to_string())) as Box<dyn std::error::Error>)?
+                .map_err(|e| {
+                    Box::new(ProtocolError::NetworkError(e.to_string()))
+                        as Box<dyn std::error::Error>
+                })?
                 .ok_or_else(|| {
-                    Box::new(ProtocolError::PublishFailed("Transaction receipt not found".to_string())) as Box<dyn std::error::Error>
+                    Box::new(ProtocolError::PublishFailed(
+                        "Transaction receipt not found".to_string(),
+                    )) as Box<dyn std::error::Error>
                 })?;
 
             let has_valid_event = verify_seal_consumption_in_receipt(
@@ -256,7 +268,10 @@ impl SealProtocol for EthereumSealProtocol {
         }
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    fn verify_inclusion(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
         #[cfg(feature = "rpc")]
         {
             // Try to get real proof data from RPC
@@ -294,7 +309,10 @@ impl SealProtocol for EthereumSealProtocol {
                 let receipt = handle
                     .block_on(self.rpc.get_transaction_receipt(anchor.tx_hash))
                     .map_err(|e| {
-                        Box::new(ProtocolError::InclusionProofFailed(format!("Failed to get receipt: {}", e))) as Box<dyn std::error::Error>
+                        Box::new(ProtocolError::InclusionProofFailed(format!(
+                            "Failed to get receipt: {}",
+                            e
+                        ))) as Box<dyn std::error::Error>
                     })?
                     .ok_or_else(|| {
                         Box::new(ProtocolError::InclusionProofFailed(
@@ -340,7 +358,10 @@ impl SealProtocol for EthereumSealProtocol {
         Ok(proof)
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    fn verify_finality(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
         #[cfg(feature = "rpc")]
         {
             use tokio::runtime::Handle;
@@ -433,7 +454,10 @@ impl SealProtocol for EthereumSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, value: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    fn create_seal(
+        &self,
+        value: Option<u64>,
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         // Derive a seal from the CSVSeal contract address and a deterministic slot
         // The seal represents a nullifier slot in the contract's usedSeals mapping
         let nonce = value.unwrap_or(0);
@@ -468,8 +492,9 @@ impl SealProtocol for EthereumSealProtocol {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
 
-        let dag_segment: csv_proof::dag::DAGSegment = csv_codec::from_canonical_cbor(&transition_dag)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        let dag_segment: csv_proof::dag::DAGSegment =
+            csv_codec::from_canonical_cbor(&transition_dag)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
         let seal_ref = CoreSealPoint::new(anchor.tx_hash.to_vec(), Some(anchor.log_index))
             .map_err(|e| ProtocolError::Generic(e.to_string()))?;
@@ -516,9 +541,9 @@ impl SealProtocol for EthereumSealProtocol {
         {
             use tokio::runtime::Handle;
             let handle = Handle::current();
-            let current = handle
-                .block_on(self.rpc.block_number())
-                .map_err(|e| Box::new(ProtocolError::NetworkError(e.to_string())) as Box<dyn std::error::Error>)?;
+            let current = handle.block_on(self.rpc.block_number()).map_err(|e| {
+                Box::new(ProtocolError::NetworkError(e.to_string())) as Box<dyn std::error::Error>
+            })?;
             if anchor.block_number > current {
                 return Err(Box::new(ProtocolError::ReorgInvalid(format!(
                     "Block {} beyond current {}",

@@ -6,22 +6,16 @@
 
 // Re-export canonical types from csv-proof
 pub use csv_proof::proof::{
-    InclusionProof, FinalityProof, ProofBundle,
-    MAX_PROOF_BYTES, MAX_FINALITY_DATA, MAX_SIGNATURES_TOTAL_SIZE,
+    FinalityProof, InclusionProof, MAX_FINALITY_DATA, MAX_PROOF_BYTES, MAX_SIGNATURES_TOTAL_SIZE,
+    ProofBundle,
 };
 
 // Re-export proof taxonomy
 pub use csv_proof::proof_types::{
-    Proof, ProofCategory,
-    InclusionProof as InclusionProofType,
-    FinalityProof as FinalityProofType,
-    OwnershipProof, TransitionProof,
-    ReplayProof, ExecutionProof,
-    ZKProof as ZKProofType,
-    CompositeProof,
-    CompositionRule,
-    ProofPhase,
+    CompositeProof, CompositionRule, ExecutionProof, FinalityProof as FinalityProofType,
+    InclusionProof as InclusionProofType, OwnershipProof, Proof, ProofCategory, ProofPhase,
+    ReplayProof, TransitionProof, ZKProof as ZKProofType,
 };
 
 // Re-export proof DAGs
-pub use csv_proof::proof_dags::{ProofNode, ProofDag, ProofId};
+pub use csv_proof::proof_dags::{ProofDag, ProofId, ProofNode};

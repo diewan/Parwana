@@ -2,12 +2,12 @@
 //!
 //! Protocol bundle composition is delegated to `csv-verifier::verify_chain_proof_bundle`.
 
-use csv_protocol::backend::ChainOpError;
-use csv_protocol::backend::ChainOpResult;
 use csv_hash::Hash;
 use csv_proof::proof::{FinalityProof, InclusionProof};
+use csv_protocol::backend::ChainOpError;
+use csv_protocol::backend::ChainOpResult;
 use csv_verifier::{
-    verify_chain_proof_bundle, ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier,
+    ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier, verify_chain_proof_bundle,
 };
 
 #[cfg(feature = "rpc")]

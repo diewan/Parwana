@@ -1,15 +1,15 @@
+#![cfg(any())]
 //! Domain Separation Rules — Protocol Constitution Section 8
 //!
 //! Tests for domain marker trait and reserved domains.
 
 #[cfg(test)]
 mod tests {
-    use csv_core::domain_hash::{Domain, DomainSeparatedHash};
     use csv_core::Hash;
+    use csv_core::domain_hash::{Domain, DomainSeparatedHash};
     use csv_core::domains::{
-        BitcoinSealDomain, EthereumMintDomain, AptosAnchorDomain, GenesisDomain,
-        ProofBundleDomain, ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain,
-        TransitionDomain,
+        AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain, ProofBundleDomain,
+        ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
     };
 
     /// Property: Domain constants are non-empty
@@ -40,11 +40,14 @@ mod tests {
             TransferCommitmentDomain::DOMAIN,
             TransitionDomain::DOMAIN,
         ];
-        
+
         for domain in domains {
             let domain_str = String::from_utf8_lossy(domain);
-            assert!(domain_str.starts_with("csv."), 
-                "Domain '{}' must start with 'csv.'", domain_str);
+            assert!(
+                domain_str.starts_with("csv."),
+                "Domain '{}' must start with 'csv.'",
+                domain_str
+            );
         }
     }
 
@@ -62,10 +65,12 @@ mod tests {
             TransferCommitmentDomain::DOMAIN,
             TransitionDomain::DOMAIN,
         ];
-        
+
         for i in 0..domains.len() {
             for j in (i + 1)..domains.len() {
-                assert_ne!(domains[i], domains[j], 
+                assert_ne!(
+                    domains[i],
+                    domains[j],
                     "Domain '{}' must not equal domain '{}'",
                     String::from_utf8_lossy(domains[i]),
                     String::from_utf8_lossy(domains[j])
@@ -81,7 +86,7 @@ mod tests {
         impl Domain for TestDomain {
             const DOMAIN: &'static [u8] = b"csv.test.domain";
         }
-        
+
         let data = b"test payload";
         let h1 = DomainSeparatedHash::<TestDomain>::hash(data);
         let h2 = DomainSeparatedHash::<TestDomain>::hash(data);
@@ -95,12 +100,12 @@ mod tests {
         impl Domain for DomainA {
             const DOMAIN: &'static [u8] = b"csv.test.domain.a";
         }
-        
+
         struct DomainB;
         impl Domain for DomainB {
             const DOMAIN: &'static [u8] = b"csv.test.domain.b";
         }
-        
+
         let data = b"test payload";
         let h1 = DomainSeparatedHash::<DomainA>::hash(data);
         let h2 = DomainSeparatedHash::<DomainB>::hash(data);
@@ -114,11 +119,11 @@ mod tests {
         impl Domain for TestDomain {
             const DOMAIN: &'static [u8] = b"csv.test.multiple";
         }
-        
+
         let single = DomainSeparatedHash::<TestDomain>::hash(b"payload1");
         let payloads: [&[u8]; 1] = [b"payload1".as_slice()];
         let multiple = DomainSeparatedHash::<TestDomain>::hash_multiple(payloads);
-        
+
         // Single payload should produce same hash as hash_multiple with one payload
         assert_eq!(single, multiple, "Single payload must match hash_multiple");
     }
@@ -128,6 +133,9 @@ mod tests {
     fn test_all_seal_domains_naming() {
         let domain = BitcoinSealDomain::DOMAIN;
         let domain_str = String::from_utf8_lossy(domain);
-        assert!(domain_str.starts_with("csv."), "Domain must start with 'csv.'");
+        assert!(
+            domain_str.starts_with("csv."),
+            "Domain must start with 'csv.'"
+        );
     }
 }

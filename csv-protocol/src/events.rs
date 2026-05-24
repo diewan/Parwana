@@ -750,29 +750,34 @@ impl EventIndexerRegistry {
 }
 
 /// Structured JSON event formatter
-pub struct JsonEventFormatter {
-}
+pub struct JsonEventFormatter {}
 
 impl JsonEventFormatter {
     /// Create a new JSON formatter
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
 
     /// Create a new JSON formatter with pretty printing
     pub fn pretty() -> Self {
-        Self { }
+        Self {}
     }
 
     /// Format a single event as CBOR (canonical serialization per AGENTS.md)
-    pub fn format_event(&self, event: &CsvEvent) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
+    pub fn format_event(
+        &self,
+        event: &CsvEvent,
+    ) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
         let mut buf = Vec::new();
         ciborium::into_writer(event, &mut buf)?;
         Ok(buf)
     }
 
     /// Format multiple events as a CBOR array
-    pub fn format_events(&self, events: &[CsvEvent]) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
+    pub fn format_events(
+        &self,
+        events: &[CsvEvent],
+    ) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
         let mut buf = Vec::new();
         ciborium::into_writer(events, &mut buf)?;
         Ok(buf)

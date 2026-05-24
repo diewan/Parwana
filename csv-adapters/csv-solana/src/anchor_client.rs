@@ -100,8 +100,15 @@ pub mod pdas {
     }
 
     /// Derive the refund sanad account PDA: ["sanad", claimant, sanad_id, "refund"]
-    pub fn refund_sanad_account(program_id: &Pubkey, claimant: &Pubkey, sanad_id: &[u8; 32]) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[b"sanad", claimant.as_ref(), sanad_id, b"refund"], program_id)
+    pub fn refund_sanad_account(
+        program_id: &Pubkey,
+        claimant: &Pubkey,
+        sanad_id: &[u8; 32],
+    ) -> (Pubkey, u8) {
+        Pubkey::find_program_address(
+            &[b"sanad", claimant.as_ref(), sanad_id, b"refund"],
+            program_id,
+        )
     }
 }
 
@@ -114,8 +121,7 @@ impl InstructionBuilder {
     /// Create a new instruction builder with the CSV Seal program ID
     pub fn new() -> Self {
         Self {
-            program_id: Pubkey::from_str(CSV_SEAL_PROGRAM_ID)
-                .expect("Invalid CSV Seal program ID"),
+            program_id: Pubkey::from_str(CSV_SEAL_PROGRAM_ID).expect("Invalid CSV Seal program ID"),
         }
     }
 
@@ -125,11 +131,7 @@ impl InstructionBuilder {
     }
 
     /// Build initialize_registry instruction
-    pub fn initialize_registry(
-        &self,
-        registry: Pubkey,
-        authority: Pubkey,
-    ) -> Instruction {
+    pub fn initialize_registry(&self, registry: Pubkey, authority: Pubkey) -> Instruction {
         let mut data = Vec::new();
         data.extend_from_slice(&discriminators::initialize_registry());
 
@@ -173,11 +175,7 @@ impl InstructionBuilder {
     }
 
     /// Build consume_seal instruction
-    pub fn consume_seal(
-        &self,
-        sanad_account: Pubkey,
-        consumer: Pubkey,
-    ) -> Instruction {
+    pub fn consume_seal(&self, sanad_account: Pubkey, consumer: Pubkey) -> Instruction {
         let mut data = Vec::new();
         data.extend_from_slice(&discriminators::consume_seal());
 
@@ -192,6 +190,7 @@ impl InstructionBuilder {
     }
 
     /// Build lock_sanad instruction
+    #[allow(clippy::too_many_arguments)]
     pub fn lock_sanad(
         &self,
         sanad_account: Pubkey,
@@ -223,6 +222,7 @@ impl InstructionBuilder {
     }
 
     /// Build mint_sanad instruction
+    #[allow(clippy::too_many_arguments)]
     pub fn mint_sanad(
         &self,
         sanad_account: Pubkey,
@@ -311,6 +311,7 @@ impl InstructionBuilder {
     }
 
     /// Build record_sanad_metadata instruction
+    #[allow(clippy::too_many_arguments)]
     pub fn record_sanad_metadata(
         &self,
         sanad_account: Pubkey,
@@ -389,7 +390,7 @@ mod tests {
         let disc1 = discriminators::create_seal();
         let disc2 = discriminators::consume_seal();
         let disc3 = discriminators::lock_sanad();
-        
+
         assert_ne!(disc1, disc2);
         assert_ne!(disc2, disc3);
         assert_ne!(disc1, disc3);
@@ -411,7 +412,7 @@ mod tests {
         let state_root = [3u8; 32];
 
         let ix = builder.create_seal(sanad_account, owner, sanad_id, commitment, state_root);
-        
+
         assert_eq!(ix.program_id.to_string(), CSV_SEAL_PROGRAM_ID);
         assert_eq!(ix.accounts.len(), 3);
         assert_eq!(ix.data.len(), 8 + 32 + 32 + 32); // discriminator + 3x32-byte fields
@@ -443,7 +444,7 @@ mod tests {
             proof_root,
             leaf_position,
         );
-        
+
         assert_eq!(ix.accounts.len(), 3);
         // discriminator + sanad_id + commitment + state_root + source_chain + source_seal_ref + proof_len + proof + proof_root + leaf_position
         assert_eq!(ix.data.len(), 8 + 32 + 32 + 32 + 1 + 32 + 4 + 64 + 32 + 8);

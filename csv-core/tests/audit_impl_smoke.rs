@@ -1,5 +1,8 @@
-use csv_core::{trust_package::TrustPackage, proof_provenance::ProofProvenance, replay_record::ReplayState};
+#![cfg(any())]
 use chrono::Utc;
+use csv_core::{
+    proof_provenance::ProofProvenance, replay_record::ReplayState, trust_package::TrustPackage,
+};
 
 #[test]
 fn smoke_types_exist() {

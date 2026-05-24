@@ -67,7 +67,10 @@ fn test_six_block_deep_reorg() {
 
     // The reorg depth equals the confirmation threshold
     let reorg_depth = 6usize;
-    assert!(reorg_depth >= 6, "Reorg depth must be at least 6 for this test");
+    assert!(
+        reorg_depth >= 6,
+        "Reorg depth must be at least 6 for this test"
+    );
 
     // After a 6-block reorg, a proof with exactly 6 confirmations becomes invalid
     let proof_confirmations = 6u64;
@@ -86,7 +89,10 @@ fn test_conflicting_spv_proofs() {
 
     // Two SPV proofs claim inclusion in different chain tips
     // Only one chain can be the valid longest chain
-    assert_ne!(chain_a_block, chain_b_block, "Conflicting chain tips must differ");
+    assert_ne!(
+        chain_a_block, chain_b_block,
+        "Conflicting chain tips must differ"
+    );
 
     // In a reorg scenario, the proof on the shorter chain becomes invalid
     // while the proof on the longer chain remains valid
@@ -136,6 +142,9 @@ fn test_merkle_root_after_reorg() {
     let proof_includes_original = original_merkle_root == original_merkle_root;
     let proof_includes_new = original_merkle_root == new_block_merkle_root;
 
-    assert!(proof_includes_original, "Proof matches original merkle root");
+    assert!(
+        proof_includes_original,
+        "Proof matches original merkle root"
+    );
     assert!(!proof_includes_new, "Proof does not match new merkle root");
 }

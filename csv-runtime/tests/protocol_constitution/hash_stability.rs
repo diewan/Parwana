@@ -4,16 +4,15 @@
 // unless explicitly changed via RFC and version bump.
 
 use csv_hash::{
-    canonical::{to_canonical_cbor, from_canonical_cbor},
-    tagged_hash::{tagged_hash, tagged_hash_str, csv_tagged_hash},
-    Hash, HashDomain, DomainSeparatedHash,
-    domains::{ProofBundleDomain, TransitionDomain, ReplayRegistryDomain},
-    seal::{SealPoint, CommitAnchor},
+    DomainSeparatedHash, Hash, HashDomain,
+    canonical::{from_canonical_cbor, to_canonical_cbor},
     commitment::Commitment,
     dag::DAGSegment,
+    domains::{ProofBundleDomain, ReplayRegistryDomain, TransitionDomain},
+    seal::{CommitAnchor, SealPoint},
+    tagged_hash::{csv_tagged_hash, tagged_hash},
 };
-use csv_proof::proof::{ProofBundle, InclusionProof, FinalityProof};
-use csv_codec::to_canonical_cbor as codec_canonical_cbor;
+use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Test that canonical serialization produces stable, deterministic hashes
 /// for protocol types across multiple serializations.
@@ -56,7 +55,8 @@ fn protocol_hashes_are_stable() {
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let bytes1 = bundle.to_bytes().expect("bundle serialization");
     let bytes2 = bundle.to_bytes().expect("bundle serialization");
@@ -81,9 +81,17 @@ fn protocol_hashes_are_stable() {
 
     // 6. Verify roundtrip preserves hash
     let cbor_c = commitment.to_canonical_bytes();
-    let restored_commitment: Commitment = from_canonical_cbor(&cbor_c).expect("commitment deserialization");
-    assert_eq!(commitment, restored_commitment, "Commitment roundtrip must preserve value");
-    assert_eq!(h1, restored_commitment.commitment_hash(), "Restored commitment hash must match");
+    let restored_commitment: Commitment =
+        from_canonical_cbor(&cbor_c).expect("commitment deserialization");
+    assert_eq!(
+        commitment, restored_commitment,
+        "Commitment roundtrip must preserve value"
+    );
+    assert_eq!(
+        h1,
+        restored_commitment.commitment_hash(),
+        "Restored commitment hash must match"
+    );
 }
 
 /// Verify that all hash domain tags are unique and stable.
@@ -125,9 +133,18 @@ fn hash_domain_separation_is_enforced() {
     let h2 = tagged_hash(HashDomain::EthereumSealV1, test_data);
     let h3 = tagged_hash(HashDomain::SolanaSealV1, test_data);
 
-    assert_ne!(h1.hash, h2.hash, "Bitcoin and Ethereum seal domains must differ");
-    assert_ne!(h2.hash, h3.hash, "Ethereum and Solana seal domains must differ");
-    assert_ne!(h1.hash, h3.hash, "Bitcoin and Solana seal domains must differ");
+    assert_ne!(
+        h1.hash, h2.hash,
+        "Bitcoin and Ethereum seal domains must differ"
+    );
+    assert_ne!(
+        h2.hash, h3.hash,
+        "Ethereum and Solana seal domains must differ"
+    );
+    assert_ne!(
+        h1.hash, h3.hash,
+        "Bitcoin and Solana seal domains must differ"
+    );
 
     // Verify tagged_hash_str (BIP-340 style) produces different results than raw SHA256
     let raw_hash = Hash::sha256(test_data);
@@ -144,8 +161,14 @@ fn hash_domain_separation_is_enforced() {
     let dh3 = DomainSeparatedHash::<ReplayRegistryDomain>::hash(test_data);
 
     assert_ne!(dh1, dh2, "ProofBundle and Transition domains must differ");
-    assert_ne!(dh2, dh3, "Transition and ReplayRegistry domains must differ");
-    assert_ne!(dh1, dh3, "ProofBundle and ReplayRegistry domains must differ");
+    assert_ne!(
+        dh2, dh3,
+        "Transition and ReplayRegistry domains must differ"
+    );
+    assert_ne!(
+        dh1, dh3,
+        "ProofBundle and ReplayRegistry domains must differ"
+    );
 
     // Verify domain separation prevents replay: same payload, different domains
     let payload = b"valid_proof_data";

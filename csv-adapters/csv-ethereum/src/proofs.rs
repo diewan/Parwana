@@ -413,10 +413,8 @@ fn check_for_seal_used_event(
                     return true;
                 }
             }
-        } else {
-            if log.data.len() >= 64 {
-                return true;
-            }
+        } else if log.data.len() >= 64 {
+            return true;
         }
     }
 

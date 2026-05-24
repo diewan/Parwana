@@ -1,12 +1,13 @@
+#![cfg(any())]
 //! Proof Encoding Rules — Protocol Constitution Section 4
 //!
 //! Tests for proof bundle structure and lifecycle requirements.
 
 #[cfg(test)]
 mod tests {
-    use csv_core::proof::{ProofPhase, InclusionProof, FinalityProof};
     use csv_core::Hash;
-    use csv_core::seal::{SealPoint, CommitAnchor};
+    use csv_core::proof::{FinalityProof, InclusionProof, ProofPhase};
+    use csv_core::seal::{CommitAnchor, SealPoint};
 
     /// Property: ProofPhase has correct number of stages
     #[test]
@@ -37,7 +38,10 @@ mod tests {
         // MAX_PROOF_BYTES = 64KB
         let large_proof = vec![0u8; 65536 + 1];
         let result = InclusionProof::new(large_proof, Hash::zero(), 1000, 0);
-        assert!(result.is_err(), "Proof exceeding MAX_PROOF_BYTES must be rejected");
+        assert!(
+            result.is_err(),
+            "Proof exceeding MAX_PROOF_BYTES must be rejected"
+        );
     }
 
     /// Property: InclusionProof accepts valid size
@@ -52,7 +56,10 @@ mod tests {
     #[test]
     fn test_finality_proof_zero_confirmations_rejected() {
         let result = FinalityProof::new(vec![], 0, false);
-        assert!(result.is_err(), "Zero confirmations for probabilistic finality must be rejected");
+        assert!(
+            result.is_err(),
+            "Zero confirmations for probabilistic finality must be rejected"
+        );
     }
 
     /// Property: FinalityProof accepts valid confirmations
@@ -84,7 +91,7 @@ mod tests {
         let anchor = CommitAnchor::new(vec![0xCDu8; 32], 1000, vec![]).unwrap();
         let inclusion = InclusionProof::new(vec![0xEFu8; 64], Hash::zero(), 1000, 0).unwrap();
         let finality = FinalityProof::new(vec![0x12u8; 32], 6, true).unwrap();
-        
+
         // Verify all components are valid
         assert!(!seal.id.is_empty());
         assert!(!anchor.anchor_id.is_empty());

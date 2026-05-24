@@ -20,13 +20,11 @@
 
 use bitcoin::hashes::Hash as BitcoinHash;
 
-use csv_hash::seal::SealPoint;
 #[cfg(test)]
 use csv_hash::Hash;
+use csv_hash::seal::SealPoint;
 
-use csv_core::zk_proof::{
-    ChainWitness, ProofSystem, VerifierKey, ZkError, ZkProver, ZkPublicInputs, ZkSealProof,
-};
+use csv_core::zk_proof::{ChainWitness, ProofSystem, ZkError, ZkProver, ZkSealProof};
 use csv_protocol::version::builtin;
 
 /// Bitcoin SPV ZK Prover using SP1
@@ -75,8 +73,9 @@ impl BitcoinSpvProver {
         seal: &SealPoint,
         witness: &ChainWitness,
     ) -> Result<ZkSealProof, ZkError> {
+        use csv_core::zk_proof::{VerifierKey, ZkPublicInputs};
         use sha2::{Digest, Sha256};
-        
+
         // Create a deterministic mock proof based on witness hash
         let mut hasher = Sha256::new();
         hasher.update(&seal.id);
@@ -90,13 +89,12 @@ impl BitcoinSpvProver {
             mock_proof.extend_from_slice(&mock_proof_hash[..]);
         }
 
-        let verifier_key = VerifierKey {
-            chain: builtin::BITCOIN.clone(),
-            hash_algorithm: csv_core::zk_proof::HashAlgorithm::Sha256,
-            key_bytes: vec![0u8; 64],
-            proof_system: csv_core::zk_proof::ProofSystem::SP1,
-            version: 1,
-        };
+        let verifier_key = VerifierKey::new(
+            builtin::BITCOIN.clone(),
+            vec![0u8; 64],
+            csv_core::zk_proof::ProofSystem::SP1,
+            1,
+        );
 
         let public_inputs = ZkPublicInputs {
             seal_ref: seal.clone(),
@@ -107,11 +105,11 @@ impl BitcoinSpvProver {
             timestamp: witness.timestamp,
         };
 
-        ZkSealProof {
+        Ok(ZkSealProof {
             proof_bytes: mock_proof,
             verifier_key,
             public_inputs,
-        }
+        })
     }
 }
 

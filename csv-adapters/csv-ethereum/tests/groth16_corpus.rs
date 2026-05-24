@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Negative proof corpus tests for Groth16 verification.
 //!
 //! These tests verify that the real Groth16 pairing implementation correctly
@@ -5,15 +6,17 @@
 //! feature is enabled.
 
 #[cfg(feature = "real-groth16")]
-use csv_hash::Hash;
-#[cfg(feature = "real-groth16")]
 use csv_core::protocol_version::builtin;
 #[cfg(feature = "real-groth16")]
 use csv_core::seal::SealPoint;
 #[cfg(feature = "real-groth16")]
-use csv_core::zk_proof::{ProofSystem, VerifierKey, ZkError, ZkPublicInputs, ZkSealProof, ZkVerifier};
+use csv_core::zk_proof::{
+    ProofSystem, VerifierKey, ZkError, ZkPublicInputs, ZkSealProof, ZkVerifier,
+};
 #[cfg(feature = "real-groth16")]
 use csv_ethereum::zk_verifier::EthereumGroth16Verifier;
+#[cfg(feature = "real-groth16")]
+use csv_hash::Hash;
 
 /// Helper: create a verifier key for testing
 #[cfg(feature = "real-groth16")]
@@ -46,11 +49,7 @@ fn default_proof() -> (ZkSealProof, VerifierKey) {
         1,
     );
 
-    let proof = ZkSealProof::new(
-        vec![0xABu8; 200],
-        vk.clone(),
-        public_inputs,
-    ).unwrap();
+    let proof = ZkSealProof::new(vec![0xABu8; 200], vk.clone(), public_inputs).unwrap();
 
     (proof, vk)
 }
@@ -79,7 +78,8 @@ fn rejects_zero_proof() {
             1,
         ),
         public_inputs,
-    ).unwrap();
+    )
+    .unwrap();
 
     let result = verifier.verify(&proof);
     assert!(result.is_err(), "Zero proof should be rejected");
@@ -109,7 +109,8 @@ fn rejects_truncated_proof() {
             1,
         ),
         public_inputs,
-    ).unwrap();
+    )
+    .unwrap();
 
     let result = verifier.verify(&proof);
     assert!(

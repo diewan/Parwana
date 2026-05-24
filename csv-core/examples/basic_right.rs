@@ -5,7 +5,8 @@
 //! 2. Transferring it to a new owner
 //! 3. Verifying the Sanad's integrity
 
-use csv_core::{Hash, OwnershipProof, Sanad, SignatureScheme};
+use csv_core::Hash;
+use csv_protocol::{OwnershipProof, Sanad, SignatureScheme};
 
 fn main() {
     println!("=== CSV Adapter Core: Basic Sanad Example ===\n");
@@ -48,7 +49,7 @@ fn main() {
     };
 
     let transfer_salt = b"transfer-salt-2026";
-    let transferred_sanad = sanad.transfer(new_owner.clone(), transfer_salt);
+    let transferred_sanad = Sanad::new(sanad.commitment, new_owner.clone(), transfer_salt);
 
     println!("\n3. Transferred Sanad:");
     println!(

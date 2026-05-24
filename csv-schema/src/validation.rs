@@ -175,10 +175,7 @@ pub(crate) fn validate_field_value(
                 ));
             }
             hex::decode(s).map_err(|_| {
-                ValidationError::InvalidValue(
-                    name.to_string(),
-                    "Invalid hex encoding".to_string(),
-                )
+                ValidationError::InvalidValue(name.to_string(), "Invalid hex encoding".to_string())
             })?;
         }
         FieldType::Hash => {
@@ -243,7 +240,10 @@ pub(crate) fn validate_field_value(
             if !variants.contains(&s.to_string()) {
                 return Err(ValidationError::InvalidValue(
                     name.to_string(),
-                    format!("Value '{}' is not a valid enum variant. Allowed: {:?}", s, variants),
+                    format!(
+                        "Value '{}' is not a valid enum variant. Allowed: {:?}",
+                        s, variants
+                    ),
                 ));
             }
         }
@@ -255,7 +255,7 @@ pub(crate) fn validate_field_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::{SchemaField, CompiledSchema};
+    use crate::registry::{CompiledSchema, SchemaField};
     use std::collections::HashMap;
 
     fn make_test_schema() -> CompiledSchema {
@@ -266,7 +266,10 @@ mod tests {
                 name: "name".to_string(),
                 field_type: FieldType::String,
                 required: true,
-                constraints: vec![FieldConstraint::MinLength(1), FieldConstraint::MaxLength(100)],
+                constraints: vec![
+                    FieldConstraint::MinLength(1),
+                    FieldConstraint::MaxLength(100),
+                ],
                 description: None,
             },
         );
@@ -293,7 +296,11 @@ mod tests {
     fn test_validator_valid() {
         let compiled = make_test_schema();
         let validator = SchemaValidator::new(compiled);
-        assert!(validator.validate_json(r#"{"name": "Alice", "age": 30}"#).is_ok());
+        assert!(
+            validator
+                .validate_json(r#"{"name": "Alice", "age": 30}"#)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -302,7 +309,10 @@ mod tests {
         let validator = SchemaValidator::new(compiled);
         let result = validator.validate_json(r#"{"name": "Alice"}"#);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ValidationError::MissingField(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ValidationError::MissingField(_)
+        ));
     }
 
     #[test]
@@ -311,6 +321,9 @@ mod tests {
         let validator = SchemaValidator::new(compiled);
         let result = validator.validate_json(r#"{"name": "Alice", "age": "thirty"}"#);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ValidationError::TypeMismatch(..)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ValidationError::TypeMismatch(..)
+        ));
     }
 }

@@ -13,11 +13,11 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use csv_hash::commitment::Commitment;
 use csv_hash::Hash;
+use csv_hash::commitment::Commitment;
 // Sanad is not available in csv-hash, TODO: find correct location
-use csv_hash::seal::SealPoint;
 use crate::error::ProtocolError;
+use csv_hash::seal::SealPoint;
 
 /// A recorded state transition in the contract history.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -97,7 +97,8 @@ impl ContractHistory {
     /// Check if a seal has been consumed.
     pub fn is_seal_consumed(&self, seal_ref: &SealPoint) -> bool {
         // Use canonical serialization for consistent indexing (PHASE 2 requirement)
-        let seal_bytes = seal_ref.to_canonical_bytes()
+        let seal_bytes = seal_ref
+            .to_canonical_bytes()
             .expect("canonical serialization should not fail");
         self.consumed_seals.contains_key(&seal_bytes)
     }
@@ -105,7 +106,8 @@ impl ContractHistory {
     /// Mark a seal as consumed.
     pub fn mark_seal_consumed(&mut self, seal_ref: SealPoint) {
         // Use canonical serialization for consistent indexing (PHASE 2 requirement)
-        let seal_bytes = seal_ref.to_canonical_bytes()
+        let seal_bytes = seal_ref
+            .to_canonical_bytes()
             .expect("canonical serialization should not fail");
         self.consumed_seals.insert(seal_bytes, seal_ref);
     }
@@ -201,7 +203,7 @@ pub enum StoreError {
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
 

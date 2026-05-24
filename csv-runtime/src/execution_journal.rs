@@ -98,7 +98,10 @@ impl InMemoryJournal {
 
     /// Record a phase entry in the journal.
     fn record_locked(&self, entry: TransferPhaseEntry) -> Result<(), JournalError> {
-        let mut guard = self.entries.lock().map_err(|e| JournalError::Io(e.to_string()))?;
+        let mut guard = self
+            .entries
+            .lock()
+            .map_err(|e| JournalError::Io(e.to_string()))?;
 
         // Enforce capacity limit
         if guard.len() >= self.max_entries {
@@ -117,17 +120,12 @@ impl InMemoryJournal {
         let mut transfer_phases: HashMap<String, &TransferPhaseEntry> = HashMap::new();
 
         for entry in guard.iter() {
-            transfer_phases
-                .entry(entry.transfer_id.clone())
-                .or_insert(entry);
+            transfer_phases.insert(entry.transfer_id.clone(), entry);
         }
 
         transfer_phases
             .into_values()
-            .filter(|entry| {
-                !matches!(entry.outcome, PhaseOutcome::Completed)
-                    && !entry.phase.is_terminal()
-            })
+            .filter(|entry| !entry.phase.is_terminal())
             .cloned()
             .collect()
     }

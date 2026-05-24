@@ -85,7 +85,10 @@ impl MempoolSignetRpc {
         // The BitcoinRpc trait is synchronous by design, which is incompatible with WASM
         // This implementation is intentionally disabled for WASM targets
         // Use a different RPC implementation for WASM (e.g., browser-native fetch)
-        Err("MempoolSignetRpc is not supported on WASM - use a WASM-compatible RPC implementation".into())
+        Err(
+            "MempoolSignetRpc is not supported on WASM - use a WASM-compatible RPC implementation"
+                .into(),
+        )
     }
 
     /// HTTP GET with automatic retry and exponential backoff

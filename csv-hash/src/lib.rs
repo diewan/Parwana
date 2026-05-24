@@ -15,50 +15,54 @@
 #![allow(dead_code)]
 #![allow(clippy::empty_line_after_doc_comments)]
 
-pub mod hash_registry;
-pub mod registry;
-pub mod tagged_hash;
-pub mod domain_separation;
-pub mod domain_hash;
-pub mod domains;
-pub mod merkle;
-pub mod proof_commitments;
-pub mod commit_mux;
 pub mod canonical;
-pub mod seal;
-pub mod commitment;
-pub mod sanad;
 pub mod chain_id;
-pub mod nullifier;
+pub mod commit_mux;
+pub mod commitment;
 pub mod dag;
+pub mod domain_hash;
+pub mod domain_separation;
+pub mod domains;
+pub mod hash_registry;
+pub mod merkle;
+pub mod nullifier;
+pub mod proof_commitments;
+pub mod registry;
+pub mod sanad;
+pub mod seal;
+pub mod tagged_hash;
 
 // Re-exports
-pub use hash_registry::{
-    HashDomain, Hash, HashParseError, DomainCategory,
-    SealHash, CommitmentHash, SanadIdHash, NullifierHash, ReplayIdHash,
-    VerificationHash, MerkleHash,
-};
-pub use registry::{TypedHashDomain, ContentHash, ProofHash, SealHash as TypedSealHash};
-pub use tagged_hash::{TaggedHash, tagged_hash, tagged_hash_str, csv_tagged_hash, CSV_TAG_PREFIX};
-pub use domain_separation::{DomainSeparator, derive_domain_separator};
-pub use domain_hash::{Domain, DomainSeparatedHash};
-pub use domains::{
-    AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain,
-    ProofBundleDomain, ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
-};
-pub use merkle::{MerkleProof, MerkleTree, verify_merkle_proof, verify_merkle_proofs_batch, compute_root_from_proof, StreamingMerkleBuilder, StreamingMerkleProofGenerator};
-pub use commit_mux::{CommitMux, MuxLeaf, MuxProof, MerkleBranchNode, ProtocolId};
-pub use canonical::{
-    CanonicalError, to_canonical_cbor, from_canonical_cbor, canonical_hash,
-    to_canonical_cbor_with_tag, to_canonical_cbor_with_checksum, from_canonical_cbor_with_checksum,
-    from_canonical_cbor_full, CBOR_TAG_RANGE_START, CBOR_TAG_RANGE_END,
-};
 pub use canonical::cbor_tags;
-pub use seal::{SealPoint, CommitAnchor, MAX_SEAL_ID_SIZE, MAX_ANCHOR_ID_SIZE, MAX_ANCHOR_METADATA_SIZE};
-pub use commitment::{Commitment, COMMITMENT_VERSION};
-pub use sanad::SanadId;
+pub use canonical::{
+    CBOR_TAG_RANGE_END, CBOR_TAG_RANGE_START, CanonicalError, canonical_hash, from_canonical_cbor,
+    from_canonical_cbor_full, from_canonical_cbor_with_checksum, to_canonical_cbor,
+    to_canonical_cbor_with_checksum, to_canonical_cbor_with_tag,
+};
 pub use chain_id::ChainId;
-pub use nullifier::{SealConsumption, SealStatus, SealNullifier, DoubleSpendError};
+pub use commit_mux::{CommitMux, MerkleBranchNode, MuxLeaf, MuxProof, ProtocolId};
+pub use commitment::{COMMITMENT_VERSION, Commitment};
 pub use dag::{DAGNode, DAGSegment};
+pub use domain_hash::{Domain, DomainSeparatedHash};
+pub use domain_separation::{DomainSeparator, derive_domain_separator};
+pub use domains::{
+    AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain, ProofBundleDomain,
+    ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
+};
+pub use hash_registry::{
+    CommitmentHash, DomainCategory, Hash, HashDomain, HashParseError, MerkleHash, NullifierHash,
+    ReplayIdHash, SanadIdHash, SealHash, VerificationHash,
+};
+pub use merkle::{
+    MerkleProof, MerkleTree, StreamingMerkleBuilder, StreamingMerkleProofGenerator,
+    compute_root_from_proof, verify_merkle_proof, verify_merkle_proofs_batch,
+};
 #[cfg(feature = "std")]
-pub use nullifier::{OptimizedSealNullifier, BloomFilter, FilterStats};
+pub use nullifier::{BloomFilter, FilterStats, OptimizedSealNullifier};
+pub use nullifier::{DoubleSpendError, SealConsumption, SealNullifier, SealStatus};
+pub use registry::{ContentHash, ProofHash, SealHash as TypedSealHash, TypedHashDomain};
+pub use sanad::SanadId;
+pub use seal::{
+    CommitAnchor, MAX_ANCHOR_ID_SIZE, MAX_ANCHOR_METADATA_SIZE, MAX_SEAL_ID_SIZE, SealPoint,
+};
+pub use tagged_hash::{CSV_TAG_PREFIX, TaggedHash, csv_tagged_hash, tagged_hash, tagged_hash_str};

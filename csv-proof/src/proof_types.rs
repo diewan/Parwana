@@ -4,8 +4,8 @@
 //! All proofs must be one of these variants, ensuring consistent semantics
 //! and enabling unified verification.
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// Maximum allowed size for proof bytes (64KB)
 pub const MAX_PROOF_BYTES: usize = 64 * 1024;
@@ -109,8 +109,8 @@ impl Proof {
 
     /// Compute a hash of this proof for identification.
     pub fn hash(&self) -> Hash {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let cat = self.category();
         let category_bytes = cat.as_bytes();
@@ -278,8 +278,8 @@ impl InclusionProof {
 
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut data = Vec::with_capacity(32 * (2 + self.siblings.len()) + self.source.len() + 8);
         data.extend_from_slice(&self.leaf.0);
@@ -376,8 +376,8 @@ impl FinalityProof {
 
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut data = Vec::with_capacity(32 + 4 + 8 + self.data.len() + self.source.len());
         data.extend_from_slice(&self.block_hash.0);
@@ -406,10 +406,11 @@ pub struct OwnershipProof {
 impl OwnershipProof {
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
-        let mut data = Vec::with_capacity(self.owner.len() + self.proof.len() + 32 + self.scheme.len());
+        let mut data =
+            Vec::with_capacity(self.owner.len() + self.proof.len() + 32 + self.scheme.len());
         data.extend_from_slice(&self.owner);
         data.extend_from_slice(&self.proof);
         data.extend_from_slice(&self.asset_id.0);
@@ -435,8 +436,8 @@ pub struct TransitionProof {
 impl TransitionProof {
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut data = Vec::with_capacity(64 + self.transition_data.len() + self.proof.len());
         data.extend_from_slice(&self.previous_state.0);
@@ -462,8 +463,8 @@ pub struct ReplayProof {
 impl ReplayProof {
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut data = Vec::with_capacity(32 + self.chain_id.len() + self.context.len());
         data.extend_from_slice(&self.nullifier.0);
@@ -488,8 +489,8 @@ pub struct ExecutionProof {
 impl ExecutionProof {
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut data = Vec::with_capacity(32 + self.proof.len() + self.context.len());
         data.extend_from_slice(&self.computation_hash.0);
@@ -516,10 +517,12 @@ pub struct ZKProof {
 impl ZKProof {
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
-        let mut data = Vec::with_capacity(self.system.len() + self.proof.len() + 32 * self.public_inputs.len() + 32);
+        let mut data = Vec::with_capacity(
+            self.system.len() + self.proof.len() + 32 * self.public_inputs.len() + 32,
+        );
         data.extend_from_slice(self.system.as_bytes());
         data.extend_from_slice(&self.proof);
         for input in &self.public_inputs {
@@ -545,8 +548,8 @@ pub struct CompositeProof {
 impl CompositeProof {
     /// Get a variant-specific hash.
     pub fn variant_hash(&self) -> [u8; 32] {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut data = Vec::with_capacity(self.proof.len() + self.rule.as_bytes().len());
         for child in &self.children {

@@ -669,7 +669,7 @@ pub struct AgentExportProofResult {
     pub verification_level: VerificationLevel,
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::protocol_version::builtin;

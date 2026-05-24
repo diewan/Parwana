@@ -2,6 +2,8 @@
 
 use anyhow::Result;
 use clap::Subcommand;
+use csv_proof::proof::ProofBundle;
+use csv_protocol::SignatureScheme;
 
 use crate::config::{Chain, Config};
 use crate::output;
@@ -103,16 +105,16 @@ fn cmd_proof(
 
     // Determine signature scheme based on source chain
     let signature_scheme = match proof_chain {
-        "bitcoin" => csv_core::signature::SignatureScheme::Secp256k1,
-        "ethereum" => csv_core::signature::SignatureScheme::Secp256k1,
-        "sui" => csv_core::signature::SignatureScheme::Ed25519,
-        "aptos" => csv_core::signature::SignatureScheme::Ed25519,
-        "solana" => csv_core::signature::SignatureScheme::Ed25519,
-        _ => csv_core::signature::SignatureScheme::Secp256k1,
+        "bitcoin" => SignatureScheme::Secp256k1,
+        "ethereum" => SignatureScheme::Secp256k1,
+        "sui" => SignatureScheme::Ed25519,
+        "aptos" => SignatureScheme::Ed25519,
+        "solana" => SignatureScheme::Ed25519,
+        _ => SignatureScheme::Secp256k1,
     };
 
     // Parse proof bundle from JSON using serde
-    let proof_bundle: csv_core::proof::ProofBundle = serde_json::from_value(proof)
+    let proof_bundle: ProofBundle = serde_json::from_value(proof)
         .map_err(|e| anyhow::anyhow!("Failed to parse proof bundle: {}", e))?;
 
     let seal_registry = |_seal_id: &[u8]| false;
@@ -202,7 +204,7 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
     let content = std::fs::read_to_string(&file)
         .map_err(|e| anyhow::anyhow!("Failed to read proof file: {}", e))?;
 
-    let proof_bundle: csv_core::proof::ProofBundle = serde_json::from_str(&content)
+    let proof_bundle: ProofBundle = serde_json::from_str(&content)
         .map_err(|e| anyhow::anyhow!("Invalid proof bundle JSON: {}", e))?;
 
     output::progress(1, 5, "Parsing proof bundle...");
@@ -247,12 +249,12 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
 
     // Determine signature scheme based on source chain
     let signature_scheme = match source_chain {
-        "bitcoin" => csv_core::signature::SignatureScheme::Secp256k1,
-        "ethereum" => csv_core::signature::SignatureScheme::Secp256k1,
-        "sui" => csv_core::signature::SignatureScheme::Ed25519,
-        "aptos" => csv_core::signature::SignatureScheme::Ed25519,
-        "solana" => csv_core::signature::SignatureScheme::Ed25519,
-        _ => csv_core::signature::SignatureScheme::Secp256k1,
+        "bitcoin" => SignatureScheme::Secp256k1,
+        "ethereum" => SignatureScheme::Secp256k1,
+        "sui" => SignatureScheme::Ed25519,
+        "aptos" => SignatureScheme::Ed25519,
+        "solana" => SignatureScheme::Ed25519,
+        _ => SignatureScheme::Secp256k1,
     };
 
     let result = csv_verifier::verify_proof(&proof_bundle, seal_registry, signature_scheme);
@@ -288,7 +290,7 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
 
 /// Generate explorer URLs for the proof bundle components
 fn generate_explorer_links(
-    proof_bundle: &csv_core::proof::ProofBundle,
+    proof_bundle: &ProofBundle,
     source_chain: &str,
     dest_chain: &str,
 ) -> Vec<(&'static str, String)> {

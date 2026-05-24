@@ -9,16 +9,16 @@
 //! - ChainSanadOps: Sanad management via program accounts
 //!
 use async_trait::async_trait;
-use csv_protocol::seal_protocol::SealProtocol;
+use csv_hash::Hash;
+use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
-use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
@@ -730,9 +730,11 @@ impl ChainSanadOps for SolanaBackend {
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         // Parse source chain to ensure it's valid
-        let _source = source_chain.parse::<csv_hash::chain_id::ChainId>().map_err(|_| {
-            ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
-        })?;
+        let _source = source_chain
+            .parse::<csv_hash::chain_id::ChainId>()
+            .map_err(|_| {
+                ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
+            })?;
 
         // Verify the lock proof has valid structure before attempting mint
         if lock_proof.proof_bytes.is_empty() {

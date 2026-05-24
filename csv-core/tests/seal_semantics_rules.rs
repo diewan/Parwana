@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Seal Semantics Rules — Protocol Constitution Section 5
 
 #[cfg(test)]

@@ -48,9 +48,7 @@ pub enum RuntimeError {
 
     /// Finality not met for chain
     #[error("Finality not met for chain {chain}")]
-    FinalityNotMet {
-        chain: csv_hash::chain_id::ChainId,
-    },
+    FinalityNotMet { chain: csv_hash::chain_id::ChainId },
 
     /// No policy registered for chain
     #[error("No finality policy registered for chain {0}")]

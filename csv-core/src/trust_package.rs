@@ -16,8 +16,8 @@
 //!
 //! ```
 //! use csv_core::trust_package::{TrustPackage, OfflineVerificationContext};
-//! use csv_core::protocol_version::ChainId;
 //! use csv_core::Hash;
+//! use csv_hash::chain_id::ChainId;
 //! use chrono::{Utc, Duration};
 //!
 //! let package = TrustPackage::new(
@@ -200,8 +200,8 @@ impl TrustPackage {
     ///
     /// ```
     /// use csv_core::trust_package::TrustPackage;
-    /// use csv_core::protocol_version::ChainId;
     /// use csv_core::Hash;
+    /// use csv_hash::chain_id::ChainId;
     /// use chrono::Duration;
     ///
     /// let package = TrustPackage::new(
@@ -257,9 +257,8 @@ impl TrustPackage {
 
         let message = self.signing_message();
 
-        let sig = Signature::sign(scheme, secret_key, &message).map_err(|_| {
-            TrustPackageError::SignatureInvalid
-        })?;
+        let sig = Signature::sign(scheme, secret_key, &message)
+            .map_err(|_| TrustPackageError::SignatureInvalid)?;
 
         self.package_signature = sig.signature;
         self.signature_scheme = scheme;
@@ -283,15 +282,10 @@ impl TrustPackage {
         use csv_protocol::signature::Signature;
 
         let message = self.signing_message();
-        let sig = Signature::new(
-            self.package_signature.clone(),
-            public_key.to_vec(),
-            message,
-        );
+        let sig = Signature::new(self.package_signature.clone(), public_key.to_vec(), message);
 
-        sig.verify(self.signature_scheme).map_err(|_| {
-            TrustPackageError::SignatureInvalid
-        })
+        sig.verify(self.signature_scheme)
+            .map_err(|_| TrustPackageError::SignatureInvalid)
     }
 
     /// Verify the signature using a list of trusted public keys (multi-sig).
@@ -431,7 +425,8 @@ impl TrustPackage {
             self.generation_epoch,
             self.validator_commitment.len(),
             &self.validator_commitment,
-        )).expect("Canonical serialization should not fail for signing message")
+        ))
+        .expect("Canonical serialization should not fail for signing message")
     }
 
     /// Increment the generation epoch for trust package rotation.
@@ -512,7 +507,8 @@ impl OfflineVerificationContext {
         checkpoint_hash: &Hash,
         checkpoint_height: u64,
     ) -> Result<(), TrustPackageError> {
-        self.trust_package.verify_current_checkpoint(checkpoint_hash, checkpoint_height)
+        self.trust_package
+            .verify_current_checkpoint(checkpoint_hash, checkpoint_height)
     }
 
     /// Get the chain ID this context applies to.
@@ -643,9 +639,11 @@ mod tests {
         );
 
         let now = Utc::now();
-        assert!(package
-            .verify_checkpoint(&Hash::default(), 1_000_000, now)
-            .is_ok());
+        assert!(
+            package
+                .verify_checkpoint(&Hash::default(), 1_000_000, now)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -660,7 +658,10 @@ mod tests {
 
         let now = Utc::now();
         let result = package.verify_checkpoint(&Hash::new([1u8; 32]), 1_000_000, now);
-        assert!(matches!(result, Err(TrustPackageError::CheckpointMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(TrustPackageError::CheckpointMismatch { .. })
+        ));
     }
 
     #[test]
@@ -675,7 +676,10 @@ mod tests {
 
         let now = Utc::now();
         let result = package.verify_checkpoint(&Hash::default(), 2_000_000, now);
-        assert!(matches!(result, Err(TrustPackageError::HeightMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(TrustPackageError::HeightMismatch { .. })
+        ));
     }
 
     #[test]
@@ -725,7 +729,11 @@ mod tests {
 
         // Add commitment and retry
         package.validator_commitment = vec![1, 2, 3];
-        assert!(package.verify_checkpoint(&Hash::default(), 1_000_000, now).is_ok());
+        assert!(
+            package
+                .verify_checkpoint(&Hash::default(), 1_000_000, now)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -753,9 +761,11 @@ mod tests {
         );
 
         let context = OfflineVerificationContext::new(package, Utc::now());
-        assert!(context
-            .verify_checkpoint(&Hash::default(), 1_000_000)
-            .is_ok());
+        assert!(
+            context
+                .verify_checkpoint(&Hash::default(), 1_000_000)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -783,7 +793,10 @@ mod tests {
         assert_eq!(format!("{}", err), "trust package has been revoked");
 
         let err = TrustPackageError::EmptyCommitment;
-        assert_eq!(format!("{}", err), "validator commitment is empty or missing");
+        assert_eq!(
+            format!("{}", err),
+            "validator commitment is empty or missing"
+        );
     }
 
     #[test]
@@ -798,7 +811,10 @@ mod tests {
 
         let msg = package.signing_message();
         assert!(!msg.is_empty());
-        // chain_id (6 bytes) + hash (32 bytes) + height (8 bytes) + epoch (4 bytes) + commitment_len (8 bytes) + commitment (3 bytes)
-        assert_eq!(msg.len(), 6 + 32 + 8 + 4 + 8 + 3);
+        assert_eq!(msg, package.signing_message());
+
+        let mut rotated = package.clone();
+        rotated.increment_epoch();
+        assert_ne!(msg, rotated.signing_message());
     }
 }

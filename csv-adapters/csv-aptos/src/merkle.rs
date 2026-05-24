@@ -3,7 +3,7 @@
 //! This module provides production-grade Merkle accumulator support for Aptos,
 //! implementing the native state verification using the Merkle Accumulator structure.
 
-use csv_hash::{DomainSeparatedHash, AptosAnchorDomain};
+use csv_hash::{AptosAnchorDomain, DomainSeparatedHash};
 
 /// Merkle accumulator errors
 #[derive(Debug, thiserror::Error)]
@@ -477,16 +477,22 @@ impl LedgerProof {
         let mut current = self.root_hash;
         let mut pos = self.version;
         for sibling in &self.proof {
-            let (left, right) = if pos % 2 == 0 {
-                (current, match sibling {
-                    MerkleProofItem::Left { hash } => *hash,
-                    MerkleProofItem::Sanad { hash } => *hash,
-                })
+            let (left, right) = if pos.is_multiple_of(2) {
+                (
+                    current,
+                    match sibling {
+                        MerkleProofItem::Left { hash } => *hash,
+                        MerkleProofItem::Sanad { hash } => *hash,
+                    },
+                )
             } else {
-                (match sibling {
-                    MerkleProofItem::Left { hash } => *hash,
-                    MerkleProofItem::Sanad { hash } => *hash,
-                }, current)
+                (
+                    match sibling {
+                        MerkleProofItem::Left { hash } => *hash,
+                        MerkleProofItem::Sanad { hash } => *hash,
+                    },
+                    current,
+                )
             };
             current = MerkleNode::compute_internal_hash(left, right);
             pos /= 2;
@@ -501,7 +507,10 @@ impl LedgerProof {
 
     /// Legacy verification — kept for backward compatibility.
     /// In production code, use `verify_against_accumulator()` instead.
-    #[deprecated(since = "0.5.0", note = "Use verify_against_accumulator() for real verification")]
+    #[deprecated(
+        since = "0.5.0",
+        note = "Use verify_against_accumulator() for real verification"
+    )]
     pub fn verify(&self) -> bool {
         self.root_hash != [0u8; 32]
     }

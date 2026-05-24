@@ -184,7 +184,8 @@ impl CheckpointManager {
             committed: false,
         };
         let id = checkpoint.id;
-        self.recovery_checkpoints.insert(checkpoint.transfer_id.clone(), checkpoint);
+        self.recovery_checkpoints
+            .insert(checkpoint.transfer_id.clone(), checkpoint);
         id
     }
 
@@ -229,14 +230,11 @@ impl CheckpointManager {
         passed: bool,
         data: Vec<u8>,
     ) -> CheckpointId {
-        let checkpoint = VerificationCheckpoint::new(
-            transfer_id,
-            verification_results,
-            passed,
-            data,
-        );
+        let checkpoint =
+            VerificationCheckpoint::new(transfer_id, verification_results, passed, data);
         let id = checkpoint.id;
-        self.verification_checkpoints.insert(checkpoint.transfer_id.clone(), checkpoint);
+        self.verification_checkpoints
+            .insert(checkpoint.transfer_id.clone(), checkpoint);
         id
     }
 
@@ -302,11 +300,7 @@ mod tests {
     #[test]
     fn test_replay_checkpoint() {
         let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([1u8; 32]));
-        let checkpoint = ReplayCheckpoint::new(
-            vec![replay_id.clone()],
-            vec![],
-            vec![],
-        );
+        let checkpoint = ReplayCheckpoint::new(vec![replay_id.clone()], vec![], vec![]);
 
         assert!(checkpoint.is_consumed(&replay_id));
         assert!(!checkpoint.is_pending(&replay_id));
@@ -325,12 +319,8 @@ mod tests {
             },
         );
 
-        let checkpoint = VerificationCheckpoint::new(
-            "test-transfer".to_string(),
-            results,
-            true,
-            vec![],
-        );
+        let checkpoint =
+            VerificationCheckpoint::new("test-transfer".to_string(), results, true, vec![]);
 
         assert!(checkpoint.passed);
         assert!(checkpoint.get_result("inclusion").is_some());
@@ -351,7 +341,12 @@ mod tests {
 
         // Commit checkpoint
         assert!(manager.commit_recovery_checkpoint("transfer-1"));
-        assert!(manager.get_recovery_checkpoint("transfer-1").unwrap().committed);
+        assert!(
+            manager
+                .get_recovery_checkpoint("transfer-1")
+                .unwrap()
+                .committed
+        );
 
         // Create replay checkpoint
         let replay_id = manager.create_replay_checkpoint(vec![], vec![], vec![]);
@@ -368,12 +363,8 @@ mod tests {
                 timestamp: SystemTime::now(),
             },
         );
-        let _verification_id = manager.create_verification_checkpoint(
-            "transfer-1".to_string(),
-            results,
-            true,
-            vec![],
-        );
+        let _verification_id =
+            manager.create_verification_checkpoint("transfer-1".to_string(), results, true, vec![]);
         assert!(manager.get_verification_checkpoint("transfer-1").is_some());
 
         // Clear transfer checkpoints

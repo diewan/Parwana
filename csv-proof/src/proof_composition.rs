@@ -2,7 +2,7 @@
 //!
 //! This module provides utilities for composing proofs.
 
-use crate::proof::{ProofBundle, InclusionProof, FinalityProof};
+use crate::proof::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Proof composer for combining proofs
 pub struct ProofComposer {
@@ -27,8 +27,16 @@ impl ProofComposer {
             return None;
         }
 
-        let inclusion_proofs: Vec<_> = self.proofs.iter().map(|p| p.inclusion_proof.clone()).collect();
-        let finality_proofs: Vec<_> = self.proofs.iter().map(|p| p.finality_proof.clone()).collect();
+        let inclusion_proofs: Vec<_> = self
+            .proofs
+            .iter()
+            .map(|p| p.inclusion_proof.clone())
+            .collect();
+        let finality_proofs: Vec<_> = self
+            .proofs
+            .iter()
+            .map(|p| p.finality_proof.clone())
+            .collect();
 
         Some(ComposedProof {
             inclusion_proofs,

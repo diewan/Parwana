@@ -5,12 +5,11 @@
 
 use csv_hash::{
     Hash,
-    nullifier::{SealNullifier, SealConsumption, SealStatus, DoubleSpendError, ChainId},
+    nullifier::{ChainId, SealConsumption, SealNullifier, SealStatus},
     sanad::SanadId,
     seal::SealPoint,
 };
 use csv_proof::proof::ReplayId;
-use std::collections::BTreeMap;
 
 /// Test that duplicate proofs are rejected by the seal nullifier registry.
 #[test]
@@ -82,69 +81,56 @@ fn replay_is_impossible() {
 #[test]
 fn replay_nullifiers_are_deterministic() {
     // 1. Same inputs must produce the same ReplayId
-    let id1 = ReplayId::derive(
-        "bitcoin",
-        &[1u8; 32],
-        0,
-        &[2u8; 32],
-        &[3u8; 32],
-        "ethereum",
-    ).expect("replay ID derivation");
+    let id1 = ReplayId::derive("bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+        .expect("replay ID derivation");
 
-    let id2 = ReplayId::derive(
-        "bitcoin",
-        &[1u8; 32],
-        0,
-        &[2u8; 32],
-        &[3u8; 32],
-        "ethereum",
-    ).expect("replay ID derivation");
+    let id2 = ReplayId::derive("bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+        .expect("replay ID derivation");
 
     assert_eq!(id1, id2, "Same inputs must produce identical ReplayId");
 
     // 2. Different source chain must produce different ReplayId
     let id3 = ReplayId::derive(
         "ethereum", // different source
-        &[1u8; 32],
-        0,
-        &[2u8; 32],
-        &[3u8; 32],
-        "ethereum",
-    ).expect("replay ID derivation");
-    assert_ne!(id1, id3, "Different source chain must produce different ReplayId");
+        &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum",
+    )
+    .expect("replay ID derivation");
+    assert_ne!(
+        id1, id3,
+        "Different source chain must produce different ReplayId"
+    );
 
     // 3. Different destination chain must produce different ReplayId
     let id4 = ReplayId::derive(
-        "bitcoin",
-        &[1u8; 32],
-        0,
-        &[2u8; 32],
-        &[3u8; 32],
-        "solana", // different destination
-    ).expect("replay ID derivation");
-    assert_ne!(id1, id4, "Different destination chain must produce different ReplayId");
+        "bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "solana", // different destination
+    )
+    .expect("replay ID derivation");
+    assert_ne!(
+        id1, id4,
+        "Different destination chain must produce different ReplayId"
+    );
 
     // 4. Different seal ID must produce different ReplayId
     let id5 = ReplayId::derive(
-        "bitcoin",
-        &[1u8; 32],
-        0,
-        &[9u8; 32], // different seal
-        &[3u8; 32],
-        "ethereum",
-    ).expect("replay ID derivation");
-    assert_ne!(id1, id5, "Different seal ID must produce different ReplayId");
+        "bitcoin", &[1u8; 32], 0, &[9u8; 32], // different seal
+        &[3u8; 32], "ethereum",
+    )
+    .expect("replay ID derivation");
+    assert_ne!(
+        id1, id5,
+        "Different seal ID must produce different ReplayId"
+    );
 
     // 5. Different transition ID must produce different ReplayId
     let id6 = ReplayId::derive(
-        "bitcoin",
-        &[1u8; 32],
-        0,
-        &[2u8; 32],
-        &[9u8; 32], // different transition
+        "bitcoin", &[1u8; 32], 0, &[2u8; 32], &[9u8; 32], // different transition
         "ethereum",
-    ).expect("replay ID derivation");
-    assert_ne!(id1, id6, "Different transition ID must produce different ReplayId");
+    )
+    .expect("replay ID derivation");
+    assert_ne!(
+        id1, id6,
+        "Different transition ID must produce different ReplayId"
+    );
 
     // 6. ReplayId version must be CURRENT_VERSION
     assert_eq!(

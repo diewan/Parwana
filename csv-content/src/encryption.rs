@@ -52,11 +52,7 @@ pub struct EncryptionEnvelope {
 
 impl EncryptionEnvelope {
     /// Create a new encryption envelope
-    pub fn new(
-        descriptor: EncryptionDescriptor,
-        ciphertext: Vec<u8>,
-        tag: Vec<u8>,
-    ) -> Self {
+    pub fn new(descriptor: EncryptionDescriptor, ciphertext: Vec<u8>, tag: Vec<u8>) -> Self {
         Self {
             descriptor,
             ciphertext,

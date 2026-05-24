@@ -3,9 +3,9 @@
 //! Seals represent single-use sanads to authorize state transitions.
 //! Anchors represent on-chain references containing commitments.
 
-use std::vec::Vec;
+use crate::canonical::{CanonicalError, from_canonical_cbor, to_canonical_cbor};
 use serde::{Deserialize, Serialize};
-use crate::canonical::{to_canonical_cbor, from_canonical_cbor, CanonicalError};
+use std::vec::Vec;
 
 /// Maximum allowed size for seal identifiers (1KB)
 pub const MAX_SEAL_ID_SIZE: usize = 1024;
@@ -75,7 +75,10 @@ impl SealPoint {
     ///
     /// Format: `[nonce_flag(1) | nonce_bytes(8 if flag=1) | id_len(varuint) | id]`
     /// The nonce_flag is 1 for `Some(nonce)`, 0 for `None`.
-    #[deprecated(since = "1.0.0", note = "Use to_canonical_bytes() for protocol-critical paths")]
+    #[deprecated(
+        since = "1.0.0",
+        note = "Use to_canonical_bytes() for protocol-critical paths"
+    )]
     pub fn to_vec(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(9 + self.id.len());
         if let Some(nonce) = self.nonce {
@@ -109,8 +112,16 @@ impl SealPoint {
                 if bytes.len() < pos + 8 {
                     return Err("insufficient bytes for nonce");
                 }
-                let nonce_bytes = [bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3],
-                                  bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]];
+                let nonce_bytes = [
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                    bytes[pos + 4],
+                    bytes[pos + 5],
+                    bytes[pos + 6],
+                    bytes[pos + 7],
+                ];
                 pos += 8;
                 Some(u64::from_le_bytes(nonce_bytes))
             }
@@ -120,7 +131,9 @@ impl SealPoint {
         if bytes.len() < pos + 4 {
             return Err("insufficient bytes for id length");
         }
-        let id_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        let id_len =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize;
         pos += 4;
 
         if bytes.len() < pos + id_len {
@@ -183,7 +196,11 @@ impl CommitAnchor {
     ///
     /// # Errors
     /// Returns an error if anchor_id or metadata exceeds maximum allowed size
-    pub fn new(anchor_id: Vec<u8>, block_height: u64, metadata: Vec<u8>) -> Result<Self, &'static str> {
+    pub fn new(
+        anchor_id: Vec<u8>,
+        block_height: u64,
+        metadata: Vec<u8>,
+    ) -> Result<Self, &'static str> {
         if anchor_id.len() > MAX_ANCHOR_ID_SIZE {
             return Err("anchor_id exceeds maximum allowed size (1KB)");
         }
@@ -217,7 +234,10 @@ impl CommitAnchor {
     /// # Deprecated
     /// This method is deprecated for protocol-critical hashing. Use `to_canonical_bytes()` instead.
     /// Manual serialization is forbidden in protocol-critical hashing paths per AUDIT.md.
-    #[deprecated(since = "1.0.0", note = "Use to_canonical_bytes() for protocol-critical paths")]
+    #[deprecated(
+        since = "1.0.0",
+        note = "Use to_canonical_bytes() for protocol-critical paths"
+    )]
     pub fn to_vec(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8 + 4 + self.anchor_id.len() + 4 + self.metadata.len());
         out.extend_from_slice(&self.block_height.to_le_bytes());
@@ -236,14 +256,17 @@ impl CommitAnchor {
         if bytes.len() < 8 {
             return Err("insufficient bytes for block_height");
         }
-        let block_height = u64::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3],
-                                               bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let block_height = u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]);
         let mut pos = 8;
 
         if bytes.len() < pos + 4 {
             return Err("insufficient bytes for anchor_id length");
         }
-        let anchor_id_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        let anchor_id_len =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize;
         pos += 4;
 
         if bytes.len() < pos + anchor_id_len {
@@ -259,7 +282,9 @@ impl CommitAnchor {
         if bytes.len() < pos + 4 {
             return Err("insufficient bytes for metadata length");
         }
-        let metadata_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        let metadata_len =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize;
         pos += 4;
 
         if bytes.len() < pos + metadata_len {

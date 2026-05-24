@@ -2,10 +2,10 @@
 
 #![allow(missing_docs)]
 
+use csv_hash::ReplayIdHash;
 use csv_protocol::verified::VerificationAssurance;
 use std::string::String;
 use uuid::Uuid;
-use csv_hash::ReplayIdHash;
 
 /// Forensic context for transfer events
 ///
@@ -64,7 +64,10 @@ pub enum TransferEvent {
     /// Transfer complete with mint tx hash
     Complete(TransferContext),
     /// Rollback was triggered
-    RollbackTriggered { ctx: TransferContext, reason: String },
+    RollbackTriggered {
+        ctx: TransferContext,
+        reason: String,
+    },
     /// Replay was detected
     ReplayDetected(TransferContext),
     /// Verification assurance was downgraded
@@ -173,13 +176,7 @@ mod tests {
 
         bus.emit(TransferEvent::Complete(ctx));
 
-        assert_eq!(
-            count1.load(Ordering::SeqCst),
-            1
-        );
-        assert_eq!(
-            count2.load(Ordering::SeqCst),
-            1
-        );
+        assert_eq!(count1.load(Ordering::SeqCst), 1);
+        assert_eq!(count2.load(Ordering::SeqCst), 1);
     }
 }

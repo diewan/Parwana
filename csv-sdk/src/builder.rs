@@ -129,10 +129,10 @@ impl ClientBuilder {
     pub fn with_config(mut self, config: Config) -> Self {
         // Enable chains from config before moving config into state
         for (name, chain_cfg) in &config.chains {
-            if chain_cfg.enabled {
-                if let Ok(chain) = name.parse::<ChainId>() {
-                    self.state.enabled_chains.insert(chain);
-                }
+            if chain_cfg.enabled
+                && let Ok(chain) = name.parse::<ChainId>()
+            {
+                self.state.enabled_chains.insert(chain);
             }
         }
         self.state.config = Some(config);

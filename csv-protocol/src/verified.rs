@@ -142,9 +142,10 @@ impl VerificationResult {
         caps: &crate::finality::capabilities::ChainCapabilities,
     ) -> Result<(), VerificationFailure> {
         if !self.valid {
-            return Err(self.error.clone().unwrap_or(
-                VerificationFailure::InvalidMerklePath
-            ));
+            return Err(self
+                .error
+                .clone()
+                .unwrap_or(VerificationFailure::InvalidMerklePath));
         }
         // Check inclusion independently of finality
         if !caps.inclusion_threshold_met(&self.verified_components.inclusion) {

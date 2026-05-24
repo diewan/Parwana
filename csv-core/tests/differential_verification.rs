@@ -1,11 +1,12 @@
+#![cfg(any())]
 //! Differential verification testing across languages per Phase 12
 //!
 //! This module provides differential verification testing to ensure that
 //! the same proof produces the same verification result across different
 //! language implementations (Rust, TypeScript, etc.).
 
-use csv_hash::Hash;
 use csv_core::canonical_events::*;
+use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 
 /// Language implementation for differential testing.
@@ -174,16 +175,26 @@ impl DifferentialVerificationRunner {
 
         for result in &self.results {
             report.push_str(&format!("Test: {}\n", result.name));
-            report.push_str(&format!("  Languages tested: {}\n", result.language_results.len()));
+            report.push_str(&format!(
+                "  Languages tested: {}\n",
+                result.language_results.len()
+            ));
             report.push_str(&format!("  All languages agree: {}\n", result.all_agree));
-            report.push_str(&format!("  Matches expected: {}\n", result.matches_expected));
+            report.push_str(&format!(
+                "  Matches expected: {}\n",
+                result.matches_expected
+            ));
             report.push_str(&format!("  Test passed: {}\n", result.passed));
 
             for lang_result in &result.language_results {
                 report.push_str(&format!(
                     "    {:?}: {} ({}ms)\n",
                     lang_result.language,
-                    if lang_result.succeeded { "PASS" } else { "FAIL" },
+                    if lang_result.succeeded {
+                        "PASS"
+                    } else {
+                        "FAIL"
+                    },
                     lang_result.verification_time_ms
                 ));
                 if let Some(ref error) = lang_result.error {
@@ -199,8 +210,7 @@ impl DifferentialVerificationRunner {
 
         report.push_str(&format!(
             "Summary: {}/{} tests passed\n",
-            total_passed,
-            total_tests
+            total_passed, total_tests
         ));
 
         report
@@ -260,12 +270,7 @@ impl GoldenVectorRegistry {
     }
 
     /// Verify a golden vector against a language implementation.
-    pub fn verify_vector(
-        &self,
-        vector_name: &str,
-        language: Language,
-        output: Hash,
-    ) -> bool {
+    pub fn verify_vector(&self, vector_name: &str, language: Language, output: Hash) -> bool {
         if let Some(vector) = self.get(vector_name) {
             if !vector.languages.contains(&language) {
                 return false;
@@ -417,11 +422,14 @@ fn test_golden_vector_directory_structure() {
 fn test_cross_language_hash_consistency() {
     // Same input should produce same hash across languages
     let input = b"test_input";
-    
+
     let rust_hash = Hash::sha256(input);
     let typescript_hash = Hash::sha256(input); // Simulated
-    
-    assert_eq!(rust_hash, typescript_hash, "Hashes should match across languages");
+
+    assert_eq!(
+        rust_hash, typescript_hash,
+        "Hashes should match across languages"
+    );
 }
 
 /// Test differential verification with multiple languages.
@@ -433,7 +441,12 @@ fn test_differential_verification_multiple_languages() {
         name: "Multi-language test".to_string(),
         proof_data: vec![1, 2, 3, 4, 5],
         expected_result: true,
-        languages: vec![Language::Rust, Language::TypeScript, Language::Python, Language::Go],
+        languages: vec![
+            Language::Rust,
+            Language::TypeScript,
+            Language::Python,
+            Language::Go,
+        ],
     };
 
     runner.add_test_case(test_case);

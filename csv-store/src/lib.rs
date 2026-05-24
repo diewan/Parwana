@@ -1,8 +1,6 @@
 #![allow(unexpected_cfgs)]
 //! SQLite persistence for CSV Adapter seals and anchors
 
-use csv_hash::Hash;
-
 // #[cfg(feature = "sqlite")]
 // use rusqlite::{Connection, params};
 // #[cfg(feature = "sqlite")]
@@ -148,7 +146,7 @@ pub use encrypted_storage::{
 //         ).map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(())
 //     }
-// 
+//
 //     fn is_seal_consumed(&self, chain: &str, seal_id: &[u8]) -> Result<bool, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let count: i64 = conn
@@ -160,13 +158,13 @@ pub use encrypted_storage::{
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(count > 0)
 //     }
-// 
+//
 //     fn get_seals(&self, chain: &str) -> Result<Vec<csv_protocol::SealRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn.prepare(
 //             "SELECT seal_id, consumed_at_height, commitment_hash, recorded_at FROM seals WHERE chain = ?1"
 //         ).map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let seals = stmt
 //             .query_map(params![chain], |row| {
 //                 let seal_id: Vec<u8> = row.get(0)?;
@@ -184,12 +182,12 @@ pub use encrypted_storage::{
 //                 })
 //             })
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         seals
 //             .collect::<Result<Vec<_>, _>>()
 //             .map_err(|e| StoreError::IoError(e.to_string()))
 //     }
-// 
+//
 //     fn remove_seal(&mut self, chain: &str, seal_id: &[u8]) -> Result<(), StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         conn.execute(
@@ -199,7 +197,7 @@ pub use encrypted_storage::{
 //         .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(())
 //     }
-// 
+//
 //     fn remove_seals_after(&mut self, chain: &str, height: u64) -> Result<usize, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let removed = conn
@@ -210,7 +208,7 @@ pub use encrypted_storage::{
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(removed)
 //     }
-// 
+//
 //     fn save_anchor(&mut self, record: &AnchorRecord) -> Result<(), StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         conn.execute(
@@ -228,7 +226,7 @@ pub use encrypted_storage::{
 //         ).map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(())
 //     }
-// 
+//
 //     fn has_anchor(&self, chain: &str, anchor_id: &[u8]) -> Result<bool, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let count: i64 = conn
@@ -240,7 +238,7 @@ pub use encrypted_storage::{
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(count > 0)
 //     }
-// 
+//
 //     fn finalize_anchor(
 //         &mut self,
 //         chain: &str,
@@ -256,7 +254,7 @@ pub use encrypted_storage::{
 //         .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(())
 //     }
-// 
+//
 //     fn pending_anchors(&self, chain: &str) -> Result<Vec<AnchorRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn
@@ -265,7 +263,7 @@ pub use encrypted_storage::{
 //              FROM anchors WHERE chain = ?1 AND is_finalized = 0",
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let anchors = stmt
 //             .query_map(params![chain], |row| {
 //                 let anchor_id: Vec<u8> = row.get(0)?;
@@ -286,12 +284,12 @@ pub use encrypted_storage::{
 //                 })
 //             })
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         anchors
 //             .collect::<Result<Vec<_>, _>>()
 //             .map_err(|e| StoreError::IoError(e.to_string()))
 //     }
-// 
+//
 //     fn remove_anchors_after(&mut self, chain: &str, height: u64) -> Result<usize, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let removed = conn
@@ -302,7 +300,7 @@ pub use encrypted_storage::{
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(removed)
 //     }
-// 
+//
 //     fn highest_block(&self, chain: &str) -> Result<u64, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let max: Option<i64> = conn
@@ -315,7 +313,7 @@ pub use encrypted_storage::{
 //         Ok(max.unwrap_or(0) as u64)
 //     }
 // }
-// 
+//
 // #[cfg(feature = "sqlite")]
 // impl SanadStore for SqliteSealStore {
 //     fn save_sanad(&mut self, record: &SanadRecord) -> Result<(), StoreError> {
@@ -338,16 +336,16 @@ pub use encrypted_storage::{
 //         .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(())
 //     }
-// 
+//
 //     fn get_sanad(&self, sanad_id: &csv_protocol::SanadId) -> Result<Option<SanadRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn
 //             .prepare(
-//                 "SELECT chain, owner, sanad_data, consumed, recorded_at, consumed_at 
+//                 "SELECT chain, owner, sanad_data, consumed, recorded_at, consumed_at
 //                  FROM sanads WHERE sanad_id = ?1",
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let result = stmt.query_row(params![sanad_id.0.as_bytes()], |row| {
 //             let chain: String = row.get(0)?;
 //             let owner: Vec<u8> = row.get(1)?;
@@ -355,7 +353,7 @@ pub use encrypted_storage::{
 //             let consumed: i64 = row.get(3)?;
 //             let recorded_at: i64 = row.get(4)?;
 //             let consumed_at: Option<i64> = row.get(5)?;
-// 
+//
 //             Ok(SanadRecord {
 //                 sanad_id: sanad_id.clone(),
 //                 chain,
@@ -366,23 +364,23 @@ pub use encrypted_storage::{
 //                 consumed_at: consumed_at.map(|t| t as u64),
 //             })
 //         });
-// 
+//
 //         match result {
 //             Ok(record) => Ok(Some(record)),
 //             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
 //             Err(e) => Err(StoreError::IoError(e.to_string())),
 //         }
 //     }
-// 
+//
 //     fn list_sanads_by_chain(&self, chain: &str) -> Result<Vec<SanadRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn
 //             .prepare(
-//                 "SELECT sanad_id, owner, sanad_data, consumed, recorded_at, consumed_at 
+//                 "SELECT sanad_id, owner, sanad_data, consumed, recorded_at, consumed_at
 //                  FROM sanads WHERE chain = ?1",
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let sanads = stmt
 //             .query_map(params![chain], |row| {
 //                 let sanad_id_bytes: Vec<u8> = row.get(0)?;
@@ -391,10 +389,10 @@ pub use encrypted_storage::{
 //                 let consumed: i64 = row.get(3)?;
 //                 let recorded_at: i64 = row.get(4)?;
 //                 let consumed_at: Option<i64> = row.get(5)?;
-// 
+//
 //                 let mut hash_bytes = [0u8; 32];
 //                 hash_bytes.copy_from_slice(&sanad_id_bytes);
-// 
+//
 //                 Ok(SanadRecord {
 //                     sanad_id: csv_protocol::SanadId(Hash::new(hash_bytes)),
 //                     chain: chain.to_string(),
@@ -406,21 +404,21 @@ pub use encrypted_storage::{
 //                 })
 //             })
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         sanads
 //             .collect::<Result<Vec<_>, _>>()
 //             .map_err(|e| StoreError::IoError(e.to_string()))
 //     }
-// 
+//
 //     fn list_sanads_by_owner(&self, owner: &[u8]) -> Result<Vec<SanadRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn
 //             .prepare(
-//                 "SELECT sanad_id, chain, sanad_data, consumed, recorded_at, consumed_at 
+//                 "SELECT sanad_id, chain, sanad_data, consumed, recorded_at, consumed_at
 //                  FROM sanads WHERE owner = ?1",
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let sanads = stmt
 //             .query_map(params![owner], |row| {
 //                 let sanad_id_bytes: Vec<u8> = row.get(0)?;
@@ -429,10 +427,10 @@ pub use encrypted_storage::{
 //                 let consumed: i64 = row.get(3)?;
 //                 let recorded_at: i64 = row.get(4)?;
 //                 let consumed_at: Option<i64> = row.get(5)?;
-// 
+//
 //                 let mut hash_bytes = [0u8; 32];
 //                 hash_bytes.copy_from_slice(&sanad_id_bytes);
-// 
+//
 //                 Ok(SanadRecord {
 //                     sanad_id: csv_protocol::SanadId(Hash::new(hash_bytes)),
 //                     chain,
@@ -444,12 +442,12 @@ pub use encrypted_storage::{
 //                 })
 //             })
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         sanads
 //             .collect::<Result<Vec<_>, _>>()
 //             .map_err(|e| StoreError::IoError(e.to_string()))
 //     }
-// 
+//
 //     fn consume_sanad(
 //         &mut self,
 //         sanad_id: &csv_protocol::SanadId,
@@ -462,7 +460,7 @@ pub use encrypted_storage::{
 //                 params![sanad_id.0.as_bytes(), consumed_at as i64],
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         if updated == 0 {
 //             // Check if sanad exists and is already consumed
 //             let exists: bool = conn
@@ -472,7 +470,7 @@ pub use encrypted_storage::{
 //                     |_| Ok(true),
 //                 )
 //                 .unwrap_or(false);
-// 
+//
 //             if exists {
 //                 return Err(StoreError::DuplicateRecord(format!(
 //                     "Sanad {:?} already consumed",
@@ -487,16 +485,16 @@ pub use encrypted_storage::{
 //         }
 //         Ok(())
 //     }
-// 
+//
 //     fn list_consumed_sanads(&self) -> Result<Vec<SanadRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn
 //             .prepare(
-//                 "SELECT sanad_id, chain, owner, sanad_data, recorded_at, consumed_at 
+//                 "SELECT sanad_id, chain, owner, sanad_data, recorded_at, consumed_at
 //                  FROM sanads WHERE consumed = 1",
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let sanads = stmt
 //             .query_map([], |row| {
 //                 let sanad_id_bytes: Vec<u8> = row.get(0)?;
@@ -505,10 +503,10 @@ pub use encrypted_storage::{
 //                 let sanad_data: Vec<u8> = row.get(3)?;
 //                 let recorded_at: i64 = row.get(4)?;
 //                 let consumed_at: Option<i64> = row.get(5)?;
-// 
+//
 //                 let mut hash_bytes = [0u8; 32];
 //                 hash_bytes.copy_from_slice(&sanad_id_bytes);
-// 
+//
 //                 Ok(SanadRecord {
 //                     sanad_id: csv_protocol::SanadId(Hash::new(hash_bytes)),
 //                     chain,
@@ -520,21 +518,21 @@ pub use encrypted_storage::{
 //                 })
 //             })
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         sanads
 //             .collect::<Result<Vec<_>, _>>()
 //             .map_err(|e| StoreError::IoError(e.to_string()))
 //     }
-// 
+//
 //     fn list_active_sanads(&self) -> Result<Vec<SanadRecord>, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let mut stmt = conn
 //             .prepare(
-//                 "SELECT sanad_id, chain, owner, sanad_data, recorded_at 
+//                 "SELECT sanad_id, chain, owner, sanad_data, recorded_at
 //                  FROM sanads WHERE consumed = 0",
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         let sanads = stmt
 //             .query_map([], |row| {
 //                 let sanad_id_bytes: Vec<u8> = row.get(0)?;
@@ -542,10 +540,10 @@ pub use encrypted_storage::{
 //                 let owner: Vec<u8> = row.get(2)?;
 //                 let sanad_data: Vec<u8> = row.get(3)?;
 //                 let recorded_at: i64 = row.get(4)?;
-// 
+//
 //                 let mut hash_bytes = [0u8; 32];
 //                 hash_bytes.copy_from_slice(&sanad_id_bytes);
-// 
+//
 //                 Ok(SanadRecord {
 //                     sanad_id: csv_protocol::SanadId(Hash::new(hash_bytes)),
 //                     chain,
@@ -557,12 +555,12 @@ pub use encrypted_storage::{
 //                 })
 //             })
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         sanads
 //             .collect::<Result<Vec<_>, _>>()
 //             .map_err(|e| StoreError::IoError(e.to_string()))
 //     }
-// 
+//
 //     fn has_sanad(&self, sanad_id: &csv_protocol::SanadId) -> Result<bool, StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let count: i64 = conn
@@ -574,7 +572,7 @@ pub use encrypted_storage::{
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
 //         Ok(count > 0)
 //     }
-// 
+//
 //     fn delete_sanad(&mut self, sanad_id: &csv_protocol::SanadId) -> Result<(), StoreError> {
 //         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
 //         let deleted = conn
@@ -583,7 +581,7 @@ pub use encrypted_storage::{
 //                 params![sanad_id.0.as_bytes()],
 //             )
 //             .map_err(|e| StoreError::IoError(e.to_string()))?;
-// 
+//
 //         if deleted == 0 {
 //             return Err(StoreError::NotFound(format!(
 //                 "Sanad {:?} not found",
@@ -594,7 +592,10 @@ pub use encrypted_storage::{
 //     }
 // }
 
-#[cfg(test)]
+// The legacy SqliteSealStore implementation above is retired while csv-store
+// is backed by the unified state module. Keep this module out of the default
+// test build until the SQLite facade is rebuilt on top of StateStorage.
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::state::SealRecord;

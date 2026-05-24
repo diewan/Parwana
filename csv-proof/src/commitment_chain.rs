@@ -26,11 +26,11 @@
 //! 3. No commitments are missing in the sequence
 //! 4. All commitments belong to the same contract (contract_id consistency)
 
-use std::vec::Vec;
 use std::collections::{BTreeMap, BTreeSet};
+use std::vec::Vec;
 
-use csv_hash::commitment::Commitment;
 use csv_hash::Hash;
+use csv_hash::commitment::Commitment;
 
 /// Result of commitment chain verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,8 +165,12 @@ pub fn verify_commitment_chain(
     // Reverse the chain so it's in chronological order (genesis → latest)
     chain.reverse();
 
-    let genesis_commitment = chain.first().unwrap().clone();
-    let latest_commitment = chain.last().unwrap().clone();
+    let Some(genesis_commitment) = chain.first().cloned() else {
+        return Err(ChainError::EmptyChain);
+    };
+    let Some(latest_commitment) = chain.last().cloned() else {
+        return Err(ChainError::EmptyChain);
+    };
     let chain_length = chain.len();
 
     Ok(VerificationResult {
@@ -221,7 +225,10 @@ pub fn verify_ordered_commitment_chain(
     }
 
     // Verify first is genesis
-    if ordered_commitments.first().unwrap().previous_commitment != Hash::new([0u8; 32]) {
+    let Some(first_commitment) = ordered_commitments.first() else {
+        return Err(ChainError::EmptyChain);
+    };
+    if first_commitment.previous_commitment != Hash::new([0u8; 32]) {
         return Err(ChainError::NotGenesis);
     }
 
@@ -234,8 +241,12 @@ pub fn verify_ordered_commitment_chain(
         }
     }
 
-    let genesis = ordered_commitments.first().unwrap().clone();
-    let latest = ordered_commitments.last().unwrap().clone();
+    let Some(genesis) = ordered_commitments.first().cloned() else {
+        return Err(ChainError::EmptyChain);
+    };
+    let Some(latest) = ordered_commitments.last().cloned() else {
+        return Err(ChainError::EmptyChain);
+    };
     let contract_id = genesis.contract_id;
 
     Ok(VerificationResult {
@@ -287,9 +298,11 @@ mod tests {
     fn make_genesis_commitment(contract_id: Hash) -> Commitment {
         let domain = [0u8; 32];
         let seal = SealPoint::new(vec![0x01], None).unwrap();
-        Commitment::simple(
+        Commitment::new(
+            Hash::new([0xC0; 32]),
+            Hash::new([0u8; 32]),
             contract_id,
-            Hash::new([0u8; 32]), // Genesis has zero previous_commitment
+            Hash::new([0u8; 32]),
             Hash::new([0u8; 32]),
             &seal,
             domain,
@@ -299,7 +312,9 @@ mod tests {
     fn make_commitment(contract_id: Hash, previous_commitment: Hash, seal_id: u8) -> Commitment {
         let domain = [0u8; 32];
         let seal = SealPoint::new(vec![seal_id], None).unwrap();
-        Commitment::simple(
+        Commitment::new(
+            Hash::new([0xC0; 32]),
+            Hash::new([0u8; 32]),
             contract_id,
             previous_commitment,
             Hash::new([0u8; 32]),

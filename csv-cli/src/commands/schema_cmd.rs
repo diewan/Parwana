@@ -77,8 +77,10 @@ fn diff_schemas(left: PathBuf, right: PathBuf) -> Result<()> {
         b.name
     );
     let mut reg = SchemaRegistry::new();
-    reg.register(a.clone()).map_err(|e| anyhow::anyhow!("{e}"))?;
-    reg.register(b.clone()).map_err(|e| anyhow::anyhow!("{e}"))?;
+    reg.register(a.clone())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    reg.register(b.clone())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let diff = reg
         .diff(&a.name, &a.version, &b.version)
         .map_err(|e| anyhow::anyhow!("{e}"))?;

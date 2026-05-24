@@ -79,15 +79,15 @@ pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateMana
     let mut rows = Vec::new();
 
     for transfer in &state.storage.transfers {
-        if let Some(ref filter_from) = from {
-            if transfer.source_chain != *filter_from {
-                continue;
-            }
+        if let Some(ref filter_from) = from
+            && transfer.source_chain != *filter_from
+        {
+            continue;
         }
-        if let Some(ref filter_to) = to {
-            if transfer.dest_chain != *filter_to {
-                continue;
-            }
+        if let Some(ref filter_to) = to
+            && transfer.dest_chain != *filter_to
+        {
+            continue;
         }
 
         let status_str = match &transfer.status {

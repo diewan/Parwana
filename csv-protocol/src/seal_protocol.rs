@@ -35,9 +35,9 @@
 //! - [ ] No adapter exposes raw keys or secrets through trait methods
 //! - [ ] No adapter accepts mock/simulated proofs in production builds
 
+use crate::signature::SignatureScheme;
 use csv_hash::Hash;
 use csv_proof::proof::ProofBundle;
-use crate::signature::SignatureScheme;
 
 /// The SealProtocol trait defines the security-critical interface for chain-specific adapters.
 ///
@@ -102,7 +102,11 @@ pub trait SealProtocol {
     /// # Returns
     /// * `Ok(CommitAnchor)` - The anchor reference for inclusion/finality proofs
     /// * `Err` - If publication fails or seal already consumed
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>>;
+    fn publish(
+        &self,
+        commitment: Hash,
+        seal: Self::SealPoint,
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>>;
 
     /// Verify and extract inclusion proof from the base layer.
     ///
@@ -127,7 +131,10 @@ pub trait SealProtocol {
     /// - Bitcoin: Merkle branch verification against block header
     /// - Ethereum: MPT proof verification against state root
     /// - Sui: Checkpoint content verification
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>>;
+    fn verify_inclusion(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>>;
 
     /// Verify finality according to base-layer consensus rules.
     ///
@@ -156,7 +163,10 @@ pub trait SealProtocol {
     /// # Returns
     /// * `Ok(FinalityProof)` - Proof that anchor has reached finality
     /// * `Err` - If finality not yet reached or proof invalid
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>>;
+    fn verify_finality(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>>;
 
     /// Enforce that the seal is single-use and non-replayable.
     ///
@@ -192,7 +202,10 @@ pub trait SealProtocol {
     ///
     /// # Arguments
     /// * `value` - Optional value/funding for the seal (chain-specific units)
-    fn create_seal(&self, value: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>>;
+    fn create_seal(
+        &self,
+        value: Option<u64>,
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>>;
 
     /// Compute a domain-separated commitment hash from components.
     ///

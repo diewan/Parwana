@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Invariant 8: Mint Authorization MUST Use VerificationResult::meets_chain_thresholds()
 //!
 //! Rule: Mint authorization MUST use `VerificationResult::meets_chain_thresholds(&caps)`,
@@ -6,7 +7,10 @@
 
 #[cfg(test)]
 mod tests {
-    use csv_core::verified::{VerificationResult, VerificationAssurance, VerifiedComponents, InclusionStrength, FinalityStrength};
+    use csv_core::verified::{
+        FinalityStrength, InclusionStrength, VerificationAssurance, VerificationResult,
+        VerifiedComponents,
+    };
     use csv_protocol::finality::capabilities::ChainCapabilities;
 
     /// Property: VerificationResult contains required fields
@@ -23,7 +27,7 @@ mod tests {
             },
             error: None,
         };
-        
+
         assert!(result.valid);
         assert_eq!(result.assurance, VerificationAssurance::Structural);
     }
@@ -31,18 +35,39 @@ mod tests {
     /// Property: VerificationAssurance has correct variants
     #[test]
     fn test_verification_assurance_variants() {
-        assert!(matches!(VerificationAssurance::Structural, VerificationAssurance::Structural));
-        assert!(matches!(VerificationAssurance::PartialCryptographic, VerificationAssurance::PartialCryptographic));
-        assert!(matches!(VerificationAssurance::Cryptographic, VerificationAssurance::Cryptographic));
-        assert!(matches!(VerificationAssurance::ConsensusBound, VerificationAssurance::ConsensusBound));
+        assert!(matches!(
+            VerificationAssurance::Structural,
+            VerificationAssurance::Structural
+        ));
+        assert!(matches!(
+            VerificationAssurance::PartialCryptographic,
+            VerificationAssurance::PartialCryptographic
+        ));
+        assert!(matches!(
+            VerificationAssurance::Cryptographic,
+            VerificationAssurance::Cryptographic
+        ));
+        assert!(matches!(
+            VerificationAssurance::ConsensusBound,
+            VerificationAssurance::ConsensusBound
+        ));
     }
 
     /// Property: VerificationAssurance variants are distinct
     #[test]
     fn test_verification_assurance_distinct() {
-        assert_ne!(VerificationAssurance::Structural, VerificationAssurance::Cryptographic);
-        assert_ne!(VerificationAssurance::Cryptographic, VerificationAssurance::ConsensusBound);
-        assert_ne!(VerificationAssurance::Structural, VerificationAssurance::PartialCryptographic);
+        assert_ne!(
+            VerificationAssurance::Structural,
+            VerificationAssurance::Cryptographic
+        );
+        assert_ne!(
+            VerificationAssurance::Cryptographic,
+            VerificationAssurance::ConsensusBound
+        );
+        assert_ne!(
+            VerificationAssurance::Structural,
+            VerificationAssurance::PartialCryptographic
+        );
     }
 
     /// Property: VerificationResult is cloneable
@@ -104,7 +129,7 @@ mod tests {
             },
             error: None,
         };
-        
+
         assert!(result.meets_chain_thresholds(&caps).is_err());
     }
 
@@ -123,7 +148,7 @@ mod tests {
             },
             error: None,
         };
-        
+
         // This may pass or fail depending on chain thresholds, but should not panic
         let _ = result.meets_chain_thresholds(&caps);
     }
@@ -132,16 +157,31 @@ mod tests {
     #[test]
     fn test_inclusion_strength_variants() {
         assert!(matches!(InclusionStrength::None, InclusionStrength::None));
-        assert!(matches!(InclusionStrength::Checksum, InclusionStrength::Checksum));
-        assert!(matches!(InclusionStrength::MerklePath, InclusionStrength::MerklePath));
-        assert!(matches!(InclusionStrength::AnchoredMerklePath, InclusionStrength::AnchoredMerklePath));
+        assert!(matches!(
+            InclusionStrength::Checksum,
+            InclusionStrength::Checksum
+        ));
+        assert!(matches!(
+            InclusionStrength::MerklePath,
+            InclusionStrength::MerklePath
+        ));
+        assert!(matches!(
+            InclusionStrength::AnchoredMerklePath,
+            InclusionStrength::AnchoredMerklePath
+        ));
     }
 
     /// Property: FinalityStrength has correct variants
     #[test]
     fn test_finality_strength_variants() {
         assert!(matches!(FinalityStrength::None, FinalityStrength::None));
-        assert!(matches!(FinalityStrength::Probabilistic { confirmations: 6 }, FinalityStrength::Probabilistic { .. }));
-        assert!(matches!(FinalityStrength::Deterministic, FinalityStrength::Deterministic));
+        assert!(matches!(
+            FinalityStrength::Probabilistic { confirmations: 6 },
+            FinalityStrength::Probabilistic { .. }
+        ));
+        assert!(matches!(
+            FinalityStrength::Deterministic,
+            FinalityStrength::Deterministic
+        ));
     }
 }

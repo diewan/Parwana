@@ -36,8 +36,8 @@
 //! - `csv-explorer/shared/src/types.rs`
 //! - `csv-wallet/src/services/`
 
-use serde::{Deserialize, Serialize};
 use csv_hash::chain_id::ChainId;
+use serde::{Deserialize, Serialize};
 
 // ===========================================================================
 // Protocol Version
@@ -60,7 +60,11 @@ pub struct ProtocolVersion {
 impl ProtocolVersion {
     /// Current stable protocol version.
     pub const fn current() -> Self {
-        Self { major: 1, minor: 0, patch: 0 }
+        Self {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        }
     }
 
     /// Check if this version is compatible with the current protocol.
@@ -89,12 +93,20 @@ pub struct Version {
 impl Version {
     /// Create a new version
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     /// Get the current protocol version
     pub const fn current() -> Self {
-        Self { major: 1, minor: 0, patch: 0 }
+        Self {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        }
     }
 }
 

@@ -12,7 +12,8 @@ pub fn decode_u64(bytes: &[u8]) -> Result<u64, CodecError> {
             "Insufficient bytes for u64".to_string(),
         ));
     }
-    let arr: [u8; 8] = bytes[0..8].try_into().unwrap();
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&bytes[0..8]);
     Ok(from_le_bytes(arr))
 }
 
@@ -23,7 +24,8 @@ pub fn decode_u32(bytes: &[u8]) -> Result<u32, CodecError> {
             "Insufficient bytes for u32".to_string(),
         ));
     }
-    let arr: [u8; 4] = bytes[0..4].try_into().unwrap();
+    let mut arr = [0u8; 4];
+    arr.copy_from_slice(&bytes[0..4]);
     Ok(from_le_bytes_32(arr))
 }
 
@@ -67,8 +69,15 @@ pub fn decode_version(bytes: &[u8]) -> Result<(u16, u16, u16), CodecError> {
             "Insufficient bytes for version".to_string(),
         ));
     }
-    let major = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
-    let minor = u16::from_le_bytes(bytes[2..4].try_into().unwrap());
-    let patch = u16::from_le_bytes(bytes[4..6].try_into().unwrap());
+    let mut major_bytes = [0u8; 2];
+    major_bytes.copy_from_slice(&bytes[0..2]);
+    let mut minor_bytes = [0u8; 2];
+    minor_bytes.copy_from_slice(&bytes[2..4]);
+    let mut patch_bytes = [0u8; 2];
+    patch_bytes.copy_from_slice(&bytes[4..6]);
+
+    let major = u16::from_le_bytes(major_bytes);
+    let minor = u16::from_le_bytes(minor_bytes);
+    let patch = u16::from_le_bytes(patch_bytes);
     Ok((major, minor, patch))
 }

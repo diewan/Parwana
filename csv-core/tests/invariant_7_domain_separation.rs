@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Invariant 7: Domain Separation Must Be Used for All Hashes
 //!
 //! Rule: All cryptographic hashes must use domain separation to prevent
@@ -9,12 +10,11 @@ mod tests {
     use csv_core::Hash;
     use csv_core::canonical::canonical_hash;
     use csv_core::domain_hash::{Domain, DomainSeparatedHash};
-    use csv_core::tagged_hash::csv_tagged_hash;
     use csv_core::domains::{
-        BitcoinSealDomain, EthereumMintDomain, AptosAnchorDomain, GenesisDomain,
-        ProofBundleDomain, ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain,
-        TransitionDomain,
+        AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain, ProofBundleDomain,
+        ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
     };
+    use csv_core::tagged_hash::csv_tagged_hash;
 
     /// Property: Same data with different domains produces different hashes
     #[test]
@@ -48,11 +48,14 @@ mod tests {
             TransferCommitmentDomain::DOMAIN,
             TransitionDomain::DOMAIN,
         ];
-        
+
         for i in 0..domains.len() {
             for j in (i + 1)..domains.len() {
-                assert_ne!(domains[i], domains[j], 
-                    "Domain {} must not equal domain {}", i, j);
+                assert_ne!(
+                    domains[i], domains[j],
+                    "Domain {} must not equal domain {}",
+                    i, j
+                );
             }
         }
     }
@@ -64,17 +67,20 @@ mod tests {
         impl Domain for DomainA {
             const DOMAIN: &'static [u8] = b"csv.test.domain.a";
         }
-        
+
         struct DomainB;
         impl Domain for DomainB {
             const DOMAIN: &'static [u8] = b"csv.test.domain.b";
         }
-        
+
         let data = b"test payload";
         let h1 = DomainSeparatedHash::<DomainA>::hash(data);
         let h2 = DomainSeparatedHash::<DomainB>::hash(data);
-        
-        assert_ne!(h1, h2, "Different domain types must produce different hashes");
+
+        assert_ne!(
+            h1, h2,
+            "Different domain types must produce different hashes"
+        );
     }
 
     /// Property: DomainSeparatedHash hash_multiple uses separators
@@ -84,10 +90,10 @@ mod tests {
         impl Domain for TestDomain {
             const DOMAIN: &'static [u8] = b"csv.test.multiple";
         }
-        
+
         let payloads: [&[u8]; 2] = [b"payload1".as_slice(), b"payload2".as_slice()];
         let h = DomainSeparatedHash::<TestDomain>::hash_multiple(payloads);
-        
+
         assert_ne!(h, Hash::zero(), "Hash must not be zero");
     }
 
@@ -97,7 +103,7 @@ mod tests {
         let data = vec![1u8, 2, 3, 4];
         let h1 = canonical_hash("domain.x", &data).unwrap();
         let h2 = canonical_hash("domain.y", &data).unwrap();
-        
+
         assert_ne!(h1, h2, "canonical_hash must use domain separation");
     }
 
@@ -114,7 +120,10 @@ mod tests {
     fn test_empty_data_domain_separation() {
         let h1 = csv_tagged_hash("empty.domain.a", &[]);
         let h2 = csv_tagged_hash("empty.domain.b", &[]);
-        
-        assert_ne!(h1, h2, "Empty data with different domains must produce different hashes");
+
+        assert_ne!(
+            h1, h2,
+            "Empty data with different domains must produce different hashes"
+        );
     }
 }

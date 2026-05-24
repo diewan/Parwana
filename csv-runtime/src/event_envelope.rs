@@ -141,6 +141,7 @@ impl RuntimeEventEnvelope {
     /// * `correlation_id` - ID grouping related events
     /// * `runtime_id` - The runtime instance generating this event
     /// * `timestamp` - When the event occurred
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         aggregate_id: TransferId,
         event_type: EventType,

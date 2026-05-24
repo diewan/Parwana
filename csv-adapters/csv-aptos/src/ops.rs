@@ -9,16 +9,16 @@
 //! - ChainSanadOps: Sanad management operations
 //!
 use async_trait::async_trait;
-use csv_protocol::seal_protocol::SealProtocol;
+use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
-use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
-use csv_hash::sanad::SanadId;
-use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use sha3::{Digest, Sha3_256};
 use std::sync::Arc;
@@ -728,9 +728,11 @@ impl ChainSanadOps for AptosBackend {
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         // Parse the source chain to ensure it's valid
-        let _source = source_chain.parse::<csv_hash::chain_id::ChainId>().map_err(|_| {
-            ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
-        })?;
+        let _source = source_chain
+            .parse::<csv_hash::chain_id::ChainId>()
+            .map_err(|_| {
+                ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
+            })?;
 
         // Parse new owner address (expecting hex-encoded 32-byte Aptos address)
         let owner_bytes = hex::decode(new_owner)

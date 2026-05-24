@@ -1,8 +1,8 @@
 //! Adversarial and Byzantine simulation framework (audit item 11).
 
-use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use csv_proof::proof::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
+use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 
 /// Simulated Byzantine RPC behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,12 +95,7 @@ mod tests {
     fn quorum_requires_majority() {
         let runner = AdversarialRunner::new(AdversarialConfig::default());
         let h = [1u8; 32];
-        let responses = vec![
-            Some(h),
-            Some(h),
-            Some(h),
-            Some([2u8; 32]),
-        ];
+        let responses = vec![Some(h), Some(h), Some(h), Some([2u8; 32])];
         assert!(runner.quorum_agrees(&responses));
     }
 }

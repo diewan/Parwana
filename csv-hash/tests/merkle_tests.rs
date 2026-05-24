@@ -8,14 +8,12 @@
 //! - Proof compression
 
 use csv_hash::{
-    merkle::{
-        tree::{MerkleTree, MerkleProof},
-        verifier::{
-            verify_merkle_proof, verify_merkle_proofs_batch, compute_root_from_proof,
-        },
-        streaming::{StreamingMerkleBuilder, StreamingMerkleProofGenerator},
-    },
     Hash,
+    merkle::{
+        streaming::{StreamingMerkleBuilder, StreamingMerkleProofGenerator},
+        tree::MerkleTree,
+        verifier::{compute_root_from_proof, verify_merkle_proof, verify_merkle_proofs_batch},
+    },
 };
 
 // ============================================================================
@@ -33,7 +31,10 @@ fn test_ordered_hashing_deterministic() {
     let leaves2 = vec![Hash([2u8; 32]), Hash([1u8; 32])];
     let tree2 = MerkleTree::from_leaves(leaves2).unwrap();
 
-    assert_eq!(tree1.root, tree2.root, "Ordered hashing must be commutative");
+    assert_eq!(
+        tree1.root, tree2.root,
+        "Ordered hashing must be commutative"
+    );
 }
 
 #[test]
@@ -79,7 +80,10 @@ fn test_leaf_vs_internal_node_separation() {
     let combined = Hash::combine(&leaf_hash, &leaf_hash);
 
     // The combined hash should be different from the leaf hash
-    assert_ne!(leaf_hash, combined, "Leaf and internal node hashes must be domain-separated");
+    assert_ne!(
+        leaf_hash, combined,
+        "Leaf and internal node hashes must be domain-separated"
+    );
 }
 
 // ============================================================================
@@ -134,15 +138,11 @@ fn test_balancing_even_leaves() {
 #[test]
 fn test_balancing_odd_leaves() {
     // Odd number of leaves should be duplicated
-    let leaves = vec![
-        Hash([1u8; 32]),
-        Hash([2u8; 32]),
-        Hash([3u8; 32]),
-    ];
+    let leaves = vec![Hash([1u8; 32]), Hash([2u8; 32]), Hash([3u8; 32])];
 
     let tree = MerkleTree::from_leaves(leaves.clone()).unwrap();
     assert_eq!(tree.balanced_count, 4); // 3 leaves -> 4 after balancing
-    assert_eq!(tree.leaf_count(), 3);   // Original count remains 3
+    assert_eq!(tree.leaf_count(), 3); // Original count remains 3
 }
 
 #[test]
@@ -200,7 +200,11 @@ fn test_proof_verification_all_leaves() {
 
     for i in 0..leaves.len() {
         let proof = tree.proof(i).unwrap();
-        assert!(proof.verify(leaves[i], tree.root), "Proof failed for leaf {}", i);
+        assert!(
+            proof.verify(leaves[i], tree.root),
+            "Proof failed for leaf {}",
+            i
+        );
     }
 }
 
@@ -213,7 +217,11 @@ fn test_proof_verification_odd_leaves() {
 
     for i in 0..leaves.len() {
         let proof = tree.proof(i).unwrap();
-        assert!(proof.verify(leaves[i], tree.root), "Proof failed for leaf {}", i);
+        assert!(
+            proof.verify(leaves[i], tree.root),
+            "Proof failed for leaf {}",
+            i
+        );
     }
 }
 
@@ -294,11 +302,7 @@ fn test_tree_construction_single_leaf() {
 #[test]
 fn test_tree_deterministic() {
     // Same input should always produce the same tree
-    let leaves = vec![
-        b"leaf1".to_vec(),
-        b"leaf2".to_vec(),
-        b"leaf3".to_vec(),
-    ];
+    let leaves = vec![b"leaf1".to_vec(), b"leaf2".to_vec(), b"leaf3".to_vec()];
 
     let tree1 = MerkleTree::new(leaves.clone()).unwrap();
     let tree2 = MerkleTree::new(leaves).unwrap();
@@ -319,7 +323,12 @@ fn test_verify_merkle_proof_basic() {
     let tree = MerkleTree::from_leaves(leaves.clone()).unwrap();
     let proof = tree.proof(2).unwrap();
 
-    assert!(verify_merkle_proof(leaves[2], &proof.siblings, 2, tree.root));
+    assert!(verify_merkle_proof(
+        leaves[2],
+        &proof.siblings,
+        2,
+        tree.root
+    ));
 }
 
 #[test]
@@ -330,7 +339,12 @@ fn test_verify_merkle_proof_invalid() {
     let proof = tree.proof(0).unwrap();
 
     let wrong_leaf = Hash([99u8; 32]);
-    assert!(!verify_merkle_proof(wrong_leaf, &proof.siblings, 0, tree.root));
+    assert!(!verify_merkle_proof(
+        wrong_leaf,
+        &proof.siblings,
+        0,
+        tree.root
+    ));
 }
 
 #[test]
@@ -477,7 +491,11 @@ fn test_full_merkle_workflow() {
     for i in 0..leaf_data.len() {
         let leaf_hash = MerkleTree::hash_leaf(&leaf_data[i]);
         let proof = tree.proof(i).unwrap();
-        assert!(proof.verify(leaf_hash, tree.root), "Proof failed for leaf {}", i);
+        assert!(
+            proof.verify(leaf_hash, tree.root),
+            "Proof failed for leaf {}",
+            i
+        );
     }
 
     // Verify inclusion
@@ -493,16 +511,19 @@ fn test_full_merkle_workflow() {
 #[test]
 fn test_merkle_proof_standalone_verification() {
     // Test that proofs can be verified without the original tree
-    let leaf_data: Vec<Vec<u8>> = (0..8)
-        .map(|i| format!("leaf_{}", i).into_bytes())
-        .collect();
+    let leaf_data: Vec<Vec<u8>> = (0..8).map(|i| format!("leaf_{}", i).into_bytes()).collect();
 
     let tree = MerkleTree::new(leaf_data.clone()).unwrap();
     let proof = tree.proof(3).unwrap();
 
     // Verify using standalone function
     let leaf_hash = MerkleTree::hash_leaf(&leaf_data[3]);
-    assert!(verify_merkle_proof(leaf_hash, &proof.siblings, 3, tree.root));
+    assert!(verify_merkle_proof(
+        leaf_hash,
+        &proof.siblings,
+        3,
+        tree.root
+    ));
 
     // Verify using compute_root_from_proof
     let computed_root = compute_root_from_proof(leaf_hash, &proof.siblings, 3);
@@ -519,7 +540,11 @@ fn test_merkle_tree_large() {
     // Verify all proofs
     for i in 0..leaves.len() {
         let proof = tree.proof(i).unwrap();
-        assert!(proof.verify(leaves[i], tree.root), "Proof failed for leaf {}", i);
+        assert!(
+            proof.verify(leaves[i], tree.root),
+            "Proof failed for leaf {}",
+            i
+        );
     }
 }
 
@@ -545,7 +570,11 @@ fn test_merkle_proof_with_odd_leaves() {
     // All proofs should verify
     for i in 0..leaves.len() {
         let proof = tree.proof(i).unwrap();
-        assert!(proof.verify(leaves[i], tree.root), "Proof failed for leaf {}", i);
+        assert!(
+            proof.verify(leaves[i], tree.root),
+            "Proof failed for leaf {}",
+            i
+        );
     }
 
     // Balanced count should be 8 (next power of 2)
@@ -563,6 +592,6 @@ fn test_merkle_tree_single_leaf_proof() {
     // Single leaf tree has no siblings
     assert!(proof.siblings.is_empty());
 
-   // Proof should still verify
+    // Proof should still verify
     assert!(proof.verify(leaves[0], tree.root));
 }

@@ -5,7 +5,8 @@
 //! 2. Transferring it to a new owner
 //! 3. Verifying the Sanad's integrity
 
-use csv_core::{Hash, OwnershipProof, Sanad, SignatureScheme};
+use csv_core::Hash;
+use csv_protocol::{OwnershipProof, Sanad, SignatureScheme};
 
 fn main() {
     println!("=== CSV Adapter Core: Basic Sanad Example ===\n");
@@ -40,7 +41,7 @@ fn main() {
     println!("   Owner: {}", hex::encode(&sanad.owner.owner));
     println!("   Salt: {}", String::from_utf8_lossy(&sanad.salt));
 
-    // Step 4: Transfer to a new owner
+    // Step 4: Transfer to a new owner by deriving a successor Sanad.
     let new_owner = OwnershipProof {
         proof: vec![0x03; 64], // New simulated signature
         owner: vec![0x04; 33], // New simulated public key
@@ -48,17 +49,17 @@ fn main() {
     };
 
     let transfer_salt = b"transfer-salt-2026";
-    let transferred = sanad.transfer(new_owner, transfer_salt);
+    let transferred = Sanad::new(sanad.commitment, new_owner, transfer_salt);
 
     println!("\n3. Transferred Sanad:");
     println!("   New ID: {}", hex::encode(transferred.id.0.as_bytes()));
     println!("   New Owner: {}", hex::encode(&transferred.owner.owner));
 
-    // Step 5: Verify the Sanad
-    match transferred.verify() {
-        Ok(()) => println!("\n4. Sanad verification: PASSED"),
-        Err(e) => println!("\n4. Sanad verification: FAILED ({})", e),
-    }
+    // Step 5: Verify canonical round-trip encoding.
+    let encoded = transferred.to_canonical_bytes().unwrap();
+    let decoded = Sanad::from_canonical_bytes(&encoded).unwrap();
+    assert_eq!(transferred, decoded);
+    println!("\n4. Sanad canonical round-trip: PASSED");
 
     println!("\n=== Example Complete ===");
 }

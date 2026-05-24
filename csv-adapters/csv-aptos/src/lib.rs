@@ -52,7 +52,6 @@ pub mod types;
 // pub mod verifier;  // REMOVED: verification centralized in csv-verifier per implementation.md
 
 #[cfg(feature = "rpc")]
-#[cfg(feature = "rpc")]
 pub mod node;
 
 pub use seal_protocol::AptosSealProtocol;

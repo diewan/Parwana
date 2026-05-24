@@ -4,19 +4,19 @@
 
 #![allow(missing_docs)]
 
-use std::vec::Vec;
 use serde::{Deserialize, Serialize};
+use std::vec::Vec;
 
-use csv_hash::canonical::to_canonical_cbor;
+use crate::provenance::ProofProvenance;
 use csv_hash::Hash;
+use csv_hash::HashDomain;
+use csv_hash::canonical::to_canonical_cbor;
+use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
-use csv_hash::HashDomain;
-use csv_hash::dag::DAGSegment;
-use crate::provenance::ProofProvenance;
 
 // Re-export canonical proof types from proof_types
-pub use crate::proof_types::{InclusionProof, FinalityProof};
+pub use crate::proof_types::{FinalityProof, InclusionProof};
 
 /// Maximum proof bundle size in bytes
 pub const MAX_PROOF_BYTES: usize = 1_000_000;
@@ -74,12 +74,17 @@ impl ReplayId {
             transition_id,
             destination_chain,
         };
-        let cbor = to_canonical_cbor(&inputs)
-            .map_err(|e| crate::error::ProofError::SerializationError(
-                format!("Failed to serialize replay ID inputs: {}", e)
-            ))?;
+        let cbor = to_canonical_cbor(&inputs).map_err(|e| {
+            crate::error::ProofError::SerializationError(format!(
+                "Failed to serialize replay ID inputs: {}",
+                e
+            ))
+        })?;
         let id = tagged_hash(HashDomain::ReplayIdV1, &cbor).hash.0;
-        Ok(ReplayId { version: Self::CURRENT_VERSION, id })
+        Ok(ReplayId {
+            version: Self::CURRENT_VERSION,
+            id,
+        })
     }
 
     /// Return the raw 32-byte replay ID.
@@ -93,7 +98,9 @@ impl ReplayId {
     /// destination chain, and sanad ID for deterministic replay prevention.
     ///
     /// Returns error if CBOR serialization fails, ensuring replay ID correctness.
-    pub fn from_cross_chain_proof(proof: &crate::cross_chain::CrossChainTransferProof) -> crate::error::Result<Self> {
+    pub fn from_cross_chain_proof(
+        proof: &crate::cross_chain::CrossChainTransferProof,
+    ) -> crate::error::Result<Self> {
         use csv_hash::canonical::to_canonical_cbor;
 
         #[derive(Serialize)]
@@ -113,12 +120,17 @@ impl ReplayId {
             sanad_id: proof.lock_event.sanad_id.as_bytes(),
         };
 
-        let cbor = to_canonical_cbor(&inputs)
-            .map_err(|e| crate::error::ProofError::SerializationError(
-                format!("Failed to serialize cross-chain replay inputs: {}", e)
-            ))?;
+        let cbor = to_canonical_cbor(&inputs).map_err(|e| {
+            crate::error::ProofError::SerializationError(format!(
+                "Failed to serialize cross-chain replay inputs: {}",
+                e
+            ))
+        })?;
         let id = tagged_hash(HashDomain::ReplayIdV1, &cbor).hash.0;
-        Ok(ReplayId { version: Self::CURRENT_VERSION, id })
+        Ok(ReplayId {
+            version: Self::CURRENT_VERSION,
+            id,
+        })
     }
 }
 
@@ -128,64 +140,31 @@ mod replay_id_tests {
 
     #[test]
     fn test_replay_id_determinism() {
-        let id1 = ReplayId::derive(
-            "bitcoin",
-            &[1u8; 32],
-            0,
-            &[2u8; 32],
-            &[3u8; 32],
-            "ethereum",
-        ).expect("replay ID derivation should succeed");
-        let id2 = ReplayId::derive(
-            "bitcoin",
-            &[1u8; 32],
-            0,
-            &[2u8; 32],
-            &[3u8; 32],
-            "ethereum",
-        ).expect("replay ID derivation should succeed");
+        let id1 = ReplayId::derive("bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+            .expect("replay ID derivation should succeed");
+        let id2 = ReplayId::derive("bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+            .expect("replay ID derivation should succeed");
         assert_eq!(id1, id2);
     }
 
     #[test]
     fn test_replay_id_uniqueness() {
-        let id1 = ReplayId::derive(
-            "bitcoin",
-            &[1u8; 32],
-            0,
-            &[2u8; 32],
-            &[3u8; 32],
-            "ethereum",
-        ).expect("replay ID derivation should succeed");
+        let id1 = ReplayId::derive("bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+            .expect("replay ID derivation should succeed");
         let id2 = ReplayId::derive(
-            "bitcoin",
-            &[1u8; 32],
-            0,
-            &[2u8; 32],
-            &[3u8; 32],
+            "bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32],
             "solana", // different destination
-        ).expect("replay ID derivation should succeed");
+        )
+        .expect("replay ID derivation should succeed");
         assert_ne!(id1, id2);
     }
 
     #[test]
     fn test_replay_id_different_txid() {
-        let id1 = ReplayId::derive(
-            "bitcoin",
-            &[1u8; 32],
-            0,
-            &[2u8; 32],
-            &[3u8; 32],
-            "ethereum",
-        ).expect("replay ID derivation should succeed");
-        let id2 = ReplayId::derive(
-            "bitcoin",
-            &[9u8; 32],
-            0,
-            &[2u8; 32],
-            &[3u8; 32],
-            "ethereum",
-        ).expect("replay ID derivation should succeed");
+        let id1 = ReplayId::derive("bitcoin", &[1u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+            .expect("replay ID derivation should succeed");
+        let id2 = ReplayId::derive("bitcoin", &[9u8; 32], 0, &[2u8; 32], &[3u8; 32], "ethereum")
+            .expect("replay ID derivation should succeed");
         assert_ne!(id1, id2);
     }
 }
@@ -483,22 +462,12 @@ mod tests {
         assert!(bundle.provenance().is_none());
         assert!(!bundle.has_complete_provenance());
 
-        let mut provenance = crate::provenance::ProofProvenance::new(
-            "bitcoin".to_string(),
-            1000,
-            "runtime-1".to_string(),
-            vec![1u8; 32],
-        );
-
-        provenance.add_verification_step(crate::provenance::VerificationStep::new(
-            crate::provenance::VerificationStepType::ProofCreation,
-            "adapter".to_string(),
-            true,
-        ));
+        let provenance =
+            crate::provenance::ProofProvenance::new("bitcoin".to_string(), 1000, 1_700_000_000);
 
         bundle.set_provenance(provenance);
         assert!(bundle.provenance().is_some());
-        assert!(!bundle.has_complete_provenance()); // Not complete without all steps
+        assert!(bundle.has_complete_provenance());
     }
 
     #[test]
@@ -516,25 +485,11 @@ mod tests {
         assert!(bundle.certification().is_none());
         assert!(!bundle.has_certification());
 
-        let inputs = crate::certification::VerificationInputs::new(
-            vec![1u8; 32],
-            vec![2u8; 32],
-            vec![3u8; 32],
-            crate::certification::ChainMetadata::new("bitcoin".to_string(), 1000, vec![4u8; 32]),
-            crate::certification::RuntimePolicyConfig::new(6, false, 3, true),
-        );
-
-        let outputs = crate::certification::VerificationOutputs::new(
-            true,
-            "verified".to_string(),
-            crate::certification::VerificationStrength::maximum(),
-        );
-
-        let certification = crate::certification::ProofCertification::new(
-            "runtime-1".to_string(),
-            inputs,
-            outputs,
-        );
+        let certification = crate::certification::ProofCertification {
+            status: crate::certification::CertificationStatus::Certified,
+            certifier_id: "runtime-1".to_string(),
+            timestamp: 1_700_000_000,
+        };
 
         bundle.set_certification(certification);
         assert!(bundle.certification().is_some());

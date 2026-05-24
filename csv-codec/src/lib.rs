@@ -15,25 +15,21 @@
 
 #![warn(missing_docs)]
 
-pub mod canonical;
-pub mod schema;
 pub mod byte_order;
-pub mod error;
-pub mod encode;
+pub mod canonical;
 pub mod decode;
+pub mod encode;
+pub mod error;
+pub mod schema;
 pub mod versioning;
 
 // Re-exports
 pub use canonical::{
-    to_canonical_cbor, 
-    from_canonical_cbor, 
-    to_canonical_cbor_with_tag,
-    to_canonical_cbor_with_checksum,
-    from_canonical_cbor_with_checksum,
-    from_canonical_cbor_full,
-    cbor_tags,
-    CBOR_TAG_RANGE_START,
-    CBOR_TAG_RANGE_END,
+    CBOR_TAG_RANGE_END, CBOR_TAG_RANGE_START, cbor_tags, from_canonical_cbor,
+    from_canonical_cbor_full, from_canonical_cbor_with_checksum, to_canonical_cbor,
+    to_canonical_cbor_with_checksum, to_canonical_cbor_with_tag,
 };
 pub use error::{CodecError, Result as CodecResult};
-pub use versioning::{ProtocolVersion, PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR, PROTOCOL_VERSION_PATCH};
+pub use versioning::{
+    PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR, PROTOCOL_VERSION_PATCH, ProtocolVersion,
+};

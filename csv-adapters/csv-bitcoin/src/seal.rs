@@ -5,12 +5,6 @@ use crate::types::BitcoinSealPoint;
 use crate::wallet::Bip86Path;
 use csv_protocol::invariants::{BoundedQueue, MAX_SEAL_NULLIFIER_SIZE};
 
-
-#[cfg(feature = "rpc")]
-
-#[cfg(feature = "rpc")]
-
-
 /// Registry for tracking used seals (prevents replay)
 pub struct SealRegistry {
     /// Set of used seal identifiers
@@ -82,7 +76,7 @@ impl SealRegistry {
 
         // Then persist if storage is configured
         // NOTE: Disabled - SqliteSealStore implementation is commented out in csv-store
-        if let Some(_) = self.storage {
+        if self.storage.is_some() {
             // Storage disabled - no-op
         }
         Ok(())

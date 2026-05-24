@@ -1,7 +1,7 @@
 //! Cross-chain stub module
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// Lock event
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,7 +53,13 @@ pub struct CrossChainTransferProof {
 
 impl CrossChainTransferProof {
     /// Create new cross-chain transfer proof
-    pub fn new(source_chain: String, destination_chain: String, transfer_id: Vec<u8>, proof_data: Vec<u8>, lock_event: LockEvent) -> Self {
+    pub fn new(
+        source_chain: String,
+        destination_chain: String,
+        transfer_id: Vec<u8>,
+        proof_data: Vec<u8>,
+        lock_event: LockEvent,
+    ) -> Self {
         Self {
             source_chain,
             destination_chain,

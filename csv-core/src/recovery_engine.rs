@@ -214,9 +214,8 @@ impl<B: RecoveryStorageBackend> RecoveryEngine<B> {
                 use csv_codec::to_canonical_cbor;
                 let checksum_data = to_canonical_cbor(&self.last_known_heights)
                     .expect("Canonical serialization should not fail for checksum");
-                let domain_hash = csv_hash::DomainSeparatedHash::<
-                    csv_hash::GenesisDomain,
-                >::hash(&checksum_data);
+                let domain_hash =
+                    csv_hash::DomainSeparatedHash::<csv_hash::GenesisDomain>::hash(&checksum_data);
                 self.state_checksum = Some(Hash::new(*domain_hash.as_bytes()));
                 RecoveryStep {
                     name: "load_persistent_state",
@@ -527,10 +526,10 @@ impl<B: RecoveryStorageBackend> RecoveryEngine<B> {
             // Update detector with current state
             let hash = [0u8; 32]; // Would be real block hash in production
             // detector.update(
-//                 csv_hash::chain_id::ChainId::new(chain_name),
-//                 *height,
-//                 csv_hash::Hash::new(hash),
-//             // );
+            //                 csv_hash::chain_id::ChainId::new(chain_name),
+            //                 *height,
+            //                 csv_hash::Hash::new(hash),
+            //             // );
         }
 
         // Store detected reorgs for rollback in step 8
@@ -679,10 +678,7 @@ pub struct RecoveryResult {
 /// - Reorg events (for rollback detection)
 pub trait RecoveryStorageBackend: Clone + Send + Sync + 'static {
     /// Get last known block height for a specific chain
-    fn get_last_known_height(
-        &self,
-        chain: &str,
-    ) -> Option<u64>;
+    fn get_last_known_height(&self, chain: &str) -> Option<u64>;
 
     /// Load last known block heights for all tracked chains
     fn load_last_known_heights(

@@ -24,15 +24,15 @@
 //! Use [`ReplayRegistry`] for in-memory replay protection (tests, development).
 //! Use [`PersistentReplayRegistry`] for production deployments with SQLite persistence.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use csv_hash::{DomainSeparatedHash, ReplayRegistryDomain, HashDomain, tagged_hash};
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
+use csv_hash::{DomainSeparatedHash, HashDomain, ReplayRegistryDomain, tagged_hash};
 
 /// Replay constitution version.
 pub const REPLAY_CONSTITUTION_VERSION: u32 = 1;
@@ -90,7 +90,8 @@ impl ReplayKey {
             self.commitment_hash,
             self.source_chain.clone(),
             self.destination_chain.clone(),
-        )).unwrap_or_else(|_| {
+        ))
+        .unwrap_or_else(|_| {
             // This should never fail: all types in the tuple (Hash, ChainId) are
             // canonical CBOR-serializable primitives. If it does fail, something
             // fundamental is broken in the serialization layer.
@@ -205,7 +206,11 @@ impl ReplayRegistry {
     /// Returns Ok(true) if the seal was successfully consumed.
     /// Returns Ok(false) if the seal was already consumed (idempotent).
     /// Returns Err if the operation failed due to a replay attack.
-    pub fn consume_if_unconsumed(&mut self, key: ReplayKey, timestamp: u64) -> Result<bool, String> {
+    pub fn consume_if_unconsumed(
+        &mut self,
+        key: ReplayKey,
+        timestamp: u64,
+    ) -> Result<bool, String> {
         let key_hash = key.hash();
 
         match self.entries.get(&key_hash) {
@@ -265,13 +270,9 @@ pub trait ReplayRegistryBackend: Send + Sync + 'static {
         key: &ReplayKey,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
     /// Get total tracked proofs
-    async fn total_proofs(
-        &self,
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>>;
+    async fn total_proofs(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>>;
     /// Get total replay attempts detected
-    async fn total_replay_attempts(
-        &self,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
+    async fn total_replay_attempts(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Idempotent consume-if-unconsumed operation.
     ///
@@ -309,15 +310,11 @@ pub struct ReplayNullifier {
 
 impl ReplayNullifier {
     /// Create a new replay nullifier.
-    pub fn new(
-        sanad_id: Hash,
-        source_chain: u8,
-        source_seal_ref: Hash,
-    ) -> Self {
+    pub fn new(sanad_id: Hash, source_chain: u8, source_seal_ref: Hash) -> Self {
         let nullifier = Self::compute_nullifier(sanad_id, source_chain, source_seal_ref);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         let expires_at = now + NULLIFIER_EXPIRY_SECONDS;
 
@@ -338,7 +335,7 @@ impl ReplayNullifier {
         data.extend_from_slice(sanad_id.as_ref());
         data.push(source_chain);
         data.extend_from_slice(source_seal_ref.as_ref());
-        
+
         tagged_hash(HashDomain::ReplayIdV1, &data).hash
     }
 
@@ -346,7 +343,7 @@ impl ReplayNullifier {
     pub fn is_expired(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         now >= self.expires_at
     }
@@ -390,26 +387,27 @@ impl NullifierRegistry {
     /// Register a replay nullifier.
     pub fn register(&mut self, nullifier: ReplayNullifier) -> Result<(), ReplayError> {
         let nullifier_key: String = hex::encode(nullifier.nullifier.as_ref() as &[u8]);
-        
+
         // Check if nullifier already exists
         if self.nullifiers.contains_key(&nullifier_key) {
             return Err(ReplayError::AlreadyRegistered);
         }
 
         // Add to nullifiers map
-        self.nullifiers.insert(nullifier_key.clone(), nullifier.clone());
+        self.nullifiers
+            .insert(nullifier_key.clone(), nullifier.clone());
 
         // Add to sanad ID index
         let sanad_key: String = hex::encode(nullifier.sanad_id.as_ref() as &[u8]);
         self.by_sanad_id
             .entry(sanad_key)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(nullifier_key.clone());
 
         // Add to source chain index
         self.by_source_chain
             .entry(nullifier.source_chain)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(nullifier_key);
 
         Ok(())
@@ -432,11 +430,7 @@ impl NullifierRegistry {
         let sanad_key: String = hex::encode(sanad_id.as_ref() as &[u8]);
         self.by_sanad_id
             .get(&sanad_key)
-            .map(|keys| {
-                keys.iter()
-                    .filter_map(|k| self.nullifiers.get(k))
-                    .collect()
-            })
+            .map(|keys| keys.iter().filter_map(|k| self.nullifiers.get(k)).collect())
             .unwrap_or_default()
     }
 
@@ -444,11 +438,7 @@ impl NullifierRegistry {
     pub fn get_by_source_chain(&self, source_chain: u8) -> Vec<&ReplayNullifier> {
         self.by_source_chain
             .get(&source_chain)
-            .map(|keys| {
-                keys.iter()
-                    .filter_map(|k| self.nullifiers.get(k))
-                    .collect()
-            })
+            .map(|keys| keys.iter().filter_map(|k| self.nullifiers.get(k)).collect())
             .unwrap_or_default()
     }
 
@@ -469,7 +459,7 @@ impl NullifierRegistry {
     /// Clean up expired nullifiers.
     pub fn cleanup_expired(&mut self) -> usize {
         let mut to_remove = Vec::new();
-        
+
         for (key, nullifier) in &self.nullifiers {
             if nullifier.is_expired() {
                 to_remove.push(key.clone());
@@ -785,7 +775,10 @@ mod tests {
         // Second consumption - should be idempotent
         let result2 = registry.consume_if_unconsumed(key.clone(), 2000);
         assert!(result2.is_ok());
-        assert!(!result2.unwrap(), "Second consumption should return false (idempotent)");
+        assert!(
+            !result2.unwrap(),
+            "Second consumption should return false (idempotent)"
+        );
     }
 
     #[test]

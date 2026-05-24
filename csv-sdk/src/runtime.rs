@@ -47,13 +47,14 @@ use sha2::Digest as Sha2Digest;
 #[allow(unused_imports)]
 use sha3::Digest;
 
-use csv_protocol::backend::{
-    BalanceInfo, ChainBackend, DeploymentStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
-};
-use csv_hash::chain_id::ChainId;
 use csv_hash::Hash;
+use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
 use csv_proof::proof::ProofBundle;
+use csv_protocol::backend::{
+    BalanceInfo, ChainBackend, DeploymentStatus, SanadOperationResult, TransactionInfo,
+    TransactionStatus,
+};
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -837,7 +838,9 @@ impl ChainRuntime {
 
         #[cfg(not(feature = "tokio"))]
         let is_consumed = {
-            let store = store_arc.lock().map_err(|e| CsvError::StoreError(e.to_string()))?;
+            let store = store_arc
+                .lock()
+                .map_err(|e| CsvError::StoreError(e.to_string()))?;
             match store.get_sanad(&sanad_id_clone) {
                 Ok(Some(record)) => Ok(record.consumed_at.is_some()),
                 Ok(None) => Ok(false), // Sanad not found = not consumed

@@ -3,7 +3,7 @@
 //! Tests lease edge cases and adversarial scenarios to ensure
 //! exactly one coordinator is active for each transfer.
 
-use csv_runtime::coordinator_lease::{CoordinatorLease, CoordinatorId, InMemoryLease, LeaseError};
+use csv_runtime::coordinator_lease::{CoordinatorId, CoordinatorLease, InMemoryLease, LeaseError};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -16,13 +16,19 @@ async fn duplicate_coordinators_conflict() {
     let coord2 = CoordinatorId("node-2".to_string());
 
     // First coordinator acquires lease
-    let result1 = lease.acquire_or_renew(&coord1, Duration::from_secs(60)).await;
+    let result1 = lease
+        .acquire_or_renew(&coord1, Duration::from_secs(60))
+        .await;
     assert!(result1.is_ok(), "First coordinator should acquire lease");
 
     // Second coordinator should get conflict
-    let result2 = lease.acquire_or_renew(&coord2, Duration::from_secs(60)).await;
-    assert!(matches!(result2, Err(LeaseError::Conflict { .. })), 
-        "Second coordinator must fail with LeaseConflict");
+    let result2 = lease
+        .acquire_or_renew(&coord2, Duration::from_secs(60))
+        .await;
+    assert!(
+        matches!(result2, Err(LeaseError::Conflict { .. })),
+        "Second coordinator must fail with LeaseConflict"
+    );
 }
 
 /// Test 2: Expired lease reuse
@@ -34,15 +40,22 @@ async fn expired_lease_reuse() {
     let coord2 = CoordinatorId("node-2".to_string());
 
     // First coordinator acquires with very short TTL
-    let result1 = lease.acquire_or_renew(&coord1, Duration::from_millis(10)).await;
+    let result1 = lease
+        .acquire_or_renew(&coord1, Duration::from_millis(10))
+        .await;
     assert!(result1.is_ok());
 
     // Wait for expiry
     sleep(Duration::from_millis(50)).await;
 
     // Second coordinator should now be able to acquire
-    let result2 = lease.acquire_or_renew(&coord2, Duration::from_secs(60)).await;
-    assert!(result2.is_ok(), "Second coordinator must succeed after lease expires");
+    let result2 = lease
+        .acquire_or_renew(&coord2, Duration::from_secs(60))
+        .await;
+    assert!(
+        result2.is_ok(),
+        "Second coordinator must succeed after lease expires"
+    );
 }
 
 /// Test 3: Clock drift - system clock moves backward
@@ -55,12 +68,16 @@ async fn clock_drift_handling() {
     let coord = CoordinatorId("node-1".to_string());
 
     // Acquire lease
-    let result = lease.acquire_or_renew(&coord, Duration::from_secs(60)).await;
+    let result = lease
+        .acquire_or_renew(&coord, Duration::from_secs(60))
+        .await;
     assert!(result.is_ok());
 
     // Renewal should succeed even if system clock has minor drift
     // (InMemoryLease uses SystemTime which is monotonic)
-    let result2 = lease.acquire_or_renew(&coord, Duration::from_secs(60)).await;
+    let result2 = lease
+        .acquire_or_renew(&coord, Duration::from_secs(60))
+        .await;
     assert!(result2.is_ok(), "Renewal must succeed despite clock drift");
 }
 
@@ -74,7 +91,9 @@ async fn network_partition_detection() {
     let coord = CoordinatorId("node-1".to_string());
 
     // Acquire lease
-    let result = lease.acquire_or_renew(&coord, Duration::from_secs(60)).await;
+    let result = lease
+        .acquire_or_renew(&coord, Duration::from_secs(60))
+        .await;
     assert!(result.is_ok());
 
     // Check lease status
@@ -97,14 +116,18 @@ async fn db_failover_recovery() {
     let coord2 = CoordinatorId("node-2".to_string());
 
     // Node 1 acquires lease
-    let result1 = lease.acquire_or_renew(&coord1, Duration::from_secs(60)).await;
+    let result1 = lease
+        .acquire_or_renew(&coord1, Duration::from_secs(60))
+        .await;
     assert!(result1.is_ok());
 
     // Simulate failover: Node 1 releases lease
     lease.release(&coord1).await.unwrap();
 
     // Node 2 should be able to acquire
-    let result2 = lease.acquire_or_renew(&coord2, Duration::from_secs(60)).await;
+    let result2 = lease
+        .acquire_or_renew(&coord2, Duration::from_secs(60))
+        .await;
     assert!(result2.is_ok(), "Node 2 must acquire after failover");
 }
 
@@ -116,14 +139,18 @@ async fn delayed_renewal() {
     let coord = CoordinatorId("node-1".to_string());
 
     // Acquire lease with 10 second TTL
-    let result = lease.acquire_or_renew(&coord, Duration::from_secs(10)).await;
+    let result = lease
+        .acquire_or_renew(&coord, Duration::from_secs(10))
+        .await;
     assert!(result.is_ok());
 
     // Wait until 5 seconds before expiry (simulated)
     sleep(Duration::from_millis(50)).await;
 
     // Renewal should succeed
-    let result2 = lease.acquire_or_renew(&coord, Duration::from_secs(60)).await;
+    let result2 = lease
+        .acquire_or_renew(&coord, Duration::from_secs(60))
+        .await;
     assert!(result2.is_ok(), "Renewal must succeed even when delayed");
 
     // Operations should continue

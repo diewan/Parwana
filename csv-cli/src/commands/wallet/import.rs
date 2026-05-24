@@ -8,13 +8,13 @@ use crate::config::{Config, Network};
 use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
+use csv_hash::chain_id::ChainId;
 use csv_keys::{
     bip39::Mnemonic,
     bip44::{derive_address_from_key, derive_all_chain_keys},
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
-use csv_hash::chain_id::ChainId;
 use csv_store::state::WalletAccount;
 
 /// Import wallet from mnemonic phrase.

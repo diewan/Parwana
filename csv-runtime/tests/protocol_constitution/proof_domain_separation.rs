@@ -3,26 +3,21 @@
 // Invariant: All proofs must be properly domain-separated
 // to prevent cross-domain proof reuse attacks.
 
-use csv_hash::{
-    Hash, HashDomain,
-    tagged_hash::{tagged_hash, csv_tagged_hash},
-    DomainSeparatedHash, Domain,
-    domains::{
-        ProofBundleDomain, TransitionDomain, ReplayRegistryDomain,
-        BitcoinSealDomain, EthereumMintDomain, AptosAnchorDomain,
-        GenesisDomain, SchemaDomain, TransferCommitmentDomain,
-    },
-    seal::{SealPoint, CommitAnchor},
-    commitment::Commitment,
-};
-use csv_proof::{
-    Proof, ProofCategory,
-    InclusionProof, FinalityProof, OwnershipProof, TransitionProof,
-    ReplayProof, ExecutionProof, ZKProof, CompositeProof,
-    CompositionRule,
-};
-use csv_proof::proof::{ProofBundle, InclusionProof as BundleInclusionProof, FinalityProof as BundleFinalityProof};
 use csv_hash::dag::DAGSegment;
+use csv_hash::{
+    Domain, DomainSeparatedHash, Hash, HashDomain,
+    domains::{
+        BitcoinSealDomain, EthereumMintDomain, ProofBundleDomain, ReplayRegistryDomain,
+        TransitionDomain,
+    },
+    seal::{CommitAnchor, SealPoint},
+    tagged_hash::{csv_tagged_hash, tagged_hash},
+};
+use csv_proof::proof::ProofBundle;
+use csv_proof::{
+    CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
+    Proof, ProofCategory, ReplayProof, TransitionProof, ZKProof,
+};
 
 /// Test that all proof types use domain-separated hashing.
 #[test]
@@ -41,7 +36,8 @@ fn all_proofs_are_domain_separated() {
 
     // Verify all category bytes are unique
     let category_bytes: Vec<&[u8]> = categories.iter().map(|(_, b)| *b).collect();
-    let unique_categories: std::collections::HashSet<&[u8]> = category_bytes.iter().copied().collect();
+    let unique_categories: std::collections::HashSet<&[u8]> =
+        category_bytes.iter().copied().collect();
     assert_eq!(
         category_bytes.len(),
         unique_categories.len(),
@@ -51,61 +47,45 @@ fn all_proofs_are_domain_separated() {
     // 2. Create proofs of each type and verify they produce different hashes
     let zero_hash = Hash::zero();
 
-    let inclusion = Proof::Inclusion(
-        InclusionProof::new(vec![1, 2, 3], zero_hash, 100, 0).unwrap()
-    );
-    let finality = Proof::Finality(
-        FinalityProof::new(vec![0xCD; 32], 6, false).unwrap()
-    );
-    let ownership = Proof::Ownership(
-        OwnershipProof {
-            owner: vec![0xAA; 32],
-            proof: vec![0xBB; 64],
-            asset_id: zero_hash,
-            scheme: "secp256k1".to_string(),
-        }
-    );
-    let transition = Proof::Transition(
-        TransitionProof {
-            previous_state: zero_hash,
-            new_state: Hash::new([1u8; 32]),
-            transition_data: vec![0x01],
-            proof: vec![0x02],
-        }
-    );
-    let replay = Proof::Replay(
-        ReplayProof {
-            nullifier: zero_hash,
-            chain_id: "bitcoin".to_string(),
-            context: vec![0x03],
-        }
-    );
-    let execution = Proof::Execution(
-        ExecutionProof {
-            computation_hash: zero_hash,
-            proof: vec![0x04],
-            context: vec![],
-        }
-    );
-    let zk = Proof::ZK(
-        ZKProof {
-            system: "dilithium".to_string(),
-            proof: vec![0x05],
-            public_inputs: vec![],
-            verification_key_hash: zero_hash,
-        }
-    );
-    let composite = Proof::Composite(
-        CompositeProof {
-            children: vec![inclusion.clone()],
-            rule: CompositionRule::And,
-            proof: vec![],
-        }
-    );
+    let inclusion =
+        Proof::Inclusion(InclusionProof::new(vec![1, 2, 3], zero_hash, 100, 0).unwrap());
+    let finality = Proof::Finality(FinalityProof::new(vec![0xCD; 32], 6, false).unwrap());
+    let ownership = Proof::Ownership(OwnershipProof {
+        owner: vec![0xAA; 32],
+        proof: vec![0xBB; 64],
+        asset_id: zero_hash,
+        scheme: "secp256k1".to_string(),
+    });
+    let transition = Proof::Transition(TransitionProof {
+        previous_state: zero_hash,
+        new_state: Hash::new([1u8; 32]),
+        transition_data: vec![0x01],
+        proof: vec![0x02],
+    });
+    let replay = Proof::Replay(ReplayProof {
+        nullifier: zero_hash,
+        chain_id: "bitcoin".to_string(),
+        context: vec![0x03],
+    });
+    let execution = Proof::Execution(ExecutionProof {
+        computation_hash: zero_hash,
+        proof: vec![0x04],
+        context: vec![],
+    });
+    let zk = Proof::ZK(ZKProof {
+        system: "dilithium".to_string(),
+        proof: vec![0x05],
+        public_inputs: vec![],
+        verification_key_hash: zero_hash,
+    });
+    let composite = Proof::Composite(CompositeProof {
+        children: vec![inclusion.clone()],
+        rule: CompositionRule::And,
+        proof: vec![],
+    });
 
     let proofs = vec![
-        inclusion, finality, ownership, transition,
-        replay, execution, zk, composite,
+        inclusion, finality, ownership, transition, replay, execution, zk, composite,
     ];
 
     // Each proof type must produce a unique hash
@@ -135,7 +115,8 @@ fn all_proofs_are_domain_separated() {
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let bundle_bytes = bundle.to_bytes().expect("bundle serialization");
     let bundle_hash = Hash::sha256(&bundle_bytes);
@@ -156,7 +137,8 @@ fn all_proofs_are_domain_separated() {
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let bundle2_bytes = bundle2.to_bytes().expect("bundle serialization");
     assert_ne!(
@@ -232,9 +214,18 @@ fn proof_bundle_domain_separation() {
     let h2_arr = Hash::new(csv_h2);
     let h3_arr = Hash::new(csv_h3);
 
-    assert_ne!(h1_arr, h2_arr, "csv_tagged_hash('seal') != csv_tagged_hash('proof')");
-    assert_ne!(h2_arr, h3_arr, "csv_tagged_hash('proof') != csv_tagged_hash('commitment')");
-    assert_ne!(h1_arr, h3_arr, "csv_tagged_hash('seal') != csv_tagged_hash('commitment')");
+    assert_ne!(
+        h1_arr, h2_arr,
+        "csv_tagged_hash('seal') != csv_tagged_hash('proof')"
+    );
+    assert_ne!(
+        h2_arr, h3_arr,
+        "csv_tagged_hash('proof') != csv_tagged_hash('commitment')"
+    );
+    assert_ne!(
+        h1_arr, h3_arr,
+        "csv_tagged_hash('seal') != csv_tagged_hash('commitment')"
+    );
 }
 
 /// Test that proof taxonomy is enforced (all proofs use the canonical Proof enum).
@@ -244,123 +235,105 @@ fn proof_taxonomy_is_enforced() {
     //    (we can't count variants directly, but we can verify each one works)
     let zero_hash = Hash::zero();
 
-    let _p1 = Proof::Inclusion(
-        InclusionProof::new(vec![], zero_hash, 0, 0).unwrap()
-    );
-    let _p2 = Proof::Finality(
-        FinalityProof::new(vec![], 0, false).unwrap()
-    );
-    let _p3 = Proof::Ownership(
-        OwnershipProof {
-            owner: vec![],
-            proof: vec![],
-            asset_id: zero_hash,
-            scheme: "test".to_string(),
-        }
-    );
-    let _p4 = Proof::Transition(
-        TransitionProof {
-            previous_state: zero_hash,
-            new_state: zero_hash,
-            transition_data: vec![],
-            proof: vec![],
-        }
-    );
-    let _p5 = Proof::Replay(
-        ReplayProof {
-            nullifier: zero_hash,
-            chain_id: "test".to_string(),
-            context: vec![],
-        }
-    );
-    let _p6 = Proof::Execution(
-        ExecutionProof {
-            computation_hash: zero_hash,
-            proof: vec![],
-            context: vec![],
-        }
-    );
-    let _p7 = Proof::ZK(
-        ZKProof {
-            system: "test".to_string(),
-            proof: vec![],
-            public_inputs: vec![],
-            verification_key_hash: zero_hash,
-        }
-    );
-    let _p8 = Proof::Composite(
-        CompositeProof {
-            children: vec![],
-            rule: CompositionRule::And,
-            proof: vec![],
-        }
-    );
+    let _p1 = Proof::Inclusion(InclusionProof::new(vec![], zero_hash, 0, 0).unwrap());
+    let _p2 = Proof::Finality(FinalityProof::new(vec![], 0, false).unwrap());
+    let _p3 = Proof::Ownership(OwnershipProof {
+        owner: vec![],
+        proof: vec![],
+        asset_id: zero_hash,
+        scheme: "test".to_string(),
+    });
+    let _p4 = Proof::Transition(TransitionProof {
+        previous_state: zero_hash,
+        new_state: zero_hash,
+        transition_data: vec![],
+        proof: vec![],
+    });
+    let _p5 = Proof::Replay(ReplayProof {
+        nullifier: zero_hash,
+        chain_id: "test".to_string(),
+        context: vec![],
+    });
+    let _p6 = Proof::Execution(ExecutionProof {
+        computation_hash: zero_hash,
+        proof: vec![],
+        context: vec![],
+    });
+    let _p7 = Proof::ZK(ZKProof {
+        system: "test".to_string(),
+        proof: vec![],
+        public_inputs: vec![],
+        verification_key_hash: zero_hash,
+    });
+    let _p8 = Proof::Composite(CompositeProof {
+        children: vec![],
+        rule: CompositionRule::And,
+        proof: vec![],
+    });
 
     // 2. Verify that each proof's category matches its variant
-    let p_inclusion = Proof::Inclusion(
-        InclusionProof::new(vec![], zero_hash, 0, 0).unwrap()
-    );
+    let p_inclusion = Proof::Inclusion(InclusionProof::new(vec![], zero_hash, 0, 0).unwrap());
     assert_eq!(p_inclusion.category(), ProofCategory::Inclusion);
 
-    let p_finality = Proof::Finality(
-        FinalityProof::new(vec![], 0, false).unwrap()
-    );
+    let p_finality = Proof::Finality(FinalityProof::new(vec![], 0, false).unwrap());
     assert_eq!(p_finality.category(), ProofCategory::Finality);
 
-    let p_ownership = Proof::Ownership(
-        OwnershipProof {
-            owner: vec![], proof: vec![],
-            asset_id: zero_hash, scheme: "test".to_string(),
-        }
-    );
+    let p_ownership = Proof::Ownership(OwnershipProof {
+        owner: vec![],
+        proof: vec![],
+        asset_id: zero_hash,
+        scheme: "test".to_string(),
+    });
     assert_eq!(p_ownership.category(), ProofCategory::Ownership);
 
-    let p_transition = Proof::Transition(
-        TransitionProof {
-            previous_state: zero_hash, new_state: zero_hash,
-            transition_data: vec![], proof: vec![],
-        }
-    );
+    let p_transition = Proof::Transition(TransitionProof {
+        previous_state: zero_hash,
+        new_state: zero_hash,
+        transition_data: vec![],
+        proof: vec![],
+    });
     assert_eq!(p_transition.category(), ProofCategory::Transition);
 
-    let p_replay = Proof::Replay(
-        ReplayProof {
-            nullifier: zero_hash, chain_id: "test".to_string(), context: vec![],
-        }
-    );
+    let p_replay = Proof::Replay(ReplayProof {
+        nullifier: zero_hash,
+        chain_id: "test".to_string(),
+        context: vec![],
+    });
     assert_eq!(p_replay.category(), ProofCategory::Replay);
 
-    let p_execution = Proof::Execution(
-        ExecutionProof {
-            computation_hash: zero_hash, proof: vec![], context: vec![],
-        }
-    );
+    let p_execution = Proof::Execution(ExecutionProof {
+        computation_hash: zero_hash,
+        proof: vec![],
+        context: vec![],
+    });
     assert_eq!(p_execution.category(), ProofCategory::Execution);
 
-    let p_zk = Proof::ZK(
-        ZKProof {
-            system: "test".to_string(), proof: vec![],
-            public_inputs: vec![], verification_key_hash: zero_hash,
-        }
-    );
+    let p_zk = Proof::ZK(ZKProof {
+        system: "test".to_string(),
+        proof: vec![],
+        public_inputs: vec![],
+        verification_key_hash: zero_hash,
+    });
     assert_eq!(p_zk.category(), ProofCategory::ZK);
 
-    let p_composite = Proof::Composite(
-        CompositeProof {
-            children: vec![], rule: CompositionRule::And, proof: vec![],
-        }
-    );
+    let p_composite = Proof::Composite(CompositeProof {
+        children: vec![],
+        rule: CompositionRule::And,
+        proof: vec![],
+    });
     assert_eq!(p_composite.category(), ProofCategory::Composite);
 
     // 3. Verify that all proof hashes are non-zero
     for proof in [
-        p_inclusion, p_finality, p_ownership, p_transition,
-        p_replay, p_execution, p_zk, p_composite,
+        p_inclusion,
+        p_finality,
+        p_ownership,
+        p_transition,
+        p_replay,
+        p_execution,
+        p_zk,
+        p_composite,
     ] {
-        assert_ne!(
-            proof.hash(),
-            Hash::zero(),
-            "Proof hash must not be zero"
-        );
+        assert_ne!(proof.hash(), Hash::zero(), "Proof hash must not be zero");
     }
 }

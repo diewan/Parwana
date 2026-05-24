@@ -2,11 +2,10 @@
 //!
 //! Provides incremental Merkle tree construction for large datasets
 /// that cannot fit in memory all at once.
-
 use std::vec::Vec;
 
+use super::tree::{MerkleProof, MerkleTree};
 use crate::Hash;
-use super::tree::{MerkleTree, MerkleProof};
 
 /// A streaming Merkle tree builder.
 ///

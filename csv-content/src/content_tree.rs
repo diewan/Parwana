@@ -14,7 +14,7 @@
 use std::vec::Vec;
 
 use csv_hash::{Hash, merkle::tree::MerkleTree as CanonicalMerkleTree};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// The type of a content node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,10 +101,7 @@ impl ContentTree {
         }
 
         // Hash each leaf with domain separation
-        let leaf_hashes: Vec<Hash> = leaves
-            .iter()
-            .map(|data| Self::hash_leaf(data))
-            .collect();
+        let leaf_hashes: Vec<Hash> = leaves.iter().map(|data| Self::hash_leaf(data)).collect();
 
         // Build canonical Merkle tree
         let canonical = CanonicalMerkleTree::from_leaves(leaf_hashes.clone()).unwrap();
@@ -131,8 +128,8 @@ impl ContentTree {
 
     /// Hash a leaf value with domain separation.
     pub fn hash_leaf(data: &[u8]) -> Hash {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let mut combined = Vec::with_capacity(32 + data.len());
         combined.extend_from_slice(&HashDomain::MerkleLeaf.as_bytes()[..]);

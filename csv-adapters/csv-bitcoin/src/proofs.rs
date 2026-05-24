@@ -202,16 +202,16 @@ pub fn verify_spv_proof(
     if block_header_data.len() < 80 {
         return false;
     }
-    
+
     // Extract merkle_root from block header (bytes 36-68)
     let mut merkle_root = [0u8; 32];
     merkle_root.copy_from_slice(&block_header_data[36..68]);
-    
+
     // Verify merkle proof against the actual merkle_root from block header
     if !verify_merkle_proof(txid, &merkle_root, merkle_proof) {
         return false;
     }
-    
+
     // Ensure block_hash is not zero
     *block_hash != [0u8; 32]
 }
@@ -552,7 +552,9 @@ pub fn to_core_inclusion_proof(proof: &BitcoinInclusionProof) -> csv_proof::proo
 }
 
 /// Convert core CSV inclusion proof to Bitcoin-specific type.
-pub fn from_core_inclusion_proof(proof: &csv_proof::proof::InclusionProof) -> BitcoinInclusionProof {
+pub fn from_core_inclusion_proof(
+    proof: &csv_proof::proof::InclusionProof,
+) -> BitcoinInclusionProof {
     let proof_bytes = &proof.proof_bytes;
     if proof_bytes.len() < 48 {
         return BitcoinInclusionProof::new(vec![], [0u8; 32], 0, 0);
@@ -680,7 +682,9 @@ mod tests {
     fn test_spv_proof() {
         let txid = [1u8; 32];
         let proof = BitcoinInclusionProof::new(vec![], txid, 0, 100);
-        assert!(verify_spv_proof(&txid, &txid, &proof));
+        let mut block_header = [0u8; 80];
+        block_header[36..68].copy_from_slice(&txid);
+        assert!(verify_spv_proof(&txid, &txid, &proof, &block_header));
     }
 
     #[test]
@@ -707,7 +711,8 @@ mod tests {
         proof_bytes.extend_from_slice(&5u64.to_le_bytes());
         proof_bytes.extend_from_slice(&100u64.to_le_bytes());
         let core_proof =
-            csv_proof::proof::InclusionProof::new(proof_bytes, CoreHash::new([1u8; 32]), 5, 100).unwrap();
+            csv_proof::proof::InclusionProof::new(proof_bytes, CoreHash::new([1u8; 32]), 5, 100)
+                .unwrap();
         let bitcoin_proof = from_core_inclusion_proof(&core_proof);
         assert_eq!(bitcoin_proof.tx_index, 5);
         assert_eq!(bitcoin_proof.block_height, 100);

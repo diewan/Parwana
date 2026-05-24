@@ -30,42 +30,39 @@
 #![allow(clippy::redundant_slicing)]
 
 pub mod error;
-pub mod proof_types;
-pub mod proof_dags;
 pub mod proof_composition;
+pub mod proof_dags;
+pub mod proof_types;
 pub mod proof_validation;
 
 // Migrated from csv-core
 pub mod proof;
 // pub mod proof_pipeline;  // REMOVED: verification centralized in csv-verifier per implementation.md
-pub mod proof_material;
 pub mod commitment_chain;
 pub mod commitments_ext;
+pub mod proof_material;
 
 // Stub modules for protocol types to break cyclic dependency
+pub mod certification;
 pub mod chain_config;
 pub mod cross_chain;
-pub mod provenance;
-pub mod certification;
-pub mod signature;
 pub mod dag;
-pub mod replay_registry;
 pub mod events;
+pub mod provenance;
+pub mod replay_registry;
+pub mod signature;
 
 // Re-exports
-pub use error::{ProofError, Result};
-pub use proof_types::{
-    Proof, ProofCategory,
-    InclusionProof, FinalityProof, OwnershipProof, TransitionProof,
-    ReplayProof, ExecutionProof, ZKProof, CompositeProof,
-    CompositionRule,
-    ProofPhase,
-};
-pub use proof_dags::{ProofNode, ProofDag, ProofId};
-pub use proof::{MAX_PROOF_BYTES, MAX_FINALITY_DATA, MAX_SIGNATURES_TOTAL_SIZE};
-pub use chain_config::{EthereumFinalityStage, SolanaCommitmentGrade, ChainCapabilities};
-pub use dag::DAGSegment;
-pub use signature::SignatureScheme;
+pub use chain_config::{ChainCapabilities, EthereumFinalityStage, SolanaCommitmentGrade};
 pub use cross_chain::CrossChainTransferProof;
-pub use replay_registry::{ReplayKey, ReplayRegistryBackend};
+pub use dag::DAGSegment;
+pub use error::{ProofError, Result};
 pub use events::{CsvEvent, EventIndexerRegistry};
+pub use proof::{MAX_FINALITY_DATA, MAX_PROOF_BYTES, MAX_SIGNATURES_TOTAL_SIZE};
+pub use proof_dags::{ProofDag, ProofId, ProofNode};
+pub use proof_types::{
+    CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
+    Proof, ProofCategory, ProofPhase, ReplayProof, TransitionProof, ZKProof,
+};
+pub use replay_registry::{ReplayKey, ReplayRegistryBackend};
+pub use signature::SignatureScheme;

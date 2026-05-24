@@ -12,7 +12,7 @@ mod real_rpc_impl {
         signers::local::PrivateKeySigner,
     };
     use async_trait::async_trait;
-    
+
     use serde_json::json;
 
     use crate::rpc::{

@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof};
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_proof::proof::{FinalityProof, InclusionProof};
 
 /// Result type for chain operations
 pub type ChainOpResult<T> = Result<T, ChainOpError>;

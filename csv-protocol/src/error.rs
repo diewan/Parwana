@@ -71,10 +71,7 @@ pub enum ProtocolError {
 
     /// Unsupported protocol version
     #[error("Unsupported protocol version: found {found}, max supported {max_supported}")]
-    UnsupportedVersion {
-        found: u16,
-        max_supported: u16,
-    },
+    UnsupportedVersion { found: u16, max_supported: u16 },
 
     /// Malformed envelope
     #[error("Malformed envelope")]

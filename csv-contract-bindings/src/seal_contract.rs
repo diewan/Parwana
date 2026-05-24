@@ -6,8 +6,8 @@
 //! - Verifying seal ownership
 //! - Processing seal consumption
 
-use serde::{Serialize, Deserialize};
-use crate::common::{ContractAddress, ContractAbi, FunctionSelector};
+use crate::common::{ContractAbi, ContractAddress, FunctionSelector};
+use serde::{Deserialize, Serialize};
 
 /// Seal contract ABI (Ethereum-compatible)
 pub const SEAL_CONTRACT_ABI: &str = r#"[

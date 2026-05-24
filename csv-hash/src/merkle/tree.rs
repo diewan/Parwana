@@ -52,10 +52,7 @@ impl MerkleTree {
         }
 
         // Hash leaves with domain separation
-        let hashed_leaves: Vec<Hash> = leaves
-            .iter()
-            .map(|data| Self::hash_leaf(data))
-            .collect();
+        let hashed_leaves: Vec<Hash> = leaves.iter().map(|data| Self::hash_leaf(data)).collect();
 
         // Balance the tree (duplicate odd leaves)
         let balanced = Self::balance_leaves(hashed_leaves.clone());
@@ -138,8 +135,9 @@ impl MerkleTree {
         }
         let mut balanced = leaves;
         while balanced.len() % 2 != 0 {
-            let last = *balanced.last().unwrap();
-            balanced.push(last);
+            if let Some(last) = balanced.last().copied() {
+                balanced.push(last);
+            }
         }
         balanced
     }

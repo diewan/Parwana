@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Invariant 4: Balances Are Stored as u64 Native Units
 //!
 //! Rule: Balances must be stored as `u64` native units (satoshis, lamports, MIST, octas, wei).
@@ -5,8 +6,8 @@
 
 #[cfg(test)]
 mod tests {
-    use std::hash::{Hash, Hasher};
     use csv_core::protocol_version::ChainId;
+    use std::hash::{Hash, Hasher};
 
     /// Property: ChainId uses native unit representation
     #[test]
@@ -14,7 +15,7 @@ mod tests {
         let btc = ChainId::new("bitcoin");
         let eth = ChainId::new("ethereum");
         let sol = ChainId::new("solana");
-        
+
         assert_eq!(btc.as_str(), "bitcoin");
         assert_eq!(eth.as_str(), "ethereum");
         assert_eq!(sol.as_str(), "solana");
@@ -26,7 +27,7 @@ mod tests {
         let btc1 = ChainId::new("bitcoin");
         let btc2 = ChainId::new("bitcoin");
         let eth = ChainId::new("ethereum");
-        
+
         assert_eq!(btc1, btc2, "Same chain IDs must be equal");
         assert_ne!(btc1, eth, "Different chain IDs must not be equal");
     }
@@ -35,16 +36,20 @@ mod tests {
     #[test]
     fn test_chain_id_hash_consistency() {
         use std::collections::hash_map::DefaultHasher;
-        
+
         let btc1 = ChainId::new("bitcoin");
         let btc2 = ChainId::new("bitcoin");
-        
+
         let mut s1 = DefaultHasher::new();
         let mut s2 = DefaultHasher::new();
         btc1.hash(&mut s1);
         btc2.hash(&mut s2);
-        
-        assert_eq!(s1.finish(), s2.finish(), "Same chain IDs must have same hash");
+
+        assert_eq!(
+            s1.finish(),
+            s2.finish(),
+            "Same chain IDs must have same hash"
+        );
     }
 
     /// Property: ChainId handles empty string

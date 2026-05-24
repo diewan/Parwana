@@ -320,7 +320,8 @@ impl ProofMetrics {
     /// Record a successful verification
     pub fn record_success(&self) {
         self.total_verifications.fetch_add(1, Ordering::Relaxed);
-        self.successful_verifications.fetch_add(1, Ordering::Relaxed);
+        self.successful_verifications
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record a failed verification with component breakdown
@@ -403,7 +404,8 @@ impl ReplayMetrics {
     pub fn record_insert_conflict_replay(&self) {
         self.total_checks.fetch_add(1, Ordering::Relaxed);
         self.replays_detected.fetch_add(1, Ordering::Relaxed);
-        self.insert_conflict_detections.fetch_add(1, Ordering::Relaxed);
+        self.insert_conflict_detections
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record a clean check (no replay)
@@ -524,7 +526,8 @@ impl PipelineChainMetrics {
     /// Record a pipeline execution
     pub fn record(&self, latency_ms: u64) {
         self.executions.fetch_add(1, Ordering::Relaxed);
-        self.total_latency_ms.fetch_add(latency_ms, Ordering::Relaxed);
+        self.total_latency_ms
+            .fetch_add(latency_ms, Ordering::Relaxed);
     }
 
     /// Get average latency
@@ -553,14 +556,16 @@ impl PipelineMetrics {
             return metrics.clone();
         }
         let metrics = Arc::new(PipelineChainMetrics::new(chain));
-        self.chain_latency.insert(chain.to_string(), metrics.clone());
+        self.chain_latency
+            .insert(chain.to_string(), metrics.clone());
         metrics
     }
 
     /// Record a pipeline execution
     pub fn record_execution(&mut self, chain: &str, latency_ms: u64) {
         self.total_executions.fetch_add(1, Ordering::Relaxed);
-        self.total_latency_ms.fetch_add(latency_ms, Ordering::Relaxed);
+        self.total_latency_ms
+            .fetch_add(latency_ms, Ordering::Relaxed);
 
         let chain_metrics = self.get_or_create_chain(chain);
         chain_metrics.record(latency_ms);

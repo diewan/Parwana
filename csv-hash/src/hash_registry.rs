@@ -3,10 +3,10 @@
 //! This module defines the hash domains and hash types used in the CSV protocol.
 //! Migrated from csv-core/src/hash.rs as part of Phase 1 restructuring.
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::str::FromStr;
-use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
 
 /// A 32-byte hash value.
 ///
@@ -292,19 +292,30 @@ impl HashDomain {
     /// Returns the category for this domain.
     pub fn category(&self) -> DomainCategory {
         match self {
-            Self::BitcoinSealV1 | Self::EthereumSealV1 | Self::SolanaSealV1 |
-            Self::SuiSealV1 | Self::AptosSealV1 | Self::CelestiaSealV1 | Self::StarkSealV1 => {
-                DomainCategory::Seal
-            }
-            Self::TransferCommitmentV1 | Self::CommitmentVersion | Self::CommitmentProtocolId |
-            Self::CommitmentMpcRoot | Self::CommitmentContractId | Self::CommitmentPrevious |
-            Self::CommitmentPayload | Self::CommitmentSeal | Self::CommitmentDomain => {
-                DomainCategory::Commitment
-            }
+            Self::BitcoinSealV1
+            | Self::EthereumSealV1
+            | Self::SolanaSealV1
+            | Self::SuiSealV1
+            | Self::AptosSealV1
+            | Self::CelestiaSealV1
+            | Self::StarkSealV1 => DomainCategory::Seal,
+            Self::TransferCommitmentV1
+            | Self::CommitmentVersion
+            | Self::CommitmentProtocolId
+            | Self::CommitmentMpcRoot
+            | Self::CommitmentContractId
+            | Self::CommitmentPrevious
+            | Self::CommitmentPayload
+            | Self::CommitmentSeal
+            | Self::CommitmentDomain => DomainCategory::Commitment,
             Self::SanadId | Self::Nullifier | Self::ReplayIdV1 => DomainCategory::Identity,
             Self::VerificationProofV1 | Self::VerificationResult => DomainCategory::Verification,
-            Self::StealthAddressV1 | Self::StealthNonceV1 | Self::EphemeralPointV1 => DomainCategory::Stealth,
-            Self::ProtocolVersion | Self::MerkleCombine | Self::MerkleLeaf => DomainCategory::Protocol,
+            Self::StealthAddressV1 | Self::StealthNonceV1 | Self::EphemeralPointV1 => {
+                DomainCategory::Stealth
+            }
+            Self::ProtocolVersion | Self::MerkleCombine | Self::MerkleLeaf => {
+                DomainCategory::Protocol
+            }
             Self::MpcProof => DomainCategory::Mpc,
         }
     }

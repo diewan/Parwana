@@ -175,7 +175,9 @@ impl ChainCapabilities {
                 FinalityStrength::Probabilistic { confirmations: obs },
             ) => obs >= slots,
             (
-                FinalityModel::FinalizedCheckpoint | FinalityModel::BftInstant | FinalityModel::DataAvailabilityHeader,
+                FinalityModel::FinalizedCheckpoint
+                | FinalityModel::BftInstant
+                | FinalityModel::DataAvailabilityHeader,
                 FinalityStrength::Deterministic,
             ) => true,
             _ => false,
@@ -340,43 +342,43 @@ impl std::fmt::Display for FinalityDepths {
 // ============================================================================
 
 /// Chain capability trait - all chains must implement this.
-/// 
+///
 /// **DEPRECATED**: Use ChainCapabilities struct instead.
 /// This trait is kept for backward compatibility during migration.
 pub trait ChainCapability: std::fmt::Debug {
     /// Get the chain ID.
     fn chain_id(&self) -> &str;
-    
+
     /// Get the chain name.
     fn chain_name(&self) -> &str;
-    
+
     /// Get the finality type for this chain.
     fn finality_type(&self) -> FinalityType;
-    
+
     /// Get the required confirmations for this chain.
     fn required_confirmations(&self) -> u64;
-    
+
     /// Check if the chain supports SPV proofs.
     fn supports_spv(&self) -> bool;
-    
+
     /// Check if the chain supports contract calls.
     fn supports_contracts(&self) -> bool;
-    
+
     /// Check if the chain supports tapret commitments.
     fn supports_tapret(&self) -> bool;
-    
+
     /// Get the maximum proof size for this chain.
     fn max_proof_size(&self) -> usize;
-    
+
     /// Get the maximum transaction size for this chain.
     fn max_tx_size(&self) -> usize;
-    
+
     /// Get the block time for this chain.
     fn block_time(&self) -> u64;
-    
+
     /// Check if the chain supports reorg detection.
     fn supports_reorg_detection(&self) -> bool;
-    
+
     /// Get the capability set for this chain.
     fn capabilities(&self) -> CapabilitySet;
 }
@@ -435,31 +437,31 @@ impl CapabilitySet {
 pub enum Capability {
     /// SPV proof support
     SpvProofs,
-    
+
     /// Contract call support
     ContractCalls,
-    
+
     /// Tapret commitment support
     TapretCommitments,
-    
+
     /// Reorg detection
     ReorgDetection,
-    
+
     /// State proofs
     StateProofs,
-    
+
     /// Receipt proofs
     ReceiptProofs,
-    
+
     /// Event indexing
     EventIndexing,
-    
+
     /// Account abstraction
     AccountAbstraction,
-    
+
     /// ZK proof verification
     ZkProofVerification,
-    
+
     /// Cross-chain messaging
     CrossChainMessaging,
 }
@@ -479,12 +481,15 @@ impl ChainCapabilityRegistry {
 
     /// Register a chain capability.
     pub fn register(&mut self, capability: Box<dyn ChainCapability>) {
-        self.chains.insert(capability.chain_id().to_string(), capability);
+        self.chains
+            .insert(capability.chain_id().to_string(), capability);
     }
 
     /// Get a chain capability by ID.
-    pub fn get(&self, chain_id: &str) -> Option<&Box<dyn ChainCapability>> {
-        self.chains.get(chain_id)
+    pub fn get(&self, chain_id: &str) -> Option<&dyn ChainCapability> {
+        self.chains
+            .get(chain_id)
+            .map(|capability| capability.as_ref())
     }
 
     /// Check if a chain supports a specific capability.

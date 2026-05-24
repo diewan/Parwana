@@ -329,7 +329,10 @@ pub fn derive_address_from_chain_id_with_network(
     derive_address_from_key_with_network(key_bytes, chain_id, network)
 }
 
-fn derive_bitcoin_address_from_key(key_bytes: &[u8], network: bitcoin::Network) -> Result<String, Bip44Error> {
+fn derive_bitcoin_address_from_key(
+    key_bytes: &[u8],
+    network: bitcoin::Network,
+) -> Result<String, Bip44Error> {
     use bitcoin::address::KnownHrp;
     use secp256k1::{Keypair, Secp256k1, SecretKey, XOnlyPublicKey};
 
@@ -342,7 +345,10 @@ fn derive_bitcoin_address_from_key(key_bytes: &[u8], network: bitcoin::Network) 
 
     let hrp = match network {
         bitcoin::Network::Bitcoin => KnownHrp::Mainnet,
-        bitcoin::Network::Testnet | bitcoin::Network::Testnet4 | bitcoin::Network::Signet | bitcoin::Network::Regtest => KnownHrp::Testnets,
+        bitcoin::Network::Testnet
+        | bitcoin::Network::Testnet4
+        | bitcoin::Network::Signet
+        | bitcoin::Network::Regtest => KnownHrp::Testnets,
     };
 
     let address = bitcoin::Address::p2tr(&secp, xonly_pubkey, None, hrp);

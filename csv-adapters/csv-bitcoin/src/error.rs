@@ -5,9 +5,18 @@ use thiserror::Error;
 // Local implementations (mcp module removed during migration)
 #[derive(Debug, Clone)]
 pub enum FixAction {
-    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
-    CheckState { check: String, url: String, what: String },
-    SwitchEndpoint { endpoint: String },
+    Retry {
+        backoff_secs: u64,
+        parameter_changes: Vec<String>,
+    },
+    CheckState {
+        check: String,
+        url: String,
+        what: String,
+    },
+    SwitchEndpoint {
+        endpoint: String,
+    },
 }
 
 pub trait HasErrorSuggestion {
@@ -105,28 +114,39 @@ impl From<BitcoinError> for csv_protocol::error::ProtocolError {
         match err {
             BitcoinError::CoreError(e) => e,
             BitcoinError::RpcError(msg) => csv_protocol::error::ProtocolError::NetworkError(msg),
-            BitcoinError::TransactionNotFound(msg) => csv_protocol::error::ProtocolError::Generic(msg),
+            BitcoinError::TransactionNotFound(msg) => {
+                csv_protocol::error::ProtocolError::Generic(msg)
+            }
             BitcoinError::UTXOSpent(msg) => csv_protocol::error::ProtocolError::InvalidSeal(msg),
             BitcoinError::InvalidMerkleProof(msg) => {
                 csv_protocol::error::ProtocolError::InclusionProofFailed(msg)
             }
             BitcoinError::RegistryFull(msg) => csv_protocol::error::ProtocolError::Generic(msg),
-            BitcoinError::ReorgDetected { height, depth } => csv_protocol::error::ProtocolError::ReorgInvalid(
-                format!("Reorg at height {}, depth {}", height, depth),
-            ),
+            BitcoinError::ReorgDetected { height, depth } => {
+                csv_protocol::error::ProtocolError::ReorgInvalid(format!(
+                    "Reorg at height {}, depth {}",
+                    height, depth
+                ))
+            }
             BitcoinError::InsufficientConfirmations { got, need } => {
                 csv_protocol::error::ProtocolError::FinalityNotReached(format!(
                     "Got {} confirmations, need {}",
                     got, need
                 ))
             }
-            BitcoinError::InvalidInput(msg) => csv_protocol::error::ProtocolError::InvalidInput(msg),
+            BitcoinError::InvalidInput(msg) => {
+                csv_protocol::error::ProtocolError::InvalidInput(msg)
+            }
             BitcoinError::MpcError(msg) => {
                 csv_protocol::error::ProtocolError::Generic(format!("MPC: {}", msg))
             }
-            BitcoinError::StorageError(msg) => csv_protocol::error::ProtocolError::StorageError(msg),
+            BitcoinError::StorageError(msg) => {
+                csv_protocol::error::ProtocolError::StorageError(msg)
+            }
             BitcoinError::TransactionError(msg) => csv_protocol::error::ProtocolError::Generic(msg),
-            BitcoinError::InsufficientFunds(msg) => csv_protocol::error::ProtocolError::Generic(msg),
+            BitcoinError::InsufficientFunds(msg) => {
+                csv_protocol::error::ProtocolError::Generic(msg)
+            }
         }
     }
 }
@@ -243,8 +263,14 @@ impl HasErrorSuggestion for BitcoinError {
                 msg
             ),
             BitcoinError::CoreError(_) => "https://docs.csv.network/errors/protocol".to_string(),
-            BitcoinError::TransactionError(msg) => format!("Transaction building/signing failed: {}. Check input data and retry.", msg),
-            BitcoinError::InsufficientFunds(msg) => format!("{} Add more Bitcoin to your wallet or use a different address with sufficient balance.", msg),
+            BitcoinError::TransactionError(msg) => format!(
+                "Transaction building/signing failed: {}. Check input data and retry.",
+                msg
+            ),
+            BitcoinError::InsufficientFunds(msg) => format!(
+                "{} Add more Bitcoin to your wallet or use a different address with sufficient balance.",
+                msg
+            ),
         }
     }
 
@@ -252,8 +278,12 @@ impl HasErrorSuggestion for BitcoinError {
         match self {
             BitcoinError::CoreError(_) => "https://docs.csv.network/errors/protocol".to_string(),
             BitcoinError::MpcError(_) => "https://docs.csv.network/errors/mpc".to_string(),
-            BitcoinError::TransactionError(_) => "https://docs.csv.network/errors/bitcoin".to_string(),
-            BitcoinError::InsufficientFunds(_) => "https://docs.csv.network/errors/bitcoin".to_string(),
+            BitcoinError::TransactionError(_) => {
+                "https://docs.csv.network/errors/bitcoin".to_string()
+            }
+            BitcoinError::InsufficientFunds(_) => {
+                "https://docs.csv.network/errors/bitcoin".to_string()
+            }
             _ => error_codes::docs_url(self.error_code()),
         }
     }
@@ -267,15 +297,10 @@ impl HasErrorSuggestion for BitcoinError {
                     "https://mempool.space/api".to_string(),
                 ],
             }),
-            BitcoinError::InsufficientConfirmations { need, .. } => {
-                Some(FixAction::Retry {
-                    backoff_secs: (*need * 600) as u64,
-                    parameter_changes: vec![
-                        "wait_for_confirmations".to_string(),
-                        need.to_string(),
-                    ],
-                })
-            }
+            BitcoinError::InsufficientConfirmations { need, .. } => Some(FixAction::Retry {
+                backoff_secs: *need * 600,
+                parameter_changes: vec!["wait_for_confirmations".to_string(), need.to_string()],
+            }),
             BitcoinError::ReorgDetected { .. } => Some(FixAction::CheckState {
                 check: "reorg_detected".to_string(),
                 url: "https://mempool.space".to_string(),
@@ -283,10 +308,7 @@ impl HasErrorSuggestion for BitcoinError {
             }),
             BitcoinError::TransactionNotFound(_) => Some(FixAction::Retry {
                 backoff_secs: 60,
-                parameter_changes: vec![
-                    "wait_seconds".to_string(),
-                    "60".to_string(),
-                ],
+                parameter_changes: vec!["wait_seconds".to_string(), "60".to_string()],
             }),
             BitcoinError::CoreError(_) => None,
             BitcoinError::InvalidInput(_) => None,

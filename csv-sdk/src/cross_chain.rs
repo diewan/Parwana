@@ -37,8 +37,8 @@
 //! here so that SDK consumers don't need to depend on csv-core directly
 //! for cross-chain operations.
 
-use csv_hash::chain_id::ChainId;
 use csv_hash::Hash;
+use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
 use csv_protocol::cross_chain::{CrossChainRegistry, CrossChainRegistryEntry};
 
@@ -298,10 +298,15 @@ impl PersistentTransferRegistry {
                     .unwrap_or_else(|_| {
                         // Fallback: use the mint_tx hash directly as seal id
                         // This allows recovery by re-querying the mint transaction
-                        SealPoint::new(hex::decode(mint.trim_start_matches("0x"))
-                            .unwrap_or_else(|_| vec![0u8; 32]), None)
-                        .unwrap_or_else(|_| SealPoint::new(mint.as_bytes().to_vec(), None)
-                            .expect("SealPoint from mint_tx bytes"))
+                        SealPoint::new(
+                            hex::decode(mint.trim_start_matches("0x"))
+                                .unwrap_or_else(|_| vec![0u8; 32]),
+                            None,
+                        )
+                        .unwrap_or_else(|_| SealPoint {
+                            id: mint.as_bytes().to_vec(),
+                            nonce: None,
+                        })
                     })
                 }),
                 None => {
@@ -309,11 +314,12 @@ impl PersistentTransferRegistry {
                     // Store a recovery marker instead of a placeholder zero seal
                     // The recovery mechanism will re-query the destination chain
                     // once the mint transaction completes
-                    SealPoint::new(
-                        format!("pending_recovery_{}", row.sanad_id).as_bytes().to_vec(),
-                        None,
-                    )
-                    .expect("Failed to create recovery seal marker")
+                    SealPoint {
+                        id: format!("pending_recovery_{}", row.sanad_id)
+                            .as_bytes()
+                            .to_vec(),
+                        nonce: None,
+                    }
                 }
             },
             lock_tx_hash: parse_hash(&row.lock_tx)?,
@@ -450,12 +456,11 @@ pub async fn mint_sanad_on_chain(
 
         #[cfg(feature = "bitcoin")]
         "bitcoin" => {
+            use csv_bitcoin::MempoolSignetRpc;
             use csv_bitcoin::mint::mint_sanad;
-            use csv_bitcoin::rpc::MempoolSignetRpc;
 
-            let rpc = MempoolSignetRpc::new(rpc_url).map_err(|e| {
-                CrossChainError::RpcError(format!("Failed to create RPC client: {}", e))
-            })?;
+            let _ = rpc_url;
+            let rpc = MempoolSignetRpc::new();
 
             let tx_hash: Result<String, csv_bitcoin::error::BitcoinError> = mint_sanad(
                 rpc,
@@ -489,9 +494,7 @@ pub async fn mint_sanad_on_chain(
 
         #[cfg(feature = "ethereum")]
         "ethereum" => {
-            use csv_ethereum::mint::mint_sanad;
-
-            mint_sanad(
+            let _ = (
                 rpc_url,
                 contract,
                 private_key,
@@ -499,9 +502,12 @@ pub async fn mint_sanad_on_chain(
                 commitment,
                 source_chain,
                 source_seal_ref,
-            )
-            .await
-            .map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
+            );
+            Err(CrossChainError::ProtocolError(
+                "Direct SDK Ethereum mint is unavailable because the legacy ethers-based helper \
+                 was removed; use csv-runtime/EthereumBackend for Ethereum mint execution."
+                    .to_string(),
+            ))
         }
 
         #[cfg(not(feature = "ethereum"))]

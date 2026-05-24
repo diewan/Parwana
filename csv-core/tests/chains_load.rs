@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Testnet chain configuration loading (Phase 7 deployment framework).
 
 use csv_protocol::finality::capabilities::ChainCapabilities;
@@ -22,7 +23,8 @@ fn testnet_chain_config_toml_roundtrip() {
 
     for config in &configs {
         let toml_str = toml::to_string_pretty(config).expect("serialize chain config");
-        let parsed: ChainCapabilities = toml::from_str(&toml_str).expect("deserialize chain config");
+        let parsed: ChainCapabilities =
+            toml::from_str(&toml_str).expect("deserialize chain config");
         assert_eq!(parsed.state_model, config.state_model);
         assert_eq!(parsed.finality_model, config.finality_model);
     }

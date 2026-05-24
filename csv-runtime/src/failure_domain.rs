@@ -89,7 +89,11 @@ impl ClassifiedError {
     }
 
     /// Create a new classified error with an error code
-    pub fn with_code(domain: FailureDomain, message: impl Into<String>, code: impl Into<String>) -> Self {
+    pub fn with_code(
+        domain: FailureDomain,
+        message: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
         Self {
             domain,
             message: message.into(),

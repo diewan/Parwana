@@ -21,8 +21,9 @@ pub use crate::transfers::{TransferBuilder, TransferManager};
 pub use crate::wallet::Wallet;
 
 // Re-exports from csv-adapter-core
-pub use csv_hash::commitment::Commitment;
 pub use csv_hash::Hash;
+pub use csv_hash::chain_id::ChainId;
+pub use csv_hash::commitment::Commitment;
 pub use csv_hash::sanad::SanadId;
 pub use csv_hash::seal::SealPoint;
 pub use csv_proof::proof::ProofBundle;

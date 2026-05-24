@@ -52,7 +52,10 @@ fn test_uncle_orphan_behavior() {
     let proof_on_uncle = main_chain_block == uncle_block_hash;
 
     assert!(proof_on_main_chain, "Proof on main chain is valid");
-    assert!(!proof_on_uncle, "Proof on uncle block does not match main chain");
+    assert!(
+        !proof_on_uncle,
+        "Proof on uncle block does not match main chain"
+    );
 }
 
 /// Simulates a reorg that affects the block number used in a proof.
@@ -70,7 +73,10 @@ fn test_reorg_affects_block_number_verification() {
     let _proof_hash = original_tip_hash;
 
     // Post-reorg, block 1000 doesn't exist in the chain
-    assert!(post_reorg_tip_block < proof_block, "Tip block decreased after reorg");
+    assert!(
+        post_reorg_tip_block < proof_block,
+        "Tip block decreased after reorg"
+    );
 
     // The hash at the original proof block height no longer matches
     let hash_at_proof_height_changed = original_tip_hash != post_reorg_tip_hash;
@@ -88,7 +94,10 @@ fn test_deep_reorg_beyond_finality() {
 
     // A reorg deeper than the finality distance is a catastrophic event
     let reorg_depth = 100u64;
-    assert!(reorg_depth > finality_distance_blocks, "Reorg exceeds finality distance");
+    assert!(
+        reorg_depth > finality_distance_blocks,
+        "Reorg exceeds finality distance"
+    );
 
     // After such a reorg, all blocks within the reorg depth are invalid
     // Any proofs built on those blocks must be re-verified
@@ -110,6 +119,9 @@ fn test_reorg_affects_state_root() {
     let mpt_proof_valid_original = original_state_root == original_state_root;
     let mpt_proof_valid_new = original_state_root == new_state_root;
 
-    assert!(mpt_proof_valid_original, "MPT proof valid against original state");
+    assert!(
+        mpt_proof_valid_original,
+        "MPT proof valid against original state"
+    );
     assert!(!mpt_proof_valid_new, "MPT proof invalid against new state");
 }

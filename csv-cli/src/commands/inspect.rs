@@ -49,8 +49,7 @@ fn inspect_replay(id: Option<String>, file: Option<PathBuf>) -> Result<()> {
         return Ok(());
     }
     if let Some(hex_id) = id {
-        let raw = hex::decode(hex_id.trim_start_matches("0x"))
-            .context("replay id must be hex")?;
+        let raw = hex::decode(hex_id.trim_start_matches("0x")).context("replay id must be hex")?;
         anyhow::ensure!(raw.len() == 32, "replay id must be 32 bytes");
         let canonical = to_canonical_cbor(&raw).context("canonical encode replay id")?;
         println!("replay_id_hex: {}", hex::encode(&raw));

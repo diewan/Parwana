@@ -95,14 +95,9 @@ pub struct Schema {
 #[allow(missing_docs)]
 pub enum SchemaDiffOp {
     /// Field added
-    FieldAdded {
-        name: String,
-        field_type: FieldType,
-    },
+    FieldAdded { name: String, field_type: FieldType },
     /// Field removed
-    FieldRemoved {
-        name: String,
-    },
+    FieldRemoved { name: String },
     /// Field type changed
     FieldTypeChanged {
         name: String,
@@ -110,10 +105,7 @@ pub enum SchemaDiffOp {
         new_type: FieldType,
     },
     /// Field constraint changed
-    FieldConstraintChanged {
-        name: String,
-        constraint: String,
-    },
+    FieldConstraintChanged { name: String, constraint: String },
     /// Field required status changed
     FieldRequiredChanged {
         name: String,
@@ -159,10 +151,14 @@ impl SchemaRegistry {
     pub fn register(&mut self, schema: Schema) -> Result<(), SchemaError> {
         // Validate the schema definition
         if schema.name.is_empty() {
-            return Err(SchemaError::InvalidName("Schema name cannot be empty".to_string()));
+            return Err(SchemaError::InvalidName(
+                "Schema name cannot be empty".to_string(),
+            ));
         }
         if schema.version.is_empty() {
-            return Err(SchemaError::InvalidVersion("Schema version cannot be empty".to_string()));
+            return Err(SchemaError::InvalidVersion(
+                "Schema version cannot be empty".to_string(),
+            ));
         }
 
         // Try to compile the schema
@@ -228,7 +224,12 @@ impl SchemaRegistry {
     }
 
     /// Compile a schema from raw JSON Schema
-    pub fn compile(&self, name: &str, version: &str, json_schema: &str) -> Result<CompiledSchema, SchemaError> {
+    pub fn compile(
+        &self,
+        name: &str,
+        version: &str,
+        json_schema: &str,
+    ) -> Result<CompiledSchema, SchemaError> {
         let schema = Schema {
             name: name.to_string(),
             version: version.to_string(),
@@ -238,7 +239,12 @@ impl SchemaRegistry {
     }
 
     /// Diff two schema versions
-    pub fn diff(&self, name: &str, version_a: &str, version_b: &str) -> Result<SchemaDiff, SchemaError> {
+    pub fn diff(
+        &self,
+        name: &str,
+        version_a: &str,
+        version_b: &str,
+    ) -> Result<SchemaDiff, SchemaError> {
         let schema_a = self
             .get_version(name, version_a)
             .ok_or_else(|| SchemaError::VersionNotFound(name.to_string(), version_a.to_string()))?;
@@ -320,12 +326,12 @@ pub enum ValidationError {
 /// Compile a schema definition into a compiled schema
 fn compile_schema_definition(schema: &Schema) -> Result<CompiledSchema, SchemaError> {
     // Try to parse as JSON Schema first
-    let json_value: serde_json::Value =
-        serde_json::from_str(&schema.definition).map_err(|e| {
-            SchemaError::ParseError(format!("Failed to parse schema definition: {}", e))
-        })?;
+    let json_value: serde_json::Value = serde_json::from_str(&schema.definition).map_err(|e| {
+        SchemaError::ParseError(format!("Failed to parse schema definition: {}", e))
+    })?;
 
-    let fields = if let Some(properties) = json_value.get("properties").and_then(|v| v.as_object()) {
+    let fields = if let Some(properties) = json_value.get("properties").and_then(|v| v.as_object())
+    {
         let mut fields = HashMap::new();
         let mut field_order = Vec::new();
         let required_fields: Vec<String> = json_value
@@ -613,10 +619,7 @@ fn validate_field_value(
                 ));
             }
             hex::decode(s).map_err(|_| {
-                ValidationError::InvalidValue(
-                    name.to_string(),
-                    "Invalid hex encoding".to_string(),
-                )
+                ValidationError::InvalidValue(name.to_string(), "Invalid hex encoding".to_string())
             })?;
         }
         FieldType::Hash => {
@@ -681,7 +684,10 @@ fn validate_field_value(
             if !variants.contains(&s.to_string()) {
                 return Err(ValidationError::InvalidValue(
                     name.to_string(),
-                    format!("Value '{}' is not a valid enum variant. Allowed: {:?}", s, variants),
+                    format!(
+                        "Value '{}' is not a valid enum variant. Allowed: {:?}",
+                        s, variants
+                    ),
                 ));
             }
         }
@@ -769,11 +775,7 @@ fn diff_compiled_schemas(
         } else {
             "BREAKING CHANGE"
         };
-        format!(
-            "{} change(s) detected ({})",
-            changes.len(),
-            compatibility
-        )
+        format!("{} change(s) detected ({})", changes.len(), compatibility)
     };
 
     Ok(SchemaDiff {

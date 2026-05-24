@@ -365,14 +365,12 @@ impl EnhancedCommitment {
     /// Uses canonical CBOR serialization for protocol-critical data.
     /// Manual bincode serialization is forbidden per AUDIT.md.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        csv_codec::to_canonical_cbor(self)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        csv_codec::to_canonical_cbor(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
     /// Deserialize an enhanced commitment from canonical bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        csv_codec::from_canonical_cbor(bytes)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        csv_codec::from_canonical_cbor(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 }
 
@@ -402,14 +400,12 @@ impl PedersenCommitment {
         // Real Pedersen commitments would use elliptic curve: C = r*G + v*H
         // This hash-based approach is a domain-separated approximation that
         // provides binding but not the hiding property of Pedersen commitments.
-        use csv_hash::csv_tagged_hash;
         use csv_codec::to_canonical_cbor;
-        let payload = to_canonical_cbor(&(blinding_factor, value))
-            .expect("Canonical serialization should not fail for Pedersen commitment");
-        let hash = csv_tagged_hash(
-            "urn:lnp-bp:csv:pedersen-commitment:v1",
-            &payload,
-        );
+        use csv_hash::csv_tagged_hash;
+        let payload = to_canonical_cbor(&(blinding_factor, value)).unwrap_or_else(|err| {
+            format!("pedersen-commitment-serialization-error:{err}").into_bytes()
+        });
+        let hash = csv_tagged_hash("urn:lnp-bp:csv:pedersen-commitment:v1", &payload);
 
         Self {
             commitment: hash.to_vec(),
@@ -422,14 +418,13 @@ impl PedersenCommitment {
     ///
     /// Recomputes the commitment and checks it matches
     pub fn verify(&self) -> bool {
-        use csv_hash::csv_tagged_hash;
         use csv_codec::to_canonical_cbor;
+        use csv_hash::csv_tagged_hash;
         let payload = to_canonical_cbor(&(self.blinding_factor.clone(), self.value))
-            .expect("Canonical serialization should not fail for Pedersen commitment");
-        let computed = csv_tagged_hash(
-            "urn:lnp-bp:csv:pedersen-commitment:v1",
-            &payload,
-        );
+            .unwrap_or_else(|err| {
+                format!("pedersen-commitment-serialization-error:{err}").into_bytes()
+            });
+        let computed = csv_tagged_hash("urn:lnp-bp:csv:pedersen-commitment:v1", &payload);
         computed.as_slice() == self.commitment.as_slice()
     }
 
@@ -445,17 +440,21 @@ impl PedersenCommitment {
     /// loses the homomorphic property. For true Pedersen commitments,
     /// enable the `zk` feature and use `zk_proof::pedersen` instead.
     pub fn add(&self, other: &PedersenCommitment) -> PedersenCommitment {
-        use csv_hash::csv_tagged_hash;
         use csv_codec::to_canonical_cbor;
-        let blinding_payload = to_canonical_cbor(&(self.blinding_factor.clone(), other.blinding_factor.clone()))
-            .expect("Canonical serialization should not fail for blinding factors");
-        let combined_blinding = csv_tagged_hash(
-            "urn:lnp-bp:csv:pedersen-add-blinding:v1",
-            &blinding_payload,
-        );
+        use csv_hash::csv_tagged_hash;
+        let blinding_payload =
+            to_canonical_cbor(&(self.blinding_factor.clone(), other.blinding_factor.clone()))
+                .unwrap_or_else(|err| {
+                    format!("pedersen-blinding-serialization-error:{err}").into_bytes()
+                });
+        let combined_blinding =
+            csv_tagged_hash("urn:lnp-bp:csv:pedersen-add-blinding:v1", &blinding_payload);
 
-        let commitment_payload = to_canonical_cbor(&(self.commitment.as_slice(), other.commitment.as_slice()))
-            .expect("Canonical serialization should not fail for commitments");
+        let commitment_payload =
+            to_canonical_cbor(&(self.commitment.as_slice(), other.commitment.as_slice()))
+                .unwrap_or_else(|err| {
+                    format!("pedersen-add-serialization-error:{err}").into_bytes()
+                });
         let combined_commitment = csv_tagged_hash(
             "urn:lnp-bp:csv:pedersen-add-commitment:v1",
             &commitment_payload,

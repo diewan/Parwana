@@ -69,7 +69,13 @@ pub struct AptosInclusionProof {
 }
 
 impl AptosInclusionProof {
-    pub fn new(transaction_proof: Vec<u8>, event_proof: Vec<u8>, version: u64, ledger_info: Vec<u8>, events: Vec<u8>) -> Self {
+    pub fn new(
+        transaction_proof: Vec<u8>,
+        event_proof: Vec<u8>,
+        version: u64,
+        ledger_info: Vec<u8>,
+        events: Vec<u8>,
+    ) -> Self {
         Self {
             transaction_proof,
             event_proof,

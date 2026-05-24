@@ -9,17 +9,17 @@
 //! - ChainSanadOps: Sanad management operations
 
 use async_trait::async_trait;
-use csv_protocol::seal_protocol::SealProtocol;
+use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
-use csv_hash::Hash;
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
-use csv_hash::sanad::SanadId;
-use csv_hash::seal::{CommitAnchor, SealPoint};
 use ed25519_dalek::{Verifier, VerifyingKey};
 use std::sync::Arc;
 
@@ -1221,7 +1221,8 @@ mod tests {
     fn test_sui_chain_operations_creation() {
         let rpc = Box::new(MockSuiRpc::new(1));
         let mut config = SuiConfig::new(SuiNetwork::Testnet);
-        config.seal_contract.package_id = Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
+        config.seal_contract.package_id =
+            Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
         let ops = SuiBackend::new(rpc, config);
         assert_eq!(ops.config.network, SuiNetwork::Testnet);
     }
@@ -1230,7 +1231,8 @@ mod tests {
     fn test_address_validation() {
         let rpc = Box::new(MockSuiRpc::new(1));
         let mut config = SuiConfig::new(SuiNetwork::Testnet);
-        config.seal_contract.package_id = Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
+        config.seal_contract.package_id =
+            Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
         let ops = SuiBackend::new(rpc, config);
 
         // Valid address
@@ -1249,7 +1251,8 @@ mod tests {
     fn test_signature_verification() {
         let rpc = Box::new(MockSuiRpc::new(1));
         let mut config = SuiConfig::new(SuiNetwork::Testnet);
-        config.seal_contract.package_id = Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
+        config.seal_contract.package_id =
+            Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
         let ops = SuiBackend::new(rpc, config);
 
         // Generate a keypair

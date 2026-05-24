@@ -266,11 +266,11 @@ impl Config {
 
         // Fall back to csv-wallet exported JSON (legacy format)
         let csv_wallet_path = expand_path("~/.csv/wallet/csv-wallet.json");
-        if let Ok(csv_wallet) = CsvWalletData::load_from_file(&csv_wallet_path) {
-            if let Some(account) = csv_wallet.find_account(chain.as_ref()) {
-                // Create a LegacyWalletConfig from the CSV account
-                return get_cached_wallet_config(chain, account);
-            }
+        if let Ok(csv_wallet) = CsvWalletData::load_from_file(&csv_wallet_path)
+            && let Some(account) = csv_wallet.find_account(chain.as_ref())
+        {
+            // Create a LegacyWalletConfig from the CSV account
+            return get_cached_wallet_config(chain, account);
         }
 
         None
@@ -317,10 +317,10 @@ impl Config {
     /// Get RPC URL for a chain
     pub fn get_rpc_url(&self, chain: &Chain) -> String {
         // First check if chain config has an RPC URL
-        if let Ok(chain_config) = self.chain(chain) {
-            if !chain_config.rpc_url.is_empty() {
-                return chain_config.rpc_url.clone();
-            }
+        if let Ok(chain_config) = self.chain(chain)
+            && !chain_config.rpc_url.is_empty()
+        {
+            return chain_config.rpc_url.clone();
         }
 
         // Fall back to environment variables
@@ -362,10 +362,10 @@ fn get_cached_wallet_config(chain: &Chain, _account: &CsvAccount) -> Option<Lega
 
 /// Expand ~ to home directory
 fn expand_path(path: &str) -> String {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped).to_string_lossy().to_string();
-        }
+    if let Some(stripped) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(stripped).to_string_lossy().to_string();
     }
     path.to_string()
 }

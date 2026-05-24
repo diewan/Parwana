@@ -18,12 +18,9 @@ use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
 use crate::recovery::{CheckpointManager, TransferStage};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
-use csv_protocol::cross_chain::CrossChainRegistryEntry;
 use csv_protocol::signature::SignatureScheme;
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
-use std::collections::HashMap;
-use std::sync::Mutex;
 use uuid::Uuid;
 
 const LOCK_OUTPUT_INDEX_BYTES: usize = std::mem::size_of::<u32>();
@@ -223,7 +220,9 @@ impl TransferCoordinator {
 
     /// Record a health check result
     pub fn record_health_check(&self, check: crate::runtime_mode::HealthCheck) {
-        self.health_monitor.lock().unwrap().record_check(check);
+        if let Ok(mut monitor) = self.health_monitor.lock() {
+            monitor.record_check(check);
+        }
     }
 
     /// Assert that this coordinator owns the lease for the given transfer.
@@ -233,16 +232,16 @@ impl TransferCoordinator {
     ///
     /// # Errors
     ///
-    /// Returns `TransferCoordinatorError::NoLeaseBackend` if no lease backend is configured.
+    /// If no distributed lease backend is configured, the runtime relies on
+    /// the per-call [`RuntimeExecutionContext`] lease validation in `execute`.
     /// Returns `TransferCoordinatorError::LeaseViolation` if this coordinator does not own the lease.
     async fn assert_single_active_coordinator(
         &self,
         transfer_id: &str,
     ) -> Result<(), TransferCoordinatorError> {
-        let lease = self
-            .coordinator_lease
-            .as_ref()
-            .ok_or(TransferCoordinatorError::NoLeaseBackend)?;
+        let Some(lease) = self.coordinator_lease.as_ref() else {
+            return Ok(());
+        };
 
         // Check if this coordinator holds the lease
         let is_held = lease.is_held_by(&self.runtime_id).await;
@@ -328,7 +327,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::Initialized,
                 ts: std::time::SystemTime::now(),
@@ -373,7 +372,7 @@ impl TransferCoordinator {
                     self.event_bus.emit(TransferEvent::ReplayDetected(
                         crate::event_bus::TransferContext {
                             transfer_id: transfer.id.clone(),
-                            replay_id: Some(replay_id.clone()),
+                            replay_id: Some(replay_id),
                             proof_hash: None,
                             coordinator_id: self
                                 .runtime_id
@@ -393,7 +392,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id.clone(),
+                            replay_id,
                             proof_hash: [0u8; 32],
                             phase: crate::recovery::TransferStage::Initialized,
                             ts: std::time::SystemTime::now(),
@@ -407,7 +406,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id.clone(),
+                            replay_id,
                             proof_hash: [0u8; 32],
                             phase: crate::recovery::TransferStage::Initialized,
                             ts: std::time::SystemTime::now(),
@@ -428,7 +427,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::Initialized,
                 ts: std::time::SystemTime::now(),
@@ -477,7 +476,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::LockConfirmed,
                 ts: std::time::SystemTime::now(),
@@ -571,7 +570,7 @@ impl TransferCoordinator {
                 .execution_journal
                 .record(crate::execution_journal::TransferPhaseEntry {
                     transfer_id: transfer.id.clone(),
-                    replay_id: replay_id.clone(),
+                    replay_id,
                     proof_hash: [0u8; 32],
                     phase: crate::recovery::TransferStage::LockConfirmed,
                     ts: std::time::SystemTime::now(),
@@ -595,7 +594,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::LockConfirmed,
                 ts: std::time::SystemTime::now(),
@@ -618,7 +617,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::AwaitingFinality,
                 ts: std::time::SystemTime::now(),
@@ -653,7 +652,7 @@ impl TransferCoordinator {
         self.event_bus.emit(TransferEvent::AwaitingFinality(
             crate::event_bus::TransferContext {
                 transfer_id: transfer.id.clone(),
-                replay_id: Some(replay_id.clone()),
+                replay_id: Some(replay_id),
                 proof_hash: None,
                 coordinator_id: self
                     .runtime_id
@@ -690,7 +689,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id.clone(),
+                            replay_id,
                             proof_hash: [0u8; 32],
                             phase: crate::recovery::TransferStage::AwaitingFinality,
                             ts: std::time::SystemTime::now(),
@@ -704,7 +703,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::AwaitingFinality,
                 ts: std::time::SystemTime::now(),
@@ -718,7 +717,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::ProofBuilding,
                 ts: std::time::SystemTime::now(),
@@ -750,7 +749,7 @@ impl TransferCoordinator {
         self.event_bus.emit(TransferEvent::BuildingProof(
             crate::event_bus::TransferContext {
                 transfer_id: transfer.id.clone(),
-                replay_id: Some(replay_id.clone()),
+                replay_id: Some(replay_id),
                 proof_hash: None,
                 coordinator_id: self
                     .runtime_id
@@ -774,9 +773,7 @@ impl TransferCoordinator {
             })?;
 
         // Verify the proof bundle using the canonical verifier
-        let signature_scheme = match proof_bundle.anchor_ref.block_height {
-            _ => SignatureScheme::Secp256k1, // Default; adapters should provide scheme
-        };
+        let signature_scheme = SignatureScheme::Secp256k1; // Default; adapters should provide scheme
 
         let required_confirmations = runtime_ctx
             .policy
@@ -800,7 +797,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id.clone(),
+                            replay_id,
                             proof_hash: [0u8; 32],
                             phase: crate::recovery::TransferStage::ProofBuilding,
                             ts: std::time::SystemTime::now(),
@@ -848,7 +845,7 @@ impl TransferCoordinator {
                 self.event_bus.emit(TransferEvent::ProofVerified(
                     crate::event_bus::TransferContext {
                         transfer_id: transfer.id.clone(),
-                        replay_id: Some(replay_id.clone()),
+                        replay_id: Some(replay_id),
                         proof_hash: None,
                         coordinator_id: self
                             .runtime_id
@@ -867,7 +864,7 @@ impl TransferCoordinator {
                 self.execution_journal
                     .record(crate::execution_journal::TransferPhaseEntry {
                         transfer_id: transfer.id.clone(),
-                        replay_id: replay_id.clone(),
+                        replay_id,
                         proof_hash: [0u8; 32],
                         phase: crate::recovery::TransferStage::ProofBuilding,
                         ts: std::time::SystemTime::now(),
@@ -883,7 +880,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id.clone(),
+                            replay_id,
                             proof_hash: [0u8; 32],
                             phase: crate::recovery::TransferStage::ProofBuilding,
                             ts: std::time::SystemTime::now(),
@@ -922,7 +919,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id.clone(),
+                            replay_id,
                             proof_hash: [0u8; 32],
                             phase: crate::recovery::TransferStage::MintConfirmed,
                             ts: std::time::SystemTime::now(),
@@ -943,7 +940,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::MintConfirmed,
                 ts: std::time::SystemTime::now(),
@@ -988,7 +985,7 @@ impl TransferCoordinator {
                 .execution_journal
                 .record(crate::execution_journal::TransferPhaseEntry {
                     transfer_id: transfer.id.clone(),
-                    replay_id: replay_id.clone(),
+                    replay_id,
                     proof_hash: [0u8; 32],
                     phase: crate::recovery::TransferStage::MintConfirmed,
                     ts: std::time::SystemTime::now(),
@@ -1014,7 +1011,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::MintConfirmed,
                 ts: std::time::SystemTime::now(),
@@ -1108,7 +1105,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id,
                 proof_hash: [0u8; 32],
                 phase: crate::recovery::TransferStage::Completed,
                 ts: std::time::SystemTime::now(),
@@ -1529,7 +1526,7 @@ mod tests {
         AdapterRegistryImpl, ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer,
         LockResult, MintResult, SealRegistryStatus,
     };
-    use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+    use csv_proof::proof::{InclusionProof, ProofBundle};
     use csv_protocol::finality::ChainCapabilities;
     use std::sync::Arc;
 
@@ -1648,7 +1645,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-1".to_string(),
@@ -1785,9 +1784,11 @@ mod tests {
                 Ok("0".to_string())
             }
         }
-        registry.register_adapter(Box::new(CelestiaAdapter {
-            caps: celestia_caps,
-        }));
+        registry
+            .register_adapter(Box::new(CelestiaAdapter {
+                caps: celestia_caps,
+            }))
+            .unwrap();
 
         let transfer = RuntimeCrossChainTransfer {
             id: "test-1".to_string(),
@@ -1827,7 +1828,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-policy".to_string(),
@@ -1885,7 +1888,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-retry".to_string(),
@@ -1927,7 +1932,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         // Open the circuit breaker by recording failures
         for _ in 0..5 {
@@ -2020,7 +2027,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-ha".to_string(),
@@ -2090,7 +2099,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-ha-expiry".to_string(),
@@ -2158,7 +2169,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-reorg".to_string(),
@@ -2266,7 +2279,9 @@ mod tests {
             TransferCoordinator::new(Box::new(csv_storage::InMemoryReplayDb::new()), event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-race".to_string(),
@@ -2330,7 +2345,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-diff-race".to_string(),
@@ -2470,7 +2487,9 @@ mod tests {
         }
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(MaliciousTestAdapter::new()));
+        registry
+            .register_adapter(Box::new(MaliciousTestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-malicious".to_string(),
@@ -2512,7 +2531,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-doublespend".to_string(),
@@ -2593,7 +2614,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-epoch".to_string(),
@@ -2679,7 +2702,9 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         let mut registry = AdapterRegistryImpl::new();
-        registry.register_adapter(Box::new(TestAdapter::new()));
+        registry
+            .register_adapter(Box::new(TestAdapter::new()))
+            .unwrap();
 
         let transfer = CrossChainTransfer {
             id: "test-rollback".to_string(),

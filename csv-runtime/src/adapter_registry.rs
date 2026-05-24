@@ -5,9 +5,9 @@
 
 #![allow(missing_docs)]
 
-use csv_protocol::finality::ChainCapabilities;
 use csv_hash::Hash;
 use csv_proof::proof::ProofBundle;
+use csv_protocol::finality::ChainCapabilities;
 
 /// Cross-chain transfer data passed to adapters.
 /// This type should eventually live in csv-core.
@@ -82,11 +82,7 @@ pub trait AdapterRegistry: Send + Sync {
         seal_id: &[u8],
     ) -> Result<SealRegistryStatus, AdapterError>;
 
-    async fn get_balance(
-        &self,
-        chain_id: &str,
-        address: &str,
-    ) -> Result<String, AdapterError>;
+    async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError>;
 
     async fn build_inclusion_proof(
         &self,
@@ -131,6 +127,12 @@ impl AdapterRegistryImpl {
 
     fn capabilities(&self, chain_id: &str) -> Option<ChainCapabilities> {
         self.adapters.get(chain_id).map(|a| a.capabilities())
+    }
+}
+
+impl Default for AdapterRegistryImpl {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -186,11 +188,7 @@ impl AdapterRegistry for AdapterRegistryImpl {
         adapter.check_seal_registry(seal_id).await
     }
 
-    async fn get_balance(
-        &self,
-        chain_id: &str,
-        address: &str,
-    ) -> Result<String, AdapterError> {
+    async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError> {
         let adapter = self
             .adapters
             .get(chain_id)
@@ -224,9 +222,17 @@ pub trait ChainAdapter: Send + Sync {
     fn capabilities(&self) -> ChainCapabilities;
 
     async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError>;
-    async fn mint_sanad(&self, transfer: &CrossChainTransfer, proof_bundle: &[u8]) -> Result<MintResult, AdapterError>;
-    async fn build_inclusion_proof(&self, lock_result: &LockResult) -> Result<ProofBundle, AdapterError>;
-    async fn check_seal_registry(&self, seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError>;
+    async fn mint_sanad(
+        &self,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &[u8],
+    ) -> Result<MintResult, AdapterError>;
+    async fn build_inclusion_proof(
+        &self,
+        lock_result: &LockResult,
+    ) -> Result<ProofBundle, AdapterError>;
+    async fn check_seal_registry(&self, seal_id: &[u8])
+    -> Result<SealRegistryStatus, AdapterError>;
     async fn get_balance(&self, address: &str) -> Result<String, AdapterError>;
 }
 
@@ -256,21 +262,31 @@ mod tests {
             self.caps.clone()
         }
 
-        async fn lock_sanad(&self, _transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError> {
+        async fn lock_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+        ) -> Result<LockResult, AdapterError> {
             Ok(LockResult {
                 tx_hash: "0xmock".to_string(),
                 block_height: 100,
             })
         }
 
-        async fn mint_sanad(&self, _transfer: &CrossChainTransfer, _proof_bundle: &[u8]) -> Result<MintResult, AdapterError> {
+        async fn mint_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+            _proof_bundle: &[u8],
+        ) -> Result<MintResult, AdapterError> {
             Ok(MintResult {
                 tx_hash: "0xmock".to_string(),
                 block_height: 200,
             })
         }
 
-        async fn build_inclusion_proof(&self, _lock_result: &LockResult) -> Result<ProofBundle, AdapterError> {
+        async fn build_inclusion_proof(
+            &self,
+            _lock_result: &LockResult,
+        ) -> Result<ProofBundle, AdapterError> {
             // Return a minimal valid proof bundle for testing
             use csv_hash::dag::{DAGNode, DAGSegment};
             use csv_hash::seal::{CommitAnchor, SealPoint};
@@ -290,10 +306,14 @@ mod tests {
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
                 csv_proof::proof::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
-            ).unwrap())
+            )
+            .unwrap())
         }
 
-        async fn check_seal_registry(&self, _seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
+        async fn check_seal_registry(
+            &self,
+            _seal_id: &[u8],
+        ) -> Result<SealRegistryStatus, AdapterError> {
             Ok(SealRegistryStatus::Available)
         }
 

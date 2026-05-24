@@ -112,10 +112,7 @@ impl Signature {
     pub fn verify(&self, scheme: SignatureScheme) -> Result<()> {
         match scheme {
             SignatureScheme::Secp256k1 => {
-                // secp256k1 is chain-specific and should be implemented in adapters
-                return Err(ProtocolError::SignatureVerificationFailed(
-                    "secp256k1 verification requires chain adapter support (csv-bitcoin, csv-ethereum, etc.)".to_string(),
-                ));
+                verify_secp256k1(&self.signature, &self.public_key, &self.message)
             }
             SignatureScheme::Ed25519 => {
                 verify_ed25519(&self.signature, &self.public_key, &self.message)
@@ -133,11 +130,65 @@ impl Signature {
 /// Public key format: 33 bytes (compressed) or 65 bytes (uncompressed)
 /// Message: 32 bytes (pre-hashed)
 ///
-/// NOTE: This is a stub implementation. Chain adapters should provide their own
-/// secp256k1 verification since this is chain-specific functionality.
+#[cfg(feature = "secp256k1")]
+fn verify_secp256k1(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result<()> {
+    use secp256k1::{Message, PublicKey, Secp256k1, ecdsa::Signature as EcdsaSignature};
+
+    if message.len() != 32 {
+        return Err(ProtocolError::SignatureVerificationFailed(format!(
+            "Invalid secp256k1 message length: {} (expected 32-byte digest)",
+            message.len()
+        )));
+    }
+
+    let public_key = PublicKey::from_slice(public_key).map_err(|e| {
+        ProtocolError::SignatureVerificationFailed(format!("Invalid secp256k1 public key: {}", e))
+    })?;
+
+    let msg = Message::from_digest_slice(message).map_err(|e| {
+        ProtocolError::SignatureVerificationFailed(format!(
+            "Invalid secp256k1 message digest: {}",
+            e
+        ))
+    })?;
+
+    let mut candidates: Vec<&[u8]> = Vec::new();
+    match signature.len() {
+        64 => candidates.push(signature),
+        65 => {
+            candidates.push(&signature[..64]);
+            candidates.push(&signature[1..]);
+        }
+        len => {
+            return Err(ProtocolError::SignatureVerificationFailed(format!(
+                "Invalid secp256k1 signature length: {} (expected 64 or 65)",
+                len
+            )));
+        }
+    }
+
+    let secp = Secp256k1::verification_only();
+    let mut last_error = None;
+
+    for candidate in candidates {
+        match EcdsaSignature::from_compact(candidate) {
+            Ok(sig) => match secp.verify_ecdsa(&msg, &sig, &public_key) {
+                Ok(()) => return Ok(()),
+                Err(e) => last_error = Some(e.to_string()),
+            },
+            Err(e) => last_error = Some(e.to_string()),
+        }
+    }
+
+    Err(ProtocolError::SignatureVerificationFailed(
+        last_error.unwrap_or_else(|| "secp256k1 signature verification failed".to_string()),
+    ))
+}
+
+#[cfg(not(feature = "secp256k1"))]
 fn verify_secp256k1(_signature: &[u8], _public_key: &[u8], _message: &[u8]) -> Result<()> {
     Err(ProtocolError::SignatureVerificationFailed(
-        "secp256k1 verification requires chain adapter support (csv-bitcoin, csv-ethereum, etc.)".to_string(),
+        "secp256k1 verification requires the 'secp256k1' feature to be enabled".to_string(),
     ))
 }
 
@@ -181,7 +232,8 @@ fn verify_ed25519(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result
     // Parse public key
     let verifying_key = VerifyingKey::from_bytes(public_key.try_into().map_err(|_| {
         ProtocolError::SignatureVerificationFailed("Invalid Ed25519 public key length".to_string())
-    })?).map_err(|e| {
+    })?)
+    .map_err(|e| {
         ProtocolError::SignatureVerificationFailed(format!("Invalid Ed25519 public key: {}", e))
     })?;
 
@@ -200,23 +252,6 @@ fn verify_ed25519(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result
     })?;
 
     Ok(())
-}
-
-/// Sign a message using ECDSA secp256k1
-///
-/// # Arguments
-/// * `message` - The 32-byte message to sign (pre-hashed)
-/// * `secret_key` - The secp256k1 secret key (32 bytes)
-///
-/// # Returns
-/// Signature bytes (64 bytes: r || s)
-///
-/// NOTE: This is a stub implementation. Chain adapters should provide their own
-/// secp256k1 signing since this is chain-specific functionality.
-fn sign_secp256k1(_message: &[u8], _secret_key: &[u8]) -> Result<Vec<u8>> {
-    Err(ProtocolError::SignatureVerificationFailed(
-        "secp256k1 signing requires chain adapter support (csv-bitcoin, csv-ethereum, etc.)".to_string(),
-    ))
 }
 
 /// Sign a message using Ed25519
@@ -405,8 +440,7 @@ pub fn parse_signatures_from_bundle(
         }
 
         let pk_len =
-            u32::from_le_bytes([sig_bytes[0], sig_bytes[1], sig_bytes[2], sig_bytes[3]])
-                as usize;
+            u32::from_le_bytes([sig_bytes[0], sig_bytes[1], sig_bytes[2], sig_bytes[3]]) as usize;
 
         if sig_bytes.len() < 4 + pk_len {
             return Err(ProtocolError::SignatureVerificationFailed(format!(
@@ -441,7 +475,10 @@ pub fn verify_bundle_signatures(
     bundle: &csv_proof::proof::ProofBundle,
     scheme: SignatureScheme,
 ) -> Result<()> {
-    let signatures = parse_signatures_from_bundle(&bundle.signatures, bundle.transition_dag.root_commitment.as_bytes())?;
+    let signatures = parse_signatures_from_bundle(
+        &bundle.signatures,
+        bundle.transition_dag.root_commitment.as_bytes(),
+    )?;
     verify_signatures(&signatures, scheme)
 }
 
@@ -449,12 +486,20 @@ pub fn verify_bundle_signatures(
 mod tests {
     use super::*;
 
+    fn secp_secret_key(byte: u8) -> secp256k1::SecretKey {
+        secp256k1::SecretKey::from_slice(&[byte; 32]).unwrap()
+    }
+
+    fn ed25519_signing_key(byte: u8) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[byte; 32])
+    }
+
     #[test]
     fn test_secp256k1_valid_signature() {
         use secp256k1::{Message, Secp256k1, SecretKey};
 
         let secp = Secp256k1::new();
-        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let secret_key = secp_secret_key(1);
         let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
         let message = [0xCD; 32];
         let msg = Message::from_digest_slice(&message).unwrap();
@@ -471,7 +516,7 @@ mod tests {
         use secp256k1::{Message, Secp256k1, SecretKey};
 
         let secp = Secp256k1::new();
-        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let secret_key = secp_secret_key(2);
         let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
         let pubkey_bytes = public_key.serialize();
 
@@ -494,9 +539,8 @@ mod tests {
     fn test_ed25519_valid_signature() {
         use ed25519_dalek::Signature as DalekSignature;
         use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
-        use rand::rngs::OsRng;
 
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = ed25519_signing_key(3);
         let verifying_key: VerifyingKey = signing_key.verifying_key();
         let message = b"This is a test message for Ed25519 verification";
         let signature: DalekSignature = signing_key.sign(message);
@@ -513,9 +557,8 @@ mod tests {
     fn test_ed25519_invalid_signature_fails() {
         use ed25519_dalek::Signature as DalekSignature;
         use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
-        use rand::rngs::OsRng;
 
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = ed25519_signing_key(4);
         let verifying_key: VerifyingKey = signing_key.verifying_key();
         let message = b"Original message";
         let different_message = b"Different message";
@@ -539,8 +582,8 @@ mod tests {
 
         // Create 3 valid secp256k1 signatures with different keys
         let mut sigs = Vec::new();
-        for _ in 0..3 {
-            let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        for key_byte in 5..8 {
+            let secret_key = secp_secret_key(key_byte);
             let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
             let signature = secp.sign_ecdsa(&msg, &secret_key);
             let sig_bytes = signature.serialize_compact();

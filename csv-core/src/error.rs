@@ -265,7 +265,10 @@ impl HasErrorSuggestion for ProtocolError {
                     expected, actual
                 )
             }
-            ProtocolError::UnsupportedVersion { found, max_supported } => {
+            ProtocolError::UnsupportedVersion {
+                found,
+                max_supported,
+            } => {
                 format!(
                     "Protocol version {} is not supported. Maximum supported version is {}. \
                      Upgrade your client to a version that supports protocol v{}.",

@@ -51,10 +51,10 @@ impl ReplayKey {
 pub trait ReplayRegistryBackend: Send + Sync {
     /// Check if a replay key exists
     async fn contains(&self, key: &ReplayKey) -> Result<bool, String>;
-    
+
     /// Insert a replay key
     async fn insert(&self, key: ReplayKey) -> Result<(), String>;
-    
+
     /// Consume if unconsumed
     async fn consume_if_unconsumed(&self, key: &ReplayKey, timestamp: u64) -> Result<bool, String>;
 }

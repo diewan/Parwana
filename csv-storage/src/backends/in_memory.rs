@@ -1,9 +1,9 @@
 //! In-memory replay database (testing only).
 
 use async_trait::async_trait;
-use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_proof::proof::ReplayId;
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -24,7 +24,6 @@ impl InMemoryReplayDb {
             transfer_entries: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-
 }
 
 impl Default for InMemoryReplayDb {
@@ -36,12 +35,18 @@ impl Default for InMemoryReplayDb {
 #[async_trait]
 impl ReplayDatabase for InMemoryReplayDb {
     async fn contains(&self, id: &[u8]) -> Result<bool, ReplayDbError> {
-        let entries = self.entries.read().unwrap();
+        let entries = self
+            .entries
+            .read()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         Ok(entries.contains_key(id))
     }
 
     async fn insert_if_absent(&self, id: &[u8]) -> Result<(), ReplayDbError> {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         if entries.contains_key(id) {
             return Err(ReplayDbError::AlreadyExists);
         }
@@ -50,7 +55,10 @@ impl ReplayDatabase for InMemoryReplayDb {
     }
 
     async fn consume_if_unconsumed(&self, id: &[u8]) -> Result<(), ReplayDbError> {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         match entries.get(id) {
             None => {
                 entries.insert(id.to_vec(), ReplayEntryState::Pending);
@@ -65,10 +73,13 @@ impl ReplayDatabase for InMemoryReplayDb {
 
     async fn confirm_consumed_replay_id(&self, id: &ReplayId) -> Result<(), ReplayDbError> {
         let key = id.as_bytes().to_vec();
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         match entries.get_mut(&key) {
-            Some(ReplayEntryState::Pending) => {
-                *entries.get_mut(&key).unwrap() = ReplayEntryState::Consumed;
+            Some(state @ ReplayEntryState::Pending) => {
+                *state = ReplayEntryState::Consumed;
                 Ok(())
             }
             Some(ReplayEntryState::Consumed) => Ok(()),
@@ -81,12 +92,16 @@ impl ReplayDatabase for InMemoryReplayDb {
 
     async fn mark_rolled_back(&self, id: &ReplayId) -> Result<(), ReplayDbError> {
         let key = id.as_bytes().to_vec();
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         match entries.get_mut(&key) {
-            Some(ReplayEntryState::Pending) => {
-                *entries.get_mut(&key).unwrap() = ReplayEntryState::RolledBack;
+            Some(state @ ReplayEntryState::Pending) => {
+                *state = ReplayEntryState::RolledBack;
                 Ok(())
             }
+            Some(ReplayEntryState::RolledBack) => Ok(()),
             Some(_) => Err(ReplayDbError::Storage(
                 "Entry is not in Pending state".to_string(),
             )),
@@ -101,15 +116,19 @@ impl ReplayDatabase for InMemoryReplayDb {
         let key = hex::encode(entry.sanad_id.as_bytes());
         let val = to_canonical_cbor(entry)
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
-        let mut entries = self.transfer_entries.write().unwrap();
+        let mut entries = self
+            .transfer_entries
+            .write()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         entries.insert(key, val);
         Ok(())
     }
 
-    async fn load_all_transfers(
-        &self,
-    ) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
-        let entries = self.transfer_entries.read().unwrap();
+    async fn load_all_transfers(&self) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
+        let entries = self
+            .transfer_entries
+            .read()
+            .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         let mut out = Vec::new();
         for val in entries.values() {
             let entry: CrossChainRegistryEntry = from_canonical_cbor(val)
@@ -123,24 +142,36 @@ impl ReplayDatabase for InMemoryReplayDb {
 #[async_trait]
 impl StorageBackend for InMemoryReplayDb {
     async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
-        let entries = self.transfer_entries.read().unwrap();
+        let entries = self
+            .transfer_entries
+            .read()
+            .map_err(|e| StorageError::ConnectionError(format!("Storage lock poisoned: {e}")))?;
         Ok(entries.get(&hex::encode(key)).cloned())
     }
 
     async fn set(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
-        let mut entries = self.transfer_entries.write().unwrap();
+        let mut entries = self
+            .transfer_entries
+            .write()
+            .map_err(|e| StorageError::ConnectionError(format!("Storage lock poisoned: {e}")))?;
         entries.insert(hex::encode(key), value.to_vec());
         Ok(())
     }
 
     async fn delete(&self, key: &[u8]) -> Result<(), StorageError> {
-        let mut entries = self.transfer_entries.write().unwrap();
+        let mut entries = self
+            .transfer_entries
+            .write()
+            .map_err(|e| StorageError::ConnectionError(format!("Storage lock poisoned: {e}")))?;
         entries.remove(&hex::encode(key));
         Ok(())
     }
 
     async fn exists(&self, key: &[u8]) -> Result<bool, StorageError> {
-        let entries = self.transfer_entries.read().unwrap();
+        let entries = self
+            .transfer_entries
+            .read()
+            .map_err(|e| StorageError::ConnectionError(format!("Storage lock poisoned: {e}")))?;
         Ok(entries.contains_key(&hex::encode(key)))
     }
 }

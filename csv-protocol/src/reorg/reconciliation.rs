@@ -4,8 +4,8 @@
 //! After a rollback is executed, this engine ensures all affected transfers
 //! are in a consistent state.
 
-use std::vec::Vec;
 use async_trait::async_trait;
+use std::vec::Vec;
 
 use super::detector::ReorgEvent;
 use csv_hash::Hash;
@@ -421,8 +421,9 @@ impl MockChainBackend {
 
     /// Insert a block hash for a given height (for testing).
     pub fn set_block_hash(&self, height: u64, hash: Hash) {
-        let mut map = self.block_hashes.lock().unwrap();
-        map.insert(height, hash);
+        if let Ok(mut map) = self.block_hashes.lock() {
+            map.insert(height, hash);
+        }
     }
 }
 

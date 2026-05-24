@@ -24,6 +24,7 @@
 //!     keystore::{KeystoreFile, create_keystore},
 //!     memory::{SecretKey, Passphrase},
 //! };
+//! use csv_hash::ChainId;
 //!
 //! // Generate a 24-word mnemonic
 //! let mnemonic = Mnemonic::generate(MnemonicType::Words24);
@@ -33,7 +34,7 @@
 //! let seed = mnemonic.to_seed(None);
 //!
 //! // Derive Ethereum key
-//! let eth_key = derive_key(seed.as_bytes(), &csv_core::ChainId::new("ethereum"), 0, 0).unwrap();
+//! let eth_key = derive_key(seed.as_bytes(), &ChainId::new("ethereum"), 0, 0).unwrap();
 //!
 //! // Encrypt and save
 //! let passphrase = Passphrase::new("secure password");

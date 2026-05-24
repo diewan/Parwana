@@ -46,15 +46,15 @@
 //! - [ ] No path exists to remove or modify recorded consumptions
 //! - [ ] Cross-chain seal identity collisions are properly handled
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::vec::Vec;
-use serde::{Deserialize, Serialize};
 
-use crate::{DomainSeparatedHash, ReplayRegistryDomain};
 use crate::Hash;
+pub use crate::chain_id::ChainId;
 use crate::sanad::SanadId;
 use crate::seal::SealPoint;
-pub use crate::chain_id::ChainId;
+use crate::{DomainSeparatedHash, ReplayRegistryDomain};
 
 /// A seal consumption event recording when and where a seal was used.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -166,8 +166,15 @@ impl SealNullifier {
         &mut self,
         consumption: SealConsumption,
     ) -> Result<(), Box<DoubleSpendError>> {
-        let seal_key = consumption.seal_ref.to_canonical_bytes()
-            .unwrap_or_else(|_| consumption.seal_ref.to_canonical_bytes().unwrap_or_default());
+        let seal_key = consumption
+            .seal_ref
+            .to_canonical_bytes()
+            .unwrap_or_else(|_| {
+                consumption
+                    .seal_ref
+                    .to_canonical_bytes()
+                    .unwrap_or_default()
+            });
         let is_double_spend = self.consumed_seals.contains_key(&seal_key)
             && !self
                 .consumed_seals
@@ -178,8 +185,7 @@ impl SealNullifier {
         self.known_chains.insert(consumption.chain.clone());
 
         // Check if already consumed
-        if is_double_spend {
-            let existing = self.consumed_seals.get(&seal_key).unwrap();
+        if let (true, Some(existing)) = (is_double_spend, self.consumed_seals.get(&seal_key)) {
             let is_cross_chain = existing.iter().any(|e| e.chain != consumption.chain);
 
             let err = DoubleSpendError {
@@ -258,9 +264,8 @@ impl SealNullifier {
 
     /// Check if a seal has been consumed (anywhere).
     pub fn is_seal_consumed(&self, seal_ref: &SealPoint) -> bool {
-        self.consumed_seals.contains_key(
-            &seal_ref.to_canonical_bytes().unwrap_or_default()
-        )
+        self.consumed_seals
+            .contains_key(&seal_ref.to_canonical_bytes().unwrap_or_default())
     }
 
     /// Get all consumption events for a specific seal.
@@ -477,7 +482,7 @@ pub struct FilterStats {
 /// Bloom filter for fast seal registry lookups.
 #[cfg(feature = "std")]
 pub struct BloomFilter {
-    filter: bloomfilter::Bloom<[u8]>,
+    filter: Option<bloomfilter::Bloom<[u8]>>,
     capacity: usize,
     false_positive_rate: f64,
 }
@@ -486,14 +491,18 @@ pub struct BloomFilter {
 impl BloomFilter {
     /// Create a new bloom filter with specified capacity and false positive rate.
     pub fn new(capacity: usize, false_positive_rate: f64) -> Self {
+        let capacity = capacity.max(1);
+        let false_positive_rate = if false_positive_rate > 0.0 && false_positive_rate < 1.0 {
+            false_positive_rate
+        } else {
+            0.01
+        };
         let filter = bloomfilter::Bloom::new_for_fp_rate_with_seed(
             capacity,
             false_positive_rate,
             &[0u8; 32],
         )
-        .expect(
-            "Invalid bloom filter parameters: capacity must be > 0, fp_rate must be 0 < rate < 1",
-        );
+        .ok();
         Self {
             filter,
             capacity,
@@ -503,12 +512,16 @@ impl BloomFilter {
 
     /// Check if a hash might exist in the filter.
     pub fn might_contain(&self, hash: &Hash) -> bool {
-        self.filter.check(hash.as_slice())
+        self.filter
+            .as_ref()
+            .is_none_or(|filter| filter.check(hash.as_slice()))
     }
 
     /// Add a hash to the filter.
     pub fn insert(&mut self, hash: &Hash) {
-        self.filter.set(hash.as_slice());
+        if let Some(filter) = &mut self.filter {
+            filter.set(hash.as_slice());
+        }
     }
 
     /// Get filter statistics.
@@ -518,7 +531,10 @@ impl BloomFilter {
                 self.capacity,
                 self.false_positive_rate,
             ),
-            hash_count: self.filter.number_of_hash_functions() as usize,
+            hash_count: self
+                .filter
+                .as_ref()
+                .map_or(0, |filter| filter.number_of_hash_functions() as usize),
             false_positive_rate: self.false_positive_rate,
         }
     }
@@ -579,7 +595,10 @@ impl OptimizedSealNullifier {
         &mut self,
         consumption: SealConsumption,
     ) -> Result<(), Box<DoubleSpendError>> {
-        let seal_key = consumption.seal_ref.to_vec();
+        let seal_key = consumption
+            .seal_ref
+            .to_canonical_bytes()
+            .unwrap_or_else(|_| consumption.seal_ref.to_vec());
         let seal_hash = DomainSeparatedHash::<ReplayRegistryDomain>::hash(&seal_key);
 
         let might_exist = self.bloom_filter.might_contain(&seal_hash);
@@ -600,8 +619,7 @@ impl OptimizedSealNullifier {
 
         self.status_cache.remove(&seal_key);
 
-        if is_double_spend {
-            let existing = self.consumed_seals.get(&seal_key).unwrap();
+        if let (true, Some(existing)) = (is_double_spend, self.consumed_seals.get(&seal_key)) {
             let is_cross_chain = existing.iter().any(|e| e.chain != consumption.chain);
 
             let err = DoubleSpendError {
@@ -639,7 +657,8 @@ impl OptimizedSealNullifier {
 
     /// Check the status of a seal with bloom filter optimization.
     pub fn check_seal_status(&mut self, seal_ref: &SealPoint) -> SealStatus {
-        let key = seal_ref.to_canonical_bytes()
+        let key = seal_ref
+            .to_canonical_bytes()
             .unwrap_or_else(|_| seal_ref.to_vec());
 
         if let Some(cached) = self.status_cache.get(&key) {
@@ -714,7 +733,8 @@ impl OptimizedSealNullifier {
 
     /// Check if a seal has been consumed (anywhere) with O(1) bloom filter check.
     pub fn is_seal_consumed(&self, seal_ref: &SealPoint) -> bool {
-        let seal_key = seal_ref.to_canonical_bytes()
+        let seal_key = seal_ref
+            .to_canonical_bytes()
             .unwrap_or_else(|_| seal_ref.to_vec());
         let seal_hash = DomainSeparatedHash::<ReplayRegistryDomain>::hash(&seal_key);
 
@@ -727,7 +747,8 @@ impl OptimizedSealNullifier {
 
     /// Get all consumption events for a specific seal.
     pub fn get_consumption_history(&self, seal_ref: &SealPoint) -> Vec<SealConsumption> {
-        let key = seal_ref.to_canonical_bytes()
+        let key = seal_ref
+            .to_canonical_bytes()
             .unwrap_or_else(|_| seal_ref.to_vec());
         self.consumed_seals.get(&key).cloned().unwrap_or_default()
     }

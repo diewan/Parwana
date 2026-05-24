@@ -1,7 +1,7 @@
 //! Sanad identifier types
 
-use serde::{Deserialize, Serialize};
 use crate::Hash;
+use serde::{Deserialize, Serialize};
 
 /// A unique Sanad identifier.
 ///
@@ -18,12 +18,16 @@ impl SanadId {
     }
 
     /// Creates a new SanadId from a byte slice.
-    /// Panics if the slice is not exactly 32 bytes.
+    ///
+    /// Exact 32-byte inputs are used directly. Other lengths are hashed into a
+    /// canonical 32-byte identifier.
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        let array: [u8; 32] = bytes
-            .try_into()
-            .expect("SanadId::from_bytes requires exactly 32 bytes");
+        if bytes.len() != 32 {
+            return Self(Hash::sha256(bytes));
+        }
+        let mut array = [0u8; 32];
+        array.copy_from_slice(bytes);
         Self::new(array)
     }
 

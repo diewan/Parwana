@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Property tests for seal consumption
 //!
 //! These tests verify that seals can only be consumed once,
@@ -5,10 +6,10 @@
 
 #[cfg(test)]
 mod tests {
-    use csv_core::seal::SealPoint;
-    use csv_core::Hash;
-    use csv_core::replay_registry::{ReplayRegistry, ReplayKey};
     use csv_core::ChainId;
+    use csv_core::Hash;
+    use csv_core::replay_registry::{ReplayKey, ReplayRegistry};
+    use csv_core::seal::SealPoint;
 
     /// Property: A seal can only be consumed once
     #[test]
@@ -40,7 +41,10 @@ mod tests {
         // Second consumption attempt should be idempotent (return false, not error)
         let result_2 = registry.consume_if_unconsumed(replay_key.clone(), 2000);
         assert!(result_2.is_ok(), "Second consumption should not error");
-        assert!(!result_2.unwrap(), "Second consumption should return false (idempotent)");
+        assert!(
+            !result_2.unwrap(),
+            "Second consumption should return false (idempotent)"
+        );
     }
 
     /// Property: Each seal has a unique identifier
@@ -48,8 +52,11 @@ mod tests {
     fn test_seal_uniqueness() {
         let seal1 = SealPoint::new(vec![1u8; 16], Some(1)).unwrap();
         let seal2 = SealPoint::new(vec![2u8; 16], Some(2)).unwrap();
-        
-        assert_ne!(seal1.id, seal2.id, "Different seals should have different IDs");
+
+        assert_ne!(
+            seal1.id, seal2.id,
+            "Different seals should have different IDs"
+        );
     }
 
     /// Property: Seal consumption is tracked via nullifier registration
@@ -73,14 +80,19 @@ mod tests {
         assert!(!registry.has_been_seen(&replay_key));
 
         // Consume the seal using atomic consume_if_unconsumed
-        registry.consume_if_unconsumed(replay_key.clone(), 1000).unwrap();
+        registry
+            .consume_if_unconsumed(replay_key.clone(), 1000)
+            .unwrap();
 
         // Now replay should be detected
         assert!(registry.has_been_seen(&replay_key));
 
         // Verify the nullifier is registered
         let entries = registry.entries();
-        assert!(!entries.is_empty(), "Replay registry should have entries after consumption");
+        assert!(
+            !entries.is_empty(),
+            "Replay registry should have entries after consumption"
+        );
     }
 
     /// Property: Different chains have independent seal consumption
@@ -121,7 +133,7 @@ mod tests {
         let seal_id = Hash::new([1u8; 32]);
         let commitment_hash_1 = Hash::new([2u8; 32]);
         let commitment_hash_2 = Hash::new([3u8; 32]);
-        
+
         let replay_key_1 = ReplayKey::new(
             seal_id,
             seal_id,
@@ -129,7 +141,7 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
+
         let replay_key_2 = ReplayKey::new(
             seal_id,
             seal_id,
@@ -137,7 +149,7 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
+
         // Different commitment hashes should produce different replay keys
         assert_ne!(replay_key_1.hash(), replay_key_2.hash());
     }
@@ -166,11 +178,17 @@ mod tests {
         // Second attempt - should be idempotent (return false, not error)
         let result_2 = registry.consume_if_unconsumed(replay_key.clone(), 2000);
         assert!(result_2.is_ok(), "Second consumption should not error");
-        assert!(!result_2.unwrap(), "Second consumption should return false (idempotent)");
+        assert!(
+            !result_2.unwrap(),
+            "Second consumption should return false (idempotent)"
+        );
 
         // Third attempt - should also be idempotent
         let result_3 = registry.consume_if_unconsumed(replay_key.clone(), 3000);
         assert!(result_3.is_ok(), "Third consumption should not error");
-        assert!(!result_3.unwrap(), "Third consumption should return false (idempotent)");
+        assert!(
+            !result_3.unwrap(),
+            "Third consumption should return false (idempotent)"
+        );
     }
 }

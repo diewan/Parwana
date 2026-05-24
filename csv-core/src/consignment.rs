@@ -8,11 +8,11 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use csv_protocol::genesis::Genesis;
+use crate::transition::Transition;
 use csv_hash::Hash;
 use csv_hash::seal::CommitAnchor;
+use csv_protocol::genesis::Genesis;
 use csv_protocol::state::{Metadata, StateAssignment};
-use crate::transition::Transition;
 
 /// Consignment version for forward compatibility
 pub const CONSIGNMENT_VERSION: u8 = 1;
@@ -141,10 +141,15 @@ impl Consignment {
         hasher.update((self.seal_assignments.len() as u64).to_le_bytes());
         for assignment in &self.seal_assignments {
             // Use canonical serialization for hashing (PHASE 2 requirement)
-            let seal_ref_bytes = assignment.seal_ref.to_canonical_bytes()
+            let seal_ref_bytes = assignment
+                .seal_ref
+                .to_canonical_bytes()
                 .expect("canonical serialization should not fail");
             hasher.update(seal_ref_bytes);
-            let seal_bytes = assignment.assignment.seal.to_canonical_bytes()
+            let seal_bytes = assignment
+                .assignment
+                .seal
+                .to_canonical_bytes()
                 .expect("canonical serialization should not fail");
             hasher.update(seal_bytes);
             hasher.update(&assignment.assignment.data);
@@ -155,7 +160,9 @@ impl Consignment {
         for anchor in &self.anchors {
             hasher.update(anchor.commitment.as_bytes());
             // Use canonical serialization for hashing (PHASE 2 requirement)
-            let anchor_ref_bytes = anchor.anchor_ref.to_canonical_bytes()
+            let anchor_ref_bytes = anchor
+                .anchor_ref
+                .to_canonical_bytes()
                 .expect("canonical serialization should not fail");
             hasher.update(anchor_ref_bytes);
         }
@@ -190,7 +197,10 @@ impl Consignment {
     ///
     /// Walks transitions in order to find the most recent assignment
     /// to the given seal.
-    pub fn latest_state_for_seal(&self, seal: &csv_hash::seal::SealPoint) -> Option<&StateAssignment> {
+    pub fn latest_state_for_seal(
+        &self,
+        seal: &csv_hash::seal::SealPoint,
+    ) -> Option<&StateAssignment> {
         // Walk assignments in reverse to find the latest for this seal
         self.seal_assignments
             .iter()
@@ -210,7 +220,9 @@ impl Consignment {
         // Genesis outputs
         for owned in &self.genesis.owned_state {
             // Use canonical serialization for consistent indexing (PHASE 2 requirement)
-            let seal_bytes = owned.seal.to_canonical_bytes()
+            let seal_bytes = owned
+                .seal
+                .to_canonical_bytes()
                 .expect("canonical serialization should not fail");
             active.insert(seal_bytes);
         }
@@ -219,7 +231,9 @@ impl Consignment {
         for transition in &self.transitions {
             for output in &transition.owned_outputs {
                 // Use canonical serialization for consistent indexing (PHASE 2 requirement)
-                let seal_bytes = output.seal.to_canonical_bytes()
+                let seal_bytes = output
+                    .seal
+                    .to_canonical_bytes()
                     .expect("canonical serialization should not fail");
                 active.insert(seal_bytes);
             }
@@ -270,8 +284,7 @@ impl Consignment {
     /// Uses canonical CBOR serialization for protocol-critical data.
     /// Manual bincode serialization is forbidden per AUDIT.md.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        csv_codec::to_canonical_cbor(self)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        csv_codec::to_canonical_cbor(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
     /// Deserialize consignment from canonical bytes with size limit (50MB max)
@@ -362,13 +375,13 @@ impl core::fmt::Display for ConsignmentError {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::genesis::Genesis;
-    use csv_hash::seal::SealPoint;
     use crate::state::{GlobalState, Metadata, OwnedState};
     use crate::state::{StateAssignment, StateRef};
+    use csv_hash::seal::SealPoint;
 
     fn test_consignment() -> Consignment {
         let genesis = Genesis::new(

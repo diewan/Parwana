@@ -12,8 +12,8 @@
 //! This separation ensures that protocol changes require a version bump, while
 //! operational changes can be made without affecting protocol compatibility.
 
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Operational configuration for the CSV runtime
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,10 +202,18 @@ pub enum ConfigValidationError {
 impl std::fmt::Display for ConfigValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigValidationError::InvalidLeaseDuration(msg) => write!(f, "Invalid lease duration: {}", msg),
-            ConfigValidationError::InvalidRetryConfig(msg) => write!(f, "Invalid retry config: {}", msg),
-            ConfigValidationError::InvalidCircuitBreakerConfig(msg) => write!(f, "Invalid circuit breaker config: {}", msg),
-            ConfigValidationError::InvalidTimeoutConfig(msg) => write!(f, "Invalid timeout config: {}", msg),
+            ConfigValidationError::InvalidLeaseDuration(msg) => {
+                write!(f, "Invalid lease duration: {}", msg)
+            }
+            ConfigValidationError::InvalidRetryConfig(msg) => {
+                write!(f, "Invalid retry config: {}", msg)
+            }
+            ConfigValidationError::InvalidCircuitBreakerConfig(msg) => {
+                write!(f, "Invalid circuit breaker config: {}", msg)
+            }
+            ConfigValidationError::InvalidTimeoutConfig(msg) => {
+                write!(f, "Invalid timeout config: {}", msg)
+            }
         }
     }
 }
@@ -243,7 +251,7 @@ mod tests {
         let mut config = OperationalConfig::production();
         config.lease.default_duration = Duration::from_secs(100000);
         config.lease.max_duration = Duration::from_secs(50000);
-        
+
         let result = config.validate();
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -256,7 +264,7 @@ mod tests {
     fn test_config_validation_invalid_retry_config() {
         let mut config = OperationalConfig::production();
         config.retry.max_retries = 0;
-        
+
         let result = config.validate();
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -269,7 +277,7 @@ mod tests {
     fn test_config_validation_invalid_circuit_breaker() {
         let mut config = OperationalConfig::production();
         config.circuit_breaker.failure_threshold = 0;
-        
+
         let result = config.validate();
         assert!(result.is_err());
         match result.unwrap_err() {

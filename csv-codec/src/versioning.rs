@@ -30,7 +30,11 @@ impl ProtocolVersion {
 
     /// Create new version
     pub fn new(major: u16, minor: u16, patch: u16) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     /// Encode as bytes (little-endian)
@@ -49,10 +53,21 @@ impl ProtocolVersion {
                 "Insufficient bytes for version".to_string(),
             ));
         }
-        let major = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
-        let minor = u16::from_le_bytes(bytes[2..4].try_into().unwrap());
-        let patch = u16::from_le_bytes(bytes[4..6].try_into().unwrap());
-        Ok(Self { major, minor, patch })
+        let mut major_bytes = [0u8; 2];
+        major_bytes.copy_from_slice(&bytes[0..2]);
+        let mut minor_bytes = [0u8; 2];
+        minor_bytes.copy_from_slice(&bytes[2..4]);
+        let mut patch_bytes = [0u8; 2];
+        patch_bytes.copy_from_slice(&bytes[4..6]);
+
+        let major = u16::from_le_bytes(major_bytes);
+        let minor = u16::from_le_bytes(minor_bytes);
+        let patch = u16::from_le_bytes(patch_bytes);
+        Ok(Self {
+            major,
+            minor,
+            patch,
+        })
     }
 
     /// Check if this version is compatible with another

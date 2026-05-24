@@ -227,14 +227,25 @@ impl Wallet {
             use csv_bitcoin::wallet::{Bip86Path, SealWallet};
 
             // Create wallet from seed (using regtest network for derivation)
-            let wallet = SealWallet::from_seed(&self.seed, bitcoin::Network::Regtest)
-                .expect("Failed to create Bitcoin wallet from seed");
+            let Ok(wallet) = SealWallet::from_seed(&self.seed, bitcoin::Network::Regtest) else {
+                return format!(
+                    "btc:seed-prefix-{}-{}-{}",
+                    hex::encode(&self.seed[..4]),
+                    account,
+                    index
+                );
+            };
 
             // Derive external address at specified account and index
             let path = Bip86Path::external(account, index);
-            let key = wallet
-                .derive_key(&path)
-                .expect("Failed to derive Bitcoin key");
+            let Ok(key) = wallet.derive_key(&path) else {
+                return format!(
+                    "btc:seed-prefix-{}-{}-{}",
+                    hex::encode(&self.seed[..4]),
+                    account,
+                    index
+                );
+            };
 
             key.address.to_string()
         }

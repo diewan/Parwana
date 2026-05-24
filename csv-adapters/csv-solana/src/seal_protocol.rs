@@ -420,13 +420,13 @@ impl SealProtocol for SolanaSealProtocol {
         // by checking both local registry and on-chain account state
 
         // Step 1: Check local registry (fast path)
-        if let Ok(seals) = self.active_seals.lock() {
-            if !seals.iter().any(|s| s.account == seal_point.account) {
-                return Err(Box::new(ProtocolError::SealReplay(format!(
-                    "PDA account {:?} not found in active seals",
-                    seal_point.account
-                ))));
-            }
+        if let Ok(seals) = self.active_seals.lock()
+            && !seals.iter().any(|s| s.account == seal_point.account)
+        {
+            return Err(Box::new(ProtocolError::SealReplay(format!(
+                "PDA account {:?} not found in active seals",
+                seal_point.account
+            ))));
         }
 
         // Step 2: Check on-chain account state via RPC (authoritative check)

@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use csv_hash::chain_id::ChainId;
 use csv_hash::Hash;
+use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
 
 use crate::client::ClientRef;
@@ -350,7 +350,9 @@ impl TransferBuilder {
             .await?;
 
         let finality_block = match tx_status {
-            csv_protocol::backend::TransactionStatus::Confirmed { block_height, .. } => block_height,
+            csv_protocol::backend::TransactionStatus::Confirmed { block_height, .. } => {
+                block_height
+            }
             csv_protocol::backend::TransactionStatus::Failed { reason, .. } => {
                 record.status = crate::TransferStatus::Failed {
                     error_code: "LOCK_FAILED".to_string(),

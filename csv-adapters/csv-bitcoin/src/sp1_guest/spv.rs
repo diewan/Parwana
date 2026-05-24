@@ -8,10 +8,8 @@ use bitcoin::hashes::{Hash as BitcoinHash, sha256d};
 use csv_hash::Hash;
 
 use csv_hash::seal::SealPoint;
-use csv_core::zk_proof::ProofSystem;
 use csv_protocol::cross_chain::{VerifierKey, ZkPublicInputs, ZkSealProof};
 use csv_protocol::version::builtin;
-
 
 /// Input to the SP1 Bitcoin SPV guest program
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,8 +141,7 @@ impl Sp1BtcSpvOutput {
     /// the binary and can be rotated without code changes.
     pub fn to_zk_proof(&self, proof_bytes: Vec<u8>) -> Result<ZkSealProof, &'static str> {
         let key_bytes = if let Ok(key_hex) = std::env::var("SP1_VERIFIER_KEY") {
-            hex::decode(&key_hex)
-                .map_err(|_| "SP1_VERIFIER_KEY must be a valid hex string")?
+            hex::decode(&key_hex).map_err(|_| "SP1_VERIFIER_KEY must be a valid hex string")?
         } else {
             #[cfg(test)]
             {
@@ -156,11 +153,9 @@ impl Sp1BtcSpvOutput {
             }
             #[cfg(not(test))]
             {
-                return Err(
-                    "SP1_VERIFIER_KEY environment variable not set. \
+                return Err("SP1_VERIFIER_KEY environment variable not set. \
                      Set SP1_VERIFIER_KEY to the hex-encoded SP1 verifier \
-                     verification key before generating ZK proofs."
-                );
+                     verification key before generating ZK proofs.");
             }
         };
 

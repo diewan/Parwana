@@ -3,6 +3,8 @@
 //! Type-safe bindings for the CSV Mint contract using Alloy.
 //! Generated from CSVMint.sol
 
+#![allow(clippy::too_many_arguments)]
+
 use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_sol_types::sol;
 
@@ -228,7 +230,7 @@ impl CsvMintClient {
             sourceSealPoint: source_seal_point,
             proofs,
             proofRoot: proof_root,
-            leaf_positions: leaf_positions,
+            leaf_positions,
         }
     }
 }

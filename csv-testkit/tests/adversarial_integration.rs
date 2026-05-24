@@ -1,8 +1,8 @@
 //! Integration tests for adversarial testkit wiring.
 
-use csv_testkit::{AdversarialConfig, AdversarialRunner, ByzantineBehavior, TestProofBundle};
-use csv_verifier::{CanonicalVerifier, VerificationContext};
 use csv_protocol::signature::SignatureScheme;
+use csv_testkit::{AdversarialConfig, AdversarialRunner, ByzantineBehavior, TestProofBundle};
+use csv_verifier::VerificationContext;
 
 #[test]
 fn adversarial_runner_rejects_minimal_fixture_via_canonical_verifier() {

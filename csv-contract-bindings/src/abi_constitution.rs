@@ -25,8 +25,8 @@
 //! - registerNullifier(bytes32 nullifier) -> bool
 //! - updateProofRoot(bytes32 proofRoot) -> bool
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// ABI constitution version.
 pub const ABI_CONSTITUTION_VERSION: u32 = 1;
@@ -69,7 +69,9 @@ impl RequiredFunction {
             RequiredFunction::CreateSeal => "createSeal(bytes32)",
             RequiredFunction::ConsumeSeal => "consumeSeal(bytes32)",
             RequiredFunction::LockSeal => "lockSeal(bytes32,uint8,bytes)",
-            RequiredFunction::MintSeal => "mintSeal(bytes32,bytes32,uint8,bytes,bytes,bytes32,uint256)",
+            RequiredFunction::MintSeal => {
+                "mintSeal(bytes32,bytes32,uint8,bytes,bytes,bytes32,uint256)"
+            }
             RequiredFunction::RefundSeal => "refundSeal(bytes32)",
             RequiredFunction::RegisterNullifier => "registerNullifier(bytes32)",
             RequiredFunction::UpdateProofRoot => "updateProofRoot(bytes32)",
@@ -152,24 +154,36 @@ impl AbiConstitution {
 
         // Check required functions
         for required_fn in &self.required_functions {
-            if !contract_abi.functions.iter().any(|f| f.name == required_fn.signature()) {
+            if !contract_abi
+                .functions
+                .iter()
+                .any(|f| f.name == required_fn.signature())
+            {
                 missing_functions.push(required_fn.signature().to_string());
             }
         }
 
         // Check required events
         for required_event in &self.required_events {
-            if !contract_abi.events.iter().any(|e| e.name == *required_event) {
+            if !contract_abi
+                .events
+                .iter()
+                .any(|e| e.name == *required_event)
+            {
                 missing_events.push(required_event.clone());
             }
         }
 
         // Check function signatures
         for func in &contract_abi.functions {
-            if let Some(required) = self.required_functions.iter().find(|r| r.signature() == func.name) {
-                if func.param_count() != required.param_count() {
-                    invalid_signatures.push(func.name.clone());
-                }
+            if let Some(required) = self
+                .required_functions
+                .iter()
+                .find(|r| r.signature() == func.name)
+                .filter(|required| func.param_count() != required.param_count())
+            {
+                let _ = required;
+                invalid_signatures.push(func.name.clone());
             }
         }
 
@@ -344,13 +358,13 @@ impl StateMachineInvariants {
 
     /// Check if a state transition is valid.
     pub fn check_transition(&self, from_state: SealState, to_state: SealState) -> bool {
-        match (from_state, to_state) {
-            (SealState::Created, SealState::Consumed) => true,
-            (SealState::Created, SealState::Locked) => true,
-            (SealState::Locked, SealState::Minted) => true,
-            (SealState::Locked, SealState::Refunded) => true,
-            _ => false,
-        }
+        matches!(
+            (from_state, to_state),
+            (SealState::Created, SealState::Consumed)
+                | (SealState::Created, SealState::Locked)
+                | (SealState::Locked, SealState::Minted)
+                | (SealState::Locked, SealState::Refunded)
+        )
     }
 }
 

@@ -79,16 +79,16 @@ impl ReorgDetector {
                             .unwrap_or_default()
                             .as_secs();
                         let csv_event = CsvEvent::reorg_detected(
-                            &chain.to_string(),
+                            chain.as_ref(),
                             *last_height,
-                            "",  // tx_hash - not available in this context
+                            "", // tx_hash - not available in this context
                             timestamp,
                             *last_height,
                             height,
                             depth,
                         );
                         if let Ok(guard) = registry.lock() {
-                            let _ = guard.emit(csv_event);
+                            std::mem::drop(guard.emit(csv_event));
                         }
                     }
 
@@ -111,16 +111,16 @@ impl ReorgDetector {
                             .unwrap_or_default()
                             .as_secs();
                         let csv_event = CsvEvent::reorg_detected(
-                            &chain.to_string(),
+                            chain.as_ref(),
                             *last_height,
-                            "",  // tx_hash - not available in this context
+                            "", // tx_hash - not available in this context
                             timestamp,
                             *last_height,
                             height,
                             0,
                         );
                         if let Ok(guard) = registry.lock() {
-                            let _ = guard.emit(csv_event);
+                            std::mem::drop(guard.emit(csv_event));
                         }
                     }
 

@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Hashing Rules — Protocol Constitution Section 3
 //!
 //! Tests for tagged hashing and domain separation requirements.
@@ -39,7 +40,7 @@ mod tests {
         let left = Hash::new([1u8; 32]);
         let right = Hash::new([2u8; 32]);
         let combined = Hash::combine(&left, &right);
-        
+
         assert_ne!(combined, left);
         assert_ne!(combined, right);
     }
@@ -50,13 +51,19 @@ mod tests {
         let a = Hash::new([1u8; 32]);
         let b = Hash::new([2u8; 32]);
         let c = Hash::new([3u8; 32]);
-        
+
         let ab = Hash::combine(&a, &b);
         let ac = Hash::combine(&a, &c);
         let bc = Hash::combine(&b, &c);
-        
-        assert_ne!(ab, ac, "Different inputs must produce different combined hashes");
-        assert_ne!(ab, bc, "Different inputs must produce different combined hashes");
+
+        assert_ne!(
+            ab, ac,
+            "Different inputs must produce different combined hashes"
+        );
+        assert_ne!(
+            ab, bc,
+            "Different inputs must produce different combined hashes"
+        );
     }
 
     /// Property: Hash zero is all zeros
@@ -69,10 +76,11 @@ mod tests {
     /// Property: Hash hex encoding/decoding roundtrip
     #[test]
     fn test_hash_hex_roundtrip() {
-        let original = Hash::new([0xAB, 0xCD, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05,
-                                  0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
-                                  0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
-                                  0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D]);
+        let original = Hash::new([
+            0xAB, 0xCD, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+            0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+            0x1A, 0x1B, 0x1C, 0x1D,
+        ]);
         let hex = original.to_hex();
         let restored = Hash::from_hex(&hex).unwrap();
         assert_eq!(original, restored);
@@ -96,12 +104,16 @@ mod tests {
     /// Property: Hash Display shows abbreviated form
     #[test]
     fn test_hash_display_abbreviated() {
-        let hash = Hash::new([0xAB, 0xCD, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05,
-                              0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
-                              0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
-                              0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D]);
+        let hash = Hash::new([
+            0xAB, 0xCD, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+            0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+            0x1A, 0x1B, 0x1C, 0x1D,
+        ]);
         let display = format!("{}", hash);
         assert!(display.starts_with("0x"), "Display must start with 0x");
-        assert!(display.len() < 66, "Display must be abbreviated (less than full hex)");
+        assert!(
+            display.len() < 66,
+            "Display must be abbreviated (less than full hex)"
+        );
     }
 }

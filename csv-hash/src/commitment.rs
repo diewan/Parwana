@@ -10,14 +10,14 @@
 //! between clients. All commitments must use the V2 format. This format
 //! will not change without a version bump and backward-compatible migration.
 
-use std::vec::Vec;
 use serde::{Deserialize, Serialize};
+use std::vec::Vec;
 
-use crate::commit_mux::CommitMux;
-use crate::{DomainSeparatedHash, TransferCommitmentDomain};
 use crate::Hash;
-use crate::seal::SealPoint;
+use crate::commit_mux::CommitMux;
 use crate::csv_tagged_hash;
+use crate::seal::SealPoint;
+use crate::{DomainSeparatedHash, TransferCommitmentDomain};
 
 /// Current commitment format version.
 ///
@@ -153,7 +153,8 @@ impl Commitment {
     /// # Returns
     /// The commitment hash.
     pub fn commitment_hash(&self) -> Hash {
-        let domain_separator = DomainSeparatedHash::<TransferCommitmentDomain>::hash(&self.domain_separator);
+        let domain_separator =
+            DomainSeparatedHash::<TransferCommitmentDomain>::hash(&self.domain_separator);
         let commitment_hash = csv_tagged_hash("commitment-hash", &self.to_canonical_bytes());
         let mut combined = Vec::with_capacity(64);
         combined.extend_from_slice(domain_separator.as_bytes());
@@ -179,8 +180,9 @@ impl Commitment {
     /// # Returns
     /// The seal_id hash.
     fn compute_seal_id(seal: &SealPoint) -> Hash {
-        let seal_bytes = seal.to_canonical_bytes()
-            .expect("Canonical serialization should not fail for SealPoint");
+        let seal_bytes = seal.to_canonical_bytes().unwrap_or_else(|err| {
+            format!("seal-id-canonical-serialization-error:{err}").into_bytes()
+        });
         Hash::new(csv_tagged_hash("seal-id", &seal_bytes))
     }
 
@@ -189,11 +191,12 @@ impl Commitment {
     /// # Returns
     /// The canonical CBOR encoding of this commitment.
     ///
-    /// # Panics
-    /// Panics if canonical serialization fails (should not happen for valid commitments).
+    /// If canonical serialization fails, returns deterministic error bytes so callers
+    /// never panic while still getting a domain-separated value.
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        crate::canonical::to_canonical_cbor(self)
-            .expect("Canonical serialization should not fail for Commitment")
+        crate::canonical::to_canonical_cbor(self).unwrap_or_else(|err| {
+            format!("commitment-canonical-serialization-error:{err}").into_bytes()
+        })
     }
 
     /// Check if this is a genesis commitment (no previous commitment).

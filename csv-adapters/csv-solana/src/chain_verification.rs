@@ -1,10 +1,10 @@
 //! Chain-native Solana inclusion/finality checks (RULE 3).
 
-use csv_protocol::backend::{ChainOpError, ChainOpResult};
 use csv_hash::Hash;
 use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::backend::{ChainOpError, ChainOpResult};
 use csv_verifier::{
-    verify_chain_proof_bundle, ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier,
+    ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier, verify_chain_proof_bundle,
 };
 
 impl super::SolanaBackend {
@@ -50,7 +50,8 @@ impl super::SolanaBackend {
             }
 
             // Verify position matches the slot in the proof
-            let proof_slot = u64::from_le_bytes(proof.proof_bytes[..8].try_into().unwrap_or([0u8; 8]));
+            let proof_slot =
+                u64::from_le_bytes(proof.proof_bytes[..8].try_into().unwrap_or([0u8; 8]));
             if proof.position != proof_slot {
                 return Err(ChainOpError::ProofVerificationError(
                     "Position does not match slot in proof".to_string(),

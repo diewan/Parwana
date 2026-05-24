@@ -13,24 +13,24 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::let_unit_value)]
 
+pub mod backend;
+pub mod chain_config;
+pub mod commitment;
+pub mod cross_chain;
+pub mod deterministic_recovery;
+pub mod envelope;
 pub mod error;
 pub mod events;
-pub mod verified;
-pub mod chain_config;
-pub mod signature;
-pub mod backend;
-pub mod verification;
-pub mod cross_chain;
-pub mod sanad;
-pub mod seal;
-pub mod commitment;
+pub mod failure_domains;
+pub mod lease;
 pub mod proof;
 pub mod proof_verification;
-pub mod lease;
-pub mod failure_domains;
-pub mod deterministic_recovery;
+pub mod sanad;
+pub mod seal;
 pub mod seal_protocol;
-pub mod envelope;
+pub mod signature;
+pub mod verification;
+pub mod verified;
 
 // State machine modules
 pub mod state_machine;
@@ -60,15 +60,18 @@ pub mod replay;
 pub mod transition;
 
 // Versioning
-pub mod version;
-pub mod state;
 pub mod genesis;
+pub mod state;
+pub mod version;
 
 // Re-export version types
-pub use version::{ProtocolVersion, Version, TransferStatus, SimplifiedTransferStatus, ErrorCode, Capabilities, SyncStatus, builtin};
+pub use version::{
+    Capabilities, ErrorCode, ProtocolVersion, SimplifiedTransferStatus, SyncStatus, TransferStatus,
+    Version, builtin,
+};
 
 // Re-export state types
-pub use state::{GlobalState, OwnedState, Metadata, StateAssignment, StateRef, StateTypeId};
+pub use state::{GlobalState, Metadata, OwnedState, StateAssignment, StateRef, StateTypeId};
 
 // Re-export genesis types
 pub use genesis::Genesis;
@@ -77,21 +80,23 @@ pub use genesis::Genesis;
 pub use error::{ProtocolError, Result as ProtocolResult};
 
 // Re-export replay registry for convenience
-pub use replay::{ReplayKey, ReplayEntry, ReplayRegistry, ReplayRegistryBackend};
+pub use replay::{ReplayEntry, ReplayKey, ReplayRegistry, ReplayRegistryBackend};
 
 // Re-export finality types
-pub use finality::{FinalityType, FinalityRequirement, FinalityProof, ChainCapabilities};
+pub use finality::{ChainCapabilities, FinalityProof, FinalityRequirement, FinalityType};
 
 // Re-export signature types
-pub use signature::{Signature, SignatureScheme, verify_signatures, parse_signatures_from_bundle, parse_signatures_from_bytes};
+pub use signature::{
+    Signature, SignatureScheme, parse_signatures_from_bundle, parse_signatures_from_bytes,
+    verify_signatures,
+};
 
 // Re-export backend types
 pub use backend::{
-    ChainOpError, ChainOpResult, ChainQuery, ChainSigner, ChainBroadcaster, ChainDeployer,
-    ChainProofProvider, ChainSanadOps, ChainBackend, ChainCapability,
-    TransactionStatus, DeploymentStatus, FinalityStatus,
-    BalanceInfo, TransactionInfo, ContractStatus,
-    SanadOperation, SanadOperationResult,
+    BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
+    ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
+    DeploymentStatus, FinalityStatus, SanadOperation, SanadOperationResult, TransactionInfo,
+    TransactionStatus,
 };
 
 // Re-export verification types
@@ -101,10 +106,10 @@ pub use verification::VerificationLevel;
 pub use cross_chain::HashEntry;
 
 // Re-export sanad types
-pub use sanad::{SanadId, OwnershipProof, Sanad, SanadEnvelope, SCHEMA_VERSION, Schema};
+pub use sanad::{OwnershipProof, SCHEMA_VERSION, Sanad, SanadEnvelope, SanadId, Schema};
 
 // Re-export seal types
-pub use seal::{SealPoint, CommitAnchor};
+pub use seal::{CommitAnchor, SealPoint};
 
 // Re-export commitment types
 pub use commitment::Commitment;
@@ -119,10 +124,10 @@ pub use proof::{InclusionProof, ProofBundle};
 pub use transfer_state::TransferStage;
 
 // Re-export lease types
-pub use lease::{LeaseId, Lease, LeaseManager, LeaseError, now_secs};
+pub use lease::{Lease, LeaseError, LeaseId, LeaseManager, now_secs};
 
 // Re-export verification types
 pub use verified::{
-    VerificationAssurance, VerificationFailure, VerificationResult, VerifiedComponents,
-    InclusionStrength, FinalityStrength,
+    FinalityStrength, InclusionStrength, VerificationAssurance, VerificationFailure,
+    VerificationResult, VerifiedComponents,
 };

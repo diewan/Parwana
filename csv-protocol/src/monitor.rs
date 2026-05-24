@@ -4,8 +4,8 @@
 //! - Reorg detection and anchor invalidation
 //! - Publication timeout tracking (censorship detection)
 
-use std::collections::BTreeMap;
 use csv_hash::Hash;
+use std::collections::BTreeMap;
 
 /// Reorg event detected on a chain
 #[derive(Clone, Debug)]
@@ -162,7 +162,10 @@ impl PublicationTracker {
 
     /// Get count of pending publications
     pub fn pending_count(&self, chain: &str) -> usize {
-        self.pending.get(chain).map(|p: &Vec<PendingPublication>| p.len()).unwrap_or(0)
+        self.pending
+            .get(chain)
+            .map(|p: &Vec<PendingPublication>| p.len())
+            .unwrap_or(0)
     }
 
     /// Clear all pending publications for a chain

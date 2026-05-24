@@ -1,7 +1,7 @@
 //! Events stub module
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// CSV event
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,12 +18,7 @@ pub struct CsvEvent {
 
 impl CsvEvent {
     /// Create a replay detected event
-    pub fn replay_detected(
-        source_chain: &str,
-        old_hash: Hash,
-        new_hash: Hash,
-        depth: u64,
-    ) -> Self {
+    pub fn replay_detected(source_chain: &str, old_hash: Hash, new_hash: Hash, depth: u64) -> Self {
         Self {
             event_type: "replay_detected".to_string(),
             data: vec![],

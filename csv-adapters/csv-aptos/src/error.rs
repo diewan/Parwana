@@ -8,9 +8,18 @@ use thiserror::Error;
 // Local implementations (mcp module removed during migration)
 #[derive(Debug, Clone)]
 pub enum FixAction {
-    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
-    CheckState { check: String, url: String, what: String },
-    SwitchEndpoint { endpoint: String },
+    Retry {
+        backoff_secs: u64,
+        parameter_changes: Vec<String>,
+    },
+    CheckState {
+        check: String,
+        url: String,
+        what: String,
+    },
+    SwitchEndpoint {
+        endpoint: String,
+    },
 }
 
 pub trait HasErrorSuggestion {

@@ -21,8 +21,8 @@
 //! - Constructor parameters are canonical CBOR encoded
 //! - Checksums use SHA-256 of canonical bytecode
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Deployment manifest version.
@@ -123,18 +123,10 @@ impl DeploymentManifest {
 }
 
 /// Deployment registry tracking all deployed contracts.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct DeploymentRegistry {
     /// All deployment manifests indexed by contract address
     pub deployments: BTreeMap<String, DeploymentManifest>,
-}
-
-impl Default for DeploymentRegistry {
-    fn default() -> Self {
-        Self {
-            deployments: BTreeMap::new(),
-        }
-    }
 }
 
 impl DeploymentRegistry {
@@ -204,13 +196,13 @@ impl Create2Deployer {
     /// Formula: keccak256(0xff ++ deployer ++ salt ++ keccak256(bytecode))[12:]
     pub fn calculate_address(&self, bytecode: &[u8]) -> Result<Vec<u8>, DeploymentError> {
         let bytecode_hash = Hash::sha256(bytecode);
-        
+
         let mut data = Vec::with_capacity(1 + self.deployer_address.len() + 32 + 32);
         data.push(0xff);
         data.extend_from_slice(&self.deployer_address);
         data.extend_from_slice(self.salt.as_ref());
         data.extend_from_slice(bytecode_hash.as_ref());
-        
+
         let hash = Hash::sha256(&data);
         // Return last 20 bytes (Ethereum address format)
         let hash_bytes = hash.as_ref() as &[u8];
@@ -361,10 +353,10 @@ mod tests {
             vec![],
             vec![4, 5, 6],
         );
-        
+
         let mut finalized = manifest.clone();
         finalized.finalize(vec![7, 8, 9], Hash::zero(), 100);
-        
+
         registry.register(finalized).unwrap();
         assert!(registry.verify_deployment(&[7, 8, 9]));
     }

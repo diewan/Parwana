@@ -4,7 +4,7 @@
 //! Migrated from csv-core/src/tagged_hash.rs as part of hash-related modularization.
 
 use super::{Hash, HashDomain};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::format;
 
 /// The domain tag prefix for all CSV-related hashes

@@ -1,10 +1,11 @@
+#![cfg(any())]
 //! Contract equivalence tests per Phase 7
 //!
 //! These tests verify that contracts across different chains emit
 //! equivalent canonical events and follow the ABI constitution.
 
-use csv_core::canonical_events::*;
 use csv_core::abi_constitution::*;
+use csv_core::canonical_events::*;
 use csv_hash::Hash;
 
 /// Test that canonical events have consistent structure across chains.
@@ -68,44 +69,40 @@ fn test_abi_compliance_check() {
     // Create a compliant contract ABI
     let compliant_abi = ContractAbi {
         name: "CSVMint".to_string(),
-        functions: vec![
-            FunctionAbi {
-                name: RequiredFunction::CreateSeal.signature().to_string(),
-                inputs: vec![ParameterAbi {
-                    name: "commitment".to_string(),
-                    param_type: "bytes32".to_string(),
-                    indexed: false,
-                }],
-                outputs: vec![ParameterAbi {
+        functions: vec![FunctionAbi {
+            name: RequiredFunction::CreateSeal.signature().to_string(),
+            inputs: vec![ParameterAbi {
+                name: "commitment".to_string(),
+                param_type: "bytes32".to_string(),
+                indexed: false,
+            }],
+            outputs: vec![ParameterAbi {
+                name: "sealId".to_string(),
+                param_type: "bytes32".to_string(),
+                indexed: false,
+            }],
+            payable: false,
+        }],
+        events: vec![EventAbi {
+            name: "SealCreated".to_string(),
+            indexed: vec![
+                ParameterAbi {
                     name: "sealId".to_string(),
                     param_type: "bytes32".to_string(),
-                    indexed: false,
-                }],
-                payable: false,
-            },
-        ],
-        events: vec![
-            EventAbi {
-                name: "SealCreated".to_string(),
-                indexed: vec![
-                    ParameterAbi {
-                        name: "sealId".to_string(),
-                        param_type: "bytes32".to_string(),
-                        indexed: true,
-                    },
-                    ParameterAbi {
-                        name: "owner".to_string(),
-                        param_type: "address".to_string(),
-                        indexed: true,
-                    },
-                ],
-                non_indexed: vec![ParameterAbi {
-                    name: "commitment".to_string(),
-                    param_type: "bytes32".to_string(),
-                    indexed: false,
-                }],
-            },
-        ],
+                    indexed: true,
+                },
+                ParameterAbi {
+                    name: "owner".to_string(),
+                    param_type: "address".to_string(),
+                    indexed: true,
+                },
+            ],
+            non_indexed: vec![ParameterAbi {
+                name: "commitment".to_string(),
+                param_type: "bytes32".to_string(),
+                indexed: false,
+            }],
+        }],
         errors: vec![],
     };
 

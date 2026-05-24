@@ -75,9 +75,9 @@ impl VerificationLimit {
     /// Create conservative limits for production
     pub fn conservative() -> Self {
         Self {
-            max_cpu: 1_000_000,      // 1M CPU units
-            max_memory: 100 * 1024 * 1024,  // 100 MB
-            max_io: 10 * 1024 * 1024,  // 10 MB
+            max_cpu: 1_000_000,            // 1M CPU units
+            max_memory: 100 * 1024 * 1024, // 100 MB
+            max_io: 10 * 1024 * 1024,      // 10 MB
             max_recursion_depth: 100,
         }
     }
@@ -121,13 +121,25 @@ impl std::fmt::Display for ResourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ResourceError::CPULimitExceeded { requested, limit } => {
-                write!(f, "CPU limit exceeded: requested {}, limit {}", requested, limit)
+                write!(
+                    f,
+                    "CPU limit exceeded: requested {}, limit {}",
+                    requested, limit
+                )
             }
             ResourceError::MemoryLimitExceeded { requested, limit } => {
-                write!(f, "Memory limit exceeded: requested {}, limit {}", requested, limit)
+                write!(
+                    f,
+                    "Memory limit exceeded: requested {}, limit {}",
+                    requested, limit
+                )
             }
             ResourceError::IOLimitExceeded { requested, limit } => {
-                write!(f, "I/O limit exceeded: requested {}, limit {}", requested, limit)
+                write!(
+                    f,
+                    "I/O limit exceeded: requested {}, limit {}",
+                    requested, limit
+                )
             }
             ResourceError::RecursionDepthExceeded { requested, limit } => {
                 write!(

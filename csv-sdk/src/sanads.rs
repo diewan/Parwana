@@ -15,11 +15,11 @@
 
 use std::sync::Arc;
 
-use csv_hash::chain_id::ChainId;
+use csv_core::store::SanadRecord;
 use csv_hash::Hash;
+use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
 use csv_protocol::Sanad;
-use csv_core::store::SanadRecord;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -202,22 +202,22 @@ impl SanadsManager {
             };
 
             // Apply filters
-            if let Some(ref chain) = filters.chain {
-                if record.chain != chain.to_string() {
-                    continue;
-                }
+            if let Some(ref chain) = filters.chain
+                && record.chain != chain.to_string()
+            {
+                continue;
             }
 
-            if let Some(ref owner) = filters.owner {
-                if record.owner != owner.as_bytes() {
-                    continue;
-                }
+            if let Some(ref owner) = filters.owner
+                && record.owner != owner.as_bytes()
+            {
+                continue;
             }
 
-            if let Some(consumed) = filters.consumed {
-                if record.consumed != consumed {
-                    continue;
-                }
+            if let Some(consumed) = filters.consumed
+                && record.consumed != consumed
+            {
+                continue;
             }
 
             sanads.push(sanad);

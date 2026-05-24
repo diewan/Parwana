@@ -17,12 +17,12 @@ use std::sync::{Arc, Mutex};
 
 use csv_hash::Hash;
 use csv_hash::commitment::Commitment;
-use csv_protocol::seal_protocol::SealProtocol;
-use csv_protocol::error::ProtocolError;
-use csv_proof::proof::{FinalityProof, ProofBundle};
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
+use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::error::ProtocolError;
+use csv_protocol::seal_protocol::SealProtocol;
 
 use crate::config::BitcoinConfig;
 use crate::error::{BitcoinError, BitcoinResult};
@@ -361,7 +361,10 @@ impl BitcoinSealProtocol {
     }
 
     /// Verify a UTXO is unspent
-    fn verify_utxo_unspent(&self, seal: &BitcoinSealPoint) -> Result<(), Box<dyn std::error::Error>> {
+    fn verify_utxo_unspent(
+        &self,
+        seal: &BitcoinSealPoint,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(rpc) = &self.rpc {
             let unspent = rpc
                 .is_utxo_unspent(seal.txid, seal.vout)
@@ -453,8 +456,12 @@ impl SealProtocol for BitcoinSealProtocol {
     type InclusionProof = BitcoinInclusionProof;
     type FinalityProof = BitcoinFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
-        self.verify_utxo_unspent(&seal).map_err(|e| e)?;
+    fn publish(
+        &self,
+        commitment: Hash,
+        seal: Self::SealPoint,
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
+        self.verify_utxo_unspent(&seal)?;
 
         // If RPC client is available, use real broadcasting
         if let Some(rpc) = &self.rpc {
@@ -516,7 +523,10 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(BitcoinCommitAnchor::new(txid, 0, current_height))
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    fn verify_inclusion(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
         // If we have an RPC client, fetch real Merkle proof from the blockchain
         if let Some(rpc) = &self.rpc {
             // Get the block containing the anchor transaction
@@ -540,7 +550,10 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(proof)
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    fn verify_finality(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
         let current_height = self.get_current_height();
 
         if anchor.block_height == 0 {
@@ -609,7 +622,10 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, value: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    fn create_seal(
+        &self,
+        value: Option<u64>,
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         let value_sat = value.unwrap_or(100_000);
         let (seal_ref, _path) = self.derive_next_seal(value_sat)?;
         Ok(seal_ref)
@@ -637,7 +653,7 @@ impl SealProtocol for BitcoinSealProtocol {
     fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        transition_dag: Vec<u8>,
+        _transition_dag: Vec<u8>,
     ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;

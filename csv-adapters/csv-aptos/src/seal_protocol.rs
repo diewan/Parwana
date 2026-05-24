@@ -19,16 +19,17 @@ use crate::proofs::StateProofVerifier;
 use tokio::runtime::Handle;
 
 use csv_hash::Hash;
-use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::commitment::Commitment;
+use csv_protocol::seal_protocol::SealProtocol;
 // DAGSegment removed during migration - using placeholder
 // use csv_protocol::dag::DAGSegment;
-use csv_protocol::error::ProtocolError;
-use csv_protocol::error::Result as CoreResult;
-use csv_proof::proof::{FinalityProof, ProofBundle};
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
+use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::error::ProtocolError;
+use csv_protocol::error::Result as CoreResult;
 
+use crate::address_utils::{format_address, parse_aptos_address};
 use crate::checkpoint::CheckpointVerifier;
 use crate::config::{AptosConfig, AptosNetwork};
 use crate::error::{AptosError, AptosResult};
@@ -38,7 +39,6 @@ use crate::rpc::AptosRpc;
 use crate::rpc::{AptosLedgerInfo, AptosTransaction};
 use crate::seal::SealRegistry;
 use crate::types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, AptosSealPoint};
-use crate::address_utils::{format_address, parse_aptos_address};
 
 #[cfg(feature = "rpc")]
 fn spawn_blocking_async<F, T>(future: F) -> Result<T, AptosError>
@@ -436,7 +436,11 @@ impl SealProtocol for AptosSealProtocol {
     type InclusionProof = AptosInclusionProof;
     type FinalityProof = AptosFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
+    fn publish(
+        &self,
+        commitment: Hash,
+        seal: Self::SealPoint,
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
         log::debug!(
             "Publishing commitment via seal {}",
             format_address(seal.account_address)
@@ -526,7 +530,10 @@ impl SealProtocol for AptosSealProtocol {
         }
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    fn verify_inclusion(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
         log::debug!(
             "Verifying inclusion for anchor at version {}",
             anchor.version
@@ -614,11 +621,14 @@ impl SealProtocol for AptosSealProtocol {
             ledger_proof.clone(),
             anchor.version,
             ledger_proof, // ledger_info
-            vec![], // events
+            vec![],       // events
         ))
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    fn verify_finality(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
         log::debug!(
             "Verifying finality for anchor at version {}",
             anchor.version
@@ -701,7 +711,10 @@ impl SealProtocol for AptosSealProtocol {
         Ok(())
     }
 
-    fn create_seal(&self, _value: Option<u64>) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    fn create_seal(
+        &self,
+        _value: Option<u64>,
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(b"aptos-seal");
@@ -739,11 +752,14 @@ impl SealProtocol for AptosSealProtocol {
         let inclusion = self.verify_inclusion(anchor.clone())?;
         let finality = self.verify_finality(anchor.clone())?;
         let seal_ref = CoreSealPoint::new(anchor.event_handle.to_vec(), Some(anchor.version))
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
+            .map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+            })?;
 
         let anchor_ref =
-            CoreCommitAnchor::new(anchor.event_handle.to_vec(), anchor.version, vec![])
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
+            CoreCommitAnchor::new(anchor.event_handle.to_vec(), anchor.version, vec![]).map_err(
+                |e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>,
+            )?;
 
         // Use csv_proof::InclusionProof (struct) instead of csv_protocol::cross_chain::InclusionProof (enum)
         let inclusion_proof = csv_proof::proof::InclusionProof::new(
@@ -751,13 +767,18 @@ impl SealProtocol for AptosSealProtocol {
             csv_hash::Hash::zero(), // block_hash - would need to extract from proof
             inclusion.version,
             0, // leaf_index
-        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
+        )
+        .map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+        })?;
 
         let finality_proof = FinalityProof::new(vec![], finality.version, finality.is_certified)
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?;
+            .map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+            })?;
 
         // Convert Vec<u8> to DAGSegment for ProofBundle
-        use csv_hash::dag::{DAGSegment, DAGNode};
+        use csv_hash::dag::{DAGNode, DAGSegment};
         let dag_segment = DAGSegment {
             nodes: vec![DAGNode {
                 node_id: csv_hash::Hash::zero(),
@@ -772,14 +793,15 @@ impl SealProtocol for AptosSealProtocol {
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        Ok(ProofBundle::new(
+        ProofBundle::new(
             dag_segment,
             signatures,
             seal_ref,
             anchor_ref,
             inclusion_proof,
             finality_proof,
-        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error>)?)
+        )
+        .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>)
     }
 
     fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {

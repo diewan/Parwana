@@ -30,7 +30,10 @@ impl EntryFunctionBuilder {
 
     /// Get the full function name for a given function
     fn function_name(&self, function: &str) -> String {
-        format!("{}::{}::{}", self.module_address, CSV_SEAL_MODULE_NAME, function)
+        format!(
+            "{}::{}::{}",
+            self.module_address, CSV_SEAL_MODULE_NAME, function
+        )
     }
 
     /// Build consume_seal EntryFunction payload
@@ -85,6 +88,7 @@ impl EntryFunctionBuilder {
     /// * `proof` - Cross-chain Merkle proof bytes
     /// * `proof_root` - Trusted proof root for verification (32 bytes)
     /// * `leaf_position` - Position of leaf in Merkle tree (u64)
+    #[allow(clippy::too_many_arguments)]
     pub fn mint_sanad(
         &self,
         sanad_id: [u8; 32],
@@ -163,10 +167,7 @@ impl EntryFunctionPayload {
 
     /// Get the function name without module path
     pub fn function_short_name(&self) -> &str {
-        self.function
-            .split("::")
-            .last()
-            .unwrap_or(&self.function)
+        self.function.split("::").last().unwrap_or(&self.function)
     }
 }
 
@@ -263,7 +264,12 @@ mod tests {
         let api_payload = payload.to_api_payload();
 
         assert_eq!(api_payload["type"], "entry_function_payload");
-        assert!(api_payload["function"].as_str().unwrap().contains("consume_seal"));
+        assert!(
+            api_payload["function"]
+                .as_str()
+                .unwrap()
+                .contains("consume_seal")
+        );
         assert_eq!(api_payload["type_arguments"].as_array().unwrap().len(), 0);
         assert_eq!(api_payload["arguments"].as_array().unwrap().len(), 1);
     }

@@ -172,12 +172,11 @@ impl CircuitBreaker {
             CircuitBreakerState::Closed => true,
             CircuitBreakerState::HalfOpen => true,
             CircuitBreakerState::Open => {
-                if let Some(last_failure) = self.last_failure_time {
-                    if let Ok(elapsed) = SystemTime::now().duration_since(last_failure) {
-                        if elapsed >= self.config.open_timeout {
-                            return true; // Allow request to test recovery
-                        }
-                    }
+                if let Some(last_failure) = self.last_failure_time
+                    && let Ok(elapsed) = SystemTime::now().duration_since(last_failure)
+                    && elapsed >= self.config.open_timeout
+                {
+                    return true; // Allow request to test recovery
                 }
                 false
             }
@@ -186,16 +185,14 @@ impl CircuitBreaker {
 
     /// Attempt to transition from open to half-open state
     pub fn attempt_recovery(&mut self) -> bool {
-        if self.state == CircuitBreakerState::Open {
-            if let Some(last_failure) = self.last_failure_time {
-                if let Ok(elapsed) = SystemTime::now().duration_since(last_failure) {
-                    if elapsed >= self.config.open_timeout {
-                        self.state = CircuitBreakerState::HalfOpen;
-                        self.success_count = 0;
-                        return true;
-                    }
-                }
-            }
+        if self.state == CircuitBreakerState::Open
+            && let Some(last_failure) = self.last_failure_time
+            && let Ok(elapsed) = SystemTime::now().duration_since(last_failure)
+            && elapsed >= self.config.open_timeout
+        {
+            self.state = CircuitBreakerState::HalfOpen;
+            self.success_count = 0;
+            return true;
         }
         false
     }

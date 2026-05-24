@@ -3,8 +3,8 @@
 //! Defines the roles and identities of participants in content creation,
 //! modification, and verification.
 
-use serde::{Serialize, Deserialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// A participant in a Sanad's content lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,8 +26,8 @@ pub struct ParticipantId(pub Hash);
 impl ParticipantId {
     /// Create a new participant ID.
     pub fn new(public_key: &[u8]) -> Self {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let hash = tagged_hash(HashDomain::Nullifier, public_key).hash;
         Self(hash)
@@ -35,7 +35,7 @@ impl ParticipantId {
 
     /// Get the underlying hash.
     pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0 .0
+        &self.0.0
     }
 }
 
@@ -85,12 +85,17 @@ impl ParticipantSet {
 
     /// Check if a participant has a specific role.
     pub fn has_role(&self, participant_id: &ParticipantId, role: &ParticipantRole) -> bool {
-        self.participants.iter().any(|p| &p.id == participant_id && &p.role == role)
+        self.participants
+            .iter()
+            .any(|p| &p.id == participant_id && &p.role == role)
     }
 
     /// Get all participants with a specific role.
     pub fn by_role(&self, role: &ParticipantRole) -> Vec<&Participant> {
-        self.participants.iter().filter(|p| &p.role == role).collect()
+        self.participants
+            .iter()
+            .filter(|p| &p.role == role)
+            .collect()
     }
 
     /// Get the creator.

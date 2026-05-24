@@ -78,8 +78,8 @@ pub fn cmd_list(_config: &Config, state: &mut UnifiedStateManager) -> Result<()>
 /// This function uses only the unified CsvClient runtime, avoiding direct
 /// chain adapter dependencies per Phase 5 of the Production Guarantee Plan.
 async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<f64> {
-    use csv_sdk::prelude::NetworkType;
     use csv_sdk::config::{ChainConfig, RpcConfig, StoreConfig};
+    use csv_sdk::prelude::NetworkType;
     use std::collections::HashMap;
 
     // Map CLI Chain to core Chain
@@ -87,7 +87,10 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
 
     // Build SDK config from CLI config, passing through xpub
     let sdk_chain = config.chains.get(&core_chain.clone()).cloned();
-    let wallet_xpub = config.wallets.get(&core_chain.clone()).and_then(|w| w.xpub.clone());
+    let wallet_xpub = config
+        .wallets
+        .get(&core_chain.clone())
+        .and_then(|w| w.xpub.clone());
 
     let mut sdk_chains = HashMap::new();
     if let Some(cc) = &sdk_chain {

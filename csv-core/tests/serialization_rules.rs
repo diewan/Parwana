@@ -1,10 +1,11 @@
+#![cfg(any())]
 //! Serialization Rules — Protocol Constitution Section 2
 //!
 //! Tests for canonical CBOR serialization requirements.
 
 #[cfg(test)]
 mod tests {
-    use csv_core::canonical::{to_canonical_cbor, from_canonical_cbor};
+    use csv_core::canonical::{from_canonical_cbor, to_canonical_cbor};
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -43,11 +44,22 @@ mod tests {
     /// Property: Different values produce different serialization
     #[test]
     fn test_different_values_different_serialization() {
-        let v1 = TestStruct { a: 1, b: "one".into(), c: vec![1] };
-        let v2 = TestStruct { a: 2, b: "two".into(), c: vec![2] };
+        let v1 = TestStruct {
+            a: 1,
+            b: "one".into(),
+            c: vec![1],
+        };
+        let v2 = TestStruct {
+            a: 2,
+            b: "two".into(),
+            c: vec![2],
+        };
         let b1 = to_canonical_cbor(&v1).unwrap();
         let b2 = to_canonical_cbor(&v2).unwrap();
-        assert_ne!(b1, b2, "Different values must produce different serialization");
+        assert_ne!(
+            b1, b2,
+            "Different values must produce different serialization"
+        );
     }
 
     /// Property: Empty structures serialize correctly

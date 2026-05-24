@@ -30,10 +30,18 @@ impl fmt::Display for InvariantViolation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             InvariantViolation::ProofSizeExceeded => write!(f, "Proof size exceeds maximum"),
-            InvariantViolation::FinalityDataSizeExceeded => write!(f, "Finality data size exceeds maximum"),
-            InvariantViolation::SignaturesSizeExceeded => write!(f, "Signatures size exceeds maximum"),
-            InvariantViolation::ProofBundleSizeExceeded => write!(f, "Proof bundle size exceeds maximum"),
-            InvariantViolation::InsufficientConfirmations => write!(f, "Confirmations below minimum"),
+            InvariantViolation::FinalityDataSizeExceeded => {
+                write!(f, "Finality data size exceeds maximum")
+            }
+            InvariantViolation::SignaturesSizeExceeded => {
+                write!(f, "Signatures size exceeds maximum")
+            }
+            InvariantViolation::ProofBundleSizeExceeded => {
+                write!(f, "Proof bundle size exceeds maximum")
+            }
+            InvariantViolation::InsufficientConfirmations => {
+                write!(f, "Confirmations below minimum")
+            }
             InvariantViolation::ProofExpired => write!(f, "Proof age exceeds maximum"),
             InvariantViolation::InvalidStateTransition => write!(f, "Invalid state transition"),
             InvariantViolation::ReplayDetected => write!(f, "Replay detected"),
@@ -50,8 +58,8 @@ pub type InvariantResult<T> = Result<T, InvariantViolation>;
 // Production Hardening Utilities
 // ============================================================================
 
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// Maximum number of items in bounded queues
 pub const MAX_SEAL_NULLIFIER_SIZE: usize = 1000;
@@ -238,7 +246,10 @@ impl CircuitBreaker {
 
 impl Default for CircuitBreaker {
     fn default() -> Self {
-        Self::new(DEFAULT_CIRCUIT_MAX_FAILURES, DEFAULT_CIRCUIT_RESET_TIMEOUT_SECS)
+        Self::new(
+            DEFAULT_CIRCUIT_MAX_FAILURES,
+            DEFAULT_CIRCUIT_RESET_TIMEOUT_SECS,
+        )
     }
 }
 

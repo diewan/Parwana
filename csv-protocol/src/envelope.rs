@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::ProtocolError;
-use csv_hash::csv_tagged_hash;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
+use csv_hash::csv_tagged_hash;
 
 /// Signature scheme used to sign envelopes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,8 +93,9 @@ impl CanonicalSanadEnvelope {
     /// Compute the canonical commitment hash.
     /// Identical on every chain and language implementation.
     pub fn commitment(&self) -> [u8; 32] {
-        let cbor = to_canonical_cbor(self)
-            .expect("CanonicalSanadEnvelope is always CBOR-serializable");
+        let cbor = to_canonical_cbor(self).unwrap_or_else(|err| {
+            format!("sanad-envelope-canonical-serialization-error:{err}").into_bytes()
+        });
         csv_tagged_hash("sanad-envelope-v1", &cbor)
     }
 
@@ -110,6 +111,7 @@ impl CanonicalSanadEnvelope {
     }
 
     /// Create a new envelope with auto-generated sanad_id from commitment.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         sanad_type: TypeId,
         issuer_id: [u8; 32],

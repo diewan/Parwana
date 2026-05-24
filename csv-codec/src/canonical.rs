@@ -11,6 +11,7 @@
 //! External crate: `ciborium` (no_std compatible, pure Rust)
 
 use crate::error::CodecError;
+use ciborium::value::{CanonicalValue, Value};
 
 /// CBOR tag range reserved for CSV protocol types (0x1C0–0x1FF = 448–511)
 pub const CBOR_TAG_RANGE_START: u64 = 448;
@@ -36,10 +37,78 @@ pub mod cbor_tags {
 /// # Errors
 /// Returns `CodecError` if encoding fails.
 pub fn to_canonical_cbor<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, CodecError> {
+    let mut value =
+        Value::serialized(value).map_err(|e| CodecError::SerializationError(e.to_string()))?;
+    normalize_canonical_value(&mut value)?;
+
     let mut buf = Vec::new();
-    ciborium::into_writer(value, &mut buf)
+    ciborium::into_writer(&value, &mut buf)
         .map_err(|e| CodecError::SerializationError(e.to_string()))?;
     Ok(buf)
+}
+
+fn normalize_canonical_value(value: &mut Value) -> Result<(), CodecError> {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                normalize_canonical_value(item)?;
+            }
+        }
+        Value::Map(entries) => {
+            for (key, entry_value) in entries.iter_mut() {
+                normalize_canonical_value(key)?;
+                normalize_canonical_value(entry_value)?;
+            }
+
+            if let Some(number) = serde_json_number_value(entries)? {
+                *value = number;
+                return Ok(());
+            }
+
+            entries.sort_by(|(left, _), (right, _)| {
+                CanonicalValue::from(left.clone()).cmp(&CanonicalValue::from(right.clone()))
+            });
+        }
+        Value::Tag(_, tagged) => normalize_canonical_value(tagged)?,
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn serde_json_number_value(entries: &[(Value, Value)]) -> Result<Option<Value>, CodecError> {
+    if entries.len() != 1 {
+        return Ok(None);
+    }
+
+    let (key, value) = &entries[0];
+    let Value::Text(key) = key else {
+        return Ok(None);
+    };
+    if key != "$serde_json::private::Number" {
+        return Ok(None);
+    }
+
+    let Value::Text(number) = value else {
+        return Err(CodecError::SerializationError(
+            "invalid serde_json number representation".to_string(),
+        ));
+    };
+
+    if let Ok(unsigned) = number.parse::<u64>() {
+        return Ok(Some(Value::Integer(unsigned.into())));
+    }
+    if let Ok(signed) = number.parse::<i64>() {
+        return Ok(Some(Value::Integer(signed.into())));
+    }
+    if let Ok(float) = number.parse::<f64>() {
+        return Ok(Some(Value::Float(float)));
+    }
+
+    Err(CodecError::SerializationError(format!(
+        "invalid serde_json number: {}",
+        number
+    )))
 }
 
 /// Deserialize from deterministic CBOR bytes.
@@ -47,8 +116,7 @@ pub fn to_canonical_cbor<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, Code
 /// # Errors
 /// Returns `CodecError` if decoding fails.
 pub fn from_canonical_cbor<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, CodecError> {
-    ciborium::from_reader(bytes)
-        .map_err(|e| CodecError::DeserializationError(e.to_string()))
+    ciborium::from_reader(bytes).map_err(|e| CodecError::DeserializationError(e.to_string()))
 }
 
 /// Serialize `value` to deterministic CBOR bytes with a CBOR tag.
@@ -67,14 +135,13 @@ pub fn to_canonical_cbor_with_tag<T: serde::Serialize>(
             tag, CBOR_TAG_RANGE_START, CBOR_TAG_RANGE_END
         )));
     }
-    
+
     let mut buf = Vec::new();
     // Write CBOR tag
     ciborium::into_writer(&tag, &mut buf)
         .map_err(|e| CodecError::SerializationError(e.to_string()))?;
     // Write value
-    ciborium::into_writer(value, &mut buf)
-        .map_err(|e| CodecError::SerializationError(e.to_string()))?;
+    buf.extend_from_slice(&to_canonical_cbor(value)?);
     Ok(buf)
 }
 
@@ -89,10 +156,10 @@ pub fn to_canonical_cbor_with_checksum<T: serde::Serialize>(
     value: &T,
 ) -> Result<Vec<u8>, CodecError> {
     let cbor = to_canonical_cbor(value)?;
-    
+
     // Compute CRC32 checksum
     let checksum = crc32fast::hash(&cbor);
-    
+
     let mut result = cbor;
     result.extend_from_slice(&checksum.to_le_bytes());
     Ok(result)
@@ -112,21 +179,21 @@ pub fn from_canonical_cbor_with_checksum<T: serde::de::DeserializeOwned>(
             "Bytes too short for checksum".to_string(),
         ));
     }
-    
+
     let (cbor, checksum_bytes) = bytes.split_at(bytes.len() - 4);
-    let stored_checksum = u32::from_le_bytes(checksum_bytes.try_into().map_err(|_| {
-        CodecError::DeserializationError("Invalid checksum length".to_string())
-    })?);
-    
+    let stored_checksum =
+        u32::from_le_bytes(checksum_bytes.try_into().map_err(|_| {
+            CodecError::DeserializationError("Invalid checksum length".to_string())
+        })?);
+
     let computed_checksum = crc32fast::hash(cbor);
     if stored_checksum != computed_checksum {
         return Err(CodecError::IntegrityError(
             "CRC32 checksum mismatch — data may be corrupted".to_string(),
         ));
     }
-    
-    ciborium::from_reader(cbor)
-        .map_err(|e| CodecError::DeserializationError(e.to_string()))
+
+    ciborium::from_reader(cbor).map_err(|e| CodecError::DeserializationError(e.to_string()))
 }
 
 /// Deserialize from CBOR bytes with optional tag and version validation.
@@ -148,10 +215,7 @@ pub fn from_canonical_cbor_full<T: serde::de::DeserializeOwned>(
 
     if let Some(tag) = expected_tag {
         let decoded_tag: u64 = ciborium::from_reader(&mut cursor).map_err(|e| {
-            CodecError::SerializationError(format!(
-                "Failed to decode CBOR tag prefix: {}",
-                e
-            ))
+            CodecError::SerializationError(format!("Failed to decode CBOR tag prefix: {}", e))
         })?;
         if decoded_tag != tag {
             return Err(CodecError::SerializationError(format!(

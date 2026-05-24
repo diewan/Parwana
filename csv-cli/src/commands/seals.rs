@@ -264,10 +264,10 @@ fn cmd_list(chain: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
 
         for (i, seal) in consumed_seals.iter().enumerate() {
             // Filter by chain if specified
-            if let Some(ref filter_chain) = chain {
-                if &seal.chain != filter_chain {
-                    continue;
-                }
+            if let Some(ref filter_chain) = chain
+                && &seal.chain != filter_chain
+            {
+                continue;
             }
 
             rows.push(vec![

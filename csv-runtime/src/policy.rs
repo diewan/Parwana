@@ -10,8 +10,8 @@
 //! Adapters MUST NOT make policy decisions. They only execute operations
 //! according to runtime-provided policies.
 
-use std::time::Duration;
 use crate::runtime_mode::RuntimeMode;
+use std::time::Duration;
 
 /// Runtime policy configuration
 ///
@@ -105,11 +105,13 @@ impl RuntimePolicy {
         self.finality_depths
             .get(chain_id)
             .copied()
-            .or_else(|| csv_protocol::finality::capabilities::FinalityDepths::defaults().for_chain(chain_id))
+            .or_else(|| {
+                csv_protocol::finality::capabilities::FinalityDepths::defaults().for_chain(chain_id)
+            })
             .or(Some(1))
     }
 
-   /// Set the finality depth for a specific chain
+    /// Set the finality depth for a specific chain
     pub fn set_finality_depth(&mut self, chain_id: String, depth: u64) {
         self.finality_depths.insert(chain_id, depth);
     }
@@ -119,11 +121,7 @@ impl RuntimePolicy {
     /// Returns `Err` if `observed < required` for the given chain.
     /// This enforces hard-fail finality: transfers are aborted if finality
     /// requirements are not met, regardless of runtime mode.
-    pub fn check_finality_threshold(
-        &self,
-        chain: &str,
-        observed: u64,
-    ) -> Result<(), String> {
+    pub fn check_finality_threshold(&self, chain: &str, observed: u64) -> Result<(), String> {
         let required = self.finality_depth_for_chain(chain);
         let required = required.unwrap_or(1);
         if observed < required {
@@ -176,8 +174,14 @@ mod tests {
         // Verify that runtime policy sources defaults from csv-protocol
         let core_depths = csv_protocol::finality::capabilities::FinalityDepths::defaults();
         let policy = RuntimePolicy::new();
-        assert_eq!(policy.finality_depth_for_chain("bitcoin"), core_depths.for_chain("bitcoin"));
-        assert_eq!(policy.finality_depth_for_chain("ethereum"), core_depths.for_chain("ethereum"));
+        assert_eq!(
+            policy.finality_depth_for_chain("bitcoin"),
+            core_depths.for_chain("bitcoin")
+        );
+        assert_eq!(
+            policy.finality_depth_for_chain("ethereum"),
+            core_depths.for_chain("ethereum")
+        );
     }
 
     #[test]

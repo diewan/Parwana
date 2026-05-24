@@ -100,10 +100,11 @@ impl TransferData {
 /// ```
 ///
 /// Terminal states: `Completed`, `RolledBack`, `Compromised`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub enum TransferStage {
     /// Initial state — transfer created, not yet submitted
+    #[default]
     Initialized,
     /// Lock transaction submitted to source chain
     LockSubmitted,
@@ -166,12 +167,6 @@ impl TransferStage {
                 | TransferStage::MintConfirmed
                 | TransferStage::Completed
         )
-    }
-}
-
-impl Default for TransferStage {
-    fn default() -> Self {
-        Self::Initialized
     }
 }
 

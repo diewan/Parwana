@@ -11,8 +11,10 @@
 //! 3. No indefinite-length encoding
 //! 4. Smallest integer representation
 
-use csv_hash::canonical::{to_canonical_cbor, to_canonical_cbor_with_tag, to_canonical_cbor_with_checksum, cbor_tags};
-use csv_hash::{Hash, SealHash, CommitmentHash, SanadIdHash, NullifierHash};
+use csv_hash::canonical::{
+    cbor_tags, to_canonical_cbor, to_canonical_cbor_with_checksum, to_canonical_cbor_with_tag,
+};
+use csv_hash::{CommitmentHash, Hash, NullifierHash, SanadIdHash, SealHash};
 
 // ===========================================================================
 // Golden Vector 1: Simple Struct Serialization
@@ -35,10 +37,14 @@ fn golden_simple_struct() {
     let hex = hex::encode(&bytes);
 
     // This golden vector must NOT change without an RFC
-    assert_eq!(hex, "a26161182a61626568656c6c6f", "Simple struct serialization must match golden vector");
+    assert_eq!(
+        hex, "a26161182a61626568656c6c6f",
+        "Simple struct serialization must match golden vector"
+    );
 
     // Verify roundtrip
-    let decoded: SimpleStruct = csv_hash::canonical::from_canonical_cbor(&bytes).expect("deserialization should succeed");
+    let decoded: SimpleStruct =
+        csv_hash::canonical::from_canonical_cbor(&bytes).expect("deserialization should succeed");
     assert_eq!(decoded, value);
 }
 
@@ -63,7 +69,10 @@ fn golden_map_key_ordering() {
 
     // Golden vector for the canonical form
     let hex = hex::encode(&cbor1);
-    assert_eq!(hex, "a3616102616d03617a01", "Canonical map must match golden vector");
+    assert_eq!(
+        hex, "a3616102616d03617a01",
+        "Canonical map must match golden vector"
+    );
 }
 
 // ===========================================================================
@@ -95,11 +104,16 @@ fn golden_nested_structure() {
     let hex = hex::encode(&bytes);
 
     // Verify roundtrip
-    let decoded: NestedStruct = csv_hash::canonical::from_canonical_cbor(&bytes).expect("deserialization should succeed");
+    let decoded: NestedStruct =
+        csv_hash::canonical::from_canonical_cbor(&bytes).expect("deserialization should succeed");
     assert_eq!(decoded, value);
 
     // Golden vector must not change
-    assert_eq!(hex.len() > 0, true, "Nested struct serialization must produce output");
+    assert_eq!(
+        hex.len() > 0,
+        true,
+        "Nested struct serialization must produce output"
+    );
 }
 
 // ===========================================================================
@@ -118,7 +132,11 @@ fn golden_hash_serialization() {
     assert_eq!(bytes, bytes2, "Hash serialization must be deterministic");
 
     // Golden vector must not change
-    assert_eq!(hex.len(), 122, "Hash serialization must produce consistent length");
+    assert_eq!(
+        hex.len(),
+        122,
+        "Hash serialization must produce consistent length"
+    );
 }
 
 // ===========================================================================
@@ -134,14 +152,18 @@ fn golden_cbor_tagged_serialization() {
         .expect("tagged serialization should succeed");
 
     // Verify tag is present (CBOR major type 6, tag 448)
-    assert!(tagged_bytes.len() > value.len() + 2, "Tagged serialization must include tag bytes");
+    assert!(
+        tagged_bytes.len() > value.len() + 2,
+        "Tagged serialization must include tag bytes"
+    );
 
     // Verify roundtrip with tag
     let decoded: Vec<u8> = csv_hash::canonical::from_canonical_cbor_full(
         &tagged_bytes,
         Some(cbor_tags::PROOF_BUNDLE),
         None,
-    ).expect("tagged deserialization should succeed");
+    )
+    .expect("tagged deserialization should succeed");
     assert_eq!(decoded, value);
 }
 
@@ -178,12 +200,16 @@ fn golden_cbor_tag_validation() {
 fn golden_checksum_serialization() {
     let value = vec![1u8, 2, 3, 4, 5];
 
-    let tagged_bytes = to_canonical_cbor_with_checksum(&value)
-        .expect("checksum serialization should succeed");
+    let tagged_bytes =
+        to_canonical_cbor_with_checksum(&value).expect("checksum serialization should succeed");
 
     // Must be longer than raw CBOR (4 bytes for CRC32)
     let raw_cbor = to_canonical_cbor(&value).expect("raw serialization should succeed");
-    assert_eq!(tagged_bytes.len(), raw_cbor.len() + 4, "Checksum adds 4 bytes");
+    assert_eq!(
+        tagged_bytes.len(),
+        raw_cbor.len() + 4,
+        "Checksum adds 4 bytes"
+    );
 
     // Verify checksum roundtrip
     let decoded: Vec<u8> = csv_hash::canonical::from_canonical_cbor_with_checksum(&tagged_bytes)
@@ -207,30 +233,49 @@ fn golden_typed_hash_serialization() {
     let seal_hash = SealHash::new_bitcoin(b"test seal data");
     let seal_bytes = to_canonical_cbor(&seal_hash).expect("seal hash serialization should succeed");
     let seal_hex = hex::encode(&seal_bytes);
-    assert!(seal_hex.len() > 0, "SealHash must serialize to non-empty output");
+    assert!(
+        seal_hex.len() > 0,
+        "SealHash must serialize to non-empty output"
+    );
 
     // CommitmentHash
     let commitment_hash = CommitmentHash::new_transfer(b"test commitment data");
-    let commitment_bytes = to_canonical_cbor(&commitment_hash).expect("commitment hash serialization should succeed");
+    let commitment_bytes =
+        to_canonical_cbor(&commitment_hash).expect("commitment hash serialization should succeed");
     let commitment_hex = hex::encode(&commitment_bytes);
-    assert!(commitment_hex.len() > 0, "CommitmentHash must serialize to non-empty output");
+    assert!(
+        commitment_hex.len() > 0,
+        "CommitmentHash must serialize to non-empty output"
+    );
 
     // SanadIdHash
     let sanad_hash = SanadIdHash::new(b"test sanad data");
-    let sanad_bytes = to_canonical_cbor(&sanad_hash).expect("sanad hash serialization should succeed");
+    let sanad_bytes =
+        to_canonical_cbor(&sanad_hash).expect("sanad hash serialization should succeed");
     let sanad_hex = hex::encode(&sanad_bytes);
-    assert!(sanad_hex.len() > 0, "SanadIdHash must serialize to non-empty output");
+    assert!(
+        sanad_hex.len() > 0,
+        "SanadIdHash must serialize to non-empty output"
+    );
 
     // NullifierHash
     let nullifier_hash = NullifierHash::new(b"test nullifier data");
-    let nullifier_bytes = to_canonical_cbor(&nullifier_hash).expect("nullifier hash serialization should succeed");
+    let nullifier_bytes =
+        to_canonical_cbor(&nullifier_hash).expect("nullifier hash serialization should succeed");
     let nullifier_hex = hex::encode(&nullifier_bytes);
-    assert!(nullifier_hex.len() > 0, "NullifierHash must serialize to non-empty output");
+    assert!(
+        nullifier_hex.len() > 0,
+        "NullifierHash must serialize to non-empty output"
+    );
 
     // All typed hashes must serialize deterministically
     let seal_hash2 = SealHash::new_bitcoin(b"test seal data");
-    let seal_bytes2 = to_canonical_cbor(&seal_hash2).expect("seal hash serialization should succeed");
-    assert_eq!(seal_bytes, seal_bytes2, "SealHash serialization must be deterministic");
+    let seal_bytes2 =
+        to_canonical_cbor(&seal_hash2).expect("seal hash serialization should succeed");
+    assert_eq!(
+        seal_bytes, seal_bytes2,
+        "SealHash serialization must be deterministic"
+    );
 }
 
 // ===========================================================================
@@ -243,19 +288,31 @@ fn golden_empty_collections() {
     let empty_vec: Vec<u8> = vec![];
     let vec_bytes = to_canonical_cbor(&empty_vec).expect("empty vec serialization should succeed");
     let vec_hex = hex::encode(&vec_bytes);
-    assert_eq!(vec_hex, "80", "Empty vec must serialize to CBOR empty array");
+    assert_eq!(
+        vec_hex, "80",
+        "Empty vec must serialize to CBOR empty array"
+    );
 
     // Empty string
     let empty_str = String::new();
-    let str_bytes = to_canonical_cbor(&empty_str).expect("empty string serialization should succeed");
+    let str_bytes =
+        to_canonical_cbor(&empty_str).expect("empty string serialization should succeed");
     let str_hex = hex::encode(&str_bytes);
-    assert_eq!(str_hex, "60", "Empty string must serialize to CBOR empty string");
+    assert_eq!(
+        str_hex, "60",
+        "Empty string must serialize to CBOR empty string"
+    );
 
     // Roundtrip
-    let decoded_vec: Vec<u8> = csv_hash::canonical::from_canonical_cbor(&vec_bytes).expect("empty vec roundtrip should succeed");
-    assert!(decoded_vec.is_empty(), "Empty vec roundtrip should produce empty vec");
+    let decoded_vec: Vec<u8> = csv_hash::canonical::from_canonical_cbor(&vec_bytes)
+        .expect("empty vec roundtrip should succeed");
+    assert!(
+        decoded_vec.is_empty(),
+        "Empty vec roundtrip should produce empty vec"
+    );
 
-    let decoded_str: String = csv_hash::canonical::from_canonical_cbor(&str_bytes).expect("empty string roundtrip should succeed");
+    let decoded_str: String = csv_hash::canonical::from_canonical_cbor(&str_bytes)
+        .expect("empty string roundtrip should succeed");
     assert_eq!(decoded_str, "");
 }
 
@@ -268,27 +325,54 @@ fn golden_integer_smallest_representation() {
     // Small integers should use the smallest CBOR encoding
     let zero: u64 = 0;
     let zero_bytes = to_canonical_cbor(&zero).expect("zero serialization should succeed");
-    assert_eq!(hex::encode(&zero_bytes), "00", "Zero must use smallest encoding");
+    assert_eq!(
+        hex::encode(&zero_bytes),
+        "00",
+        "Zero must use smallest encoding"
+    );
 
     let one: u64 = 1;
     let one_bytes = to_canonical_cbor(&one).expect("one serialization should succeed");
-    assert_eq!(hex::encode(&one_bytes), "01", "One must use smallest encoding");
+    assert_eq!(
+        hex::encode(&one_bytes),
+        "01",
+        "One must use smallest encoding"
+    );
 
     let twentythree: u64 = 23;
-    let twentythree_bytes = to_canonical_cbor(&twentythree).expect("23 serialization should succeed");
-    assert_eq!(hex::encode(&twentythree_bytes), "17", "23 must use smallest encoding");
+    let twentythree_bytes =
+        to_canonical_cbor(&twentythree).expect("23 serialization should succeed");
+    assert_eq!(
+        hex::encode(&twentythree_bytes),
+        "17",
+        "23 must use smallest encoding"
+    );
 
     let twentyfour: u64 = 24;
     let twentyfour_bytes = to_canonical_cbor(&twentyfour).expect("24 serialization should succeed");
-    assert_eq!(hex::encode(&twentyfour_bytes), "1818", "24 must use smallest encoding (1-byte uint)");
+    assert_eq!(
+        hex::encode(&twentyfour_bytes),
+        "1818",
+        "24 must use smallest encoding (1-byte uint)"
+    );
 
     let twofiftyfive: u64 = 255;
-    let twofiftyfive_bytes = to_canonical_cbor(&twofiftyfive).expect("255 serialization should succeed");
-    assert_eq!(hex::encode(&twofiftyfive_bytes), "18ff", "255 must use 1-byte uint");
+    let twofiftyfive_bytes =
+        to_canonical_cbor(&twofiftyfive).expect("255 serialization should succeed");
+    assert_eq!(
+        hex::encode(&twofiftyfive_bytes),
+        "18ff",
+        "255 must use 1-byte uint"
+    );
 
     let twofiftysix: u64 = 256;
-    let twofiftysix_bytes = to_canonical_cbor(&twofiftysix).expect("256 serialization should succeed");
-    assert_eq!(hex::encode(&twofiftysix_bytes), "190100", "256 must use 2-byte uint");
+    let twofiftysix_bytes =
+        to_canonical_cbor(&twofiftysix).expect("256 serialization should succeed");
+    assert_eq!(
+        hex::encode(&twofiftysix_bytes),
+        "190100",
+        "256 must use 2-byte uint"
+    );
 }
 
 // ===========================================================================
@@ -298,16 +382,26 @@ fn golden_integer_smallest_representation() {
 #[test]
 fn golden_boolean_serialization() {
     let true_bytes = to_canonical_cbor(&true).expect("true serialization should succeed");
-    assert_eq!(hex::encode(&true_bytes), "f5", "True must serialize to CBOR true");
+    assert_eq!(
+        hex::encode(&true_bytes),
+        "f5",
+        "True must serialize to CBOR true"
+    );
 
     let false_bytes = to_canonical_cbor(&false).expect("false serialization should succeed");
-    assert_eq!(hex::encode(&false_bytes), "f4", "False must serialize to CBOR false");
+    assert_eq!(
+        hex::encode(&false_bytes),
+        "f4",
+        "False must serialize to CBOR false"
+    );
 
     // Roundtrip
-    let decoded_true: bool = csv_hash::canonical::from_canonical_cbor(&true_bytes).expect("true roundtrip should succeed");
+    let decoded_true: bool = csv_hash::canonical::from_canonical_cbor(&true_bytes)
+        .expect("true roundtrip should succeed");
     assert!(decoded_true);
 
-    let decoded_false: bool = csv_hash::canonical::from_canonical_cbor(&false_bytes).expect("false roundtrip should succeed");
+    let decoded_false: bool = csv_hash::canonical::from_canonical_cbor(&false_bytes)
+        .expect("false roundtrip should succeed");
     assert!(!decoded_false);
 }
 
@@ -344,6 +438,9 @@ fn golden_determinism_across_calls() {
 
     // All hashes must be identical
     for hash in &hashes[1..] {
-        assert_eq!(*hash, hashes[0], "Serialization must be deterministic across 100 calls");
+        assert_eq!(
+            *hash, hashes[0],
+            "Serialization must be deterministic across 100 calls"
+        );
     }
 }

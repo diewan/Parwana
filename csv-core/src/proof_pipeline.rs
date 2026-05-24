@@ -6,9 +6,9 @@
 use async_trait::async_trait;
 
 use crate::error::Result;
+use csv_hash::Hash;
 use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
 use csv_protocol::verified::VerificationResult;
-use csv_hash::Hash;
 
 /// Chain-specific verifier used during proof and seal checks.
 #[async_trait]
@@ -45,7 +45,9 @@ pub async fn validate_proof_bundle(
     }
     if bundle.inclusion_proof.proof_bytes.is_empty() {
         return Ok(VerificationResult::invalid(
-            csv_protocol::verified::VerificationFailure::MissingData("empty inclusion proof".into()),
+            csv_protocol::verified::VerificationFailure::MissingData(
+                "empty inclusion proof".into(),
+            ),
         ));
     }
     Ok(VerificationResult::valid_structural())

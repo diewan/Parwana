@@ -13,11 +13,11 @@
 //! - `verifier` - Standalone proof verification
 //! - `streaming` - Incremental tree construction
 
+pub mod streaming;
 pub mod tree;
 pub mod verifier;
-pub mod streaming;
 
 // Re-exports for backward compatibility
-pub use tree::{MerkleTree, MerkleProof};
-pub use verifier::{verify_merkle_proof, verify_merkle_proofs_batch, compute_root_from_proof};
 pub use streaming::{StreamingMerkleBuilder, StreamingMerkleProofGenerator};
+pub use tree::{MerkleProof, MerkleTree};
+pub use verifier::{compute_root_from_proof, verify_merkle_proof, verify_merkle_proofs_batch};

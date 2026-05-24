@@ -5,10 +5,8 @@
 
 #![allow(missing_docs)]
 
-pub use csv_storage::{
-    InMemoryReplayDb, ReplayDatabase, ReplayDbError, ReplayEntryState,
-};
-#[cfg(feature = "persistent")]
-pub use csv_storage::RocksDbReplayDb;
 #[cfg(feature = "postgres")]
 pub use csv_storage::PostgresReplayDb;
+#[cfg(feature = "persistent")]
+pub use csv_storage::RocksDbReplayDb;
+pub use csv_storage::{InMemoryReplayDb, ReplayDatabase, ReplayDbError, ReplayEntryState};

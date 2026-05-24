@@ -3,17 +3,16 @@
 // Invariant: Serialization must be canonical and deterministic
 // across all implementations and languages.
 
+use csv_hash::dag::DAGNode;
 use csv_hash::{
-    canonical::{to_canonical_cbor, from_canonical_cbor},
     Hash,
-    seal::{SealPoint, CommitAnchor},
+    canonical::{from_canonical_cbor, to_canonical_cbor},
     commitment::Commitment,
     dag::DAGSegment,
+    seal::{CommitAnchor, SealPoint},
 };
-use csv_hash::dag::DAGNode;
-use csv_proof::proof::{ProofBundle, InclusionProof, FinalityProof};
-use csv_codec::to_canonical_cbor as codec_canonical_cbor;
-use serde::{Serialize, Deserialize};
+use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+use serde::{Deserialize, Serialize};
 
 /// Test that canonical serialization is deterministic and field-order independent.
 #[test]
@@ -23,8 +22,14 @@ fn serialization_is_canonical() {
     let cbor1 = to_canonical_cbor(&seal).expect("seal serialization");
     let cbor2 = to_canonical_cbor(&seal).expect("seal serialization");
     let cbor3 = to_canonical_cbor(&seal).expect("seal serialization");
-    assert_eq!(cbor1, cbor2, "Canonical CBOR must be deterministic (run 1 vs 2)");
-    assert_eq!(cbor2, cbor3, "Canonical CBOR must be deterministic (run 2 vs 3)");
+    assert_eq!(
+        cbor1, cbor2,
+        "Canonical CBOR must be deterministic (run 1 vs 2)"
+    );
+    assert_eq!(
+        cbor2, cbor3,
+        "Canonical CBOR must be deterministic (run 2 vs 3)"
+    );
 
     // 2. Roundtrip: serialize then deserialize must recover the original
     let restored: SealPoint = from_canonical_cbor(&cbor1).expect("seal deserialization");
@@ -33,8 +38,12 @@ fn serialization_is_canonical() {
     // 3. CommitAnchor canonical serialization
     let anchor = CommitAnchor::new(vec![0xBB; 8], 100, vec![0xCC; 4]).unwrap();
     let cbor_a = to_canonical_cbor(&anchor).expect("anchor serialization");
-    let restored_anchor: CommitAnchor = from_canonical_cbor(&cbor_a).expect("anchor deserialization");
-    assert_eq!(anchor, restored_anchor, "Anchor roundtrip must recover original");
+    let restored_anchor: CommitAnchor =
+        from_canonical_cbor(&cbor_a).expect("anchor deserialization");
+    assert_eq!(
+        anchor, restored_anchor,
+        "Anchor roundtrip must recover original"
+    );
 
     // 4. DAGNode canonical serialization
     let node = DAGNode::new(
@@ -46,7 +55,10 @@ fn serialization_is_canonical() {
     );
     let cbor_n = to_canonical_cbor(&node).expect("node serialization");
     let restored_node: DAGNode = from_canonical_cbor(&cbor_n).expect("node deserialization");
-    assert_eq!(node, restored_node, "DAGNode roundtrip must recover original");
+    assert_eq!(
+        node, restored_node,
+        "DAGNode roundtrip must recover original"
+    );
 
     // 5. Commitment canonical serialization
     let seal2 = SealPoint::new(vec![0xFF; 16], Some(1)).unwrap();
@@ -58,8 +70,12 @@ fn serialization_is_canonical() {
         [0xEE; 32],
     );
     let cbor_c = commitment.to_canonical_bytes();
-    let restored_commitment: Commitment = from_canonical_cbor(&cbor_c).expect("commitment deserialization");
-    assert_eq!(commitment, restored_commitment, "Commitment roundtrip must recover original");
+    let restored_commitment: Commitment =
+        from_canonical_cbor(&cbor_c).expect("commitment deserialization");
+    assert_eq!(
+        commitment, restored_commitment,
+        "Commitment roundtrip must recover original"
+    );
 
     // 6. ProofBundle canonical serialization via to_bytes/from_bytes
     let bundle = ProofBundle::new(
@@ -69,11 +85,16 @@ fn serialization_is_canonical() {
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let bytes = bundle.to_bytes().expect("bundle serialization");
-    let restored_bundle: ProofBundle = ProofBundle::from_bytes(&bytes).expect("bundle deserialization");
-    assert_eq!(bundle, restored_bundle, "ProofBundle roundtrip must recover original");
+    let restored_bundle: ProofBundle =
+        ProofBundle::from_bytes(&bytes).expect("bundle deserialization");
+    assert_eq!(
+        bundle, restored_bundle,
+        "ProofBundle roundtrip must recover original"
+    );
 
     // 7. Custom struct with multiple fields: field ordering must be fixed
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,10 +114,17 @@ fn serialization_is_canonical() {
 
     let cbor_obj1 = to_canonical_cbor(&test_obj).expect("test struct serialization");
     let cbor_obj2 = to_canonical_cbor(&test_obj).expect("test struct serialization");
-    assert_eq!(cbor_obj1, cbor_obj2, "Custom struct CBOR must be deterministic");
+    assert_eq!(
+        cbor_obj1, cbor_obj2,
+        "Custom struct CBOR must be deterministic"
+    );
 
-    let restored_obj: TestStruct = from_canonical_cbor(&cbor_obj1).expect("test struct deserialization");
-    assert_eq!(test_obj, restored_obj, "Custom struct roundtrip must recover original");
+    let restored_obj: TestStruct =
+        from_canonical_cbor(&cbor_obj1).expect("test struct deserialization");
+    assert_eq!(
+        test_obj, restored_obj,
+        "Custom struct roundtrip must recover original"
+    );
 
     // 8. Verify that the CBOR output is consistent across runs by checking
     //    that the hash of the CBOR is deterministic
@@ -134,7 +162,10 @@ fn field_ordering_is_fixed() {
             break;
         }
     }
-    assert!(all_same, "Field ordering must be fixed across serializations");
+    assert!(
+        all_same,
+        "Field ordering must be fixed across serializations"
+    );
 
     // Verify the serialized bytes are non-empty and consistent
     let cbor = to_canonical_cbor(&obj).expect("serialization");

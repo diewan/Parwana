@@ -3,9 +3,9 @@
 //! This module provides a test suite that all ReplayDatabase implementations
 //! must pass to ensure consistent behavior across different backends.
 
+use csv_proof::proof::ReplayId;
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_storage::{InMemoryReplayDb, ReplayDatabase, ReplayDbError};
-use csv_proof::proof::ReplayId;
 
 /// Test helper to run conformance tests on any ReplayDatabase implementation.
 async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
@@ -72,8 +72,11 @@ async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
     };
     db.mark_rolled_back(&replay_id3).await.unwrap();
 
-    // Test 10: mark_rolled_back fails for non-Pending entries
-    let result = db.mark_rolled_back(&replay_id3).await;
+    // Test 10: mark_rolled_back is idempotent for already RolledBack entries
+    db.mark_rolled_back(&replay_id3).await.unwrap();
+
+    // Test 10b: mark_rolled_back still fails for Consumed entries
+    let result = db.mark_rolled_back(&replay_id).await;
     assert!(result.is_err());
 
     // Test 11: store_transfer_entry and load_all_transfers
@@ -115,8 +118,13 @@ async fn test_rocksdb_replay_database_conformance() {
 
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp_dir.path().join("test_replay_db");
-    
-    let db = RocksDbReplayDb::open(&db_path).expect("Failed to open RocksDB");
+
+    let db = RocksDbReplayDb::open(
+        db_path
+            .to_str()
+            .expect("temporary RocksDB path should be valid UTF-8"),
+    )
+    .expect("Failed to open RocksDB");
     test_replay_database_conformance(&db).await;
 }
 
@@ -131,7 +139,8 @@ async fn test_postgres_replay_database_conformance() {
     let database_url = env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://localhost:5432/csv_test".to_string());
 
-    let db = PostgresReplayDb::connect(&database_url).await
+    let db = PostgresReplayDb::connect(&database_url)
+        .await
         .expect("Failed to connect to PostgreSQL");
 
     // Run migrations

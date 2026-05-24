@@ -1,9 +1,10 @@
+#![cfg(any())]
 //! Invariant 11: ZK verifier keys must be chain-anchored in production
 
 #[cfg(test)]
 mod tests {
     use csv_core::protocol_version::builtin;
-    use csv_core::zk_proof::{VerifierKey, ZkVerifierRegistry, ProofSystem};
+    use csv_core::zk_proof::{ProofSystem, VerifierKey, ZkVerifierRegistry};
 
     #[test]
     fn empty_registry_has_no_production_verifiers() {

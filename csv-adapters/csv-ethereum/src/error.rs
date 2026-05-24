@@ -5,10 +5,21 @@ use thiserror::Error;
 // Local implementations (mcp module removed during migration)
 #[derive(Debug, Clone)]
 pub enum FixAction {
-    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
-    CheckState { check: String, url: String, what: String },
-    SwitchEndpoint { endpoint: String },
-    WaitForConfirmations { confirmations: u64 },
+    Retry {
+        backoff_secs: u64,
+        parameter_changes: Vec<String>,
+    },
+    CheckState {
+        check: String,
+        url: String,
+        what: String,
+    },
+    SwitchEndpoint {
+        endpoint: String,
+    },
+    WaitForConfirmations {
+        confirmations: u64,
+    },
 }
 
 pub trait HasErrorSuggestion {
@@ -212,9 +223,12 @@ impl From<EthereumError> for csv_protocol::ProtocolError {
             EthereumError::InvalidReceiptProof(msg) => {
                 csv_protocol::ProtocolError::InclusionProofFailed(msg)
             }
-            EthereumError::ReorgDetected { block, depth } => csv_protocol::ProtocolError::ReorgInvalid(
-                format!("Reorg at block {}, depth {}", block, depth),
-            ),
+            EthereumError::ReorgDetected { block, depth } => {
+                csv_protocol::ProtocolError::ReorgInvalid(format!(
+                    "Reorg at block {}, depth {}",
+                    block, depth
+                ))
+            }
             EthereumError::InsufficientConfirmations { got, need } => {
                 csv_protocol::ProtocolError::FinalityNotReached(format!(
                     "Got {} confirmations, need {}",

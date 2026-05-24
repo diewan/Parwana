@@ -7,10 +7,10 @@
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
-use csv_hash::dag::DAGNode;
-use csv_hash::{DomainSeparatedHash, TransitionDomain};
 use csv_hash::Hash;
+use csv_hash::dag::DAGNode;
 use csv_hash::seal::SealPoint;
+use csv_hash::{DomainSeparatedHash, TransitionDomain};
 use csv_protocol::state::{GlobalState, Metadata, StateAssignment, StateRef};
 
 /// A contract transition
@@ -62,8 +62,7 @@ impl Transition {
         use csv_hash::canonical::to_canonical_cbor;
 
         // Use canonical CBOR serialization for deterministic hashing
-        let cbor_bytes = to_canonical_cbor(self)
-            .expect("Transition serialization should not fail");
+        let cbor_bytes = to_canonical_cbor(self).expect("Transition serialization should not fail");
         DomainSeparatedHash::<TransitionDomain>::hash(&cbor_bytes)
     }
 

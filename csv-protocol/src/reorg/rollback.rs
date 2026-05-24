@@ -4,11 +4,11 @@
 //! When a chain reorg occurs, this module identifies and rolls back
 //! transfers that were dependent on blocks in the reorged chain segment.
 
-use std::vec::Vec;
 use async_trait::async_trait;
+use std::vec::Vec;
 
-use csv_hash::chain_id::ChainId;
 use crate::reorg::detector::ReorgEvent;
+use csv_hash::chain_id::ChainId;
 
 /// Type of rollback action taken
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,9 +283,7 @@ pub struct MockRollbackBackend {
 impl MockRollbackBackend {
     pub fn new() -> Self {
         Self {
-            states: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::BTreeMap::new(),
-            )),
+            states: std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new())),
             rollback_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }

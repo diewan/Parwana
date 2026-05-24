@@ -108,7 +108,11 @@ where
     type InclusionProof = CommitmentProof;
     type FinalityProof = CelestiaFinalityProof;
 
-    fn publish(&self, commitment: Hash, seal: Self::SealPoint) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
+    fn publish(
+        &self,
+        commitment: Hash,
+        seal: Self::SealPoint,
+    ) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         // This is a synchronous wrapper around async code
         // In production, this should be properly async
 
@@ -137,7 +141,10 @@ where
         Ok(anchor)
     }
 
-    fn verify_inclusion(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
+    fn verify_inclusion(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
         // In production, this would verify the inclusion proof from Celestia
         // Create a minimal commitment proof for testing
         let proof = CommitmentProof::new(
@@ -152,7 +159,10 @@ where
         Ok(proof)
     }
 
-    fn verify_finality(&self, anchor: Self::CommitAnchor) -> std::result::Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
+    fn verify_finality(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> std::result::Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
         // Tendermint has deterministic finality
         let proof = CelestiaFinalityProof::new(
             anchor.height,
@@ -164,7 +174,10 @@ where
         Ok(proof)
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
+    fn enforce_seal(
+        &self,
+        seal: Self::SealPoint,
+    ) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
         // Verify seal hasn't been consumed
         if !seal.is_valid() {
             return Err(Box::new(std::io::Error::new(
@@ -177,7 +190,10 @@ where
         Ok(())
     }
 
-    fn create_seal(&self, value: Option<u64>) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
+    fn create_seal(
+        &self,
+        value: Option<u64>,
+    ) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // Create a new seal at the next available height
         // In production, this would query for the latest height
         let height = value.unwrap_or(1); // Use value as height hint
@@ -283,8 +299,8 @@ where
         })?;
 
         // Deserialize transition_dag from Vec<u8> to DAGSegment
-        let dag_segment: csv_hash::dag::DAGSegment = csv_codec::from_canonical_cbor(&transition_dag)
-            .map_err(|e| {
+        let dag_segment: csv_hash::dag::DAGSegment =
+            csv_codec::from_canonical_cbor(&transition_dag).map_err(|e| {
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("Failed to deserialize DAG: {}", e),
@@ -310,7 +326,10 @@ where
         })
     }
 
-    fn rollback(&self, _anchor: Self::CommitAnchor) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
+    fn rollback(
+        &self,
+        _anchor: Self::CommitAnchor,
+    ) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
         // Handle rollback for a specific anchor due to chain reorganization
         // In production, this would:
         // 1. Verify the anchor is no longer in the canonical chain

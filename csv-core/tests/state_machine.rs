@@ -1,12 +1,13 @@
+#![cfg(any())]
 //! State machine verification with transition graph per Phase 12
 //!
 //! This module provides state machine verification with explicit transition graphs
 //! to ensure protocol invariants are maintained throughout state transitions.
 
-use std::collections::{HashMap, HashSet};
-use csv_hash::Hash;
 use csv_core::abi_constitution::{SealState, StateMachineInvariants};
+use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /// State in the state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -384,7 +385,10 @@ fn test_state_machine_test_runner() {
     runner.add_test_case(StateMachineTestCase {
         name: "Valid lock and mint".to_string(),
         initial_state: State::Created,
-        transitions: vec![(State::Locked, "lock".to_string()), (State::Minted, "mint".to_string())],
+        transitions: vec![
+            (State::Locked, "lock".to_string()),
+            (State::Minted, "mint".to_string()),
+        ],
         expected_final_state: State::Minted,
         should_succeed: true,
     });

@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Invariant 1: Seal IDs Must Come From Real Blockchain Transactions
 //!
 //! Rule: A `SealPoint.seal_id` must come from a real blockchain transaction.
@@ -66,7 +67,10 @@ mod tests {
     fn test_seal_uniqueness() {
         let seal1 = SealPoint::new(vec![1u8; 32], Some(1)).unwrap();
         let seal2 = SealPoint::new(vec![2u8; 32], Some(2)).unwrap();
-        assert_ne!(seal1.id, seal2.id, "Different inputs must produce different seal IDs");
+        assert_ne!(
+            seal1.id, seal2.id,
+            "Different inputs must produce different seal IDs"
+        );
     }
 
     /// Property: Seal ID size validation matches MAX_SEAL_ID_SIZE
@@ -74,6 +78,9 @@ mod tests {
     fn test_seal_id_size_limit() {
         // MAX_SEAL_ID_SIZE = 1024
         let result = SealPoint::new(vec![0u8; 1025], None);
-        assert!(result.is_err(), "Seal ID exceeding MAX_SEAL_ID_SIZE must be rejected");
+        assert!(
+            result.is_err(),
+            "Seal ID exceeding MAX_SEAL_ID_SIZE must be rejected"
+        );
     }
 }

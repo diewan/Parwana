@@ -84,10 +84,7 @@ pub async fn execute(
             dest_owner,
             lease_token,
         } => {
-            transfer::cmd_transfer(
-                from, to, sanad_id, dest_owner, lease_token, config, state,
-            )
-            .await
+            transfer::cmd_transfer(from, to, sanad_id, dest_owner, lease_token, config, state).await
         }
         CrossChainAction::Status { transfer_id } => status::cmd_status(transfer_id, state),
         CrossChainAction::List { from, to } => status::cmd_list(from, to, state),

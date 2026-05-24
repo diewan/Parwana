@@ -141,19 +141,22 @@ impl ProofDag {
 
     /// Get all root nodes (nodes with no dependencies).
     pub fn roots(&self) -> Vec<&ProofNode> {
-        self.nodes.values()
+        self.nodes
+            .values()
             .filter(|n| n.dependencies.is_empty())
             .collect()
     }
 
     /// Get all leaf nodes (nodes that no other node depends on).
     pub fn leaves(&self) -> Vec<&ProofNode> {
-        let dependent_ids: std::collections::HashSet<&ProofId> = self.nodes
+        let dependent_ids: std::collections::HashSet<&ProofId> = self
+            .nodes
             .values()
             .flat_map(|n| n.dependencies.iter())
             .collect();
 
-        self.nodes.values()
+        self.nodes
+            .values()
             .filter(|n| !dependent_ids.contains(&n.id))
             .collect()
     }
@@ -211,7 +214,8 @@ impl ProofDag {
         }
 
         // Start with nodes that have no dependencies
-        let mut queue: Vec<ProofId> = in_degree.iter()
+        let mut queue: Vec<ProofId> = in_degree
+            .iter()
             .filter(|&(_, &deg)| deg == 0)
             .map(|(id, _)| id.clone())
             .collect();
@@ -244,7 +248,8 @@ impl ProofDag {
     pub fn depth(&self) -> usize {
         let mut memo: std::collections::HashMap<ProofId, usize> = std::collections::HashMap::new();
 
-        self.nodes.values()
+        self.nodes
+            .values()
             .filter(|n| n.dependencies.is_empty())
             .map(|root| Self::node_depth(root, &self.nodes, &mut memo))
             .max()
@@ -262,7 +267,8 @@ impl ProofDag {
         }
 
         // Find all nodes that depend on this node (children in the dependency graph)
-        let children: Vec<&ProofNode> = nodes.values()
+        let children: Vec<&ProofNode> = nodes
+            .values()
             .filter(|n| n.dependencies.contains(&node.id))
             .collect();
 
@@ -270,7 +276,8 @@ impl ProofDag {
             // This node has no dependents, it's a leaf
             1
         } else {
-            1 + children.iter()
+            1 + children
+                .iter()
                 .map(|child| Self::node_depth(child, nodes, memo))
                 .max()
                 .unwrap_or(0)

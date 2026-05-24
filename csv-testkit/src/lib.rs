@@ -12,4 +12,4 @@ pub mod helpers;
 // Re-exports
 pub use adversarial::{AdversarialConfig, AdversarialRunner, ByzantineBehavior};
 pub use fixtures::{TestProofBundle, TestTransfer};
-pub use helpers::{TestContext, TestBuilder};
+pub use helpers::{TestBuilder, TestContext};

@@ -211,10 +211,10 @@ fn cmd_list(chain: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
     let mut rows = Vec::new();
 
     for sanad in &state.storage.sanads {
-        if let Some(ref filter_chain) = chain {
-            if sanad.chain != *filter_chain {
-                continue;
-            }
+        if let Some(ref filter_chain) = chain
+            && sanad.chain != *filter_chain
+        {
+            continue;
         }
 
         // Check if seal is consumed in registry even if flag not set

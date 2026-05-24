@@ -5,9 +5,18 @@ use thiserror::Error;
 // Local implementations (mcp module removed during migration)
 #[derive(Debug, Clone)]
 pub enum FixAction {
-    Retry { backoff_secs: u64, parameter_changes: Vec<String> },
-    CheckState { check: String, url: String, what: String },
-    SwitchEndpoint { endpoint: String },
+    Retry {
+        backoff_secs: u64,
+        parameter_changes: Vec<String>,
+    },
+    CheckState {
+        check: String,
+        url: String,
+        what: String,
+    },
+    SwitchEndpoint {
+        endpoint: String,
+    },
 }
 
 pub trait HasErrorSuggestion {
@@ -346,7 +355,10 @@ impl HasErrorSuggestion for SolanaError {
             SolanaError::Transaction(_) | SolanaError::InvalidInstruction(_) => {
                 Some(FixAction::Retry {
                     backoff_secs: 10,
-                    parameter_changes: vec!["simulate_first".to_string(), "check_program".to_string()],
+                    parameter_changes: vec![
+                        "simulate_first".to_string(),
+                        "check_program".to_string(),
+                    ],
                 })
             }
             _ => None,

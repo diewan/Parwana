@@ -14,20 +14,23 @@ pub fn format_address(addr: [u8; 32]) -> String {
 /// Short forms are left-padded with zeros to 32 bytes.
 pub fn parse_aptos_address(s: &str) -> Result<[u8; 32], String> {
     let hex_str = s.trim_start_matches("0x");
-    
+
     // Reject addresses longer than 32 bytes (64 hex chars)
     if hex_str.len() > 64 {
-        return Err(format!("Address too long: {} hex chars (max 64)", hex_str.len()));
+        return Err(format!(
+            "Address too long: {} hex chars (max 64)",
+            hex_str.len()
+        ));
     }
-    
+
     let mut padded = String::new();
-    
+
     // Left-pad with zeros to ensure 32-byte length
     for _ in 0..(64 - hex_str.len()) {
         padded.push('0');
     }
     padded.push_str(hex_str);
-    
+
     hex::decode(&padded)
         .map_err(|e| format!("Invalid hex address: {}", e))
         .and_then(|bytes| {
@@ -92,7 +95,9 @@ mod tests {
     #[test]
     fn test_is_valid_address() {
         assert!(is_valid_address("0x1"));
-        assert!(is_valid_address("0xdeadbeef00000000000000000000000000000000000000000000000000000001"));
+        assert!(is_valid_address(
+            "0xdeadbeef00000000000000000000000000000000000000000000000000000001"
+        ));
         assert!(!is_valid_address("0xxyz"));
         assert!(!is_valid_address("invalid"));
     }

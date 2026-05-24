@@ -6,15 +6,15 @@
 use async_trait::async_trait;
 use bitcoin::Network;
 use bitcoin_hashes::Hash as BitcoinHash;
+use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
+use csv_hash::seal::{CommitAnchor, SealPoint};
+use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperation, SanadOperationResult, TransactionStatus,
 };
-use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
-use csv_hash::sanad::SanadId;
-use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
@@ -470,9 +470,10 @@ impl BitcoinChainSignerExt for BitcoinChainSigner {
                 })?;
 
             // Compute sighash with the prevout amount
-            let sighash = compute_sighash(&tx, input, &pubkey_bytes, Some(amount)).map_err(|e| {
-                ChainOpError::SigningError(format!("Failed to compute sighash: {}", e))
-            })?;
+            let sighash =
+                compute_sighash(&tx, input, &pubkey_bytes, Some(amount)).map_err(|e| {
+                    ChainOpError::SigningError(format!("Failed to compute sighash: {}", e))
+                })?;
 
             let message = secp256k1::Message::from_digest_slice(&sighash)
                 .map_err(|e| ChainOpError::SigningError(format!("Invalid sighash: {}", e)))?;
@@ -1670,8 +1671,7 @@ impl ChainProofProvider for BitcoinBackend {
         commitment: &Hash,
     ) -> ChainOpResult<bool> {
         let provider = BitcoinChainProofProvider::new(self.rpc.clone_boxed());
-        provider
-            .verify_proof_bundle_native(inclusion_proof, finality_proof, commitment)
+        provider.verify_proof_bundle_native(inclusion_proof, finality_proof, commitment)
     }
 }
 

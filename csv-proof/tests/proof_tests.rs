@@ -2,11 +2,9 @@
 
 use csv_hash::Hash;
 use csv_proof::{
-    Proof, ProofCategory, ProofPhase,
-    InclusionProof, FinalityProof, OwnershipProof, TransitionProof,
-    ReplayProof, ExecutionProof, ZKProof, CompositeProof,
-    CompositionRule,
-    ProofNode, ProofDag, ProofId,
+    CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
+    Proof, ProofCategory, ProofDag, ProofId, ProofNode, ProofPhase, ReplayProof, TransitionProof,
+    ZKProof,
 };
 
 fn test_hash() -> Hash {
@@ -23,6 +21,7 @@ fn test_proof_category_inclusion() {
         siblings: vec![test_hash()],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     assert_eq!(proof.category(), ProofCategory::Inclusion);
 }
@@ -35,6 +34,7 @@ fn test_proof_category_finality() {
         confirmations: 100,
         data: vec![1, 2, 3],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     assert_eq!(proof.category(), ProofCategory::Finality);
 }
@@ -112,6 +112,7 @@ fn test_proof_hash_is_consistent() {
         siblings: vec![test_hash()],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let hash1 = proof.hash();
     let hash2 = proof.hash();
@@ -126,6 +127,7 @@ fn test_different_proofs_have_different_hashes() {
         siblings: vec![test_hash()],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let proof2 = Proof::Inclusion(InclusionProof {
         leaf: test_hash(),
@@ -133,6 +135,7 @@ fn test_different_proofs_have_different_hashes() {
         siblings: vec![test_hash()],
         leaf_index: 1, // Different leaf index
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     assert_ne!(proof1.hash(), proof2.hash());
 }
@@ -145,6 +148,7 @@ fn test_different_categories_have_different_hashes() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let finality = Proof::Finality(FinalityProof {
         block_hash: test_hash(),
@@ -152,6 +156,7 @@ fn test_different_categories_have_different_hashes() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     assert_ne!(inclusion.hash(), finality.hash());
 }
@@ -183,6 +188,7 @@ fn test_dag_add_root_node() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node = ProofNode::root(proof);
     let mut dag = ProofDag::new();
@@ -198,6 +204,7 @@ fn test_dag_add_dependent_node() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -208,6 +215,7 @@ fn test_dag_add_dependent_node() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -225,6 +233,7 @@ fn test_dag_reject_missing_dependency() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let fake_id = ProofId::from_bytes(b"nonexistent");
     let node = ProofNode::new(proof, vec![fake_id]);
@@ -242,6 +251,7 @@ fn test_dag_verify_acyclic() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -252,6 +262,7 @@ fn test_dag_verify_acyclic() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -269,6 +280,7 @@ fn test_dag_roots() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -279,6 +291,7 @@ fn test_dag_roots() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -299,6 +312,7 @@ fn test_dag_leaves() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -309,6 +323,7 @@ fn test_dag_leaves() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -329,6 +344,7 @@ fn test_dag_topological_sort() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -339,6 +355,7 @@ fn test_dag_topological_sort() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -359,6 +376,7 @@ fn test_dag_depth() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -369,6 +387,7 @@ fn test_dag_depth() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -387,6 +406,7 @@ fn test_dag_verify_structure() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node1 = ProofNode::root(proof1);
     let id1 = node1.id.clone();
@@ -397,6 +417,7 @@ fn test_dag_verify_structure() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node2 = ProofNode::new(proof2, vec![id1.clone()]);
 
@@ -415,6 +436,7 @@ fn test_proof_node_metadata() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node = ProofNode::root(proof)
         .with_created_at(1000)
@@ -434,6 +456,7 @@ fn test_proof_node_is_expired() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node = ProofNode::root(proof)
         .with_created_at(2000)
@@ -472,6 +495,7 @@ fn test_composite_proof_and_rule() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let child2 = Proof::Finality(FinalityProof {
         block_hash: test_hash(),
@@ -479,6 +503,7 @@ fn test_composite_proof_and_rule() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
 
     let composite = CompositeProof {
@@ -499,6 +524,7 @@ fn test_composite_proof_or_rule() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
 
     let composite = CompositeProof {
@@ -519,6 +545,7 @@ fn test_composite_proof_threshold_rule() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let child2 = Proof::Finality(FinalityProof {
         block_hash: test_hash(),
@@ -526,6 +553,7 @@ fn test_composite_proof_threshold_rule() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
 
     let composite = CompositeProof {
@@ -565,17 +593,17 @@ fn test_proof_id_equality() {
 
 #[test]
 fn test_max_proof_bytes() {
-    assert_eq!(csv_proof::MAX_PROOF_BYTES, 64 * 1024);
+    assert_eq!(csv_proof::MAX_PROOF_BYTES, 1_000_000);
 }
 
 #[test]
 fn test_max_finality_data() {
-    assert_eq!(csv_proof::MAX_FINALITY_DATA, 4 * 1024);
+    assert_eq!(csv_proof::MAX_FINALITY_DATA, 100_000);
 }
 
 #[test]
 fn test_max_signatures_total_size() {
-    assert_eq!(csv_proof::MAX_SIGNATURES_TOTAL_SIZE, 1024 * 1024);
+    assert_eq!(csv_proof::MAX_SIGNATURES_TOTAL_SIZE, 10_000);
 }
 
 // ==================== Proof Category as Bytes Tests ====================
@@ -602,6 +630,7 @@ fn test_proof_node_id_is_unique() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let proof2 = Proof::Inclusion(InclusionProof {
         leaf: test_hash(),
@@ -609,6 +638,7 @@ fn test_proof_node_id_is_unique() {
         siblings: vec![],
         leaf_index: 1,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
 
     let node1 = ProofNode::root(proof1);
@@ -633,6 +663,7 @@ fn test_complex_dag() {
         siblings: vec![],
         leaf_index: 0,
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node_a = ProofNode::root(proof_a);
     let id_a = node_a.id.clone();
@@ -643,6 +674,7 @@ fn test_complex_dag() {
         siblings: vec![],
         leaf_index: 1,
         source: "bitcoin".to_string(),
+        ..Default::default()
     });
     let node_b = ProofNode::root(proof_b);
     let id_b = node_b.id.clone();
@@ -653,6 +685,7 @@ fn test_complex_dag() {
         confirmations: 100,
         data: vec![],
         source: "ethereum".to_string(),
+        ..Default::default()
     });
     let node_c = ProofNode::new(proof_c, vec![id_a.clone(), id_b.clone()]);
     let id_c = node_c.id.clone();

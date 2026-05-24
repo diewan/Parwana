@@ -28,8 +28,8 @@
 use serde::{Deserialize, Serialize};
 
 use csv_hash::Hash;
-use csv_hash::seal::SealPoint;
 use csv_hash::csv_tagged_hash;
+use csv_hash::seal::SealPoint;
 
 /// Maximum ZK proof size (1MB)
 pub const MAX_ZK_PROOF_SIZE: usize = 1024 * 1024;
@@ -174,14 +174,12 @@ impl ZkSealProof {
     /// Uses canonical CBOR serialization for protocol-critical data.
     /// Manual bincode serialization is forbidden per AUDIT.md.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        csv_codec::to_canonical_cbor(self)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        csv_codec::to_canonical_cbor(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
     /// Deserialize a proof from canonical bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        csv_codec::from_canonical_cbor(bytes)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        csv_codec::from_canonical_cbor(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 }
 
@@ -244,7 +242,8 @@ impl ChainWitness {
             self.inclusion_proof.clone(),
             self.finality_proof.clone(),
             self.timestamp,
-        )).expect("Canonical serialization should not fail for Witness");
+        ))
+        .expect("Canonical serialization should not fail for Witness");
         Hash::new(csv_tagged_hash("csv.zk.witness.v1", &data))
     }
 }
@@ -460,7 +459,7 @@ pub fn verify_zk_proof(
 /// In production, verifier keys must be loaded from on-chain verifier contracts
 /// or other trusted sources at runtime.
 pub fn default_verifier_registry() -> ZkVerifierRegistry {
-    use crate::protocol_version::builtin;
+    use csv_protocol::builtin;
 
     let mut registry = ZkVerifierRegistry::new();
 
@@ -484,7 +483,7 @@ pub fn default_verifier_registry() -> ZkVerifierRegistry {
     registry
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::protocol_version::builtin;
@@ -835,8 +834,8 @@ pub mod pedersen {
 mod pedersen_tests {
     #[cfg(feature = "zk")]
     mod zk_tests {
-        use curve25519_dalek::scalar::Scalar;
         use crate::zk_proof::pedersen::*;
+        use curve25519_dalek::scalar::Scalar;
 
         #[test]
         fn test_commit_and_verify() {

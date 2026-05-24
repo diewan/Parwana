@@ -5,44 +5,44 @@
 
 #![allow(missing_docs)]
 
-use std::time::Duration;
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::time::Duration;
 use thiserror::Error;
 
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 
-pub mod monitor;
-pub mod policy;
-pub mod state;
 pub mod abstraction;
 pub mod capabilities;
 pub mod chain_specific;
+pub mod monitor;
+pub mod policy;
+pub mod state;
 
 // Re-exports
+pub use abstraction::{FinalityRequirement, FinalityType as AbstractionFinalityType};
+pub use capabilities::ChainCapabilities;
+pub use chain_specific::{EthereumFinalityStage, SolanaCommitmentGrade};
 pub use monitor::FinalityMonitor;
 pub use policy::{ChainFinalityPolicy, FinalityThreshold};
 pub use state::{FinalityState, FinalityStatus};
-pub use abstraction::{FinalityType as AbstractionFinalityType, FinalityRequirement};
-pub use capabilities::ChainCapabilities;
-pub use chain_specific::{SolanaCommitmentGrade, EthereumFinalityStage};
 
 /// Finality type enum for chain-specific finality mechanisms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalityType {
     /// Probabilistic finality (Bitcoin-style)
     Probabilistic,
-    
+
     /// Economic finality (Ethereum-style)
     Economic,
-    
+
     /// Checkpoint finality (Sui/Aptos-style)
     Checkpoint,
-    
+
     /// Quorum finality (Solana-style)
     Quorum,
-    
+
     /// Instant finality (rare)
     Instant,
 }
@@ -52,10 +52,10 @@ impl FinalityType {
     pub fn default_confirmations(&self) -> u64 {
         match self {
             FinalityType::Probabilistic => 6, // Bitcoin standard
-            FinalityType::Economic => 2, // Ethereum finality after 2 blocks
-            FinalityType::Checkpoint => 1, // Checkpoint is final
-            FinalityType::Quorum => 1, // Quorum is final
-            FinalityType::Instant => 0, // Instant is final
+            FinalityType::Economic => 2,      // Ethereum finality after 2 blocks
+            FinalityType::Checkpoint => 1,    // Checkpoint is final
+            FinalityType::Quorum => 1,        // Quorum is final
+            FinalityType::Instant => 0,       // Instant is final
         }
     }
 
@@ -63,10 +63,10 @@ impl FinalityType {
     pub fn expected_time_to_finality(&self) -> Duration {
         match self {
             FinalityType::Probabilistic => Duration::from_secs(3600), // ~1 hour
-            FinalityType::Economic => Duration::from_secs(24), // ~24 seconds
-            FinalityType::Checkpoint => Duration::from_secs(2), // ~2 seconds
-            FinalityType::Quorum => Duration::from_secs(2), // ~2 seconds
-            FinalityType::Instant => Duration::from_secs(0), // Instant
+            FinalityType::Economic => Duration::from_secs(24),        // ~24 seconds
+            FinalityType::Checkpoint => Duration::from_secs(2),       // ~2 seconds
+            FinalityType::Quorum => Duration::from_secs(2),           // ~2 seconds
+            FinalityType::Instant => Duration::from_secs(0),          // Instant
         }
     }
 }
@@ -100,7 +100,7 @@ impl FinalityProof {
         finality_data: Vec<u8>,
     ) -> Self {
         let confirmations = current_height.saturating_sub(block_height);
-        
+
         Self {
             finality_type,
             block_height,
@@ -124,12 +124,8 @@ impl FinalityProof {
 
     /// Get the time to finality (if finalized).
     pub fn time_to_finality(&self) -> Option<Duration> {
-        if let Some(finalized_at) = self.finalized_at {
-            // In production, this would use the block timestamp
-            Some(Duration::from_secs(0))
-        } else {
-            None
-        }
+        // In production, this would use the block timestamp.
+        self.finalized_at.map(|_| Duration::from_secs(0))
     }
 }
 
@@ -138,16 +134,16 @@ impl FinalityProof {
 pub enum FinalityError {
     #[error("Invalid finality proof")]
     InvalidProof,
-    
+
     #[error("Insufficient confirmations: {current}/{required}")]
     InsufficientConfirmations { current: u64, required: u64 },
-    
+
     #[error("Invalid finality data")]
     InvalidFinalityData,
-    
+
     #[error("Block height mismatch")]
     BlockHeightMismatch,
-    
+
     #[error("Verification failed: {0}")]
     VerificationFailed(String),
 }
@@ -156,10 +152,10 @@ pub enum FinalityError {
 pub trait FinalityVerifier {
     /// Verify a finality proof for this chain.
     fn verify_finality(&self, proof: &FinalityProof) -> Result<bool, FinalityError>;
-    
+
     /// Get the finality type for this chain.
     fn finality_type(&self) -> FinalityType;
-    
+
     /// Get the required confirmations for this chain.
     fn required_confirmations(&self) -> u64;
 }
@@ -485,7 +481,7 @@ impl FinalityAnchor {
             cumulative_work,
             finalized_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
         }
     }
@@ -508,7 +504,7 @@ impl FinalityAnchor {
     pub fn is_stale(&self, max_age: Duration) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         now.saturating_sub(self.finalized_at) > max_age.as_secs()
     }
@@ -626,7 +622,10 @@ impl AncestorContinuityProof {
     ///
     /// Returns `Ok(())` if all ancestors are within `max_safe_reorg_depth`
     /// of the anchor, `Err` if any ancestor is too far back.
-    pub fn verify_within_safety_depth(&self, max_safe_reorg_depth: u64) -> Result<(), ContinuityError> {
+    pub fn verify_within_safety_depth(
+        &self,
+        max_safe_reorg_depth: u64,
+    ) -> Result<(), ContinuityError> {
         let anchor_height = self.anchor.finalized_height;
         for (height, _) in &self.ancestor_hashes {
             let depth = anchor_height.saturating_sub(*height);
@@ -796,7 +795,10 @@ pub trait FinalityAnchorStore: Send + Sync {
     /// Load the latest anchor for a chain.
     ///
     /// Returns `Ok(None)` if no anchor exists for the chain.
-    fn load_latest_anchor(&self, chain: &ChainId) -> Result<Option<FinalityAnchor>, AnchorStoreError>;
+    fn load_latest_anchor(
+        &self,
+        chain: &ChainId,
+    ) -> Result<Option<FinalityAnchor>, AnchorStoreError>;
 
     /// Load the ancestor continuity proof for a chain.
     ///
@@ -887,7 +889,10 @@ impl FinalityGuarantee {
             ) => *sequence >= *min_sequence,
 
             (
-                FinalityGuarantee::Economic { challenge_window_secs, .. },
+                FinalityGuarantee::Economic {
+                    challenge_window_secs,
+                    ..
+                },
                 FinalityPolicy::EconomicSettlement,
             ) => *challenge_window_secs == 0,
 

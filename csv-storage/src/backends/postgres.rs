@@ -1,9 +1,9 @@
 //! PostgreSQL-backed replay database with server-side CAS.
 
 use async_trait::async_trait;
-use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_proof::proof::ReplayId;
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use sqlx::PgPool;
 
 use crate::errors::ReplayDbError;
@@ -44,12 +44,10 @@ impl PostgresReplayDb {
         .await
         .map_err(|e| ReplayDbError::Storage(format!("Migration failed: {e}")))?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_replay_state ON replay_entries (state)",
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| ReplayDbError::Storage(format!("Migration failed: {e}")))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_replay_state ON replay_entries (state)")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ReplayDbError::Storage(format!("Migration failed: {e}")))?;
 
         sqlx::query(
             r#"
@@ -71,12 +69,11 @@ impl PostgresReplayDb {
 impl ReplayDatabase for PostgresReplayDb {
     async fn contains(&self, id: &[u8]) -> Result<bool, ReplayDbError> {
         let hex_id = hex::encode(id);
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT id FROM replay_entries WHERE id = $1")
-                .bind(&hex_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| ReplayDbError::Storage(e.to_string()))?;
+        let row: Option<(String,)> = sqlx::query_as("SELECT id FROM replay_entries WHERE id = $1")
+            .bind(&hex_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| ReplayDbError::Storage(e.to_string()))?;
         Ok(row.is_some())
     }
 
@@ -205,9 +202,7 @@ impl ReplayDatabase for PostgresReplayDb {
         Ok(())
     }
 
-    async fn load_all_transfers(
-        &self,
-    ) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
+    async fn load_all_transfers(&self) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
         let rows = sqlx::query_as::<_, (String, String)>(
             "SELECT sanad_id, entry_data FROM cross_chain_transfers",
         )

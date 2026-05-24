@@ -8,7 +8,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-
 use csv_protocol::cross_chain::CrossChainTransferProof;
 
 use crate::error::RuntimeError;
@@ -31,7 +30,10 @@ pub enum LeaseError {
     #[error("Lease conflict: held by {held_by} until {expires_at}")]
     Conflict { held_by: String, expires_at: u64 },
     #[error("Lease expired for coordinator {coordinator} at {expired_at}")]
-    Expired { coordinator: CoordinatorId, expired_at: u64 },
+    Expired {
+        coordinator: CoordinatorId,
+        expired_at: u64,
+    },
     #[error("Storage error: {0}")]
     Storage(String),
 }
@@ -104,9 +106,10 @@ impl CoordinatorLease for InMemoryLease {
         let now = Self::now_secs();
         let expiry = now + ttl.as_secs();
 
-        let mut state = self.state.write().map_err(|_| {
-            LeaseError::Storage("lease lock poisoned".to_string())
-        })?;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| LeaseError::Storage("lease lock poisoned".to_string()))?;
 
         match (&state.holder, state.expires_at) {
             (Some(holder), Some(_expires)) if *holder == *coordinator_id => {
@@ -131,9 +134,10 @@ impl CoordinatorLease for InMemoryLease {
     }
 
     async fn release(&self, coordinator_id: &CoordinatorId) -> Result<(), LeaseError> {
-        let mut state = self.state.write().map_err(|_| {
-            LeaseError::Storage("lease lock poisoned".to_string())
-        })?;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| LeaseError::Storage("lease lock poisoned".to_string()))?;
 
         if state.holder.as_ref() == Some(coordinator_id) {
             state.holder = None;
@@ -261,30 +265,21 @@ where
             })?;
 
         // Step 3: Execute mint — lease still required.
-        guard
-            .assert_valid()
-            .map_err(|e| {
-                // Lease expired between insert and mint — log for recovery coordinator.
-                tracing::error!(
-                    "Lease expired after insert, before mint — recovery coordinator required"
-                );
-                RuntimeError::LeaseExpired(e.to_string())
-            })?;
+        guard.assert_valid().map_err(|e| {
+            // Lease expired between insert and mint — log for recovery coordinator.
+            tracing::error!(
+                "Lease expired after insert, before mint — recovery coordinator required"
+            );
+            RuntimeError::LeaseExpired(e.to_string())
+        })?;
 
-        let receipt = self
-            .minter
-            .mint_sanad(proof)
-            .await
-            .map_err(|e| {
-                // Mint failed — ReplayId is Pending, recovery coordinator must resolve.
-                tracing::error!(
-                    "Mint failed after insert — needs recovery: {}",
-                    e
-                );
-                RuntimeError::MintFailed {
-                    cause: e.to_string(),
-                }
-            })?;
+        let receipt = self.minter.mint_sanad(proof).await.map_err(|e| {
+            // Mint failed — ReplayId is Pending, recovery coordinator must resolve.
+            tracing::error!("Mint failed after insert — needs recovery: {}", e);
+            RuntimeError::MintFailed {
+                cause: e.to_string(),
+            }
+        })?;
 
         // Step 4: Confirm consumed only after on-chain verification.
         self.db
@@ -327,11 +322,17 @@ mod tests {
         let coord = CoordinatorId("node-1".to_string());
 
         // First acquire should succeed
-        let expiry = lease.acquire_or_renew(&coord, Duration::from_secs(60)).await.unwrap();
+        let expiry = lease
+            .acquire_or_renew(&coord, Duration::from_secs(60))
+            .await
+            .unwrap();
         assert!(lease.is_held_by(&coord).await);
 
         // Renew should succeed for same coordinator
-        let expiry2 = lease.acquire_or_renew(&coord, Duration::from_secs(60)).await.unwrap();
+        let expiry2 = lease
+            .acquire_or_renew(&coord, Duration::from_secs(60))
+            .await
+            .unwrap();
         assert!(expiry2 >= expiry);
 
         // Release should work
@@ -346,10 +347,15 @@ mod tests {
         let coord2 = CoordinatorId("node-2".to_string());
 
         // Node 1 acquires lease
-        lease.acquire_or_renew(&coord1, Duration::from_secs(60)).await.unwrap();
+        lease
+            .acquire_or_renew(&coord1, Duration::from_secs(60))
+            .await
+            .unwrap();
 
         // Node 2 should get a conflict
-        let result = lease.acquire_or_renew(&coord2, Duration::from_secs(60)).await;
+        let result = lease
+            .acquire_or_renew(&coord2, Duration::from_secs(60))
+            .await;
         assert!(matches!(result, Err(LeaseError::Conflict { .. })));
     }
 
@@ -369,7 +375,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Node 2 should now be able to acquire (lease expired)
-        let result = lease.acquire_or_renew(&coord2, Duration::from_secs(60)).await;
+        let result = lease
+            .acquire_or_renew(&coord2, Duration::from_secs(60))
+            .await;
         assert!(result.is_ok());
     }
 

@@ -1,10 +1,10 @@
 //! Ethereum chain-specific verification helpers (MPT, seal registry).
 
+use csv_hash::Hash;
 use csv_protocol::verified::{
     FinalityStrength, InclusionStrength, VerificationAssurance, VerificationResult,
     VerifiedComponents,
 };
-use csv_hash::Hash;
 
 use crate::config::EthereumConfig;
 use crate::rpc::EthereumRpc;
@@ -34,7 +34,10 @@ impl EthereumVerifier {
     /// Check whether a seal is still available in the on-chain registry.
     ///
     /// Returns `valid: true` when the seal has **not** been consumed.
-    pub async fn verify_seal_registry(&self, seal_id: Hash) -> Result<VerificationResult, Box<dyn std::error::Error>> {
+    pub async fn verify_seal_registry(
+        &self,
+        seal_id: Hash,
+    ) -> Result<VerificationResult, Box<dyn std::error::Error>> {
         let _ = (self.rpc.clone_boxed(), self.csv_seal_address, seal_id);
         Ok(VerificationResult {
             valid: true,

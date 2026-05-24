@@ -1,6 +1,6 @@
 //! Common contract types shared across all chains
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Contract version
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,12 +16,20 @@ pub struct ContractVersion {
 impl ContractVersion {
     /// Create a new contract version
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     /// Current contract version
     pub const fn current() -> Self {
-        Self { major: 1, minor: 0, patch: 0 }
+        Self {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        }
     }
 }
 

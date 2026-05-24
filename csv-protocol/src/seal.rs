@@ -5,6 +5,5 @@
 //! `csv_protocol::seal::*` without depending directly on csv-hash.
 
 pub use csv_hash::seal::{
-    SealPoint, CommitAnchor,
-    MAX_SEAL_ID_SIZE, MAX_ANCHOR_ID_SIZE, MAX_ANCHOR_METADATA_SIZE,
+    CommitAnchor, MAX_ANCHOR_ID_SIZE, MAX_ANCHOR_METADATA_SIZE, MAX_SEAL_ID_SIZE, SealPoint,
 };

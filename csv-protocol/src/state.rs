@@ -4,9 +4,9 @@
 //! Unlike opaque byte vectors, typed state enables schema validation
 //! and consumer-friendly decoding.
 
-use serde::{Deserialize, Serialize};
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
+use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a state type within a schema
 pub type StateTypeId = u16;
@@ -176,4 +176,3 @@ impl StateRef {
         }
     }
 }
-

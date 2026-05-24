@@ -161,49 +161,49 @@ impl KeystoreFile {
         // Calculate MAC (SHA3-256 of derived key + ciphertext)
         let mac = calculate_mac(&derived_key, &ciphertext);
 
-       // Build KDF parameters
-            let kdfparams = match kdf_type {
-                KdfType::Scrypt => KdfParams {
-                    dklen: 32,
-                    salt: hex::encode(salt),
-                    n: Some(262144), // 2^18
-                    r: Some(8),
-                    p: Some(1),
-                    c: None,
-                    prf: None,
-                },
-                KdfType::ScryptTest => KdfParams {
-                    dklen: 32,
-                    salt: hex::encode(salt),
-                    n: Some(1024), // 2^10
-                    r: Some(8),
-                    p: Some(1),
-                    c: None,
-                    prf: None,
-                },
-                KdfType::Pbkdf2 => KdfParams {
-                    dklen: 32,
-                    salt: hex::encode(salt),
-                    n: None,
-                    r: None,
-                    p: None,
-                    c: Some(100000),
-                    prf: Some("hmac-sha256".to_string()),
-                },
-            };
+        // Build KDF parameters
+        let kdfparams = match kdf_type {
+            KdfType::Scrypt => KdfParams {
+                dklen: 32,
+                salt: hex::encode(salt),
+                n: Some(262144), // 2^18
+                r: Some(8),
+                p: Some(1),
+                c: None,
+                prf: None,
+            },
+            KdfType::ScryptTest => KdfParams {
+                dklen: 32,
+                salt: hex::encode(salt),
+                n: Some(1024), // 2^10
+                r: Some(8),
+                p: Some(1),
+                c: None,
+                prf: None,
+            },
+            KdfType::Pbkdf2 => KdfParams {
+                dklen: 32,
+                salt: hex::encode(salt),
+                n: None,
+                r: None,
+                p: None,
+                c: Some(100000),
+                prf: Some("hmac-sha256".to_string()),
+            },
+        };
 
-            let crypto = CryptoParams {
-                cipher: "aes-256-gcm".to_string(),
-                ciphertext: hex::encode(&ciphertext),
-                cipherparams: CipherParams {
-                    iv: hex::encode(iv_bytes),
-                },
-                kdf: match kdf_type {
-                    KdfType::Scrypt => "scrypt",
-                    KdfType::ScryptTest => "scrypt",
-                    KdfType::Pbkdf2 => "pbkdf2",
-                }
-                .to_string(),
+        let crypto = CryptoParams {
+            cipher: "aes-256-gcm".to_string(),
+            ciphertext: hex::encode(&ciphertext),
+            cipherparams: CipherParams {
+                iv: hex::encode(iv_bytes),
+            },
+            kdf: match kdf_type {
+                KdfType::Scrypt => "scrypt",
+                KdfType::ScryptTest => "scrypt",
+                KdfType::Pbkdf2 => "pbkdf2",
+            }
+            .to_string(),
             kdfparams,
             mac: hex::encode(mac),
         };

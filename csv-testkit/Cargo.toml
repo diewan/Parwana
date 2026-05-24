@@ -11,9 +11,10 @@ csv-codec = { path = "../csv-codec" }
 csv-proof = { path = "../csv-proof" }
 csv-verifier = { path = "../csv-verifier" }
 csv-storage = { path = "../csv-storage" }
+csv-runtime = { path = "../csv-runtime" }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 [[test]]
 name = "adversarial_integration"

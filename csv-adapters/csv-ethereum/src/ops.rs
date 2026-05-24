@@ -17,13 +17,13 @@ use csv_protocol::backend::{
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
 
-use csv_protocol::seal_protocol::SealProtocol;
+use csv_hash::Hash;
 #[cfg(feature = "rpc")]
 use csv_protocol::backend::SanadOperation;
-use csv_hash::Hash;
 use csv_protocol::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};
+use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
@@ -778,8 +778,8 @@ impl ChainBroadcaster for EthereumBackend {
 
         #[cfg(feature = "rpc")]
         {
-            use alloy_consensus::TxEnvelope;
             use alloy::rlp::Decodable;
+            use alloy_consensus::TxEnvelope;
             use alloy_consensus::transaction::SignerRecoverable;
 
             // Decode the transaction using alloy's TxEnvelope
@@ -1329,7 +1329,8 @@ impl ChainSanadOps for EthereumBackend {
         // This functionality needs to be implemented or the code path refactored
         Err(ChainOpError::FeatureNotEnabled(
             "call_contract method not available in EthereumRpc trait. \
-             This functionality needs to be implemented via eth_call RPC method.".to_string()
+             This functionality needs to be implemented via eth_call RPC method."
+                .to_string(),
         ))
     }
 }

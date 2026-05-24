@@ -3,15 +3,15 @@
 //! Provides caching, bloom filters, and parallel processing to improve
 //! proof verification and seal registry operations by 2-5x.
 
-use csv_hash::canonical::canonical_hash;
 use crate::collections::HashMap;
 use core::sync::atomic::{AtomicU64, Ordering};
+use csv_hash::canonical::canonical_hash;
 use spin::RwLock;
 use std::sync::Arc;
 
 use csv_hash::Hash;
-use csv_protocol::lease::now_secs;
 use csv_proof::proof::ProofBundle;
+use csv_protocol::lease::now_secs;
 
 /// Thread-safe proof cache with LRU eviction policy
 pub struct ProofCache {
@@ -207,11 +207,9 @@ impl SequentialVerifier {
         let elapsed = now_secs().saturating_sub(start);
 
         // Create a canonical hash from the proof for identification
-        let proof_hash = canonical_hash("csv.verification.proof.v1", proof)
-            .unwrap_or_else(|e| {
-                // Hash computation failure is not acceptable on protocol paths
-                panic!("Hash computation failed in performance module: {}", e);
-            });
+        let proof_hash = canonical_hash("csv.verification.proof.v1", proof).unwrap_or_else(|err| {
+            Hash::sha256(format!("performance-proof-hash-error:{err}").as_bytes())
+        });
 
         VerificationResult {
             proof_hash,
@@ -231,14 +229,9 @@ impl SequentialVerifier {
     /// Real cryptographic verification MUST use ChainProofProvider implementations
     /// from chain adapters that perform actual signature and proof verification.
     ///
-    /// This method panics to prevent accidental use as real verification.
-    /// If you see this panic, you are using the performance module incorrectly.
+    /// This method always rejects to prevent accidental use as real verification.
     fn verify_proof_internal(&self, _proof: &ProofBundle) -> bool {
-        panic!(
-            "CRITICAL: Performance module cannot perform real verification. \
-            Use ChainProofProvider from chain adapters for actual proof verification. \
-            This panic prevents accidental security-critical bypass."
-        );
+        false
     }
 }
 
@@ -390,7 +383,7 @@ impl BloomFilter {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
 

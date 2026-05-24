@@ -3,6 +3,8 @@
 //! Type-safe bindings for the CSV Lock contract using Alloy.
 //! Generated from CSVLock.sol
 
+#![allow(clippy::too_many_arguments)]
+
 use alloy_primitives::{Address, Bytes, FixedBytes};
 use alloy_sol_types::sol;
 

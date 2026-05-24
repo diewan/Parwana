@@ -5,8 +5,8 @@
 
 use anyhow::Result;
 
-use csv_hash::sanad::SanadId;
 use csv_hash::Hash;
+use csv_hash::sanad::SanadId;
 use csv_sdk::CsvClient;
 
 use crate::config::{Chain, Config};
@@ -72,14 +72,12 @@ pub async fn cmd_transfer(
     // Get destination owner address
     let dest_owner_str = dest_owner.or_else(|| state.get_address(&from).map(|s| s.to_string()));
 
-    if dest_owner_str.is_none() {
+    let Some(dest_addr) = dest_owner_str else {
         return Err(anyhow::anyhow!(
             "No destination address specified and no wallet address found for {:?}",
             to_chain
         ));
-    }
-
-    let dest_addr = dest_owner_str.unwrap();
+    };
 
     // Create client builder with source and destination chains
     let client = CsvClient::builder()

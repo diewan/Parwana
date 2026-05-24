@@ -213,11 +213,11 @@ impl StateProofVerifier {
             // We use a positional nibble approach: position is derived from the leaf hash
             let position_bit = (leaf_hash[0] >> (i % 8)) & 1;
             if position_bit == 0 {
-                combined.update(&current_hash);
+                combined.update(current_hash);
                 combined.update(sibling);
             } else {
                 combined.update(sibling);
-                combined.update(&current_hash);
+                combined.update(current_hash);
             }
             current_hash = combined.finalize().into();
         }

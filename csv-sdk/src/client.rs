@@ -77,10 +77,7 @@ impl StoreHandle {
     }
 
     /// List all Sanads for a specific chain.
-    pub fn list_sanads_by_chain(
-        &self,
-        chain: &str,
-    ) -> Result<Vec<SanadRecord>, CsvError> {
+    pub fn list_sanads_by_chain(&self, chain: &str) -> Result<Vec<SanadRecord>, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
                 .list_sanads_by_chain(chain)
@@ -354,13 +351,11 @@ impl CsvClient {
 
         let registered = self.chain_runtime.registered_chains().await;
         if registered.is_empty() && !failed_chains.is_empty() {
-            return Err(CsvError::ConfigError(
-                format!(
-                    "No chain adapters could be initialized. Failed chains: [{}]. \
+            return Err(CsvError::ConfigError(format!(
+                "No chain adapters could be initialized. Failed chains: [{}]. \
                      Check your configuration (e.g., Bitcoin requires an xpub for seal protocol).",
-                    failed_chains.join(", ")
-                )
-            ));
+                failed_chains.join(", ")
+            )));
         }
 
         Ok(())
@@ -638,7 +633,7 @@ impl ClientRef {
             ))),
             config: Config::default(),
             event_tx,
-            chain_runtime: None
+            chain_runtime: None,
         }
     }
 

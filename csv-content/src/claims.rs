@@ -3,8 +3,8 @@
 //! Provides a system for expressing and verifying claims about content
 //! and managing access rights to content nodes.
 
-use serde::{Serialize, Deserialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// A claim about content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,7 +40,11 @@ pub enum ClaimPredicate {
 
 impl Claim {
     /// Create a new claim.
-    pub fn new(subject: impl Into<String>, object: impl Into<String>, predicate: ClaimPredicate) -> Self {
+    pub fn new(
+        subject: impl Into<String>,
+        object: impl Into<String>,
+        predicate: ClaimPredicate,
+    ) -> Self {
         Self {
             subject: subject.into(),
             object: object.into(),
@@ -52,8 +56,8 @@ impl Claim {
 
     /// Hash this claim for storage.
     pub fn hash(&self) -> Hash {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let data = format!("{}:{}:{}", self.subject, self.object, self.predicate_tag());
         tagged_hash(HashDomain::VerificationProofV1, data.as_bytes()).hash
@@ -126,8 +130,8 @@ pub struct RightsTransfer {
 impl RightsTransfer {
     /// Hash this transfer request.
     pub fn hash(&self) -> Hash {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
 
         let data = format!(
             "{}:{}:{}:{}",

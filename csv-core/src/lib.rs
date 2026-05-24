@@ -61,20 +61,17 @@ extern crate alloc;
 pub mod collections;
 
 // Re-exports
+pub use csv_hash::chain_id::ChainId;
 pub use csv_hash::commitment::Commitment;
 pub use csv_hash::sanad::SanadId;
-pub use csv_hash::chain_id::ChainId;
-pub use csv_proof::commitments_ext::CommitmentScheme;
 pub use csv_hash::{
-    Hash, HashDomain, HashParseError, DomainCategory,
-    SealHash, CommitmentHash, SanadIdHash, NullifierHash, ReplayIdHash,
-    VerificationHash, MerkleHash,
-    MerkleProof, MerkleTree,
-    Domain, DomainSeparatedHash,
-    csv_tagged_hash, CSV_TAG_PREFIX,
-    AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain,
-    ProofBundleDomain, ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
+    AptosAnchorDomain, BitcoinSealDomain, CSV_TAG_PREFIX, CommitmentHash, Domain, DomainCategory,
+    DomainSeparatedHash, EthereumMintDomain, GenesisDomain, Hash, HashDomain, HashParseError,
+    MerkleHash, MerkleProof, MerkleTree, NullifierHash, ProofBundleDomain, ReplayIdHash,
+    ReplayRegistryDomain, SanadIdHash, SchemaDomain, SealHash, TransferCommitmentDomain,
+    TransitionDomain, VerificationHash, csv_tagged_hash,
 };
+pub use csv_proof::commitments_ext::CommitmentScheme;
 
 // Advanced commitment types
 // pub mod commitments_ext; // DELETED - use csv_proof::commitments_ext
@@ -119,26 +116,24 @@ pub mod trust_package;
 // pub mod chain_capabilities; // DELETED - use csv_protocol::finality::capabilities
 
 // Trust package re-exports
-pub use trust_package::{
-    OfflineVerificationContext, TrustPackage, TrustPackageError,
-};
+pub use trust_package::{OfflineVerificationContext, TrustPackage, TrustPackageError};
 
 /// Proof provenance metadata for forensic and deterministic verification.
 pub mod proof_provenance;
 
-/// Startup-time config validation helpers to assert capability alignment.
+// Startup-time config validation helpers to assert capability alignment.
 // pub mod config_validation; // DELETED - depends on deleted chain_config
 
 /// Runtime health and degraded-mode types used by runtime orchestration.
 pub mod runtime_health;
 
-/// Restart-safe finality anchoring — canonical chain snapshot persistence.
+// Restart-safe finality anchoring — canonical chain snapshot persistence.
 // pub mod finality_anchor; // Moved to csv-protocol during migration
 
 /// Protocol version compatibility matrix for version negotiation.
 pub mod compatibility;
 
-/// Chain-specific finality grades (SolanaCommitmentGrade, EthereumFinalityStage).
+// Chain-specific finality grades (SolanaCommitmentGrade, EthereumFinalityStage).
 // pub mod chain_specific; // Moved to csv-protocol during migration
 
 /// Data authority tags — prevent explorer-authoritative state interpretation.
@@ -146,7 +141,6 @@ pub mod data_authority;
 
 /// Persisted state transitions — atomic coupling of proofs and state changes.
 pub mod persisted_transition;
-
 
 /// Wallet capability separation and signing provider abstraction.
 pub mod wallet_types;
@@ -193,15 +187,12 @@ pub mod zk_proof;
 // Re-exports: Stable API (will not change without semver-major bump)
 // ===========================================================================
 
-pub use error::{ProtocolError, Result};
-pub use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
-pub use csv_hash::seal::{CommitAnchor, SealPoint};
-pub use csv_hash::nullifier::{
-    DoubleSpendError, SealConsumption, SealNullifier,
-};
 #[cfg(feature = "std")]
 pub use csv_hash::nullifier::OptimizedSealNullifier;
-
+pub use csv_hash::nullifier::{DoubleSpendError, SealConsumption, SealNullifier};
+pub use csv_hash::seal::{CommitAnchor, SealPoint};
+pub use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+pub use error::{ProtocolError, Result};
 
 // ===========================================================================
 // Re-exports: Beta API (may receive additive changes)
@@ -216,8 +207,8 @@ pub use csv_proof::commitments_ext::{
 pub use mcp::{
     AgentChainAdapterInfo, AgentCreateSealResult, AgentExportProofResult, AgentGetSanadsResult,
     AgentProtocolInfoResult, AgentRpcStatus, AgentSanadSummary, AgentSealStatus,
-    AgentTransferResult, AgentTransferStatus, AgentVerifyProofResult, ErrorSuggestion,
-    FixAction, HasErrorSuggestion, VerificationLevel, error_codes,
+    AgentTransferResult, AgentTransferStatus, AgentVerifyProofResult, ErrorSuggestion, FixAction,
+    HasErrorSuggestion, VerificationLevel, error_codes,
 };
 
 // Production hardening
@@ -231,12 +222,11 @@ pub use mcp::{
 // pub use protocol_version::FinalityDepths; // DELETED - use csv_protocol::version
 
 // State machine (Phase 1)
-pub use consignment::{Consignment, CONSIGNMENT_VERSION};
+pub use consignment::{CONSIGNMENT_VERSION, Consignment};
 // pub use genesis::Genesis; // DELETED - use csv_protocol::genesis
 // pub use state::{GlobalState, OwnedState, StateAssignment, StateRef}; // DELETED - use csv_protocol::state
-pub use transition::Transition;
 pub use store::InMemorySealStore;
-
+pub use transition::Transition;
 
 // ===========================================================================
 // Re-exports: Experimental API (feature-gated, may change)

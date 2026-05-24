@@ -70,7 +70,9 @@ pub fn execute(
             chain,
             sanad_id,
             output,
-        } => cmd_generate(chain, sanad_id, output, config, state, canonical, proof_tree),
+        } => cmd_generate(
+            chain, sanad_id, output, config, state, canonical, proof_tree,
+        ),
         ProofAction::Verify { chain, proof } => {
             cmd_verify(chain, proof, config, state, canonical, proof_tree)
         }
@@ -193,8 +195,8 @@ fn cmd_verify(
     canonical: bool,
     proof_tree: bool,
 ) -> Result<()> {
-    use csv_proof::proof::ProofBundle;
     use csv_hash::sanad::SanadId;
+    use csv_proof::proof::ProofBundle;
     use csv_sdk::prelude::CsvClient;
 
     output::header(&format!("Verifying Proof on {}", chain));
@@ -215,15 +217,49 @@ fn cmd_verify(
             let json: serde_json::Value = serde_json::from_slice(&proof_bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid proof format: {}", e))?;
             Ok::<ProofOutput, anyhow::Error>(ProofOutput {
-                chain: json.get("chain").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-                sanad_id: json.get("sanad_id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                proof_type: json.get("proof_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-                block_height: json.get("block_height").and_then(|v| v.as_u64()).unwrap_or(0),
-                inclusion_proof: json.get("inclusion_proof").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                dag_root: json.get("dag_root").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                seal_id: json.get("seal_id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                anchor_height: json.get("anchor_height").and_then(|v| v.as_u64()).unwrap_or(0),
-                generated_at: json.get("generated_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                chain: json
+                    .get("chain")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                sanad_id: json
+                    .get("sanad_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                proof_type: json
+                    .get("proof_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                block_height: json
+                    .get("block_height")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                inclusion_proof: json
+                    .get("inclusion_proof")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                dag_root: json
+                    .get("dag_root")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                seal_id: json
+                    .get("seal_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                anchor_height: json
+                    .get("anchor_height")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                generated_at: json
+                    .get("generated_at")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .map_err(|e| anyhow::anyhow!("Failed to parse proof: {}", e))?;
@@ -262,12 +298,12 @@ fn cmd_verify(
 
     // Reconstruct the proof bundle
     let proof_bundle = {
-        use csv_protocol::{
+        use csv_hash::{
+            Hash,
             dag::{DAGNode, DAGSegment},
-            proof::{FinalityProof, InclusionProof},
             seal::{CommitAnchor, SealPoint},
         };
-        use csv_hash::Hash;
+        use csv_proof::proof::{FinalityProof, InclusionProof};
 
         let dag_root = hex::decode(&proof_output.dag_root)
             .ok()
@@ -275,8 +311,7 @@ fn cmd_verify(
             .map(Hash::new)
             .unwrap_or_else(|| Hash::new(hash_bytes));
 
-        let seal_id = hex::decode(&proof_output.seal_id)
-            .unwrap_or_else(|_| hash_bytes.to_vec());
+        let seal_id = hex::decode(&proof_output.seal_id).unwrap_or_else(|_| hash_bytes.to_vec());
 
         let anchor_height = proof_output.anchor_height;
 
@@ -323,9 +358,9 @@ fn cmd_verify(
     output::progress(4, 4, "Finalizing verification...");
 
     let level = if valid {
-        csv_protocol::mcp::VerificationLevel::FullyVerified
+        csv_protocol::VerificationLevel::FullyVerified
     } else {
-        csv_protocol::mcp::VerificationLevel::StructuralOnly
+        csv_protocol::VerificationLevel::StructuralOnly
     };
 
     let result = serde_json::json!({
@@ -368,15 +403,49 @@ fn cmd_verify_cross_chain(
             let json: serde_json::Value = serde_json::from_slice(&proof_bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid proof format: {}", e))?;
             Ok::<ProofOutput, anyhow::Error>(ProofOutput {
-                chain: json.get("chain").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-                sanad_id: json.get("sanad_id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                proof_type: json.get("proof_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-                block_height: json.get("block_height").and_then(|v| v.as_u64()).unwrap_or(0),
-                inclusion_proof: json.get("inclusion_proof").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                dag_root: json.get("dag_root").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                seal_id: json.get("seal_id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                anchor_height: json.get("anchor_height").and_then(|v| v.as_u64()).unwrap_or(0),
-                generated_at: json.get("generated_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                chain: json
+                    .get("chain")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                sanad_id: json
+                    .get("sanad_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                proof_type: json
+                    .get("proof_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                block_height: json
+                    .get("block_height")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                inclusion_proof: json
+                    .get("inclusion_proof")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                dag_root: json
+                    .get("dag_root")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                seal_id: json
+                    .get("seal_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                anchor_height: json
+                    .get("anchor_height")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                generated_at: json
+                    .get("generated_at")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .map_err(|e| anyhow::anyhow!("Failed to parse proof: {}", e))?;

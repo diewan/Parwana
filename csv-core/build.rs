@@ -6,26 +6,29 @@
 #![allow(clippy::use_debug)]
 
 use std::env;
+use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     // Tell cargo to rerun if Cargo.toml changes
     println!("cargo:rerun-if-changed=../Cargo.toml");
     println!("cargo:rerun-if-changed=Cargo.toml");
 
     // Get the workspace root
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = Path::new(&manifest_dir).parent().unwrap();
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
+    let workspace_root = Path::new(&manifest_dir)
+        .parent()
+        .ok_or("CARGO_MANIFEST_DIR has no parent directory")?;
     let workspace_cargo_toml = workspace_root.join("Cargo.toml");
 
     // Read workspace version
     let version = if workspace_cargo_toml.exists() {
-        let content = fs::read_to_string(&workspace_cargo_toml).unwrap();
-        parse_version_from_toml(&content)
+        let content = fs::read_to_string(&workspace_cargo_toml)?;
+        parse_version_from_toml(&content).unwrap_or(env::var("CARGO_PKG_VERSION")?)
     } else {
         // Fallback: use CARGO_PKG_VERSION
-        env::var("CARGO_PKG_VERSION").unwrap()
+        env::var("CARGO_PKG_VERSION")?
     };
 
     // Parse version components
@@ -44,7 +47,7 @@ fn main() {
         .unwrap_or(0);
 
     // Generate version.rs
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR")?;
     let dest_path = Path::new(&out_dir).join("version.rs");
 
     let version_code = format!(
@@ -78,16 +81,17 @@ pub const EXAMPLE_VERSION: &str = "{}";
         version, version, version, major, minor, patch, major, minor, patch, version, version
     );
 
-    fs::write(&dest_path, version_code).unwrap();
+    fs::write(&dest_path, version_code)?;
 
     // Also emit as cargo environment variable for dependent crates
     println!("cargo:rustc-env=CSV_PROTOCOL_VERSION={}", version);
+
+    Ok(())
 }
 
-fn parse_version_from_toml(content: &str) -> String {
+fn parse_version_from_toml(content: &str) -> Option<String> {
     content
         .lines()
         .find(|line| line.trim().starts_with("version ="))
         .and_then(|line| line.split('"').nth(1).map(|s| s.to_string()))
-        .unwrap_or_else(|| env::var("CARGO_PKG_VERSION").unwrap())
 }

@@ -22,8 +22,7 @@ pub mod semantics {
 pub mod registry;
 
 pub use registry::{
-    ReplayKey, ReplayEntry, ReplayRegistry, ReplayRegistryBackend,
-    ReplayNullifier, NullifierRegistry, NullifierRegistryStats,
-    ReplayError, ReplayConstitutionValidator,
-    REPLAY_CONSTITUTION_VERSION, NULLIFIER_EXPIRY_SECONDS,
+    NULLIFIER_EXPIRY_SECONDS, NullifierRegistry, NullifierRegistryStats,
+    REPLAY_CONSTITUTION_VERSION, ReplayConstitutionValidator, ReplayEntry, ReplayError, ReplayKey,
+    ReplayNullifier, ReplayRegistry, ReplayRegistryBackend,
 };

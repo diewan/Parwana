@@ -3,8 +3,8 @@
 //! Provides a system for referencing external content attachments
 //! without storing large blobs directly in Sanads.
 
-use serde::{Serialize, Deserialize};
 use csv_hash::Hash;
+use serde::{Deserialize, Serialize};
 
 /// A reference to an external attachment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,12 +25,7 @@ pub struct AttachmentRef {
 
 impl AttachmentRef {
     /// Create a new attachment reference.
-    pub fn new(
-        cid: impl Into<String>,
-        media_type: MediaType,
-        size: u64,
-        hash: Hash,
-    ) -> Self {
+    pub fn new(cid: impl Into<String>, media_type: MediaType, size: u64, hash: Hash) -> Self {
         Self {
             cid: cid.into(),
             media_type,
@@ -121,7 +116,7 @@ impl Default for AttachmentBudget {
         Self {
             max_count: 10,
             max_total_size: 100 * 1024 * 1024, // 100 MB
-            max_single_size: 50 * 1024 * 1024,  // 50 MB
+            max_single_size: 50 * 1024 * 1024, // 50 MB
             allowed_types: vec![
                 MediaType::Json,
                 MediaType::Pdf,
@@ -146,7 +141,12 @@ impl AttachmentBudget {
     }
 
     /// Check if adding an attachment would exceed the budget.
-    pub fn would_exceed_budget(&self, current_count: u32, current_size: u64, attachment: &AttachmentRef) -> bool {
+    pub fn would_exceed_budget(
+        &self,
+        current_count: u32,
+        current_size: u64,
+        attachment: &AttachmentRef,
+    ) -> bool {
         if current_count >= self.max_count {
             return true;
         }

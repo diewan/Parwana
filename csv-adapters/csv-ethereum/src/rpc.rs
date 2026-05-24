@@ -4,7 +4,7 @@
 //! by the CSV adapter: storage proofs, receipts, block queries, finality.
 
 use async_trait::async_trait;
-#[cfg(feature = "quorum")]
+#[cfg(any())]
 use csv_protocol::rpc::quorum_client::QuorumClient;
 
 use std::collections::HashMap;
@@ -412,12 +412,12 @@ impl EthereumRpc for MockEthereumRpc {
 /// Wraps a `QuorumClient` to provide quorum-based consensus for all
 /// Ethereum JSON-RPC calls. This is the recommended production RPC
 /// implementation for the Ethereum adapter.
-#[cfg(feature = "quorum")]
+#[cfg(any())]
 pub struct QuorumEthereumRpc {
     client: QuorumClient,
 }
 
-#[cfg(feature = "quorum")]
+#[cfg(any())]
 impl QuorumEthereumRpc {
     /// Create a new quorum-backed Ethereum RPC from providers.
     pub fn new(providers: Vec<csv_core::rpc::quorum_client::RpcProvider>) -> Self {
@@ -439,7 +439,7 @@ impl QuorumEthereumRpc {
     }
 }
 
-#[cfg(feature = "quorum")]
+#[cfg(any())]
 #[async_trait]
 impl EthereumRpc for QuorumEthereumRpc {
     async fn block_number(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {

@@ -42,10 +42,10 @@
 //! here could allow fraudulent proofs to be accepted, leading to
 //! unauthorized state transitions or double-spends.
 
-use csv_protocol::error::ProtocolError;
-use csv_protocol::verification::VerificationLevel;
 use csv_proof::proof::ProofBundle;
+use csv_protocol::error::ProtocolError;
 use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};
+use csv_protocol::verification::VerificationLevel;
 use serde::Serialize;
 
 type Result<T> = std::result::Result<T, ProtocolError>;
@@ -466,7 +466,9 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         // Chain-specific inclusion verification would be delegated to chain adapters
         // For now, we perform basic validation
         if anchor_ref.anchor_id.is_empty() {
-            return Err(ProtocolError::InvalidInput("anchor_id is empty".to_string()));
+            return Err(ProtocolError::InvalidInput(
+                "anchor_id is empty".to_string(),
+            ));
         }
 
         Ok(VerificationResult::merkle_verified())
@@ -482,9 +484,10 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         if let Some(current_height) = context.current_block_height {
             let confirmations = current_height.saturating_sub(block_height);
             if confirmations < context.required_confirmations {
-                return Err(ProtocolError::FinalityNotReached(
-                    format!("{} confirmations, need {}", confirmations, context.required_confirmations)
-                ));
+                return Err(ProtocolError::FinalityNotReached(format!(
+                    "{} confirmations, need {}",
+                    confirmations, context.required_confirmations
+                )));
             }
         }
 
@@ -517,20 +520,20 @@ impl CanonicalVerifierImpl {
     }
 
     /// Verify all signatures in the proof bundle.
-    fn verify_signatures(
-        &self,
-        bundle: &ProofBundle,
-        context: &VerificationContext,
-    ) -> Result<()> {
+    fn verify_signatures(&self, bundle: &ProofBundle, context: &VerificationContext) -> Result<()> {
         if bundle.signatures.is_empty() {
-            return Err(ProtocolError::InvalidInput("No signatures present".to_string()));
+            return Err(ProtocolError::InvalidInput(
+                "No signatures present".to_string(),
+            ));
         }
 
         // Signature verification would use the signature scheme from context
         // For now, we perform basic validation
         for sig in &bundle.signatures {
             if sig.is_empty() {
-                return Err(ProtocolError::SignatureVerificationFailed("Empty signature".to_string()));
+                return Err(ProtocolError::SignatureVerificationFailed(
+                    "Empty signature".to_string(),
+                ));
             }
         }
 
@@ -538,20 +541,15 @@ impl CanonicalVerifierImpl {
     }
 
     /// Check seal replay status.
-    fn check_seal_replay(
-        &self,
-        bundle: &ProofBundle,
-        context: &VerificationContext,
-    ) -> Result<()> {
+    fn check_seal_replay(&self, bundle: &ProofBundle, context: &VerificationContext) -> Result<()> {
         let status = self.verify_seal_registry(&bundle.seal_ref.id, context)?;
         match status {
-            SealRegistryStatus::Consumed => {
-                Err(ProtocolError::SealReplay(format!("{:?}", bundle.seal_ref.id)))
-            }
+            SealRegistryStatus::Consumed => Err(ProtocolError::SealReplay(format!(
+                "{:?}",
+                bundle.seal_ref.id
+            ))),
             SealRegistryStatus::Available => Ok(()),
-            SealRegistryStatus::CheckFailed(msg) => {
-                Err(ProtocolError::InvalidInput(msg))
-            }
+            SealRegistryStatus::CheckFailed(msg) => Err(ProtocolError::InvalidInput(msg)),
         }
     }
 }
@@ -610,22 +608,22 @@ impl VerificationResult {
     /// Failed result from a ProtocolError, converted to typed error.
     pub fn from_protocol_error(e: &ProtocolError) -> Self {
         let error = match e {
-            ProtocolError::SealReplay(_) => {
-                VerificationError::seal_replay(&[])
-            }
-            ProtocolError::SignatureVerificationFailed(_) => {
-                VerificationError::signature_invalid()
-            }
+            ProtocolError::SealReplay(_) => VerificationError::seal_replay(&[]),
+            ProtocolError::SignatureVerificationFailed(_) => VerificationError::signature_invalid(),
             ProtocolError::InclusionProofFailed(_) => {
                 VerificationError::inclusion_proof_invalid("verification failed")
             }
             ProtocolError::FinalityNotReached(msg) => {
                 // Parse confirmations from message if possible
-                let confirmations = msg.split(':').nth(1)
+                let confirmations = msg
+                    .split(':')
+                    .nth(1)
                     .and_then(|s: &str| s.split(',').next())
                     .and_then(|s: &str| s.trim().parse::<u64>().ok())
                     .unwrap_or(0);
-                let required = msg.split(',').nth(1)
+                let required = msg
+                    .split(',')
+                    .nth(1)
                     .and_then(|s: &str| s.split(':').nth(1))
                     .and_then(|s: &str| s.trim().parse::<u64>().ok())
                     .unwrap_or(MIN_REQUIRED_CONFIRMATIONS);
@@ -679,17 +677,16 @@ pub fn verify_proof(
     signature_scheme: SignatureScheme,
 ) -> VerificationResult {
     // Step 1: Validate proof bundle size (DoS protection)
-//     if let Err(e) = validate_proof_bundle_size(bundle) {
-//         return VerificationResult::from_protocol_error(&e);
-//     }
-// 
-//     // Step 2: Validate DAG structure
-//     if let Err(e) = bundle
-//         .transition_dag
-//         .validate_structure()
-//         .map_err(|e| ProtocolError::Generic(format!("Invalid DAG structure: {}", e)))
-    {
-    }
+    //     if let Err(e) = validate_proof_bundle_size(bundle) {
+    //         return VerificationResult::from_protocol_error(&e);
+    //     }
+    //
+    //     // Step 2: Validate DAG structure
+    //     if let Err(e) = bundle
+    //         .transition_dag
+    //         .validate_structure()
+    //         .map_err(|e| ProtocolError::Generic(format!("Invalid DAG structure: {}", e)))
+    {}
 
     // Step 3: Validate proof timestamp (prevent replay of old proofs)
     if let Err(e) = validate_proof_timestamp(bundle) {
@@ -740,7 +737,7 @@ pub fn verify_proof(
 // fn validate_proof_bundle_size(bundle: &ProofBundle) -> Result<()> {
 //     // Estimate size by summing all components
 //     let mut total_size: usize = 0;
-// 
+//
 //     // DAG segment size
 //     total_size += bundle.transition_dag.root_commitment.as_bytes().len();
 //     for node in &bundle.transition_dag.nodes {
@@ -754,28 +751,27 @@ pub fn verify_proof(
 //             total_size += parent.as_bytes().len();
 //         }
 //     }
-// 
+//
 //     // Signatures size
 //     for sig in &bundle.signatures {
 //         total_size += sig.len();
 //     }
-// 
+//
 //     // Seal and anchor references
 //     total_size += bundle.seal_ref.id.len();
 //     total_size += bundle.anchor_ref.anchor_id.len();
 //     total_size += bundle.anchor_ref.metadata.len();
-// 
+//
 //     // Proof data
 //     total_size += bundle.inclusion_proof.proof_bytes.len();
 //     total_size += bundle.finality_proof.finality_data.len();
-// 
+//
 //     if total_size > MAX_PROOF_BUNDLE_SIZE {
 //         return Err(ProtocolError::Generic(format!(
 //             "Proof bundle too large: {} bytes (max {})",
 //             total_size, MAX_PROOF_BUNDLE_SIZE
 //         )));
 //     }
-
 
 /// Validate proof timestamp to prevent replay of old proofs.
 ///
@@ -997,28 +993,11 @@ fn verify_bundle_signatures(bundle: &ProofBundle, scheme: SignatureScheme) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_hash::dag::{DAGNode, DAGSegment};
     use csv_hash::Hash;
-    use csv_proof::proof::{FinalityProof, InclusionProof};
+    use csv_hash::dag::{DAGNode, DAGSegment};
     use csv_hash::seal::{CommitAnchor, SealPoint};
+    use csv_proof::proof::{FinalityProof, InclusionProof};
     use csv_protocol::signature::SignatureScheme;
-
-    fn make_secp256k1_signature_bytes(message: &[u8; 32]) -> Vec<u8> {
-        use secp256k1::{Message, Secp256k1, SecretKey};
-        let secp = Secp256k1::new();
-        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
-        let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
-        let msg = Message::from_digest_slice(message).unwrap();
-        let signature = secp.sign_ecdsa(&msg, &secret_key);
-        let sig_bytes = signature.serialize_compact();
-        let pubkey_bytes = public_key.serialize();
-        // Format: [pk_len (4 bytes LE)] [public_key] [signature]
-        let mut encoded = Vec::with_capacity(4 + pubkey_bytes.len() + sig_bytes.len());
-        encoded.extend_from_slice(&(pubkey_bytes.len() as u32).to_le_bytes());
-        encoded.extend_from_slice(&pubkey_bytes);
-        encoded.extend_from_slice(&sig_bytes);
-        encoded
-    }
 
     fn make_ed25519_signature_bytes(message: &[u8]) -> Vec<u8> {
         use ed25519_dalek::{Signer, SigningKey};

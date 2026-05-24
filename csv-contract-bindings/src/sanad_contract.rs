@@ -3,8 +3,8 @@
 //! Type-safe bindings for the CSV Sanad contract deployed on each chain.
 //! The sanad contract manages the content tree and rights transfer protocol.
 
-use serde::{Serialize, Deserialize};
-use crate::common::{ContractAddress, ContractAbi, FunctionSelector};
+use crate::common::{ContractAbi, ContractAddress, FunctionSelector};
+use serde::{Deserialize, Serialize};
 
 /// Sanad contract ABI (Ethereum-compatible)
 pub const SANAD_CONTRACT_ABI: &str = r#"[

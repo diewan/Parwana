@@ -13,6 +13,8 @@
 use std::string::String;
 use std::vec::Vec;
 
+use ciborium::value::{CanonicalValue, Value};
+
 /// Error type for canonical serialization operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalError {
@@ -26,7 +28,9 @@ impl core::fmt::Display for CanonicalError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CanonicalError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
-            CanonicalError::DeserializationError(msg) => write!(f, "Deserialization error: {}", msg),
+            CanonicalError::DeserializationError(msg) => {
+                write!(f, "Deserialization error: {}", msg)
+            }
         }
     }
 }
@@ -57,19 +61,88 @@ pub mod cbor_tags {
 /// # Errors
 /// Returns `CanonicalError::SerializationError` if encoding fails.
 pub fn to_canonical_cbor<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, CanonicalError> {
+    let mut value = Value::serialized(value)
+        .map_err(|e| CanonicalError::SerializationError(format!("{}", e)))?;
+    normalize_canonical_value(&mut value)?;
+
     let mut buf = Vec::new();
-    ciborium::into_writer(value, &mut buf)
+    ciborium::into_writer(&value, &mut buf)
         .map_err(|e| CanonicalError::SerializationError(format!("{}", e)))?;
     Ok(buf)
+}
+
+fn normalize_canonical_value(value: &mut Value) -> Result<(), CanonicalError> {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                normalize_canonical_value(item)?;
+            }
+        }
+        Value::Map(entries) => {
+            for (key, entry_value) in entries.iter_mut() {
+                normalize_canonical_value(key)?;
+                normalize_canonical_value(entry_value)?;
+            }
+
+            if let Some(number) = serde_json_number_value(entries)? {
+                *value = number;
+                return Ok(());
+            }
+
+            entries.sort_by(|(left, _), (right, _)| {
+                CanonicalValue::from(left.clone()).cmp(&CanonicalValue::from(right.clone()))
+            });
+        }
+        Value::Tag(_, tagged) => normalize_canonical_value(tagged)?,
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn serde_json_number_value(entries: &[(Value, Value)]) -> Result<Option<Value>, CanonicalError> {
+    if entries.len() != 1 {
+        return Ok(None);
+    }
+
+    let (key, value) = &entries[0];
+    let Value::Text(key) = key else {
+        return Ok(None);
+    };
+    if key != "$serde_json::private::Number" {
+        return Ok(None);
+    }
+
+    let Value::Text(number) = value else {
+        return Err(CanonicalError::SerializationError(
+            "invalid serde_json number representation".to_string(),
+        ));
+    };
+
+    if let Ok(unsigned) = number.parse::<u64>() {
+        return Ok(Some(Value::Integer(unsigned.into())));
+    }
+    if let Ok(signed) = number.parse::<i64>() {
+        return Ok(Some(Value::Integer(signed.into())));
+    }
+    if let Ok(float) = number.parse::<f64>() {
+        return Ok(Some(Value::Float(float)));
+    }
+
+    Err(CanonicalError::SerializationError(format!(
+        "invalid serde_json number: {}",
+        number
+    )))
 }
 
 /// Deserialize from deterministic CBOR bytes.
 ///
 /// # Errors
 /// Returns `CanonicalError::DeserializationError` if decoding fails.
-pub fn from_canonical_cbor<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, CanonicalError> {
-    ciborium::from_reader(bytes)
-        .map_err(|e| CanonicalError::DeserializationError(format!("{}", e)))
+pub fn from_canonical_cbor<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, CanonicalError> {
+    ciborium::from_reader(bytes).map_err(|e| CanonicalError::DeserializationError(format!("{}", e)))
 }
 
 /// Hash canonical CBOR encoding of `value` using tagged_hash.
@@ -81,9 +154,7 @@ pub fn canonical_hash<T: serde::Serialize>(
     value: &T,
 ) -> Result<crate::Hash, CanonicalError> {
     let cbor = to_canonical_cbor(value)?;
-    Ok(crate::Hash::new(
-        crate::csv_tagged_hash(domain, &cbor)
-    ))
+    Ok(crate::Hash::new(crate::csv_tagged_hash(domain, &cbor)))
 }
 
 /// Serialize `value` to deterministic CBOR bytes with a CBOR tag.
@@ -102,14 +173,13 @@ pub fn to_canonical_cbor_with_tag<T: serde::Serialize>(
             tag, CBOR_TAG_RANGE_START, CBOR_TAG_RANGE_END
         )));
     }
-    
+
     let mut buf = Vec::new();
     // Write CBOR tag
     ciborium::into_writer(&tag, &mut buf)
         .map_err(|e| CanonicalError::SerializationError(format!("{}", e)))?;
     // Write value
-    ciborium::into_writer(value, &mut buf)
-        .map_err(|e| CanonicalError::SerializationError(format!("{}", e)))?;
+    buf.extend_from_slice(&to_canonical_cbor(value)?);
     Ok(buf)
 }
 
@@ -124,10 +194,10 @@ pub fn to_canonical_cbor_with_checksum<T: serde::Serialize>(
     value: &T,
 ) -> Result<Vec<u8>, CanonicalError> {
     let cbor = to_canonical_cbor(value)?;
-    
+
     // Compute CRC32 checksum
     let checksum = crc32fast::hash(&cbor);
-    
+
     let mut result = cbor;
     result.extend_from_slice(&checksum.to_le_bytes());
     Ok(result)
@@ -147,21 +217,20 @@ pub fn from_canonical_cbor_with_checksum<T: serde::de::DeserializeOwned>(
             "Bytes too short for checksum".to_string(),
         ));
     }
-    
+
     let (cbor, checksum_bytes) = bytes.split_at(bytes.len() - 4);
     let stored_checksum = u32::from_le_bytes(checksum_bytes.try_into().map_err(|_| {
         CanonicalError::DeserializationError("Invalid checksum length".to_string())
     })?);
-    
+
     let computed_checksum = crc32fast::hash(cbor);
     if stored_checksum != computed_checksum {
         return Err(CanonicalError::DeserializationError(
             "CRC32 checksum mismatch — data may be corrupted".to_string(),
         ));
     }
-    
-    ciborium::from_reader(cbor)
-        .map_err(|e| CanonicalError::DeserializationError(format!("{}", e)))
+
+    ciborium::from_reader(cbor).map_err(|e| CanonicalError::DeserializationError(format!("{}", e)))
 }
 
 /// Deserialize from CBOR bytes with optional tag and version validation.
@@ -208,11 +277,17 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, PartialEq, Debug)]
-    struct Fixture { a: u32, b: String }
+    struct Fixture {
+        a: u32,
+        b: String,
+    }
 
     #[test]
     fn roundtrip_is_lossless() {
-        let v = Fixture { a: 42, b: "hello".into() };
+        let v = Fixture {
+            a: 42,
+            b: "hello".into(),
+        };
         let bytes = to_canonical_cbor(&v).unwrap();
         let back: Fixture = from_canonical_cbor(&bytes).unwrap();
         assert_eq!(v, back);
@@ -220,7 +295,10 @@ mod tests {
 
     #[test]
     fn encoding_is_deterministic() {
-        let v = Fixture { a: 1, b: "world".into() };
+        let v = Fixture {
+            a: 1,
+            b: "world".into(),
+        };
         let b1 = to_canonical_cbor(&v).unwrap();
         let b2 = to_canonical_cbor(&v).unwrap();
         assert_eq!(b1, b2);
@@ -228,7 +306,10 @@ mod tests {
 
     #[test]
     fn canonical_hash_domain_separation() {
-        let v = Fixture { a: 0, b: "test".into() };
+        let v = Fixture {
+            a: 0,
+            b: "test".into(),
+        };
         let h1 = canonical_hash("domain.a", &v).unwrap();
         let h2 = canonical_hash("domain.b", &v).unwrap();
         assert_ne!(h1, h2);
@@ -236,7 +317,10 @@ mod tests {
 
     #[test]
     fn checksum_roundtrip() {
-        let v = Fixture { a: 42, b: "hello".into() };
+        let v = Fixture {
+            a: 42,
+            b: "hello".into(),
+        };
         let bytes = to_canonical_cbor_with_checksum(&v).unwrap();
         let back: Fixture = from_canonical_cbor_with_checksum(&bytes).unwrap();
         assert_eq!(v, back);
@@ -244,7 +328,10 @@ mod tests {
 
     #[test]
     fn checksum_detects_corruption() {
-        let v = Fixture { a: 42, b: "hello".into() };
+        let v = Fixture {
+            a: 42,
+            b: "hello".into(),
+        };
         let mut bytes = to_canonical_cbor_with_checksum(&v).unwrap();
         // Corrupt the data
         bytes[0] ^= 0xFF;
@@ -254,9 +341,12 @@ mod tests {
 
     #[test]
     fn tag_validation_rejects_invalid_tag() {
-        let v = Fixture { a: 42, b: "hello".into() };
+        let v = Fixture {
+            a: 42,
+            b: "hello".into(),
+        };
         let bytes = to_canonical_cbor_with_tag(&v, cbor_tags::PROOF_BUNDLE).unwrap();
-        
+
         // Try to deserialize with wrong expected tag
         let result = from_canonical_cbor_full::<Fixture>(&bytes, Some(999), None);
         assert!(result.is_err(), "Wrong tag must be rejected");
@@ -264,17 +354,24 @@ mod tests {
 
     #[test]
     fn tag_validation_accepts_valid_tag() {
-        let v = Fixture { a: 42, b: "hello".into() };
+        let v = Fixture {
+            a: 42,
+            b: "hello".into(),
+        };
         let bytes = to_canonical_cbor_with_tag(&v, cbor_tags::PROOF_BUNDLE).unwrap();
-        
+
         // Deserialize with correct expected tag
-        let result = from_canonical_cbor_full::<Fixture>(&bytes, Some(cbor_tags::PROOF_BUNDLE), None);
+        let result =
+            from_canonical_cbor_full::<Fixture>(&bytes, Some(cbor_tags::PROOF_BUNDLE), None);
         assert!(result.is_ok(), "Correct tag must be accepted");
     }
 
     #[test]
     fn tag_rejects_out_of_range() {
-        let v = Fixture { a: 42, b: "hello".into() };
+        let v = Fixture {
+            a: 42,
+            b: "hello".into(),
+        };
         let result = to_canonical_cbor_with_tag(&v, 100);
         assert!(result.is_err(), "Out-of-range tag must be rejected");
     }

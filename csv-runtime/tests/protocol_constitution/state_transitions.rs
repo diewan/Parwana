@@ -25,7 +25,8 @@ fn forbidden_state_transitions_fail() {
     ];
 
     for (i, expected) in expected_sequence.iter().enumerate() {
-        let next = current.next_stage()
+        let next = current
+            .next_stage()
             .unwrap_or_else(|| panic!("Transition from {:?} at step {} must be valid", current, i));
         assert_eq!(
             next, *expected,
@@ -141,11 +142,7 @@ fn state_machine_is_exhaustive() {
         TransferStage::Compromised,
     ];
     for stage in &terminal_stages {
-        assert!(
-            stage.is_terminal(),
-            "{:?} must be terminal",
-            stage
-        );
+        assert!(stage.is_terminal(), "{:?} must be terminal", stage);
     }
 
     // Verify non-terminal stages
@@ -160,11 +157,7 @@ fn state_machine_is_exhaustive() {
         TransferStage::MintConfirmed,
     ];
     for stage in &non_terminal_stages {
-        assert!(
-            !stage.is_terminal(),
-            "{:?} must not be terminal",
-            stage
-        );
+        assert!(!stage.is_terminal(), "{:?} must not be terminal", stage);
     }
 
     // Verify proof_validated stages
@@ -243,10 +236,7 @@ fn transition_legality_is_enforced() {
     for stage in &stages_with_next {
         let next = stage.next_stage().expect("must have next stage");
         // The next stage must be different from the current stage
-        assert_ne!(
-            *stage, next,
-            "Next stage must differ from current stage"
-        );
+        assert_ne!(*stage, next, "Next stage must differ from current stage");
     }
 
     // 2. Verify that the transition graph is a simple chain (no branches

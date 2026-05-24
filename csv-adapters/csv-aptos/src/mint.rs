@@ -55,9 +55,9 @@ pub async fn mint_sanad(
         [0u8; 32], // state_root placeholder
         source_chain,
         *source_seal_ref.as_bytes(),
-        vec![], // proof placeholder
+        vec![],    // proof placeholder
         [0u8; 32], // proof_root placeholder
-        0, // leaf_position placeholder
+        0,         // leaf_position placeholder
     );
 
     // Get account sequence number via RPC

@@ -772,6 +772,11 @@ impl Default for NostrTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use csv_hash::{
+        Hash,
+        seal::{CommitAnchor, SealPoint},
+    };
+    use csv_proof::{DAGSegment, FinalityProof, InclusionProof};
 
     #[test]
     fn test_new_transport_with_default_relays() {
@@ -856,19 +861,18 @@ mod tests {
         // Create a proof with metadata containing chain ID
         let metadata = b"ethereum".to_vec();
 
-        let anchor = csv_core::seal::CommitAnchor::new(vec![1u8; 32], 1000, metadata).unwrap();
+        let anchor = CommitAnchor::new(vec![1u8; 32], 1000, metadata).unwrap();
 
-        let hash: csv_core::Hash = [0u8; 32].into();
+        let hash: Hash = [0u8; 32].into();
 
         let proof = ProofBundle {
             version: 1,
-            transition_dag: csv_core::dag::DAGSegment::new(vec![], hash),
+            transition_dag: DAGSegment::new(vec![], hash),
             signatures: vec![],
-            seal_ref: csv_core::seal::SealPoint::new(vec![1u8; 32], None).unwrap(),
+            seal_ref: SealPoint::new(vec![1u8; 32], None).unwrap(),
             anchor_ref: anchor,
-            inclusion_proof: csv_core::proof::InclusionProof::new(vec![1u8; 32], hash, 1000, 0)
-                .unwrap(),
-            finality_proof: csv_core::proof::FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
+            inclusion_proof: InclusionProof::new(vec![1u8; 32], hash, 1000, 0).unwrap(),
+            finality_proof: FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
             provenance: None,
             certification: None,
         };
@@ -880,19 +884,18 @@ mod tests {
     #[test]
     fn test_extract_dest_chain_from_proof_unknown() {
         // Create a proof with empty bytecode
-        let anchor = csv_core::seal::CommitAnchor::new(vec![1u8; 32], 1000, vec![]).unwrap();
+        let anchor = CommitAnchor::new(vec![1u8; 32], 1000, vec![]).unwrap();
 
-        let hash: csv_core::Hash = [0u8; 32].into();
+        let hash: Hash = [0u8; 32].into();
 
         let proof = ProofBundle {
             version: 1,
-            transition_dag: csv_core::dag::DAGSegment::new(vec![], hash),
+            transition_dag: DAGSegment::new(vec![], hash),
             signatures: vec![],
-            seal_ref: csv_core::seal::SealPoint::new(vec![1u8; 32], None).unwrap(),
+            seal_ref: SealPoint::new(vec![1u8; 32], None).unwrap(),
             anchor_ref: anchor,
-            inclusion_proof: csv_core::proof::InclusionProof::new(vec![1u8; 32], hash, 1000, 0)
-                .unwrap(),
-            finality_proof: csv_core::proof::FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
+            inclusion_proof: InclusionProof::new(vec![1u8; 32], hash, 1000, 0).unwrap(),
+            finality_proof: FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
             provenance: None,
             certification: None,
         };
@@ -904,19 +907,18 @@ mod tests {
     #[test]
     fn test_proof_bundle_serialization_roundtrip() {
         let metadata = b"ethereum".to_vec();
-        let anchor = csv_core::seal::CommitAnchor::new(vec![1u8; 32], 1000, metadata).unwrap();
+        let anchor = CommitAnchor::new(vec![1u8; 32], 1000, metadata).unwrap();
 
-        let hash: csv_core::Hash = [0u8; 32].into();
+        let hash: Hash = [0u8; 32].into();
 
         let proof = ProofBundle {
             version: 1,
-            transition_dag: csv_core::dag::DAGSegment::new(vec![], hash),
+            transition_dag: DAGSegment::new(vec![], hash),
             signatures: vec![vec![1u8; 64]],
-            seal_ref: csv_core::seal::SealPoint::new(vec![1u8; 32], None).unwrap(),
+            seal_ref: SealPoint::new(vec![1u8; 32], None).unwrap(),
             anchor_ref: anchor,
-            inclusion_proof: csv_core::proof::InclusionProof::new(vec![1u8; 32], hash, 1000, 0)
-                .unwrap(),
-            finality_proof: csv_core::proof::FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
+            inclusion_proof: InclusionProof::new(vec![1u8; 32], hash, 1000, 0).unwrap(),
+            finality_proof: FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
             provenance: None,
             certification: None,
         };
@@ -935,19 +937,18 @@ mod tests {
     #[test]
     fn test_event_content_with_metadata() {
         let metadata = b"ethereum".to_vec();
-        let anchor = csv_core::seal::CommitAnchor::new(vec![1u8; 32], 1000, metadata).unwrap();
+        let anchor = CommitAnchor::new(vec![1u8; 32], 1000, metadata).unwrap();
 
-        let hash: csv_core::Hash = [0u8; 32].into();
+        let hash: Hash = [0u8; 32].into();
 
         let proof = ProofBundle {
             version: 1,
-            transition_dag: csv_core::dag::DAGSegment::new(vec![], hash),
+            transition_dag: DAGSegment::new(vec![], hash),
             signatures: vec![],
-            seal_ref: csv_core::seal::SealPoint::new(vec![1u8; 32], None).unwrap(),
+            seal_ref: SealPoint::new(vec![1u8; 32], None).unwrap(),
             anchor_ref: anchor,
-            inclusion_proof: csv_core::proof::InclusionProof::new(vec![1u8; 32], hash, 1000, 0)
-                .unwrap(),
-            finality_proof: csv_core::proof::FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
+            inclusion_proof: InclusionProof::new(vec![1u8; 32], hash, 1000, 0).unwrap(),
+            finality_proof: FinalityProof::new(vec![1u8; 32], 1, true).unwrap(),
             provenance: None,
             certification: None,
         };

@@ -3,10 +3,10 @@
 //! This module defines the canonical storage traits for the CSV protocol.
 //! All implementations MUST use these traits, not custom interfaces.
 
+use super::errors::{ReplayDbError, StorageError};
 use async_trait::async_trait;
-use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_proof::proof::ReplayId;
-use super::errors::{StorageError, ReplayDbError};
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 
 /// Generic storage backend trait
 #[async_trait]
@@ -77,7 +77,7 @@ pub trait ReplayDatabase: Send + Sync {
         ))
     }
 
-    /// Mark Pending → RolledBack.
+    /// Mark Pending → RolledBack. Already RolledBack entries are idempotent.
     async fn mark_rolled_back(&self, id: &ReplayId) -> Result<(), ReplayDbError> {
         let _ = id;
         Err(ReplayDbError::Storage(
@@ -97,9 +97,7 @@ pub trait ReplayDatabase: Send + Sync {
     }
 
     /// Load all persisted transfer entries.
-    async fn load_all_transfers(
-        &self,
-    ) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
+    async fn load_all_transfers(&self) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
         Err(ReplayDbError::Storage(
             "load_all_transfers not implemented for this backend".to_string(),
         ))

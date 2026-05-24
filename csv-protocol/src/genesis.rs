@@ -4,10 +4,10 @@
 //! the global state and assigns initial owned states to their seals.
 //! Every consignment chain starts from exactly one genesis.
 
-use serde::{Deserialize, Serialize};
-use csv_hash::{DomainSeparatedHash, GenesisDomain};
-use csv_hash::Hash;
 use crate::state::{GlobalState, Metadata, OwnedState};
+use csv_hash::Hash;
+use csv_hash::{DomainSeparatedHash, GenesisDomain};
+use serde::{Deserialize, Serialize};
 
 /// Contract genesis
 ///
@@ -52,8 +52,9 @@ impl Genesis {
         use csv_hash::canonical::to_canonical_cbor;
 
         // Use canonical CBOR serialization for deterministic hashing
-        let cbor_bytes = to_canonical_cbor(self)
-            .expect("Genesis serialization should not fail");
+        let cbor_bytes = to_canonical_cbor(self).unwrap_or_else(|err| {
+            format!("genesis-canonical-serialization-error:{err}").into_bytes()
+        });
         DomainSeparatedHash::<GenesisDomain>::hash(&cbor_bytes)
     }
 
@@ -78,4 +79,3 @@ impl Genesis {
             .collect()
     }
 }
-

@@ -48,11 +48,7 @@ impl CompatibilityMatrix {
     }
 
     /// Set the minimum adapter version for a chain.
-    pub fn with_adapter_version(
-        mut self,
-        chain: ChainId,
-        version: ProtocolVersion,
-    ) -> Self {
+    pub fn with_adapter_version(mut self, chain: ChainId, version: ProtocolVersion) -> Self {
         self.minimum_adapter_versions.insert(chain, version);
         self
     }

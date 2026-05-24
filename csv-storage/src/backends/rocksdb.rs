@@ -1,10 +1,10 @@
 //! RocksDB-backed replay database with CAS semantics.
 
 use async_trait::async_trait;
-use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_proof::proof::ReplayId;
-use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, DBCompressionType, Options, DB};
+use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
+use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, DB, DBCompressionType, Options};
 use std::sync::Arc;
 
 use crate::errors::ReplayDbError;
@@ -47,18 +47,21 @@ impl RocksDbReplayDb {
     }
 
     fn cf_replay(&self) -> Result<&ColumnFamily, ReplayDbError> {
-        self.db.cf_handle(CF_REPLAY)
-            .ok_or_else(|| ReplayDbError::Storage("replay_entries column family not found".to_string()))
+        self.db.cf_handle(CF_REPLAY).ok_or_else(|| {
+            ReplayDbError::Storage("replay_entries column family not found".to_string())
+        })
     }
 
     fn cf_conflict(&self) -> Result<&ColumnFamily, ReplayDbError> {
-        self.db.cf_handle(CF_CONFLICT)
-            .ok_or_else(|| ReplayDbError::Storage("replay_conflicts column family not found".to_string()))
+        self.db.cf_handle(CF_CONFLICT).ok_or_else(|| {
+            ReplayDbError::Storage("replay_conflicts column family not found".to_string())
+        })
     }
 
     fn cf_transfers(&self) -> Result<&ColumnFamily, ReplayDbError> {
-        self.db.cf_handle(CF_TRANSFERS)
-            .ok_or_else(|| ReplayDbError::Storage("transfer_entries column family not found".to_string()))
+        self.db.cf_handle(CF_TRANSFERS).ok_or_else(|| {
+            ReplayDbError::Storage("transfer_entries column family not found".to_string())
+        })
     }
 
     fn encode_state(state: ReplayEntryState) -> Vec<u8> {
@@ -178,9 +181,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         Ok(())
     }
 
-    async fn load_all_transfers(
-        &self,
-    ) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
+    async fn load_all_transfers(&self) -> Result<Vec<CrossChainRegistryEntry>, ReplayDbError> {
         let mut transfers = Vec::new();
         for result in self
             .db

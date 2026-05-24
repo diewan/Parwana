@@ -1,12 +1,11 @@
 //! Tests for csv-content crate
 
-use csv_content::{
-    ContentTree, DisclosureProof, VerificationCost,
-    AttachmentRef, MediaType, AttachmentBudget,
-    Claim, ClaimPredicate, ContentRights,
-    Participant, ParticipantId, ParticipantRole, ParticipantSet,
-};
 use csv_content::content_tree::ContentClaim;
+use csv_content::{
+    AttachmentBudget, AttachmentRef, Claim, ClaimPredicate,
+    ContentDisclosureProof as DisclosureProof, ContentRights, ContentTree, MediaType, Participant,
+    ParticipantId, ParticipantRole, ParticipantSet, VerificationCost,
+};
 use csv_hash::Hash;
 
 // ============================================================================
@@ -45,9 +44,7 @@ fn test_content_tree_single_leaf() {
 
 #[test]
 fn test_content_tree_proof() {
-    let leaves: Vec<Vec<u8>> = (0..8)
-        .map(|i| format!("leaf_{}", i).into_bytes())
-        .collect();
+    let leaves: Vec<Vec<u8>> = (0..8).map(|i| format!("leaf_{}", i).into_bytes()).collect();
 
     let tree = ContentTree::from_leaves(leaves.clone());
 
@@ -100,11 +97,7 @@ fn test_content_tree_inclusion() {
 
 #[test]
 fn test_content_tree_deterministic() {
-    let leaves = vec![
-        b"leaf1".to_vec(),
-        b"leaf2".to_vec(),
-        b"leaf3".to_vec(),
-    ];
+    let leaves = vec![b"leaf1".to_vec(), b"leaf2".to_vec(), b"leaf3".to_vec()];
 
     let tree1 = ContentTree::from_leaves(leaves.clone());
     let tree2 = ContentTree::from_leaves(leaves);
@@ -210,7 +203,10 @@ fn test_verification_cost_validate_error() {
     };
 
     let err = cost.validate(1000, 10240, 100, 10).unwrap_err();
-    assert!(matches!(err, csv_content::VerificationCostError::CpuExceeded { .. }));
+    assert!(matches!(
+        err,
+        csv_content::VerificationCostError::CpuExceeded { .. }
+    ));
 }
 
 // ============================================================================
@@ -219,9 +215,7 @@ fn test_verification_cost_validate_error() {
 
 #[test]
 fn test_disclosure_proof_verify() {
-    let leaves: Vec<Vec<u8>> = (0..8)
-        .map(|i| format!("leaf_{}", i).into_bytes())
-        .collect();
+    let leaves: Vec<Vec<u8>> = (0..8).map(|i| format!("leaf_{}", i).into_bytes()).collect();
 
     let tree = ContentTree::from_leaves(leaves);
     let proof = tree.proof(3).unwrap();

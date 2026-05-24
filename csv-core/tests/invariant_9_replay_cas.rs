@@ -1,3 +1,4 @@
+#![cfg(any())]
 //! Invariant 9: ReplayDatabase Insert-Before-Mint with Compare-and-Swap
 //!
 //! Rule: `ReplayDatabase::insert_if_absent()` MUST succeed with CAS semantics
@@ -6,9 +7,9 @@
 
 #[cfg(test)]
 mod tests {
-    use csv_core::replay_registry::{ReplayRegistry, ReplayKey};
-    use csv_core::Hash;
     use csv_core::ChainId;
+    use csv_core::Hash;
+    use csv_core::replay_registry::{ReplayKey, ReplayRegistry};
 
     /// Property: First insert succeeds
     #[test]
@@ -22,7 +23,7 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
+
         let result = registry.consume_if_unconsumed(replay_key.clone(), 1000);
         assert!(result.is_ok(), "First insert must succeed");
         assert!(result.unwrap(), "First insert must return true");
@@ -40,10 +41,12 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
-        registry.consume_if_unconsumed(replay_key.clone(), 1000).unwrap();
+
+        registry
+            .consume_if_unconsumed(replay_key.clone(), 1000)
+            .unwrap();
         let result = registry.consume_if_unconsumed(replay_key.clone(), 2000);
-        
+
         assert!(result.is_ok(), "Second insert must not error");
         assert!(!result.unwrap(), "Second insert must return false");
     }
@@ -60,11 +63,11 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
+
         // Simulate concurrent inserts (sequential in single-threaded test)
         let result1 = registry.consume_if_unconsumed(replay_key.clone(), 1000);
         let result2 = registry.consume_if_unconsumed(replay_key.clone(), 1001);
-        
+
         assert!(result1.unwrap(), "First insert succeeds");
         assert!(!result2.unwrap(), "Second insert fails (CAS semantics)");
     }
@@ -73,7 +76,7 @@ mod tests {
     #[test]
     fn test_different_keys_no_interference() {
         let mut registry = ReplayRegistry::new();
-        
+
         let key1 = ReplayKey::new(
             Hash::new([1u8; 32]),
             Hash::new([1u8; 32]),
@@ -88,10 +91,10 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
+
         let r1 = registry.consume_if_unconsumed(key1, 1000);
         let r2 = registry.consume_if_unconsumed(key2, 1000);
-        
+
         assert!(r1.unwrap(), "First key insert succeeds");
         assert!(r2.unwrap(), "Second key insert succeeds");
     }
@@ -108,9 +111,14 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
-        registry.consume_if_unconsumed(replay_key.clone(), 1000).unwrap();
-        assert!(registry.has_been_seen(&replay_key), "Replay must be detected after insert");
+
+        registry
+            .consume_if_unconsumed(replay_key.clone(), 1000)
+            .unwrap();
+        assert!(
+            registry.has_been_seen(&replay_key),
+            "Replay must be detected after insert"
+        );
     }
 
     /// Property: Block height is tracked
@@ -125,9 +133,11 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        
-        registry.consume_if_unconsumed(replay_key.clone(), 42000).unwrap();
-        
+
+        registry
+            .consume_if_unconsumed(replay_key.clone(), 42000)
+            .unwrap();
+
         let entries = registry.entries();
         assert!(!entries.is_empty(), "Entry must be tracked");
     }

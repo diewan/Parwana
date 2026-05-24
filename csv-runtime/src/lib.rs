@@ -24,6 +24,7 @@
 
 pub mod adapter_registry;
 pub mod config;
+pub mod coordinator_lease;
 pub mod error;
 pub mod event_bus;
 pub mod event_envelope;
@@ -34,27 +35,37 @@ pub mod lease;
 pub mod policy;
 pub mod queue;
 pub mod recovery;
+pub mod replay_db;
 pub mod runtime_mode;
 pub mod transfer_coordinator;
-pub mod coordinator_lease;
-pub mod replay_db;
 
 // Re-exports (orchestration only)
 pub use adapter_registry::{AdapterRegistryImpl, ChainAdapter};
-pub use config::{CircuitBreakerConfig, ConfigValidationError, LeaseConfig, OperationalConfig, RetryConfig, RpcConfig, TimeoutConfig};
+pub use config::{
+    CircuitBreakerConfig, ConfigValidationError, LeaseConfig, OperationalConfig, RetryConfig,
+    RpcConfig, TimeoutConfig,
+};
 pub use error::{RuntimeError, TransferCoordinatorError};
 pub use event_bus::{EventBus, TransferEvent};
 pub use event_store::{EventStore, EventStoreError, InMemoryEventStore};
-pub use execution_journal::{ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry};
+pub use execution_journal::{
+    ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry,
+};
 pub use failure_domain::{ClassifiedError, FailureDomain};
 pub use lease::{
-    DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, RuntimeExecutionContext, RuntimeId,
-    TransferLease, MAX_LEASE_DURATION_SECS,
+    DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,
+    RuntimeExecutionContext, RuntimeId, TransferLease,
 };
 pub use policy::RuntimePolicy;
 pub use queue::{TaskQueue, TaskQueueError};
-pub use recovery::{CheckpointId, CheckpointManager, RecoveryCheckpoint, ReplayCheckpoint, TransferStage, VerificationCheckpoint};
-pub use runtime_mode::{CircuitBreaker, CircuitBreakerConfig as RuntimeCircuitBreakerConfig, CircuitBreakerState, HealthMonitor, HealthStatus, RuntimeMode};
+pub use recovery::{
+    CheckpointId, CheckpointManager, RecoveryCheckpoint, ReplayCheckpoint, TransferStage,
+    VerificationCheckpoint,
+};
+pub use runtime_mode::{
+    CircuitBreaker, CircuitBreakerConfig as RuntimeCircuitBreakerConfig, CircuitBreakerState,
+    HealthMonitor, HealthStatus, RuntimeMode,
+};
 pub use transfer_coordinator::TransferCoordinator;
 
 // Coordinator lease re-exports
