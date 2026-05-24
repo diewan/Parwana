@@ -289,7 +289,7 @@ mod tests {
                 SealPoint::new(vec![0u8; 32], Some(0)).unwrap(),
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
-                csv_proof::proof::FinalityProof::new(vec![], 6, false).unwrap(),
+                csv_proof::proof::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             ).unwrap())
         }
 

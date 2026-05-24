@@ -7,7 +7,7 @@
 #[cfg(test)]
 mod tests {
     use csv_core::verified::{VerificationResult, VerificationAssurance, VerifiedComponents, InclusionStrength, FinalityStrength};
-    use csv_core::chain_config::ChainCapabilities;
+    use csv_protocol::finality::capabilities::ChainCapabilities;
 
     /// Property: VerificationResult contains required fields
     #[test]

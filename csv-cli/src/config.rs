@@ -488,8 +488,8 @@ private_key = "0xabc123"
     #[test]
     fn test_config_roundtrip_serialization() {
         let original = Config::default();
-        let toml_str = toml::to_string_pretty(&original).expect("Should serialize");
-        let deserialized: Config = toml::from_str(&toml_str).expect("Should deserialize");
+        let toml_str = toml::to_string_pretty(&original).unwrap();
+        let deserialized: Config = toml::from_str(&toml_str).unwrap();
 
         assert_eq!(original.chains.len(), deserialized.chains.len());
         assert_eq!(original.data_dir, deserialized.data_dir);

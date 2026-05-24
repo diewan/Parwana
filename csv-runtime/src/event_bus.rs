@@ -124,13 +124,23 @@ mod tests {
             received_clone.lock().unwrap().push(event);
         }));
 
-        bus.emit(TransferEvent::Locking {
+        let ctx = TransferContext {
             transfer_id: "test-1".to_string(),
-        });
+            replay_id: None,
+            proof_hash: None,
+            coordinator_id: Uuid::new_v4(),
+            lease_id: None,
+            source_chain: "bitcoin".to_string(),
+            dest_chain: "ethereum".to_string(),
+            finality_state: FinalityState::NotChecked,
+            recovery_attempt: 0,
+        };
+
+        bus.emit(TransferEvent::Locking(ctx.clone()));
 
         let events = received.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], TransferEvent::Locking { .. }));
+        assert!(matches!(&events[0], TransferEvent::Locking(_)));
     }
 
     #[test]
@@ -149,10 +159,19 @@ mod tests {
             count2_clone.fetch_add(1, Ordering::SeqCst);
         }));
 
-        bus.emit(TransferEvent::Complete {
+        let ctx = TransferContext {
             transfer_id: "test-1".to_string(),
-            mint_tx_hash: "0xabc".to_string(),
-        });
+            replay_id: None,
+            proof_hash: None,
+            coordinator_id: Uuid::new_v4(),
+            lease_id: None,
+            source_chain: "bitcoin".to_string(),
+            dest_chain: "ethereum".to_string(),
+            finality_state: FinalityState::Confirmed,
+            recovery_attempt: 0,
+        };
+
+        bus.emit(TransferEvent::Complete(ctx));
 
         assert_eq!(
             count1.load(Ordering::SeqCst),

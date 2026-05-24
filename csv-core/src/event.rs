@@ -1,53 +1,14 @@
-//! Canonical event model with causality chains.
+//! Canonical event model — re-exported from csv-protocol.
 //!
-//! Every state transition MUST emit exactly one CanonicalEvent.
-//! Events form a tamper-evident, causally-ordered audit log.
+//! **DEPRECATED**: This module has been moved to csv-protocol.
+//! Please use `csv_protocol::events` instead.
+//!
+//! This module is kept as a compatibility shim during the migration period.
+//! All types are re-exported from csv-protocol.
 
-use serde::{Deserialize, Serialize};
+// Re-export all event types from csv-protocol
+pub use csv_protocol::events::{CanonicalEvent, EventType};
 
-use crate::error::ProtocolError;
-use csv_hash::csv_tagged_hash;
-use csv_hash::canonical::to_canonical_cbor;
-
-/// A canonical, deterministically hashable protocol event.
-///
-/// Every state transition MUST emit exactly one CanonicalEvent.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CanonicalEvent {
-    /// Deterministic event identity: tagged_hash("csv-event-v1", cbor(self minus event_id))
-    pub event_id: [u8; 32],
-
-    /// Hash of the event that causally precedes this one (None = genesis).
-    pub causality_parent: Option<[u8; 32]>,
-
-    /// Transfer this event belongs to.
-    pub transfer_id: [u8; 32],
-
-    /// Monotonically increasing sequence within this transfer.
-    pub sequence: u64,
-
-    /// Unix seconds when this event was emitted.
-    pub emitted_at: u64,
-
-    /// Event variant.
-    pub event_type: EventType,
-
-    /// Tagged hash of the event-specific payload.
-    pub payload_hash: [u8; 32],
-}
-
-/// Event variant types for the protocol event stream.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum EventType {
-    SealCreated,
-    SealLocked,
-    InclusionVerified,
-    FinalityConfirmed,
-    TransferComplete,
-    SealRolledBack { reorg_depth: u64 },
-    ReplayRejected,
-    AdapterError { retryable: bool },
-}
 
 impl CanonicalEvent {
     /// Construct and self-hash a new event.

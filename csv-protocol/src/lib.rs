@@ -30,6 +30,7 @@ pub mod lease;
 pub mod failure_domains;
 pub mod deterministic_recovery;
 pub mod seal_protocol;
+pub mod envelope;
 
 // State machine modules
 pub mod state_machine;
@@ -60,6 +61,17 @@ pub mod transition;
 
 // Versioning
 pub mod version;
+pub mod state;
+pub mod genesis;
+
+// Re-export version types
+pub use version::{ProtocolVersion, Version, TransferStatus, SimplifiedTransferStatus, ErrorCode, Capabilities, SyncStatus, builtin};
+
+// Re-export state types
+pub use state::{GlobalState, OwnedState, Metadata, StateAssignment, StateRef, StateTypeId};
+
+// Re-export genesis types
+pub use genesis::Genesis;
 
 // Re-export error types
 pub use error::{ProtocolError, Result as ProtocolResult};
@@ -96,6 +108,9 @@ pub use seal::{SealPoint, CommitAnchor};
 
 // Re-export commitment types
 pub use commitment::Commitment;
+
+// Re-export envelope types
+pub use envelope::{CanonicalSanadEnvelope, TypeId, decode_envelope};
 
 // Re-export proof types (excluding FinalityProof to avoid conflict with finality module)
 pub use proof::{InclusionProof, ProofBundle};

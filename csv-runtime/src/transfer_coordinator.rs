@@ -199,6 +199,26 @@ impl TransferCoordinator {
         self.health_monitor.clone()
     }
 
+    /// Assert that exactly one coordinator is active for the given transfer.
+    ///
+    /// This invariant ensures that no two coordinators can simultaneously operate
+    /// on the same transfer, preventing race conditions and double-execution.
+    fn assert_single_active_coordinator(&self, transfer_id: &str) -> Result<(), TransferCoordinatorError> {
+        let lease = self.coordinator_lease
+            .as_ref()
+            .ok_or(TransferCoordinatorError::NoLeaseBackend)?
+            .get_active_lease(transfer_id)?;
+
+        if lease.owner_runtime_id != self.runtime_id {
+            return Err(TransferCoordinatorError::LeaseViolation(
+                format!("Coordinator {} does not own lease for {}",
+                    self.runtime_id, transfer_id)
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Record a health check result
     pub fn record_health_check(&self, check: crate::runtime_mode::HealthCheck) {
         self.health_monitor.lock().unwrap().record_check(check);
@@ -264,19 +284,8 @@ impl TransferCoordinator {
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
-      // Enforce lease ownership for mutating operations. The lease must match
-        // the transfer's Sanad identifier and must be currently active.
-        let expected = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
-        if runtime_ctx.lease.transfer_id != expected {
-            return Err(TransferCoordinatorError::RuntimeError(
-                "Lease transfer_id does not match transfer SanadId".to_string(),
-            ));
-        }
-        if !runtime_ctx.lease.is_active(std::time::SystemTime::now()) {
-            return Err(TransferCoordinatorError::RuntimeError(
-                "Lease is expired".to_string(),
-            ));
-        }
+        // Assert lease ownership invariant
+        self.assert_single_active_coordinator(&transfer.id)?;
 
         // Validate that the runtime instance matches the lease owner.
         // This prevents any runtime from executing a transfer with a valid lease
@@ -1071,6 +1080,9 @@ impl TransferCoordinator {
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        // Assert lease ownership invariant
+        self.assert_single_active_coordinator(transfer_id)?;
+
         let phase = self.execution_journal.latest_phase(transfer_id)
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?
             .ok_or(TransferCoordinatorError::NotFound)?;
@@ -1224,6 +1236,9 @@ impl TransferCoordinator {
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        // Assert lease ownership invariant
+        self.assert_single_active_coordinator(&transfer.id)?;
+
         tracing::info!(
             "Executing transfer {} from lock phase (skipping lock broadcast)",
             transfer.id
@@ -1256,6 +1271,9 @@ impl TransferCoordinator {
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        // Assert lease ownership invariant
+        self.assert_single_active_coordinator(&transfer.id)?;
+
         tracing::info!(
             "Executing transfer {} from proof phase (skipping proof generation)",
             transfer.id
@@ -1286,6 +1304,9 @@ impl TransferCoordinator {
         mint_tx_hash: &str,
         _adapter_registry: &dyn AdapterRegistry,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        // Assert lease ownership invariant
+        self.assert_single_active_coordinator(transfer_id)?;
+
         tracing::info!(
             "Executing transfer {} from mint phase (confirming mint transaction {})",
             transfer_id,
@@ -1429,7 +1450,7 @@ mod tests {
                 SealPoint::new(vec![0u8; 32], Some(0)).unwrap(),
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
-                FinalityProof::new(vec![0u8; 32], 6, false).unwrap(),
+                csv_proof::proof::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             ).map_err(|e| crate::adapter_registry::AdapterError::Generic(e.to_string()))?)
         }
 
