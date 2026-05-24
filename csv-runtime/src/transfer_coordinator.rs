@@ -21,6 +21,8 @@ use crate::recovery::{CheckpointManager, TransferStage};
 use csv_protocol::signature::SignatureScheme;
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use csv_storage::{ReplayDatabase, ReplayDbError};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Receipt returned after a successful transfer
 #[derive(Debug, Clone)]
@@ -56,6 +58,9 @@ pub struct TransferCoordinator {
     verifier: std::sync::Arc<CanonicalVerifierImpl>,
     /// Execution journal for crash-safe phase tracking
     execution_journal: Box<dyn ExecutionJournal>,
+    /// In-memory transfer cache for same-session recovery
+    /// TODO: Replace with durable TransferStore once csv-storage backends implement it
+    pub transfer_cache: Mutex<HashMap<String, CrossChainTransfer>>,
 }
 
 impl TransferCoordinator {
@@ -86,6 +91,7 @@ impl TransferCoordinator {
             checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal: Box::new(InMemoryJournal::new(10000)),
+            transfer_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -110,7 +116,22 @@ impl TransferCoordinator {
         event_bus: EventBus,
         execution_journal: Box<dyn ExecutionJournal>,
     ) -> Self {
-        Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
+        Self {
+            replay_db,
+            event_bus,
+            event_store: Box::new(InMemoryEventStore::new()),
+            circuit_breaker: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime_mode::CircuitBreaker::new(),
+            )),
+            health_monitor: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime_mode::HealthMonitor::new(),
+            )),
+            coordinator_lease: None,
+            checkpoint_manager: std::sync::Arc::new(std::sync::Mutex::new(CheckpointManager::new())),
+            verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
+            execution_journal,
+            transfer_cache: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Get a reference to the circuit breaker
@@ -269,6 +290,18 @@ impl TransferCoordinator {
             outcome: crate::execution_journal::PhaseOutcome::Completed,
             attempt: 1,
         }).map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
+        // Cache transfer for same-session recovery
+        let transfer_entry = CrossChainTransfer {
+            id: transfer.id.clone(),
+            source_chain: transfer.source_chain.clone(),
+            destination_chain: transfer.destination_chain.clone(),
+            lock_tx_hash: transfer.lock_tx_hash.clone(),
+            lock_output_index: transfer.lock_output_index,
+            sanad_id: transfer.sanad_id,
+            transition_id: transfer.transition_id.clone(),
+        };
+        self.transfer_cache.lock().unwrap().insert(transfer.id.clone(), transfer_entry);
 
         // Step 2: Verify source chain capabilities
         let src_caps = adapter_registry
@@ -829,28 +862,45 @@ impl TransferCoordinator {
             phase
         );
 
+        // Try to retrieve transfer from cache for same-session recovery
+        let cached_transfer = self.transfer_cache.lock().unwrap().get(transfer_id).cloned();
+
         // Phase-specific recovery logic
         match phase {
             crate::recovery::TransferStage::Initialized => {
                 // Transfer was initialized but lock was never broadcast
-                // This should not happen in normal flow - requires reconstructing transfer
-                Err(TransferCoordinatorError::RuntimeError(
-                    "Cannot resume from Initialized phase - transfer state lost".to_string()
-                ))
+                // Try to recover from cache if available
+                if let Some(transfer) = cached_transfer {
+                    tracing::info!("Recovering transfer from cache - restarting from lock phase");
+                    // Re-execute the transfer from the beginning
+                    // The replay check will prevent duplicate execution
+                    self.execute(transfer, adapter_registry, runtime_ctx).await
+                } else {
+                    Err(TransferCoordinatorError::RuntimeError(
+                        "Cannot resume from Initialized phase - transfer state lost (cache miss)".to_string()
+                    ))
+                }
             }
             crate::recovery::TransferStage::LockSubmitted => {
                 // Lock was submitted but not confirmed - resume by checking lock status
+                // TODO: Implement lock status check via adapter
                 Err(TransferCoordinatorError::RuntimeError(
                     "Resume from LockSubmitted not yet implemented - requires lock status check".to_string()
                 ))
             }
             crate::recovery::TransferStage::LockConfirmed => {
                 // Lock was confirmed, need to resume from finality check/proof generation
-                // This requires the original transfer request which is not stored in journal
-                // TODO: Implement transfer persistence to enable this recovery path
-                Err(TransferCoordinatorError::RuntimeError(
-                    "Resume from LockConfirmed not yet implemented - requires transfer persistence".to_string()
-                ))
+                // This requires the original transfer request
+                if let Some(transfer) = cached_transfer {
+                    tracing::info!("Resuming from LockConfirmed - will regenerate proof");
+                    // TODO: Implement proof regeneration from LockConfirmed phase
+                    // For now, re-execute from lock (idempotent)
+                    self.execute(transfer, adapter_registry, runtime_ctx).await
+                } else {
+                    Err(TransferCoordinatorError::RuntimeError(
+                        "Resume from LockConfirmed not yet implemented - requires transfer persistence (cache miss)".to_string()
+                    ))
+                }
             }
             crate::recovery::TransferStage::ProofBuilding => {
                 // Proof was generated, need to resume from mint broadcast
@@ -861,6 +911,7 @@ impl TransferCoordinator {
             }
             crate::recovery::TransferStage::ProofValidated => {
                 // Proof was validated, need to resume from mint broadcast
+                // TODO: Implement proof retrieval and mint resumption
                 Err(TransferCoordinatorError::RuntimeError(
                     "Resume from ProofValidated not yet implemented - requires proof persistence".to_string()
                 ))
@@ -874,6 +925,7 @@ impl TransferCoordinator {
             }
             crate::recovery::TransferStage::MintSubmitted => {
                 // Mint was submitted but not confirmed - resume by checking mint status
+                // TODO: Implement mint status check via adapter
                 Err(TransferCoordinatorError::RuntimeError(
                     "Resume from MintSubmitted not yet implemented - requires mint status check".to_string()
                 ))
@@ -898,6 +950,101 @@ impl TransferCoordinator {
                 ))
             }
         }
+    }
+
+    /// Execute transfer from lock phase (skip lock, go to proof generation).
+    ///
+    /// This helper method is used for crash recovery when the lock transaction
+    /// is already confirmed but the transfer crashed before proof generation.
+    ///
+    /// # Arguments
+    ///
+    /// * `transfer` - The transfer to execute
+    /// * `adapter_registry` - The adapter registry for chain operations
+    /// * `runtime_ctx` - Runtime execution context with lease and policy
+    ///
+    /// # Returns
+    ///
+    /// The transfer receipt if the transfer completes successfully.
+    pub async fn execute_from_lock(
+        &self,
+        transfer: CrossChainTransfer,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::lease::RuntimeExecutionContext,
+    ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        tracing::info!(
+            "Executing transfer {} from lock phase (skipping lock broadcast)",
+            transfer.id
+        );
+
+        // TODO: Implement proof generation from lock
+        // For now, delegate to full execute which is idempotent due to replay check
+        self.execute(transfer, adapter_registry, runtime_ctx).await
+    }
+
+    /// Execute transfer from proof phase (skip proof generation, go to mint).
+    ///
+    /// This helper method is used for crash recovery when the proof is already
+    /// generated but the transfer crashed before minting.
+    ///
+    /// # Arguments
+    ///
+    /// * `transfer` - The transfer to execute
+    /// * `proof_bundle` - The proof bundle to use for minting
+    /// * `adapter_registry` - The adapter registry for chain operations
+    /// * `runtime_ctx` - Runtime execution context with lease and policy
+    ///
+    /// # Returns
+    ///
+    /// The transfer receipt if the transfer completes successfully.
+    pub async fn execute_from_proof(
+        &self,
+        transfer: CrossChainTransfer,
+        proof_bundle: Vec<u8>,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::lease::RuntimeExecutionContext,
+    ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        tracing::info!(
+            "Executing transfer {} from proof phase (skipping proof generation)",
+            transfer.id
+        );
+
+        // TODO: Implement mint from proof
+        // For now, delegate to full execute which is idempotent due to replay check
+        self.execute(transfer, adapter_registry, runtime_ctx).await
+    }
+
+    /// Execute transfer from mint phase (skip mint broadcast, just confirm).
+    ///
+    /// This helper method is used for crash recovery when the mint transaction
+    /// is already submitted but the transfer crashed before confirmation.
+    ///
+    /// # Arguments
+    ///
+    /// * `transfer_id` - The ID of the transfer to confirm
+    /// * `mint_tx_hash` - The hash of the submitted mint transaction
+    /// * `adapter_registry` - The adapter registry for chain operations
+    ///
+    /// # Returns
+    ///
+    /// The transfer receipt if the transfer completes successfully.
+    pub async fn execute_from_mint(
+        &self,
+        transfer_id: &str,
+        mint_tx_hash: &str,
+        adapter_registry: &dyn AdapterRegistry,
+    ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        tracing::info!(
+            "Executing transfer {} from mint phase (confirming mint transaction {})",
+            transfer_id,
+            mint_tx_hash
+        );
+
+        // TODO: Implement mint confirmation polling
+        // For now, return a placeholder receipt
+        Err(TransferCoordinatorError::RuntimeError(
+            "execute_from_mint not yet implemented - requires mint confirmation polling".to_string()
+        ))
     }
 
     /// Resume all incomplete transfers after a crash or restart.

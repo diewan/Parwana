@@ -49,6 +49,9 @@ pub mod constants;
 // Protocol invariants
 pub mod invariants;
 
+// Reorg monitoring and censorship detection
+pub mod monitor;
+
 // Replay semantics
 pub mod replay;
 

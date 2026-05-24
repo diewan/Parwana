@@ -5,6 +5,7 @@
 
 use crate::verified::{FinalityStrength, InclusionStrength};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// State model used by a chain
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -186,6 +187,69 @@ impl ChainCapabilities {
     pub fn can_authorize_mint(&self) -> bool {
         matches!(self.chain_role, ChainRole::Settlement)
     }
+
+    /// Create Bitcoin chain capabilities (convenience method for backward compatibility)
+    pub fn bitcoin() -> Self {
+        Self {
+            state_model: StateModel::Utxo,
+            finality_model: FinalityModel::ProofOfWork { confirmations: 6 },
+            finality_depth: 6,
+            deterministic_finality: false,
+            proof_model: ProofModel::SpvMerkle,
+            replay_protection: ReplayProtectionModel::UtxoSpentCheck,
+            native_single_use_semantics: true,
+            reorg_risk: ReorgRisk::High,
+            max_safe_reorg_depth: 6,
+            supports_light_client_proofs: true,
+            supports_state_proofs: false,
+            supports_transaction_inclusion_proofs: true,
+            supports_offline_verification: true,
+            supports_zk_proofs: false,
+            chain_role: ChainRole::Settlement,
+        }
+    }
+
+    /// Create Ethereum chain capabilities (convenience method for backward compatibility)
+    pub fn ethereum() -> Self {
+        Self {
+            state_model: StateModel::Account,
+            finality_model: FinalityModel::FinalizedCheckpoint,
+            finality_depth: 15,
+            deterministic_finality: true,
+            proof_model: ProofModel::MerklePatricia,
+            replay_protection: ReplayProtectionModel::SmartContractNullifier,
+            native_single_use_semantics: false,
+            reorg_risk: ReorgRisk::Medium,
+            max_safe_reorg_depth: 2,
+            supports_light_client_proofs: true,
+            supports_state_proofs: true,
+            supports_transaction_inclusion_proofs: true,
+            supports_offline_verification: false,
+            supports_zk_proofs: false,
+            chain_role: ChainRole::Settlement,
+        }
+    }
+
+    /// Create Celestia chain capabilities (convenience method for backward compatibility)
+    pub fn celestia() -> Self {
+        Self {
+            state_model: StateModel::DataBlob,
+            finality_model: FinalityModel::DataAvailabilityHeader,
+            finality_depth: 100,
+            deterministic_finality: true,
+            proof_model: ProofModel::DaNamespace,
+            replay_protection: ReplayProtectionModel::UtxoSpentCheck,
+            native_single_use_semantics: false,
+            reorg_risk: ReorgRisk::None,
+            max_safe_reorg_depth: 0,
+            supports_light_client_proofs: true,
+            supports_state_proofs: false,
+            supports_transaction_inclusion_proofs: true,
+            supports_offline_verification: true,
+            supports_zk_proofs: false,
+            chain_role: ChainRole::DataAvailability,
+        }
+    }
 }
 
 /// Protocol-recommended minimum confirmation counts for each supported chain.
@@ -268,5 +332,174 @@ impl std::fmt::Display for FinalityDepths {
             "FinalityDepths {{ bitcoin: {}, ethereum: {}, solana: {}, aptos: {}, sui: {}, celestia: {} }}",
             self.bitcoin, self.ethereum, self.solana, self.aptos, self.sui, self.celestia
         )
+    }
+}
+
+// ============================================================================
+// Legacy ChainCapability trait (for backward compatibility)
+// ============================================================================
+
+/// Chain capability trait - all chains must implement this.
+/// 
+/// **DEPRECATED**: Use ChainCapabilities struct instead.
+/// This trait is kept for backward compatibility during migration.
+pub trait ChainCapability: std::fmt::Debug {
+    /// Get the chain ID.
+    fn chain_id(&self) -> &str;
+    
+    /// Get the chain name.
+    fn chain_name(&self) -> &str;
+    
+    /// Get the finality type for this chain.
+    fn finality_type(&self) -> FinalityType;
+    
+    /// Get the required confirmations for this chain.
+    fn required_confirmations(&self) -> u64;
+    
+    /// Check if the chain supports SPV proofs.
+    fn supports_spv(&self) -> bool;
+    
+    /// Check if the chain supports contract calls.
+    fn supports_contracts(&self) -> bool;
+    
+    /// Check if the chain supports tapret commitments.
+    fn supports_tapret(&self) -> bool;
+    
+    /// Get the maximum proof size for this chain.
+    fn max_proof_size(&self) -> usize;
+    
+    /// Get the maximum transaction size for this chain.
+    fn max_tx_size(&self) -> usize;
+    
+    /// Get the block time for this chain.
+    fn block_time(&self) -> u64;
+    
+    /// Check if the chain supports reorg detection.
+    fn supports_reorg_detection(&self) -> bool;
+    
+    /// Get the capability set for this chain.
+    fn capabilities(&self) -> CapabilitySet;
+}
+
+/// Finality type (legacy, for ChainCapability trait)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FinalityType {
+    /// Probabilistic finality (Bitcoin PoW)
+    Probabilistic,
+    /// Economic finality (Ethereum PoS)
+    Economic,
+    /// Quorum-based finality (Solana)
+    Quorum,
+    /// Checkpoint finality (Aptos, Sui)
+    Checkpoint,
+}
+
+/// Capability set for a chain (legacy)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilitySet {
+    /// Chain ID
+    pub chain_id: String,
+    /// Supported capabilities
+    pub capabilities: Vec<Capability>,
+}
+
+impl CapabilitySet {
+    /// Create a new capability set.
+    pub fn new(chain_id: String, capabilities: Vec<Capability>) -> Self {
+        Self {
+            chain_id,
+            capabilities,
+        }
+    }
+
+    /// Check if a capability is supported.
+    pub fn has_capability(&self, capability: Capability) -> bool {
+        self.capabilities.contains(&capability)
+    }
+
+    /// Add a capability.
+    pub fn add_capability(&mut self, capability: Capability) {
+        if !self.has_capability(capability) {
+            self.capabilities.push(capability);
+        }
+    }
+
+    /// Remove a capability.
+    pub fn remove_capability(&mut self, capability: Capability) {
+        self.capabilities.retain(|c| c != &capability);
+    }
+}
+
+/// Individual capability flags (legacy)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Capability {
+    /// SPV proof support
+    SpvProofs,
+    
+    /// Contract call support
+    ContractCalls,
+    
+    /// Tapret commitment support
+    TapretCommitments,
+    
+    /// Reorg detection
+    ReorgDetection,
+    
+    /// State proofs
+    StateProofs,
+    
+    /// Receipt proofs
+    ReceiptProofs,
+    
+    /// Event indexing
+    EventIndexing,
+    
+    /// Account abstraction
+    AccountAbstraction,
+    
+    /// ZK proof verification
+    ZkProofVerification,
+    
+    /// Cross-chain messaging
+    CrossChainMessaging,
+}
+
+/// Chain capability registry for querying chain capabilities (legacy)
+#[derive(Debug, Default)]
+pub struct ChainCapabilityRegistry {
+    /// Registered chain capabilities
+    pub chains: std::collections::HashMap<String, Box<dyn ChainCapability>>,
+}
+
+impl ChainCapabilityRegistry {
+    /// Create a new chain capability registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a chain capability.
+    pub fn register(&mut self, capability: Box<dyn ChainCapability>) {
+        self.chains.insert(capability.chain_id().to_string(), capability);
+    }
+
+    /// Get a chain capability by ID.
+    pub fn get(&self, chain_id: &str) -> Option<&Box<dyn ChainCapability>> {
+        self.chains.get(chain_id)
+    }
+
+    /// Check if a chain supports a specific capability.
+    pub fn supports_capability(&self, chain_id: &str, capability: Capability) -> bool {
+        self.get(chain_id)
+            .map(|c| c.capabilities().has_capability(capability))
+            .unwrap_or(false)
+    }
+
+    /// Get all chains that support a specific capability.
+    pub fn get_chains_with_capability(&self, capability: Capability) -> Vec<String> {
+        self.chains
+            .iter()
+            .filter(|(_, c)| c.capabilities().has_capability(capability))
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 }
