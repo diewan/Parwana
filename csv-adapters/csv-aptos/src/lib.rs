@@ -35,6 +35,7 @@
 #![allow(dead_code)]
 
 pub mod address_utils;
+pub mod anchor;
 pub mod chain_verification;
 pub mod checkpoint;
 pub mod config;

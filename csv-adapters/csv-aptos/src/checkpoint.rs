@@ -68,58 +68,9 @@ impl CheckpointVerifier {
     ///
     /// # Returns
     /// `Ok(CheckpointInfo)` with certification details, or `Err` on failure.
-    pub fn is_version_finalized(
-        &self,
-        version: u64,
-        rpc: &dyn AptosRpc,
-        required_signatures: u64,
-    ) -> AptosResult<CheckpointInfo> {
-        // Check timeout
-        let start = std::time::Instant::now();
-
-        let result = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async {
-                let block = rpc.get_block_by_version(version).await?;
-                let is_certified = if self.config.require_certified {
-                    required_signatures > 0 && rpc.verify_checkpoint(version).await?
-                } else {
-                    block.is_some()
-                };
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>((block, is_certified))
-            })
-        };
-
-        let (block, is_certified) = result.map_err(|e| {
-            if start.elapsed().as_millis() > self.config.timeout_ms as u128 {
-                AptosError::timeout(&format!("version_{}", version), self.config.timeout_ms)
-            } else {
-                AptosError::CheckpointFailed(format!("Failed to verify checkpoint: {}", e))
-            }
-        })?;
-
-        match block {
-            Some(block) => Ok(CheckpointInfo {
-                version,
-                epoch: block.epoch,
-                round: block.round,
-                signatures_count: if is_certified { required_signatures } else { 0 },
-                is_certified,
-            }),
-            None => Err(AptosError::CheckpointFailed(format!(
-                "Block containing version {} not found",
-                version
-            ))),
-        }
-    }
-
-    /// Async version of is_version_finalized for use in async contexts.
+    ///
+    /// # Note
+    /// This is an async-only method. Use the async version from async contexts.
     pub async fn is_version_finalized_async(
         &self,
         version: u64,
@@ -174,23 +125,13 @@ impl CheckpointVerifier {
     /// * `address` - The account address
     /// * `resource_type` - The resource type tag
     /// * `rpc` - RPC client for fetching resource data
-    pub fn is_resource_present(
+    pub async fn is_resource_present_async(
         &self,
         address: [u8; 32],
         resource_type: &str,
         rpc: &dyn AptosRpc,
     ) -> AptosResult<bool> {
-        let resource = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async { rpc.get_resource(address, resource_type, None).await })
-        }
-        .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get resource: {}", e)))?;
+        let resource = rpc.get_resource(address, resource_type, None).await;
         Ok(resource.is_some())
     }
 
@@ -200,23 +141,14 @@ impl CheckpointVerifier {
     /// * `tx_version` - The transaction version to check
     /// * `expected_event_data` - The expected event data bytes
     /// * `rpc` - RPC client for fetching transaction data
-    pub fn verify_event_in_transaction(
+    pub async fn verify_event_in_transaction_async(
         &self,
         tx_version: u64,
         expected_event_data: &[u8],
         rpc: &dyn AptosRpc,
     ) -> AptosResult<bool> {
-        let tx = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async { rpc.get_transaction_by_version(tx_version).await })
-        }
-        .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get transaction: {}", e)))?;
+        let tx = rpc.get_transaction_by_version(tx_version).await
+            .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get transaction: {}", e)))?;
         match tx {
             Some(tx) => {
                 if !tx.success {
@@ -235,18 +167,9 @@ impl CheckpointVerifier {
     ///
     /// # Arguments
     /// * `rpc` - RPC client for fetching epoch info
-    pub fn current_epoch(&self, rpc: &dyn AptosRpc) -> AptosResult<u64> {
-        let ledger = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async { rpc.get_ledger_info().await })
-        }
-        .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get ledger: {}", e)))?;
+    pub async fn current_epoch_async(&self, rpc: &dyn AptosRpc) -> AptosResult<u64> {
+        let ledger = rpc.get_ledger_info().await
+            .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get ledger: {}", e)))?;
         Ok(ledger.epoch)
     }
 
@@ -257,8 +180,8 @@ impl CheckpointVerifier {
     /// # Arguments
     /// * `expected_epoch` - The epoch we expect the network to be in
     /// * `rpc` - RPC client for fetching current epoch
-    pub fn is_epoch_passed(&self, expected_epoch: u64, rpc: &dyn AptosRpc) -> AptosResult<bool> {
-        let current = self.current_epoch(rpc)?;
+    pub async fn is_epoch_passed_async(&self, expected_epoch: u64, rpc: &dyn AptosRpc) -> AptosResult<bool> {
+        let current = self.current_epoch_async(rpc).await?;
         Ok(current >= expected_epoch)
     }
 }
@@ -274,8 +197,8 @@ mod tests {
     use super::*;
     use crate::rpc::{AptosBlockInfo, AptosEvent, AptosResource, AptosTransaction, MockAptosRpc};
 
-    #[test]
-    fn test_version_finalization() {
+    #[tokio::test]
+    async fn test_version_finalization() {
         let rpc = MockAptosRpc::new(5000);
         rpc.set_block(
             1500,
@@ -289,24 +212,24 @@ mod tests {
         );
 
         let verifier = CheckpointVerifier::new();
-        let result = verifier.is_version_finalized(1500, &rpc, 3).unwrap();
+        let result = verifier.is_version_finalized_async(1500, &rpc, 3).await.unwrap();
         assert!(result.is_certified);
         assert_eq!(result.version, 1500);
         assert_eq!(result.epoch, 1);
         assert_eq!(result.round, 42);
     }
 
-    #[test]
-    fn test_version_not_found() {
+    #[tokio::test]
+    async fn test_version_not_found() {
         let rpc = MockAptosRpc::new(5000);
 
         let verifier = CheckpointVerifier::new();
-        let result = verifier.is_version_finalized(9999, &rpc, 3);
+        let result = verifier.is_version_finalized_async(9999, &rpc, 3).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_resource_presence() {
+    #[tokio::test]
+    async fn test_resource_presence() {
         let rpc = MockAptosRpc::new(5000);
         rpc.set_resource(
             [1u8; 32],
@@ -319,18 +242,20 @@ mod tests {
         let verifier = CheckpointVerifier::new();
         assert!(
             verifier
-                .is_resource_present([1u8; 32], "CSV::Seal", &rpc)
+                .is_resource_present_async([1u8; 32], "CSV::Seal", &rpc)
+                .await
                 .unwrap()
         );
         assert!(
             !verifier
-                .is_resource_present([99u8; 32], "CSV::Seal", &rpc)
+                .is_resource_present_async([99u8; 32], "CSV::Seal", &rpc)
+                .await
                 .unwrap()
         );
     }
 
-    #[test]
-    fn test_failed_transaction_event() {
+    #[tokio::test]
+    async fn test_failed_transaction_event() {
         let rpc = MockAptosRpc::new(5000);
         rpc.add_transaction(
             1500,
@@ -359,23 +284,26 @@ mod tests {
         let verifier = CheckpointVerifier::new();
         assert!(
             !verifier
-                .verify_event_in_transaction(1500, &[0xAB, 0xCD], &rpc)
+                .verify_event_in_transaction_async(1500, &[0xAB, 0xCD], &rpc)
+                .await
                 .unwrap()
         );
         assert!(
             !verifier
-                .verify_event_in_transaction(1500, &[0xFF], &rpc)
+                .verify_event_in_transaction_async(1500, &[0xFF], &rpc)
+                .await
                 .unwrap()
         );
         assert!(
             verifier
-                .verify_event_in_transaction(9999, &[0xAB], &rpc)
+                .verify_event_in_transaction_async(9999, &[0xAB], &rpc)
+                .await
                 .is_err()
         );
     }
 
-    #[test]
-    fn test_event_in_transaction() {
+    #[tokio::test]
+    async fn test_event_in_transaction() {
         let rpc = MockAptosRpc::new(5000);
         rpc.add_transaction(
             1500,
@@ -404,7 +332,8 @@ mod tests {
         let verifier = CheckpointVerifier::new();
         assert!(
             verifier
-                .verify_event_in_transaction(1500, &[0xAB, 0xCD], &rpc)
+                .verify_event_in_transaction_async(1500, &[0xAB, 0xCD], &rpc)
+                .await
                 .unwrap()
         );
     }

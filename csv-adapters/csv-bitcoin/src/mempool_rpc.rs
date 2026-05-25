@@ -62,6 +62,10 @@ impl MempoolSignetRpc {
             + Send
             + 'static,
     {
+        // DEPRECATED: This blocking wrapper is being removed.
+        // Call sites should be updated to use async directly.
+        // For now, this is a placeholder to maintain compilation.
+        // TODO: Remove this function and update all call sites to async.
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

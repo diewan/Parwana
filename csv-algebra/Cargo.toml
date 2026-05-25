@@ -1,0 +1,15 @@
+[package]
+name = "csv-algebra"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+
+[dependencies]
+# Zero runtime dependencies.
+# alloc is available via extern crate alloc.
+# Any addition here that requires std will break the #![no_std] compile.
+
+[features]
+default = []
+# std feature is ONLY for test harness compatibility — never enabled in production
+std = []

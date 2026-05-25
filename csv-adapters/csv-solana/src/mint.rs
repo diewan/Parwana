@@ -28,32 +28,22 @@ pub fn mint_sanad_from_hex_key(
         transaction::Transaction,
     };
 
-    fn post_rpc_json(
+    /// Async version of post_rpc_json for use in async contexts.
+    async fn post_rpc_json_async(
         rpc_url: String,
         request: serde_json::Value,
     ) -> SolanaResult<serde_json::Value> {
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| SolanaError::Rpc(format!("Failed to build HTTP runtime: {}", e)))?;
+        let response = reqwest::Client::new()
+            .post(&rpc_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| SolanaError::Rpc(format!("RPC request failed: {}", e)))?;
 
-            rt.block_on(async move {
-                let response = reqwest::Client::new()
-                    .post(&rpc_url)
-                    .json(&request)
-                    .send()
-                    .await
-                    .map_err(|e| SolanaError::Rpc(format!("RPC request failed: {}", e)))?;
-
-                response
-                    .json()
-                    .await
-                    .map_err(|e| SolanaError::Rpc(format!("Failed to parse RPC response: {}", e)))
-            })
-        })
-        .join()
-        .map_err(|_| SolanaError::Rpc("HTTP worker thread panicked".to_string()))?
+        response
+            .json()
+            .await
+            .map_err(|e| SolanaError::Rpc(format!("Failed to parse RPC response: {}", e)))
     }
 
     // Parse private key from hex

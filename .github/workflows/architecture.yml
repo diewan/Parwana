@@ -1,0 +1,44 @@
+name: Architectural Constitution
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  constitution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Check dependency graph constitution
+        run: cargo deny check graph
+
+      - name: Run dependency DAG test
+        run: cargo test -p csv-architecture --test dep_graph_constitution
+
+      - name: No tokio::runtime::Builder in adapters
+        run: |
+          count=$(grep -rn "tokio::runtime::Builder" csv-adapters/ 2>/dev/null | wc -l)
+          if [ "$count" -ne 0 ]; then
+            echo "FAIL: $count runtime construction sites in adapters"
+            grep -rn "tokio::runtime::Builder" csv-adapters/
+            exit 1
+          fi
+
+      - name: No block_on outside binaries and tests
+        run: |
+          violations=$(grep -rn "\.block_on(" csv-*/src/ \
+            --exclude-dir=csv-cli --exclude-dir=csv-sdk 2>/dev/null | grep -v "#\[cfg(test)\]" || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: block_on found outside of binaries and tests"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: Run existing architecture guard tests
+        run: cargo test -p csv-architecture --test architecture_guard

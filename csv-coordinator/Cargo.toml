@@ -1,0 +1,16 @@
+[package]
+name = "csv-coordinator"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+
+[dependencies]
+csv-protocol = { path = "../csv-protocol" }
+csv-verifier = { path = "../csv-verifier" }
+csv-storage = { path = "../csv-storage" }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+thiserror = "1.0"
+tracing = "0.1"
+
+[features]
+default = []

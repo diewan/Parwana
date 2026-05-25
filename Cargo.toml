@@ -3,6 +3,8 @@ resolver = "2"
 
 members = [
     # Core crates (Phase 1 restructuring)
+    "csv-algebra",
+    "csv-wire",
     "csv-protocol",
     "csv-codec",
     "csv-hash",
@@ -13,6 +15,8 @@ members = [
     "csv-storage",
     "csv-testkit",
     "csv-contract-bindings",
+    # Coordinator crate
+    "csv-coordinator",
     # Runtime crates
     "csv-runtime",
     "csv-sdk",

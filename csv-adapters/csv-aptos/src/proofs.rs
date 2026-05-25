@@ -237,29 +237,12 @@ impl StateProofVerifier {
     ///
     /// # Returns
     /// `true` if the resource exists and has not been consumed.
-    pub fn verify_resource_exists(
-        address: [u8; 32],
-        resource_type: &str,
-        rpc: &dyn AptosRpc,
-    ) -> AptosResult<bool> {
-        let resource = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async { rpc.get_resource(address, resource_type, None).await })
-        }
-        .map_err(|e| AptosError::StateProofFailed(format!("Failed to fetch resource: {}", e)))?;
-        match resource {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
-    }
-
-    /// Async version of verify_resource_exists for use in async contexts.
+    /// Verify that a resource exists at the given address.
+    ///
+    /// # Arguments
+    /// * `address` - The account address
+    /// * `resource_type` - The resource type tag
+    /// * `rpc` - RPC client for fetching resource data
     pub async fn verify_resource_exists_async(
         address: [u8; 32],
         resource_type: &str,
@@ -278,28 +261,20 @@ impl StateProofVerifier {
     /// Verify that a resource has been consumed (no longer exists).
     ///
     /// This is used to verify seal consumption after publishing.
-    pub fn verify_resource_consumed(
+    ///
+    /// # Arguments
+    /// * `address` - The account address
+    /// * `resource_type` - The resource type tag
+    /// * `rpc` - RPC client for fetching resource data
+    pub async fn verify_resource_consumed_async(
         address: [u8; 32],
         resource_type: &str,
         rpc: &dyn AptosRpc,
     ) -> AptosResult<bool> {
-        let resource = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async { rpc.get_resource(address, resource_type, None).await })
-        }
-        .map_err(|e| {
-            AptosError::StateProofFailed(format!("Failed to verify resource consumption: {}", e))
-        })?;
-        // Resource is consumed when it no longer exists
-        match resource {
-            Some(_) => Ok(false), // Still exists, not consumed
-            None => Ok(true),     // Doesn't exist, was consumed
+        match rpc.get_resource(address, resource_type, None).await {
+            Ok(Some(_)) => Ok(false), // Still exists, not consumed
+            Ok(None) => Ok(true),     // Doesn't exist, was consumed
+            Err(e) => Err(AptosError::StateProofFailed(format!("Failed to verify resource consumption: {}", e))),
         }
     }
 }

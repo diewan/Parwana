@@ -241,20 +241,16 @@ mod real_rpc_impl {
             .collect()
     }
 
-    fn parse_hex_bytes32(s: &str) -> [u8; 32] {
-        let bytes = parse_hex_bytes(s);
-        let mut arr = [0u8; 32];
-        let len = bytes.len().min(32);
-        arr[(32 - len)..].copy_from_slice(&bytes[bytes.len() - len..]);
-        arr
+    fn parse_hex_bytes32(s: &str) -> Result<[u8; 32], String> {
+        let s = s.trim_start_matches("0x");
+        let bytes = hex::decode(s).map_err(|e| format!("Invalid hex: {}", e))?;
+        bytes.try_into().map_err(|v: Vec<u8>| format!("must be 32 bytes, got {}", v.len()))
     }
 
-    fn parse_hex_bytes20(s: &str) -> [u8; 20] {
-        let bytes = parse_hex_bytes(s);
-        let mut arr = [0u8; 20];
-        let len = bytes.len().min(20);
-        arr[(20 - len)..].copy_from_slice(&bytes[bytes.len() - len..]);
-        arr
+    fn parse_hex_bytes20(s: &str) -> Result<[u8; 20], String> {
+        let s = s.trim_start_matches("0x");
+        let bytes = hex::decode(s).map_err(|e| format!("Invalid hex: {}", e))?;
+        bytes.try_into().map_err(|v: Vec<u8>| format!("must be 20 bytes, got {}", v.len()))
     }
 
     #[async_trait]
@@ -274,7 +270,7 @@ mod real_rpc_impl {
                 .ok_or_else(|| format!("Block {} not found", block_number))?;
 
             let hash_str = block["hash"].as_str().ok_or("Missing block hash")?;
-            Ok(parse_hex_bytes32(hash_str))
+            parse_hex_bytes32(hash_str).map_err(|e| e.into())
         }
 
         async fn get_proof(
@@ -312,7 +308,8 @@ mod real_rpc_impl {
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|sp| {
-                            let key = sp["key"].as_str().map(parse_hex_bytes32)?;
+                            let key_str = sp["key"].as_str()?;
+                            let key = parse_hex_bytes32(key_str).ok()?;
                             let value = sp["value"]
                                 .as_str()
                                 .map(parse_hex_bytes)
@@ -335,12 +332,17 @@ mod real_rpc_impl {
                 })
                 .unwrap_or_default();
 
+            let code_hash_str = proof["codeHash"].as_str().ok_or("Missing codeHash")?;
+            let code_hash = parse_hex_bytes32(code_hash_str).map_err(|e| e.to_string())?;
+            let storage_hash_str = proof["storageHash"].as_str().ok_or("Missing storageHash")?;
+            let storage_hash = parse_hex_bytes32(storage_hash_str).map_err(|e| e.to_string())?;
+            
             Ok(StorageProof {
                 account_proof,
                 balance: proof["balance"].as_str().unwrap_or("0").to_string(),
-                code_hash: parse_hex_bytes32(proof["codeHash"].as_str().unwrap_or("0x0")),
+                code_hash,
                 nonce: proof["nonce"].as_str().unwrap_or("0").to_string(),
-                storage_hash: parse_hex_bytes32(proof["storageHash"].as_str().unwrap_or("0x0")),
+                storage_hash,
                 storage_proof,
             })
         }
@@ -365,7 +367,10 @@ mod real_rpc_impl {
                                 .as_array()
                                 .map(|t| {
                                     t.iter()
-                                        .filter_map(|v| v.as_str().map(parse_hex_bytes32))
+                                        .filter_map(|v| {
+                                            v.as_str()
+                                                .and_then(|s| parse_hex_bytes32(s).ok())
+                                        })
                                         .collect()
                                 })
                                 .unwrap_or_default();
@@ -405,7 +410,7 @@ mod real_rpc_impl {
 
             let block_hash = receipt["blockHash"]
                 .as_str()
-                .map(parse_hex_bytes32)
+                .and_then(|s| parse_hex_bytes32(s).ok())
                 .unwrap_or_default();
 
             let gas_used = receipt["gasUsed"]
@@ -454,10 +459,15 @@ mod real_rpc_impl {
             if result.is_null() {
                 return Ok(None);
             }
+            let hash_str = result["hash"].as_str().ok_or("Missing block hash")?;
+            let hash = parse_hex_bytes32(hash_str).map_err(|e| e.to_string())?;
+            let state_root_str = result["stateRoot"].as_str().ok_or("Missing stateRoot")?;
+            let state_root = parse_hex_bytes32(state_root_str).map_err(|e| e.to_string())?;
+            
             Ok(Some(RpcBlock {
                 number: block_number,
-                hash: parse_hex_bytes32(result["hash"].as_str().unwrap_or("0x0")),
-                state_root: parse_hex_bytes32(result["stateRoot"].as_str().unwrap_or("0x0")),
+                hash,
+                state_root,
                 timestamp: parse_hex_u64(result["timestamp"].as_str().unwrap_or("0x0"))
                     .unwrap_or(0),
             }))
@@ -510,9 +520,8 @@ mod real_rpc_impl {
                 .await?
                 .ok_or_else(|| format!("Block {:?} not found", block_hash))?;
 
-            Ok(parse_hex_bytes32(
-                block["stateRoot"].as_str().unwrap_or("0x0"),
-            ))
+            let state_root_str = block["stateRoot"].as_str().ok_or("Missing stateRoot")?;
+            parse_hex_bytes32(state_root_str).map_err(|e| e.into())
         }
 
         async fn get_finalized_block_number(
@@ -537,7 +546,7 @@ mod real_rpc_impl {
         ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             let tx_hex = format!("0x{}", hex::encode(&tx_bytes));
             let hash_str = self.send_raw_tx_raw(&tx_hex).await?;
-            Ok(parse_hex_bytes32(&hash_str))
+            parse_hex_bytes32(&hash_str).map_err(|e| e.into())
         }
 
         async fn get_balance(
