@@ -39,6 +39,7 @@ use crate::rpc::AptosRpc;
 use crate::rpc::{AptosLedgerInfo, AptosTransaction};
 use crate::seal::SealRegistry;
 use crate::types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, AptosSealPoint};
+use crate::rpc::{AptosLedgerReader, AptosTransactionReader, AptosTransactionSubmitter};
 
 
 /// Aptos implementation of the SealProtocol trait
@@ -178,7 +179,7 @@ impl AptosSealProtocol {
             StateProofVerifier::verify_resource_exists_async(
                 account_address,
                 &resource_type,
-                rpc.as_ref(),
+                rpc.as_ref() as &(dyn crate::rpc::AptosAccountReader + Send + Sync),
             )
             .await
         };
@@ -401,7 +402,7 @@ impl AptosSealProtocol {
                 EventProofVerifier::verify_event_in_tx(
                     anchor.version,
                     &expected_event_data,
-                    self.rpc.as_ref(),
+                    self.rpc_as_transaction_reader(),
                 )
                 .await
             })
@@ -452,14 +453,14 @@ impl SealProtocol for AptosSealProtocol {
                 })?;
 
             // Submit signed transaction via REST API
-            let submit_result = self.rpc.submit_signed_transaction(tx_json)
+            let submit_result = self.rpc_as_transaction_submitter().submit_signed_transaction(tx_json)
                 .await
                 .map_err(|e| {
                     ProtocolError::PublishFailed(format!("Failed to submit transaction: {}", e))
                 })?;
 
             // Wait for transaction confirmation
-            let tx = self.rpc.wait_for_transaction(submit_result)
+            let tx = self.rpc_as_transaction_reader().wait_for_transaction(submit_result)
                 .await
                 .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
@@ -467,7 +468,7 @@ impl SealProtocol for AptosSealProtocol {
             let valid = EventProofVerifier::verify_event_in_tx(
                 tx.version,
                 &expected_event_data,
-                self.rpc.as_ref(),
+                self.rpc_as_transaction_reader(),
             )
             .await
             .map_err(|e: AptosError| ProtocolError::InclusionProofFailed(e.to_string()))?;
@@ -521,7 +522,7 @@ impl SealProtocol for AptosSealProtocol {
 
         // Fetch transaction from the Aptos node by version
         #[cfg(feature = "rpc")]
-        let tx = self.rpc.get_transaction(anchor.version)
+        let tx = self.rpc_as_transaction_reader().get_transaction(anchor.version)
             .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!(
@@ -563,7 +564,7 @@ impl SealProtocol for AptosSealProtocol {
 
         // Fetch ledger info to verify the transaction is part of the ledger
         #[cfg(feature = "rpc")]
-        let ledger_info = self.rpc.get_ledger_info()
+        let ledger_info = self.rpc_as_ledger_reader().get_ledger_info()
             .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!("Failed to fetch ledger info: {}", e))
@@ -655,7 +656,7 @@ impl SealProtocol for AptosSealProtocol {
             let resource_exists = StateProofVerifier::verify_resource_exists_async(
                 seal.account_address,
                 &seal.resource_type,
-                self.rpc.as_ref(),
+                self.rpc.as_ref() as &(dyn crate::rpc::AptosAccountReader + Send + Sync),
             )
             .await
             .map_err(|e| {
@@ -783,7 +784,7 @@ impl SealProtocol for AptosSealProtocol {
             anchor.version
         );
         #[cfg(feature = "rpc")]
-        let current_version = self.rpc.get_latest_version()
+        let current_version = self.rpc_as_ledger_reader().get_latest_version()
             .await
             .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
@@ -825,6 +826,19 @@ impl SealProtocol for AptosSealProtocol {
 impl AptosSealProtocol {
     /// Get RPC client reference (crate-visible for chain_operations)
     pub(crate) fn rpc(&self) -> &dyn AptosRpc {
+        self.rpc.as_ref()
+    }
+
+    /// Get RPC client as specific subtraits for operations that need them
+    pub(crate) fn rpc_as_transaction_reader(&self) -> &(dyn AptosTransactionReader + Send + Sync) {
+        self.rpc.as_ref()
+    }
+
+    pub(crate) fn rpc_as_ledger_reader(&self) -> &(dyn AptosLedgerReader + Send + Sync) {
+        self.rpc.as_ref()
+    }
+
+    pub(crate) fn rpc_as_transaction_submitter(&self) -> &(dyn AptosTransactionSubmitter + Send + Sync) {
         self.rpc.as_ref()
     }
 

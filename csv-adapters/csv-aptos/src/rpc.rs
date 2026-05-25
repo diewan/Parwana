@@ -115,10 +115,12 @@ pub trait AptosCheckpointVerifier: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<bool, Box<dyn std::error::Error + Send + Sync>>>;
 }
 
-/// DEPRECATED: Composite Aptos RPC facade.
+/// Composite Aptos RPC trait combining multiple capabilities.
 ///
-/// This trait is retained for backward compatibility but should NOT be used in new code.
-/// Instead, use the specific subtraits:
+/// This trait combines the most commonly used subtraits for convenience
+/// in situations where multiple capabilities are needed (e.g., seal_protocol).
+/// For new code, prefer depending on the narrowest possible trait bound
+/// to enforce least privilege:
 /// - AptosLedgerReader for ledger info
 /// - AptosAccountReader for account resources
 /// - AptosTransactionReader for transaction queries
@@ -127,102 +129,19 @@ pub trait AptosCheckpointVerifier: Send + Sync + 'static {
 /// - AptosTransactionSubmitter for transaction submission
 /// - AptosModulePublisher for module publishing
 /// - AptosCheckpointVerifier for checkpoint verification
-///
-/// Callers should depend on the narrowest possible trait bound to enforce least privilege.
-#[deprecated(since = "0.1.0", note = "Use specific subtraits instead (e.g., AptosLedgerReader, AptosTransactionReader)")]
-pub trait AptosRpc: Send + Sync + 'static {
-    fn get_ledger_info(
-        &self,
-    ) -> BoxFuture<'_, Result<AptosLedgerInfo, Box<dyn std::error::Error + Send + Sync>>>;
-
-    /// Get the sender's account address.
-    fn sender_address(
-        &self,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_account_sequence_number(
-        &self,
-        address: [u8; 32],
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_resource(
-        &self,
-        address: [u8; 32],
-        resource_type: &str,
-        position: Option<u64>,
-    ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_transaction(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_transactions(
-        &self,
-        start_version: u64,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_events(
-        &self,
-        event_handle: String,
-        position: String,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn submit_transaction(
-        &self,
-        tx_bytes: Vec<u8>,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn submit_signed_transaction(
-        &self,
-        signed_tx_json: serde_json::Value,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn wait_for_transaction(
-        &self,
-        tx_hash: [u8; 32],
-    ) -> BoxFuture<'_, Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_block_by_version(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_events_by_account(
-        &self,
-        account: [u8; 32],
-        start: u64,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_latest_version(
-        &self,
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn get_transaction_by_version(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn publish_module(
-        &self,
-        tx_bytes: Vec<u8>,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn verify_checkpoint(
-        &self,
-        sequence_number: u64,
-    ) -> BoxFuture<'_, Result<bool, Box<dyn std::error::Error + Send + Sync>>>;
-
-    fn as_any(&self) -> &dyn std::any::Any
-    where
-        Self: Sized,
-    {
-        self
-    }
-
+pub trait AptosRpc:
+    AptosLedgerReader
+    + AptosAccountReader
+    + AptosTransactionReader
+    + AptosEventReader
+    + AptosSignerIdentity
+    + AptosTransactionSubmitter
+    + AptosModulePublisher
+    + AptosCheckpointVerifier
+    + Send
+    + Sync
+    + 'static
+{
     /// Clone the RPC client for creating new boxed instances
     fn clone_boxed(&self) -> Box<dyn AptosRpc>;
 }
@@ -391,6 +310,30 @@ impl MockAptosRpc {
 }
 
 // Implement specific subtraits for MockAptosRpc
+impl AptosLedgerReader for MockAptosRpc {
+    fn get_ledger_info(
+        &self,
+    ) -> BoxFuture<'_, Result<AptosLedgerInfo, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async {
+            Ok(AptosLedgerInfo {
+                chain_id: self.chain_id,
+                epoch: 1,
+                ledger_version: self.latest_version,
+                oldest_ledger_version: 0,
+                ledger_timestamp: 0,
+                oldest_transaction_timestamp: 0,
+                epoch_start_timestamp: 0,
+            })
+        })
+    }
+
+    fn get_latest_version(
+        &self,
+    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async { Ok(self.latest_version) })
+    }
+}
+
 impl AptosAccountReader for MockAptosRpc {
     fn get_account_sequence_number(
         &self,
@@ -455,79 +398,7 @@ impl AptosTransactionReader for MockAptosRpc {
     }
 }
 
-impl AptosRpc for MockAptosRpc {
-    fn get_ledger_info(
-        &self,
-    ) -> BoxFuture<'_, Result<AptosLedgerInfo, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async {
-            Ok(AptosLedgerInfo {
-                chain_id: self.chain_id,
-                epoch: 1,
-                ledger_version: self.latest_version,
-                oldest_ledger_version: 0,
-                ledger_timestamp: 0,
-                oldest_transaction_timestamp: 0,
-                epoch_start_timestamp: 0,
-            })
-        })
-    }
-
-    fn sender_address(
-        &self,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async { Ok(self.test_address) })
-    }
-
-    fn get_account_sequence_number(
-        &self,
-        _address: [u8; 32],
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async { Ok(self.tx_counter.load(std::sync::atomic::Ordering::SeqCst)) })
-    }
-
-    fn get_resource(
-        &self,
-        address: [u8; 32],
-        resource_type: &str,
-        _position: Option<u64>,
-    ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        let resource_type = resource_type.to_string();
-        Box::pin(async move {
-            Ok(self
-                .resources
-                .lock()
-                .unwrap()
-                .get(&(address, resource_type))
-                .cloned())
-        })
-    }
-
-    fn get_transaction(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        Box::pin(async move { Ok(self.transactions.lock().unwrap().get(&version).cloned()) })
-    }
-
-    fn get_transactions(
-        &self,
-        start_version: u64,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        Box::pin(async move {
-            let transactions = self.transactions.lock().unwrap();
-            Ok(transactions
-                .iter()
-                .filter(|(v, _)| **v >= start_version)
-                .take(limit as usize)
-                .map(|(_, tx)| tx.clone())
-                .collect())
-        })
-    }
-
+impl AptosEventReader for MockAptosRpc {
     fn get_events(
         &self,
         event_handle: String,
@@ -551,6 +422,34 @@ impl AptosRpc for MockAptosRpc {
         })
     }
 
+    fn get_events_by_account(
+        &self,
+        _account: [u8; 32],
+        start: u64,
+        limit: u32,
+    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async move {
+            let events = self.events.lock().unwrap();
+            Ok(events
+                .values()
+                .flatten()
+                .skip(start as usize)
+                .take(limit as usize)
+                .cloned()
+                .collect())
+        })
+    }
+}
+
+impl AptosSignerIdentity for MockAptosRpc {
+    fn sender_address(
+        &self,
+    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async { Ok(self.test_address) })
+    }
+}
+
+impl AptosTransactionSubmitter for MockAptosRpc {
     fn submit_transaction(
         &self,
         tx_bytes: Vec<u8>,
@@ -617,76 +516,9 @@ impl AptosRpc for MockAptosRpc {
             Ok(hash)
         })
     }
+}
 
-    fn wait_for_transaction(
-        &self,
-        _tx_hash: [u8; 32],
-    ) -> BoxFuture<'_, Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async {
-            let events = self.next_tx_events.lock().unwrap().drain(..).collect();
-            let tx = AptosTransaction {
-                version: self.latest_version,
-                hash: [0xCD; 32],
-                state_change_hash: [0xEF; 32],
-                event_root_hash: [0x1F; 32],
-                state_checkpoint_hash: None,
-                epoch: 1,
-                round: 0,
-                events,
-                payload: Vec::new(),
-                success: true,
-                vm_status: "Executed".to_string(),
-                gas_used: 0,
-                cumulative_gas_used: 0,
-            };
-            self.transactions
-                .lock()
-                .unwrap()
-                .insert(self.latest_version, tx.clone());
-            Ok(tx)
-        })
-    }
-
-    fn get_block_by_version(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        Box::pin(async move { Ok(self.blocks.lock().unwrap().get(&version).cloned()) })
-    }
-
-    fn get_events_by_account(
-        &self,
-        _account: [u8; 32],
-        start: u64,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async move {
-            let events = self.events.lock().unwrap();
-            Ok(events
-                .values()
-                .flatten()
-                .skip(start as usize)
-                .take(limit as usize)
-                .cloned()
-                .collect())
-        })
-    }
-
-    fn get_latest_version(
-        &self,
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async { Ok(self.latest_version) })
-    }
-
-    fn get_transaction_by_version(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        Box::pin(async move { Ok(self.transactions.lock().unwrap().get(&version).cloned()) })
-    }
-
+impl AptosModulePublisher for MockAptosRpc {
     fn publish_module(
         &self,
         tx_bytes: Vec<u8>,
@@ -696,18 +528,18 @@ impl AptosRpc for MockAptosRpc {
             Ok([0xAB; 32])
         })
     }
+}
 
+impl AptosCheckpointVerifier for MockAptosRpc {
     fn verify_checkpoint(
         &self,
         _sequence_number: u64,
     ) -> BoxFuture<'_, Result<bool, Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async { Ok(true) })
     }
+}
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
+impl AptosRpc for MockAptosRpc {
     fn clone_boxed(&self) -> Box<dyn AptosRpc> {
         let tx_count = self.tx_counter.load(std::sync::atomic::Ordering::SeqCst);
         Box::new(MockAptosRpc {
@@ -734,7 +566,7 @@ mod tests {
     #[tokio::test]
     async fn test_ledger_info() {
         let rpc = MockAptosRpc::new(1000);
-        let info = AptosRpc::get_ledger_info(&rpc).await.unwrap();
+        let info = AptosLedgerReader::get_ledger_info(&rpc).await.unwrap();
         assert_eq!(info.chain_id, 1);
         assert_eq!(info.ledger_version, 1000);
     }
@@ -748,7 +580,7 @@ mod tests {
         };
         rpc.set_resource(address, "CSV::Seal", resource.clone());
 
-        let fetched = AptosRpc::get_resource(&rpc, address, "CSV::Seal", None)
+        let fetched = AptosAccountReader::get_resource(&rpc, address, "CSV::Seal", None)
             .await
             .unwrap();
         assert_eq!(fetched.unwrap().data, vec![0xAB, 0xCD]);
@@ -774,7 +606,7 @@ mod tests {
         };
         rpc.add_transaction(500, tx.clone());
 
-        let fetched = AptosRpc::get_transaction(&rpc, 500).await.unwrap();
+        let fetched = AptosTransactionReader::get_transaction(&rpc, 500).await.unwrap();
         assert_eq!(fetched.unwrap().version, 500);
     }
 
@@ -789,7 +621,7 @@ mod tests {
         };
         rpc.add_event("CSV::Seal", event.clone());
 
-        let fetched = AptosRpc::get_events(&rpc, "CSV::Seal".to_string(), "0".to_string(), 10)
+        let fetched = AptosEventReader::get_events(&rpc, "CSV::Seal".to_string(), "0".to_string(), 10)
             .await
             .unwrap();
         assert_eq!(fetched.len(), 1);
@@ -798,7 +630,7 @@ mod tests {
     #[tokio::test]
     async fn test_submit_transaction() {
         let rpc = MockAptosRpc::new(1000);
-        let tx_hash = AptosRpc::submit_transaction(&rpc, vec![0x01, 0x02])
+        let tx_hash = AptosTransactionSubmitter::submit_transaction(&rpc, vec![0x01, 0x02])
             .await
             .unwrap();
         assert_eq!(tx_hash, [0xAB; 32]);
@@ -808,7 +640,7 @@ mod tests {
     async fn test_wait_for_transaction() {
         let rpc = MockAptosRpc::new(1000);
         let tx_hash = [1u8; 32];
-        let tx = AptosRpc::wait_for_transaction(&rpc, tx_hash).await.unwrap();
+        let tx = AptosTransactionReader::wait_for_transaction(&rpc, tx_hash).await.unwrap();
         assert_eq!(tx.version, 1000);
         assert!(tx.success);
     }

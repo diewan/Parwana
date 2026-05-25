@@ -74,7 +74,7 @@ impl CheckpointVerifier {
     pub async fn is_version_finalized_async(
         &self,
         version: u64,
-        rpc: &dyn AptosRpc,
+        rpc: &dyn crate::rpc::AptosRpc,
         required_signatures: u64,
     ) -> AptosResult<CheckpointInfo> {
         // Check timeout

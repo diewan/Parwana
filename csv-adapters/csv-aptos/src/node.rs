@@ -1,27 +1,36 @@
 //! Real Aptos RPC client using REST API
 //!
-//! Implements the AptosRpc trait using Aptos's official REST API.
-//! Only compiled when the `rpc` feature is enabled.
+//! Implements the Aptos RPC subtraits using Aptos's official REST API.
+//! Only compiled when the `rpc` feature is enabled and not targeting wasm32.
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 use std::time::{Duration, Instant};
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 use reqwest::Client;
+
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 use serde_json::Value;
 
 use crate::address_utils::format_address;
 use crate::rpc::{
-    AptosBlockInfo, AptosEvent, AptosLedgerInfo, AptosResource, AptosRpc, AptosTransaction,
-    BoxFuture,
+    AptosBlockInfo, AptosEvent, AptosLedgerInfo, AptosResource, AptosTransaction, BoxFuture,
+    AptosLedgerReader, AptosAccountReader, AptosTransactionReader, AptosEventReader,
+    AptosSignerIdentity, AptosTransactionSubmitter, AptosModulePublisher, AptosCheckpointVerifier,
+    AptosRpc,
 };
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 type RpcResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 /// Real Aptos RPC client using REST API
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 pub struct AptosNode {
     client: Client,
     rpc_url: String,
 }
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 impl AptosNode {
     /// Create a new Aptos RPC client
     pub fn new(rpc_url: &str) -> Self {
@@ -194,7 +203,8 @@ impl AptosNode {
     }
 }
 
-impl AptosRpc for AptosNode {
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosLedgerReader for AptosNode {
     fn get_ledger_info(
         &self,
     ) -> BoxFuture<'_, Result<AptosLedgerInfo, Box<dyn std::error::Error + Send + Sync>>> {
@@ -215,14 +225,18 @@ impl AptosRpc for AptosNode {
         })
     }
 
-    fn sender_address(
+    fn get_latest_version(
         &self,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
+    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            Err("CapabilityUnavailable: sender_address requires a configured signer.                  Use AptosNode with an external key management system or                  configure a signer address explicitly.".into())
+            let ledger = self.get_ledger_info().await?;
+            Ok(ledger.ledger_version)
         })
     }
+}
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosAccountReader for AptosNode {
     fn get_account_sequence_number(
         &self,
         address: [u8; 32],
@@ -259,7 +273,10 @@ impl AptosRpc for AptosNode {
             Ok(Some(AptosResource { data: data_bytes }))
         })
     }
+}
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosTransactionReader for AptosNode {
     fn get_transaction(
         &self,
         version: u64,
@@ -295,56 +312,6 @@ impl AptosRpc for AptosNode {
                 .map(Self::parse_transaction)
                 .collect::<RpcResult<Vec<_>>>()?;
             Ok(txs)
-        })
-    }
-
-    fn get_events(
-        &self,
-        event_handle: String,
-        _position: String,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async move {
-            let result = self
-                .get(&format!("/events?handle={}&limit={}", event_handle, limit))
-                .await?;
-            let events = result
-                .as_array()
-                .ok_or_else(|| Self::missing_field("events"))?
-                .iter()
-                .map(Self::parse_event)
-                .collect::<RpcResult<Vec<_>>>()?;
-            Ok(events)
-        })
-    }
-
-    fn submit_transaction(
-        &self,
-        _tx_bytes: Vec<u8>,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async move {
-            Err("CapabilityUnavailable: BCS-encoded transaction submission not yet implemented.                  Use submit_signed_transaction() with JSON format, or                  implement BCS encoding with proper transaction structure.".into())
-        })
-    }
-
-    fn submit_signed_transaction(
-        &self,
-        signed_tx_json: serde_json::Value,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async move {
-            let result = self.post("/transactions", &signed_tx_json).await?;
-            if let Some(hash_hex) = result.get("hash").and_then(|h| h.as_str()) {
-                Ok(Self::parse_hex_bytes("hash", hash_hex)?)
-            } else if let Some(error) = result.get("error_code") {
-                Err(format!(
-                    "Aptos transaction submission failed: {} - {:?}",
-                    error,
-                    result.get("message")
-                )
-                .into())
-            } else {
-                Err(format!("Unexpected Aptos response: {:?}", result).into())
-            }
         })
     }
 
@@ -406,6 +373,37 @@ impl AptosRpc for AptosNode {
         })
     }
 
+    fn get_transaction_by_version(
+        &self,
+        version: u64,
+    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
+    {
+        Box::pin(async move { self.get_transaction(version).await })
+    }
+}
+
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosEventReader for AptosNode {
+    fn get_events(
+        &self,
+        event_handle: String,
+        _position: String,
+        limit: u32,
+    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async move {
+            let result = self
+                .get(&format!("/events?handle={}&limit={}", event_handle, limit))
+                .await?;
+            let events = result
+                .as_array()
+                .ok_or_else(|| Self::missing_field("events"))?
+                .iter()
+                .map(Self::parse_event)
+                .collect::<RpcResult<Vec<_>>>()?;
+            Ok(events)
+        })
+    }
+
     fn get_events_by_account(
         &self,
         account: [u8; 32],
@@ -430,24 +428,54 @@ impl AptosRpc for AptosNode {
             Ok(events)
         })
     }
+}
 
-    fn get_latest_version(
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosSignerIdentity for AptosNode {
+    fn sender_address(
         &self,
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
+    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            let ledger = self.get_ledger_info().await?;
-            Ok(ledger.ledger_version)
+            Err("CapabilityUnavailable: sender_address requires a configured signer.                  Use AptosNode with an external key management system or                  configure a signer address explicitly.".into())
+        })
+    }
+}
+
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosTransactionSubmitter for AptosNode {
+    fn submit_transaction(
+        &self,
+        _tx_bytes: Vec<u8>,
+    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async move {
+            Err("CapabilityUnavailable: BCS-encoded transaction submission not yet implemented.                  Use submit_signed_transaction() with JSON format, or                  implement BCS encoding with proper transaction structure.".into())
         })
     }
 
-    fn get_transaction_by_version(
+    fn submit_signed_transaction(
         &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        Box::pin(async move { self.get_transaction(version).await })
+        signed_tx_json: serde_json::Value,
+    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async move {
+            let result = self.post("/transactions", &signed_tx_json).await?;
+            if let Some(hash_hex) = result.get("hash").and_then(|h| h.as_str()) {
+                Ok(Self::parse_hex_bytes("hash", hash_hex)?)
+            } else if let Some(error) = result.get("error_code") {
+                Err(format!(
+                    "Aptos transaction submission failed: {} - {:?}",
+                    error,
+                    result.get("message")
+                )
+                .into())
+            } else {
+                Err(format!("Unexpected Aptos response: {:?}", result).into())
+            }
+        })
     }
+}
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosModulePublisher for AptosNode {
     fn publish_module(
         &self,
         _tx_bytes: Vec<u8>,
@@ -456,7 +484,10 @@ impl AptosRpc for AptosNode {
             Err("CapabilityUnavailable: Module publishing not yet implemented.                  Use submit_signed_transaction() with a properly constructed                  module publish transaction including bytecode and signature.".into())
         })
     }
+}
 
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosCheckpointVerifier for AptosNode {
     fn verify_checkpoint(
         &self,
         sequence_number: u64,
@@ -469,17 +500,16 @@ impl AptosRpc for AptosNode {
             .into())
         })
     }
+}
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosRpc for AptosNode {
     fn clone_boxed(&self) -> Box<dyn AptosRpc> {
         Box::new(AptosNode::new(&self.rpc_url))
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rpc", not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use serde_json::json;

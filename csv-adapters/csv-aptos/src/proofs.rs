@@ -246,7 +246,7 @@ impl StateProofVerifier {
     pub async fn verify_resource_exists_async(
         address: [u8; 32],
         resource_type: &str,
-        rpc: &dyn crate::rpc::AptosRpc,
+        rpc: &(dyn crate::rpc::AptosAccountReader + Send + Sync),
     ) -> AptosResult<bool> {
         match rpc.get_resource(address, resource_type, None).await {
             Ok(Some(_)) => Ok(true),
@@ -321,7 +321,7 @@ impl EventProofVerifier {
     pub async fn verify_event_in_tx(
         tx_version: u64,
         expected_data: &[u8],
-        rpc: &dyn crate::rpc::AptosRpc,
+        rpc: &(dyn crate::rpc::AptosTransactionReader + Send + Sync),
     ) -> AptosResult<bool> {
         let tx = rpc.get_transaction_by_version(tx_version).await?;
         match tx {

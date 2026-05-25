@@ -36,21 +36,30 @@ ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 base64 = "0.22"
 
 # Native Aptos SDK (required per Phase 3)
-aptos-sdk = "0.4"
+aptos-sdk = { version = "0.4", optional = true }
 aptos-bcs = "0.1"
 
-# Async runtime
-tokio = { version = "1", features = ["rt", "time", "macros"] }
+# Async runtime - tokio for native, wasm-bindgen-futures for wasm32
+tokio = { version = "1", features = ["rt", "time", "macros"], optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 reqwest = { version = "0.12", features = ["json"], optional = true }
 async-trait.workspace = true
 rand_core = "0.6"
+
+# Target-specific dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["rt", "time", "macros"] }
+aptos-sdk = "0.4"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
 
 [features]
 default = []
 # Enables real RPC client (HTTP client for network calls)
 rpc = ["tokio/macros", "reqwest"]
-# Enables aptos-sdk integration
-aptos-sdk = []
+# Enables aptos-sdk integration (native only)
+native-sdk = ["aptos-sdk"]
 # Dev/mocks feature for test utilities
 dev-mocks = []
 
