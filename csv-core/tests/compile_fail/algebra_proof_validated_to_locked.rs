@@ -4,7 +4,7 @@
 //! is impossible at compile time with csv-algebra typestate.
 
 use csv_algebra::state::{Locked, ProofValidated};
-use csv_algebra::transfer::{SealId, ChainId};
+use csv_algebra::transfer::SealId;
 
 fn main() {
     let locked = Locked {
@@ -22,5 +22,5 @@ fn main() {
 
     // This should fail to compile - cannot go backward from ProofValidated to Locked
     // Locked has no method to accept a ProofValidated
-    let _locked = Locked::from(proof_validated); // ERROR: no such method
+    let _locked = proof_validated.into_locked(); // ERROR: no such method
 }

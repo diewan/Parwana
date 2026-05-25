@@ -1,7 +1,8 @@
-use crate::finality::FinalityEvidence;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 /// Pure proof types.
-/// 
+///
 /// Canonical proof structures without wire encoding.
 /// No serde, no IO, no infrastructure dependencies.
 

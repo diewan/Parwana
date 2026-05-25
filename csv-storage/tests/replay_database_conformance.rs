@@ -94,6 +94,7 @@ async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
             nonce: None,
         },
         lock_tx_hash: csv_hash::Hash::new([2u8; 32]),
+        transition_id: vec![3, 4, 5, 6],
         mint_tx_hash: csv_hash::Hash::new([3u8; 32]),
         timestamp: 1234567890,
     };

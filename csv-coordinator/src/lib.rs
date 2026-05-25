@@ -13,4 +13,5 @@ pub use cell::{ChainCell, CellConfig, CellError, CellTask};
 pub use circuit::{CellCircuitBreaker, CircuitState};
 pub use memory::MemoryCeiling;
 pub use negotiation::{CapabilityNegotiator, NegotiatedPlan, NegotiationError, SecurityRequirements};
-pub use router::{TransferRouter, RouterError, InboundTransfer};
+pub use router::{TransferRouter, RouterError};
+pub use cell::InboundTransfer;

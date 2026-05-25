@@ -27,7 +27,7 @@ impl TryFrom<SolanaRpcProof> for CanonicalProof {
             block_hash,
             state_root,
             vec![rpc_proof.proof],
-            ChainId::new(2), // Solana chain ID
+            2, // Solana chain ID as u32
         ))
     }
 }

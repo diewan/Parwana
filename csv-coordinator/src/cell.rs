@@ -19,6 +19,16 @@ pub struct InboundTransfer {
     pub dest_chain: u32,
 }
 
+impl InboundTransfer {
+    pub fn new(transfer_id: [u8; 32], source_chain: u32, dest_chain: u32) -> Self {
+        Self {
+            transfer_id,
+            source_chain,
+            dest_chain,
+        }
+    }
+}
+
 /// Chain cell configuration.
 #[derive(Debug, Clone)]
 pub struct CellConfig {

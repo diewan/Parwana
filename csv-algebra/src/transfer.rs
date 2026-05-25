@@ -43,6 +43,18 @@ impl SealId {
     }
 }
 
+impl From<&[u8; 32]> for SealId {
+    fn from(bytes: &[u8; 32]) -> Self {
+        Self(*bytes)
+    }
+}
+
+impl From<[u8; 32]> for SealId {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 impl ChainId {
     pub fn new(id: u32) -> Self {
         Self(id)

@@ -1,0 +1,19 @@
+warning: unused imports: `ProofBuilding` and `ProofValidated`
+ --> tests/compile_fail/algebra_skip_awaiting_finality.rs:6:34
+  |
+6 | use csv_algebra::state::{Locked, ProofBuilding, ProofValidated};
+  |                                  ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ChainId`
+ --> tests/compile_fail/algebra_skip_awaiting_finality.rs:7:37
+  |
+7 | use csv_algebra::transfer::{SealId, ChainId};
+  |                                     ^^^^^^^
+
+error[E0599]: no method named `validate` found for struct `ProofBuilding` in the current scope
+  --> tests/compile_fail/algebra_skip_awaiting_finality.rs:20:43
+   |
+20 |     let _proof_validated = proof_building.validate(
+   |                            ---------------^^^^^^^^ method not found in `ProofBuilding`

@@ -131,7 +131,7 @@ impl CheckpointVerifier {
         resource_type: &str,
         rpc: &dyn AptosRpc,
     ) -> AptosResult<bool> {
-        let resource = rpc.get_resource(address, resource_type, None).await;
+        let resource = rpc.get_resource(address, resource_type, None).await?;
         Ok(resource.is_some())
     }
 

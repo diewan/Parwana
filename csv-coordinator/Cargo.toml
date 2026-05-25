@@ -11,6 +11,7 @@ csv-storage = { path = "../csv-storage" }
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
 thiserror = "1.0"
 tracing = "0.1"
+hex = "0.4"
 
 [features]
 default = []

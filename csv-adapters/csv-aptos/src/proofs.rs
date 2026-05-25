@@ -526,8 +526,8 @@ mod tests {
         assert!(builder.parse(&[0u8; 50]).is_err());
     }
 
-    #[test]
-    fn test_verify_resource_exists() {
+    #[tokio::test]
+    async fn test_verify_resource_exists() {
         let rpc = MockAptosRpc::new(1000);
         rpc.set_resource(
             [1u8; 32],
@@ -537,15 +537,15 @@ mod tests {
             },
         );
 
-        assert!(StateProofVerifier::verify_resource_exists([1u8; 32], "CSV::Seal", &rpc).unwrap());
+        assert!(StateProofVerifier::verify_resource_exists_async([1u8; 32], "CSV::Seal", &rpc).await.unwrap());
 
         assert!(
-            !StateProofVerifier::verify_resource_exists([99u8; 32], "CSV::Seal", &rpc).unwrap()
+            !StateProofVerifier::verify_resource_exists_async([99u8; 32], "CSV::Seal", &rpc).await.unwrap()
         );
     }
 
-    #[test]
-    fn test_verify_resource_consumed() {
+    #[tokio::test]
+    async fn test_verify_resource_consumed() {
         let rpc = MockAptosRpc::new(1000);
         rpc.set_resource(
             [1u8; 32],
@@ -557,12 +557,12 @@ mod tests {
 
         // Resource exists, not consumed
         assert!(
-            !StateProofVerifier::verify_resource_consumed([1u8; 32], "CSV::Seal", &rpc).unwrap()
+            !StateProofVerifier::verify_resource_consumed_async([1u8; 32], "CSV::Seal", &rpc).await.unwrap()
         );
 
         // Resource doesn't exist, was consumed
         assert!(
-            StateProofVerifier::verify_resource_consumed([99u8; 32], "CSV::Seal", &rpc).unwrap()
+            StateProofVerifier::verify_resource_consumed_async([99u8; 32], "CSV::Seal", &rpc).await.unwrap()
         );
     }
 

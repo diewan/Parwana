@@ -437,6 +437,7 @@ pub async fn mint_sanad_on_chain(
                 source_chain,
                 source_seal_ref,
             )
+            .await
             .map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
         }
 

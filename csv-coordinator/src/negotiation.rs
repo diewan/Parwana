@@ -3,10 +3,19 @@
 //! This module provides the CapabilityNegotiator which uses FinalityGuaranteeSpec
 //! to make security decisions at runtime, replacing boolean capability flags.
 
-use csv_hash::chain_id::ChainId;
 use csv_protocol::finality::{FinalityGuaranteeSpec, ProofSystem};
 use std::collections::HashMap;
 use thiserror::Error;
+
+/// Chain identifier for capability negotiation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChainId(pub [u8; 32]);
+
+impl std::fmt::Display for ChainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
 
 /// Security requirements for a transfer.
 #[derive(Debug, Clone)]
@@ -158,7 +167,7 @@ mod tests {
     #[test]
     fn test_negotiate_deterministic_success() {
         let mut negotiator = CapabilityNegotiator::new();
-        let chain_id = ChainId::from([1u8; 32]);
+        let chain_id = ChainId([1u8; 32]);
 
         negotiator.register_chain(
             chain_id,
@@ -187,7 +196,7 @@ mod tests {
     #[test]
     fn test_negotiate_probabilistic_rejected() {
         let mut negotiator = CapabilityNegotiator::new();
-        let chain_id = ChainId::from([1u8; 32]);
+        let chain_id = ChainId([1u8; 32]);
 
         negotiator.register_chain(
             chain_id,
@@ -217,7 +226,7 @@ mod tests {
     #[test]
     fn test_negotiate_insufficient_reorg_depth() {
         let mut negotiator = CapabilityNegotiator::new();
-        let chain_id = ChainId::from([1u8; 32]);
+        let chain_id = ChainId([1u8; 32]);
 
         negotiator.register_chain(
             chain_id,

@@ -85,6 +85,7 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 # secp256k1 = { version = "0.28", features = ["rand-std"] }  # REMOVED: chain-specific
 toml = { version = "0.8", features = ["parse", "display"] }
 trybuild = "1.0"
+csv-algebra = { path = "../csv-algebra" }
 
 [[example]]
 name = "basic_sanad"

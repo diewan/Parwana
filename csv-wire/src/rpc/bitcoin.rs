@@ -26,7 +26,7 @@ impl TryFrom<BitcoinRpcProof> for CanonicalProof {
             block_hash,
             state_root,
             rpc_proof.merkle_proof,
-            ChainId::new(0), // Bitcoin chain ID
+            0, // Bitcoin chain ID as u32
         ).with_metadata("tx_index".to_string(), rpc_proof.tx_index.to_be_bytes().to_vec()))
     }
 }

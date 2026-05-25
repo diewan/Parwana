@@ -176,8 +176,8 @@ impl TransferCoordinatorError {
     }
 }
 
-impl From<crate::admission::AdmissionError> for TransferCoordinatorError {
-    fn from(e: crate::admission::AdmissionError) -> Self {
+impl From<csv_admission::AdmissionError> for TransferCoordinatorError {
+    fn from(e: csv_admission::AdmissionError) -> Self {
         TransferCoordinatorError::AdmissionRejected(e.to_string())
     }
 }

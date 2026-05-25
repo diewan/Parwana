@@ -1,0 +1,19 @@
+warning: unused import: `Minting`
+ --> tests/compile_fail/algebra_locked_to_minting.rs:6:34
+  |
+6 | use csv_algebra::state::{Locked, Minting};
+  |                                  ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ChainId`
+ --> tests/compile_fail/algebra_locked_to_minting.rs:7:37
+  |
+7 | use csv_algebra::transfer::{SealId, ChainId};
+  |                                     ^^^^^^^
+
+error[E0599]: no method named `mint` found for struct `Locked` in the current scope
+  --> tests/compile_fail/algebra_locked_to_minting.rs:18:27
+   |
+18 |     let _minting = locked.mint([4u8; 32]); // ERROR: no such method
+   |                           ^^^^ method not found in `Locked`

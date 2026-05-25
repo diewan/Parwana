@@ -9,7 +9,7 @@
 #![allow(missing_docs)]
 
 use crate::adapter_registry::{AdapterRegistry, CrossChainTransfer};
-use crate::admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
+use csv_admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
 use crate::coordinator_lease::{CoordinatorId, CoordinatorLease};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};

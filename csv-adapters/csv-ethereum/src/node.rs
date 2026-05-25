@@ -362,7 +362,8 @@ mod real_rpc_impl {
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|log| {
-                            let address = log["address"].as_str().map(parse_hex_bytes20)?;
+                            let address = log["address"].as_str()
+                                .and_then(|s| parse_hex_bytes20(s).ok())?;
                             let topics: Vec<[u8; 32]> = log["topics"]
                                 .as_array()
                                 .map(|t| {
@@ -396,7 +397,7 @@ mod real_rpc_impl {
             let contract_addr = receipt["contractAddress"]
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "null")
-                .map(parse_hex_bytes20);
+                .and_then(|s| parse_hex_bytes20(s).ok());
 
             let status = receipt["status"]
                 .as_str()
@@ -485,11 +486,12 @@ mod real_rpc_impl {
                 return Ok(None);
             }
 
-            let from = parse_hex_bytes20(result["from"].as_str().unwrap_or("0x0"));
+            let from = parse_hex_bytes20(result["from"].as_str().unwrap_or("0x0"))
+                .map_err(|e| format!("Invalid from address: {}", e))?;
             let to = result["to"]
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "null")
-                .map(parse_hex_bytes20);
+                .and_then(|s| parse_hex_bytes20(s).ok());
             let value = result["value"].as_str().and_then(|s| parse_hex_u64(s).ok());
             let gas_price = result["gasPrice"]
                 .as_str()

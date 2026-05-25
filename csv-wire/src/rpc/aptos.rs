@@ -27,7 +27,7 @@ impl TryFrom<AptosRpcProof> for CanonicalProof {
             block_hash,
             state_root,
             vec![rpc_proof.ledger_info],
-            ChainId::new(3), // Aptos chain ID
+            3, // Aptos chain ID as u32
         ).with_metadata("aptos_version".to_string(), rpc_proof.version.to_be_bytes().to_vec()))
     }
 }

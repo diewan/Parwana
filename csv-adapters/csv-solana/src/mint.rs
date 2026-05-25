@@ -5,12 +5,14 @@
 
 use crate::error::{SolanaError, SolanaResult};
 use csv_hash::Hash as CsvHash;
+use reqwest::Client;
+use serde_json::Value;
 
 /// Mint a sanad on Solana using JSON-RPC
 ///
 /// This uses solana-sdk for keypair/transaction construction and direct JSON-RPC for sending.
 #[allow(clippy::too_many_arguments)]
-pub fn mint_sanad_from_hex_key(
+pub async fn mint_sanad_from_hex_key(
     rpc_url: &str,
     program_id: &str,
     private_key_hex: &str,
@@ -70,7 +72,7 @@ pub fn mint_sanad_from_hex_key(
         .map_err(|e| SolanaError::InvalidProgramId(format!("Invalid program ID: {}", e)))?;
 
     // Get recent blockhash via JSON-RPC
-    let blockhash_json = post_rpc_json(
+    let blockhash_json = post_rpc_json_async(
         rpc_url.to_string(),
         json!({
             "jsonrpc": "2.0",
@@ -79,7 +81,7 @@ pub fn mint_sanad_from_hex_key(
             "id": 1
         }),
     )
-    .map_err(|e| SolanaError::Rpc(format!("Failed to get blockhash: {}", e)))?;
+    .await?;
 
     let blockhash_str = blockhash_json
         .get("result")
@@ -148,7 +150,7 @@ pub fn mint_sanad_from_hex_key(
     let tx_base64 = general_purpose::STANDARD.encode(&tx_bytes);
 
     // Send via JSON-RPC
-    let send_json = post_rpc_json(
+    let send_json = post_rpc_json_async(
         rpc_url.to_string(),
         json!({
             "jsonrpc": "2.0",
@@ -157,7 +159,7 @@ pub fn mint_sanad_from_hex_key(
             "id": 1
         }),
     )
-    .map_err(|e| SolanaError::Transaction(format!("Send request failed: {}", e)))?;
+    .await?;
 
     if let Some(error) = send_json.get("error") {
         return Err(SolanaError::Transaction(format!("RPC error: {}", error)));

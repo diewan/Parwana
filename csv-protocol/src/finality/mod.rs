@@ -27,7 +27,6 @@ pub use chain_specific::{EthereumFinalityStage, SolanaCommitmentGrade};
 pub use monitor::FinalityMonitor;
 pub use policy::{ChainFinalityPolicy, FinalityThreshold};
 pub use state::{FinalityState, FinalityStatus};
-pub use {FinalityGuaranteeSpec, ProofSystem};
 
 /// Finality type enum for chain-specific finality mechanisms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

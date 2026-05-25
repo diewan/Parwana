@@ -31,7 +31,7 @@ impl TryFrom<EthereumRpcProof> for CanonicalProof {
             block_hash,
             state_root,
             proof_nodes,
-            ChainId::new(1), // Ethereum chain ID
+            1, // Ethereum chain ID as u32
         ))
     }
 }

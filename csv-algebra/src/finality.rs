@@ -1,7 +1,9 @@
 /// Pure finality types.
-/// 
+///
 /// Cryptographic commitment types for finality evidence.
 /// No serde, no IO, no infrastructure dependencies.
+
+use alloc::vec::Vec;
 
 /// Evidence of finality for a block.
 #[derive(Debug, Clone, PartialEq, Eq)]

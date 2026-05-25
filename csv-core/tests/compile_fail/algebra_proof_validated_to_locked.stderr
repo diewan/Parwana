@@ -1,0 +1,13 @@
+warning: unused import: `ProofValidated`
+ --> tests/compile_fail/algebra_proof_validated_to_locked.rs:6:34
+  |
+6 | use csv_algebra::state::{Locked, ProofValidated};
+  |                                  ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0599]: no method named `into_locked` found for struct `ProofValidated` in the current scope
+  --> tests/compile_fail/algebra_proof_validated_to_locked.rs:25:35
+   |
+25 |     let _locked = proof_validated.into_locked(); // ERROR: no such method
+   |                                   ^^^^^^^^^^^ method not found in `ProofValidated`

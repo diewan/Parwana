@@ -12,6 +12,8 @@ csv-proof = { path = "../csv-proof" }
 csv-verifier = { path = "../csv-verifier" }
 csv-storage = { path = "../csv-storage" }
 csv-runtime = { path = "../csv-runtime" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros", "time"] }
