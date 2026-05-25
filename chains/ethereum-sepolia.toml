@@ -5,6 +5,14 @@ rpc_endpoints = ["https://rpc.sepolia.org"]
 block_explorer_urls = ["https://sepolia.etherscan.io"]
 start_block = 0
 
+[finality_guarantee]
+max_reorg_depth = 12
+is_probabilistic = false
+validator_honesty_threshold = 0.67
+proof_system = { type = "EthereumPos", finality_epochs = 2 }
+max_proof_age_blocks = 100
+min_anchor_sources = 1
+
 [capabilities]
 state_model = "Account"
 finality_model = "FinalizedCheckpoint"

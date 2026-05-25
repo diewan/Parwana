@@ -17,6 +17,8 @@ members = [
     "csv-contract-bindings",
     # Coordinator crate
     "csv-coordinator",
+    # Admission crate
+    "csv-admission",
     # Runtime crates
     "csv-runtime",
     "csv-sdk",

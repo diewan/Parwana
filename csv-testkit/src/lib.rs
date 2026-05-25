@@ -8,8 +8,10 @@
 pub mod adversarial;
 pub mod fixtures;
 pub mod helpers;
+pub mod traces;
 
 // Re-exports
-pub use adversarial::{AdversarialConfig, AdversarialRunner, ByzantineBehavior};
+pub use adversarial::{AdversarialConfig, AdversarialRunner, ByzantineBehavior, ByzantineRpcReader, ByzantineFaultMode};
 pub use fixtures::{TestProofBundle, TestTransfer};
 pub use helpers::{TestBuilder, TestContext};
+pub use traces::{CanonicalTrace, ExpectedOutput, InjectedFault, RecordedRpcInteraction};

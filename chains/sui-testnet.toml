@@ -5,6 +5,14 @@ rpc_endpoints = ["https://fullnode.testnet.sui.io:443"]
 block_explorer_urls = ["https://suiscan.xyz/testnet"]
 start_block = 0
 
+[finality_guarantee]
+max_reorg_depth = 0
+is_probabilistic = false
+validator_honesty_threshold = 0.67
+proof_system = { type = "BftQc", quorum_fraction = 0.67 }
+max_proof_age_blocks = 100
+min_anchor_sources = 1
+
 [capabilities]
 state_model = "Object"
 finality_model = "BftInstant"

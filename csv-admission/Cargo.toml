@@ -1,0 +1,13 @@
+[package]
+name = "csv-admission"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+
+[dependencies]
+csv-protocol = { path = "../csv-protocol" }
+thiserror = "1.0"
+tracing = "0.1"
+
+[features]
+default = []

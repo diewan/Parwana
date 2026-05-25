@@ -14,6 +14,7 @@
 #![allow(clippy::let_unit_value)]
 
 pub mod backend;
+pub mod canonical_proof;
 pub mod chain_config;
 pub mod commitment;
 pub mod cross_chain;
@@ -131,3 +132,6 @@ pub use verified::{
     FinalityStrength, InclusionStrength, VerificationAssurance, VerificationFailure,
     VerificationResult, VerifiedComponents,
 };
+
+// Re-export canonical proof types
+pub use canonical_proof::{CanonicalProof, ProofValidationError};

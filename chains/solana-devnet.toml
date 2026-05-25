@@ -5,6 +5,14 @@ rpc_endpoints = ["https://api.devnet.solana.com"]
 block_explorer_urls = ["https://explorer.solana.com/?cluster=devnet"]
 start_block = 0
 
+[finality_guarantee]
+max_reorg_depth = 32
+is_probabilistic = true
+validator_honesty_threshold = 0.33
+proof_system = { type = "BftQc", quorum_fraction = 0.33 }
+max_proof_age_blocks = 100
+min_anchor_sources = 1
+
 [capabilities]
 state_model = "Account"
 finality_depth = 32

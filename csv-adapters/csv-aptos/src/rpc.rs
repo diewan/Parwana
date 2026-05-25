@@ -115,7 +115,21 @@ pub trait AptosCheckpointVerifier: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<bool, Box<dyn std::error::Error + Send + Sync>>>;
 }
 
-/// Composite Aptos RPC facade retained for compatibility.
+/// DEPRECATED: Composite Aptos RPC facade.
+///
+/// This trait is retained for backward compatibility but should NOT be used in new code.
+/// Instead, use the specific subtraits:
+/// - AptosLedgerReader for ledger info
+/// - AptosAccountReader for account resources
+/// - AptosTransactionReader for transaction queries
+/// - AptosEventReader for event queries
+/// - AptosSignerIdentity for signer operations
+/// - AptosTransactionSubmitter for transaction submission
+/// - AptosModulePublisher for module publishing
+/// - AptosCheckpointVerifier for checkpoint verification
+///
+/// Callers should depend on the narrowest possible trait bound to enforce least privilege.
+#[deprecated(since = "0.1.0", note = "Use specific subtraits instead (e.g., AptosLedgerReader, AptosTransactionReader)")]
 pub trait AptosRpc: Send + Sync + 'static {
     fn get_ledger_info(
         &self,
@@ -213,142 +227,9 @@ pub trait AptosRpc: Send + Sync + 'static {
     fn clone_boxed(&self) -> Box<dyn AptosRpc>;
 }
 
-impl<T: AptosRpc + ?Sized> AptosLedgerReader for T {
-    fn get_ledger_info(
-        &self,
-    ) -> BoxFuture<'_, Result<AptosLedgerInfo, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::get_ledger_info(self)
-    }
-
-    fn get_latest_version(
-        &self,
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::get_latest_version(self)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosAccountReader for T {
-    fn get_account_sequence_number(
-        &self,
-        address: [u8; 32],
-    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::get_account_sequence_number(self, address)
-    }
-
-    fn get_resource(
-        &self,
-        address: [u8; 32],
-        resource_type: &str,
-        position: Option<u64>,
-    ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        AptosRpc::get_resource(self, address, resource_type, position)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosTransactionReader for T {
-    fn get_transaction(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        AptosRpc::get_transaction(self, version)
-    }
-
-    fn get_transactions(
-        &self,
-        start_version: u64,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        AptosRpc::get_transactions(self, start_version, limit)
-    }
-
-    fn wait_for_transaction(
-        &self,
-        tx_hash: [u8; 32],
-    ) -> BoxFuture<'_, Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::wait_for_transaction(self, tx_hash)
-    }
-
-    fn get_block_by_version(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        AptosRpc::get_block_by_version(self, version)
-    }
-
-    fn get_transaction_by_version(
-        &self,
-        version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
-    {
-        AptosRpc::get_transaction_by_version(self, version)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosEventReader for T {
-    fn get_events(
-        &self,
-        event_handle: String,
-        position: String,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::get_events(self, event_handle, position, limit)
-    }
-
-    fn get_events_by_account(
-        &self,
-        account: [u8; 32],
-        start: u64,
-        limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::get_events_by_account(self, account, start, limit)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosSignerIdentity for T {
-    fn sender_address(
-        &self,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::sender_address(self)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosTransactionSubmitter for T {
-    fn submit_transaction(
-        &self,
-        tx_bytes: Vec<u8>,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::submit_transaction(self, tx_bytes)
-    }
-
-    fn submit_signed_transaction(
-        &self,
-        signed_tx_json: serde_json::Value,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::submit_signed_transaction(self, signed_tx_json)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosModulePublisher for T {
-    fn publish_module(
-        &self,
-        tx_bytes: Vec<u8>,
-    ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::publish_module(self, tx_bytes)
-    }
-}
-
-impl<T: AptosRpc + ?Sized> AptosCheckpointVerifier for T {
-    fn verify_checkpoint(
-        &self,
-        sequence_number: u64,
-    ) -> BoxFuture<'_, Result<bool, Box<dyn std::error::Error + Send + Sync>>> {
-        AptosRpc::verify_checkpoint(self, sequence_number)
-    }
-}
+// Blanket impls removed to enforce least privilege.
+// Callers must now explicitly depend on the specific subtraits they need.
+// This prevents accidental access to privileged operations (e.g., module publishing).
 
 /// Aptos ledger info
 #[derive(Clone, Debug, serde::Serialize)]

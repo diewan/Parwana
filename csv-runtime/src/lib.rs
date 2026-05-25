@@ -1,29 +1,28 @@
-//! csv-runtime — CSV Protocol orchestration engine
+//! csv-runtime — CSV Protocol orchestration facade
 //!
-//! This crate provides the runtime layer for cross-chain transfer execution.
-//! It contains ONLY orchestration, queues, scheduling, and coordination logic.
-//! It depends on csv-protocol and csv-storage (for traits) — no chain adapter imports.
+//! This crate is a facade that composes focused orchestration crates:
+//! - csv-coordinator: Per-chain execution cells with isolated failure domains
+//! - csv-admission: Admission control and pressure boundaries
 //!
-//! ## Architecture
-//!
-//! - **TransferCoordinator**: Single source of truth for transfer execution
-//! - **AdapterRegistry**: Dependency injection for chain adapters
-//! - **EventBus**: Structured events for observability
-//! - **EventStore**: Durable event sourcing storage
-//! - **ExecutionJournal**: Phase-by-phase audit trail for crash recovery
-//! - **Queue**: Task queue for scheduling
-//! - **Policy**: Runtime policies and circuit breakers (sourced from csv-core)
-//! - **Verifier**: All proof verification delegated to csv-verifier::CanonicalVerifier
-//!
-//! ## Persistence
-//!
-//! Concrete persistence implementations (RocksDB, PostgreSQL) are in separate crates
-//! that depend on csv-storage traits.
+//! This crate re-exports types from these crates with no additional logic.
+//! Target: < 200 lines of re-exports.
 
 #![warn(missing_docs)]
 
+// Re-exports from csv-coordinator
+pub use csv_coordinator::{
+    CapabilityNegotiator, ChainCell, CellConfig, CellCircuitBreaker, CellError, CellTask,
+    CircuitState, MemoryCeiling, NegotiatedPlan, NegotiationError, SecurityRequirements,
+    TransferRouter, RouterError, InboundTransfer,
+};
+
+// Re-exports from csv-admission
+pub use csv_admission::{
+    AdmissionController, AdmissionError, AdmissionLimits, AdmissionPermit, AdmissionSnapshot,
+};
+
+// Legacy re-exports (to be migrated to focused crates)
 pub mod adapter_registry;
-pub mod admission;
 pub mod config;
 pub mod coordinator_lease;
 pub mod error;
@@ -40,13 +39,10 @@ pub mod replay_db;
 pub mod runtime_mode;
 pub mod transfer_coordinator;
 
-// Re-exports (orchestration only)
+// Legacy re-exports (orchestration only)
 pub use adapter_registry::{
     AdapterRegistryImpl, ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,
     ChainProofPort, ChainReadPort, ChainSealRegistryPort,
-};
-pub use admission::{
-    AdmissionController, AdmissionError, AdmissionLimits, AdmissionPermit, AdmissionSnapshot,
 };
 pub use config::{
     CircuitBreakerConfig, ConfigValidationError, LeaseConfig, OperationalConfig, RetryConfig,

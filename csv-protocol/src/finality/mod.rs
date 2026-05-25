@@ -27,6 +27,7 @@ pub use chain_specific::{EthereumFinalityStage, SolanaCommitmentGrade};
 pub use monitor::FinalityMonitor;
 pub use policy::{ChainFinalityPolicy, FinalityThreshold};
 pub use state::{FinalityState, FinalityStatus};
+pub use {FinalityGuaranteeSpec, ProofSystem};
 
 /// Finality type enum for chain-specific finality mechanisms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -837,6 +838,39 @@ impl core::fmt::Display for AnchorStoreError {
 }
 
 impl std::error::Error for AnchorStoreError {}
+
+/// Structured finality guarantee for capability negotiation.
+///
+/// This is NOT a boolean config flag. It is a machine-readable proof-carrying
+/// constraint used by the orchestrator to make security decisions at runtime.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FinalityGuaranteeSpec {
+    /// Maximum blocks that can be reorged without breaking finality.
+    pub max_reorg_depth: u64,
+    /// Whether finality is probabilistic (Bitcoin) or deterministic (BFT).
+    pub is_probabilistic: bool,
+    /// Fraction of validators assumed honest (e.g., 0.67 for BFT).
+    pub validator_honesty_threshold: f32,
+    /// Proof system used by this chain's finality mechanism.
+    pub proof_system: ProofSystem,
+    /// Maximum age of a proof before it is considered stale.
+    pub max_proof_age_blocks: u64,
+    /// Minimum number of independent anchor sources required.
+    pub min_anchor_sources: u8,
+}
+
+/// Proof system types for finality guarantees.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ProofSystem {
+    /// Bitcoin SPV with given confirmation depth.
+    BitcoinSpv { confirmations: u64 },
+    /// BFT quorum certificate (Tendermint, HotStuff, etc.).
+    BftQc { quorum_fraction: f32 },
+    /// ZK header proof (SP1, Risc0, etc.).
+    ZkHeader { circuit_id: [u8; 32] },
+    /// Ethereum PoS with beacon chain finality.
+    EthereumPos { finality_epochs: u8 },
+}
 
 /// Typed finality guarantee — chain-agnostic, runtime-enforceable.
 ///

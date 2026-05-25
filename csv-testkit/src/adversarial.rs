@@ -87,6 +87,86 @@ impl AdversarialRunner {
     }
 }
 
+/// Byzantine RPC — returns plausible but cryptographically invalid responses.
+///
+/// Used to verify that the verifier correctly rejects them.
+pub struct ByzantineRpcReader {
+    fault_mode: ByzantineFaultMode,
+}
+
+/// Byzantine fault modes for testing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ByzantineFaultMode {
+    /// Returns valid-looking zero hashes for all block hashes.
+    ZeroHashInjection,
+    /// Returns success status for all transactions regardless of actual status.
+    AlwaysSuccessStatus,
+    /// Truncates hex strings to test parse_hex_bytes32 hardening.
+    TruncatedHex { truncate_to: usize },
+    /// Returns responses from a different block height (stale data).
+    StaleHeightInjection { lag_blocks: u64 },
+    /// Silently drops every Nth response (simulates censorship).
+    SelectiveCensorship { every_n: usize },
+}
+
+impl ByzantineRpcReader {
+    /// Create a new Byzantine RPC reader with the specified fault mode.
+    pub fn new(fault_mode: ByzantineFaultMode) -> Self {
+        Self { fault_mode }
+    }
+
+    /// Get the current fault mode.
+    pub fn fault_mode(&self) -> ByzantineFaultMode {
+        self.fault_mode
+    }
+
+    /// Simulate a block hash response with the fault applied.
+    pub fn simulate_block_hash(&self, original: [u8; 32]) -> [u8; 32] {
+        match self.fault_mode {
+            ByzantineFaultMode::ZeroHashInjection => [0u8; 32],
+            _ => original,
+        }
+    }
+
+    /// Simulate a transaction status response with the fault applied.
+    pub fn simulate_transaction_status(&self, original: bool) -> bool {
+        match self.fault_mode {
+            ByzantineFaultMode::AlwaysSuccessStatus => true,
+            _ => original,
+        }
+    }
+
+    /// Simulate a hex string response with the fault applied.
+    pub fn simulate_hex_string(&self, original: &str) -> String {
+        match self.fault_mode {
+            ByzantineFaultMode::TruncatedHex { truncate_to } => {
+                original.chars().take(truncate_to).collect()
+            }
+            _ => original.to_string(),
+        }
+    }
+
+    /// Simulate a block height response with the fault applied.
+    pub fn simulate_block_height(&self, original: u64) -> u64 {
+        match self.fault_mode {
+            ByzantineFaultMode::StaleHeightInjection { lag_blocks } => {
+                original.saturating_sub(lag_blocks)
+            }
+            _ => original,
+        }
+    }
+
+    /// Check if a response should be dropped based on selective censorship.
+    pub fn should_drop_response(&self, response_index: usize) -> bool {
+        match self.fault_mode {
+            ByzantineFaultMode::SelectiveCensorship { every_n } => {
+                response_index > 0 && response_index % every_n == 0
+            }
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +177,43 @@ mod tests {
         let h = [1u8; 32];
         let responses = vec![Some(h), Some(h), Some(h), Some([2u8; 32])];
         assert!(runner.quorum_agrees(&responses));
+    }
+
+    #[test]
+    fn test_byzantine_zero_hash_injection() {
+        let reader = ByzantineRpcReader::new(ByzantineFaultMode::ZeroHashInjection);
+        let original = [1u8; 32];
+        let result = reader.simulate_block_hash(original);
+        assert_eq!(result, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_byzantine_always_success_status() {
+        let reader = ByzantineRpcReader::new(ByzantineFaultMode::AlwaysSuccessStatus);
+        assert!(reader.simulate_transaction_status(false));
+        assert!(reader.simulate_transaction_status(true));
+    }
+
+    #[test]
+    fn test_byzantine_truncated_hex() {
+        let reader = ByzantineRpcReader::new(ByzantineFaultMode::TruncatedHex { truncate_to: 4 });
+        let result = reader.simulate_hex_string("0x12345678");
+        assert_eq!(result, "0x12");
+    }
+
+    #[test]
+    fn test_byzantine_stale_height() {
+        let reader = ByzantineRpcReader::new(ByzantineFaultMode::StaleHeightInjection { lag_blocks: 10 });
+        let result = reader.simulate_block_height(100);
+        assert_eq!(result, 90);
+    }
+
+    #[test]
+    fn test_byzantine_selective_censorship() {
+        let reader = ByzantineRpcReader::new(ByzantineFaultMode::SelectiveCensorship { every_n: 3 });
+        assert!(!reader.should_drop_response(0));
+        assert!(!reader.should_drop_response(1));
+        assert!(reader.should_drop_response(3));
+        assert!(reader.should_drop_response(6));
     }
 }
