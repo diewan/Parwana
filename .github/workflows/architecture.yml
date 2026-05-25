@@ -40,5 +40,19 @@ jobs:
             exit 1
           fi
 
+      - name: Adapter configs must use csv-adapter-core
+        run: |
+          for adapter in csv-adapters/csv-*; do
+            if [ "$adapter" = "csv-adapters/csv-adapter-core" ]; then
+              continue
+            fi
+            if [ -f "$adapter/Cargo.toml" ]; then
+              if ! grep -q "csv-adapter-core" "$adapter/Cargo.toml"; then
+                echo "FAIL: $adapter does not depend on csv-adapter-core"
+                exit 1
+              fi
+            fi
+          done
+
       - name: Run existing architecture guard tests
         run: cargo test -p csv-architecture --test architecture_guard

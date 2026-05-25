@@ -1,7 +1,7 @@
 //! Chain-native Bitcoin inclusion/finality checks (RULE 3).
 
 use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{ChainOpError, ChainOpResult};
 use csv_verifier::{
     ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier, verify_chain_proof_bundle,

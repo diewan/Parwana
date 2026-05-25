@@ -2691,6 +2691,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv-adapter-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "csv-hash",
+ "csv-proof",
+ "csv-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "csv-admission"
 version = "0.1.0"
 dependencies = [
@@ -2712,6 +2725,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "csv-adapter-core",
  "csv-hash",
  "csv-proof",
  "csv-protocol",
@@ -2748,6 +2762,7 @@ dependencies = [
  "bitcoin 0.32.9",
  "bitcoin_hashes 0.14.1",
  "bitcoincore-rpc",
+ "csv-adapter-core",
  "csv-core",
  "csv-hash",
  "csv-proof",
@@ -2774,6 +2789,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cid",
+ "csv-adapter-core",
  "csv-codec",
  "csv-hash",
  "csv-proof",
@@ -2936,6 +2952,7 @@ dependencies = [
  "ark-snark",
  "async-trait",
  "base64 0.22.1",
+ "csv-adapter-core",
  "csv-codec",
  "csv-hash",
  "csv-proof",
@@ -3027,6 +3044,7 @@ dependencies = [
  "chrono",
  "csv-hash",
  "csv-proof",
+ "csv-protocol",
  "dirs-next",
  "futures",
  "hex",
@@ -3171,6 +3189,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "bs58",
+ "csv-adapter-core",
  "csv-codec",
  "csv-hash",
  "csv-proof",
@@ -3252,6 +3271,7 @@ dependencies = [
  "base64 0.22.1",
  "bcs",
  "chrono",
+ "csv-adapter-core",
  "csv-codec",
  "csv-hash",
  "csv-proof",

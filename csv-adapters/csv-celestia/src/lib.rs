@@ -2,6 +2,7 @@
 #![allow(clippy::let_and_return)]
 #![allow(clippy::collapsible_if)]
 #![allow(unexpected_cfgs)]
+#![deny(clippy::unwrap_used)]
 //!
 //! This adapter provides **Data Availability (DA)** for large Sanad proofs,
 //! particularly STARK proofs that are too large for on-chain storage.

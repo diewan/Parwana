@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
@@ -32,28 +32,6 @@ use crate::seal_protocol::SuiSealProtocol;
 
 /// Execute an async future using a dedicated thread to avoid nested runtime panics.
 /// CRITICAL FIX: Uses std::thread::spawn instead of creating nested Tokio runtimes.
-fn spawn_blocking_async<F, T, E>(future: F) -> ChainOpResult<T>
-where
-    F: std::future::Future<Output = Result<T, E>> + Send + 'static,
-    T: Send + 'static,
-    E: std::fmt::Display + Send + 'static,
-{
-    // DEPRECATED: This blocking wrapper is being removed.
-    // Call sites should be updated to use async directly.
-    // For now, this is a placeholder to maintain compilation.
-    // TODO: Remove this function and update all call sites to async.
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to create runtime: {}", e)))?;
-        rt.block_on(future)
-            .map_err(|e| ChainOpError::RpcError(e.to_string()))
-    })
-    .join()
-    .map_err(|_| ChainOpError::RpcError("Thread panicked".to_string()))
-    .and_then(|r| r)
-}
 
 /// Sui chain operations implementation
 ///
@@ -1159,6 +1137,7 @@ impl From<SuiError> for ChainOpError {
     }
 }
 
+#[async_trait]
 impl ChainBackend for SuiBackend {
     fn chain_id(&self) -> &'static str {
         "sui"
@@ -1172,10 +1151,11 @@ impl ChainBackend for SuiBackend {
         true
     }
 
-    fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
         let sui_seal = self
             .seal_protocol
             .create_seal(value)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 
         // Convert SuiSealPoint to core SealPoint
@@ -1186,7 +1166,7 @@ impl ChainBackend for SuiBackend {
         })
     }
 
-    fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to SuiSealPoint
         if seal.id.len() < 32 {
             return Err(ChainOpError::InvalidInput(
@@ -1204,6 +1184,7 @@ impl ChainBackend for SuiBackend {
         let sui_anchor = self
             .seal_protocol
             .publish(commitment, sui_seal)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 
         // Convert SuiCommitAnchor to core CommitAnchor

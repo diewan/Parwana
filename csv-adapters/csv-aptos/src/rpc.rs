@@ -476,7 +476,10 @@ impl AptosRpc for MockAptosRpc {
                 .unwrap()
                 .get(&event_handle)
                 .cloned()
-                .unwrap_or_default()
+                .ok_or_else(|| Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Event handle {} not found", event_handle),
+                )) as Box<dyn std::error::Error + Send + Sync>)?
                 .into_iter()
                 .take(limit as usize)
                 .collect())
@@ -498,17 +501,30 @@ impl AptosRpc for MockAptosRpc {
         signed_tx_json: serde_json::Value,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            let tx_bytes = serde_json::to_vec(&signed_tx_json).unwrap_or_default();
+            let tx_bytes = serde_json::to_vec(&signed_tx_json)
+                .map_err(|e| Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to serialize transaction: {}", e),
+                )) as Box<dyn std::error::Error + Send + Sync>)?;
             self.sent_transactions.lock().unwrap().push(tx_bytes);
 
             if let Some(payload) = signed_tx_json.get("payload") {
                 if let Some(args) = payload.get("arguments").and_then(|a| a.as_array()) {
                     if !args.is_empty() {
-                        let commit_str = args[0].as_str().unwrap_or("");
+                        let commit_str = args[0].as_str().ok_or_else(|| Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Commitment argument is not a string",
+                        )) as Box<dyn std::error::Error + Send + Sync>)?;
                         let commitment = if let Some(hex) = commit_str.strip_prefix("0x") {
-                            hex::decode(hex).unwrap_or_default()
+                            hex::decode(hex).map_err(|e| Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("Failed to decode hex commitment: {}", e),
+                            )) as Box<dyn std::error::Error + Send + Sync>)?
                         } else {
-                            hex::decode(commit_str).unwrap_or_default()
+                            hex::decode(commit_str).map_err(|e| Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("Failed to decode hex commitment: {}", e),
+                            )) as Box<dyn std::error::Error + Send + Sync>)?
                         };
 
                         let mut event_data = vec![0u8; 96];

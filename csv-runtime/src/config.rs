@@ -12,6 +12,7 @@
 //! This separation ensures that protocol changes require a version bump, while
 //! operational changes can be made without affecting protocol compatibility.
 
+use crate::backpressure::{AdmissionLimits as BackpressureAdmissionLimits, BackpressureMode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -28,6 +29,8 @@ pub struct OperationalConfig {
     pub lease: LeaseConfig,
     /// Circuit breaker configuration
     pub circuit_breaker: CircuitBreakerConfig,
+    /// Backpressure configuration
+    pub backpressure: BackpressureConfig,
 }
 
 impl Default for OperationalConfig {
@@ -67,6 +70,10 @@ impl OperationalConfig {
                 open_timeout: Duration::from_secs(60),
                 success_threshold: 2,
             },
+            backpressure: BackpressureConfig {
+                max_queue_depth: 1000,
+                backpressure_mode: BackpressureMode::Reject,
+            },
         }
     }
 
@@ -99,6 +106,10 @@ impl OperationalConfig {
                 failure_threshold: 10,
                 open_timeout: Duration::from_secs(30),
                 success_threshold: 1,
+            },
+            backpressure: BackpressureConfig {
+                max_queue_depth: 500,
+                backpressure_mode: BackpressureMode::DropOldest,
             },
         }
     }
@@ -184,6 +195,24 @@ pub struct CircuitBreakerConfig {
     pub open_timeout: Duration,
     /// Number of successful requests required to close circuit
     pub success_threshold: u32,
+}
+
+/// Backpressure configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackpressureConfig {
+    /// Maximum queue depth
+    pub max_queue_depth: usize,
+    /// Backpressure mode
+    pub backpressure_mode: BackpressureMode,
+}
+
+impl Default for BackpressureConfig {
+    fn default() -> Self {
+        Self {
+            max_queue_depth: 1000,
+            backpressure_mode: BackpressureMode::Reject,
+        }
+    }
 }
 
 /// Configuration validation error

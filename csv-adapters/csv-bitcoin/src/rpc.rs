@@ -8,6 +8,7 @@
 
 #[cfg(test)]
 use std::collections::HashSet;
+use async_trait::async_trait;
 
 /// UTXO information for a specific output
 #[derive(Debug, Clone)]
@@ -23,35 +24,36 @@ pub struct UtxoInfo {
 }
 
 /// Trait-based RPC interface for real implementations
+#[async_trait]
 pub trait BitcoinRpc: Send + Sync {
-    fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
-    fn get_block_hash(
+    async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
+    async fn get_block_hash(
         &self,
         height: u64,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>;
-    fn is_utxo_unspent(
+    async fn is_utxo_unspent(
         &self,
         txid: [u8; 32],
         vout: u32,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-    fn send_raw_transaction(
+    async fn send_raw_transaction(
         &self,
         tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>;
-    fn get_tx_confirmations(
+    async fn get_tx_confirmations(
         &self,
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Get UTXOs for a specific address
     /// Returns list of (txid, vout, amount_sat, confirmations)
-    fn get_utxos_for_address(
+    async fn get_utxos_for_address(
         &self,
         address: &str,
     ) -> Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Build a transaction inclusion proof from real block transaction data.
-    fn get_inclusion_proof(
+    async fn get_inclusion_proof(
         &self,
         txid: [u8; 32],
         block_hash: [u8; 32],
@@ -61,7 +63,7 @@ pub trait BitcoinRpc: Send + Sync {
     }
 
     /// Estimate fee rate in sat/vbyte from the backing node or fee API.
-    fn estimate_fee_rate(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    async fn estimate_fee_rate(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         Err("Bitcoin RPC implementation does not support fee estimation".into())
     }
 

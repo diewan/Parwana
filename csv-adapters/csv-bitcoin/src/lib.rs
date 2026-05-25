@@ -2,6 +2,7 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::manual_clamp)]
 #![allow(clippy::collapsible_if)]
+#![deny(clippy::unwrap_used)]
 //!
 //! This adapter implements the SealProtocol trait for Bitcoin,
 //! using UTXOs as single-use seals and Tapret/Opret for commitment publication.
@@ -10,6 +11,7 @@
 #![allow(missing_docs)]
 #![allow(dead_code)]
 
+pub mod adapter_impl;
 pub mod bip341;
 pub mod config;
 pub mod error;

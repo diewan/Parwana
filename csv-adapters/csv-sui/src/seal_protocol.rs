@@ -13,8 +13,9 @@
 
 use std::sync::Mutex;
 
+use async_trait::async_trait;
 use csv_codec;
-use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
 
@@ -38,28 +39,6 @@ use crate::rpc::SuiRpc;
 use crate::seal::SealRegistry;
 use crate::types::{SuiCommitAnchor, SuiFinalityProof, SuiInclusionProof, SuiSealPoint};
 
-/// Execute an async future using spawn_blocking to avoid nested runtime panics.
-/// CRITICAL FIX: Uses spawn_blocking with dedicated thread pool instead of creating nested runtimes.
-fn spawn_blocking_async<F, T>(future: F) -> Result<T, SuiError>
-where
-    F: std::future::Future<Output = Result<T, SuiError>> + Send + 'static,
-    T: Send + 'static,
-{
-    // DEPRECATED: This blocking wrapper is being removed.
-    // Call sites should be updated to use async directly.
-    // For now, this is a placeholder to maintain compilation.
-    // TODO: Remove this function and update all call sites to async.
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| SuiError::RpcError(format!("Failed to create runtime: {}", e)))?;
-        rt.block_on(future)
-    })
-    .join()
-    .map_err(|_| SuiError::RpcError("Thread panicked".to_string()))
-    .and_then(|r| r)
-}
 
 /// Sui implementation of the SealProtocol trait
 pub struct SuiSealProtocol {
@@ -223,14 +202,13 @@ fn build_sui_transaction_data(
 
 impl SuiSealProtocol {
     /// Run an async operation that borrows from self, by cloning the RPC client.
-    /// CRITICAL FIX: Uses spawn_blocking_async to avoid nested Tokio runtime panics.
-    fn run_with_rpc<F, T>(&self, op: impl FnOnce(Box<dyn SuiRpc>) -> F) -> Result<T, SuiError>
+    async fn run_with_rpc<F, T>(&self, op: impl FnOnce(Box<dyn SuiRpc>) -> F) -> Result<T, SuiError>
     where
         F: std::future::Future<Output = Result<T, SuiError>> + Send + 'static,
         T: Send + 'static,
     {
         let rpc = self.rpc.clone_boxed();
-        spawn_blocking_async(op(rpc))
+        op(rpc).await
     }
 
     /// Create a new adapter from configuration and RPC client.
@@ -346,16 +324,18 @@ impl SuiSealProtocol {
     }
 
     /// Verify that a seal object is available before consumption.
-    fn verify_seal_available(&self, seal: &SuiSealPoint) -> SuiResult<()> {
+    async fn verify_seal_available(&self, seal: &SuiSealPoint) -> SuiResult<()> {
         // Check registry first
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        if registry.is_seal_used(seal) {
-            return Err(SuiError::ObjectUsed(format!(
-                "Object {} with version {} is already consumed",
-                format_object_id(seal.object_id),
-                seal.version
-            )));
-        }
+        {
+            let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            if registry.is_seal_used(seal) {
+                return Err(SuiError::ObjectUsed(format!(
+                    "Object {} with version {} is already consumed",
+                    format_object_id(seal.object_id),
+                    seal.version
+                )));
+            }
+        } // Lock is released here
 
         // Check on-chain object exists
         let obj_id = seal.object_id;
@@ -363,6 +343,7 @@ impl SuiSealProtocol {
             .run_with_rpc(move |rpc| async move {
                 StateProofVerifier::verify_object_exists(obj_id, rpc.as_ref()).await
             })
+            .await
             .map_err(|e| SuiError::StateProofFailed(e.to_string()))?;
         if obj.is_none() {
             return Err(SuiError::StateProofFailed(format!(
@@ -407,7 +388,7 @@ impl SuiSealProtocol {
     /// This implementation uses raw BCS serialization to avoid the SDK dependency,
     /// matching the exact wire format Sui nodes expect.
     #[cfg(feature = "rpc")]
-    fn build_and_sign_move_call(
+    async fn build_and_sign_move_call(
         &self,
         seal: &SuiSealPoint,
         commitment: [u8; 32],
@@ -457,6 +438,7 @@ impl SuiSealProtocol {
                 })?;
                 Ok((sender, gas_objects, seal_object))
             })
+            .await
             .map_err(|e| format!("Failed to get gas data: {}", e))?;
 
         if gas_objects.is_empty() {
@@ -494,7 +476,7 @@ impl SuiSealProtocol {
     }
 
     /// Verify the event in a published anchor matches the expected commitment.
-    fn verify_anchor_event(
+    async fn verify_anchor_event(
         &self,
         anchor: &SuiCommitAnchor,
         expected_seal: &SuiSealPoint,
@@ -517,6 +499,7 @@ impl SuiSealProtocol {
                     .await
                 }
             })
+            .await
             .map_err(|e: SuiError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
         if !valid {
@@ -529,13 +512,14 @@ impl SuiSealProtocol {
     }
 }
 
+#[async_trait]
 impl SealProtocol for SuiSealProtocol {
     type SealPoint = SuiSealPoint;
     type CommitAnchor = SuiCommitAnchor;
     type InclusionProof = SuiInclusionProof;
     type FinalityProof = SuiFinalityProof;
 
-    fn publish(
+    async fn publish(
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
@@ -546,7 +530,7 @@ impl SealProtocol for SuiSealProtocol {
         );
 
         // Verify seal is available
-        self.verify_seal_available(&seal)
+        self.verify_seal_available(&seal).await
             .map_err(ProtocolError::from)?;
 
         #[cfg(feature = "rpc")]
@@ -563,7 +547,7 @@ impl SealProtocol for SuiSealProtocol {
             // - Type arguments and call arguments (seal_id, commitment)
             // For production: use sui-sdk's transaction builder
             let (tx_bytes, signature, public_key) = self
-                .build_and_sign_move_call(&seal, *commitment.as_bytes())
+                .build_and_sign_move_call(&seal, *commitment.as_bytes()).await
                 .map_err(|e| {
                     ProtocolError::PublishFailed(format!(
                         "Failed to build and sign transaction: {}",
@@ -585,6 +569,7 @@ impl SealProtocol for SuiSealProtocol {
                         })?;
                     Ok((tx_digest, block))
                 })
+                .await
                 .map_err(|e| ProtocolError::PublishFailed(format!("Transaction failed: {}", e)))?;
 
             // Verify the emitted event matches the expected commitment
@@ -596,6 +581,7 @@ impl SealProtocol for SuiSealProtocol {
                             .await
                     }
                 })
+                .await
                 .map_err(|e: SuiError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
             if !valid {
@@ -632,7 +618,7 @@ impl SealProtocol for SuiSealProtocol {
         }
     }
 
-    fn verify_inclusion(
+    async fn verify_inclusion(
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
@@ -648,6 +634,7 @@ impl SealProtocol for SuiSealProtocol {
                     .await
                     .map_err(|e| SuiError::RpcError(e.to_string()))
             })
+            .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!("Failed to fetch checkpoint: {}", e))
             })?
@@ -671,6 +658,7 @@ impl SealProtocol for SuiSealProtocol {
                             .map_err(|e| SuiError::RpcError(e.to_string()))
                     }
                 })
+                .await
                 .map_err(|e| {
                     ProtocolError::InclusionProofFailed(format!("Checkpoint check failed: {}", e))
                 })?;
@@ -709,6 +697,7 @@ impl SealProtocol for SuiSealProtocol {
                 }
                 Ok(proof)
             })
+            .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!(
                     "Failed to build Sui object inclusion proof from transaction effects: {}",
@@ -731,7 +720,7 @@ impl SealProtocol for SuiSealProtocol {
         ))
     }
 
-    fn verify_finality(
+    async fn verify_finality(
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
@@ -751,6 +740,7 @@ impl SealProtocol for SuiSealProtocol {
                         .map_err(|e| SuiError::RpcError(e.to_string()))
                 }
             })
+            .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!("Finality check failed: {}", e))
             })?
@@ -759,7 +749,7 @@ impl SealProtocol for SuiSealProtocol {
         Ok(SuiFinalityProof::new(anchor.checkpoint, is_certified))
     }
 
-    fn enforce_seal(
+    async fn enforce_seal(
         &self,
         seal: Self::SealPoint,
     ) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
@@ -768,60 +758,63 @@ impl SealProtocol for SuiSealProtocol {
         // by checking both local registry and on-chain object state
 
         // Step 1: Check local registry (fast path)
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        if registry.is_seal_used(&seal) {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "Object {} already consumed in local registry",
-                    format_object_id(seal.object_id)
-                ),
-            )) as Box<dyn std::error::Error>);
-        }
-        drop(registry);
+        {
+            let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            if registry.is_seal_used(&seal) {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Object {} already consumed in local registry",
+                        format_object_id(seal.object_id)
+                    ),
+                )) as Box<dyn std::error::Error>);
+            }
+        } // Lock is released here
 
         // Step 2: Check on-chain object state via RPC (authoritative check)
         // This ensures that even if local state is corrupted or lost,
         // we still prevent double-spends by querying the blockchain
         #[cfg(feature = "rpc")]
         {
-            use tokio::runtime::Handle;
-            if let Ok(handle) = Handle::try_current() {
-                let object_exists = handle
-                    .block_on(StateProofVerifier::verify_object_exists(
-                        seal.object_id,
-                        self.rpc.as_ref(),
+            let object_exists = self
+                .run_with_rpc(|rpc| {
+                    let obj_id = seal.object_id;
+                    async move {
+                        StateProofVerifier::verify_object_exists(obj_id, rpc.as_ref()).await
+                    }
+                })
+                .await
+                .map_err(|e| {
+                    ProtocolError::NetworkError(format!(
+                        "Failed to check object status on-chain: {}",
+                        e
                     ))
-                    .map_err(|e| {
-                        ProtocolError::NetworkError(format!(
-                            "Failed to check object status on-chain: {}",
-                            e
-                        ))
-                    })?;
+                })?;
 
-                if object_exists.is_none() {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!(
-                            "Object {} already consumed on-chain (deleted)",
-                            format_object_id(seal.object_id)
-                        ),
-                    )) as Box<dyn std::error::Error>);
-                }
+            if object_exists.is_none() {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Object {} already consumed on-chain (deleted)",
+                        format_object_id(seal.object_id)
+                    ),
+                )) as Box<dyn std::error::Error>);
             }
         }
 
         // Step 3: Mark seal as used in local registry
         // This is done after the on-chain check to ensure consistency
-        let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        registry
-            .mark_seal_used(&seal, 0)
-            .map_err(ProtocolError::from)?;
+        {
+            let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            registry
+                .mark_seal_used(&seal, 0)
+                .map_err(ProtocolError::from)?;
+        } // Lock is released here
 
         Ok(())
     }
 
-    fn create_seal(
+    async fn create_seal(
         &self,
         _value: Option<u64>,
     ) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
@@ -859,20 +852,20 @@ impl SealProtocol for SuiSealProtocol {
         .hash()
     }
 
-    fn build_proof_bundle(
+    async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>,
     ) -> std::result::Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
-        let inclusion = self.verify_inclusion(anchor.clone())?;
-        let finality = self.verify_finality(anchor.clone())?;
+        let inclusion = self.verify_inclusion(anchor.clone()).await?;
+        let finality = self.verify_finality(anchor.clone()).await?;
 
         let seal_ref = CoreSealPoint::new(anchor.object_id.to_vec(), Some(anchor.checkpoint))
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let anchor_ref =
             CoreCommitAnchor::new(anchor.object_id.to_vec(), anchor.checkpoint, vec![])
-                .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+                .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let inclusion_proof = csv_protocol::proof::InclusionProof::new(
             inclusion.object_proof,
@@ -880,10 +873,10 @@ impl SealProtocol for SuiSealProtocol {
             inclusion.checkpoint_number,
             0,
         )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+        .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let finality_proof = FinalityProof::new(vec![], finality.checkpoint, finality.is_certified)
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         // Deserialize transition_dag from Vec<u8> to DAGSegment
         let dag_segment: csv_hash::dag::DAGSegment =
@@ -902,7 +895,7 @@ impl SealProtocol for SuiSealProtocol {
             .collect();
 
         ProofBundle::with_signature_scheme(
-            csv_proof::SignatureScheme::Ed25519,
+            csv_protocol::SignatureScheme::Ed25519,
             dag_segment,
             signatures,
             seal_ref,
@@ -918,7 +911,7 @@ impl SealProtocol for SuiSealProtocol {
         })
     }
 
-    fn rollback(
+    async fn rollback(
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
@@ -932,6 +925,7 @@ impl SealProtocol for SuiSealProtocol {
                     .await
                     .map_err(|e| SuiError::RpcError(e.to_string()))
             })
+            .await
             .map_err(|e| {
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,

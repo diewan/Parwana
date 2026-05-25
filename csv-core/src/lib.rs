@@ -191,7 +191,7 @@ pub mod zk_proof;
 pub use csv_hash::nullifier::OptimizedSealNullifier;
 pub use csv_hash::nullifier::{DoubleSpendError, SealConsumption, SealNullifier};
 pub use csv_hash::seal::{CommitAnchor, SealPoint};
-pub use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+pub use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 pub use error::{ProtocolError, Result};
 
 // ===========================================================================

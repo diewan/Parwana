@@ -318,41 +318,7 @@ impl EventProofVerifier {
     /// # Returns
     /// `Ok(true)` if the event was found and verified, `Ok(false)` if not found,
     /// or `Err` on RPC failure.
-    pub fn verify_event_in_tx(
-        tx_version: u64,
-        expected_data: &[u8],
-        rpc: &dyn AptosRpc,
-    ) -> AptosResult<bool> {
-        let tx = {
-            let rpc = rpc.clone_boxed();
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| {
-                    AptosError::CheckpointFailed(format!("Failed to build runtime: {}", e))
-                })?;
-            rt.block_on(async { rpc.get_transaction_by_version(tx_version).await })
-        }
-        .map_err(|e| AptosError::EventProofFailed(format!("Failed to get transaction: {}", e)))?;
-        match tx {
-            Some(tx) => {
-                if !tx.success {
-                    return Ok(false);
-                }
-
-                // Search for event with matching data
-                let found = tx.events.iter().any(|e| e.data == expected_data);
-                Ok(found)
-            }
-            None => Err(AptosError::EventProofFailed(format!(
-                "Transaction at version {} not found",
-                tx_version
-            ))),
-        }
-    }
-
-    /// Async version of verify_event_in_tx for use in sync contexts.
-    pub async fn verify_event_in_tx_async(
+    pub async fn verify_event_in_tx(
         tx_version: u64,
         expected_data: &[u8],
         rpc: &dyn AptosRpc,
@@ -566,8 +532,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_verify_event_in_tx() {
+    #[tokio::test]
+    async fn test_verify_event_in_tx() {
         let rpc = MockAptosRpc::new(1000);
         rpc.add_transaction(
             100,
@@ -593,8 +559,8 @@ mod tests {
             },
         );
 
-        assert!(EventProofVerifier::verify_event_in_tx(100, &[0xAB, 0xCD], &rpc).unwrap());
-        assert!(!EventProofVerifier::verify_event_in_tx(100, &[0xFF], &rpc).unwrap());
+        assert!(EventProofVerifier::verify_event_in_tx(100, &[0xAB, 0xCD], &rpc).await.unwrap());
+        assert!(!EventProofVerifier::verify_event_in_tx(100, &[0xFF], &rpc).await.unwrap());
     }
 
     #[test]

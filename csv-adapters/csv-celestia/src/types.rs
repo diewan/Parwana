@@ -133,7 +133,7 @@ impl CelestiaAnchor {
             block_hash,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
             commitment,
             inclusion_proof: None,
@@ -165,7 +165,10 @@ impl CelestiaAnchor {
     /// Convert to core CommitAnchor
     pub fn to_core_anchor(&self) -> csv_hash::seal::CommitAnchor {
         let anchor_id = self.proof_id().to_bytes().to_vec();
-        let metadata = serde_json::to_vec(&self.location).unwrap_or_default();
+        let metadata = serde_json::to_vec(&self.location).unwrap_or_else(|_| {
+            // Fallback to empty metadata if serialization fails
+            vec![]
+        });
 
         csv_hash::seal::CommitAnchor::new(anchor_id.clone(), self.height, metadata.clone())
             .unwrap_or_else(|_| unsafe {
@@ -269,7 +272,10 @@ impl CelestiaFinalityProof {
 
     /// Convert to core FinalityProof
     pub fn to_core_finality(&self) -> csv_protocol::proof::FinalityProof {
-        let finality_data = serde_json::to_vec(&self).unwrap_or_default();
+        let finality_data = serde_json::to_vec(&self).unwrap_or_else(|_| {
+            // Fallback to empty data if serialization fails
+            vec![]
+        });
 
         csv_protocol::proof::FinalityProof::new(
             finality_data.clone(),
@@ -322,7 +328,7 @@ impl CelestiaHeader {
             height,
             time: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
             hash,
             data_root,
@@ -377,7 +383,7 @@ impl CelestiaMetadata {
             location,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
             expires_at: None,
             content_type: content_type.into(),

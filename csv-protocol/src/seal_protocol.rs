@@ -38,6 +38,7 @@
 use crate::signature::SignatureScheme;
 use csv_hash::Hash;
 use crate::proof::ProofBundle;
+use async_trait::async_trait;
 
 /// The SealProtocol trait defines the security-critical interface for chain-specific adapters.
 ///
@@ -72,6 +73,7 @@ use crate::proof::ProofBundle;
 /// All methods must either perform real chain-backed operations or return a typed
 /// error indicating the capability is unavailable. "Fake success" implementations
 /// are security vulnerabilities that enable fraud.
+#[async_trait]
 pub trait SealProtocol {
     /// Chain-specific seal point type
     type SealPoint;
@@ -102,11 +104,11 @@ pub trait SealProtocol {
     /// # Returns
     /// * `Ok(CommitAnchor)` - The anchor reference for inclusion/finality proofs
     /// * `Err` - If publication fails or seal already consumed
-    fn publish(
+    async fn publish(
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
-    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>>;
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>>;
 
     /// Verify and extract inclusion proof from the base layer.
     ///
@@ -131,10 +133,10 @@ pub trait SealProtocol {
     /// - Bitcoin: Merkle branch verification against block header
     /// - Ethereum: MPT proof verification against state root
     /// - Sui: Checkpoint content verification
-    fn verify_inclusion(
+    async fn verify_inclusion(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>>;
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>>;
 
     /// Verify finality according to base-layer consensus rules.
     ///
@@ -163,10 +165,10 @@ pub trait SealProtocol {
     /// # Returns
     /// * `Ok(FinalityProof)` - Proof that anchor has reached finality
     /// * `Err` - If finality not yet reached or proof invalid
-    fn verify_finality(
+    async fn verify_finality(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>>;
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>>;
 
     /// Enforce that the seal is single-use and non-replayable.
     ///
@@ -196,16 +198,16 @@ pub trait SealProtocol {
     /// 1. It queries the actual chain state (not cached state)
     /// 2. It uses the appropriate native primitive for the chain
     /// 3. It cannot be bypassed or fooled by malicious inputs
-    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>>;
+    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>>;
 
     /// Create a new seal for authorizing state transitions.
     ///
     /// # Arguments
     /// * `value` - Optional value/funding for the seal (chain-specific units)
-    fn create_seal(
+    async fn create_seal(
         &self,
         value: Option<u64>,
-    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>>;
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>>;
 
     /// Compute a domain-separated commitment hash from components.
     ///
@@ -270,11 +272,11 @@ pub trait SealProtocol {
     ///
     /// # Returns
     /// Complete `ProofBundle` ready for cross-chain transport and verification
-    fn build_proof_bundle(
+    async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>, // Simplified DAG representation
-    ) -> Result<ProofBundle, Box<dyn std::error::Error>>;
+    ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>>;
 
     /// Handle rollback of an anchor due to chain reorganization.
     ///
@@ -299,7 +301,7 @@ pub trait SealProtocol {
     /// # Returns
     /// * `Ok(())` - Rollback processed successfully
     /// * `Err` - If rollback handling fails
-    fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>>;
+    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>>;
 
     /// Get the domain separator for this adapter.
     ///

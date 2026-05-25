@@ -71,7 +71,7 @@ pub struct BatchedPublication {
 /// This struct manages the queuing and batching of commitments
 /// to optimize on-chain costs through MPC tree aggregation.
 pub struct MpcBatcher {
-    /// Pending commitments queue
+    /// Pending commitments queue (bounded to prevent memory exhaustion)
     pending: Arc<Mutex<VecDeque<PendingCommitment>>>,
     /// Maximum commitments per batch
     batch_size: usize,
@@ -79,6 +79,8 @@ pub struct MpcBatcher {
     min_batch_size: usize,
     /// Maximum seconds to wait before forcing a batch (0 = no timeout)
     max_wait_seconds: u64,
+    /// Maximum queue depth for backpressure
+    max_queue_depth: usize,
 }
 
 impl MpcBatcher {
@@ -88,35 +90,38 @@ impl MpcBatcher {
     /// * `batch_size` - Maximum commitments per batch (default: 10)
     /// * `min_batch_size` - Minimum before auto-batch (default: 2)
     /// * `max_wait_seconds` - Timeout for forcing batch (default: 300 = 5 min)
-    pub fn new(batch_size: usize, min_batch_size: usize, max_wait_seconds: u64) -> Self {
+    /// * `max_queue_depth` - Maximum queue depth for backpressure (default: 1000)
+    pub fn new(batch_size: usize, min_batch_size: usize, max_wait_seconds: u64, max_queue_depth: usize) -> Self {
         Self {
-            pending: Arc::new(Mutex::new(VecDeque::new())),
+            pending: Arc::new(Mutex::new(VecDeque::with_capacity(max_queue_depth))),
             batch_size: batch_size.max(2), // At least 2 for batching to make sense
             min_batch_size: min_batch_size.max(1),
             max_wait_seconds,
+            max_queue_depth: max_queue_depth.max(1),
         }
     }
 
-    /// Create with default settings (batch up to 10, min 2, 5 min timeout)
+    /// Create with default settings (batch up to 10, min 2, 5 min timeout, queue depth 1000)
     #[allow(clippy::should_implement_trait)]
     pub fn default() -> Self {
-        Self::new(10, 2, 300)
+        Self::new(10, 2, 300, 1000)
     }
 
-    /// Create optimized for high-volume (batch up to 50, min 5, 10 min timeout)
+    /// Create optimized for high-volume (batch up to 50, min 5, 10 min timeout, queue depth 5000)
     pub fn high_volume() -> Self {
-        Self::new(50, 5, 600)
+        Self::new(50, 5, 600, 5000)
     }
 
-    /// Create for testing (immediate batch of 1, no timeout)
+    /// Create for testing (immediate batch of 1, no timeout, queue depth 10)
     pub fn immediate() -> Self {
-        Self::new(1, 1, 0)
+        Self::new(1, 1, 0, 10)
     }
 
     /// Queue a commitment for batching
     ///
     /// Returns true if the batch is ready to publish (reached batch_size)
-    pub fn queue(&self, commitment: Hash, seal: BitcoinSealPoint, request_id: String) -> bool {
+    /// Returns error if queue is full (backpressure)
+    pub fn queue(&self, commitment: Hash, seal: BitcoinSealPoint, request_id: String) -> Result<bool, String> {
         let pending_commitment = PendingCommitment {
             commitment,
             seal,
@@ -125,10 +130,16 @@ impl MpcBatcher {
         };
 
         let mut queue = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Enforce backpressure: reject if queue is full
+        if queue.len() >= self.max_queue_depth {
+            return Err("MPC batcher queue is full - backpressure".to_string());
+        }
+
         queue.push_back(pending_commitment);
 
         // Check if we have enough for a batch
-        queue.len() >= self.batch_size
+        Ok(queue.len() >= self.batch_size)
     }
 
     /// Get count of pending commitments
@@ -308,7 +319,7 @@ impl MpcTreeExt for CommitMux {
 fn current_timestamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
         .as_secs()
 }
 
@@ -323,11 +334,11 @@ mod tests {
         let commitment = Hash::new([1u8; 32]);
         let seal = BitcoinSealPoint::new([0u8; 32], 0, None);
 
-        assert!(!batcher.queue(commitment, seal.clone(), "test-1".to_string()));
+        assert!(!batcher.queue(commitment, seal.clone(), "test-1".to_string()).unwrap());
         assert_eq!(batcher.pending_count(), 1);
 
         // Second commitment should trigger batch ready
-        assert!(batcher.queue(commitment, seal, "test-2".to_string()));
+        assert!(batcher.queue(commitment, seal, "test-2".to_string()).unwrap());
         assert_eq!(batcher.pending_count(), 2);
     }
 
@@ -339,7 +350,7 @@ mod tests {
         for i in 0..3 {
             let commitment = Hash::new([i as u8; 32]);
             let seal = BitcoinSealPoint::new([0u8; 32], i, None);
-            batcher.queue(commitment, seal, format!("test-{}", i));
+            batcher.queue(commitment, seal, format!("test-{}", i)).unwrap();
         }
 
         // Build tree

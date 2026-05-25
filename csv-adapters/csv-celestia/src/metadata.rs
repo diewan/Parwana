@@ -125,7 +125,7 @@ impl SanadMetadata {
             verification: VerificationRequirements::default(),
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
             expires_at: None,
             extra: serde_json::Map::new(),
@@ -177,7 +177,7 @@ impl SanadMetadata {
         if let Some(expires) = self.expires_at {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .map_err(|e| CelestiaError::MetadataValidationFailed(format!("Invalid timestamp: {}", e)))?
                 .as_secs();
             if now > expires {
                 return Err(CelestiaError::MetadataValidationFailed(
@@ -309,7 +309,11 @@ impl ChallengeRecord {
     ) -> Self {
         let challenge_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
+            .unwrap_or_else(|_| {
+                // Fallback to 0 if system time is unavailable
+                // This is acceptable for challenge creation as it's not security-critical
+                std::time::Duration::from_secs(0)
+            })
             .as_secs();
 
         Self {
@@ -334,7 +338,10 @@ impl ChallengeRecord {
             challenger: resolver.into(),
             resolution_time: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| {
+                    // Fallback to 0 if system time is unavailable
+                    std::time::Duration::from_secs(0)
+                })
                 .as_secs(),
             fraud_proof,
         };
@@ -347,7 +354,10 @@ impl ChallengeRecord {
             challenger: resolver.into(),
             resolution_time: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| {
+                    // Fallback to 0 if system time is unavailable
+                    std::time::Duration::from_secs(0)
+                })
                 .as_secs(),
             reason: reason.into(),
         };
@@ -429,7 +439,7 @@ impl MetadataBatch {
     pub fn new(entries: Vec<SanadMetadata>) -> Self {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs();
 
         let merkle_root = Self::compute_merkle_root(&entries);

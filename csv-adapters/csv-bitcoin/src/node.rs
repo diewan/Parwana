@@ -213,12 +213,13 @@ pub mod real_rpc {
         }
     }
 
+    #[async_trait]
     impl BitcoinRpc for BitcoinNode {
-        fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Ok(self.client.get_block_count()?)
         }
 
-        fn get_block_hash(
+        async fn get_block_hash(
             &self,
             height: u64,
         ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
@@ -229,7 +230,7 @@ pub mod real_rpc {
             Ok(result)
         }
 
-        fn is_utxo_unspent(
+        async fn is_utxo_unspent(
             &self,
             txid: [u8; 32],
             vout: u32,
@@ -239,7 +240,7 @@ pub mod real_rpc {
             Ok(result.is_some())
         }
 
-        fn send_raw_transaction(
+        async fn send_raw_transaction(
             &self,
             tx_bytes: Vec<u8>,
         ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
@@ -252,7 +253,7 @@ pub mod real_rpc {
             Ok(result)
         }
 
-        fn get_tx_confirmations(
+        async fn get_tx_confirmations(
             &self,
             txid: [u8; 32],
         ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
@@ -261,7 +262,7 @@ pub mod real_rpc {
             Ok(info.confirmations.map(|c| c as u64).unwrap_or(0))
         }
 
-        fn get_utxos_for_address(
+        async fn get_utxos_for_address(
             &self,
             address: &str,
         ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {

@@ -6,6 +6,7 @@
 //! Includes automatic retry with exponential backoff for transient failures.
 //! Enable the `signet-rest` feature to use this implementation.
 
+use async_trait::async_trait;
 use bitcoin::{OutPoint, Txid};
 use bitcoin_hashes::Hash as BitcoinHash;
 use reqwest::Client;
@@ -54,29 +55,6 @@ impl MempoolSignetRpc {
         Self { client, base_url }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn run_http<T, F>(future: F) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
-    where
-        T: Send + 'static,
-        F: std::future::Future<Output = Result<T, Box<dyn std::error::Error + Send + Sync>>>
-            + Send
-            + 'static,
-    {
-        // DEPRECATED: This blocking wrapper is being removed.
-        // Call sites should be updated to use async directly.
-        // For now, this is a placeholder to maintain compilation.
-        // TODO: Remove this function and update all call sites to async.
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| format!("Failed to build HTTP runtime: {}", e))?;
-            rt.block_on(future)
-        })
-        .join()
-        .map_err(|_| "HTTP worker thread panicked".into())
-        .and_then(|result| result)
-    }
 
     #[cfg(target_arch = "wasm32")]
     fn run_http<T, F>(_future: F) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
@@ -97,45 +75,43 @@ impl MempoolSignetRpc {
 
     /// HTTP GET with automatic retry and exponential backoff
     #[cfg(not(target_arch = "wasm32"))]
-    fn get_with_retry<T: serde::de::DeserializeOwned + Send + 'static>(
+    async fn get_with_retry<T: serde::de::DeserializeOwned + Send + 'static>(
         &self,
         url: &str,
     ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
         let client = self.client.clone();
         let url = url.to_string();
 
-        Self::run_http(async move {
-            let mut last_err = None;
-            let mut backoff = INITIAL_BACKOFF;
+        let mut last_err = None;
+        let mut backoff = INITIAL_BACKOFF;
 
-            for attempt in 0..=MAX_RETRIES {
-                if attempt > 0 {
-                    log::warn!(
-                        "Retry {}/{} for {} after {:?} backoff",
-                        attempt,
-                        MAX_RETRIES,
-                        url,
-                        backoff
-                    );
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
-                }
-
-                match client.get(&url).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        return resp.json::<T>().await.map_err(|e| e.into());
-                    }
-                    Ok(resp) => {
-                        last_err = Some(format!("HTTP {} at {}", resp.status(), url).into());
-                    }
-                    Err(e) => {
-                        last_err = Some(format!("Network error at {}: {}", url, e).into());
-                    }
-                }
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                log::warn!(
+                    "Retry {}/{} for {} after {:?} backoff",
+                    attempt,
+                    MAX_RETRIES,
+                    url,
+                    backoff
+                );
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
             }
 
-            Err(last_err.unwrap_or_else(|| "Max retries exceeded".into()))
-        })
+            match client.get(&url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    return resp.json::<T>().await.map_err(|e| e.into());
+                }
+                Ok(resp) => {
+                    last_err = Some(format!("HTTP {} at {}", resp.status(), url).into());
+                }
+                Err(e) => {
+                    last_err = Some(format!("Network error at {}: {}", url, e).into());
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| "Max retries exceeded".into()))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -148,38 +124,36 @@ impl MempoolSignetRpc {
 
     /// HTTP GET text with retry
     #[cfg(not(target_arch = "wasm32"))]
-    fn get_text_with_retry(
+    async fn get_text_with_retry(
         &self,
         url: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let client = self.client.clone();
         let url = url.to_string();
 
-        Self::run_http(async move {
-            let mut last_err = None;
-            let mut backoff = INITIAL_BACKOFF;
+        let mut last_err = None;
+        let mut backoff = INITIAL_BACKOFF;
 
-            for attempt in 0..=MAX_RETRIES {
-                if attempt > 0 {
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
-                }
-
-                match client.get(&url).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        return resp.text().await.map_err(|e| e.into());
-                    }
-                    Ok(resp) => {
-                        last_err = Some(format!("HTTP {} at {}", resp.status(), url).into());
-                    }
-                    Err(e) => {
-                        last_err = Some(format!("Network error at {}: {}", url, e).into());
-                    }
-                }
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
             }
 
-            Err(last_err.unwrap_or_else(|| "Max retries exceeded".into()))
-        })
+            match client.get(&url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    return resp.text().await.map_err(|e| e.into());
+                }
+                Ok(resp) => {
+                    last_err = Some(format!("HTTP {} at {}", resp.status(), url).into());
+                }
+                Err(e) => {
+                    last_err = Some(format!("Network error at {}: {}", url, e).into());
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| "Max retries exceeded".into()))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -192,7 +166,7 @@ impl MempoolSignetRpc {
 
     /// HTTP POST text with retry
     #[cfg(not(target_arch = "wasm32"))]
-    fn post_text_with_retry(
+    async fn post_text_with_retry(
         &self,
         url: &str,
         body: String,
@@ -200,40 +174,40 @@ impl MempoolSignetRpc {
         let client = self.client.clone();
         let url = url.to_string();
 
-        Self::run_http(async move {
-            let mut last_err = None;
-            let mut backoff = INITIAL_BACKOFF;
+        let mut last_err = None;
+        let mut backoff = INITIAL_BACKOFF;
 
-            for attempt in 0..=MAX_RETRIES {
-                if attempt > 0 {
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
-                }
-
-                match client
-                    .post(&url)
-                    .header("Content-Type", "text/plain")
-                    .body(body.clone())
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        return resp.text().await.map_err(|e| e.into());
-                    }
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let error_text = resp.text().await.unwrap_or_default();
-                        last_err =
-                            Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
-                    }
-                    Err(e) => {
-                        last_err = Some(format!("Network error at {}: {}", url, e).into());
-                    }
-                }
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
             }
 
-            Err(last_err.unwrap_or_else(|| "Max retries exceeded".into()))
-        })
+            match client
+                .post(&url)
+                .header("Content-Type", "text/plain")
+                .body(body.clone())
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    return resp.text().await.map_err(|e| e.into());
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    let error_text = resp.text().await.map_err(|e| {
+                        format!("HTTP {} at {}: failed to read error text: {}", status, url, e)
+                    })?;
+                    last_err =
+                        Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
+                }
+                Err(e) => {
+                    last_err = Some(format!("Network error at {}: {}", url, e).into());
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| "Max retries exceeded".into()))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -246,50 +220,50 @@ impl MempoolSignetRpc {
     }
 
     /// Get block info (height, tx count, etc.)
-    pub fn get_block_info(
+    async fn get_block_info(
         &self,
         block_hash: &str,
     ) -> Result<BlockInfo, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/block/{}", self.base_url, block_hash);
-        self.get_with_retry(&url)
+        self.get_with_retry(&url).await
     }
 
     /// Get transaction status (confirmed/unconfirmed, block height, hash)
-    pub fn get_tx_status(
+    async fn get_tx_status(
         &self,
         txid: &str,
     ) -> Result<TxStatus, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/tx/{}/status", self.base_url, txid);
-        self.get_with_retry(&url)
+        self.get_with_retry(&url).await
     }
 
     /// Get full transaction details (inputs, outputs, fee, etc.)
-    pub fn get_tx(&self, txid: &str) -> Result<TxDetail, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_tx(&self, txid: &str) -> Result<TxDetail, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/tx/{}", self.base_url, txid);
-        self.get_with_retry(&url)
+        self.get_with_retry(&url).await
     }
 
     /// Get raw transaction hex
-    pub fn get_tx_hex(
+    async fn get_tx_hex(
         &self,
         txid: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/tx/{}/hex", self.base_url, txid);
-        self.get_text_with_retry(&url)
+        self.get_text_with_retry(&url).await
     }
 
     /// Get block txids for Merkle proof extraction
-    pub fn get_block_txids(
+    async fn get_block_txids(
         &self,
         block_hash: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/block/{}/txids", self.base_url, block_hash);
-        self.get_with_retry(&url)
+        self.get_with_retry(&url).await
     }
 
     /// Wait for transaction to reach required confirmations
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn wait_for_confirmation(
+    pub async fn wait_for_confirmation(
         &self,
         txid: [u8; 32],
         required_confirmations: u64,
@@ -304,11 +278,11 @@ impl MempoolSignetRpc {
                 return Err("Timeout waiting for confirmation".into());
             }
 
-            match self.get_tx_status(&txid_hex) {
+            match self.get_tx_status(&txid_hex).await {
                 Ok(status) => {
                     if status.confirmed {
                         let tx_height = status.block_height.unwrap_or(0) as u64;
-                        let new_height = self.get_block_count()?;
+                        let new_height = self.get_block_count().await?;
                         let confirmations = new_height.saturating_sub(tx_height) + 1;
 
                         if confirmations >= required_confirmations {
@@ -343,14 +317,14 @@ impl MempoolSignetRpc {
     }
 
     /// Extract Merkle proof for a transaction from its containing block
-    pub fn extract_merkle_proof(
+    async fn extract_merkle_proof(
         &self,
         txid: [u8; 32],
         block_hash: [u8; 32],
     ) -> Result<BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>> {
         let block_hash_hex = hex::encode(block_hash);
 
-        let all_txids_hex = self.get_block_txids(&block_hash_hex)?;
+        let all_txids_hex = self.get_block_txids(&block_hash_hex).await?;
         let all_txids: Vec<[u8; 32]> = all_txids_hex
             .iter()
             .map(|t| {
@@ -361,7 +335,7 @@ impl MempoolSignetRpc {
             })
             .collect::<Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>>>()?;
 
-        let block_info = self.get_block_info(&block_hash_hex)?;
+        let block_info = self.get_block_info(&block_hash_hex).await?;
         let block_height = block_info.height;
 
         extract_merkle_proof_from_block(txid, &all_txids, block_hash, block_height as u64)
@@ -375,59 +349,60 @@ impl Default for MempoolSignetRpc {
     }
 }
 
+#[async_trait]
 impl BitcoinRpc for MempoolSignetRpc {
-    fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/blocks/tip/height", self.base_url);
-        self.get_with_retry(&url)
+        self.get_with_retry(&url).await
     }
 
-    fn get_block_hash(
+    async fn get_block_hash(
         &self,
         height: u64,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/block-height/{}", self.base_url, height);
-        let hash_hex: String = self.get_text_with_retry(&url)?;
+        let hash_hex: String = self.get_text_with_retry(&url).await?;
         let hash_bytes = hex::decode(hash_hex.trim())?;
         let mut result = [0u8; 32];
         result.copy_from_slice(&hash_bytes);
         Ok(result)
     }
 
-    fn is_utxo_unspent(
+    async fn is_utxo_unspent(
         &self,
         txid: [u8; 32],
         vout: u32,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let txid_hex = hex::encode(txid);
         let spend_url = format!("{}/tx/{}/outspend/{}", self.base_url, txid_hex, vout);
-        let spend_status: OutSpendStatus = self.get_with_retry(&spend_url)?;
+        let spend_status: OutSpendStatus = self.get_with_retry(&spend_url).await?;
         Ok(!spend_status.spent)
     }
 
-    fn send_raw_transaction(
+    async fn send_raw_transaction(
         &self,
         tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/tx", self.base_url);
         let tx_hex = hex::encode(&tx_bytes);
 
-        let txid_hex = self.post_text_with_retry(&url, tx_hex)?;
+        let txid_hex = self.post_text_with_retry(&url, tx_hex).await?;
         let txid_bytes = hex::decode(txid_hex.trim())?;
         let mut result = [0u8; 32];
         result.copy_from_slice(&txid_bytes);
         Ok(result)
     }
 
-    fn get_tx_confirmations(
+    async fn get_tx_confirmations(
         &self,
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let txid_hex = hex::encode(txid);
 
-        match self.get_tx_status(&txid_hex) {
+        match self.get_tx_status(&txid_hex).await {
             Ok(status) => {
                 if status.confirmed {
-                    let current_height = self.get_block_count()?;
+                    let current_height = self.get_block_count().await?;
                     let tx_height = status.block_height.unwrap_or(0) as u64;
                     Ok(current_height.saturating_sub(tx_height) + 1)
                 } else {
@@ -438,17 +413,17 @@ impl BitcoinRpc for MempoolSignetRpc {
         }
     }
 
-    fn get_inclusion_proof(
+    async fn get_inclusion_proof(
         &self,
         txid: [u8; 32],
         block_hash: [u8; 32],
     ) -> Result<BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>> {
-        self.extract_merkle_proof(txid, block_hash)
+        self.extract_merkle_proof(txid, block_hash).await
     }
 
-    fn estimate_fee_rate(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    async fn estimate_fee_rate(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/v1/fees/recommended", self.base_url);
-        let fees: RecommendedFees = self.get_with_retry(&url)?;
+        let fees: RecommendedFees = self.get_with_retry(&url).await?;
         Ok(fees.half_hour_fee.max(fees.fastest_fee).max(1).min(10_000))
     }
 
@@ -459,13 +434,13 @@ impl BitcoinRpc for MempoolSignetRpc {
         })
     }
 
-    fn get_utxos_for_address(
+    async fn get_utxos_for_address(
         &self,
         address: &str,
     ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/address/{}/utxo", self.base_url, address);
-        let utxos: Vec<AddressUtxo> = self.get_with_retry(&url)?;
-        let current_height = self.get_block_count().unwrap_or(0);
+        let utxos: Vec<AddressUtxo> = self.get_with_retry(&url).await?;
+        let current_height = self.get_block_count().await.unwrap_or(0);
         let result: Vec<crate::rpc::UtxoInfo> = utxos
             .into_iter()
             .filter_map(|u| {
@@ -568,12 +543,12 @@ pub struct OutSpendStatus {
 }
 
 /// Get UTXOs for a specific address
-pub fn get_address_utxos(
+pub async fn get_address_utxos(
     rpc: &MempoolSignetRpc,
     address: &bitcoin::Address,
 ) -> Result<Vec<(OutPoint, u64)>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}/address/{}/utxo", rpc.base_url, address);
-    let utxos: Vec<AddressUtxo> = rpc.get_with_retry(&url)?;
+    let utxos: Vec<AddressUtxo> = rpc.get_with_retry(&url).await?;
 
     let result: Vec<(OutPoint, u64)> = utxos
         .into_iter()

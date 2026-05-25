@@ -1357,6 +1357,7 @@ fn parse_chain_id(chain_name: &str) -> ChainOpResult<u8> {
     }
 }
 
+#[async_trait]
 impl ChainBackend for EthereumBackend {
     fn chain_id(&self) -> &'static str {
         "ethereum"
@@ -1370,10 +1371,11 @@ impl ChainBackend for EthereumBackend {
         true
     }
 
-    fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
         let ethereum_seal = self
             .seal_protocol
             .create_seal(value)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 
         // Convert EthereumSealPoint to core SealPoint
@@ -1388,7 +1390,7 @@ impl ChainBackend for EthereumBackend {
         })
     }
 
-    fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to EthereumSealPoint
         if seal.id.len() < 28 {
             return Err(ChainOpError::InvalidInput(
@@ -1408,6 +1410,7 @@ impl ChainBackend for EthereumBackend {
         let ethereum_anchor = self
             .seal_protocol
             .publish(commitment, ethereum_seal)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 
         // Convert EthereumCommitAnchor to core CommitAnchor

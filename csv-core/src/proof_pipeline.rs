@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use crate::error::Result;
 use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 use csv_protocol::verified::VerificationResult;
 
 /// Chain-specific verifier used during proof and seal checks.

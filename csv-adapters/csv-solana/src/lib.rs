@@ -6,6 +6,7 @@
 #![warn(missing_docs)]
 #![allow(missing_docs)]
 #![allow(dead_code)]
+#![deny(clippy::unwrap_used)]
 
 pub mod anchor_client;
 pub mod chain_verification;

@@ -371,7 +371,7 @@ impl FraudProof {
             challenger_signature: Vec::new(),
             challenge_time: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
         }
     }

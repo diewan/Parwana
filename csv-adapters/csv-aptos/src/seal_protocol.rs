@@ -11,12 +11,12 @@
 
 #![allow(dead_code)]
 
+use async_trait::async_trait;
 use std::sync::Mutex;
+use tokio::runtime::Handle;
 
 #[cfg(feature = "rpc")]
 use crate::proofs::StateProofVerifier;
-#[cfg(feature = "rpc")]
-use tokio::runtime::Handle;
 
 use csv_hash::Hash;
 use csv_protocol::commitment::Commitment;
@@ -25,7 +25,7 @@ use csv_protocol::seal_protocol::SealProtocol;
 // use csv_protocol::dag::DAGSegment;
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
-use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
 
@@ -40,27 +40,6 @@ use crate::rpc::{AptosLedgerInfo, AptosTransaction};
 use crate::seal::SealRegistry;
 use crate::types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, AptosSealPoint};
 
-#[cfg(feature = "rpc")]
-fn spawn_blocking_async<F, T>(future: F) -> Result<T, AptosError>
-where
-    F: std::future::Future<Output = Result<T, AptosError>> + Send + 'static,
-    T: Send + 'static,
-{
-    // DEPRECATED: This blocking wrapper is being removed.
-    // Call sites should be updated to use async directly.
-    // For now, this is a placeholder to maintain compilation.
-    // TODO: Remove this function and update all call sites to async.
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| AptosError::RpcError(format!("Failed to create runtime: {}", e)))?;
-        rt.block_on(future)
-    })
-    .join()
-    .map_err(|_| AptosError::RpcError("Thread panicked".to_string()))
-    .and_then(|r| r)
-}
 
 /// Aptos implementation of the SealProtocol trait
 pub struct AptosSealProtocol {
@@ -175,7 +154,7 @@ impl AptosSealProtocol {
     }
 
     /// Verify that a seal resource is available before consumption.
-    fn verify_seal_available(&self, seal: &AptosSealPoint) -> AptosResult<()> {
+    async fn verify_seal_available(&self, seal: &AptosSealPoint) -> AptosResult<()> {
         // Check registry first
         let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
         if registry.is_seal_used(seal) {
@@ -194,14 +173,12 @@ impl AptosSealProtocol {
             );
             let account_address = seal.account_address;
             let rpc = self.rpc.clone_boxed();
-            spawn_blocking_async(async move {
-                StateProofVerifier::verify_resource_exists_async(
-                    account_address,
-                    &resource_type,
-                    rpc.as_ref(),
-                )
-                .await
-            })
+            StateProofVerifier::verify_resource_exists_async(
+                account_address,
+                &resource_type,
+                rpc.as_ref(),
+            )
+            .await
         };
 
         #[cfg(not(feature = "rpc"))]
@@ -417,12 +394,16 @@ impl AptosSealProtocol {
             expected_seal.account_address,
         );
 
-        let valid: bool = EventProofVerifier::verify_event_in_tx(
-            anchor.version,
-            &expected_event_data,
-            self.rpc.as_ref(),
-        )
-        .map_err(|e: AptosError| ProtocolError::InclusionProofFailed(e.to_string()))?;
+        let valid: bool = Handle::current()
+            .block_on(async {
+                EventProofVerifier::verify_event_in_tx(
+                    anchor.version,
+                    &expected_event_data,
+                    self.rpc.as_ref(),
+                )
+                .await
+            })
+            .map_err(|e: AptosError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
         if !valid {
             return Err(ProtocolError::InclusionProofFailed(
@@ -434,17 +415,18 @@ impl AptosSealProtocol {
     }
 }
 
+#[async_trait]
 impl SealProtocol for AptosSealProtocol {
     type SealPoint = AptosSealPoint;
     type CommitAnchor = AptosCommitAnchor;
     type InclusionProof = AptosInclusionProof;
     type FinalityProof = AptosFinalityProof;
 
-    fn publish(
+    async fn publish(
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
-    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Publishing commitment via seal {}",
             format_address(seal.account_address)
@@ -452,6 +434,7 @@ impl SealProtocol for AptosSealProtocol {
 
         // Verify seal is available
         self.verify_seal_available(&seal)
+            .await
             .map_err(ProtocolError::from)?;
 
         #[cfg(feature = "rpc")]
@@ -467,33 +450,24 @@ impl SealProtocol for AptosSealProtocol {
                 })?;
 
             // Submit signed transaction via REST API
-            let submit_result = {
-                let rt = Handle::current();
-                rt.block_on(async { self.rpc.submit_signed_transaction(tx_json).await })
-            }
-            .map_err(|e| {
-                ProtocolError::PublishFailed(format!("Failed to submit transaction: {}", e))
-            })?;
+            let submit_result = self.rpc.submit_signed_transaction(tx_json)
+                .await
+                .map_err(|e| {
+                    ProtocolError::PublishFailed(format!("Failed to submit transaction: {}", e))
+                })?;
 
             // Wait for transaction confirmation
-            let tx = {
-                let rt = Handle::current();
-                rt.block_on(async { self.rpc.wait_for_transaction(submit_result).await })
-            }
-            .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
+            let tx = self.rpc.wait_for_transaction(submit_result)
+                .await
+                .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
             // Verify the emitted event matches the expected commitment
-            let valid = {
-                let rt = Handle::current();
-                rt.block_on(async {
-                    EventProofVerifier::verify_event_in_tx_async(
-                        tx.version,
-                        &expected_event_data,
-                        self.rpc.as_ref(),
-                    )
-                    .await
-                })
-            }
+            let valid = EventProofVerifier::verify_event_in_tx_async(
+                tx.version,
+                &expected_event_data,
+                self.rpc.as_ref(),
+            )
+            .await
             .map_err(|e: AptosError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
             if !valid {
@@ -534,10 +508,10 @@ impl SealProtocol for AptosSealProtocol {
         }
     }
 
-    fn verify_inclusion(
+    async fn verify_inclusion(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Verifying inclusion for anchor at version {}",
             anchor.version
@@ -545,22 +519,20 @@ impl SealProtocol for AptosSealProtocol {
 
         // Fetch transaction from the Aptos node by version
         #[cfg(feature = "rpc")]
-        let tx = {
-            let rt = Handle::current();
-            rt.block_on(async { self.rpc.get_transaction(anchor.version).await })
-        }
-        .map_err(|e| {
-            ProtocolError::InclusionProofFailed(format!(
-                "Failed to fetch transaction at version {}: {}",
-                anchor.version, e
-            ))
-        })?
-        .ok_or_else(|| {
-            ProtocolError::InclusionProofFailed(format!(
-                "Transaction at version {} not found",
-                anchor.version
-            ))
-        })?;
+        let tx = self.rpc.get_transaction(anchor.version)
+            .await
+            .map_err(|e| {
+                ProtocolError::InclusionProofFailed(format!(
+                    "Failed to fetch transaction at version {}: {}",
+                    anchor.version, e
+                ))
+            })?
+            .ok_or_else(|| {
+                ProtocolError::InclusionProofFailed(format!(
+                    "Transaction at version {} not found",
+                    anchor.version
+                ))
+            })?;
 
         #[cfg(not(feature = "rpc"))]
         let tx = AptosTransaction {
@@ -589,13 +561,11 @@ impl SealProtocol for AptosSealProtocol {
 
         // Fetch ledger info to verify the transaction is part of the ledger
         #[cfg(feature = "rpc")]
-        let ledger_info = {
-            let rt = Handle::current();
-            rt.block_on(async { self.rpc.get_ledger_info().await })
-        }
-        .map_err(|e| {
-            ProtocolError::InclusionProofFailed(format!("Failed to fetch ledger info: {}", e))
-        })?;
+        let ledger_info = self.rpc.get_ledger_info()
+            .await
+            .map_err(|e| {
+                ProtocolError::InclusionProofFailed(format!("Failed to fetch ledger info: {}", e))
+            })?;
 
         #[cfg(not(feature = "rpc"))]
         let ledger_info = AptosLedgerInfo {
@@ -629,10 +599,10 @@ impl SealProtocol for AptosSealProtocol {
         ))
     }
 
-    fn verify_finality(
+    async fn verify_finality(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Verifying finality for anchor at version {}",
             anchor.version
@@ -641,12 +611,10 @@ impl SealProtocol for AptosSealProtocol {
         #[cfg(feature = "rpc")]
         let is_certified = {
             let f_plus_one = self.config.f_plus_one();
-            let rt = Handle::current();
-            match rt.block_on(async {
-                self.checkpoint_verifier
-                    .is_version_finalized_async(anchor.version, self.rpc.as_ref(), f_plus_one)
-                    .await
-            }) {
+            match self.checkpoint_verifier
+                .is_version_finalized_async(anchor.version, self.rpc.as_ref(), f_plus_one)
+                .await
+            {
                 Ok(info) => info.is_certified,
                 Err(e) => {
                     log::warn!("Finality check failed: {}", e);
@@ -661,47 +629,45 @@ impl SealProtocol for AptosSealProtocol {
         Ok(AptosFinalityProof::new(anchor.version, is_certified))
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
+    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that an Aptos resource cannot be consumed more than once
         // by checking both local registry and on-chain resource state
 
         // Step 1: Check local registry (fast path)
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        if registry.is_seal_used(&seal) {
-            return Err(Box::new(ProtocolError::SealReplay(format!(
-                "Resource already consumed at {} in local registry",
-                format_address(seal.account_address)
-            ))) as Box<dyn std::error::Error>);
-        }
-        drop(registry);
+        {
+            let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            if registry.is_seal_used(&seal) {
+                return Err(Box::new(ProtocolError::SealReplay(format!(
+                    "Resource already consumed at {} in local registry",
+                    format_address(seal.account_address)
+                ))) as Box<dyn std::error::Error>);
+            }
+        } // Lock is dropped here
 
         // Step 2: Check on-chain resource state via RPC (authoritative check)
         // This ensures that even if local state is corrupted or lost,
         // we still prevent double-spends by querying the blockchain
         #[cfg(feature = "rpc")]
         {
-            use tokio::runtime::Handle;
-            if let Ok(handle) = Handle::try_current() {
-                let resource_exists = handle
-                    .block_on(StateProofVerifier::verify_resource_exists_async(
-                        seal.account_address,
-                        &seal.resource_type,
-                        self.rpc.as_ref(),
-                    ))
-                    .map_err(|e| {
-                        ProtocolError::NetworkError(format!(
-                            "Failed to check resource status on-chain: {}",
-                            e
-                        ))
-                    })?;
+            let resource_exists = StateProofVerifier::verify_resource_exists_async(
+                seal.account_address,
+                &seal.resource_type,
+                self.rpc.as_ref(),
+            )
+            .await
+            .map_err(|e| {
+                ProtocolError::NetworkError(format!(
+                    "Failed to check resource status on-chain: {}",
+                    e
+                ))
+            })?;
 
-                if !resource_exists {
-                    return Err(Box::new(ProtocolError::SealReplay(format!(
-                        "Resource already consumed on-chain at {}",
-                        format_address(seal.account_address)
-                    ))) as Box<dyn std::error::Error>);
-                }
+            if !resource_exists {
+                return Err(Box::new(ProtocolError::SealReplay(format!(
+                    "Resource already consumed on-chain at {}",
+                    format_address(seal.account_address)
+                ))) as Box<dyn std::error::Error>);
             }
         }
 
@@ -715,10 +681,10 @@ impl SealProtocol for AptosSealProtocol {
         Ok(())
     }
 
-    fn create_seal(
+    async fn create_seal(
         &self,
         _value: Option<u64>,
-    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(b"aptos-seal");
@@ -748,13 +714,13 @@ impl SealProtocol for AptosSealProtocol {
         .hash()
     }
 
-    fn build_proof_bundle(
+    async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>,
-    ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
-        let inclusion = self.verify_inclusion(anchor.clone())?;
-        let finality = self.verify_finality(anchor.clone())?;
+    ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
+        let inclusion = self.verify_inclusion(anchor.clone()).await?;
+        let finality = self.verify_finality(anchor.clone()).await?;
         let seal_ref = CoreSealPoint::new(anchor.event_handle.to_vec(), Some(anchor.version))
             .map_err(|e| {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
@@ -765,8 +731,8 @@ impl SealProtocol for AptosSealProtocol {
                 |e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>,
             )?;
 
-        // Use csv_proof::InclusionProof (struct) instead of csv_protocol::cross_chain::InclusionProof (enum)
-        let inclusion_proof = csv_proof::proof::InclusionProof::new(
+        // Use csv_protocol::proof::InclusionProof (struct) instead of csv_protocol::cross_chain::InclusionProof (enum)
+        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
             inclusion.transaction_proof.clone(),
             csv_hash::Hash::zero(), // block_hash - would need to extract from proof
             inclusion.version,
@@ -798,7 +764,7 @@ impl SealProtocol for AptosSealProtocol {
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
         ProofBundle::with_signature_scheme(
-            csv_proof::SignatureScheme::Ed25519,
+            csv_protocol::SignatureScheme::Ed25519,
             dag_segment,
             signatures,
             seal_ref,
@@ -809,17 +775,15 @@ impl SealProtocol for AptosSealProtocol {
         .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>)
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
+    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
         log::warn!(
             "Rollback requested for anchor at version {}",
             anchor.version
         );
         #[cfg(feature = "rpc")]
-        let current_version = {
-            let rt = Handle::current();
-            rt.block_on(async { self.rpc.get_latest_version().await })
-        }
-        .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
+        let current_version = self.rpc.get_latest_version()
+            .await
+            .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
         #[cfg(not(feature = "rpc"))]
         let current_version = anchor.version;

@@ -6,12 +6,13 @@
 
 #![allow(dead_code)]
 
+use async_trait::async_trait;
 use std::sync::Mutex;
 
 #[cfg(feature = "rpc")]
 use crate::finality::FinalityCheckerTrait;
 use csv_hash::Hash;
-use csv_protocol::proof::{FinalityProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::commitment::Commitment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::seal::CommitAnchor as CoreCommitAnchor;
@@ -184,24 +185,24 @@ impl EthereumSealProtocol {
     }
 }
 
+#[async_trait]
 impl SealProtocol for EthereumSealProtocol {
     type SealPoint = EthereumSealPoint;
     type CommitAnchor = EthereumCommitAnchor;
     type InclusionProof = EthereumInclusionProof;
     type FinalityProof = EthereumFinalityProof;
 
-    fn publish(
+    async fn publish(
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
-    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         self.verify_slot_available(&seal)
             .map_err(ProtocolError::from)?;
 
         #[cfg(feature = "rpc")]
         {
             use crate::node::{EthereumNode, publish, verify_seal_consumption_in_receipt};
-            use tokio::runtime::Handle;
 
             // Downcast to EthereumNode for the publish flow
             let real_rpc = self
@@ -215,19 +216,17 @@ impl SealProtocol for EthereumSealProtocol {
                     )) as Box<dyn std::error::Error>
                 })?;
 
-            let handle = Handle::current();
-
             // Build, sign, and broadcast the transaction
-            let tx_hash = handle
-                .block_on(publish(real_rpc, &seal, *commitment.as_bytes()))
+            let tx_hash = publish(real_rpc, &seal, *commitment.as_bytes())
+                .await
                 .map_err(|e| {
                     Box::new(ProtocolError::PublishFailed(e.to_string()))
                         as Box<dyn std::error::Error>
                 })?;
 
             // Get the receipt and verify the SealUsed event
-            let receipt = handle
-                .block_on(self.rpc.get_transaction_receipt(tx_hash))
+            let receipt = self.rpc.get_transaction_receipt(tx_hash)
+                .await
                 .map_err(|e| {
                     Box::new(ProtocolError::NetworkError(e.to_string()))
                         as Box<dyn std::error::Error>
@@ -252,7 +251,7 @@ impl SealProtocol for EthereumSealProtocol {
             }
 
             let log_entry = receipt.logs.first().ok_or_else(|| {
-                Box::new(ProtocolError::VerificationError("No logs in receipt".to_string()))
+                Box::new(ProtocolError::InclusionProofFailed("No logs in receipt".to_string()))
                     as Box<dyn std::error::Error>
             })?;
             let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
@@ -280,15 +279,14 @@ impl SealProtocol for EthereumSealProtocol {
         }
     }
 
-    fn verify_inclusion(
+    async fn verify_inclusion(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
         #[cfg(feature = "rpc")]
         {
             // Try to get real proof data from RPC
             use crate::node::EthereumNode;
-            use tokio::runtime::Handle;
 
             if let Some(_real_rpc) = self
                 .rpc
@@ -296,11 +294,9 @@ impl SealProtocol for EthereumSealProtocol {
                 .as_any()
                 .and_then(|any| any.downcast_ref::<EthereumNode>())
             {
-                let handle = Handle::current();
-
                 // Get the block header for receipt root
-                let block_hash = handle
-                    .block_on(self.rpc.get_block_hash(anchor.block_number))
+                let block_hash = self.rpc.get_block_hash(anchor.block_number)
+                    .await
                     .map_err(|e| {
                         Box::new(ProtocolError::InclusionProofFailed(format!(
                             "Failed to get block hash: {}",
@@ -308,8 +304,8 @@ impl SealProtocol for EthereumSealProtocol {
                         ))) as Box<dyn std::error::Error>
                     })?;
 
-                let state_root = handle
-                    .block_on(self.rpc.get_block_state_root(block_hash))
+                let state_root = self.rpc.get_block_state_root(block_hash)
+                    .await
                     .map_err(|e| {
                         Box::new(ProtocolError::InclusionProofFailed(format!(
                             "Failed to get state root: {}",
@@ -318,8 +314,8 @@ impl SealProtocol for EthereumSealProtocol {
                     })?;
 
                 // Get the receipt for the transaction
-                let receipt = handle
-                    .block_on(self.rpc.get_transaction_receipt(anchor.tx_hash))
+                let receipt = self.rpc.get_transaction_receipt(anchor.tx_hash)
+                    .await
                     .map_err(|e| {
                         Box::new(ProtocolError::InclusionProofFailed(format!(
                             "Failed to get receipt: {}",
@@ -370,51 +366,39 @@ impl SealProtocol for EthereumSealProtocol {
         Ok(proof)
     }
 
-    fn verify_finality(
+    async fn verify_finality(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
         #[cfg(feature = "rpc")]
         {
-            use tokio::runtime::Handle;
-            match Handle::try_current() {
-                Ok(handle) => {
-                    let is_finalized = handle
-                        .block_on(
-                            self.finality_checker
-                                .is_finalized(anchor.block_number, self.rpc.as_ref()),
-                        )
-                        .map_err(|e| {
-                            Box::new(ProtocolError::NetworkError(format!(
-                                "Finality check failed: {}",
-                                e
-                            ))) as Box<dyn std::error::Error>
-                        })?;
+            let is_finalized = self
+                .finality_checker
+                .is_finalized(anchor.block_number, self.rpc.as_ref())
+                .await
+                .map_err(|e| {
+                    Box::new(ProtocolError::NetworkError(format!(
+                        "Finality check failed: {}",
+                        e
+                    ))) as Box<dyn std::error::Error>
+                })?;
 
-                    let confirmations = handle
-                        .block_on(
-                            self.finality_checker
-                                .get_confirmations(anchor.block_number, self.rpc.as_ref()),
-                        )
-                        .map_err(|e| {
-                            Box::new(ProtocolError::NetworkError(format!(
-                                "Failed to get confirmations: {}",
-                                e
-                            ))) as Box<dyn std::error::Error>
-                        })?;
+            let confirmations = self
+                .finality_checker
+                .get_confirmations(anchor.block_number, self.rpc.as_ref())
+                .await
+                .map_err(|e| {
+                    Box::new(ProtocolError::NetworkError(format!(
+                        "Failed to get confirmations: {}",
+                        e
+                    ))) as Box<dyn std::error::Error>
+                })?;
 
-                    Ok(EthereumFinalityProof::new(
-                        confirmations,
-                        self.config.finality_depth,
-                        is_finalized,
-                    ))
-                }
-                Err(_) => Ok(EthereumFinalityProof::new(
-                    self.config.finality_depth,
-                    self.config.finality_depth,
-                    true,
-                )),
-            }
+            return Ok(EthereumFinalityProof::new(
+                confirmations,
+                self.config.finality_depth,
+                is_finalized,
+            ));
         }
         #[cfg(not(feature = "rpc"))]
         {
@@ -427,7 +411,7 @@ impl SealProtocol for EthereumSealProtocol {
         }
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
+    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a seal cannot be used more than once
         // by checking both local registry and on-chain state via CSVLock contract
@@ -482,10 +466,10 @@ impl SealProtocol for EthereumSealProtocol {
         Ok(())
     }
 
-    fn create_seal(
+    async fn create_seal(
         &self,
         value: Option<u64>,
-    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // Derive a seal from the CSVSeal contract address and a deterministic slot
         // The seal represents a nullifier slot in the contract's usedSeals mapping
         let nonce = value.unwrap_or_else(|| {
@@ -515,32 +499,32 @@ impl SealProtocol for EthereumSealProtocol {
         .hash()
     }
 
-    fn build_proof_bundle(
+    async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>,
-    ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
-        let inclusion = self.verify_inclusion(anchor.clone())?;
-        let finality = self.verify_finality(anchor.clone())?;
+    ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
+        let inclusion = self.verify_inclusion(anchor.clone()).await?;
+        let finality = self.verify_finality(anchor.clone()).await?;
 
-        let dag_segment: csv_proof::dag::DAGSegment =
+        let dag_segment: csv_hash::dag::DAGSegment =
             csv_codec::from_canonical_cbor(&transition_dag)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
         let seal_ref = CoreSealPoint::new(anchor.tx_hash.to_vec(), Some(anchor.log_index))
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let anchor_ref =
             CoreCommitAnchor::new(anchor.tx_hash.to_vec(), anchor.block_number, vec![])
-                .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+                .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
-        let inclusion_proof = csv_protocol::InclusionProof::new(
+        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
             inclusion.merkle_proof.clone(),
             Hash::new(inclusion.block_hash),
             inclusion.log_index,
             anchor.block_number,
         )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+        .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let finality_proof = FinalityProof::new(
             finality.confirmations.to_le_bytes().to_vec(),
@@ -568,12 +552,10 @@ impl SealProtocol for EthereumSealProtocol {
         .map_err(|e| Box::new(ProtocolError::Generic(e.to_string())) as Box<dyn std::error::Error>)
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
+    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
         #[cfg(feature = "rpc")]
         {
-            use tokio::runtime::Handle;
-            let handle = Handle::current();
-            let current = handle.block_on(self.rpc.block_number()).map_err(|e| {
+            let current = self.rpc.block_number().await.map_err(|e| {
                 Box::new(ProtocolError::NetworkError(e.to_string())) as Box<dyn std::error::Error>
             })?;
             if anchor.block_number > current {

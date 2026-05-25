@@ -532,7 +532,7 @@ pub fn verify_block_merkle_root_rust_bitcoin(txids: &[Txid], expected_root: [u8;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Convert Bitcoin inclusion proof to core CSV inclusion proof.
-pub fn to_core_inclusion_proof(proof: &BitcoinInclusionProof) -> csv_proof::proof::InclusionProof {
+pub fn to_core_inclusion_proof(proof: &BitcoinInclusionProof) -> csv_proof::InclusionProof {
     let mut proof_bytes = Vec::new();
     for branch in &proof.merkle_branch {
         proof_bytes.extend_from_slice(branch);
@@ -542,7 +542,7 @@ pub fn to_core_inclusion_proof(proof: &BitcoinInclusionProof) -> csv_proof::proo
     proof_bytes.extend_from_slice(&proof.block_height.to_le_bytes());
 
     unsafe {
-        csv_proof::proof::InclusionProof::new_unchecked(
+        csv_proof::InclusionProof::new_unchecked(
             proof_bytes,
             CoreHash::new(proof.block_hash),
             proof.block_height,
@@ -553,7 +553,7 @@ pub fn to_core_inclusion_proof(proof: &BitcoinInclusionProof) -> csv_proof::proo
 
 /// Convert core CSV inclusion proof to Bitcoin-specific type.
 pub fn from_core_inclusion_proof(
-    proof: &csv_proof::proof::InclusionProof,
+    proof: &csv_proof::InclusionProof,
 ) -> BitcoinInclusionProof {
     let proof_bytes = &proof.proof_bytes;
     if proof_bytes.len() < 48 {

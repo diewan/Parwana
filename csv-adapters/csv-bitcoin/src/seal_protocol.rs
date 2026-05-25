@@ -11,6 +11,7 @@
 
 #![allow(dead_code)]
 
+use async_trait::async_trait;
 use bitcoin;
 use bitcoin_hashes::Hash as _;
 use std::sync::{Arc, Mutex};
@@ -20,7 +21,7 @@ use csv_hash::commitment::Commitment;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
-use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::error::ProtocolError;
 use csv_protocol::seal_protocol::SealProtocol;
 
@@ -187,11 +188,11 @@ impl BitcoinSealProtocol {
         commitment: Hash,
         seal: BitcoinSealPoint,
         request_id: String,
-    ) -> bool {
+    ) -> Result<bool, BitcoinError> {
         self.mpc_batcher
             .as_ref()
-            .map(|b| b.queue(commitment, seal, request_id))
-            .unwrap_or(false)
+            .map(|b| b.queue(commitment, seal, request_id).map_err(|e| BitcoinError::MpcError(e.to_string())))
+            .unwrap_or(Ok(false))
     }
 
     /// Check if a batch is ready for publication
@@ -346,9 +347,9 @@ impl BitcoinSealProtocol {
     }
 
     /// Get current block height via RPC
-    pub fn get_current_height(&self) -> u64 {
+    pub async fn get_current_height(&self) -> u64 {
         if let Some(rpc) = &self.rpc {
-            if let Ok(h) = rpc.get_block_count() {
+            if let Ok(h) = rpc.get_block_count().await {
                 return h;
             }
         }
@@ -356,18 +357,19 @@ impl BitcoinSealProtocol {
     }
 
     /// Get current block height (alias for get_current_height)
-    pub fn get_current_height_for_test(&self) -> u64 {
-        self.get_current_height()
+    pub async fn get_current_height_for_test(&self) -> u64 {
+        self.get_current_height().await
     }
 
     /// Verify a UTXO is unspent
-    fn verify_utxo_unspent(
+    async fn verify_utxo_unspent(
         &self,
         seal: &BitcoinSealPoint,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(rpc) = &self.rpc {
             let unspent = rpc
                 .is_utxo_unspent(seal.txid, seal.vout)
+                .await
                 .map_err(|e| BitcoinError::RpcError(format!("Failed to check UTXO: {}", e)))?;
             if unspent {
                 return Ok(());
@@ -450,18 +452,19 @@ fn get_address_utxos(
     Err("get_address_utxos not implemented for this RPC backend".to_string())
 }
 
+#[async_trait]
 impl SealProtocol for BitcoinSealProtocol {
     type SealPoint = BitcoinSealPoint;
     type CommitAnchor = BitcoinCommitAnchor;
     type InclusionProof = BitcoinInclusionProof;
     type FinalityProof = BitcoinFinalityProof;
 
-    fn publish(
+    async fn publish(
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
-    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error>> {
-        self.verify_utxo_unspent(&seal)?;
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
+        self.verify_utxo_unspent(&seal).await?;
 
         // If RPC client is available, use real broadcasting
         if let Some(rpc) = &self.rpc {
@@ -493,6 +496,7 @@ impl SealProtocol for BitcoinSealProtocol {
             // Broadcast the signed transaction via RPC
             let broadcast_txid =
                 rpc.send_raw_transaction(tx_result.raw_tx.clone())
+                    .await
                     .map_err(|e| {
                         ProtocolError::PublishFailed(format!(
                             "Failed to broadcast transaction: {}",
@@ -507,7 +511,7 @@ impl SealProtocol for BitcoinSealProtocol {
                 tx_result.txid,
             );
 
-            let current_height = self.get_current_height();
+            let current_height = self.get_current_height().await;
             return Ok(BitcoinCommitAnchor::new(broadcast_txid, 0, current_height));
         }
 
@@ -516,21 +520,23 @@ impl SealProtocol for BitcoinSealProtocol {
         txid[..10].copy_from_slice(b"sim-commit");
         txid[10..].copy_from_slice(&commitment.as_bytes()[..22]);
 
-        let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = registry.mark_seal_used(&seal).map_err(ProtocolError::from);
+        {
+            let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = registry.mark_seal_used(&seal).map_err(ProtocolError::from);
+        }
 
-        let current_height = self.get_current_height();
+        let current_height = self.get_current_height().await;
         Ok(BitcoinCommitAnchor::new(txid, 0, current_height))
     }
 
-    fn verify_inclusion(
+    async fn verify_inclusion(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error>> {
+    ) -> Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
         // If we have an RPC client, fetch real Merkle proof from the blockchain
         if let Some(rpc) = &self.rpc {
             // Get the block containing the anchor transaction
-            let block_hash = rpc.get_block_hash(anchor.block_height).map_err(|e| {
+            let block_hash = rpc.get_block_hash(anchor.block_height).await.map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!("Failed to get block hash: {}", e))
             })?;
 
@@ -550,11 +556,11 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(proof)
     }
 
-    fn verify_finality(
+    async fn verify_finality(
         &self,
         anchor: Self::CommitAnchor,
-    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error>> {
-        let current_height = self.get_current_height();
+    ) -> Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
+        let current_height = self.get_current_height().await;
 
         if anchor.block_height == 0 {
             let confirmations = self.config.finality_depth as u64;
@@ -575,20 +581,21 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(proof)
     }
 
-    fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error>> {
+    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a UTXO cannot be spent more than once
         // by checking both local registry and on-chain UTXO set
 
         // Step 1: Check local registry (fast path)
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        if registry.is_seal_used(&seal) {
-            return Err(Box::new(ProtocolError::SealReplay(format!(
-                "UTXO {:?}:{:?} already used in local registry",
-                seal.txid, seal.vout
-            ))));
+        {
+            let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            if registry.is_seal_used(&seal) {
+                return Err(Box::new(ProtocolError::SealReplay(format!(
+                    "UTXO {:?}:{:?} already used in local registry",
+                    seal.txid, seal.vout
+                ))));
+            }
         }
-        drop(registry);
 
         // Step 2: Check on-chain UTXO set via RPC (authoritative check)
         // This ensures that even if local state is corrupted or lost,
@@ -596,7 +603,7 @@ impl SealProtocol for BitcoinSealProtocol {
         #[cfg(feature = "rpc")]
         {
             if let Some(ref rpc) = self.rpc {
-                let is_unspent = rpc.is_utxo_unspent(seal.txid, seal.vout).map_err(|e| {
+                let is_unspent = rpc.is_utxo_unspent(seal.txid, seal.vout).await.map_err(|e| {
                     Box::new(ProtocolError::NetworkError(format!(
                         "Failed to check UTXO status on-chain: {}",
                         e
@@ -622,10 +629,10 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(())
     }
 
-    fn create_seal(
+    async fn create_seal(
         &self,
         value: Option<u64>,
-    ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
+    ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         let value_sat = value.unwrap_or(100_000);
         let (seal_ref, _path) = self.derive_next_seal(value_sat)?;
         Ok(seal_ref)
@@ -650,41 +657,41 @@ impl SealProtocol for BitcoinSealProtocol {
         .hash()
     }
 
-    fn build_proof_bundle(
+    async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
         _transition_dag: Vec<u8>,
-    ) -> Result<ProofBundle, Box<dyn std::error::Error>> {
-        let inclusion = self.verify_inclusion(anchor.clone())?;
-        let finality = self.verify_finality(anchor.clone())?;
+    ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
+        let inclusion = self.verify_inclusion(anchor.clone()).await?;
+        let finality = self.verify_finality(anchor.clone()).await?;
 
         let seal_ref = CoreSealPoint::new(anchor.txid.to_vec(), Some(0))
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let anchor_ref = CoreCommitAnchor::new(anchor.txid.to_vec(), anchor.block_height, vec![])
-            .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+            .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let mut proof_bytes = Vec::new();
         proof_bytes.extend_from_slice(&inclusion.block_hash);
         proof_bytes.extend_from_slice(&inclusion.tx_index.to_le_bytes());
 
-        let inclusion_proof = csv_proof::proof::InclusionProof::new(
+        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
             proof_bytes,
             Hash::new(inclusion.block_hash),
             inclusion.tx_index as u64,
             anchor.block_height,
         )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+        .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let finality_proof = FinalityProof::new(
             finality.confirmations.to_le_bytes().to_vec(),
             finality.confirmations,
             finality.meets_required_depth,
         )
-        .map_err(|e| ProtocolError::Generic(e.to_string()))?;
+        .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         Ok(ProofBundle::with_signature_scheme(
-            csv_proof::SignatureScheme::Secp256k1,
+            csv_protocol::SignatureScheme::Secp256k1,
             csv_hash::dag::DAGSegment::new(vec![], csv_hash::Hash::new([0u8; 32])),
             vec![],
             seal_ref,
@@ -695,8 +702,8 @@ impl SealProtocol for BitcoinSealProtocol {
         .map_err(|e| Box::new(ProtocolError::Generic(e.to_string())))?)
     }
 
-    fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error>> {
-        let current_height = self.get_current_height();
+    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
+        let current_height = self.get_current_height().await;
         if anchor.block_height > current_height {
             return Err(Box::new(ProtocolError::ReorgInvalid(format!(
                 "Block {} is beyond current height {}",

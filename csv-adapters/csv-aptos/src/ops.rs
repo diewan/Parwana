@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
@@ -849,6 +849,7 @@ impl ChainSanadOps for AptosBackend {
     }
 }
 
+#[async_trait]
 impl ChainBackend for AptosBackend {
     fn chain_id(&self) -> &'static str {
         "aptos"
@@ -862,10 +863,11 @@ impl ChainBackend for AptosBackend {
         true
     }
 
-    fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
         let aptos_seal = self
             .seal_protocol
             .create_seal(value)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 
         // Convert AptosSealPoint to core SealPoint
@@ -876,7 +878,7 @@ impl ChainBackend for AptosBackend {
         })
     }
 
-    fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to AptosSealPoint
         if seal.id.len() < 32 {
             return Err(ChainOpError::InvalidInput(
@@ -895,6 +897,7 @@ impl ChainBackend for AptosBackend {
         let aptos_anchor = self
             .seal_protocol
             .publish(commitment, aptos_seal)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 
         // Convert AptosCommitAnchor to core CommitAnchor

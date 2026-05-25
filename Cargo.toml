@@ -35,6 +35,7 @@ members = [
     # "csv-explorer/api",
     # "csv-explorer/ui",
     # Chain adapter crates
+    "csv-adapters/csv-adapter-core",
     "csv-adapters/csv-bitcoin",
     "csv-adapters/csv-ethereum",
     "csv-adapters/csv-solana",

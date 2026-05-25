@@ -33,7 +33,7 @@ use csv_hash::nullifier::{ChainId, SealConsumption, SealNullifier, SealStatus};
 use csv_proof::commitment_chain::{
     ChainError, VerificationResult, verify_ordered_commitment_chain,
 };
-use csv_proof::proof::InclusionProof as CrossChainInclusionProof;
+use csv_protocol::proof_types::InclusionProof as CrossChainInclusionProof;
 // Sanad is not available in csv-hash, TODO: find correct location
 use crate::state_store::{
     ContractHistory, InMemoryStateStore, StateHistoryStore, StateTransitionRecord,

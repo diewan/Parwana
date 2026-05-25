@@ -9,7 +9,7 @@ use bitcoin_hashes::Hash as BitcoinHash;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_proof::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
@@ -96,6 +96,7 @@ impl ChainQuery for BitcoinChainQuery {
         let utxos = self
             .rpc
             .get_utxos_for_address(address)
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query UTXOs: {}", e)))?;
 
         let total_balance: u64 = utxos.iter().map(|utxo| utxo.amount_sat).sum();
@@ -132,6 +133,7 @@ impl ChainQuery for BitcoinChainQuery {
         let confirmations = self
             .rpc
             .get_tx_confirmations(txid_array)
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get confirmations: {}", e)))?;
 
         let status = if confirmations == 0 {
@@ -191,6 +193,7 @@ impl ChainQuery for BitcoinChainQuery {
     async fn get_latest_block_height(&self) -> ChainOpResult<u64> {
         self.rpc
             .get_block_count()
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get block count: {}", e)))
     }
 
@@ -514,6 +517,7 @@ impl ChainBroadcaster for BitcoinChainBroadcaster {
         let txid = self
             .rpc
             .send_raw_transaction(tx_bytes_vec)
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to broadcast: {}", e)))?;
 
         // Convert txid to hex string
@@ -536,7 +540,7 @@ impl ChainBroadcaster for BitcoinChainBroadcaster {
             let mut txid_array = [0u8; 32];
             txid_array.copy_from_slice(&txid_bytes);
 
-            let confirmations = self.rpc.get_tx_confirmations(txid_array).map_err(|e| {
+            let confirmations = self.rpc.get_tx_confirmations(txid_array).await.map_err(|e| {
                 ChainOpError::RpcError(format!("Failed to get confirmations: {}", e))
             })?;
 
@@ -596,6 +600,7 @@ impl ChainProofProvider for BitcoinChainProofProvider {
         let block_hash = self
             .rpc
             .get_block_hash(block_height)
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get block hash: {}", e)))?;
 
         if anchor_id.len() != 32 {
@@ -610,6 +615,7 @@ impl ChainProofProvider for BitcoinChainProofProvider {
         let bitcoin_proof = self
             .rpc
             .get_inclusion_proof(txid, block_hash)
+            .await
             .map_err(|e| {
                 ChainOpError::ProofVerificationError(format!(
                     "Failed to build Bitcoin merkle inclusion proof from block data: {}",
@@ -655,12 +661,14 @@ impl ChainProofProvider for BitcoinChainProofProvider {
         let confirmations = self
             .rpc
             .get_tx_confirmations(txid_array)
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get confirmations: {}", e)))?;
 
         // Get current block height
         let current_height = self
             .rpc
             .get_block_count()
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get block count: {}", e)))?;
 
         // Build finality data: [block_hash (32) + confirmation_count (8) + current_height (8)]
@@ -673,6 +681,7 @@ impl ChainProofProvider for BitcoinChainProofProvider {
         let block_hash = if block_height > 0 {
             self.rpc
                 .get_block_hash(block_height)
+                .await
                 .map_err(|e| ChainOpError::RpcError(format!("Failed to get block hash: {}", e)))?
         } else {
             [0u8; 32]
@@ -906,6 +915,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         let seal = self
             .adapter
             .create_seal(None)
+            .await
             .map_err(|e| ChainOpError::InvalidInput(format!("Failed to create seal: {}", e)))?;
 
         Ok(SanadOperationResult {
@@ -1002,7 +1012,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             sanad_id: sanad_id.clone(),
             operation: csv_protocol::backend::SanadOperation::Lock,
             transaction_hash: signed_tx,
-            block_height: self.adapter.get_current_height(),
+            block_height: self.adapter.get_current_height().await,
             chain_id: "bitcoin".to_string(),
             metadata: serde_json::json!({
                 "destination_chain": destination_chain,
@@ -1052,7 +1062,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         })?;
 
         // Verify CSV timeout has expired (144 blocks = ~24 hours)
-        let current_height = self.adapter.get_current_height();
+        let current_height = self.adapter.get_current_height().await;
         let csv_timeout = 144u64;
 
         if current_height < csv_timeout {
@@ -1080,7 +1090,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             sanad_id: sanad_id.clone(),
             operation: SanadOperation::Refund,
             transaction_hash: format!("0x{}", hex::encode(signed_tx.as_bytes())),
-            block_height: self.adapter.get_current_height(),
+            block_height: self.adapter.get_current_height().await,
             chain_id: "bitcoin".to_string(),
             metadata: serde_json::json!({
                 "lock_txid": hex::encode(lock_seal_txid),
@@ -1144,7 +1154,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             sanad_id: sanad_id.clone(),
             operation: SanadOperation::RecordMetadata,
             transaction_hash: signed_tx,
-            block_height: self.adapter.get_current_height(),
+            block_height: self.adapter.get_current_height().await,
             chain_id: "bitcoin".to_string(),
             metadata,
         })
@@ -1189,6 +1199,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                 BitcoinHash::to_byte_array(seal_outpoint.txid),
                 seal_outpoint.vout,
             )
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to check UTXO: {}", e)))?;
 
         // Match expected state
@@ -1314,7 +1325,7 @@ impl BitcoinBackend {
             )
         })?;
 
-        Ok(batcher.queue(commitment, seal, request_id))
+        batcher.queue(commitment, seal, request_id).map_err(|e| ChainOpError::RpcError(e))
     }
 
     /// Check if a batch is ready for publication
@@ -2144,7 +2155,7 @@ mod tx_signing_tests {
 
 /// Fee estimation implementation for Bitcoin using estimatesmartfee RPC
 async fn get_fee_estimate_rpc(rpc: &dyn BitcoinRpc) -> ChainOpResult<u64> {
-    rpc.estimate_fee_rate().map_err(|e| {
+    rpc.estimate_fee_rate().await.map_err(|e| {
         ChainOpError::RpcError(format!(
             "Bitcoin fee estimation unavailable from configured RPC: {}",
             e
@@ -2152,6 +2163,7 @@ async fn get_fee_estimate_rpc(rpc: &dyn BitcoinRpc) -> ChainOpResult<u64> {
     })
 }
 
+#[async_trait]
 impl ChainBackend for BitcoinBackend {
     fn chain_id(&self) -> &'static str {
         "bitcoin"
@@ -2165,10 +2177,11 @@ impl ChainBackend for BitcoinBackend {
         true
     }
 
-    fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
         let bitcoin_seal = self
             .seal_protocol
             .create_seal(value)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 
         // Convert BitcoinSealPoint to core SealPoint
@@ -2183,7 +2196,7 @@ impl ChainBackend for BitcoinBackend {
         })
     }
 
-    fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to BitcoinSealPoint
         if seal.id.len() < 36 {
             return Err(ChainOpError::InvalidInput(
@@ -2203,6 +2216,7 @@ impl ChainBackend for BitcoinBackend {
         let bitcoin_anchor = self
             .seal_protocol
             .publish(commitment, bitcoin_seal)
+            .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 
         // Convert BitcoinCommitAnchor to core CommitAnchor

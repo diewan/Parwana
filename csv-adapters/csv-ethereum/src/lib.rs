@@ -2,6 +2,7 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::manual_clamp)]
 #![allow(clippy::collapsible_if)]
+#![deny(clippy::unwrap_used)]
 //!
 //! This adapter implements the SealProtocol trait for Ethereum,
 //! using storage slots as single-use seals and LOG events for commitment publication.

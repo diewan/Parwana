@@ -5,7 +5,7 @@
 
 use super::errors::{ReplayDbError, StorageError};
 use async_trait::async_trait;
-use csv_proof::proof::ReplayId;
+use csv_protocol::proof_types::ReplayId;
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 
 /// Generic storage backend trait

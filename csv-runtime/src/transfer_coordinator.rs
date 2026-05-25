@@ -62,9 +62,9 @@ fn runtime_signature_scheme(
     }
 }
 
-fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_proof::proof::ReplayId {
-    csv_proof::proof::ReplayId {
-        version: csv_proof::proof::ReplayId::CURRENT_VERSION,
+fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_protocol::proof_types::ReplayId {
+    csv_protocol::proof_types::ReplayId {
+        version: csv_protocol::proof_types::ReplayId::CURRENT_VERSION,
         id: *replay_id.0.as_bytes(),
     }
 }

@@ -21,8 +21,9 @@
 //! 3. Seal is now "consumed" (cannot publish different commitment there)
 //! ```
 
+use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_proof::proof::ProofBundle;
+use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 
@@ -98,6 +99,7 @@ impl From<CelestiaError> for csv_protocol::error::ProtocolError {
 }
 
 /// Implement the core SealProtocol trait
+#[async_trait]
 impl<C, I> SealProtocol for CelestiaSealProtocol<C, I>
 where
     C: CelestiaRpc + Send + Sync,
@@ -108,7 +110,7 @@ where
     type InclusionProof = CommitmentProof;
     type FinalityProof = CelestiaFinalityProof;
 
-    fn publish(
+    async fn publish(
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
@@ -141,7 +143,7 @@ where
         Ok(anchor)
     }
 
-    fn verify_inclusion(
+    async fn verify_inclusion(
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
@@ -159,7 +161,7 @@ where
         Ok(proof)
     }
 
-    fn verify_finality(
+    async fn verify_finality(
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
@@ -174,7 +176,7 @@ where
         Ok(proof)
     }
 
-    fn enforce_seal(
+    async fn enforce_seal(
         &self,
         seal: Self::SealPoint,
     ) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {
@@ -190,7 +192,7 @@ where
         Ok(())
     }
 
-    fn create_seal(
+    async fn create_seal(
         &self,
         value: Option<u64>,
     ) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
@@ -235,13 +237,13 @@ where
         Hash::new(hash)
     }
 
-    fn build_proof_bundle(
+    async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
         transition_dag: Vec<u8>,
     ) -> std::result::Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
-        let inclusion = self.verify_inclusion(anchor.clone())?;
-        let finality = self.verify_finality(anchor.clone())?;
+        let inclusion = self.verify_inclusion(anchor.clone()).await?;
+        let finality = self.verify_finality(anchor.clone()).await?;
 
         let seal_ref =
             csv_hash::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height))
@@ -310,8 +312,8 @@ where
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        csv_protocol::proof::ProofBundle::with_signature_scheme(
-            csv_proof::SignatureScheme::Secp256k1,
+        csv_protocol::proof_types::ProofBundle::with_signature_scheme(
+            csv_protocol::signature::SignatureScheme::Secp256k1,
             dag_segment,
             signatures,
             seal_ref,
@@ -327,7 +329,7 @@ where
         })
     }
 
-    fn rollback(
+    async fn rollback(
         &self,
         _anchor: Self::CommitAnchor,
     ) -> std::result::Result<(), Box<dyn std::error::Error + 'static>> {

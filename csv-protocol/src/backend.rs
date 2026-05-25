@@ -508,6 +508,7 @@ pub trait ChainSanadOps: Send + Sync {
 ///
 /// Implementors must provide real implementations for all operations.
 /// Use `CapabilityUnavailable` error for operations not supported on a chain.
+#[async_trait]
 pub trait ChainBackend:
     ChainQuery + ChainSigner + ChainBroadcaster + ChainDeployer + ChainProofProvider + ChainSanadOps
 {
@@ -532,7 +533,7 @@ pub trait ChainBackend:
     /// # Returns
     /// * `Ok(SealPoint)` - The created seal reference
     /// * `Err` - If seal creation fails or is not supported
-    fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint>;
+    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint>;
 
     /// Publish a commitment under a single-use seal.
     ///
@@ -546,7 +547,7 @@ pub trait ChainBackend:
     /// # Returns
     /// * `Ok(CommitAnchor)` - The anchor reference containing tx hash and block height
     /// * `Err` - If publication fails or seal already consumed
-    fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor>;
+    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor>;
 }
 
 /// Chain capabilities that may not be available on all chains

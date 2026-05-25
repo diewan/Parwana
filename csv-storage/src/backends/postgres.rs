@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
-use csv_proof::proof::ReplayId;
+use csv_protocol::proof_types::ReplayId;
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use sqlx::PgPool;
 

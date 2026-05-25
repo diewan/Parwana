@@ -21,6 +21,10 @@ pub use csv_admission::{
     AdmissionController, AdmissionError, AdmissionLimits, AdmissionPermit, AdmissionSnapshot,
 };
 
+// Backpressure management
+pub mod backpressure;
+pub use backpressure::{AdmissionLimits as BackpressureAdmissionLimits, BackpressureMode, BackpressureSink};
+
 // Legacy re-exports (to be migrated to focused crates)
 pub mod adapter_registry;
 pub mod config;

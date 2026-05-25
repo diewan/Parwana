@@ -291,20 +291,25 @@ impl EthereumRpc for MockEthereumRpc {
             )) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-        let storage_proof: Vec<_> = keys
+        let storage_proof: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = keys
             .iter()
             .map(|key| {
                 let value = storage_values
                     .get(&(address, *key))
                     .cloned()
-                    .unwrap_or_default();
-                SingleStorageProof {
+                    .ok_or_else(|| Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Storage value not found for address {:?} key {:?}", address, key),
+                    )) as Box<dyn std::error::Error + Send + Sync>)?;
+                Ok(SingleStorageProof {
                     key: *key,
                     value,
                     proof: vec![vec![0xAB; 32]], // Mock MPT proof nodes
-                }
+                })
             })
             .collect();
+
+        let storage_proof = storage_proof?;
 
         Ok(StorageProof {
             account_proof: vec![vec![0xCD; 32]],
@@ -520,28 +525,44 @@ impl EthereumRpc for QuorumEthereumRpc {
                     .filter_map(|v| v.as_str().and_then(Self::decode_hex))
                     .collect()
             })
-            .unwrap_or_default();
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "accountProof missing or invalid",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
         let balance = result
             .get("balance")
             .and_then(|v| v.as_str())
-            .unwrap_or("0");
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "balance missing",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
         let code_hash_hex = result
             .get("codeHash")
             .and_then(|v| v.as_str())
-            .unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000");
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "codeHash missing",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
         let mut code_hash = [0u8; 32];
         if let Some(bytes) = Self::decode_hex(code_hash_hex) {
             code_hash.copy_from_slice(&bytes[..32]);
         }
 
-        let nonce = result.get("nonce").and_then(|v| v.as_str()).unwrap_or("0");
+        let nonce = result.get("nonce").and_then(|v| v.as_str())
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "nonce missing",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
         let storage_hash_hex = result
             .get("storageHash")
             .and_then(|v| v.as_str())
-            .unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000");
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "storageHash missing",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
         let mut storage_hash = [0u8; 32];
         if let Some(bytes) = Self::decode_hex(storage_hash_hex) {
             storage_hash.copy_from_slice(&bytes[..32]);
@@ -563,20 +584,30 @@ impl EthereumRpc for QuorumEthereumRpc {
                                     .filter_map(|v| v.as_str().and_then(Self::decode_hex))
                                     .collect()
                             })
-                            .unwrap_or_default();
+                            .ok_or_else(|| Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "proof array missing",
+                            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
                         let mut key = [0u8; 32];
                         if let Some(bytes) = Self::decode_hex(key_hex) {
                             key.copy_from_slice(&bytes[..32]);
                         }
 
-                        let value = Self::decode_hex(value_hex).unwrap_or_default();
+                        let value = Self::decode_hex(value_hex)
+                            .ok_or_else(|| Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("Failed to decode value hex: {}", value_hex),
+                            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
                         Some(SingleStorageProof { key, value, proof })
                     })
                     .collect()
             })
-            .unwrap_or_default();
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "storageProof missing or invalid",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
         Ok(StorageProof {
             account_proof,

@@ -9,6 +9,7 @@ authors = ["Amin Razavi"]
 [dependencies]
 csv-hash = { path = "../csv-hash" }
 csv-proof = { path = "../csv-proof" }
+csv-protocol = { path = "../csv-protocol" }
 tokio = { workspace = true, optional = true }
 tokio-stream = "0.1"
 parking_lot = "0.12"

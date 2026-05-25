@@ -65,6 +65,7 @@ pub async fn mint_sanad<R: BitcoinRpc + 'static>(
     // Fetch UTXOs for the address
     let utxos = rpc
         .get_utxos_for_address(address)
+        .await
         .map_err(|e| BitcoinError::RpcError(format!("Failed to fetch UTXOs: {}", e)))?;
 
     if utxos.is_empty() {
@@ -202,6 +203,7 @@ pub async fn mint_sanad<R: BitcoinRpc + 'static>(
     // Broadcast transaction
     let txid = rpc
         .send_raw_transaction(tx_bytes)
+        .await
         .map_err(|e| BitcoinError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
 
     Ok(hex::encode(txid))

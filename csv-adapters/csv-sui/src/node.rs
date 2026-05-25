@@ -162,21 +162,31 @@ impl SuiRpc for SuiNode {
                     .filter_map(|obj| {
                         let id_str = obj["objectId"].as_str()?;
                         let object_id = Self::parse_object_id_static(id_str).ok()?;
+                        let change_type = match obj["type"].as_str() {
+                            Some(s) => s.to_string(),
+                            None => return None,
+                        };
                         Some(SuiObjectChange {
                             object_id,
-                            change_type: obj["type"].as_str().unwrap_or("unknown").to_string(),
+                            change_type,
                         })
                     })
                     .collect()
             })
-            .unwrap_or_default();
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "modifiedObjects missing",
+            )) as Box<dyn std::error::Error + Send + Sync>)?;
 
         Ok(Some(SuiTransactionBlock {
             digest,
             checkpoint,
             effects: SuiTransactionEffects {
                 status,
-                gas_used: effects["gasUsed"].as_u64().unwrap_or(0),
+                gas_used: effects["gasUsed"].as_u64().ok_or_else(|| Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "gasUsed missing",
+                )) as Box<dyn std::error::Error + Send + Sync>)?,
                 modified_objects,
             },
         }))
@@ -199,40 +209,54 @@ impl SuiRpc for SuiNode {
 
         let events = result["events"]
             .as_array()
-            .map(|events| {
-                events
-                    .iter()
-                    .enumerate()
-                    .map(|(index, event)| {
-                        let data = event
-                            .get("bcs")
-                            .and_then(|value| value.as_str())
-                            .and_then(|bcs| {
-                                base64::engine::general_purpose::STANDARD.decode(bcs).ok()
-                            })
-                            .or_else(|| {
-                                serde_json::to_vec(event.get("parsedJson").unwrap_or(event)).ok()
-                            })
-                            .unwrap_or_default();
-
-                        SuiEvent {
-                            id: event
-                                .get("id")
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| format!("{}:{}", hex::encode(digest), index)),
-                            transaction_digest: digest,
-                            event_sequence_number: index as u64,
-                            type_field: event
-                                .get("type")
-                                .and_then(|value| value.as_str())
-                                .unwrap_or_default()
-                                .to_string(),
-                            data,
-                        }
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "events missing",
+            )) as Box<dyn std::error::Error + Send + Sync>)?
+            .iter()
+            .enumerate()
+            .map(|(index, event)| {
+                let data = event
+                    .get("bcs")
+                    .and_then(|value| value.as_str())
+                    .and_then(|bcs| {
+                        base64::engine::general_purpose::STANDARD.decode(bcs).ok()
                     })
-                    .collect()
+                    .or_else(|| {
+                        event.get("parsedJson")
+                            .and_then(|json| serde_json::to_vec(json).ok())
+                    })
+                    .ok_or_else(|| Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Failed to decode event data",
+                    )) as Box<dyn std::error::Error + Send + Sync>)?;
+
+                let id = event
+                    .get("id")
+                    .map(|id| id.to_string())
+                    .ok_or_else(|| Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "id missing",
+                    )) as Box<dyn std::error::Error + Send + Sync>)?;
+
+                let type_field = event
+                    .get("type")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| (Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "type missing",
+                    )) as Box<dyn std::error::Error + Send + Sync>))?
+                    .to_string();
+
+                Ok(SuiEvent {
+                    id,
+                    transaction_digest: digest,
+                    event_sequence_number: index as u64,
+                    type_field,
+                    data,
+                })
             })
-            .unwrap_or_default();
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>>>()?;
 
         Ok(events)
     }
