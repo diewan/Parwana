@@ -90,24 +90,33 @@ impl CheckpointVerifier {
 
         match block {
             Some(block) => {
-                let is_certified = if self.config.require_certified {
-                    required_signatures > 0
-                        && rpc.verify_checkpoint(version).await.map_err(|e| {
-                            AptosError::CheckpointFailed(format!(
-                                "Failed to verify checkpoint: {}",
-                                e
-                            ))
-                        })?
-                } else {
-                    true
-                };
+                // Finality is NEVER optional per AGENTS.md
+                // Always verify checkpoint certification
+                if required_signatures == 0 {
+                    return Err(AptosError::CheckpointFailed(
+                        "Required signatures must be > 0 for checkpoint verification".to_string()
+                    ));
+                }
+
+                let is_certified = rpc.verify_checkpoint(version).await.map_err(|e| {
+                    AptosError::CheckpointFailed(format!(
+                        "Failed to verify checkpoint: {}",
+                        e
+                    ))
+                })?;
+
+                if !is_certified {
+                    return Err(AptosError::CheckpointFailed(
+                        format!("Checkpoint version {} is not certified by 2f+1 validators", version)
+                    ));
+                }
 
                 Ok(CheckpointInfo {
                     version,
                     epoch: block.epoch,
                     round: block.round,
-                    signatures_count: if is_certified { required_signatures } else { 0 },
-                    is_certified,
+                    signatures_count: required_signatures,
+                    is_certified: true,
                 })
             }
             None => Err(AptosError::CheckpointFailed(format!(

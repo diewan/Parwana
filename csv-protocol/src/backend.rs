@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_proof::proof::{FinalityProof, InclusionProof};
+use crate::proof::{FinalityProof, InclusionProof};
 
 /// Result type for chain operations
 pub type ChainOpResult<T> = Result<T, ChainOpError>;

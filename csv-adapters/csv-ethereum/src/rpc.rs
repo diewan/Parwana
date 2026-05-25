@@ -284,13 +284,17 @@ impl EthereumRpc for MockEthereumRpc {
         keys: Vec<[u8; 32]>,
         _block_number: u64,
     ) -> Result<StorageProof, Box<dyn std::error::Error + Send + Sync>> {
+        let storage_values = self.storage_values.lock().map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Poison error: {}", e),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
         let storage_proof: Vec<_> = keys
             .iter()
             .map(|key| {
-                let value = self
-                    .storage_values
-                    .lock()
-                    .unwrap()
+                let value = storage_values
                     .get(&(address, *key))
                     .cloned()
                     .unwrap_or_default();
@@ -316,7 +320,12 @@ impl EthereumRpc for MockEthereumRpc {
         &self,
         tx_hash: [u8; 32],
     ) -> Result<Option<TransactionReceipt>, Box<dyn std::error::Error + Send + Sync>> {
-        let receipts = self.receipts.lock().unwrap();
+        let receipts = self.receipts.lock().map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Poison error: {}", e),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
         Ok(receipts.get(&tx_hash).cloned())
     }
 
@@ -324,7 +333,12 @@ impl EthereumRpc for MockEthereumRpc {
         &self,
         block_hash: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
-        let roots = self.state_roots.lock().unwrap();
+        let roots = self.state_roots.lock().map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Poison error: {}", e),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
         roots.get(&block_hash).copied().ok_or_else(
             || -> Box<dyn std::error::Error + Send + Sync> {
                 Box::new(std::io::Error::new(
@@ -345,7 +359,12 @@ impl EthereumRpc for MockEthereumRpc {
         &self,
         tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
-        self.sent_transactions.lock().unwrap().push(tx_bytes);
+        self.sent_transactions.lock().map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Poison error: {}", e),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?.push(tx_bytes);
         Ok([0xAB; 32])
     }
 

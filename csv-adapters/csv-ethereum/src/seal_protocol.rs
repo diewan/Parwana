@@ -11,7 +11,7 @@ use std::sync::Mutex;
 #[cfg(feature = "rpc")]
 use crate::finality::FinalityCheckerTrait;
 use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, ProofBundle};
+use csv_protocol::proof::{FinalityProof, ProofBundle};
 use csv_protocol::commitment::Commitment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::seal::CommitAnchor as CoreCommitAnchor;
@@ -102,7 +102,9 @@ impl EthereumSealProtocol {
     }
 
     fn verify_slot_available(&self, seal: &EthereumSealPoint) -> EthereumResult<()> {
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+        let registry = self.seal_registry.lock().map_err(|e| {
+            EthereumError::ConfigError(format!("Poison error: {}", e))
+        })?;
         if registry.is_seal_used(seal) {
             return Err(EthereumError::SlotUsed(
                 "Storage slot already consumed".to_string(),
@@ -165,11 +167,15 @@ impl EthereumSealProtocol {
         }
 
         // Step 6: Return anchor
-        let log_index = receipt.logs.first().map(|l| l.log_index).unwrap_or(0);
-        let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_index);
+        let log_entry = receipt.logs.first().ok_or_else(|| {
+            ProtocolError::VerificationError("No logs in receipt".to_string())
+        })?;
+        let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
 
         // Mark seal as consumed
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+        let registry = self.seal_registry.lock().map_err(|e| {
+            ProtocolError::Generic(format!("Poison error: {}", e))
+        })?;
         registry
             .mark_seal_used(&seal)
             .map_err(ProtocolError::from)?;
@@ -245,11 +251,17 @@ impl SealProtocol for EthereumSealProtocol {
                 )) as Box<dyn std::error::Error>);
             }
 
-            let log_index = receipt.logs.first().map(|l| l.log_index).unwrap_or(0);
-            let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_index);
+            let log_entry = receipt.logs.first().ok_or_else(|| {
+                Box::new(ProtocolError::VerificationError("No logs in receipt".to_string()))
+                    as Box<dyn std::error::Error>
+            })?;
+            let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
 
             // Mark seal as consumed in local registry
-            let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            let registry = self.seal_registry.lock().map_err(|e| {
+                Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
+                    as Box<dyn std::error::Error>
+            })?;
             registry
                 .mark_seal_used(&seal)
                 .map_err(|e| Box::new(ProtocolError::from(e)) as Box<dyn std::error::Error>)?;
@@ -372,14 +384,24 @@ impl SealProtocol for EthereumSealProtocol {
                             self.finality_checker
                                 .is_finalized(anchor.block_number, self.rpc.as_ref()),
                         )
-                        .unwrap_or(true);
+                        .map_err(|e| {
+                            Box::new(ProtocolError::NetworkError(format!(
+                                "Finality check failed: {}",
+                                e
+                            ))) as Box<dyn std::error::Error>
+                        })?;
 
                     let confirmations = handle
                         .block_on(
                             self.finality_checker
                                 .get_confirmations(anchor.block_number, self.rpc.as_ref()),
                         )
-                        .unwrap_or(self.config.finality_depth);
+                        .map_err(|e| {
+                            Box::new(ProtocolError::NetworkError(format!(
+                                "Failed to get confirmations: {}",
+                                e
+                            ))) as Box<dyn std::error::Error>
+                        })?;
 
                     Ok(EthereumFinalityProof::new(
                         confirmations,
@@ -411,7 +433,10 @@ impl SealProtocol for EthereumSealProtocol {
         // by checking both local registry and on-chain state via CSVLock contract
 
         // Step 1: Check local registry (fast path)
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+        let registry = self.seal_registry.lock().map_err(|e| {
+            Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
+                as Box<dyn std::error::Error>
+        })?;
         if registry.is_seal_used(&seal) {
             return Err(Box::new(ProtocolError::SealReplay(format!(
                 "Seal {:?} already used in local registry",
@@ -446,7 +471,10 @@ impl SealProtocol for EthereumSealProtocol {
 
         // Step 3: Mark seal as used in local registry
         // This is done after the on-chain check to ensure consistency
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+        let registry = self.seal_registry.lock().map_err(|e| {
+            Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
+                as Box<dyn std::error::Error>
+        })?;
         registry
             .mark_seal_used(&seal)
             .map_err(|e| Box::new(ProtocolError::from(e)) as Box<dyn std::error::Error>)?;
@@ -460,7 +488,10 @@ impl SealProtocol for EthereumSealProtocol {
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error>> {
         // Derive a seal from the CSVSeal contract address and a deterministic slot
         // The seal represents a nullifier slot in the contract's usedSeals mapping
-        let nonce = value.unwrap_or(0);
+        let nonce = value.unwrap_or_else(|| {
+            // Default to 0 if no value provided - this is intentional for seal creation
+            0
+        });
 
         Ok(EthereumSealPoint::new(self.csv_seal_address, 0, nonce))
     }
@@ -526,7 +557,7 @@ impl SealProtocol for EthereumSealProtocol {
             .collect();
 
         ProofBundle::with_signature_scheme(
-            csv_proof::SignatureScheme::Secp256k1,
+            csv_protocol::signature::SignatureScheme::Secp256k1,
             dag_segment,
             signatures,
             seal_ref,
@@ -556,7 +587,10 @@ impl SealProtocol for EthereumSealProtocol {
             // Clear the seal from registry to allow reuse
             if anchor.block_number < current {
                 #[allow(unused_mut)]
-                let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+                let mut registry = self.seal_registry.lock().map_err(|e| {
+                    Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
+                        as Box<dyn std::error::Error>
+                })?;
                 // Derive the seal that was used for this anchor
                 // The nonce is tracked via the log_index
                 let seal = EthereumSealPoint::new(self.csv_seal_address, 0, anchor.log_index);

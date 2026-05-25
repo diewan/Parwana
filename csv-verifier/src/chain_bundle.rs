@@ -5,7 +5,7 @@
 //! so protocol semantics stay in csv-verifier, not adapter `ops.rs`.
 
 use csv_hash::Hash;
-use csv_proof::proof::{FinalityProof, InclusionProof};
+use csv_protocol::proof::{FinalityProof, InclusionProof};
 use csv_protocol::backend::{ChainOpError, ChainProofProvider};
 use thiserror::Error;
 
@@ -135,7 +135,7 @@ impl From<ChainOpError> for ChainBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_proof::proof::{FinalityProof, InclusionProof};
+    use csv_protocol::proof::{FinalityProof, InclusionProof};
 
     struct AlwaysValid;
 

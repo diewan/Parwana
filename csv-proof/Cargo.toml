@@ -2,9 +2,10 @@
 name = "csv-proof"
 version = "0.1.0"
 edition = "2024"
-description = "CSV Proof - Proof types, proof composition, proof validation primitives, proof DAGs"
+description = "CSV Proof - Thin re-export crate for backward compatibility"
 
 [dependencies]
+csv-protocol = { path = "../csv-protocol" }
 csv-hash = { path = "../csv-hash" }
 csv-codec = { path = "../csv-codec" }
 serde = { version = "1.0", features = ["derive"] }

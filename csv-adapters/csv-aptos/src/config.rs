@@ -78,8 +78,6 @@ impl AptosNetwork {
 /// Checkpoint verification configuration.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CheckpointConfig {
-    /// Require checkpoint to be certified by 2f+1 validators.
-    pub require_certified: bool,
     /// Maximum number of epochs to look back for certification.
     pub max_epoch_lookback: u64,
     /// Timeout for checkpoint verification in milliseconds.
@@ -89,7 +87,6 @@ pub struct CheckpointConfig {
 impl Default for CheckpointConfig {
     fn default() -> Self {
         Self {
-            require_certified: true,
             max_epoch_lookback: 5,
             timeout_ms: 30_000,
         }

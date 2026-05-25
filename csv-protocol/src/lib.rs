@@ -25,6 +25,7 @@ pub mod events;
 pub mod failure_domains;
 pub mod lease;
 pub mod proof;
+pub mod proof_types;
 pub mod proof_verification;
 pub mod sanad;
 pub mod seal;

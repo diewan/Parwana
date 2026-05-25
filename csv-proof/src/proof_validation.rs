@@ -2,9 +2,7 @@
 //!
 //! This module provides proof validation primitives.
 
-use crate::proof::FinalityProof;
-use crate::proof::InclusionProof;
-use crate::proof::ProofBundle;
+use csv_protocol::proof::{FinalityProof, InclusionProof, ProofBundle};
 use csv_hash::Hash;
 
 /// Proof validator

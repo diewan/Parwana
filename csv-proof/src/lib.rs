@@ -1,24 +1,12 @@
-//! CSV Proof - Formal proof taxonomy, proof DAGs, and proof composition
+//! CSV Proof - Thin re-export crate for backward compatibility
 //!
-//! This crate provides the canonical proof types and DAG structures for the CSV protocol.
-//! All proof-related operations must use this crate to ensure consistency.
+//! The canonical proof types now live in `csv-protocol`. This crate re-exports them
+//! for backward compatibility. New code should use `csv_protocol::proof::*` directly.
 //!
-//! # Proof Taxonomy
+//! # Migration Path
 //!
-//! The crate defines a formal `Proof` enum with 8 variants:
-//! - `Inclusion` - Merkle inclusion proofs
-//! - `Finality` - Chain finality proofs
-//! - `Ownership` - Asset/seal ownership proofs
-//! - `Transition` - State transition proofs
-//! - `Replay` - Replay prevention proofs
-//! - `Execution` - Computation execution proofs
-//! - `ZK` - Zero-knowledge proofs
-//! - `Composite` - Composed proofs
-//!
-//! # Proof DAGs
-//!
-//! Proofs can be composed into directed acyclic graphs (DAGs) for
-//! complex verification chains.
+//! - Old: `use csv_proof::Proof;`
+//! - New: `use csv_protocol::proof::Proof;`
 
 #![warn(missing_docs)]
 #![allow(missing_docs)]
@@ -32,15 +20,14 @@
 pub mod error;
 pub mod proof_composition;
 pub mod proof_dags;
-pub mod proof_types;
 pub mod proof_validation;
 
-// Migrated from csv-core
-pub mod proof;
-// pub mod proof_pipeline;  // REMOVED: verification centralized in csv-verifier per implementation.md
+// Migrated from csv-core - these types are still here for now
 pub mod commitment_chain;
 pub mod commitments_ext;
 pub mod proof_material;
+
+// proof_types and proof modules removed - types now live in csv-protocol
 
 // Stub modules for protocol types to break cyclic dependency
 pub mod certification;
@@ -52,17 +39,19 @@ pub mod provenance;
 pub mod replay_registry;
 pub mod signature;
 
-// Re-exports
+// Re-exports from csv-protocol (canonical location)
+pub use csv_protocol::proof_types::{
+    CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof,
+    MAX_FINALITY_DATA, MAX_PROOF_BYTES, MAX_SIGNATURES_TOTAL_SIZE, OwnershipProof, Proof,
+    ProofBundle, ProofCategory, ProofPhase, ReplayId, ReplayProof, TransitionProof, ZKProof,
+};
+
+// Re-exports from csv-proof (types not yet migrated)
 pub use chain_config::{ChainCapabilities, EthereumFinalityStage, SolanaCommitmentGrade};
 pub use cross_chain::CrossChainTransferProof;
 pub use dag::DAGSegment;
 pub use error::{ProofError, Result};
 pub use events::{CsvEvent, EventIndexerRegistry};
-pub use proof::{MAX_FINALITY_DATA, MAX_PROOF_BYTES, MAX_SIGNATURES_TOTAL_SIZE};
 pub use proof_dags::{ProofDag, ProofId, ProofNode};
-pub use proof_types::{
-    CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
-    Proof, ProofCategory, ProofPhase, ReplayProof, TransitionProof, ZKProof,
-};
 pub use replay_registry::{ReplayKey, ReplayRegistryBackend};
 pub use signature::SignatureScheme;

@@ -37,7 +37,7 @@
 
 use crate::signature::SignatureScheme;
 use csv_hash::Hash;
-use csv_proof::proof::ProofBundle;
+use crate::proof::ProofBundle;
 
 /// The SealProtocol trait defines the security-critical interface for chain-specific adapters.
 ///

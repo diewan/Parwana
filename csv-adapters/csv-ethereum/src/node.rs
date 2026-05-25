@@ -294,54 +294,56 @@ mod real_rpc_impl {
                 )
                 .await?;
 
-            let account_proof: Vec<Vec<u8>> = proof["accountProof"]
+            let account_proof_arr = proof["accountProof"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(parse_hex_bytes))
-                        .collect()
-                })
-                .unwrap_or_default();
+                .ok_or("Missing accountProof field")?;
+            let account_proof: Vec<Vec<u8>> = account_proof_arr
+                .iter()
+                .filter_map(|v| v.as_str().map(parse_hex_bytes))
+                .collect();
 
-            let storage_proof: Vec<SingleStorageProof> = proof["storageProof"]
+            let storage_proof_arr = proof["storageProof"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|sp| {
-                            let key_str = sp["key"].as_str()?;
-                            let key = parse_hex_bytes32(key_str).ok()?;
-                            let value = sp["value"]
-                                .as_str()
-                                .map(parse_hex_bytes)
-                                .unwrap_or_default();
-                            let proof_nodes: Vec<Vec<u8>> = sp["proof"]
-                                .as_array()
-                                .map(|p| {
-                                    p.iter()
-                                        .filter_map(|v| v.as_str().map(parse_hex_bytes))
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            Some(SingleStorageProof {
-                                key,
-                                value,
-                                proof: proof_nodes,
-                            })
-                        })
-                        .collect()
+                .ok_or("Missing storageProof field")?;
+            let storage_proof: Vec<SingleStorageProof> = storage_proof_arr
+                .iter()
+                .filter_map(|sp| {
+                    let key_str = sp["key"].as_str()?;
+                    let key = parse_hex_bytes32(key_str).ok()?;
+                    let value_str = sp["value"].as_str()?;
+                    let value = parse_hex_bytes(value_str);
+                    let proof_nodes_arr = sp["proof"].as_array()?;
+                    let proof_nodes: Vec<Vec<u8>> = proof_nodes_arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(parse_hex_bytes))
+                        .collect();
+                    Some(SingleStorageProof {
+                        key,
+                        value,
+                        proof: proof_nodes,
+                    })
                 })
-                .unwrap_or_default();
+                .collect();
 
             let code_hash_str = proof["codeHash"].as_str().ok_or("Missing codeHash")?;
             let code_hash = parse_hex_bytes32(code_hash_str).map_err(|e| e.to_string())?;
             let storage_hash_str = proof["storageHash"].as_str().ok_or("Missing storageHash")?;
             let storage_hash = parse_hex_bytes32(storage_hash_str).map_err(|e| e.to_string())?;
             
+            let balance = proof["balance"]
+                .as_str()
+                .ok_or("Missing balance field")?
+                .to_string();
+            let nonce = proof["nonce"]
+                .as_str()
+                .ok_or("Missing nonce field")?
+                .to_string();
+
             Ok(StorageProof {
                 account_proof,
-                balance: proof["balance"].as_str().unwrap_or("0").to_string(),
+                balance,
                 code_hash,
-                nonce: proof["nonce"].as_str().unwrap_or("0").to_string(),
+                nonce,
                 storage_hash,
                 storage_proof,
             })
@@ -357,42 +359,35 @@ mod real_rpc_impl {
                 None => return Ok(None),
             };
 
-            let logs: Vec<LogEntry> = receipt["logs"]
+            let logs_arr = receipt["logs"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|log| {
-                            let address = log["address"].as_str()
-                                .and_then(|s| parse_hex_bytes20(s).ok())?;
-                            let topics: Vec<[u8; 32]> = log["topics"]
-                                .as_array()
-                                .map(|t| {
-                                    t.iter()
-                                        .filter_map(|v| {
-                                            v.as_str()
-                                                .and_then(|s| parse_hex_bytes32(s).ok())
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            let data = log["data"]
-                                .as_str()
-                                .map(parse_hex_bytes)
-                                .unwrap_or_default();
-                            let log_index = log["logIndex"]
-                                .as_str()
-                                .and_then(|s| parse_hex_u64(s).ok())
-                                .unwrap_or(0);
-                            Some(LogEntry {
-                                address,
-                                topics,
-                                data,
-                                log_index,
-                            })
+                .ok_or("Missing logs field")?;
+
+            let logs: Vec<LogEntry> = logs_arr
+                .iter()
+                .filter_map(|log| {
+                    let address = log["address"].as_str()
+                        .and_then(|s| parse_hex_bytes20(s).ok())?;
+                    let topics_arr = log["topics"].as_array()?;
+                    let topics: Vec<[u8; 32]> = topics_arr
+                        .iter()
+                        .filter_map(|v| {
+                            v.as_str()
+                                .and_then(|s| parse_hex_bytes32(s).ok())
                         })
-                        .collect()
+                        .collect();
+                    let data_str = log["data"].as_str()?;
+                    let data = parse_hex_bytes(data_str);
+                    let log_index_str = log["logIndex"].as_str()?;
+                    let log_index = parse_hex_u64(log_index_str).ok()?;
+                    Some(LogEntry {
+                        address,
+                        topics,
+                        data,
+                        log_index,
+                    })
                 })
-                .unwrap_or_default();
+                .collect();
 
             let contract_addr = receipt["contractAddress"]
                 .as_str()
@@ -401,23 +396,26 @@ mod real_rpc_impl {
 
             let status = receipt["status"]
                 .as_str()
-                .and_then(|s| parse_hex_u64(s).ok())
-                .unwrap_or(1);
+                .ok_or("Missing status field")?
+                .parse::<u64>()
+                .map_err(|e| format!("Invalid status: {}", e))?;
 
             let block_number = receipt["blockNumber"]
                 .as_str()
-                .and_then(|s| parse_hex_u64(s).ok())
-                .unwrap_or(0);
+                .ok_or("Missing blockNumber field")?
+                .parse::<u64>()
+                .map_err(|e| format!("Invalid blockNumber: {}", e))?;
 
             let block_hash = receipt["blockHash"]
                 .as_str()
-                .and_then(|s| parse_hex_bytes32(s).ok())
-                .unwrap_or_default();
+                .ok_or("Missing blockHash field")?;
+            let block_hash = parse_hex_bytes32(block_hash).map_err(|e| e.to_string())?;
 
             let gas_used = receipt["gasUsed"]
                 .as_str()
-                .and_then(|s| parse_hex_u64(s).ok())
-                .unwrap_or(0);
+                .ok_or("Missing gasUsed field")?
+                .parse::<u64>()
+                .map_err(|e| format!("Invalid gasUsed: {}", e))?;
 
             let success = status == 1;
 
@@ -464,13 +462,14 @@ mod real_rpc_impl {
             let hash = parse_hex_bytes32(hash_str).map_err(|e| e.to_string())?;
             let state_root_str = result["stateRoot"].as_str().ok_or("Missing stateRoot")?;
             let state_root = parse_hex_bytes32(state_root_str).map_err(|e| e.to_string())?;
-            
+            let timestamp_str = result["timestamp"].as_str().ok_or("Missing timestamp")?;
+            let timestamp = parse_hex_u64(timestamp_str).map_err(|e| format!("Invalid timestamp: {}", e))?;
+
             Ok(Some(RpcBlock {
                 number: block_number,
                 hash,
                 state_root,
-                timestamp: parse_hex_u64(result["timestamp"].as_str().unwrap_or("0x0"))
-                    .unwrap_or(0),
+                timestamp,
             }))
         }
 
@@ -486,8 +485,8 @@ mod real_rpc_impl {
                 return Ok(None);
             }
 
-            let from = parse_hex_bytes20(result["from"].as_str().unwrap_or("0x0"))
-                .map_err(|e| format!("Invalid from address: {}", e))?;
+            let from_str = result["from"].as_str().ok_or("Missing from address")?;
+            let from = parse_hex_bytes20(from_str).map_err(|e| format!("Invalid from address: {}", e))?;
             let to = result["to"]
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "null")
@@ -496,7 +495,8 @@ mod real_rpc_impl {
             let gas_price = result["gasPrice"]
                 .as_str()
                 .and_then(|s| parse_hex_u64(s).ok());
-            let gas = parse_hex_u64(result["gas"].as_str().unwrap_or("0x0")).unwrap_or(0);
+            let gas_str = result["gas"].as_str().ok_or("Missing gas field")?;
+            let gas = parse_hex_u64(gas_str).map_err(|e| format!("Invalid gas: {}", e))?;
             let block_number = result["blockNumber"]
                 .as_str()
                 .and_then(|s| parse_hex_u64(s).ok());
@@ -532,10 +532,8 @@ mod real_rpc_impl {
             let block = self.get_block_by_tag("finalized").await?;
             match block {
                 Some(b) => {
-                    let num = b["number"]
-                        .as_str()
-                        .and_then(|s| parse_hex_u64(s).ok())
-                        .unwrap_or(0);
+                    let num_str = b["number"].as_str().ok_or("Missing block number")?;
+                    let num = parse_hex_u64(num_str).map_err(|e| format!("Invalid block number: {}", e))?;
                     Ok(Some(num))
                 }
                 None => Ok(None),
@@ -666,15 +664,15 @@ mod real_rpc_impl {
 
         // Step 5: Broadcast
         let tx_hex = format!("0x{}", hex::encode(&tx_bytes));
-        rpc.send_raw_tx_raw(&tx_hex)
-            .await
-            .map(|h| {
-                let bytes = hex::decode(h.trim_start_matches("0x")).unwrap_or_default();
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes[..32.min(bytes.len())]);
-                arr
-            })
-            .map_err(|e| e.into())
+        let hash_str = rpc.send_raw_tx_raw(&tx_hex).await?;
+        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+            .map_err(|e| format!("Invalid hex response: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(format!("Expected 32-byte hash, got {} bytes", bytes.len()).into());
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        Ok(arr)
     }
 
     /// Legacy: Build and send a raw transaction that calls `markSealUsed` on the CSVSeal contract.
