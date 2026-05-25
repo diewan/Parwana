@@ -26,7 +26,7 @@ pub use csv_hash::chain_id::ChainId;
 pub use csv_hash::commitment::Commitment;
 pub use csv_hash::sanad::SanadId;
 pub use csv_hash::seal::SealPoint;
-pub use csv_proof::proof::ProofBundle;
+pub use csv_protocol::proof_types::ProofBundle;
 
 // Agent-friendly types
 pub use csv_core::mcp::{ErrorSuggestion, FixAction};

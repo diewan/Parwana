@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::Subcommand;
-use csv_proof::proof::ProofBundle;
+use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::SignatureScheme;
 
 use crate::config::{Chain, Config};

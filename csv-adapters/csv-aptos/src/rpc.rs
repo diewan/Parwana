@@ -390,6 +390,71 @@ impl MockAptosRpc {
     }
 }
 
+// Implement specific subtraits for MockAptosRpc
+impl AptosAccountReader for MockAptosRpc {
+    fn get_account_sequence_number(
+        &self,
+        _address: [u8; 32],
+    ) -> BoxFuture<'_, Result<u64, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async { Ok(0) })
+    }
+
+    fn get_resource(
+        &self,
+        address: [u8; 32],
+        resource_type: &str,
+        _position: Option<u64>,
+    ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>> {
+        let resources = self.resources.lock().unwrap();
+        Box::pin(async {
+            Ok(resources.get(&(address, resource_type.to_string())).cloned())
+        })
+    }
+}
+
+impl AptosTransactionReader for MockAptosRpc {
+    fn get_transaction(
+        &self,
+        version: u64,
+    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
+        let transactions = self.transactions.lock().unwrap();
+        Box::pin(async { Ok(transactions.get(&version).cloned()) })
+    }
+
+    fn get_transactions(
+        &self,
+        _start_version: u64,
+        _limit: u32,
+    ) -> BoxFuture<'_, Result<Vec<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn wait_for_transaction(
+        &self,
+        _tx_hash: [u8; 32],
+    ) -> BoxFuture<'_, Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async {
+            Err("wait_for_transaction not implemented in mock".into())
+        })
+    }
+
+    fn get_block_by_version(
+        &self,
+        version: u64,
+    ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>> {
+        let blocks = self.blocks.lock().unwrap();
+        Box::pin(async { Ok(blocks.get(&version).cloned()) })
+    }
+
+    fn get_transaction_by_version(
+        &self,
+        version: u64,
+    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
+        let transactions = self.transactions.lock().unwrap();
+        Box::pin(async { Ok(transactions.get(&version).cloned()) })
+    }
+}
+
 impl AptosRpc for MockAptosRpc {
     fn get_ledger_info(
         &self,

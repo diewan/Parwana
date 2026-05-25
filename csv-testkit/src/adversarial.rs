@@ -1,6 +1,6 @@
 //! Adversarial and Byzantine simulation framework (audit item 11).
 
-use csv_proof::proof::ProofBundle;
+use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 

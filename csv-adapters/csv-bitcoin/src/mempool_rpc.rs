@@ -436,7 +436,7 @@ impl BitcoinRpc for MempoolSignetRpc {
 
     async fn get_utxos_for_address(
         &self,
-        address: &str,
+        address: String,
     ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/address/{}/utxo", self.base_url, address);
         let utxos: Vec<AddressUtxo> = self.get_with_retry(&url).await?;

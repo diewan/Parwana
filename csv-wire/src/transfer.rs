@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use csv_algebra::transfer::{TransferId, SealId, ChainId};
 
 /// Transfer wire format.
 #[derive(Debug, Clone, Serialize, Deserialize)]

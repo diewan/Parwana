@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AptosError, AptosResult};
-use crate::rpc::AptosRpc;
+use crate::rpc::{AptosAccountReader, AptosTransactionReader};
 
 /// Transaction proof containing the verified transaction data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,7 +246,7 @@ impl StateProofVerifier {
     pub async fn verify_resource_exists_async(
         address: [u8; 32],
         resource_type: &str,
-        rpc: &dyn AptosRpc,
+        rpc: &dyn AptosAccountReader,
     ) -> AptosResult<bool> {
         match rpc.get_resource(address, resource_type, None).await {
             Ok(Some(_)) => Ok(true),
@@ -269,7 +269,7 @@ impl StateProofVerifier {
     pub async fn verify_resource_consumed_async(
         address: [u8; 32],
         resource_type: &str,
-        rpc: &dyn AptosRpc,
+        rpc: &dyn AptosAccountReader,
     ) -> AptosResult<bool> {
         match rpc.get_resource(address, resource_type, None).await {
             Ok(Some(_)) => Ok(false), // Still exists, not consumed
@@ -321,7 +321,7 @@ impl EventProofVerifier {
     pub async fn verify_event_in_tx(
         tx_version: u64,
         expected_data: &[u8],
-        rpc: &dyn AptosRpc,
+        rpc: &dyn AptosTransactionReader,
     ) -> AptosResult<bool> {
         let tx = rpc.get_transaction_by_version(tx_version).await?;
         match tx {

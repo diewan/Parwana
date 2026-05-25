@@ -6,7 +6,7 @@
 use csv_hash::Hash;
 use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Test proof bundle fixture
 pub struct TestProofBundle;

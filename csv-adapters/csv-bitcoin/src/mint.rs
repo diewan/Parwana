@@ -64,7 +64,7 @@ pub async fn mint_sanad<R: BitcoinRpc + 'static>(
 
     // Fetch UTXOs for the address
     let utxos = rpc
-        .get_utxos_for_address(address)
+        .get_utxos_for_address(address.to_string())
         .await
         .map_err(|e| BitcoinError::RpcError(format!("Failed to fetch UTXOs: {}", e)))?;
 

@@ -49,7 +49,7 @@ pub trait BitcoinRpc: Send + Sync {
     /// Returns list of (txid, vout, amount_sat, confirmations)
     async fn get_utxos_for_address(
         &self,
-        address: &str,
+        address: String,
     ) -> Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Build a transaction inclusion proof from real block transaction data.

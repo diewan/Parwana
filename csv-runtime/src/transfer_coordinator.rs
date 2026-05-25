@@ -20,6 +20,7 @@ use crate::recovery::{CheckpointManager, TransferStage};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
 use csv_protocol::finality::CapabilityRequirements;
+use csv_protocol::proof_types::ProofBundle;
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use uuid::Uuid;
@@ -47,19 +48,11 @@ fn hash_from_tx_str(tx_hash: &str) -> Result<csv_hash::Hash, TransferCoordinator
 }
 
 fn runtime_signature_scheme(
-    scheme: csv_proof::SignatureScheme,
+    scheme: csv_protocol::signature::SignatureScheme,
 ) -> Result<csv_protocol::signature::SignatureScheme, TransferCoordinatorError> {
-    match scheme {
-        csv_proof::SignatureScheme::Ed25519 => {
-            Ok(csv_protocol::signature::SignatureScheme::Ed25519)
-        }
-        csv_proof::SignatureScheme::Secp256k1 => {
-            Ok(csv_protocol::signature::SignatureScheme::Secp256k1)
-        }
-        csv_proof::SignatureScheme::BLS => Err(TransferCoordinatorError::ProofVerificationFailed(
-            "BLS proof bundle signatures are not supported by the runtime verifier".to_string(),
-        )),
-    }
+    // csv_protocol::SignatureScheme only has Ed25519 and Secp256k1 variants
+    // Both are supported by the runtime verifier
+    Ok(scheme)
 }
 
 fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_protocol::proof_types::ReplayId {
@@ -107,7 +100,12 @@ fn transfer_to_registry_entry(
         mint_tx_hash: csv_hash::Hash::zero(), // Will be updated after mint
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
+            .map_err(|e| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to get current timestamp: {}",
+                    e
+                ))
+            })?
             .as_secs(),
     })
 }
@@ -1009,8 +1007,8 @@ impl TransferCoordinator {
             }
         }
 
-        // Serialize proof bundle for minting
-        let proof_bundle_bytes = proof_bundle.to_bytes().map_err(|e| {
+        // Serialize proof bundle for minting using canonical CBOR
+        let proof_bundle_bytes = csv_codec::canonical::to_canonical_cbor(&proof_bundle).map_err(|e| {
             TransferCoordinatorError::ProofBuildFailed(format!("Serialization failed: {}", e))
         })?;
 
@@ -1650,14 +1648,14 @@ impl TransferCoordinator {
     /// The number of transfers that were successfully resumed.
     pub async fn resume_transfers(
         &self,
-        _adapter_registry: &dyn AdapterRegistry,
+        adapter_registry: &dyn AdapterRegistry,
     ) -> Result<usize, TransferCoordinatorError> {
         let incomplete = self
             .execution_journal
             .incomplete_transfers()
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
-        let resumed = 0;
+        let mut resumed = 0;
 
         for entry in incomplete {
             tracing::info!(
@@ -1693,13 +1691,38 @@ impl TransferCoordinator {
             }
 
             // Attempt to resume the transfer
-            // Note: This requires transfer persistence for full functionality
-            // For now, we attempt resumption but it may fail if transfer is not in cache
-            tracing::warn!(
-                "Transfer {} at phase {:?} requires transfer persistence for full resume - skipping",
-                entry.transfer_id,
-                entry.phase
-            );
+            // Create a minimal runtime context for resumption
+            let runtime_ctx = crate::lease::RuntimeExecutionContext {
+                lease: crate::lease::CoordinatorLease {
+                    transfer_id: entry.transfer_id.clone(),
+                    owner_runtime_id: self.runtime_id.0.clone(),
+                    acquired_at: std::time::SystemTime::now(),
+                    expires_at: std::time::SystemTime::now()
+                        .checked_add(std::time::Duration::from_secs(3600))
+                        .unwrap_or_else(|| std::time::SystemTime::now()),
+                    epoch: 1,
+                },
+                runtime_instance: self.runtime_id.0.clone(),
+                policy: crate::lease::RuntimePolicy::default(),
+            };
+
+            match self
+                .resume_transfer(&entry.transfer_id, adapter_registry, runtime_ctx)
+                .await
+            {
+                Ok(_) => {
+                    tracing::info!("Successfully resumed transfer {}", entry.transfer_id);
+                    resumed += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to resume transfer {}: {}",
+                        entry.transfer_id,
+                        e
+                    );
+                    // Continue with other transfers even if this one fails
+                }
+            }
         }
 
         Ok(resumed)

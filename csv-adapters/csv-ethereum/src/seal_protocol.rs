@@ -169,7 +169,7 @@ impl EthereumSealProtocol {
 
         // Step 6: Return anchor
         let log_entry = receipt.logs.first().ok_or_else(|| {
-            ProtocolError::VerificationError("No logs in receipt".to_string())
+            ProtocolError::Generic("No logs in receipt".to_string())
         })?;
         let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
 

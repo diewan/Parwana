@@ -76,11 +76,11 @@ pub struct ChainCell {
 }
 
 impl ChainCell {
-    pub fn spawn(config: CellConfig, _anchor: Arc<dyn CryptographicAnchor>) -> Self {
-        let (tx, _rx) = mpsc::channel::<CellTask>(config.max_queue_depth);
+    pub fn spawn(config: CellConfig, anchor: Arc<dyn CryptographicAnchor>) -> Self {
+        let (tx, rx) = mpsc::channel::<CellTask>(config.max_queue_depth);
 
-        // TODO: Spawn cell worker task
-        // tokio::spawn(cell_worker(rx, anchor, config.clone()));
+        // Spawn cell worker task
+        tokio::spawn(cell_worker(rx, anchor, config.clone()));
 
         ChainCell {
             chain_id: config.chain_id,
@@ -113,4 +113,63 @@ impl ChainCell {
     pub fn memory_usage(&self) -> u64 {
         self.memory_ceiling.current_usage()
     }
+}
+
+/// Cell worker task that processes inbound transfers.
+async fn cell_worker(
+    mut rx: mpsc::Receiver<CellTask>,
+    _anchor: Arc<dyn CryptographicAnchor>,
+    config: CellConfig,
+) {
+    let mut memory_ceiling = MemoryCeiling::new(config.max_memory_bytes);
+    let mut circuit_breaker = CellCircuitBreaker::new(config.circuit_breaker);
+
+    while let Some(task) = rx.recv().await {
+        match task {
+            CellTask::Process(transfer) => {
+                // Check circuit breaker before processing
+                if circuit_breaker.is_open() {
+                    tracing::warn!(
+                        "Circuit breaker open for chain {}, rejecting transfer",
+                        config.chain_id
+                    );
+                    continue;
+                }
+
+                // Estimate memory usage for this transfer
+                let estimated_memory = 1024; // 1KB per transfer (conservative estimate)
+
+                if let Err(e) = memory_ceiling.try_allocate(estimated_memory) {
+                    tracing::warn!(
+                        "Memory ceiling exceeded for chain {}: {}",
+                        config.chain_id,
+                        e
+                    );
+                    circuit_breaker.record_failure();
+                    continue;
+                }
+
+                tracing::info!(
+                    "Processing transfer {:?} on chain {}",
+                    transfer.transfer_id,
+                    config.chain_id
+                );
+
+                // TODO: Actual transfer processing logic here
+                // This would delegate to the appropriate chain adapter
+                // For now, we just simulate success
+
+                circuit_breaker.record_success();
+                memory_ceiling.release(estimated_memory);
+            }
+            CellTask::HealthCheck => {
+                // Perform health check
+                if circuit_breaker.is_open() {
+                    circuit_breaker.attempt_reset();
+                }
+            }
+        }
+    }
+
+    tracing::info!("Cell worker for chain {} shutting down", config.chain_id);
 }

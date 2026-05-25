@@ -156,12 +156,14 @@ impl AptosSealProtocol {
     /// Verify that a seal resource is available before consumption.
     async fn verify_seal_available(&self, seal: &AptosSealPoint) -> AptosResult<()> {
         // Check registry first
-        let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
-        if registry.is_seal_used(seal) {
-            return Err(AptosError::ResourceUsed(format!(
-                "Seal at address {} is already consumed",
-                format_address(seal.account_address)
-            )));
+        {
+            let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
+            if registry.is_seal_used(seal) {
+                return Err(AptosError::ResourceUsed(format!(
+                    "Seal at address {} is already consumed",
+                    format_address(seal.account_address)
+                )));
+            }
         }
 
         // Check on-chain resource
@@ -462,7 +464,7 @@ impl SealProtocol for AptosSealProtocol {
                 .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
             // Verify the emitted event matches the expected commitment
-            let valid = EventProofVerifier::verify_event_in_tx_async(
+            let valid = EventProofVerifier::verify_event_in_tx(
                 tx.version,
                 &expected_event_data,
                 self.rpc.as_ref(),

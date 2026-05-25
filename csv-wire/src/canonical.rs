@@ -1,7 +1,6 @@
 use serde::{Serialize, Deserialize};
 use csv_algebra::proof::CanonicalProof as AlgebraProof;
 use csv_algebra::proof::Metadata;
-use csv_algebra::transfer::ChainId;
 
 /// Wire format for canonical proof.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,6 +3,7 @@
 //! This module provides traits and types for managing backpressure
 //! in the CSV runtime, preventing overload and ensuring system stability.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Trait for reporting backpressure status
@@ -31,7 +32,7 @@ pub trait BackpressureSink: Send + Sync {
 }
 
 /// Backpressure mode for handling queue overflow
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BackpressureMode {
     /// Reject new work when queue is full
     Reject,

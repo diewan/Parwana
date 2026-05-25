@@ -1,5 +1,4 @@
 use csv_algebra::proof::CanonicalProof;
-use csv_algebra::transfer::ChainId;
 
 /// Bitcoin-specific RPC wire format.
 #[derive(Debug, Clone)]

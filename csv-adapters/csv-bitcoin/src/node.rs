@@ -6,6 +6,7 @@
 #[allow(clippy::module_inception)]
 #[cfg(feature = "rpc")]
 pub mod real_rpc {
+    use async_trait::async_trait;
     use bitcoin::{Network, OutPoint, Txid};
     use bitcoin_hashes::Hash;
     use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -173,7 +174,7 @@ pub mod real_rpc {
         }
 
         /// Wait for transaction to reach required confirmations
-        pub fn wait_for_confirmation(
+        pub async fn wait_for_confirmation(
             &self,
             txid: [u8; 32],
             required_confirmations: u64,
@@ -187,12 +188,12 @@ pub mod real_rpc {
                     return Err("Timeout waiting for confirmation".into());
                 }
 
-                let confirmations = self.get_tx_confirmations(txid)?;
+                let confirmations = self.get_tx_confirmations(txid).await?;
                 if confirmations >= required_confirmations {
                     return Ok(confirmations);
                 }
 
-                std::thread::sleep(poll_interval);
+                tokio::time::sleep(poll_interval).await;
             }
         }
 
@@ -264,14 +265,14 @@ pub mod real_rpc {
 
         async fn get_utxos_for_address(
             &self,
-            address: &str,
+            address: String,
         ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
             use crate::rpc::UtxoInfo;
 
             // Use listunspent RPC call to get UTXOs for the address
             // This requires the Bitcoin Core wallet to be watching this address
             use std::str::FromStr;
-            let addr = bitcoin::Address::from_str(address)
+            let addr = bitcoin::Address::from_str(&address)
                 .map_err(|e| format!("Invalid address: {}", e))?
                 .require_network(self.network)
                 .map_err(|e| format!("Address network mismatch: {}", e))?;

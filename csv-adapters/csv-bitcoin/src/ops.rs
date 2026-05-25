@@ -95,7 +95,7 @@ impl ChainQuery for BitcoinChainQuery {
         // Query UTXOs from RPC and sum the amounts
         let utxos = self
             .rpc
-            .get_utxos_for_address(address)
+            .get_utxos_for_address(address.to_string())
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query UTXOs: {}", e)))?;
 

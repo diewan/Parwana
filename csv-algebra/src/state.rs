@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use crate::proof::CanonicalProof;
 use crate::finality::FinalityEvidence;
 use crate::transfer::SealId;

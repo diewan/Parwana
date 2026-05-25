@@ -314,8 +314,11 @@ impl ReplayNullifier {
         let nullifier = Self::compute_nullifier(sanad_id, source_chain, source_seal_ref);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to get system time for nullifier timestamp: {}", e);
+                0 // Fallback to epoch time if clock is broken
+            });
         let expires_at = now + NULLIFIER_EXPIRY_SECONDS;
 
         Self {
@@ -343,8 +346,11 @@ impl ReplayNullifier {
     pub fn is_expired(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to get system time for expiry check: {}", e);
+                0 // Fallback to epoch time if clock is broken
+            });
         now >= self.expires_at
     }
 

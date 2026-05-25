@@ -85,7 +85,7 @@ pub use csv_hash::commitment::Commitment;
 pub use csv_hash::dag::{DAGNode, DAGSegment};
 pub use csv_hash::sanad::SanadId;
 pub use csv_hash::seal::{CommitAnchor, SealPoint};
-pub use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+pub use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 pub use csv_protocol::error::ProtocolError;
 pub use csv_protocol::genesis::Genesis;
 pub use csv_protocol::seal_protocol::SealProtocol;
