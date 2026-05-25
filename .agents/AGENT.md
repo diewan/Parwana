@@ -214,10 +214,31 @@ Transfer orchestration belongs exclusively to:
 
 * TransferCoordinator
 
+**Architecture layering:**
+
+* `csv-algebra` — pure no_std typestate algebra (no dependencies on csv-wire or any serialization)
+* `csv-wire` — owns ALL serde, ALL transport encoding, ALL RPC wire format conversions
+* `csv-protocol` — protocol orchestration layer (no serialization logic)
+* `csv-codec` — canonical CBOR serialization (deterministic encoding)
+* `csv-coordinator` — per-chain execution cells (isolated failure domains)
+* `csv-admission` — admission control (zero chain adapter dependencies)
+* `csv-runtime` — depends only on csv-protocol/csv-core (no direct chain adapter imports)
+* `csv-verifier` — depends on csv-protocol + csv-proof + csv-hash (no csv-core dependency)
+
+**Forbidden dependencies:**
+
+* `csv-algebra` MUST NOT depend on `csv-wire` (enforced by deny.toml)
+* `csv-core` MUST NOT depend on any chain adapter
+* `csv-cli` MUST NOT import chain adapters directly
+* `csv-runtime` MUST NOT import chain adapters directly
+* `serde_json` is forbidden in canonical hashing paths (use canonical_cbor)
+
 ## Current Codebase Structure
 
 **Phase 1 restructuring crates:**
 
+* `csv-algebra` — pure no_std typestate algebra for transfer state machine
+* `csv-wire` — wire encoding and transport layer (owns all serde/transport encoding)
 * `csv-protocol` — protocol orchestration layer
 * `csv-codec` — canonical serialization (CBOR)
 * `csv-hash` — hash types, SanadId, replay ID types
@@ -228,11 +249,13 @@ Transfer orchestration belongs exclusively to:
 * `csv-storage` — storage traits and backends (RocksDB, PostgreSQL, in-memory)
 * `csv-testkit` — test fixtures and adversarial testing
 * `csv-contract-bindings` — smart contract bindings
+* `csv-coordinator` — per-chain execution cells with isolated failure domains
+* `csv-admission` — admission control and pressure boundaries
 
 **Legacy crates:**
 
 * `csv-core` — legacy protocol types (migration in progress)
-* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal
+* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal (depends only on csv-core/csv-protocol)
 * `csv-sdk` — public SDK facade
 * `csv-cli` — CLI binary (stateless, delegates to runtime)
 * `csv-keys` — key management

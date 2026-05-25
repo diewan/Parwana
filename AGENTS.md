@@ -4,10 +4,12 @@
 
 Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is `csv-protocol`.
 
-**Workspace members (20 crates):**
+**Workspace members (24 crates):**
 
 **Phase 1 restructuring crates (new architecture):**
 
+- `csv-algebra` — pure no_std typestate algebra for transfer state machine
+- `csv-wire` — wire encoding and transport layer (owns all serde/transport encoding)
 - `csv-protocol` — protocol orchestration layer
 - `csv-codec` — canonical serialization (CBOR)
 - `csv-hash` — hash types, SanadId, replay ID types
@@ -18,11 +20,14 @@ Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is 
 - `csv-storage` — storage traits and backends (RocksDB, PostgreSQL, in-memory)
 - `csv-testkit` — test fixtures and adversarial testing
 - `csv-contract-bindings` — smart contract bindings
+- `csv-coordinator` — per-chain execution cells with isolated failure domains
+- `csv-admission` — admission control and pressure boundaries
+- `csv-architecture` — architecture guardrails and dependency validation
 
 **Legacy crates (being refactored/deprecated):**
 
 - `csv-core` — legacy protocol types (migration in progress)
-- `csv-runtime` — `TransferCoordinator`, lease management, replay DB, circuit breakers, execution journal (depends only on csv-core/csv-protocol)
+- `csv-runtime` — `TransferCoordinator`, lease management, replay DB, circuit breakers, execution journal (depends only on csv-core/csv-protocol, uses csv-coordinator and csv-admission)
 - `csv-sdk` — public SDK facade
 - `csv-cli` — CLI binary (must not import chain adapters directly)
 - `csv-keys` — key management
@@ -84,15 +89,22 @@ cd csv-contracts/aptos/contracts && aptos move compile
 
 ## Architecture rules (enforced by CI)
 
+- `csv-algebra` MUST NOT depend on `csv-wire` (enforced by deny.toml)
 - `csv-core` must NOT import any chain adapter (`csv-adapters/csv-bitcoin`, etc.)
 - `csv-cli` must NOT import chain adapters directly — use `csv-runtime`
 - `csv-runtime` depends only on `csv-core`/`csv-protocol` — no chain adapter imports
+- `csv-runtime` uses `csv-coordinator` for per-chain execution cells
+- `csv-runtime` uses `csv-admission` for admission control and pressure boundaries
+- `csv-verifier` depends on `csv-protocol` + `csv-proof` + `csv-hash` (no csv-core dependency)
+- `csv-storage` depends on `csv-protocol` + `csv-hash` (no csv-core dependency)
 - `serde_json` is forbidden in canonical hashing paths; use `canonical_cbor`
 - `persistent` feature is incompatible with wasm32 (compile_error fires)
 - `experimental` feature gates: `vm`, `rgb`, `commit_mux`
 - Finality is NEVER optional — all runtime modes enforce strict finality
 - CLI holds NO protocol authority state (leases, transfers) — all delegated to csv-runtime
 - Execution journal (`execution_journal.rs`) provides crash-safe phase tracking
+- `csv-coordinator` provides isolated failure domains per chain (bounded queues, circuit breakers, memory ceilings)
+- `csv-admission` provides pressure boundary (rejects excess work before state mutation)
 
 ## Testing notes
 
@@ -113,3 +125,38 @@ cd csv-contracts/aptos/contracts && aptos move compile
 See `.agents/AGENT.md` for protocol invariants, forbidden patterns, and verification rules.
 See `csv-docs/THREAT_MODEL.md` for the threat model.
 See `csv-docs/PROTOCOL_INVARIANTS.md` and `csv-docs/PROTOCOL_CONSTITUTION.md` for protocol rules.
+
+## Architecture Overview
+
+```
+csv-sdk (public facade)
+  └── csv-runtime (orchestration + execution journal)
+        ├── csv-admission (pressure boundary)
+        ├── csv-coordinator (per-chain execution cells)
+        └── csv-protocol / csv-core (protocol types & traits)
+              ├── csv-algebra (typestate algebra)
+              ├── csv-wire (wire encoding & transport)
+              ├── csv-codec (canonical CBOR)
+              ├── csv-hash (hash types)
+              ├── csv-proof (proof types)
+              ├── csv-verifier (canonical verification)
+              ├── csv-storage (storage backends)
+              └── csv-adapters (chain-specific implementations)
+                    ├── csv-bitcoin
+                    ├── csv-ethereum
+                    ├── csv-solana
+                    ├── csv-sui
+                    ├── csv-aptos
+                    └── csv-celestia
+```
+
+## Key Architectural Principles
+
+1. **Typestate enforcement**: `csv-algebra` provides compile-time state transition guarantees
+2. **Serialization boundary**: `csv-wire` owns ALL serde and transport encoding
+3. **Deterministic encoding**: `csv-codec` provides canonical CBOR for protocol state
+4. **Isolated execution**: `csv-coordinator` provides per-chain isolated failure domains
+5. **Admission control**: `csv-admission` prevents overload by rejecting excess work
+6. **Protocol purity**: `csv-protocol` defines what is correct, not how to implement it
+7. **Verification canonicalization**: `csv-verifier` provides single source of truth for verification
+8. **Storage abstraction**: `csv-storage` provides unified interface for multiple backends
