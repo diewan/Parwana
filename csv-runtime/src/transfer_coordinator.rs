@@ -20,7 +20,6 @@ use crate::recovery::{CheckpointManager, TransferStage};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
 use csv_protocol::finality::CapabilityRequirements;
-use csv_protocol::proof_types::ProofBundle;
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
 use uuid::Uuid;
@@ -1692,18 +1691,24 @@ impl TransferCoordinator {
 
             // Attempt to resume the transfer
             // Create a minimal runtime context for resumption
+            let runtime_id_uuid = self.runtime_id.0.parse().unwrap_or_else(|_| uuid::Uuid::new_v4());
+            let transfer_id_bytes = entry.transfer_id.as_bytes();
+            let mut transfer_id_array = [0u8; 32];
+            let len = transfer_id_bytes.len().min(32);
+            transfer_id_array[..len].copy_from_slice(&transfer_id_bytes[..len]);
+            let transfer_id_sanad = csv_hash::SanadId::new(transfer_id_array);
             let runtime_ctx = crate::lease::RuntimeExecutionContext {
-                lease: crate::lease::CoordinatorLease {
-                    transfer_id: entry.transfer_id.clone(),
-                    owner_runtime_id: self.runtime_id.0.clone(),
+                lease: crate::lease::TransferLease {
+                    transfer_id: transfer_id_sanad,
+                    epoch: 1,
+                    owner_runtime_id: runtime_id_uuid,
                     acquired_at: std::time::SystemTime::now(),
                     expires_at: std::time::SystemTime::now()
                         .checked_add(std::time::Duration::from_secs(3600))
                         .unwrap_or_else(|| std::time::SystemTime::now()),
-                    epoch: 1,
                 },
-                runtime_instance: self.runtime_id.0.clone(),
-                policy: crate::lease::RuntimePolicy::default(),
+                runtime_instance: runtime_id_uuid,
+                policy: crate::policy::RuntimePolicy::default(),
             };
 
             match self

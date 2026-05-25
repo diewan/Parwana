@@ -12,7 +12,7 @@
 //! This separation ensures that protocol changes require a version bump, while
 //! operational changes can be made without affecting protocol compatibility.
 
-use crate::backpressure::{AdmissionLimits as BackpressureAdmissionLimits, BackpressureMode};
+use crate::backpressure::BackpressureMode;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

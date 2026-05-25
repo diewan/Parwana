@@ -5,8 +5,6 @@
 
 use crate::error::{SolanaError, SolanaResult};
 use csv_hash::Hash as CsvHash;
-use reqwest::Client;
-use serde_json::Value;
 
 /// Mint a sanad on Solana using JSON-RPC
 ///

@@ -121,7 +121,7 @@ async fn cell_worker(
     _anchor: Arc<dyn CryptographicAnchor>,
     config: CellConfig,
 ) {
-    let mut memory_ceiling = MemoryCeiling::new(config.max_memory_bytes);
+    let memory_ceiling = MemoryCeiling::new(config.max_memory_bytes);
     let mut circuit_breaker = CellCircuitBreaker::new(config.circuit_breaker);
 
     while let Some(task) = rx.recv().await {

@@ -405,10 +405,10 @@ impl AptosAccountReader for MockAptosRpc {
         resource_type: &str,
         _position: Option<u64>,
     ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>> {
-        let resources = self.resources.lock().unwrap();
-        Box::pin(async {
-            Ok(resources.get(&(address, resource_type.to_string())).cloned())
-        })
+        let resource_type_owned = resource_type.to_string();
+        let key = (address, resource_type_owned);
+        let result = self.resources.lock().unwrap().get(&key).cloned();
+        Box::pin(async move { Ok(result) })
     }
 }
 
@@ -417,8 +417,8 @@ impl AptosTransactionReader for MockAptosRpc {
         &self,
         version: u64,
     ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
-        let transactions = self.transactions.lock().unwrap();
-        Box::pin(async { Ok(transactions.get(&version).cloned()) })
+        let result = self.transactions.lock().unwrap().get(&version).cloned();
+        Box::pin(async move { Ok(result) })
     }
 
     fn get_transactions(
@@ -442,16 +442,16 @@ impl AptosTransactionReader for MockAptosRpc {
         &self,
         version: u64,
     ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>> {
-        let blocks = self.blocks.lock().unwrap();
-        Box::pin(async { Ok(blocks.get(&version).cloned()) })
+        let result = self.blocks.lock().unwrap().get(&version).cloned();
+        Box::pin(async move { Ok(result) })
     }
 
     fn get_transaction_by_version(
         &self,
         version: u64,
     ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
-        let transactions = self.transactions.lock().unwrap();
-        Box::pin(async { Ok(transactions.get(&version).cloned()) })
+        let result = self.transactions.lock().unwrap().get(&version).cloned();
+        Box::pin(async move { Ok(result) })
     }
 }
 

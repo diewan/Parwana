@@ -242,10 +242,10 @@ impl SuiRpc for SuiNode {
                 let type_field = event
                     .get("type")
                     .and_then(|value| value.as_str())
-                    .ok_or_else(|| (Box::new(std::io::Error::new(
+                    .ok_or_else(|| Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         "type missing",
-                    )) as Box<dyn std::error::Error + Send + Sync>))?
+                    )) as Box<dyn std::error::Error + Send + Sync>)?
                     .to_string();
 
                 Ok(SuiEvent {

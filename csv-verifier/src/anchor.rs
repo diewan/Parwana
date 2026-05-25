@@ -5,7 +5,6 @@
 /// any RPC operator. Every implementation must be auditable against
 /// the chain's consensus spec.
 
-use std::sync::Arc;
 
 /// Error type for anchor verification failures.
 #[derive(Debug, thiserror::Error)]

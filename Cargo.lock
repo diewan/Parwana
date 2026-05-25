@@ -3097,6 +3097,7 @@ dependencies = [
  "sha2",
  "sha3 0.10.9",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

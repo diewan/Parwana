@@ -102,11 +102,20 @@ pub enum ByzantineFaultMode {
     /// Returns success status for all transactions regardless of actual status.
     AlwaysSuccessStatus,
     /// Truncates hex strings to test parse_hex_bytes32 hardening.
-    TruncatedHex { truncate_to: usize },
+    TruncatedHex {
+        /// Maximum length to truncate hex strings to
+        truncate_to: usize,
+    },
     /// Returns responses from a different block height (stale data).
-    StaleHeightInjection { lag_blocks: u64 },
+    StaleHeightInjection {
+        /// Number of blocks to lag behind current height
+        lag_blocks: u64,
+    },
     /// Silently drops every Nth response (simulates censorship).
-    SelectiveCensorship { every_n: usize },
+    SelectiveCensorship {
+        /// Censor every Nth response
+        every_n: usize,
+    },
 }
 
 impl ByzantineRpcReader {

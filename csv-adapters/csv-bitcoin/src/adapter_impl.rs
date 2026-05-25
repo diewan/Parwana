@@ -1,7 +1,7 @@
 //! Implementation of csv-adapter-core traits for Bitcoin adapter
 
 use async_trait::async_trait;
-use csv_adapter_core::{AdapterError, AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus};
+use csv_adapter_core::{AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus};
 use csv_hash::Hash;
 use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use std::sync::Arc;
@@ -22,13 +22,13 @@ impl BitcoinAdapter {
 
 #[async_trait]
 impl ProofAdapter for BitcoinAdapter {
-    async fn verify_proof_bundle(&self, bundle: &ProofBundle) -> AdapterResult<bool> {
+    async fn verify_proof_bundle(&self, _bundle: &ProofBundle) -> AdapterResult<bool> {
         // Delegate to existing proof verification logic
         // This would integrate with the existing proofs module
         Ok(true) // Placeholder - actual implementation would use existing verification
     }
 
-    async fn verify_finality(&self, proof: &FinalityProof) -> AdapterResult<bool> {
+    async fn verify_finality(&self, _proof: &FinalityProof) -> AdapterResult<bool> {
         // Delegate to existing finality verification logic
         // This would integrate with the existing spv module
         Ok(true) // Placeholder - actual implementation would use existing verification
@@ -41,13 +41,13 @@ impl ProofAdapter for BitcoinAdapter {
 
 #[async_trait]
 impl MintAdapter for BitcoinAdapter {
-    async fn mint_commitment(&self, commitment: &csv_hash::commitment::Commitment) -> AdapterResult<Hash> {
+    async fn mint_commitment(&self, _commitment: &csv_hash::commitment::Commitment) -> AdapterResult<Hash> {
         // Delegate to existing mint logic
         // This would integrate with the existing mint module
         Ok(Hash::new([0u8; 32])) // Placeholder - actual implementation would use existing mint
     }
 
-    async fn get_mint_status(&self, tx_hash: &Hash) -> AdapterResult<MintStatus> {
+    async fn get_mint_status(&self, _tx_hash: &Hash) -> AdapterResult<MintStatus> {
         // Check transaction status via RPC
         // This would integrate with the existing rpc module
         Ok(MintStatus::Pending) // Placeholder - actual implementation would check RPC
@@ -73,19 +73,19 @@ impl ChainOps for BitcoinAdapter {
         Ok(0) // Placeholder - actual implementation would call RPC
     }
 
-    async fn get_balance(&self, address: &str) -> AdapterResult<u64> {
+    async fn get_balance(&self, _address: &str) -> AdapterResult<u64> {
         // Get balance via RPC
         // This would integrate with the existing rpc module
         Ok(0) // Placeholder - actual implementation would call RPC
     }
 
-    async fn get_transaction_status(&self, tx_hash: &Hash) -> AdapterResult<TransactionStatus> {
+    async fn get_transaction_status(&self, _tx_hash: &Hash) -> AdapterResult<TransactionStatus> {
         // Get transaction status via RPC
         // This would integrate with the existing rpc module
         Ok(TransactionStatus::Pending) // Placeholder - actual implementation would check RPC
     }
 
-    async fn broadcast_transaction(&self, tx_bytes: &[u8]) -> AdapterResult<Hash> {
+    async fn broadcast_transaction(&self, _tx_bytes: &[u8]) -> AdapterResult<Hash> {
         // Broadcast transaction via RPC
         // This would integrate with the existing rpc module
         Ok(Hash::new([0u8; 32])) // Placeholder - actual implementation would broadcast
