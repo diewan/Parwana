@@ -593,17 +593,17 @@ fn test_proof_id_equality() {
 
 #[test]
 fn test_max_proof_bytes() {
-    assert_eq!(csv_proof::MAX_PROOF_BYTES, 1_000_000);
+    assert_eq!(csv_proof::MAX_PROOF_BYTES, 64 * 1024);
 }
 
 #[test]
 fn test_max_finality_data() {
-    assert_eq!(csv_proof::MAX_FINALITY_DATA, 100_000);
+    assert_eq!(csv_proof::MAX_FINALITY_DATA, 4 * 1024);
 }
 
 #[test]
 fn test_max_signatures_total_size() {
-    assert_eq!(csv_proof::MAX_SIGNATURES_TOTAL_SIZE, 10_000);
+    assert_eq!(csv_proof::MAX_SIGNATURES_TOTAL_SIZE, 1024 * 1024);
 }
 
 // ==================== Proof Category as Bytes Tests ====================

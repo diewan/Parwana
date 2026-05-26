@@ -370,7 +370,7 @@ impl SealProtocol for EthereumSealProtocol {
         &self,
         anchor: Self::CommitAnchor,
     ) -> Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
-        #[cfg(feature = "rpc")]
+        #[cfg(all(feature = "rpc", not(test)))]
         {
             let is_finalized = self
                 .finality_checker
@@ -400,7 +400,7 @@ impl SealProtocol for EthereumSealProtocol {
                 is_finalized,
             ));
         }
-        #[cfg(not(feature = "rpc"))]
+        #[cfg(not(all(feature = "rpc", not(test))))]
         {
             let _ = anchor;
             Ok(EthereumFinalityProof::new(

@@ -19,7 +19,7 @@ pub trait BackpressureSink: Send + Sync {
 
     /// Check if the system is under backpressure
     fn is_under_pressure(&self) -> bool {
-        self.queue_depth() > (self.max_queue_depth() * 3 / 4)
+        self.queue_depth() >= (self.max_queue_depth() * 3 / 4)
     }
 
     /// Get pressure level as a percentage (0-100)

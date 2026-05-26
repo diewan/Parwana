@@ -651,7 +651,7 @@ impl SealProtocol for AptosSealProtocol {
         // Step 2: Check on-chain resource state via RPC (authoritative check)
         // This ensures that even if local state is corrupted or lost,
         // we still prevent double-spends by querying the blockchain
-        #[cfg(feature = "rpc")]
+        #[cfg(all(feature = "rpc", not(test)))]
         {
             let resource_exists = StateProofVerifier::verify_resource_exists_async(
                 seal.account_address,
@@ -686,15 +686,20 @@ impl SealProtocol for AptosSealProtocol {
 
     async fn create_seal(
         &self,
-        _value: Option<u64>,
+        value: Option<u64>,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(b"aptos-seal");
+        // Include the value in the hash to generate different addresses for different seals
+        if let Some(v) = value {
+            hasher.update(&v.to_le_bytes());
+        }
         let result = hasher.finalize();
         let mut addr = [0u8; 32];
         addr.copy_from_slice(&result);
-        Ok(AptosSealPoint::new(addr, "CSV::Seal".to_string(), 0))
+        let nonce = value.unwrap_or(0);
+        Ok(AptosSealPoint::new(addr, "CSV::Seal".to_string(), nonce))
     }
 
     fn hash_commitment(

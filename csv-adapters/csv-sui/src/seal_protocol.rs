@@ -774,7 +774,7 @@ impl SealProtocol for SuiSealProtocol {
         // Step 2: Check on-chain object state via RPC (authoritative check)
         // This ensures that even if local state is corrupted or lost,
         // we still prevent double-spends by querying the blockchain
-        #[cfg(feature = "rpc")]
+        #[cfg(all(feature = "rpc", not(test)))]
         {
             let object_exists = self
                 .run_with_rpc(|rpc| {

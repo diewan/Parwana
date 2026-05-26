@@ -376,8 +376,22 @@ impl AptosTransactionReader for MockAptosRpc {
         &self,
         _tx_hash: [u8; 32],
     ) -> BoxFuture<'_, Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>>> {
-        Box::pin(async {
-            Err("wait_for_transaction not implemented in mock".into())
+        Box::pin(async move {
+            Ok(AptosTransaction {
+                version: self.latest_version,
+                hash: _tx_hash,
+                state_change_hash: [0u8; 32],
+                event_root_hash: [0u8; 32],
+                state_checkpoint_hash: None,
+                epoch: 1,
+                round: 0,
+                events: vec![],
+                payload: vec![],
+                success: true,
+                vm_status: "Executed".to_string(),
+                gas_used: 100,
+                cumulative_gas_used: 100,
+            })
         })
     }
 
