@@ -5,7 +5,7 @@
 
 use csv_verifier::{
     AnchorError, CanonicalBlockHeader, CanonicalInclusionProof, CryptographicAnchor,
-    FinalityGuarantee, QuorumCertificate, ValidatorInfo, ValidatorSet, VerifiedHeader,
+    FinalityGuarantee, ValidatorInfo, ValidatorSet, VerifiedHeader,
 };
 
 /// Aptos-specific cryptographic anchor.

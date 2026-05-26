@@ -350,13 +350,12 @@ mod tests {
     #[test]
     fn test_checkpoint_config() {
         let config = CheckpointConfig {
-            require_certified: false,
             max_epoch_lookback: 3,
             timeout_ms: 10_000,
         };
         let verifier = CheckpointVerifier::with_config(config);
-        assert!(!verifier.config().require_certified);
         assert_eq!(verifier.config().max_epoch_lookback, 3);
+        assert_eq!(verifier.config().timeout_ms, 10_000);
     }
 
     #[test]

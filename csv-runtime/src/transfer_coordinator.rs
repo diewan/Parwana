@@ -1741,7 +1741,7 @@ mod tests {
         AdapterRegistryImpl, ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer,
         LockResult, MintResult, SealRegistryStatus,
     };
-    use csv_proof::proof::{InclusionProof, ProofBundle};
+    use csv_protocol::proof_types::{InclusionProof, ProofBundle};
     use csv_protocol::finality::ChainCapabilities;
     use std::sync::Arc;
 
@@ -1849,7 +1849,7 @@ mod tests {
                 SealPoint::new(vec![0u8; 32], Some(0)).unwrap(),
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
-                csv_proof::proof::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
+                csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             )
             .map_err(|e| crate::adapter_registry::AdapterError::Generic(e.to_string()))?)
         }

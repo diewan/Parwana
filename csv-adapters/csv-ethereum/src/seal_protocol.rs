@@ -640,25 +640,25 @@ mod tests {
         assert_eq!(&domain[..8], b"CSV-ETH-");
     }
 
-    #[test]
-    fn test_create_seal() {
+    #[tokio::test]
+    async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
+        let seal = adapter.create_seal(None).await.unwrap();
         assert_eq!(seal.slot_index, 0);
     }
 
-    #[test]
-    fn test_enforce_seal_replay() {
+    #[tokio::test]
+    async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
-        adapter.enforce_seal(seal.clone()).unwrap();
-        assert!(adapter.enforce_seal(seal).is_err());
+        let seal = adapter.create_seal(None).await.unwrap();
+        adapter.enforce_seal(seal.clone()).await.unwrap();
+        assert!(adapter.enforce_seal(seal).await.is_err());
     }
 
-    #[test]
-    fn test_hash_commitment() {
+    #[tokio::test]
+    async fn test_hash_commitment() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
+        let seal = adapter.create_seal(None).await.unwrap();
         let h = adapter.hash_commitment(
             Hash::new([1u8; 32]),
             Hash::new([2u8; 32]),
@@ -668,11 +668,11 @@ mod tests {
         assert_eq!(h.as_bytes().len(), 32);
     }
 
-    #[test]
-    fn test_verify_finality() {
+    #[tokio::test]
+    async fn test_verify_finality() {
         let adapter = test_adapter();
         let anchor = EthereumCommitAnchor::new([5u8; 32], 900, 0);
-        let result = adapter.verify_finality(anchor);
+        let result = adapter.verify_finality(anchor).await;
         assert!(result.is_ok());
         let proof = result.unwrap();
         assert_eq!(proof.confirmations, adapter.config.finality_depth);

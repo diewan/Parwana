@@ -6,6 +6,7 @@
 use csv_hash::dag::DAGSegment;
 use csv_hash::{
     Domain, DomainSeparatedHash, Hash, HashDomain,
+    canonical::to_canonical_cbor,
     domains::{
         BitcoinSealDomain, EthereumMintDomain, ProofBundleDomain, ReplayRegistryDomain,
         TransitionDomain,
@@ -13,10 +14,9 @@ use csv_hash::{
     seal::{CommitAnchor, SealPoint},
     tagged_hash::{csv_tagged_hash, tagged_hash},
 };
-use csv_proof::proof::ProofBundle;
-use csv_proof::{
+use csv_protocol::proof_types::{
     CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
-    Proof, ProofCategory, ReplayProof, TransitionProof, ZKProof,
+    Proof, ProofBundle, ProofCategory, ReplayProof, TransitionProof, ZKProof,
 };
 
 /// Test that all proof types use domain-separated hashing.
@@ -118,7 +118,7 @@ fn all_proofs_are_domain_separated() {
     )
     .unwrap();
 
-    let bundle_bytes = bundle.to_bytes().expect("bundle serialization");
+    let bundle_bytes = to_canonical_cbor(&bundle).expect("bundle serialization");
     let bundle_hash = Hash::sha256(&bundle_bytes);
 
     // The bundle hash must be different from a raw hash of the same data
@@ -140,7 +140,7 @@ fn all_proofs_are_domain_separated() {
     )
     .unwrap();
 
-    let bundle2_bytes = bundle2.to_bytes().expect("bundle serialization");
+    let bundle2_bytes = to_canonical_cbor(&bundle2).expect("bundle serialization");
     assert_ne!(
         bundle_bytes, bundle2_bytes,
         "Different bundles must produce different bytes"

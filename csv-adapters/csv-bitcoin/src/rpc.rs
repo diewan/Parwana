@@ -101,12 +101,13 @@ impl TestBitcoinRpc {
 }
 
 #[cfg(test)]
+#[async_trait]
 impl BitcoinRpc for TestBitcoinRpc {
-    fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.block_count)
     }
 
-    fn get_block_hash(
+    async fn get_block_hash(
         &self,
         height: u64,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
@@ -115,7 +116,7 @@ impl BitcoinRpc for TestBitcoinRpc {
         Ok(hash)
     }
 
-    fn is_utxo_unspent(
+    async fn is_utxo_unspent(
         &self,
         txid: [u8; 32],
         vout: u32,
@@ -123,7 +124,7 @@ impl BitcoinRpc for TestBitcoinRpc {
         Ok(self.unspent_utxos.contains(&(txid.to_vec(), vout)))
     }
 
-    fn send_raw_transaction(
+    async fn send_raw_transaction(
         &self,
         _tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
@@ -131,16 +132,16 @@ impl BitcoinRpc for TestBitcoinRpc {
         Err("TestBitcoinRpc cannot broadcast transactions — use real RPC for that".into())
     }
 
-    fn get_tx_confirmations(
+    async fn get_tx_confirmations(
         &self,
         _txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         Ok(0)
     }
 
-    fn get_utxos_for_address(
+    async fn get_utxos_for_address(
         &self,
-        _address: &str,
+        _address: String,
     ) -> Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
         // For testing, return UTXOs from the stored set
         let utxos: Vec<UtxoInfo> = self
@@ -172,14 +173,14 @@ impl BitcoinRpc for TestBitcoinRpc {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_bitcoin_rpc_block_count() {
+    #[tokio::test]
+    async fn test_bitcoin_rpc_block_count() {
         let rpc = TestBitcoinRpc::new(100);
-        assert_eq!(rpc.get_block_count().unwrap(), 100);
+        assert_eq!(rpc.get_block_count().await.unwrap(), 100);
     }
 
-    #[test]
-    fn test_bitcoin_rpc_utxo_lifecycle() {
+    #[tokio::test]
+    async fn test_bitcoin_rpc_utxo_lifecycle() {
         let mut rpc = TestBitcoinRpc::new(100);
         let _txid = [1u8, 2, 3].to_vec().into_boxed_slice();
         let txid_bytes: [u8; 32] = {
@@ -187,17 +188,17 @@ mod tests {
             arr[..3].copy_from_slice(&[1, 2, 3]);
             arr
         };
-        assert!(!rpc.is_utxo_unspent(txid_bytes, 0).unwrap());
+        assert!(!rpc.is_utxo_unspent(txid_bytes, 0).await.unwrap());
         rpc.mark_utxo_unspent(txid_bytes.to_vec(), 0);
-        assert!(rpc.is_utxo_unspent(txid_bytes, 0).unwrap());
+        assert!(rpc.is_utxo_unspent(txid_bytes, 0).await.unwrap());
         rpc.mark_utxo_spent(txid_bytes.to_vec(), 0);
-        assert!(!rpc.is_utxo_unspent(txid_bytes, 0).unwrap());
+        assert!(!rpc.is_utxo_unspent(txid_bytes, 0).await.unwrap());
     }
 
-    #[test]
-    fn test_bitcoin_rpc_refuses_broadcast() {
+    #[tokio::test]
+    async fn test_bitcoin_rpc_refuses_broadcast() {
         let rpc = TestBitcoinRpc::new(100);
-        let result = rpc.send_raw_transaction(vec![0x01, 0x02]);
+        let result = rpc.send_raw_transaction(vec![0x01, 0x02]).await;
         assert!(result.is_err(), "Test RPC must refuse to broadcast");
     }
 }

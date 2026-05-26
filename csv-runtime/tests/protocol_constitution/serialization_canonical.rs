@@ -11,7 +11,7 @@ use csv_hash::{
     dag::DAGSegment,
     seal::{CommitAnchor, SealPoint},
 };
-use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 use serde::{Deserialize, Serialize};
 
 /// Test that canonical serialization is deterministic and field-order independent.
@@ -88,9 +88,9 @@ fn serialization_is_canonical() {
     )
     .unwrap();
 
-    let bytes = bundle.to_bytes().expect("bundle serialization");
+    let bytes = to_canonical_cbor(&bundle).expect("bundle serialization");
     let restored_bundle: ProofBundle =
-        ProofBundle::from_bytes(&bytes).expect("bundle deserialization");
+        from_canonical_cbor(&bytes).expect("bundle deserialization");
     assert_eq!(
         bundle, restored_bundle,
         "ProofBundle roundtrip must recover original"

@@ -75,8 +75,8 @@ impl AdapterRegistry for MockAdapterRegistry {
         &self,
         _chain_id: &str,
         _lock_result: &LockResult,
-    ) -> Result<csv_proof::proof::ProofBundle, AdapterError> {
-        minimal_proof_bundle().map_err(|e| AdapterError::Generic(e.to_string()))
+    ) -> Result<csv_protocol::proof_types::ProofBundle, AdapterError> {
+        minimal_proof_bundle().map_err(|e| AdapterError::Generic(e))
     }
 }
 
@@ -101,10 +101,10 @@ fn runtime_ctx(transfer: &CrossChainTransfer) -> csv_runtime::lease::RuntimeExec
     }
 }
 
-fn minimal_proof_bundle() -> Result<csv_proof::proof::ProofBundle, &'static str> {
+fn minimal_proof_bundle() -> Result<csv_protocol::proof_types::ProofBundle, String> {
     use csv_hash::dag::{DAGNode, DAGSegment};
     use csv_hash::seal::{CommitAnchor, SealPoint};
-    use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+    use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 
     let node = DAGNode::new(Hash::new([1u8; 32]), vec![], vec![], vec![], vec![]);
     ProofBundle::new(

@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_mpc_batcher_queue() {
-        let batcher = MpcBatcher::new(2, 1, 0);
+        let batcher = MpcBatcher::new(2, 1, 0, 1000);
 
         let commitment = Hash::new([1u8; 32]);
         let seal = BitcoinSealPoint::new([0u8; 32], 0, None);
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_mpc_tree_building() {
-        let batcher = MpcBatcher::new(10, 1, 0);
+        let batcher = MpcBatcher::new(10, 1, 0, 1000);
 
         // Queue 3 commitments
         for i in 0..3 {

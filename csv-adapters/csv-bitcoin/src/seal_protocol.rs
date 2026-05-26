@@ -742,19 +742,19 @@ mod tests {
         BitcoinSealProtocol::signet().unwrap()
     }
 
-    #[test]
-    fn test_create_seal() {
+    #[tokio::test]
+    async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
+        let seal = adapter.create_seal(None).await.unwrap();
         assert_eq!(seal.nonce, Some(100_000));
     }
 
-    #[test]
-    fn test_enforce_seal_replay() {
+    #[tokio::test]
+    async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
-        adapter.enforce_seal(seal.clone()).unwrap();
-        assert!(adapter.enforce_seal(seal).is_err());
+        let seal = adapter.create_seal(None).await.unwrap();
+        adapter.enforce_seal(seal.clone()).await.unwrap();
+        assert!(adapter.enforce_seal(seal).await.is_err());
     }
 
     #[test]
@@ -763,30 +763,30 @@ mod tests {
         assert_eq!(&adapter.domain_separator()[..8], b"CSV-BTC-");
     }
 
-    #[test]
-    fn test_verify_finality() {
+    #[tokio::test]
+    async fn test_verify_finality() {
         let adapter = test_adapter();
         // block_height = 100 means it's confirmed at height 100
         // current_height is 200, so confirmations = 100 which is > 6 (default finality_depth)
         let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
-        let result = adapter.verify_finality(anchor);
+        let result = adapter.verify_finality(anchor).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_hd_wallet_seal_derivation() {
+    #[tokio::test]
+    async fn test_hd_wallet_seal_derivation() {
         let adapter = test_adapter();
-        let seal1 = adapter.create_seal(Some(50_000)).unwrap();
-        let seal2 = adapter.create_seal(Some(50_000)).unwrap();
+        let seal1 = adapter.create_seal(Some(50_000)).await.unwrap();
+        let seal2 = adapter.create_seal(Some(50_000)).await.unwrap();
         assert_ne!(seal1.txid, seal2.txid);
     }
 
-    #[test]
-    fn test_hd_wallet_seal_derivation_deterministic() {
+    #[tokio::test]
+    async fn test_hd_wallet_seal_derivation_deterministic() {
         let wallet = SealWallet::generate_random(bitcoin::Network::Signet);
         let config = BitcoinConfig::default();
         let adapter = BitcoinSealProtocol::with_wallet(config, wallet).unwrap();
-        let seal1 = adapter.create_seal(Some(100_000)).unwrap();
+        let seal1 = adapter.create_seal(Some(100_000)).await.unwrap();
         assert_eq!(seal1.nonce, Some(100_000));
     }
 
@@ -806,12 +806,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_derive_seal_deterministic() {
+    #[tokio::test]
+    async fn test_derive_seal_deterministic() {
         let adapter = test_adapter();
-        let seal1 = adapter.create_seal(None).unwrap();
+        let seal1 = adapter.create_seal(None).await.unwrap();
         let adapter2 = test_adapter();
-        let seal2 = adapter2.create_seal(None).unwrap();
+        let seal2 = adapter2.create_seal(None).await.unwrap();
         assert_ne!(seal1.txid, seal2.txid);
     }
 }

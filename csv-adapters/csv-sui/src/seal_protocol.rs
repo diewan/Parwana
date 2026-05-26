@@ -1013,19 +1013,19 @@ mod tests {
         SuiSealProtocol::with_test().unwrap()
     }
 
-    #[test]
-    fn test_create_seal() {
+    #[tokio::test]
+    async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
+        let seal = adapter.create_seal(None).await.unwrap();
         assert_eq!(seal.version, 1);
     }
 
-    #[test]
-    fn test_enforce_seal_replay() {
+    #[tokio::test]
+    async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
-        adapter.enforce_seal(seal.clone()).unwrap();
-        assert!(adapter.enforce_seal(seal).is_err());
+        let seal = adapter.create_seal(None).await.unwrap();
+        adapter.enforce_seal(seal.clone()).await.unwrap();
+        assert!(adapter.enforce_seal(seal).await.is_err());
     }
 
     #[test]
@@ -1035,11 +1035,11 @@ mod tests {
         assert_eq!(&domain[..8], b"CSV-SUI-");
     }
 
-    #[test]
-    fn test_verify_finality() {
+    #[tokio::test]
+    async fn test_verify_finality() {
         let adapter = test_adapter();
         let anchor = SuiCommitAnchor::new([1u8; 32], [2u8; 32], 500);
-        let result = adapter.verify_finality(anchor);
+        let result = adapter.verify_finality(anchor).await;
         assert!(result.is_ok());
     }
 
@@ -1062,10 +1062,10 @@ mod tests {
         assert_eq!(formatted.len(), 66); // 0x + 64 hex chars
     }
 
-    #[test]
-    fn test_seal_registry_replay() {
+    #[tokio::test]
+    async fn test_seal_registry_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
+        let seal = adapter.create_seal(None).await.unwrap();
 
         // Manually mark as used
         adapter
@@ -1076,6 +1076,6 @@ mod tests {
             .unwrap();
 
         // Try to enforce again
-        assert!(adapter.enforce_seal(seal).is_err());
+        assert!(adapter.enforce_seal(seal).await.is_err());
     }
 }

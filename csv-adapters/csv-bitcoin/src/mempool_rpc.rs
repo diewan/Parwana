@@ -588,21 +588,21 @@ pub struct RecommendedFees {
 mod tests {
     use super::*;
 
-    #[test]
+    #[tokio::test]
     #[ignore = "requires network"]
-    fn test_get_block_count() {
+    async fn test_get_block_count() {
         let rpc = MempoolSignetRpc::new();
-        let height = rpc.get_block_count().unwrap();
+        let height = rpc.get_block_count().await.unwrap();
         assert!(height > 200_000, "Signet height should be > 200k");
         println!("Current Signet height: {}", height);
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore = "requires network"]
-    fn test_get_block_hash() {
+    async fn test_get_block_hash() {
         let rpc = MempoolSignetRpc::new();
-        let height = rpc.get_block_count().unwrap();
-        let hash = rpc.get_block_hash(height).unwrap();
+        let height = rpc.get_block_count().await.unwrap();
+        let hash = rpc.get_block_hash(height).await.unwrap();
         assert_ne!(hash, [0u8; 32]);
         println!("Block hash at {}: {}", height, hex::encode(hash));
     }

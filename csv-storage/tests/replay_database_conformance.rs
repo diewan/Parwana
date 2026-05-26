@@ -3,7 +3,7 @@
 //! This module provides a test suite that all ReplayDatabase implementations
 //! must pass to ensure consistent behavior across different backends.
 
-use csv_proof::proof::ReplayId;
+use csv_protocol::proof_types::ReplayId;
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_storage::{InMemoryReplayDb, ReplayDatabase, ReplayDbError};
 

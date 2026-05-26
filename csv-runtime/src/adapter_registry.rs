@@ -412,7 +412,7 @@ mod tests {
         ) -> Result<ProofBundle, AdapterError> {
             use csv_hash::dag::{DAGNode, DAGSegment};
             use csv_hash::seal::{CommitAnchor, SealPoint};
-            use csv_proof::proof::InclusionProof;
+            use csv_protocol::proof_types::InclusionProof;
 
             let node = DAGNode::new(
                 csv_hash::Hash::new([1u8; 32]),
@@ -427,7 +427,7 @@ mod tests {
                 SealPoint::new(vec![0u8; 32], Some(0)).unwrap(),
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
-                csv_proof::proof::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
+                csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             )
             .unwrap())
         }

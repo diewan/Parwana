@@ -53,4 +53,9 @@ impl<T> TaskQueue<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// Check if the queue is full
+    pub fn is_full(&self) -> bool {
+        self.items.len() >= self.capacity
+    }
 }

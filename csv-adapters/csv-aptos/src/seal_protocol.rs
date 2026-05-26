@@ -886,19 +886,19 @@ mod tests {
         AptosSealProtocol::with_test().unwrap()
     }
 
-    #[test]
-    fn test_create_seal() {
+    #[tokio::test]
+    async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
+        let seal = adapter.create_seal(None).await.unwrap();
         assert_eq!(seal.nonce, 0);
     }
 
-    #[test]
-    fn test_enforce_seal_replay() {
+    #[tokio::test]
+    async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).unwrap();
-        adapter.enforce_seal(seal.clone()).unwrap();
-        assert!(adapter.enforce_seal(seal).is_err());
+        let seal = adapter.create_seal(None).await.unwrap();
+        adapter.enforce_seal(seal.clone()).await.unwrap();
+        assert!(adapter.enforce_seal(seal).await.is_err());
     }
 
     #[test]
@@ -914,7 +914,7 @@ mod tests {
     async fn test_verify_finality() {
         let adapter = test_adapter();
         let anchor = AptosCommitAnchor::new(1500, [1u8; 32], 0);
-        let result = adapter.verify_finality(anchor);
+        let result = adapter.verify_finality(anchor).await;
         assert!(result.is_ok());
     }
 
@@ -947,7 +947,7 @@ mod tests {
         // Create a seal
         let seal = AptosSealPoint::new([1u8; 32], resource_type.clone(), 0);
         let commitment = Hash::new([1u8; 32]);
-        let result = adapter.publish(commitment, seal);
+        let result = adapter.publish(commitment, seal).await;
         assert!(result.is_ok());
     }
 
@@ -979,11 +979,11 @@ mod tests {
 
         let seal = AptosSealPoint::new([1u8; 32], resource_type.clone(), 0);
         let commitment = Hash::new([1u8; 32]);
-        adapter.publish(commitment, seal.clone()).unwrap();
+        adapter.publish(commitment, seal.clone()).await.unwrap();
 
         // Try to publish again with same seal
         let commitment2 = Hash::new([2u8; 32]);
-        let result = adapter.publish(commitment2, seal);
+        let result = adapter.publish(commitment2, seal).await;
         assert!(result.is_err());
     }
 

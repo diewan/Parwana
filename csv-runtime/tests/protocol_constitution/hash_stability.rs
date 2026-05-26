@@ -12,7 +12,7 @@ use csv_hash::{
     seal::{CommitAnchor, SealPoint},
     tagged_hash::{csv_tagged_hash, tagged_hash},
 };
-use csv_proof::proof::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Test that canonical serialization produces stable, deterministic hashes
 /// for protocol types across multiple serializations.
@@ -58,12 +58,12 @@ fn protocol_hashes_are_stable() {
     )
     .unwrap();
 
-    let bytes1 = bundle.to_bytes().expect("bundle serialization");
-    let bytes2 = bundle.to_bytes().expect("bundle serialization");
+    let bytes1 = to_canonical_cbor(&bundle).expect("bundle serialization");
+    let bytes2 = to_canonical_cbor(&bundle).expect("bundle serialization");
     assert_eq!(bytes1, bytes2, "ProofBundle bytes must be deterministic");
 
-    let restored1: ProofBundle = ProofBundle::from_bytes(&bytes1).expect("bundle deserialization");
-    let restored2: ProofBundle = ProofBundle::from_bytes(&bytes2).expect("bundle deserialization");
+    let restored1: ProofBundle = from_canonical_cbor(&bytes1).expect("bundle deserialization");
+    let restored2: ProofBundle = from_canonical_cbor(&bytes2).expect("bundle deserialization");
     assert_eq!(restored1, restored2, "Restored bundles must be equal");
 
     // 5. Commitment hash stability

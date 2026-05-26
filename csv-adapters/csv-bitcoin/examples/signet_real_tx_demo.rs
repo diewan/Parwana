@@ -15,7 +15,8 @@ use csv_bitcoin::{BitcoinConfig, BitcoinSealProtocol, Network};
 use csv_core::Hash;
 use csv_protocol::seal_protocol::SealProtocol;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("=== Bitcoin Signet Real Transaction Demo ===\n");
 
     let seed_hex = std::env::var("BTC_SEED_HEX")
@@ -37,6 +38,7 @@ fn main() {
     // Get UTXOs from mempool.space
     println!("\n--- Scanning for UTXOs ---");
     let utxos = csv_bitcoin::mempool_rpc::get_address_utxos(&rpc, &key.address)
+        .await
         .expect("Failed to get UTXOs");
 
     if utxos.is_empty() {
@@ -94,6 +96,7 @@ fn main() {
 
     let anchor = adapter
         .publish(commitment, seal.clone())
+        .await
         .expect("Failed to publish commitment");
 
     let txid_hex = hex::encode(anchor.txid);
@@ -123,7 +126,7 @@ fn main() {
         }
 
         // Check if tx is confirmed
-        let current_height = adapter.get_current_height_for_test();
+        let current_height = adapter.get_current_height_for_test().await;
         if current_height > anchor.block_height + required_depth as u64 {
             println!("✅ Transaction confirmed at block {}", current_height);
             break;
@@ -141,6 +144,7 @@ fn main() {
     println!("\n--- Verifying inclusion ---");
     let inclusion = adapter
         .verify_inclusion(anchor.clone())
+        .await
         .expect("Failed to verify inclusion");
 
     println!("✅ Inclusion proof:");
@@ -151,6 +155,7 @@ fn main() {
     println!("\n--- Verifying finality ---");
     let finality = adapter
         .verify_finality(anchor.clone())
+        .await
         .expect("Failed to verify finality");
 
     println!("✅ Finality proof:");
@@ -162,10 +167,11 @@ fn main() {
     println!("\n--- Testing replay prevention ---");
     adapter
         .enforce_seal(seal.clone())
+        .await
         .expect("First enforcement should succeed");
     println!("✅ First enforcement succeeded");
 
-    let replay_result = adapter.enforce_seal(seal);
+    let replay_result = adapter.enforce_seal(seal).await;
     assert!(replay_result.is_err(), "Replay should be prevented");
     println!("✅ Replay prevention works correctly");
 

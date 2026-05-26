@@ -506,7 +506,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_seal() {
         let protocol = create_test_protocol().await;
-        let seal = protocol.create_seal(Some(12345)).unwrap();
+        let seal = protocol.create_seal(Some(12345)).await.unwrap();
 
         assert!(seal.is_valid());
         assert_eq!(seal.height, 12345);
@@ -534,34 +534,26 @@ mod tests {
         assert!(seal.is_valid());
     }
 
-    #[test]
-    fn test_enforce_seal() {
-        // Note: This test runs synchronously
-        let protocol = {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async { create_test_protocol().await })
-        };
-
-        let seal = protocol.create_seal(Some(12345)).unwrap();
-        assert!(protocol.enforce_seal(seal).is_ok());
+    #[tokio::test]
+    async fn test_enforce_seal() {
+        let protocol = create_test_protocol().await;
+        let seal = protocol.create_seal(Some(12345)).await.unwrap();
+        assert!(protocol.enforce_seal(seal).await.is_ok());
 
         // Consumed seal should fail
-        let mut consumed_seal = protocol.create_seal(Some(12346)).unwrap();
+        let mut consumed_seal = protocol.create_seal(Some(12346)).await.unwrap();
         consumed_seal.consume([0u8; 32]);
-        assert!(protocol.enforce_seal(consumed_seal).is_err());
+        assert!(protocol.enforce_seal(consumed_seal).await.is_err());
     }
 
-    #[test]
-    fn test_hash_commitment() {
-        let protocol = {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async { create_test_protocol().await })
-        };
+    #[tokio::test]
+    async fn test_hash_commitment() {
+        let protocol = create_test_protocol().await;
 
         let contract_id = Hash::new([1u8; 32]);
         let previous_commitment = Hash::new([2u8; 32]);
         let transition_payload_hash = Hash::new([3u8; 32]);
-        let seal = protocol.create_seal(Some(12345)).unwrap();
+        let seal = protocol.create_seal(Some(12345)).await.unwrap();
 
         let hash = protocol.hash_commitment(
             contract_id,
@@ -583,12 +575,9 @@ mod tests {
         assert_eq!(hash.as_bytes(), hash2.as_bytes());
     }
 
-    #[test]
-    fn test_verify_inclusion() {
-        let protocol = {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async { create_test_protocol().await })
-        };
+    #[tokio::test]
+    async fn test_verify_inclusion() {
+        let protocol = create_test_protocol().await;
 
         let anchor = CelestiaAnchor::new(
             crate::proof_id::ProofLocation::Celestia {
@@ -600,7 +589,7 @@ mod tests {
             [0u8; 32],
         );
 
-        let proof = protocol.verify_inclusion(anchor);
+        let proof = protocol.verify_inclusion(anchor).await;
         assert!(proof.is_ok());
     }
 
