@@ -9,7 +9,7 @@ use crate::state::UnifiedStateManager;
 use anyhow::Result;
 use csv_keys::Mnemonic;
 use csv_keys::bip44::derive_all_chain_keys;
-use csv_protocol::ChainId;
+use csv_hash::ChainId;
 
 /// Show the hex-encoded private key for a specific chain.
 pub fn cmd_private_key(

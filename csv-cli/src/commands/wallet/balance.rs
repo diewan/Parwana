@@ -7,7 +7,7 @@ use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 
-use csv_protocol::ChainId;
+use csv_hash::ChainId;
 use csv_sdk::CsvClient;
 use csv_sdk::StoreBackend;
 

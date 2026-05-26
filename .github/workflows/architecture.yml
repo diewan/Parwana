@@ -56,3 +56,6 @@ jobs:
 
       - name: Run existing architecture guard tests
         run: cargo test -p csv-architecture --test architecture_guard
+
+      - name: Run CLI architecture compliance tests
+        run: cargo test -p csv-cli --test architecture_compliance

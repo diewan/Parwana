@@ -115,8 +115,8 @@ fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
 
     // Check RPC connectivity using csv-sdk runtime APIs
     print!("\n  Checking RPC connectivity... ");
+    use csv_hash::ChainId;
     use csv_sdk::CsvClient;
-    use csv_protocol::ChainId;
 
     let protocol_chain = ChainId::new(chain.as_str());
     match CsvClient::builder()
@@ -132,6 +132,7 @@ fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
                         client
                             .init_adapters(csv_sdk::prelude::NetworkType::Testnet)
                             .await
+                            .map_err(|e| anyhow::anyhow!("Failed to initialize adapters: {}", e))
                     })
                 }) {
                 Ok(_) => println!("{}", "Connected ✓".green()),
@@ -152,7 +153,7 @@ fn cmd_info(chain: &Chain, config: &Config) -> Result<()> {
     output::header(&format!("RPC Info: {}", chain));
 
     // Use csv-sdk runtime APIs to fetch chain info
-    use csv_protocol::ChainId;
+    use csv_hash::ChainId;
     use csv_sdk::CsvClient;
 
     let protocol_chain = ChainId::new(chain.as_str());
@@ -169,6 +170,7 @@ fn cmd_info(chain: &Chain, config: &Config) -> Result<()> {
                         client
                             .init_adapters(csv_sdk::prelude::NetworkType::Testnet)
                             .await
+                            .map_err(|e| anyhow::anyhow!("Failed to initialize adapters: {}", e))
                     })
                 }) {
                 Ok(_) => {

@@ -15,7 +15,7 @@ use csv_keys::{
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
-use csv_protocol::ChainId;
+use csv_hash::ChainId;
 
 /// Initialize wallet with one-command setup.
 pub fn cmd_init(
