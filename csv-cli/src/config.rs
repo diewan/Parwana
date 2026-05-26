@@ -4,7 +4,7 @@
 #![allow(deprecated)]
 
 // Configuration management — chains, wallets, RPC endpoints
-// Uses unified storage types from csv-adapter-store for compatibility with csv-wallet.
+// Uses unified storage types from csv-store for compatibility with csv-wallet.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,7 +12,7 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-// Re-export unified types from csv-adapter-store
+// Re-export unified types from csv-store
 pub use csv_store::state::{Chain, ChainConfig, ChainId, Network, WalletAccount};
 
 /// CSV Wallet exported JSON format (legacy, for migration from csv-wallet < 0.4)

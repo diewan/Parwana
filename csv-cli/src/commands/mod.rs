@@ -14,4 +14,3 @@ pub mod seals;
 pub mod tests;
 pub mod validate;
 pub mod wallet;
-pub mod wallet_ext;

@@ -1,13 +1,15 @@
 //! Seal management commands (Phase 5 Compliant)
 //!
-//! Uses csv-adapter runtime APIs only - no direct chain adapter dependencies.
+//! Uses csv-sdk runtime APIs only - no direct chain adapter dependencies.
 
 use anyhow::Result;
 use clap::Subcommand;
 
+use csv_hash::Hash;
+use csv_protocol::SanadId;
 use csv_sdk::CsvClient;
 
-use crate::commands::cross_chain::to_core_chain;
+use crate::commands::cross_chain::to_protocol_chain;
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::{SealRecord, UnifiedStateManager};
@@ -63,7 +65,7 @@ pub fn execute(
 fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateManager) -> Result<()> {
     output::header(&format!("Creating Seal on {}", chain));
 
-    let core_chain = to_core_chain(chain.clone());
+    let core_chain = to_protocol_chain(chain.clone());
 
     // Phase 5: Use runtime client to create seal via SanadsManager
     let client = CsvClient::builder()
@@ -75,7 +77,7 @@ fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateManager)
     let sanads = client.sanads();
 
     // Generate a commitment for seal creation
-    let commitment = csv_core::Hash::new(generate_commitment());
+    let commitment = Hash::new(generate_commitment());
 
     // Create the sanad (which internally creates a seal via the runtime)
     match sanads.create(commitment, core_chain) {
@@ -125,7 +127,7 @@ fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) 
         return Err(anyhow::anyhow!("Seal replay detected"));
     }
 
-    let core_chain = to_core_chain(chain.clone());
+    let core_chain = to_protocol_chain(chain.clone());
 
     // Use runtime to consume the seal
     let client = CsvClient::builder()
@@ -145,7 +147,7 @@ fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) 
                 .copy_from_slice(&seal_bytes[..seal_bytes.len().min(32)]);
             padded
         });
-    let sanad_id = csv_core::SanadId::new(sanad_id_bytes);
+    let sanad_id = SanadId::new(sanad_id_bytes);
 
     // Burn the sanad, which consumes the seal
     match sanads.burn(&sanad_id) {
@@ -170,7 +172,7 @@ fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager) -> Re
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid seal reference: {}", e))?;
 
-    let core_chain = to_core_chain(chain.clone());
+    let core_chain = to_protocol_chain(chain.clone());
 
     // Use runtime to verify seal status
     let client = CsvClient::builder()
@@ -190,7 +192,7 @@ fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager) -> Re
                 .copy_from_slice(&seal_bytes[..seal_bytes.len().min(32)]);
             padded
         });
-    let sanad_id = csv_core::SanadId::new(sanad_id_bytes);
+    let sanad_id = SanadId::new(sanad_id_bytes);
 
     // Check if the sanad exists and get its status
     let local_consumed = state.is_seal_consumed(&hex::encode(&seal_bytes));

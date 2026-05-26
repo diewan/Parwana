@@ -1,6 +1,6 @@
 //! Cross-chain transfer command implementation (Phase 5 Compliant)
 //!
-//! Uses only csv-adapter runtime APIs - no direct chain adapter dependencies.
+//! Uses only csv-sdk runtime APIs - no direct chain adapter dependencies.
 //! Lease management is delegated to csv-runtime.
 
 use anyhow::Result;
@@ -13,7 +13,7 @@ use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::{TransferRecord, TransferStatus, UnifiedStateManager};
 
-use super::to_core_chain;
+use super::to_protocol_chain;
 
 /// Execute cross-chain transfer using only runtime API
 pub async fn cmd_transfer(
@@ -21,12 +21,11 @@ pub async fn cmd_transfer(
     to: Chain,
     sanad_id: String,
     dest_owner: Option<String>,
-    lease_token: Option<String>,
     _config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
-    let from_chain = to_core_chain(from.clone());
-    let to_chain = to_core_chain(to.clone());
+    let from_chain = to_protocol_chain(from.clone());
+    let to_chain = to_protocol_chain(to.clone());
 
     output::header(&format!(
         "Cross-Chain Transfer: {:?} → {:?}",
@@ -52,21 +51,6 @@ pub async fn cmd_transfer(
             "Sanad {} not found in local state",
             sanad_id_hash
         ));
-    }
-
-    // Validate lease if provided
-    // Lease validation is delegated to csv-runtime which holds authoritative lease state.
-    // The CLI only passes the lease token to the runtime.
-    if let Some(lease_token_str) = &lease_token {
-        let lease_bytes = hex::decode(lease_token_str.trim_start_matches("0x"))
-            .map_err(|e| anyhow::anyhow!("Invalid lease token: {}", e))?;
-        if lease_bytes.len() < 32 {
-            return Err(anyhow::anyhow!(
-                "Invalid lease token: expected at least 32 bytes, got {} bytes",
-                lease_bytes.len()
-            ));
-        }
-        output::info("Lease token accepted — validation delegated to runtime.");
     }
 
     // Get destination owner address

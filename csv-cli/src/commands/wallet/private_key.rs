@@ -9,6 +9,7 @@ use crate::state::UnifiedStateManager;
 use anyhow::Result;
 use csv_keys::Mnemonic;
 use csv_keys::bip44::derive_all_chain_keys;
+use csv_protocol::ChainId;
 
 /// Show the hex-encoded private key for a specific chain.
 pub fn cmd_private_key(
@@ -34,7 +35,7 @@ pub fn cmd_private_key(
     let keys = derive_all_chain_keys(&seed_array, 0);
 
     // Find the key for the requested chain
-    let core_chain = csv_core::ChainId::new(chain.as_str());
+    let core_chain = ChainId::new(chain.as_str());
     let secret_key = keys
         .get(&core_chain)
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;

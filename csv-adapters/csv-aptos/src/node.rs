@@ -42,14 +42,26 @@ impl AptosNode {
 
     /// Make a GET request to the Aptos REST API
     async fn get(&self, path: &str) -> RpcResult<Value> {
-        let url = format!("{}/v1{}", self.rpc_url, path);
+        // Avoid /v1 duplication if the URL already contains it
+        let base = if self.rpc_url.ends_with("/v1") {
+            &self.rpc_url
+        } else {
+            &format!("{}/v1", self.rpc_url)
+        };
+        let url = format!("{}{}", base, path);
         let response: Value = self.client.get(&url).send().await?.json().await?;
         Ok(response)
     }
 
     /// Make a POST request to the Aptos REST API
     async fn post(&self, path: &str, body: &Value) -> RpcResult<Value> {
-        let url = format!("{}/v1{}", self.rpc_url, path);
+        // Avoid /v1 duplication if the URL already contains it
+        let base = if self.rpc_url.ends_with("/v1") {
+            &self.rpc_url
+        } else {
+            &format!("{}/v1", self.rpc_url)
+        };
+        let url = format!("{}{}", base, path);
         let response: Value = self
             .client
             .post(&url)
@@ -258,36 +270,95 @@ impl AptosAccountReader for AptosNode {
         let resource_type = resource_type.to_string();
         Box::pin(async move {
             let addr_str = format_address(address);
+            
+            // For CoinStore resources, use the dedicated /balance endpoint
+            // This is more efficient than /resources which returns all account resources
+            // Endpoint format: /accounts/{address}/balance/{coin_type}
+            if resource_type.contains("CoinStore") && resource_type.contains("AptosCoin") {
+                // Extract coin type from CoinStore<T> format
+                // e.g., "0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>" -> "0x1::aptos_coin::AptosCoin"
+                let coin_type = resource_type
+                    .strip_prefix("0x1::coin::CoinStore<")
+                    .and_then(|s| s.strip_suffix(">"))
+                    .ok_or_else(|| {
+                        format!("Invalid CoinStore resource type format: {}", resource_type)
+                    })?;
+
+                let result = self
+                    .get(&format!(
+                        "/accounts/{}/balance/{}",
+                        addr_str, coin_type
+                    ))
+                    .await?;
+
+                // Check if the endpoint returned an error (account not initialized)
+                if result.get("error_code").is_some() {
+                    // Account doesn't have CoinStore initialized, return zero balance
+                    let mut bcs_data = vec![0u8; 8];
+                    bcs_data.copy_from_slice(&0u64.to_le_bytes());
+                    return Ok(Some(AptosResource { data: bcs_data }));
+                }
+
+                if result.is_null() {
+                    return Ok(None);
+                }
+
+                // /balance endpoint can return either:
+                // 1. A direct number: 1000000000
+                // 2. An object: { balance: "1000000000" }
+                let balance = if result.is_number() {
+                    result.as_u64().ok_or_else(|| {
+                        format!("Failed to parse balance as number: {:?}", result)
+                    })?
+                } else {
+                    let balance_str = result
+                        .get("balance")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            format!("Failed to extract balance from response: {:?}", result)
+                        })?;
+                    balance_str.parse::<u64>().map_err(|e| {
+                        format!("Failed to parse balance '{}': {}", balance_str, e)
+                    })?
+                };
+                
+                // Construct BCS data: coin.value (u64, 8 bytes little-endian) at offset 0
+                let mut bcs_data = vec![0u8; 8];
+                bcs_data.copy_from_slice(&balance.to_le_bytes());
+                return Ok(Some(AptosResource { data: bcs_data }));
+            }
+
+            // For non-CoinStore resources, fall back to /resources endpoint
             let result = self
                 .get(&format!(
-                    "/accounts/{}/resource/{}",
-                    addr_str, resource_type
+                    "/accounts/{}/resources",
+                    addr_str
                 ))
                 .await?;
 
-            if result.is_null() || result.get("type").is_none() {
+            if result.is_null() {
                 return Ok(None);
             }
 
-            // For CoinStore resources, extract the balance from JSON and construct BCS data
-            // CoinStore<T> JSON structure: { coin: { value: <balance> }, ... }
-            let data = Self::required_field(&result, "data")?;
-            
-            // Check if this is a CoinStore resource and extract balance
-            if let Some(coin) = data.get("coin") {
-                if let Some(balance_str) = coin.get("value").and_then(|v| v.as_str()) {
-                    if let Ok(balance) = balance_str.parse::<u64>() {
-                        // Construct BCS data: coin.value (u64, 8 bytes little-endian) at offset 0
-                        let mut bcs_data = vec![0u8; 8];
-                        bcs_data.copy_from_slice(&balance.to_le_bytes());
-                        return Ok(Some(AptosResource { data: bcs_data }));
-                    }
+            // The response is an array of resources
+            let resources = result.as_array().ok_or_else(|| {
+                format!("Expected array of resources, got: {:?}", result)
+            })?;
+
+            // Find the resource matching the requested type
+            for resource in resources {
+                let res_type = resource.get("type").and_then(|v| v.as_str());
+                if res_type != Some(&resource_type) {
+                    continue;
                 }
+
+                let data = Self::required_field(resource, "data")?;
+                let data_bytes = serde_json::to_vec(data)?;
+                return Ok(Some(AptosResource { data: data_bytes }));
             }
 
-            // For non-CoinStore resources, return raw JSON bytes
-            let data_bytes = serde_json::to_vec(data)?;
-            Ok(Some(AptosResource { data: data_bytes }))
+            // Resource not found
+            Ok(None)
         })
     }
 }

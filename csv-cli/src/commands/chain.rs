@@ -113,14 +113,29 @@ fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
         output::kv("Default Fee", &fee.to_string());
     }
 
-    // Check RPC connectivity
+    // Check RPC connectivity using csv-sdk runtime APIs
     print!("\n  Checking RPC connectivity... ");
-    match reqwest::blocking::get(&chain_config.rpc_url) {
-        Ok(resp) => {
-            if resp.status().is_success() || resp.status().is_server_error() {
-                println!("{}", "Connected ✓".green());
-            } else {
-                println!("{} ({})", "Partial".yellow(), resp.status());
+    use csv_sdk::CsvClient;
+    use csv_protocol::ChainId;
+
+    let protocol_chain = ChainId::new(chain.as_str());
+    match CsvClient::builder()
+        .with_chain(protocol_chain.clone())
+        .build()
+    {
+        Ok(client) => {
+            // Try to initialize the adapter to verify connectivity
+            match tokio::runtime::Runtime::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create runtime: {}", e))
+                .and_then(|rt| {
+                    rt.block_on(async {
+                        client
+                            .init_adapters(csv_sdk::prelude::NetworkType::Testnet)
+                            .await
+                    })
+                }) {
+                Ok(_) => println!("{}", "Connected ✓".green()),
+                Err(e) => println!("{} ({})", "Failed ✗".red(), e),
             }
         }
         Err(e) => {
@@ -136,52 +151,39 @@ fn cmd_info(chain: &Chain, config: &Config) -> Result<()> {
 
     output::header(&format!("RPC Info: {}", chain));
 
-    // Try to fetch chain info from RPC
-    match chain.as_str() {
-        "bitcoin" => {
-            let url = format!(
-                "{}/blocks/tip/height",
-                chain_config.rpc_url.trim_end_matches('/')
-            );
-            match reqwest::blocking::get(&url)?.text() {
-                Ok(height) => {
-                    output::kv("Current Height", height.trim());
+    // Use csv-sdk runtime APIs to fetch chain info
+    use csv_protocol::ChainId;
+    use csv_sdk::CsvClient;
+
+    let protocol_chain = ChainId::new(chain.as_str());
+    match CsvClient::builder()
+        .with_chain(protocol_chain.clone())
+        .build()
+    {
+        Ok(client) => {
+            // Try to get chain info through runtime
+            match tokio::runtime::Runtime::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create runtime: {}", e))
+                .and_then(|rt| {
+                    rt.block_on(async {
+                        client
+                            .init_adapters(csv_sdk::prelude::NetworkType::Testnet)
+                            .await
+                    })
+                }) {
+                Ok(_) => {
+                    output::kv("Endpoint", &chain_config.rpc_url);
+                    output::kv("Status", "Connected");
                 }
-                Err(e) => output::warning(&format!("Could not fetch height: {}", e)),
+                Err(e) => {
+                    output::kv("Endpoint", &chain_config.rpc_url);
+                    output::warning(&format!("Could not fetch chain info: {}", e));
+                }
             }
         }
-        "ethereum" => {
-            output::info("Ethereum RPC info requires JSON-RPC call (eth_blockNumber)");
+        Err(e) => {
             output::kv("Endpoint", &chain_config.rpc_url);
-        }
-        "sui" => {
-            output::info(
-                "Sui RPC info requires JSON-RPC call (sui_getLatestCheckpointSequenceNumber)",
-            );
-            output::kv("Endpoint", &chain_config.rpc_url);
-        }
-        "aptos" => {
-            let url = format!("{}/ledger_info", chain_config.rpc_url.trim_end_matches('/'));
-            match reqwest::blocking::get(&url)?.json::<serde_json::Value>() {
-                Ok(info) => {
-                    if let Some(ledger) = info.get("ledger_info") {
-                        if let Some(version) = ledger.get("ledger_version") {
-                            output::kv("Ledger Version", version.as_str().unwrap_or("unknown"));
-                        }
-                        if let Some(epoch) = ledger.get("epoch") {
-                            output::kv("Epoch", epoch.as_str().unwrap_or("unknown"));
-                        }
-                    }
-                }
-                Err(e) => output::warning(&format!("Could not fetch ledger info: {}", e)),
-            }
-        }
-        "solana" => {
-            output::info("Solana RPC info requires JSON-RPC call (getEpochInfo)");
-            output::kv("Endpoint", &chain_config.rpc_url);
-        }
-        _ => {
-            output::warning(&format!("Unknown chain: {}", chain));
+            output::warning(&format!("Failed to initialize client: {}", e));
         }
     }
 

@@ -6,6 +6,7 @@ use clap::Subcommand;
 use sha2::Digest;
 
 use csv_hash::Hash;
+use csv_protocol::ChainId;
 
 use crate::config::{Chain, Config};
 use crate::output;
@@ -73,8 +74,8 @@ async fn cmd_create(
     use csv_sdk::CsvClient;
     use csv_sdk::StoreBackend;
 
-    // Map CLI Chain to core Chain
-    let core_chain = csv_core::ChainId::new(chain.as_str());
+    // Map CLI Chain to protocol ChainId
+    let core_chain = ChainId::new(chain.as_str());
 
     // Build CSV client with the requested chain enabled
     let client = CsvClient::builder()
@@ -95,7 +96,7 @@ async fn cmd_create(
         }
         hasher.finalize().into()
     };
-    let commitment = csv_core::Hash::new(commitment_bytes);
+    let commitment = Hash::new(commitment_bytes);
 
     // Step 1: Create a seal on the chain
     let runtime = client.chain_runtime();

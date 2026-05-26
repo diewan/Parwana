@@ -1,12 +1,13 @@
 //! Wallet balance checking commands (Phase 5 Compliant).
 //!
-//! Uses csv-adapter runtime APIs only - no direct chain adapter dependencies.
+//! Uses csv-sdk runtime APIs only - no direct chain adapter dependencies.
 
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 
+use csv_protocol::ChainId;
 use csv_sdk::CsvClient;
 use csv_sdk::StoreBackend;
 
@@ -23,7 +24,7 @@ pub async fn cmd_balance(
         output::header(&format!("{} Balance", chain));
         output::kv("Address", &addr);
 
-        // Query balance from chain using csv-adapter runtime
+        // Query balance from chain using csv-sdk runtime
         match query_balance(&chain, &addr, config).await {
             Ok(balance) => {
                 output::kv("Balance", &format!("{} {}", balance, chain_symbol(&chain)));
@@ -73,7 +74,7 @@ pub fn cmd_list(_config: &Config, state: &mut UnifiedStateManager) -> Result<()>
     Ok(())
 }
 
-/// Query balance from chain using csv-adapter runtime APIs.
+/// Query balance from chain using csv-sdk runtime APIs.
 ///
 /// This function uses only the unified CsvClient runtime, avoiding direct
 /// chain adapter dependencies per Phase 5 of the Production Guarantee Plan.
@@ -82,8 +83,8 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
     use csv_sdk::prelude::NetworkType;
     use std::collections::HashMap;
 
-    // Map CLI Chain to core Chain
-    let core_chain = csv_core::ChainId::new(chain.as_str());
+    // Map CLI Chain to protocol ChainId
+    let core_chain = ChainId::new(chain.as_str());
 
     // Build SDK config from CLI config, passing through xpub
     let sdk_chain = config.chains.get(&core_chain.clone()).cloned();

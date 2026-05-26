@@ -506,9 +506,9 @@ impl CsvClient {
                     .filter(|url| !url.is_empty())
                     .unwrap_or_else(|| {
                         if _is_testnet {
-                            "https://fullnode.testnet.aptoslabs.com/v1".to_string()
+                            "https://api.testnet.aptoslabs.com/v1".to_string()
                         } else {
-                            "https://fullnode.mainnet.aptoslabs.com/v1".to_string()
+                            "https://api.mainnet.aptoslabs.com/v1".to_string()
                         }
                     });
                 let aptos_config = csv_aptos::AptosConfig {

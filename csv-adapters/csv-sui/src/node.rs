@@ -23,11 +23,12 @@ pub struct SuiNode {
 impl SuiNode {
     /// Create a new Sui RPC client
     pub fn new(rpc_url: &str) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| panic!("Failed to build HTTP client: {}", e));
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("Failed to build HTTP client"),
+            client,
             rpc_url: rpc_url.to_string(),
         }
     }
@@ -320,51 +321,39 @@ impl SuiRpc for SuiNode {
         let owner_hex = format!("0x{}", hex::encode(owner));
         let result = self
             .rpc_call(
-                "suix_getCoins",
+                "suix_getBalance",
                 json!([
-                    owner_hex, null, // coin type (all coins)
-                    null, // cursor
-                    null  // limit
+                    owner_hex,
+                    "0x2::sui::SUI" // coin type
                 ]),
             )
             .await?;
 
-        if let Some(data) = result.get("data") {
-            if let Some(coins) = data.as_array() {
-                return Ok(coins
-                    .iter()
-                    .filter_map(|coin| {
-                        let coin_obj = coin.get("coinObjectId")?;
-                        let id_str = coin_obj.as_str()?;
-                        let object_id =
-                            Self::parse_object_id_static(id_str.trim_start_matches("0x")).ok()?;
-                        let version = coin.get("version")?.as_str()?.parse().ok()?;
-                        let digest = coin
-                            .get("digest")
-                            .and_then(|value| value.as_str())
-                            .and_then(|digest| Self::parse_digest_static(digest).ok())?;
-                        
-                        // Extract balance from JSON response (suix_getCoins returns balance directly)
-                        let balance = coin.get("balance")?.as_str()?.parse::<u64>().ok()?;
-                        
-                        // Construct BCS data for balance parsing: id (32 bytes) + value (u64, 8 bytes little-endian)
-                        let mut bcs_data = vec![0u8; 40];
-                        bcs_data[32..40].copy_from_slice(&balance.to_le_bytes());
-                        
-                        Some(SuiObject {
-                            object_id,
-                            version,
-                            digest,
-                            owner: owner.to_vec(),
-                            object_type: "0x2::coin::Coin<0x2::sui::SUI>".to_string(),
-                            has_public_transfer: true,
-                            bcs_data: Some(bcs_data),
-                        })
-                    })
-                    .collect());
-            }
-        }
-        Ok(Vec::new())
+        // suix_getBalance returns: { totalBalance: string, coinType: string }
+        let total_balance = result
+            .get("totalBalance")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                format!(
+                    "Failed to parse totalBalance from suix_getBalance response: {:?}",
+                    result
+                )
+            })?;
+
+        // Construct a single SUI coin object with the total balance
+        let mut bcs_data = vec![0u8; 40];
+        bcs_data[32..40].copy_from_slice(&total_balance.to_le_bytes());
+
+        Ok(vec![SuiObject {
+            object_id: [0u8; 32], // Placeholder object ID
+            version: 1,
+            digest: [0u8; 32],
+            owner: owner.to_vec(),
+            object_type: "0x2::coin::Coin<0x2::sui::SUI>".to_string(),
+            has_public_transfer: true,
+            bcs_data: Some(bcs_data),
+        }])
     }
 
     async fn execute_signed_transaction(
@@ -446,11 +435,12 @@ impl SuiRpc for SuiNode {
     }
 
     fn clone_boxed(&self) -> Box<dyn SuiRpc> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| panic!("Failed to build HTTP client: {}", e));
         Box::new(SuiNode {
-            client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("Failed to build HTTP client"),
+            client,
             rpc_url: self.rpc_url.clone(),
         })
     }

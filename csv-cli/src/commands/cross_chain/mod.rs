@@ -1,32 +1,21 @@
 //! Cross-chain transfer commands (Phase 5 Compliant)
 //!
-//! This module uses only the csv-adapter runtime API.
+//! This module uses only the csv-sdk runtime API.
 //! All chain operations are delegated through `CsvClient::transfers()`.
 
 use anyhow::Result;
 use clap::Subcommand;
 
+use csv_protocol::ChainId;
+
 use crate::config::{Chain, Config};
 use crate::state::UnifiedStateManager;
 
-pub mod lease;
 pub mod status;
 pub mod transfer;
 
 #[derive(Subcommand)]
 pub enum CrossChainAction {
-    /// Acquire a lease for a sanad (required before transfer)
-    AcquireLease {
-        /// Sanad ID to lease (hex)
-        #[arg(long)]
-        sanad_id: String,
-        /// Time-to-live in seconds (default: 300)
-        #[arg(long, default_value = "300")]
-        ttl: u64,
-        /// Source chain
-        #[arg(long)]
-        from: Chain,
-    },
     /// Execute a cross-chain Sanad transfer (via runtime)
     Transfer {
         /// Source chain
@@ -41,9 +30,6 @@ pub enum CrossChainAction {
         /// Destination owner address (hex)
         #[arg(long)]
         dest_owner: Option<String>,
-        /// Lease token (hex) - acquired via acquire-lease command
-        #[arg(long)]
-        lease_token: Option<String>,
     },
     /// Check transfer status
     Status {
@@ -72,19 +58,13 @@ pub async fn execute(
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     match action {
-        CrossChainAction::AcquireLease {
-            sanad_id,
-            ttl,
-            from,
-        } => lease::cmd_acquire_lease(sanad_id, ttl, from, config, state),
         CrossChainAction::Transfer {
             from,
             to,
             sanad_id,
             dest_owner,
-            lease_token,
         } => {
-            transfer::cmd_transfer(from, to, sanad_id, dest_owner, lease_token, config, state).await
+            transfer::cmd_transfer(from, to, sanad_id, dest_owner, config, state).await
         }
         CrossChainAction::Status { transfer_id } => status::cmd_status(transfer_id, state),
         CrossChainAction::List { from, to } => status::cmd_list(from, to, state),
@@ -92,7 +72,7 @@ pub async fn execute(
     }
 }
 
-/// Convert CLI Chain enum to core Chain enum
-pub fn to_core_chain(chain: Chain) -> csv_core::ChainId {
-    csv_core::ChainId::new(chain.as_str())
+/// Convert CLI Chain enum to protocol ChainId
+pub fn to_protocol_chain(chain: Chain) -> ChainId {
+    ChainId::new(chain.as_str())
 }
