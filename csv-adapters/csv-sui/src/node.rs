@@ -343,6 +343,14 @@ impl SuiRpc for SuiNode {
                             .get("digest")
                             .and_then(|value| value.as_str())
                             .and_then(|digest| Self::parse_digest_static(digest).ok())?;
+                        
+                        // Extract balance from JSON response (suix_getCoins returns balance directly)
+                        let balance = coin.get("balance")?.as_str()?.parse::<u64>().ok()?;
+                        
+                        // Construct BCS data for balance parsing: id (32 bytes) + value (u64, 8 bytes little-endian)
+                        let mut bcs_data = vec![0u8; 40];
+                        bcs_data[32..40].copy_from_slice(&balance.to_le_bytes());
+                        
                         Some(SuiObject {
                             object_id,
                             version,
@@ -350,7 +358,7 @@ impl SuiRpc for SuiNode {
                             owner: owner.to_vec(),
                             object_type: "0x2::coin::Coin<0x2::sui::SUI>".to_string(),
                             has_public_transfer: true,
-                            bcs_data: None,
+                            bcs_data: Some(bcs_data),
                         })
                     })
                     .collect());

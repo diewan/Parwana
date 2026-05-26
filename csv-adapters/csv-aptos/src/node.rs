@@ -269,7 +269,24 @@ impl AptosAccountReader for AptosNode {
                 return Ok(None);
             }
 
-            let data_bytes = serde_json::to_vec(Self::required_field(&result, "data")?)?;
+            // For CoinStore resources, extract the balance from JSON and construct BCS data
+            // CoinStore<T> JSON structure: { coin: { value: <balance> }, ... }
+            let data = Self::required_field(&result, "data")?;
+            
+            // Check if this is a CoinStore resource and extract balance
+            if let Some(coin) = data.get("coin") {
+                if let Some(balance_str) = coin.get("value").and_then(|v| v.as_str()) {
+                    if let Ok(balance) = balance_str.parse::<u64>() {
+                        // Construct BCS data: coin.value (u64, 8 bytes little-endian) at offset 0
+                        let mut bcs_data = vec![0u8; 8];
+                        bcs_data.copy_from_slice(&balance.to_le_bytes());
+                        return Ok(Some(AptosResource { data: bcs_data }));
+                    }
+                }
+            }
+
+            // For non-CoinStore resources, return raw JSON bytes
+            let data_bytes = serde_json::to_vec(data)?;
             Ok(Some(AptosResource { data: data_bytes }))
         })
     }
