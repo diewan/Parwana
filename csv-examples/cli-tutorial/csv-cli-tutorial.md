@@ -1,5 +1,7 @@
 # CSV Protocol CLI Tutorial
 
+> **Note:** This tutorial has been moved to the root of the repository. See `csv-cli-tutorial.md` for the latest version.
+
 A comprehensive guide to using the CSV Protocol CLI for cross-chain Sanad management, proof generation, trust management, and content operations on testnet.
 
 ## Table of Contents
@@ -42,6 +44,7 @@ cp target/release/csv ~/.local/bin/csv
 ### First Run
 
 When you run `csv` for the first time, you'll be prompted for:
+
 - **Passphrase**: Used to encrypt your state file at `~/.csv/unified_storage.json`
 - **Configuration**: Default testnet settings are loaded from `~/.csv/config.toml`
 
@@ -76,6 +79,7 @@ All commands support these global flags:
 | `--config` | `-C` | Config file path (default: `~/.csv/config.toml`) |
 
 Example:
+
 ```bash
 csv --verbose wallet list
 csv --canonical proof verify --chain ethereum --proof-file proof.json
@@ -98,6 +102,7 @@ csv chain status --chain ethereum
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Ethereum Status
@@ -143,6 +148,7 @@ csv wallet init --network test --words 12
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Wallet Initialization
@@ -174,6 +180,7 @@ csv wallet export
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Wallet Export
@@ -195,6 +202,7 @@ csv wallet balance --chain ethereum
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Ethereum Balance
@@ -211,6 +219,7 @@ csv wallet list
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Wallet Addresses
@@ -231,6 +240,7 @@ csv wallet private-key --chain ethereum
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Private Key
@@ -252,6 +262,7 @@ csv sanad create --chain bitcoin --value 100000
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Create Sanad
@@ -277,6 +288,7 @@ csv sanad show 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef123456789
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Sanad Details
@@ -298,6 +310,7 @@ csv sanad list --chain ethereum
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Sanad List
@@ -334,6 +347,7 @@ csv proof generate --chain ethereum 0xabcdef1234567890abcdef1234567890abcdef1234
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Generate Proof
@@ -349,11 +363,13 @@ Generate Proof
 ```
 
 View the proof:
+
 ```bash
 cat proof.json
 ```
 
 Output:
+
 ```json
 {
   "seal_ref": {
@@ -387,6 +403,7 @@ csv proof verify --chain sui --proof-file proof.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Verify Proof on Sui
@@ -409,6 +426,7 @@ csv proof verify-cross-chain --source ethereum --dest sui proof.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Cross-Chain Proof Verification
@@ -453,6 +471,7 @@ csv cross-chain transfer --from bitcoin --to sui --sanad-id 0xabcdef1234567890ab
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Cross-Chain Transfer
@@ -481,6 +500,7 @@ csv cross-chain status 0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Transfer Status
@@ -507,6 +527,7 @@ csv cross-chain list --to sui
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Transfer List
@@ -535,6 +556,7 @@ csv seal create --chain ethereum --value 1000000000000000000
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Create Seal
@@ -564,6 +586,7 @@ csv seal verify --chain ethereum 0x1234567890abcdef1234567890abcdef1234567890abc
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Seal Verification
@@ -600,6 +623,7 @@ csv content create --input leaves.txt --output content-tree.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Create Content Tree
@@ -631,6 +655,7 @@ csv content prove --tree content-tree.json --index 1
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Generate Merkle Proof
@@ -661,6 +686,7 @@ csv content verify --tree content-tree.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Verify Content Tree
@@ -681,6 +707,7 @@ csv content verify --tree content-tree.json --leaf "This is a test" --leaf-index
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Verify Content Tree
@@ -704,6 +731,7 @@ csv content encrypt --tree content-tree.json --key-id my-encryption-key --algori
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Encrypt Content Subtree
@@ -736,6 +764,7 @@ csv content disclose --tree content-tree.json --include 0,2
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Selective Disclosure
@@ -766,6 +795,7 @@ csv content attach add --tree content-tree.json --file document.pdf --media-type
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Add Attachment Reference
@@ -784,6 +814,7 @@ csv content participants add --tree content-tree.json --key 0x1234567890abcdef12
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Add Participant
@@ -801,6 +832,7 @@ csv content claims create --tree content-tree.json --predicate authentic --descr
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Create Content Claim
@@ -827,6 +859,7 @@ csv trust status
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Trust Package Status
@@ -852,6 +885,7 @@ csv trust export -o my-trust-package.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Export Trust Package
@@ -868,6 +902,7 @@ csv trust import my-trust-package.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Import Trust Package
@@ -890,6 +925,7 @@ csv trust verify my-trust-package.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Verify Trust Package
@@ -914,6 +950,7 @@ csv trust rotate 1000100 0xabcdef1234567890abcdef1234567890abcdef1234567890abcde
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Rotate Trust Checkpoint
@@ -938,6 +975,7 @@ csv runtime status
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Runtime Status
@@ -956,6 +994,7 @@ csv runtime health
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Component Health Checks
@@ -979,6 +1018,7 @@ csv runtime admission
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Admission Control
@@ -1004,6 +1044,7 @@ csv runtime events --count 10
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Runtime Events
@@ -1033,6 +1074,7 @@ csv validate consignment consignment.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Validating Consignment
@@ -1058,6 +1100,7 @@ csv validate seal 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Validating Seal Consumption
@@ -1075,6 +1118,7 @@ csv validate offline --file proof.json
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Offline Proof Verification
@@ -1142,6 +1186,7 @@ csv test run --chain-pair bitcoin:sui
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Running Test: bitcoin -> sui
@@ -1163,6 +1208,7 @@ csv test run-all
 ```
 
 Output:
+
 ```
 ═══════════════════════════════════════════════════════════════
 Running All Tests (9 chain pairs)
@@ -1212,11 +1258,12 @@ Save your mnemonic phrase securely! This is the only way to recover your wallet.
 ### Step 2: Fund Your Wallets
 
 Get testnet tokens from faucets:
-- **Bitcoin Signet**: https://bitcoin-signet.com/faucet-to-url
-- **Ethereum Sepolia**: https://sepoliafaucet.com
-- **Sui Testnet**: https://docs.sui.io/build/testnet
-- **Aptos Testnet**: https://aptos.dev/networks/testnet
-- **Solana Devnet**: https://faucet.solana.com
+
+- **Bitcoin Signet**: <https://bitcoin-signet.com/faucet-to-url>
+- **Ethereum Sepolia**: <https://sepoliafaucet.com>
+- **Sui Testnet**: <https://docs.sui.io/build/testnet>
+- **Aptos Testnet**: <https://aptos.dev/networks/testnet>
+- **Solana Devnet**: <https://faucet.solana.com>
 
 ### Step 3: Check Your Balances
 
@@ -1329,6 +1376,7 @@ csv runtime admission
 ### Common Issues
 
 **RPC Connection Failed**
+
 ```bash
 # Check chain status
 csv chain status --chain ethereum
@@ -1338,6 +1386,7 @@ csv chain set-rpc --chain ethereum https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
 ```
 
 **Transfer Stuck**
+
 ```bash
 # Check runtime health
 csv runtime health
@@ -1350,6 +1399,7 @@ csv cross-chain retry <TRANSFER_ID>
 ```
 
 **Trust Package Expired**
+
 ```bash
 # Check trust status
 csv trust status
@@ -1359,6 +1409,7 @@ csv trust import new-trust-package.json
 ```
 
 **Proof Verification Failed**
+
 ```bash
 # Verify offline
 csv validate offline --file proof.json
@@ -1374,4 +1425,4 @@ csv validate seal <SEAL_REF>
 - Explore the code examples in `csv-examples/`
 - Run the full test suite: `csv test run-all`
 - Read the protocol documentation in `csv-docs/`
-- Contribute to the project: https://github.com/Diewan/csv-protocol
+- Contribute to the project: <https://github.com/Diewan/csv-protocol>

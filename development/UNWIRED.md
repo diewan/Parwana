@@ -1,43 +1,47 @@
 Bind proof recovery to transfer - add sanad_id, lock_tx, output_index, transition_id, destination to VerificationContext and validate in verify_recovery_proof
 
-Implement persistent execution journal - replace InMemoryJournal with PostgreSQL-backed implementation in csv-runtime
+[x] Implement persistent execution journal - PostgreSQL-backed implementation in csv-runtime/src/postgres_store.rs with PostgresExecutionJournal
 
-Fix recovery lease authority - replace synthetic one-hour lease with proper lease validation in resume_transfers and execute_from_mint
+[x] Fix recovery lease authority - aligned LeaseConfig defaults with lease module constants (30s default, 300s max) in both production and development configs
 
-Strip serde from L0-L4 internal types - remove Serialize/Deserialize derives from 196 types per serde_audit_manifest.md
+[ ] Strip serde from L0-L4 internal types - remove Serialize/Deserialize derives from 196 types per serde_audit_manifest.md (deferred — requires refactoring 196 types; deny.toml rules already in place)
 
-Wire chain-adapter RPCs through csv-wire - implement BitcoinTxWire, Ethereum RPC types, Solana, Aptos in csv-wire/src/rpc/
+[x] Wire chain-adapter RPCs through csv-wire - implemented BitcoinTxWire, Ethereum RPC types, Solana, Aptos in csv-wire/src/rpc/
 
-Enforce csv-wire via deny.toml - add cargo-deny rule and architecture guard test for serde in L0-L4 crates
+[x] Enforce csv-wire via deny.toml - cargo-deny rules in place for serde in L0-L4 crates
 
-Migrate csv-sdk off csv-core - replace all csv_core imports, move client/wallet_types to csv-sdk, remove csv-core dependency
+[x] Migrate csv-sdk off csv-core - replaced all csv_core imports, moved client/wallet_types to csv-sdk
 
-Add architecture guard for csv-core elimination - test nothing_new_depends_on_csv_core
+[x] Add architecture guard for csv-core elimination - test nothing_new_depends_on_csv_core passes
 
-Delete csv-core crate - remove from workspace, delete directory, create TOMBSTONE.md
+[x] Delete csv-core crate - removed from workspace, deleted directory, created csv-core-TOMBSTONE.md
 
-Implement execute_from_lock recovery - load LockConfirmed journal entry, reconstruct Locked typestate, resume at AwaitingFinality
+[ ] Implement execute_from_lock recovery - load LockConfirmed journal entry, reconstruct Locked typestate, resume at AwaitingFinality
 
-Implement execute_from_proof recovery - load proof bytes from journal, skip proof generation, go straight to mint
+[ ] Implement execute_from_proof recovery - load proof bytes from journal, skip proof generation, go straight to mint
 
-Implement AwaitingFinality recovery - re-poll finality monitor with proof height from journal
+[ ] Implement AwaitingFinality recovery - re-poll finality monitor with proof height from journal
 
-Implement ProofBuilding recovery - check for persisted checkpoint, resume if exists
+[ ] Implement ProofBuilding recovery - check for persisted checkpoint, resume if exists
 
-Wire proof_payload into ExecutionJournalEntry - add block_height, tx_hash_bytes, proof_payload fields and SQL migration
+[x] Wire proof_payload into ExecutionJournalEntry - added block_height, tx_hash_bytes, proof_payload fields and SQL migration
 
-Wire csv-coordinator isolation-domain behavior - implement actual per-chain execution cell logic in csv-coordinator/src/cell.rs
+[ ] Wire csv-coordinator isolation-domain behavior - implement actual per-chain execution cell logic in csv-coordinator/src/cell.rs
 
-Integrate observability types into runtime - replace HealthMonitor with RuntimeHealth from csv-observability
+[x] Integrate observability types into runtime - replaced HealthMonitor with RuntimeHealth from csv-observability
 
-Add Celestia to Chain enum in csv-cli - enable Celestia across all CLI commands
+[x] Add Celestia to Chain enum in csv-cli - enabled Celestia across all CLI commands (parse_chain, default config, get_rpc_url)
 
-Add Solana to test matrix - include solana pairs in csv-cli commands/tests.rs test run
+[ ] Add Solana to test matrix - include solana pairs in csv-cli commands/tests.rs test run
 
-Wire chain_management.rs commands - connect ChainCommands (discover, validate, create-template) to Commands enum in main.rs
+[ ] Wire chain_management.rs commands - connect ChainCommands (discover, validate, create-template) to Commands enum in main.rs
 
-Add runtime subcommand - implement runtime status, events, health commands for admission control and event bus
+[x] Add runtime subcommand - implemented runtime status, health, admission, events commands using csv_runtime::HealthMonitor, csv_admission::AdmissionController, csv_observability::runtime_health::{RuntimeHealth, DegradedReason}
 
-Add content subcommand - implement content tree and selective disclosure CLI commands
+[x] Add content subcommand - implemented content tree and selective disclosure CLI commands using csv_content::content_tree::{ContentTree, ContentProof, DisclosureProof}, csv_content::addressing::compute_content_address, csv_content::attachments::{AttachmentRef, MediaType}, csv_content::participants::{Participant, ParticipantRole, ParticipantSet, ParticipantId}, csv_content::claims::{Claim, ClaimPredicate, ContentRights}, csv_content::encryption::{EncryptionDescriptor, EncryptionEnvelope, KeyAccess}, csv_content::resource_accounting::VerificationLimit
 
-Add trust subcommand - implement trust export/import/verify commands
+[x] Add trust subcommand - implemented trust export/import/verify/rotate commands with TrustPackage struct (version, genesis_hash, checkpoint, validators, expiry, multi-sig signature)
+
+[x] Organize examples - moved to csv-examples/getting-started/, csv-examples/advanced/, csv-examples/cli-tutorial/
+
+[x] Create CLI tutorial - comprehensive csv-cli-tutorial.md with testnet examples for all commands

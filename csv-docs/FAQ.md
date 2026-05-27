@@ -26,7 +26,7 @@ A "Bridge" implies a middleman or a vault where assets are locked. In CSV, we ar
 
 Fee escrow in source-chain native token.
 
-When a transfer is initiated, the sender escrows a small amount of the source chain's native asset (e.g., a few basis points of gas equivalent). This amount is released to the proof-delivery operator upon cryptographic confirmation of successful destination mint. No new token is issued. 
+When a transfer is initiated, the sender escrows a small amount of the source chain's native asset (e.g., a few basis points of gas equivalent). This amount is released to the proof-delivery operator upon cryptographic confirmation of successful destination mint. No new token is issued.
 
 Operators run Nostr relay nodes and are economically incentivized by the escrow release. The protocol enforces this at the smart contract level.
 
@@ -36,7 +36,6 @@ This model:
 - Aligns proof-delivery node operator incentives
 - Is verifiable on-chain
 - Has a clear answer for every partner question about economics
-
 
 ## 2. Technical Security & Verification
 
@@ -87,13 +86,12 @@ This is the "Causal Invalidation" problem. If Chain A reorgs, the seal that anch
 
     We implement Finality Thresholds. A Proof Bundle is not "Final" until it reaches a depth (e.g., 6 blocks on BTC). If a reorg occurs deeper than our threshold, the protocol would trigger a protocol-level rollback, marking the destination asset as "Orphaned" until a new anchor is found.
 
-**Current Status (Stage 1):** The rollback mechanism is planned behavior but not yet implemented. We identifiesd this as "Unresolved problem  — partial failure between insert and mint" with no recovery protocol yet designed. This is a target feature for Phase 2/3. The coordinator inserts the ReplayId before minting (intentionally — to block duplicate mints on retry).
+**Current Status (Stage 1):** The rollback mechanism is planned behavior but not yet implemented. We identifiesd this as "Unresolved problem — partial failure between insert and mint" with no recovery protocol yet designed. This is a target feature for Phase 2/3. The coordinator inserts the ReplayId before minting (intentionally — to block duplicate mints on retry).
 If the mint then fails, the transfer is permanently poisoned with no recovery path. The rollback protocol for this case requires:
-(a) a separate `pending` state before `consumed`, 
-(b) a timeout-based expiry for `pending` entries, 
-(c) a recovery coordinator that can promote `pending` → `consumed` after verifying the mint on-chain, or demote `pending` → `available` after confirming the mint never landed. 
+(a) a separate `pending` state before `consumed`,
+(b) a timeout-based expiry for `pending` entries,
+(c) a recovery coordinator that can promote `pending` → `consumed` after verifying the mint on-chain, or demote `pending` → `available` after confirming the mint never landed.
 This protocol is not specified here and must be designed before production.
-
 
 ## 3. Competitive Comparison
 
@@ -104,3 +102,90 @@ IBC requires "Light Client" logic on both chains. This is extremely expensive (g
 ### How is this different from RGB or BitVM?
 
 We share ancestors with RGB, but CSV Protocol is designed for Multi-Chain Native Seals. While RGB is primarily Bitcoin-centric, we provide a unified verification layer for Ethereum, Solana, and Move-based chains using the same Proof Bundle format.
+
+## 4. CLI & Tooling
+
+### How do I get started with the CLI?
+
+Build the CLI with:
+
+```bash
+CXXFLAGS="-include cstdint" cargo build -p csv-cli --release
+```
+
+Then run the quick start:
+
+```bash
+csv chain list
+csv wallet init --network test --words 12
+```
+
+See `csv-cli-tutorial.md` for a comprehensive guide with testnet examples.
+
+### What chains does the CLI support?
+
+The CLI supports Bitcoin (signet), Ethereum (Sepolia), Sui (testnet), Aptos (testnet), and Solana (devnet). Configure RPC URLs with `csv chain set-rpc`.
+
+### Can I use the CLI for content management?
+
+Yes. The CLI supports Merkleized content trees with selective disclosure:
+
+```bash
+csv content create --input data.txt --output tree.json
+csv content prove --tree tree.json --index 0
+csv content disclose --tree tree.json --include 0,2
+```
+
+### How does trust management work?
+
+Trust packages define which chain states are considered authoritative. Manage them with:
+
+```bash
+csv trust status
+csv trust import trusted-package.json
+csv trust rotate <height> <hash>
+```
+
+### How do I monitor runtime health?
+
+Use the runtime monitoring commands:
+
+```bash
+csv runtime status
+csv runtime health
+csv runtime admission
+```
+
+## 5. Architecture & Development
+
+### What happened to csv-core?
+
+`csv-core` has been removed as part of the Phase 1 restructuring. All legacy types have been migrated to `csv-protocol`, `csv-algebra`, and `csv-wire`. See `csv-core-TOMBSTONE.md` for the migration path.
+
+### How is the repository structured?
+
+The repository follows a layered architecture:
+
+- `csv-algebra` — Pure typestate algebra
+- `csv-protocol` — Protocol orchestration
+- `csv-runtime` — Runtime coordination with csv-coordinator and csv-admission
+- `csv-adapters/` — Chain-specific implementations
+- `csv-cli` — Stateless CLI interface
+
+See `ARCHITECTURE.md` for the full architecture overview.
+
+### How are architecture rules enforced?
+
+CI enforces dependency rules through:
+
+- `deny.toml` — Compile-time dependency checks
+- Architecture compliance tests — Runtime verification of import rules
+- Constitution tests — Protocol invariant validation
+
+### What testing infrastructure exists?
+
+- Golden corpus tests — CBOR fixture validation
+- Integration tests — Require RPC secrets (signet, sepolia, sui testnet)
+- Adversarial tests — Byzantine simulations
+- Replay tests — Replay safety validation
+- End-to-end tests — Full transfer workflows via `csv test run-all`

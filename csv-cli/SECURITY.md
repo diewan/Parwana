@@ -31,7 +31,6 @@ We prefer all communications to be in English.
 ## Scope
 
 This security policy applies to all crates in the CSV Protocol workspace:
-- csv-core
 - csv-runtime
 - csv-sdk
 - csv-cli

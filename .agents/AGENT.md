@@ -222,7 +222,7 @@ Transfer orchestration belongs exclusively to:
 * `csv-codec` — canonical CBOR serialization (deterministic encoding)
 * `csv-coordinator` — per-chain execution cells (isolated failure domains)
 * `csv-admission` — admission control (zero chain adapter dependencies)
-* `csv-runtime` — depends only on csv-protocol/csv-core (no direct chain adapter imports)
+* `csv-runtime` — depends only on csv-protocol/csv-coordinator/csv-admission/csv-observability (no csv-core, no direct chain adapter imports)
 * `csv-verifier` — depends on csv-protocol + csv-proof + csv-hash (no csv-core dependency)
 
 **Forbidden dependencies:**
@@ -245,23 +245,30 @@ Transfer orchestration belongs exclusively to:
 * `csv-proof` — proof bundle types, replay ID derivation
 * `csv-verifier` — canonical proof verification
 * `csv-schema` — schema definitions
-* `csv-content` — content types
+* `csv-content` — content types (Merkle trees, selective disclosure, encryption)
 * `csv-storage` — storage traits and backends (RocksDB, PostgreSQL, in-memory)
 * `csv-testkit` — test fixtures and adversarial testing
 * `csv-contract-bindings` — smart contract bindings
 * `csv-coordinator` — per-chain execution cells with isolated failure domains
 * `csv-admission` — admission control and pressure boundaries
+* `csv-architecture` — architecture guardrails and dependency validation
+
+**Runtime & orchestration crates:**
+
+* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal, health monitoring (depends on csv-protocol, csv-coordinator, csv-admission, csv-observability)
+* `csv-sdk` — public SDK facade
+* `csv-observability` — metrics, logging, runtime health monitoring
+
+**CLI & tooling crates:**
+
+* `csv-cli` — CLI binary (stateless, delegates to runtime; runtime monitoring, trust management, content operations)
+* `csv-keys` — key management
+* `csv-store` — legacy state storage
 
 **Legacy crates:**
 
-* `csv-core` — legacy protocol types (migration in progress)
-* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal (depends only on csv-core/csv-protocol)
-* `csv-sdk` — public SDK facade
-* `csv-cli` — CLI binary (stateless, delegates to runtime)
-* `csv-keys` — key management
-* `csv-store` — legacy state storage
+* `csv-core` — **REMOVED** — legacy protocol types migrated to csv-protocol/csv-algebra/csv-wire. See `csv-core-TOMBSTONE.md` for migration path.
 * `csv-p2p` — peer-to-peer networking
-* `csv-observability` — metrics and observability
 
 **Chain adapters** (under `csv-adapters/`):
 `csv-bitcoin`, `csv-ethereum`, `csv-solana`, `csv-sui`, `csv-aptos`, `csv-celestia`

@@ -417,25 +417,40 @@ This indicates the protocol is evolving toward mathematically constrained execut
 | Crate          | Purpose                                   |
 | -------------- | ----------------------------------------- |
 | `csv-protocol` | Core protocol semantics and state machine |
-| `csv-runtime`  | Runtime orchestration and recovery        |
 | `csv-algebra`  | Pure domain algebra and invariants        |
-| `csv-proof`    | Proof composition and provenance          |
-| `csv-core`     | Core shared functionality                 |
+| `csv-wire`     | Wire encoding and transport layer         |
+| `csv-codec`    | Canonical serialization (CBOR)            |
 | `csv-hash`     | Domain-separated hashing                  |
-| `csv-codec`    | Canonical serialization                   |
-| `csv-wire`     | Canonical transport layer                 |
+| `csv-proof`    | Proof composition and provenance          |
+| `csv-verifier` | Canonical proof verification              |
+| `csv-content`  | Content trees, selective disclosure       |
+| `csv-schema`   | Schema definitions                        |
+
+**Note:** `csv-core` has been removed. All legacy types have been migrated to `csv-protocol`, `csv-algebra`, and `csv-wire`. See `csv-core-TOMBSTONE.md` for migration details.
 
 ---
 
 ## Runtime & Coordination
 
-| Crate             | Purpose                        |
-| ----------------- | ------------------------------ |
-| `csv-runtime`     | Transfer runtime               |
-| `csv-coordinator` | Coordination primitives        |
-| `csv-admission`   | Admission and pressure control |
-| `csv-storage`     | Persistent storage backends    |
-| `csv-store`       | State storage abstractions     |
+| Crate             | Purpose                                        |
+| ----------------- | ---------------------------------------------- |
+| `csv-runtime`     | Transfer runtime, health monitoring, recovery  |
+| `csv-coordinator` | Per-chain execution cells with failure domains |
+| `csv-admission`   | Admission control and pressure boundaries      |
+| `csv-observability` | Metrics, logging, runtime health             |
+| `csv-storage`     | Persistent storage backends (RocksDB, PostgreSQL) |
+| `csv-store`       | Legacy state storage                           |
+
+---
+
+## CLI & Tooling
+
+| Crate        | Purpose                                    |
+| ------------ | ------------------------------------------ |
+| `csv-cli`    | CLI binary (all chain/wallet/sanad/proof commands) |
+| `csv-sdk`    | Public SDK facade                          |
+| `csv-keys`   | Key management                             |
+| `csv-testkit`| Test fixtures and adversarial testing      |
 
 ---
 
