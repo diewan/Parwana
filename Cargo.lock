@@ -3090,6 +3090,7 @@ dependencies = [
  "csv-codec",
  "csv-coordinator",
  "csv-hash",
+ "csv-observability",
  "csv-proof",
  "csv-protocol",
  "csv-storage",
