@@ -8,18 +8,20 @@ publish = false
 csv-sdk = { path = "../csv-sdk", features = ["all-chains", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
+# Getting started examples
+[[example]]
+name = "subscriptions"
+path = "getting-started/subscriptions.rs"
+
+# Advanced examples
 [[example]]
 name = "gaming"
-path = "gaming.rs"
+path = "advanced/gaming.rs"
 
 [[example]]
 name = "parallel_verification"
-path = "parallel_verification.rs"
+path = "advanced/parallel_verification.rs"
 
 [[example]]
 name = "performance"
-path = "performance.rs"
-
-[[example]]
-name = "subscriptions"
-path = "subscriptions.rs"
+path = "advanced/performance.rs"
