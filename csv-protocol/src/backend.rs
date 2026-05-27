@@ -16,10 +16,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::proof::{FinalityProof, InclusionProof};
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use crate::proof::{FinalityProof, InclusionProof};
 
 /// Result type for chain operations
 pub type ChainOpResult<T> = Result<T, ChainOpError>;

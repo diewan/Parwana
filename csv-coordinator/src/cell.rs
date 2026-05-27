@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use csv_verifier::CryptographicAnchor;
 use crate::circuit::{CellCircuitBreaker, CircuitConfig};
 use crate::memory::MemoryCeiling;
+use csv_verifier::CryptographicAnchor;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// Task submitted to a chain cell.
 #[derive(Debug, Clone)]
@@ -98,9 +98,11 @@ impl ChainCell {
             return Err(CellError::CircuitOpen(self.chain_id));
         }
 
-        let estimated_size = match &task {
-            CellTask::Process(transfer) => {
-                self.memory_ceiling.try_allocate(4096).map_err(|_| CellError::MemoryExceeded)?;
+        let _estimated_size = match &task {
+            CellTask::Process(_transfer) => {
+                self.memory_ceiling
+                    .try_allocate(4096)
+                    .map_err(|_| CellError::MemoryExceeded)?;
                 4096
             }
             CellTask::HealthCheck => 0,
@@ -130,11 +132,11 @@ impl ChainCell {
 /// Cell worker task that processes inbound transfers.
 async fn cell_worker(
     mut rx: mpsc::Receiver<CellTask>,
-    anchor: Arc<dyn CryptographicAnchor>,
+    _anchor: Arc<dyn CryptographicAnchor>,
     config: CellConfig,
 ) {
     let mut circuit_breaker = CellCircuitBreaker::new(config.circuit_breaker);
-    let mut memory = MemoryCeiling::new(config.max_memory_bytes);
+    let memory = MemoryCeiling::new(config.max_memory_bytes);
 
     while let Some(task) = rx.recv().await {
         match task {
@@ -171,13 +173,11 @@ async fn cell_worker(
                 memory.release(4096);
             }
             CellTask::HealthCheck => {
-                if circuit_breaker.is_open() {
-                    if circuit_breaker.attempt_reset() {
-                        tracing::info!(
-                            chain_id = config.chain_id,
-                            "Circuit breaker transitioned to half-open"
-                        );
-                    }
+                if circuit_breaker.is_open() && circuit_breaker.attempt_reset() {
+                    tracing::info!(
+                        chain_id = config.chain_id,
+                        "Circuit breaker transitioned to half-open"
+                    );
                 }
             }
         }

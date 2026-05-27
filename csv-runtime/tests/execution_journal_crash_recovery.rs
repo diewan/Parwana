@@ -273,5 +273,8 @@ async fn test_journal_capacity_enforcement() {
         attempt: 1,
     });
 
-    assert_eq!(result, Err(csv_runtime::execution_journal::JournalError::CapacityExceeded));
+    assert_eq!(
+        result,
+        Err(csv_runtime::execution_journal::JournalError::CapacityExceeded)
+    );
 }

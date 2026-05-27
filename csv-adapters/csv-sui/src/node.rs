@@ -174,20 +174,24 @@ impl SuiRpc for SuiNode {
                     })
                     .collect()
             })
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "modifiedObjects missing",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "modifiedObjects missing",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         Ok(Some(SuiTransactionBlock {
             digest,
             checkpoint,
             effects: SuiTransactionEffects {
                 status,
-                gas_used: effects["gasUsed"].as_u64().ok_or_else(|| Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "gasUsed missing",
-                )) as Box<dyn std::error::Error + Send + Sync>)?,
+                gas_used: effects["gasUsed"].as_u64().ok_or_else(|| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "gasUsed missing",
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })?,
                 modified_objects,
             },
         }))
@@ -210,43 +214,47 @@ impl SuiRpc for SuiNode {
 
         let events = result["events"]
             .as_array()
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "events missing",
-            )) as Box<dyn std::error::Error + Send + Sync>)?
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "events missing",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?
             .iter()
             .enumerate()
             .map(|(index, event)| {
                 let data = event
                     .get("bcs")
                     .and_then(|value| value.as_str())
-                    .and_then(|bcs| {
-                        base64::engine::general_purpose::STANDARD.decode(bcs).ok()
-                    })
+                    .and_then(|bcs| base64::engine::general_purpose::STANDARD.decode(bcs).ok())
                     .or_else(|| {
-                        event.get("parsedJson")
+                        event
+                            .get("parsedJson")
                             .and_then(|json| serde_json::to_vec(json).ok())
                     })
-                    .ok_or_else(|| Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Failed to decode event data",
-                    )) as Box<dyn std::error::Error + Send + Sync>)?;
+                    .ok_or_else(|| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Failed to decode event data",
+                        )) as Box<dyn std::error::Error + Send + Sync>
+                    })?;
 
-                let id = event
-                    .get("id")
-                    .map(|id| id.to_string())
-                    .ok_or_else(|| Box::new(std::io::Error::new(
+                let id = event.get("id").map(|id| id.to_string()).ok_or_else(|| {
+                    Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         "id missing",
-                    )) as Box<dyn std::error::Error + Send + Sync>)?;
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })?;
 
                 let type_field = event
                     .get("type")
                     .and_then(|value| value.as_str())
-                    .ok_or_else(|| Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "type missing",
-                    )) as Box<dyn std::error::Error + Send + Sync>)?
+                    .ok_or_else(|| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "type missing",
+                        )) as Box<dyn std::error::Error + Send + Sync>
+                    })?
                     .to_string();
 
                 Ok(SuiEvent {

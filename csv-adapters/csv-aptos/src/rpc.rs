@@ -278,18 +278,21 @@ impl MockAptosRpc {
     pub fn set_resource(&self, address: [u8; 32], resource_type: &str, resource: AptosResource) {
         self.resources
             .lock()
-            .unwrap()
+            .expect("mutex not poisoned")
             .insert((address, resource_type.to_string()), resource);
     }
 
     pub fn add_transaction(&self, version: u64, tx: AptosTransaction) {
-        self.transactions.lock().unwrap().insert(version, tx);
+        self.transactions
+            .lock()
+            .expect("mutex not poisoned")
+            .insert(version, tx);
     }
 
     pub fn add_event(&self, handle: &str, event: AptosEvent) {
         self.events
             .lock()
-            .unwrap()
+            .expect("mutex not poisoned")
             .entry(handle.to_string())
             .or_default()
             .push(event);
@@ -298,14 +301,17 @@ impl MockAptosRpc {
     pub fn add_events(&self, handle: &str, events: Vec<AptosEvent>) {
         self.events
             .lock()
-            .unwrap()
+            .expect("mutex not poisoned")
             .entry(handle.to_string())
             .or_default()
             .extend(events);
     }
 
     pub fn set_block(&self, version: u64, block: AptosBlockInfo) {
-        self.blocks.lock().unwrap().insert(version, block);
+        self.blocks
+            .lock()
+            .expect("mutex not poisoned")
+            .insert(version, block);
     }
 }
 
@@ -347,10 +353,16 @@ impl AptosAccountReader for MockAptosRpc {
         address: [u8; 32],
         resource_type: &str,
         _position: Option<u64>,
-    ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>> {
+    ) -> BoxFuture<'_, Result<Option<AptosResource>, Box<dyn std::error::Error + Send + Sync>>>
+    {
         let resource_type_owned = resource_type.to_string();
         let key = (address, resource_type_owned);
-        let result = self.resources.lock().unwrap().get(&key).cloned();
+        let result = self
+            .resources
+            .lock()
+            .expect("mutex not poisoned")
+            .get(&key)
+            .cloned();
         Box::pin(async move { Ok(result) })
     }
 }
@@ -359,8 +371,14 @@ impl AptosTransactionReader for MockAptosRpc {
     fn get_transaction(
         &self,
         version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
-        let result = self.transactions.lock().unwrap().get(&version).cloned();
+    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
+    {
+        let result = self
+            .transactions
+            .lock()
+            .expect("mutex not poisoned")
+            .get(&version)
+            .cloned();
         Box::pin(async move { Ok(result) })
     }
 
@@ -368,7 +386,8 @@ impl AptosTransactionReader for MockAptosRpc {
         &self,
         _start_version: u64,
         _limit: u32,
-    ) -> BoxFuture<'_, Result<Vec<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
+    ) -> BoxFuture<'_, Result<Vec<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
+    {
         Box::pin(async { Ok(Vec::new()) })
     }
 
@@ -398,16 +417,28 @@ impl AptosTransactionReader for MockAptosRpc {
     fn get_block_by_version(
         &self,
         version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>> {
-        let result = self.blocks.lock().unwrap().get(&version).cloned();
+    ) -> BoxFuture<'_, Result<Option<AptosBlockInfo>, Box<dyn std::error::Error + Send + Sync>>>
+    {
+        let result = self
+            .blocks
+            .lock()
+            .expect("mutex not poisoned")
+            .get(&version)
+            .cloned();
         Box::pin(async move { Ok(result) })
     }
 
     fn get_transaction_by_version(
         &self,
         version: u64,
-    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>> {
-        let result = self.transactions.lock().unwrap().get(&version).cloned();
+    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
+    {
+        let result = self
+            .transactions
+            .lock()
+            .expect("mutex not poisoned")
+            .get(&version)
+            .cloned();
         Box::pin(async move { Ok(result) })
     }
 }
@@ -423,13 +454,15 @@ impl AptosEventReader for MockAptosRpc {
             Ok(self
                 .events
                 .lock()
-                .unwrap()
+                .expect("mutex not poisoned")
                 .get(&event_handle)
                 .cloned()
-                .ok_or_else(|| Box::new(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Event handle {} not found", event_handle),
-                )) as Box<dyn std::error::Error + Send + Sync>)?
+                .ok_or_else(|| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Event handle {} not found", event_handle),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })?
                 .into_iter()
                 .take(limit as usize)
                 .collect())
@@ -443,7 +476,7 @@ impl AptosEventReader for MockAptosRpc {
         limit: u32,
     ) -> BoxFuture<'_, Result<Vec<AptosEvent>, Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            let events = self.events.lock().unwrap();
+            let events = self.events.lock().expect("mutex not poisoned");
             Ok(events
                 .values()
                 .flatten()
@@ -469,7 +502,10 @@ impl AptosTransactionSubmitter for MockAptosRpc {
         tx_bytes: Vec<u8>,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            self.sent_transactions.lock().unwrap().push(tx_bytes);
+            self.sent_transactions
+                .lock()
+                .expect("mutex not poisoned")
+                .push(tx_bytes);
             Ok([0xAB; 32])
         })
     }
@@ -479,30 +515,43 @@ impl AptosTransactionSubmitter for MockAptosRpc {
         signed_tx_json: serde_json::Value,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            let tx_bytes = serde_json::to_vec(&signed_tx_json)
-                .map_err(|e| Box::new(std::io::Error::new(
+            let tx_bytes = serde_json::to_vec(&signed_tx_json).map_err(|e| {
+                Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("Failed to serialize transaction: {}", e),
-                )) as Box<dyn std::error::Error + Send + Sync>)?;
-            self.sent_transactions.lock().unwrap().push(tx_bytes);
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+            self.sent_transactions
+                .lock()
+                .expect("mutex not poisoned")
+                .push(tx_bytes);
 
             if let Some(payload) = signed_tx_json.get("payload") {
                 if let Some(args) = payload.get("arguments").and_then(|a| a.as_array()) {
                     if !args.is_empty() {
-                        let commit_str = args[0].as_str().ok_or_else(|| Box::new(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "Commitment argument is not a string",
-                        )) as Box<dyn std::error::Error + Send + Sync>)?;
+                        let commit_str = args[0].as_str().ok_or_else(|| {
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "Commitment argument is not a string",
+                            ))
+                                as Box<dyn std::error::Error + Send + Sync>
+                        })?;
                         let commitment = if let Some(hex) = commit_str.strip_prefix("0x") {
-                            hex::decode(hex).map_err(|e| Box::new(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("Failed to decode hex commitment: {}", e),
-                            )) as Box<dyn std::error::Error + Send + Sync>)?
+                            hex::decode(hex).map_err(|e| {
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    format!("Failed to decode hex commitment: {}", e),
+                                ))
+                                    as Box<dyn std::error::Error + Send + Sync>
+                            })?
                         } else {
-                            hex::decode(commit_str).map_err(|e| Box::new(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("Failed to decode hex commitment: {}", e),
-                            )) as Box<dyn std::error::Error + Send + Sync>)?
+                            hex::decode(commit_str).map_err(|e| {
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    format!("Failed to decode hex commitment: {}", e),
+                                ))
+                                    as Box<dyn std::error::Error + Send + Sync>
+                            })?
                         };
 
                         let mut event_data = vec![0u8; 96];
@@ -510,7 +559,7 @@ impl AptosTransactionSubmitter for MockAptosRpc {
                         event_data[32..64].copy_from_slice(&self.test_address);
                         event_data[64..96].copy_from_slice(&commitment[..32.min(commitment.len())]);
 
-                        let mut events = self.next_tx_events.lock().unwrap();
+                        let mut events = self.next_tx_events.lock().expect("mutex not poisoned");
                         events.push(AptosEvent {
                             data: event_data,
                             event_sequence_number: 0,
@@ -538,7 +587,10 @@ impl AptosModulePublisher for MockAptosRpc {
         tx_bytes: Vec<u8>,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            self.sent_transactions.lock().unwrap().push(tx_bytes);
+            self.sent_transactions
+                .lock()
+                .expect("mutex not poisoned")
+                .push(tx_bytes);
             Ok([0xAB; 32])
         })
     }
@@ -561,14 +613,29 @@ impl AptosRpc for MockAptosRpc {
             chain_id: self.chain_id,
             test_address: self.test_address,
             tx_counter: std::sync::atomic::AtomicU64::new(tx_count),
-            resources: std::sync::Mutex::new(self.resources.lock().unwrap().clone()),
-            transactions: std::sync::Mutex::new(self.transactions.lock().unwrap().clone()),
-            events: std::sync::Mutex::new(self.events.lock().unwrap().clone()),
-            blocks: std::sync::Mutex::new(self.blocks.lock().unwrap().clone()),
-            sent_transactions: std::sync::Mutex::new(
-                self.sent_transactions.lock().unwrap().clone(),
+            resources: std::sync::Mutex::new(
+                self.resources.lock().expect("mutex not poisoned").clone(),
             ),
-            next_tx_events: std::sync::Mutex::new(self.next_tx_events.lock().unwrap().clone()),
+            transactions: std::sync::Mutex::new(
+                self.transactions
+                    .lock()
+                    .expect("mutex not poisoned")
+                    .clone(),
+            ),
+            events: std::sync::Mutex::new(self.events.lock().expect("mutex not poisoned").clone()),
+            blocks: std::sync::Mutex::new(self.blocks.lock().expect("mutex not poisoned").clone()),
+            sent_transactions: std::sync::Mutex::new(
+                self.sent_transactions
+                    .lock()
+                    .expect("mutex not poisoned")
+                    .clone(),
+            ),
+            next_tx_events: std::sync::Mutex::new(
+                self.next_tx_events
+                    .lock()
+                    .expect("mutex not poisoned")
+                    .clone(),
+            ),
         })
     }
 }
@@ -620,7 +687,9 @@ mod tests {
         };
         rpc.add_transaction(500, tx.clone());
 
-        let fetched = AptosTransactionReader::get_transaction(&rpc, 500).await.unwrap();
+        let fetched = AptosTransactionReader::get_transaction(&rpc, 500)
+            .await
+            .unwrap();
         assert_eq!(fetched.unwrap().version, 500);
     }
 
@@ -635,9 +704,10 @@ mod tests {
         };
         rpc.add_event("CSV::Seal", event.clone());
 
-        let fetched = AptosEventReader::get_events(&rpc, "CSV::Seal".to_string(), "0".to_string(), 10)
-            .await
-            .unwrap();
+        let fetched =
+            AptosEventReader::get_events(&rpc, "CSV::Seal".to_string(), "0".to_string(), 10)
+                .await
+                .unwrap();
         assert_eq!(fetched.len(), 1);
     }
 
@@ -654,7 +724,9 @@ mod tests {
     async fn test_wait_for_transaction() {
         let rpc = MockAptosRpc::new(1000);
         let tx_hash = [1u8; 32];
-        let tx = AptosTransactionReader::wait_for_transaction(&rpc, tx_hash).await.unwrap();
+        let tx = AptosTransactionReader::wait_for_transaction(&rpc, tx_hash)
+            .await
+            .unwrap();
         assert_eq!(tx.version, 1000);
         assert!(tx.success);
     }

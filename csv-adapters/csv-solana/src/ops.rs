@@ -10,12 +10,12 @@
 //!
 use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};
 use csv_protocol::seal_protocol::SealProtocol;
@@ -58,7 +58,7 @@ impl SolanaBackend {
                         },
                         Box::new(crate::rpc::MockSolanaRpc::new()),
                     )
-                    .unwrap()
+                    .expect("Default SolanaConfig produces a valid SealProtocol")
                 });
 
         // MED-DUP-03: Derive domain separator from SealProtocol instead of recomputing

@@ -247,18 +247,21 @@ impl MockSuiRpc {
     pub fn add_object(&self, object: SuiObject) {
         self.objects
             .lock()
-            .unwrap()
+            .expect("MockSuiRpc objects lock")
             .insert(object.object_id, object);
     }
 
     pub fn add_transaction(&self, tx: SuiTransactionBlock) {
-        self.transactions.lock().unwrap().insert(tx.digest, tx);
+        self.transactions
+            .lock()
+            .expect("MockSuiRpc transactions lock")
+            .insert(tx.digest, tx);
     }
 
     pub fn add_checkpoint(&self, checkpoint: SuiCheckpoint) {
         self.checkpoints
             .lock()
-            .unwrap()
+            .expect("MockSuiRpc checkpoints lock")
             .insert(checkpoint.sequence_number, checkpoint);
     }
 }
@@ -269,14 +272,24 @@ impl SuiRpc for MockSuiRpc {
         &self,
         object_id: [u8; 32],
     ) -> Result<Option<SuiObject>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.objects.lock().unwrap().get(&object_id).cloned())
+        Ok(self
+            .objects
+            .lock()
+            .expect("MockSuiRpc objects lock")
+            .get(&object_id)
+            .cloned())
     }
 
     async fn get_transaction_block(
         &self,
         digest: [u8; 32],
     ) -> Result<Option<SuiTransactionBlock>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.transactions.lock().unwrap().get(&digest).cloned())
+        Ok(self
+            .transactions
+            .lock()
+            .expect("MockSuiRpc transactions lock")
+            .get(&digest)
+            .cloned())
     }
 
     async fn get_transaction_events(
@@ -293,7 +306,7 @@ impl SuiRpc for MockSuiRpc {
         Ok(self
             .checkpoints
             .lock()
-            .unwrap()
+            .expect("MockSuiRpc checkpoints lock")
             .get(&sequence_number)
             .cloned())
     }
@@ -359,9 +372,24 @@ impl SuiRpc for MockSuiRpc {
 
     fn clone_boxed(&self) -> Box<dyn SuiRpc> {
         Box::new(MockSuiRpc {
-            objects: std::sync::Mutex::new(self.objects.lock().unwrap().clone()),
-            transactions: std::sync::Mutex::new(self.transactions.lock().unwrap().clone()),
-            checkpoints: std::sync::Mutex::new(self.checkpoints.lock().unwrap().clone()),
+            objects: std::sync::Mutex::new(
+                self.objects
+                    .lock()
+                    .expect("MockSuiRpc objects lock")
+                    .clone(),
+            ),
+            transactions: std::sync::Mutex::new(
+                self.transactions
+                    .lock()
+                    .expect("MockSuiRpc transactions lock")
+                    .clone(),
+            ),
+            checkpoints: std::sync::Mutex::new(
+                self.checkpoints
+                    .lock()
+                    .expect("MockSuiRpc checkpoints lock")
+                    .clone(),
+            ),
             latest_checkpoint: self.latest_checkpoint,
             test_address: self.test_address,
             tx_counter: std::sync::atomic::AtomicU64::new(
@@ -393,8 +421,11 @@ mod tests {
         };
         rpc.add_object(obj.clone());
 
-        let fetched = rpc.get_object([1u8; 32]).await.unwrap();
-        assert_eq!(fetched.unwrap().version, 1);
+        let fetched = rpc
+            .get_object([1u8; 32])
+            .await
+            .expect("get_object should succeed");
+        assert_eq!(fetched.expect("fetched object should exist").version, 1);
     }
 
     #[tokio::test]
@@ -409,7 +440,10 @@ mod tests {
         };
         rpc.add_checkpoint(cp.clone());
 
-        let fetched = rpc.get_checkpoint(500).await.unwrap();
-        assert!(fetched.unwrap().certified);
+        let fetched = rpc
+            .get_checkpoint(500)
+            .await
+            .expect("get_checkpoint should succeed");
+        assert!(fetched.expect("fetched checkpoint should exist").certified);
     }
 }

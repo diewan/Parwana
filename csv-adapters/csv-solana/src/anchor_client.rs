@@ -20,63 +20,81 @@ pub mod discriminators {
         let mut hasher = Sha256::new();
         hasher.update(b"global:initialize_registry");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn create_seal() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:create_seal");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn consume_seal() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:consume_seal");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn lock_sanad() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:lock_sanad");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn mint_sanad() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:mint_sanad");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn refund_sanad() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:refund_sanad");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn register_nullifier() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:register_nullifier");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn record_sanad_metadata() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:record_sanad_metadata");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 
     pub fn transfer_sanad() -> [u8; 8] {
         let mut hasher = Sha256::new();
         hasher.update(b"global:transfer_sanad");
         let hash = hasher.finalize();
-        hash[..8].try_into().unwrap()
+        hash[..8]
+            .try_into()
+            .expect("SHA256 digest is at least 8 bytes")
     }
 }
 

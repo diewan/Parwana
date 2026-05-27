@@ -29,6 +29,11 @@ impl TestContext {
             seal_registry: None,
             chain_data: None,
             native_proof_validated: false,
+            sanad_id: None,
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
         }
     }
 }

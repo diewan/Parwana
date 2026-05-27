@@ -105,7 +105,8 @@ fn test_proofs_commands_use_runtime() {
     if let Ok(content) = std::fs::read_to_string(proofs_rs) {
         // Should use csv-sdk runtime APIs (either direct or via prelude)
         assert!(
-            content.contains("csv_sdk::CsvClient") || content.contains("csv_sdk::prelude::CsvClient"),
+            content.contains("csv_sdk::CsvClient")
+                || content.contains("csv_sdk::prelude::CsvClient"),
             "proofs.rs should use csv_sdk::CsvClient for runtime operations"
         );
         // Should use chain_runtime() for proof operations
@@ -132,7 +133,10 @@ fn test_chain_commands_error_handling() {
             "chain.rs should use anyhow::anyhow! for error construction"
         );
         // Should use ? operator for error propagation
-        assert!(content.contains("?"), "chain.rs should use ? for error propagation");
+        assert!(
+            content.contains("?"),
+            "chain.rs should use ? for error propagation"
+        );
     }
 }
 
@@ -165,7 +169,10 @@ fn test_sanads_commands_error_handling() {
             "sanads.rs should use Result<()> for error handling"
         );
         // Should use ? operator for error propagation
-        assert!(content.contains("?"), "sanads.rs should use ? for error propagation");
+        assert!(
+            content.contains("?"),
+            "sanads.rs should use ? for error propagation"
+        );
     }
 }
 

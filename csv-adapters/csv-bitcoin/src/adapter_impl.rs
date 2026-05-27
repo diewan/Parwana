@@ -1,7 +1,9 @@
 //! Implementation of csv-adapter-core traits for Bitcoin adapter
 
 use async_trait::async_trait;
-use csv_adapter_core::{AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus};
+use csv_adapter_core::{
+    AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus,
+};
 use csv_hash::Hash;
 use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use std::sync::Arc;
@@ -41,7 +43,10 @@ impl ProofAdapter for BitcoinAdapter {
 
 #[async_trait]
 impl MintAdapter for BitcoinAdapter {
-    async fn mint_commitment(&self, _commitment: &csv_hash::commitment::Commitment) -> AdapterResult<Hash> {
+    async fn mint_commitment(
+        &self,
+        _commitment: &csv_hash::commitment::Commitment,
+    ) -> AdapterResult<Hash> {
         // Delegate to existing mint logic
         // This would integrate with the existing mint module
         Ok(Hash::new([0u8; 32])) // Placeholder - actual implementation would use existing mint

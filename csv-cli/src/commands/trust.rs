@@ -126,15 +126,13 @@ fn cmd_status() -> Result<()> {
     // Load trust package from disk if it exists
     let trust_path = expand_path("~/.csv/trust-package.json");
     let package = match std::fs::read_to_string(&trust_path) {
-        Ok(content) => {
-            match serde_json::from_str::<TrustPackage>(&content) {
-                Ok(pkg) => Some(pkg),
-                Err(e) => {
-                    output::error(&format!("Failed to parse trust package: {}", e));
-                    return Ok(());
-                }
+        Ok(content) => match serde_json::from_str::<TrustPackage>(&content) {
+            Ok(pkg) => Some(pkg),
+            Err(e) => {
+                output::error(&format!("Failed to parse trust package: {}", e));
+                return Ok(());
             }
-        }
+        },
         Err(_) => None,
     };
 
@@ -142,7 +140,10 @@ fn cmd_status() -> Result<()> {
         Some(pkg) => {
             output::kv("Version", &pkg.version.to_string());
             output::kv_hash("Genesis Hash", &pkg.genesis_hash);
-            output::kv("Trusted Checkpoint Height", &pkg.trusted_checkpoint_height.to_string());
+            output::kv(
+                "Trusted Checkpoint Height",
+                &pkg.trusted_checkpoint_height.to_string(),
+            );
             output::kv_hash("Trusted Checkpoint Hash", &pkg.trusted_checkpoint_hash);
             output::kv("Validator Epoch", &pkg.validator_epoch.to_string());
             output::kv("Validator Count", &pkg.validator_count.to_string());
@@ -201,7 +202,14 @@ fn cmd_export(output: &str) -> Result<()> {
 
     output::success(&format!("Trust package exported to {}", output));
     output::kv("Genesis", &hex::encode(pkg.genesis_hash));
-    output::kv("Checkpoint", &format!("{} (0x{})", pkg.trusted_checkpoint_height, hex::encode(pkg.trusted_checkpoint_hash)));
+    output::kv(
+        "Checkpoint",
+        &format!(
+            "{} (0x{})",
+            pkg.trusted_checkpoint_height,
+            hex::encode(pkg.trusted_checkpoint_hash)
+        ),
+    );
 
     Ok(())
 }
@@ -248,8 +256,18 @@ fn cmd_import(input: &str) -> Result<()> {
 
     output::success("Trust package imported successfully");
     output::kv("Genesis", &hex::encode(pkg.genesis_hash));
-    output::kv("Checkpoint", &format!("{} (0x{})", pkg.trusted_checkpoint_height, hex::encode(pkg.trusted_checkpoint_hash)));
-    output::kv("Validators", &format!("{} (epoch {})", pkg.validator_count, pkg.validator_epoch));
+    output::kv(
+        "Checkpoint",
+        &format!(
+            "{} (0x{})",
+            pkg.trusted_checkpoint_height,
+            hex::encode(pkg.trusted_checkpoint_hash)
+        ),
+    );
+    output::kv(
+        "Validators",
+        &format!("{} (epoch {})", pkg.validator_count, pkg.validator_epoch),
+    );
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -357,8 +375,18 @@ fn cmd_rotate(height: u64, hash_hex: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to save trust package: {}", e))?;
 
     output::success("Trust checkpoint rotated successfully");
-    output::kv("Old Checkpoint", &format!("{} (0x{})", pkg.trusted_checkpoint_height, hex::encode(pkg.trusted_checkpoint_hash)));
-    output::kv("New Checkpoint", &format!("{} (0x{})", height, hex::encode(checkpoint_hash)));
+    output::kv(
+        "Old Checkpoint",
+        &format!(
+            "{} (0x{})",
+            pkg.trusted_checkpoint_height,
+            hex::encode(pkg.trusted_checkpoint_hash)
+        ),
+    );
+    output::kv(
+        "New Checkpoint",
+        &format!("{} (0x{})", height, hex::encode(checkpoint_hash)),
+    );
 
     Ok(())
 }

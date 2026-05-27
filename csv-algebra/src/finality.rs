@@ -1,7 +1,7 @@
-/// Pure finality types.
-///
-/// Cryptographic commitment types for finality evidence.
-/// No serde, no IO, no infrastructure dependencies.
+//! Pure finality types.
+//!
+//! Cryptographic commitment types for finality evidence.
+//! No serde, no IO, no infrastructure dependencies.
 
 use alloc::vec::Vec;
 
@@ -19,7 +19,12 @@ pub struct FinalityEvidence {
 }
 
 impl FinalityEvidence {
-    pub fn new(block_hash: [u8; 32], block_height: u64, proof_data: Vec<u8>, timestamp: u64) -> Self {
+    pub fn new(
+        block_hash: [u8; 32],
+        block_height: u64,
+        proof_data: Vec<u8>,
+        timestamp: u64,
+    ) -> Self {
         Self {
             block_hash,
             block_height,

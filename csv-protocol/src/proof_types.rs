@@ -658,9 +658,8 @@ impl ReplayId {
             transition_id,
             destination_chain,
         };
-        let cbor = to_canonical_cbor(&inputs).map_err(|e| {
-            format!("Failed to serialize replay ID inputs: {}", e)
-        })?;
+        let cbor = to_canonical_cbor(&inputs)
+            .map_err(|e| format!("Failed to serialize replay ID inputs: {}", e))?;
         let id = tagged_hash(HashDomain::ReplayIdV1, &cbor).hash.0;
         Ok(ReplayId {
             version: Self::CURRENT_VERSION,
@@ -753,6 +752,7 @@ impl ProofBundle {
     }
 
     /// Create a new proof bundle with certification and an explicit signature scheme.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_certification_and_signature_scheme(
         version: u32,
         signature_scheme: crate::signature::SignatureScheme,

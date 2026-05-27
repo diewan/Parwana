@@ -32,10 +32,10 @@ pub mod seal;
 pub mod tagged_hash;
 
 // Re-export canonical serialization from csv-codec
-pub use csv_codec::canonical;
 pub use chain_id::ChainId;
 pub use commit_mux::{CommitMux, MerkleBranchNode, MuxLeaf, MuxProof, ProtocolId};
 pub use commitment::{COMMITMENT_VERSION, Commitment};
+pub use csv_codec::canonical;
 pub use dag::{DAGNode, DAGSegment};
 pub use domain_hash::{Domain, DomainSeparatedHash};
 pub use domain_separation::{DomainSeparator, derive_domain_separator};

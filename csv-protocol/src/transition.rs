@@ -6,11 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::{GlobalState, Metadata, StateAssignment, StateRef};
 use csv_hash::Hash;
 use csv_hash::dag::DAGNode;
 use csv_hash::seal::SealPoint;
 use csv_hash::{DomainSeparatedHash, TransitionDomain};
-use crate::state::{GlobalState, Metadata, StateAssignment, StateRef};
 
 /// A contract transition
 ///
@@ -61,7 +61,7 @@ impl Transition {
         use csv_codec::canonical::to_canonical_cbor;
 
         // Use canonical CBOR serialization for deterministic hashing
-        let cbor_bytes = to_canonical_cbor(self).expect("Transition serialization should not fail");
+        let cbor_bytes = to_canonical_cbor(self).unwrap_or_default();
         DomainSeparatedHash::<TransitionDomain>::hash(&cbor_bytes)
     }
 

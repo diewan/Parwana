@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use csv_algebra::proof::CanonicalProof;
 use crate::canonical::CanonicalProofWire;
+use csv_algebra::proof::CanonicalProof;
+use serde::{Deserialize, Serialize};
 
 /// Proof bundle wire format.
 #[derive(Debug, Clone, Serialize, Deserialize)]

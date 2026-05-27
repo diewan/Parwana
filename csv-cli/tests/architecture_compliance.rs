@@ -125,7 +125,10 @@ fn test_no_reqwest_chain_operations() {
                 {
                     if line.contains("reqwest::") || line.contains("reqwest.") {
                         // Allow reqwest imports but warn about usage
-                        if line.contains("get(") || line.contains("post(") || line.contains("blocking") {
+                        if line.contains("get(")
+                            || line.contains("post(")
+                            || line.contains("blocking")
+                        {
                             violations.push(format!(
                                 "{}:{} - Direct reqwest call for chain operation: {}",
                                 path.display(),
@@ -195,18 +198,18 @@ fn test_commands_use_csv_sdk_runtime() {
             let filename = path.file_name().unwrap_or_default().to_string_lossy();
             let needs_runtime = !matches!(
                 filename.as_ref(),
-                "inspect.rs" |
-                "schema_cmd.rs" |
-                "mod.rs" |
-                "import.rs" |
-                "export.rs" |
-                "types.rs" |
-                "private_key.rs" |
-                "generate.rs" |
-                "contracts.rs" |
-                "validate.rs" |
-                "tests.rs" |
-                "status.rs"
+                "inspect.rs"
+                    | "schema_cmd.rs"
+                    | "mod.rs"
+                    | "import.rs"
+                    | "export.rs"
+                    | "types.rs"
+                    | "private_key.rs"
+                    | "generate.rs"
+                    | "contracts.rs"
+                    | "validate.rs"
+                    | "tests.rs"
+                    | "status.rs"
             );
 
             if needs_runtime && !uses_csv_sdk {

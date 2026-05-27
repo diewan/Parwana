@@ -21,8 +21,8 @@ use csv_hash::commitment::Commitment;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::error::ProtocolError;
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::seal_protocol::SealProtocol;
 
 use crate::config::BitcoinConfig;
@@ -191,7 +191,10 @@ impl BitcoinSealProtocol {
     ) -> Result<bool, BitcoinError> {
         self.mpc_batcher
             .as_ref()
-            .map(|b| b.queue(commitment, seal, request_id).map_err(|e| BitcoinError::MpcError(e.to_string())))
+            .map(|b| {
+                b.queue(commitment, seal, request_id)
+                    .map_err(|e| BitcoinError::MpcError(e.to_string()))
+            })
             .unwrap_or(Ok(false))
     }
 
@@ -494,15 +497,12 @@ impl SealProtocol for BitcoinSealProtocol {
                 .map_err(|e| ProtocolError::PublishFailed(e.to_string()))?;
 
             // Broadcast the signed transaction via RPC
-            let broadcast_txid =
-                rpc.send_raw_transaction(tx_result.raw_tx.clone())
-                    .await
-                    .map_err(|e| {
-                        ProtocolError::PublishFailed(format!(
-                            "Failed to broadcast transaction: {}",
-                            e
-                        ))
-                    })?;
+            let broadcast_txid = rpc
+                .send_raw_transaction(tx_result.raw_tx.clone())
+                .await
+                .map_err(|e| {
+                    ProtocolError::PublishFailed(format!("Failed to broadcast transaction: {}", e))
+                })?;
 
             log::info!(
                 "Published commitment tx {} on {:?} (tx_builder txid: {})",
@@ -581,7 +581,10 @@ impl SealProtocol for BitcoinSealProtocol {
         Ok(proof)
     }
 
-    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn enforce_seal(
+        &self,
+        seal: Self::SealPoint,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a UTXO cannot be spent more than once
         // by checking both local registry and on-chain UTXO set
@@ -603,12 +606,15 @@ impl SealProtocol for BitcoinSealProtocol {
         #[cfg(feature = "rpc")]
         {
             if let Some(ref rpc) = self.rpc {
-                let is_unspent = rpc.is_utxo_unspent(seal.txid, seal.vout).await.map_err(|e| {
-                    Box::new(ProtocolError::NetworkError(format!(
-                        "Failed to check UTXO status on-chain: {}",
-                        e
-                    )))
-                })?;
+                let is_unspent = rpc
+                    .is_utxo_unspent(seal.txid, seal.vout)
+                    .await
+                    .map_err(|e| {
+                        Box::new(ProtocolError::NetworkError(format!(
+                            "Failed to check UTXO status on-chain: {}",
+                            e
+                        )))
+                    })?;
 
                 if !is_unspent {
                     return Err(Box::new(ProtocolError::SealReplay(format!(
@@ -702,7 +708,10 @@ impl SealProtocol for BitcoinSealProtocol {
         .map_err(|e| Box::new(ProtocolError::Generic(e.to_string())))?)
     }
 
-    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn rollback(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         let current_height = self.get_current_height().await;
         if anchor.block_height > current_height {
             return Err(Box::new(ProtocolError::ReorgInvalid(format!(

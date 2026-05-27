@@ -136,8 +136,7 @@ impl InMemoryJournal {
         guard
             .iter()
             .rev()
-            .filter(|e| e.transfer_id == transfer_id)
-            .next()
+            .find(|e| e.transfer_id == transfer_id)
             .cloned()
     }
 }
@@ -201,12 +200,12 @@ impl RocksDbExecutionJournal {
         let mut options = rocksdb::Options::default();
         options.create_if_missing(true);
         let db = rocksdb::DB::open(&options, path).map_err(|e| JournalError::Io(e.to_string()))?;
-        let next_sequence = db
-            .prefix_iterator(Self::ENTRY_PREFIX)
-            .try_fold(0_u64, |count, item| {
-                item.map(|_| count + 1)
-                    .map_err(|e| JournalError::Io(e.to_string()))
-            })?;
+        let next_sequence =
+            db.prefix_iterator(Self::ENTRY_PREFIX)
+                .try_fold(0_u64, |count, item| {
+                    item.map(|_| count + 1)
+                        .map_err(|e| JournalError::Io(e.to_string()))
+                })?;
         Ok(Self {
             db,
             next_sequence: std::sync::Mutex::new(next_sequence),
@@ -270,9 +269,7 @@ impl ExecutionJournal for RocksDbExecutionJournal {
     }
 
     fn latest_phase(&self, transfer_id: &str) -> Result<Option<TransferStage>, JournalError> {
-        Ok(self
-            .latest_entry(transfer_id)?
-            .map(|entry| entry.phase))
+        Ok(self.latest_entry(transfer_id)?.map(|entry| entry.phase))
     }
 
     fn latest_entry(&self, transfer_id: &str) -> Result<Option<TransferPhaseEntry>, JournalError> {

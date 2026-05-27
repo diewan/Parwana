@@ -9,9 +9,9 @@ use async_trait::async_trait;
 use std::string::String;
 use std::vec::Vec;
 
-use csv_protocol::proof::InclusionProof;
 use crate::provenance::ProofProvenance;
 use csv_hash::Hash;
+use csv_protocol::proof::InclusionProof;
 
 /// A bundle of proof material fetched from a chain.
 ///

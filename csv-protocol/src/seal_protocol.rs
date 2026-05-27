@@ -35,10 +35,10 @@
 //! - [ ] No adapter exposes raw keys or secrets through trait methods
 //! - [ ] No adapter accepts mock/simulated proofs in production builds
 
-use crate::signature::SignatureScheme;
-use csv_hash::Hash;
 use crate::proof::ProofBundle;
+use crate::signature::SignatureScheme;
 use async_trait::async_trait;
+use csv_hash::Hash;
 
 /// The SealProtocol trait defines the security-critical interface for chain-specific adapters.
 ///
@@ -198,7 +198,10 @@ pub trait SealProtocol {
     /// 1. It queries the actual chain state (not cached state)
     /// 2. It uses the appropriate native primitive for the chain
     /// 3. It cannot be bypassed or fooled by malicious inputs
-    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>>;
+    async fn enforce_seal(
+        &self,
+        seal: Self::SealPoint,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>>;
 
     /// Create a new seal for authorizing state transitions.
     ///
@@ -301,7 +304,10 @@ pub trait SealProtocol {
     /// # Returns
     /// * `Ok(())` - Rollback processed successfully
     /// * `Err` - If rollback handling fails
-    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>>;
+    async fn rollback(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>>;
 
     /// Get the domain separator for this adapter.
     ///

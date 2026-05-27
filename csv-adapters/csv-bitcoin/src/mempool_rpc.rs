@@ -55,7 +55,6 @@ impl MempoolSignetRpc {
         Self { client, base_url }
     }
 
-
     #[cfg(target_arch = "wasm32")]
     fn run_http<T, F>(_future: F) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
     where
@@ -196,10 +195,12 @@ impl MempoolSignetRpc {
                 Ok(resp) => {
                     let status = resp.status();
                     let error_text = resp.text().await.map_err(|e| {
-                        format!("HTTP {} at {}: failed to read error text: {}", status, url, e)
+                        format!(
+                            "HTTP {} at {}: failed to read error text: {}",
+                            status, url, e
+                        )
                     })?;
-                    last_err =
-                        Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
+                    last_err = Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
                 }
                 Err(e) => {
                     last_err = Some(format!("Network error at {}: {}", url, e).into());
@@ -238,7 +239,10 @@ impl MempoolSignetRpc {
     }
 
     /// Get full transaction details (inputs, outputs, fee, etc.)
-    async fn get_tx(&self, txid: &str) -> Result<TxDetail, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_tx(
+        &self,
+        txid: &str,
+    ) -> Result<TxDetail, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/tx/{}", self.base_url, txid);
         self.get_with_retry(&url).await
     }

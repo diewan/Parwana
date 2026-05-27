@@ -244,13 +244,17 @@ mod real_rpc_impl {
     fn parse_hex_bytes32(s: &str) -> Result<[u8; 32], String> {
         let s = s.trim_start_matches("0x");
         let bytes = hex::decode(s).map_err(|e| format!("Invalid hex: {}", e))?;
-        bytes.try_into().map_err(|v: Vec<u8>| format!("must be 32 bytes, got {}", v.len()))
+        bytes
+            .try_into()
+            .map_err(|v: Vec<u8>| format!("must be 32 bytes, got {}", v.len()))
     }
 
     fn parse_hex_bytes20(s: &str) -> Result<[u8; 20], String> {
         let s = s.trim_start_matches("0x");
         let bytes = hex::decode(s).map_err(|e| format!("Invalid hex: {}", e))?;
-        bytes.try_into().map_err(|v: Vec<u8>| format!("must be 20 bytes, got {}", v.len()))
+        bytes
+            .try_into()
+            .map_err(|v: Vec<u8>| format!("must be 20 bytes, got {}", v.len()))
     }
 
     #[async_trait]
@@ -329,7 +333,7 @@ mod real_rpc_impl {
             let code_hash = parse_hex_bytes32(code_hash_str).map_err(|e| e.to_string())?;
             let storage_hash_str = proof["storageHash"].as_str().ok_or("Missing storageHash")?;
             let storage_hash = parse_hex_bytes32(storage_hash_str).map_err(|e| e.to_string())?;
-            
+
             let balance = proof["balance"]
                 .as_str()
                 .ok_or("Missing balance field")?
@@ -359,22 +363,18 @@ mod real_rpc_impl {
                 None => return Ok(None),
             };
 
-            let logs_arr = receipt["logs"]
-                .as_array()
-                .ok_or("Missing logs field")?;
+            let logs_arr = receipt["logs"].as_array().ok_or("Missing logs field")?;
 
             let logs: Vec<LogEntry> = logs_arr
                 .iter()
                 .filter_map(|log| {
-                    let address = log["address"].as_str()
+                    let address = log["address"]
+                        .as_str()
                         .and_then(|s| parse_hex_bytes20(s).ok())?;
                     let topics_arr = log["topics"].as_array()?;
                     let topics: Vec<[u8; 32]> = topics_arr
                         .iter()
-                        .filter_map(|v| {
-                            v.as_str()
-                                .and_then(|s| parse_hex_bytes32(s).ok())
-                        })
+                        .filter_map(|v| v.as_str().and_then(|s| parse_hex_bytes32(s).ok()))
                         .collect();
                     let data_str = log["data"].as_str()?;
                     let data = parse_hex_bytes(data_str);
@@ -463,7 +463,8 @@ mod real_rpc_impl {
             let state_root_str = result["stateRoot"].as_str().ok_or("Missing stateRoot")?;
             let state_root = parse_hex_bytes32(state_root_str).map_err(|e| e.to_string())?;
             let timestamp_str = result["timestamp"].as_str().ok_or("Missing timestamp")?;
-            let timestamp = parse_hex_u64(timestamp_str).map_err(|e| format!("Invalid timestamp: {}", e))?;
+            let timestamp =
+                parse_hex_u64(timestamp_str).map_err(|e| format!("Invalid timestamp: {}", e))?;
 
             Ok(Some(RpcBlock {
                 number: block_number,
@@ -486,7 +487,8 @@ mod real_rpc_impl {
             }
 
             let from_str = result["from"].as_str().ok_or("Missing from address")?;
-            let from = parse_hex_bytes20(from_str).map_err(|e| format!("Invalid from address: {}", e))?;
+            let from =
+                parse_hex_bytes20(from_str).map_err(|e| format!("Invalid from address: {}", e))?;
             let to = result["to"]
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "null")
@@ -533,7 +535,8 @@ mod real_rpc_impl {
             match block {
                 Some(b) => {
                     let num_str = b["number"].as_str().ok_or("Missing block number")?;
-                    let num = parse_hex_u64(num_str).map_err(|e| format!("Invalid block number: {}", e))?;
+                    let num = parse_hex_u64(num_str)
+                        .map_err(|e| format!("Invalid block number: {}", e))?;
                     Ok(Some(num))
                 }
                 None => Ok(None),

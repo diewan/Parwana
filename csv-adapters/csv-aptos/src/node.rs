@@ -14,10 +14,10 @@ use serde_json::Value;
 
 use crate::address_utils::format_address;
 use crate::rpc::{
-    AptosBlockInfo, AptosEvent, AptosLedgerInfo, AptosResource, AptosTransaction, BoxFuture,
-    AptosLedgerReader, AptosAccountReader, AptosTransactionReader, AptosEventReader,
-    AptosSignerIdentity, AptosTransactionSubmitter, AptosModulePublisher, AptosCheckpointVerifier,
-    AptosRpc,
+    AptosAccountReader, AptosBlockInfo, AptosCheckpointVerifier, AptosEvent, AptosEventReader,
+    AptosLedgerInfo, AptosLedgerReader, AptosModulePublisher, AptosResource, AptosRpc,
+    AptosSignerIdentity, AptosTransaction, AptosTransactionReader, AptosTransactionSubmitter,
+    BoxFuture,
 };
 
 #[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
@@ -256,7 +256,7 @@ impl AptosAccountReader for AptosNode {
         Box::pin(async move {
             let addr_str = format_address(address);
             let result = self.get(&format!("/accounts/{}", addr_str)).await?;
-            Ok(Self::required_u64(&result, "sequence_number")?)
+            Self::required_u64(&result, "sequence_number")
         })
     }
 
@@ -270,7 +270,7 @@ impl AptosAccountReader for AptosNode {
         let resource_type = resource_type.to_string();
         Box::pin(async move {
             let addr_str = format_address(address);
-            
+
             // For CoinStore resources, use the dedicated /balance endpoint
             // This is more efficient than /resources which returns all account resources
             // Endpoint format: /accounts/{address}/balance/{coin_type}
@@ -285,10 +285,7 @@ impl AptosAccountReader for AptosNode {
                     })?;
 
                 let result = self
-                    .get(&format!(
-                        "/accounts/{}/balance/{}",
-                        addr_str, coin_type
-                    ))
+                    .get(&format!("/accounts/{}/balance/{}", addr_str, coin_type))
                     .await?;
 
                 // Check if the endpoint returned an error (account not initialized)
@@ -307,21 +304,22 @@ impl AptosAccountReader for AptosNode {
                 // 1. A direct number: 1000000000
                 // 2. An object: { balance: "1000000000" }
                 let balance = if result.is_number() {
-                    result.as_u64().ok_or_else(|| {
-                        format!("Failed to parse balance as number: {:?}", result)
-                    })?
+                    result
+                        .as_u64()
+                        .ok_or_else(|| format!("Failed to parse balance as number: {:?}", result))?
                 } else {
-                    let balance_str = result
-                        .get("balance")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| {
-                            format!("Failed to extract balance from response: {:?}", result)
-                        })?;
-                    balance_str.parse::<u64>().map_err(|e| {
-                        format!("Failed to parse balance '{}': {}", balance_str, e)
-                    })?
+                    let balance_str =
+                        result
+                            .get("balance")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                format!("Failed to extract balance from response: {:?}", result)
+                            })?;
+                    balance_str
+                        .parse::<u64>()
+                        .map_err(|e| format!("Failed to parse balance '{}': {}", balance_str, e))?
                 };
-                
+
                 // Construct BCS data: coin.value (u64, 8 bytes little-endian) at offset 0
                 let mut bcs_data = vec![0u8; 8];
                 bcs_data.copy_from_slice(&balance.to_le_bytes());
@@ -330,10 +328,7 @@ impl AptosAccountReader for AptosNode {
 
             // For non-CoinStore resources, fall back to /resources endpoint
             let result = self
-                .get(&format!(
-                    "/accounts/{}/resources",
-                    addr_str
-                ))
+                .get(&format!("/accounts/{}/resources", addr_str))
                 .await?;
 
             if result.is_null() {
@@ -341,9 +336,9 @@ impl AptosAccountReader for AptosNode {
             }
 
             // The response is an array of resources
-            let resources = result.as_array().ok_or_else(|| {
-                format!("Expected array of resources, got: {:?}", result)
-            })?;
+            let resources = result
+                .as_array()
+                .ok_or_else(|| format!("Expected array of resources, got: {:?}", result))?;
 
             // Find the resource matching the requested type
             for resource in resources {

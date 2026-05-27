@@ -248,10 +248,7 @@ pub fn from_canonical_cbor_full<T: serde::de::DeserializeOwned>(
 /// This is a simplified version that doesn't include the full Hash type.
 /// For production use, csv-hash provides the full implementation with
 /// proper hash types.
-pub fn canonical_hash<T: serde::Serialize>(
-    domain: &str,
-    value: &T,
-) -> Result<Vec<u8>, CodecError> {
+pub fn canonical_hash<T: serde::Serialize>(domain: &str, value: &T) -> Result<Vec<u8>, CodecError> {
     let cbor = to_canonical_cbor(value)?;
     // Simple hash using sha2 - in production this should use csv-hash's tagged_hash
     use sha2::Digest;

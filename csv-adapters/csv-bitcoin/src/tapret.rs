@@ -54,7 +54,8 @@ impl TapretCommitment {
 
     pub fn leaf_script(&self) -> ScriptBuf {
         let payload = self.payload();
-        let push_bytes = PushBytesBuf::try_from(payload.to_vec()).unwrap();
+        let push_bytes =
+            PushBytesBuf::try_from(payload.to_vec()).expect("64-byte payload fits in PushBytesBuf");
         Builder::new()
             .push_opcode(OP_RETURN)
             .push_slice(push_bytes)
@@ -70,7 +71,8 @@ impl TapretCommitment {
         payload[..32].copy_from_slice(&self.protocol_id);
         payload[32] = nonce;
         payload[33..65].copy_from_slice(self.commitment.as_bytes());
-        let push_bytes = PushBytesBuf::try_from(payload.to_vec()).unwrap();
+        let push_bytes =
+            PushBytesBuf::try_from(payload.to_vec()).expect("65-byte payload fits in PushBytesBuf");
         Builder::new()
             .push_opcode(OP_RETURN)
             .push_slice(push_bytes)
@@ -97,7 +99,8 @@ impl OpretCommitment {
         let mut data = Vec::with_capacity(64);
         data.extend_from_slice(&self.protocol_id);
         data.extend_from_slice(self.commitment.as_bytes());
-        let push_bytes = PushBytesBuf::try_from(data).unwrap();
+        let push_bytes =
+            PushBytesBuf::try_from(data).expect("64-byte opret data fits in PushBytesBuf");
         Builder::new()
             .push_opcode(OP_RETURN)
             .push_slice(push_bytes)

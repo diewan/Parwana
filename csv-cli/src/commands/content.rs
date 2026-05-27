@@ -2,12 +2,12 @@
 
 use anyhow::Result;
 use clap::Subcommand;
-use csv_content::content_tree::{ContentTree, ContentProof, DisclosureProof, RedactedMerkleProof};
 use csv_content::addressing::compute_content_address;
 use csv_content::attachments::{AttachmentRef, MediaType};
-use csv_content::participants::{Participant, ParticipantRole, ParticipantSet};
 use csv_content::claims::{Claim, ClaimPredicate, ContentRights};
+use csv_content::content_tree::{ContentProof, ContentTree, DisclosureProof, RedactedMerkleProof};
 use csv_content::encryption::{EncryptionDescriptor, EncryptionEnvelope, KeyAccess};
+use csv_content::participants::{Participant, ParticipantRole, ParticipantSet};
 use csv_content::resource_accounting::VerificationLimit;
 
 use crate::config::Config;
@@ -142,8 +142,16 @@ pub fn execute(action: ContentAction, _config: &Config) -> Result<()> {
     match action {
         ContentAction::Create { input, output } => cmd_create(&input, &output),
         ContentAction::Prove { tree, index } => cmd_prove(&tree, index),
-        ContentAction::Verify { tree, leaf, leaf_index } => cmd_verify(&tree, leaf.as_deref(), leaf_index),
-        ContentAction::Encrypt { tree, key_id, algorithm } => cmd_encrypt(&tree, &key_id, &algorithm),
+        ContentAction::Verify {
+            tree,
+            leaf,
+            leaf_index,
+        } => cmd_verify(&tree, leaf.as_deref(), leaf_index),
+        ContentAction::Encrypt {
+            tree,
+            key_id,
+            algorithm,
+        } => cmd_encrypt(&tree, &key_id, &algorithm),
         ContentAction::Disclose { tree, include } => cmd_disclose(&tree, &include),
         ContentAction::Attach { action } => cmd_attach(action),
         ContentAction::Participants { action } => cmd_participants(action),
@@ -214,7 +222,10 @@ fn cmd_prove(tree_file: &str, index: usize) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to parse content tree: {}", e))?;
 
     if index >= tree.leaf_count {
-        output::error(&format!("Leaf index {} out of range (tree has {} leaves)", index, tree.leaf_count));
+        output::error(&format!(
+            "Leaf index {} out of range (tree has {} leaves)",
+            index, tree.leaf_count
+        ));
         return Ok(());
     }
 
@@ -223,7 +234,8 @@ fn cmd_prove(tree_file: &str, index: usize) -> Result<()> {
     output::kv("Leaf Count", &tree.leaf_count.to_string());
 
     output::progress(2, 3, &format!("Generating proof for leaf {}...", index));
-    let proof = tree.proof(index)
+    let proof = tree
+        .proof(index)
         .ok_or_else(|| anyhow::anyhow!("Failed to generate proof for leaf {}", index))?;
 
     output::progress(3, 3, "Proof generated");
@@ -306,7 +318,11 @@ fn cmd_encrypt(tree_file: &str, key_id: &str, algorithm: &str) -> Result<()> {
     // Validate algorithm
     let valid_algorithms = ["aes-256-gcm", "chacha20-poly1305"];
     if !valid_algorithms.contains(&algorithm) {
-        output::error(&format!("Unsupported algorithm: {}. Supported: {}", algorithm, valid_algorithms.join(", ")));
+        output::error(&format!(
+            "Unsupported algorithm: {}. Supported: {}",
+            algorithm,
+            valid_algorithms.join(", ")
+        ));
         return Ok(());
     }
 
@@ -397,7 +413,11 @@ fn cmd_disclose(tree_file: &str, include_str: &str) -> Result<()> {
 
 fn cmd_attach(action: AttachAction) -> Result<()> {
     match action {
-        AttachAction::Add { tree, file, media_type } => cmd_attach_add(&tree, &file, &media_type),
+        AttachAction::Add {
+            tree,
+            file,
+            media_type,
+        } => cmd_attach_add(&tree, &file, &media_type),
         AttachAction::List { tree } => cmd_attach_list(&tree),
     }
 }
@@ -475,10 +495,18 @@ fn cmd_participants_add(tree_file: &str, key_hex: &str, role_str: &str) -> Resul
 
     output::kv("Participant ID", &hex::encode(participant_id.0));
     output::kv("Role", role_str);
-    output::kv("Public Key", &format!("0x{}", &key_hex.trim_start_matches("0x")[..min(16, key_hex.trim_start_matches("0x").len())]));
+    output::kv(
+        "Public Key",
+        &format!(
+            "0x{}",
+            &key_hex.trim_start_matches("0x")[..min(16, key_hex.trim_start_matches("0x").len())]
+        ),
+    );
 
     output::success("Participant created");
-    output::info("In a full implementation, this would be added to the content tree participant set");
+    output::info(
+        "In a full implementation, this would be added to the content tree participant set",
+    );
 
     Ok(())
 }
@@ -500,7 +528,11 @@ fn cmd_participants_list(tree_file: &str) -> Result<()> {
 
 fn cmd_claims(action: ClaimsAction) -> Result<()> {
     match action {
-        ClaimsAction::Create { tree, predicate, description } => cmd_claims_create(&tree, &predicate, &description),
+        ClaimsAction::Create {
+            tree,
+            predicate,
+            description,
+        } => cmd_claims_create(&tree, &predicate, &description),
         ClaimsAction::List { tree } => cmd_claims_list(&tree),
     }
 }

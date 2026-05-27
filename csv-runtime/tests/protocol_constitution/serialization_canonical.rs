@@ -89,8 +89,7 @@ fn serialization_is_canonical() {
     .unwrap();
 
     let bytes = to_canonical_cbor(&bundle).expect("bundle serialization");
-    let restored_bundle: ProofBundle =
-        from_canonical_cbor(&bytes).expect("bundle deserialization");
+    let restored_bundle: ProofBundle = from_canonical_cbor(&bytes).expect("bundle deserialization");
     assert_eq!(
         bundle, restored_bundle,
         "ProofBundle roundtrip must recover original"

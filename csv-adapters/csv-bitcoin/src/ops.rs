@@ -9,12 +9,12 @@ use bitcoin_hashes::Hash as BitcoinHash;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperation, SanadOperationResult, TransactionStatus,
 };
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
@@ -540,9 +540,13 @@ impl ChainBroadcaster for BitcoinChainBroadcaster {
             let mut txid_array = [0u8; 32];
             txid_array.copy_from_slice(&txid_bytes);
 
-            let confirmations = self.rpc.get_tx_confirmations(txid_array).await.map_err(|e| {
-                ChainOpError::RpcError(format!("Failed to get confirmations: {}", e))
-            })?;
+            let confirmations = self
+                .rpc
+                .get_tx_confirmations(txid_array)
+                .await
+                .map_err(|e| {
+                    ChainOpError::RpcError(format!("Failed to get confirmations: {}", e))
+                })?;
 
             if confirmations >= required_confirmations {
                 use csv_protocol::backend::TransactionStatus;
@@ -797,7 +801,8 @@ impl BitcoinChainSanadOps {
         // Build refund transaction that spends the lock UTXO
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::from_height(0).unwrap(),
+            lock_time: bitcoin::absolute::LockTime::from_height(0)
+                .expect("height 0 is valid for LockTime"),
             input: vec![bitcoin::TxIn {
                 previous_output: lock_outpoint,
                 script_sig: bitcoin::ScriptBuf::new(),
@@ -833,7 +838,8 @@ impl BitcoinChainSanadOps {
         let lock_script = bitcoin::ScriptBuf::new();
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::from_height(0).unwrap(),
+            lock_time: bitcoin::absolute::LockTime::from_height(0)
+                .expect("height 0 is valid for LockTime"),
             input: vec![bitcoin::TxIn {
                 previous_output: seal_outpoint,
                 script_sig: bitcoin::ScriptBuf::new(),
@@ -875,7 +881,8 @@ impl BitcoinChainSanadOps {
         let op_return_script = bitcoin::ScriptBuf::new();
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::from_height(0).unwrap(),
+            lock_time: bitcoin::absolute::LockTime::from_height(0)
+                .expect("height 0 is valid for LockTime"),
             input: vec![bitcoin::TxIn {
                 previous_output: seal_outpoint,
                 script_sig: bitcoin::ScriptBuf::new(),
@@ -1325,7 +1332,9 @@ impl BitcoinBackend {
             )
         })?;
 
-        batcher.queue(commitment, seal, request_id).map_err(|e| ChainOpError::RpcError(e))
+        batcher
+            .queue(commitment, seal, request_id)
+            .map_err(ChainOpError::RpcError)
     }
 
     /// Check if a batch is ready for publication
@@ -1416,7 +1425,8 @@ impl BitcoinBackend {
         // wallet signing path fills the witness before broadcast.
         let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::from_height(0).unwrap(),
+            lock_time: bitcoin::absolute::LockTime::from_height(0)
+                .expect("height 0 is valid for LockTime"),
             input: vec![TxIn {
                 previous_output: funding_utxo.outpoint,
                 script_sig: ScriptBuf::new(),
@@ -1471,7 +1481,8 @@ impl BitcoinBackend {
                 ..Default::default()
             };
             let wallet = crate::wallet::SealWallet::generate_random(bitcoin::Network::Signet);
-            BitcoinSealProtocol::with_wallet(btc_config, wallet).unwrap()
+            BitcoinSealProtocol::with_wallet(btc_config, wallet)
+                .expect("wallet-based protocol construction")
         });
 
         Self {
@@ -1909,7 +1920,9 @@ fn parse_input(data: &[u8]) -> Result<(TxInput, usize), String> {
     let mut offset = 0usize;
 
     // Txid (32 bytes, little-endian in Bitcoin, but we keep as-is)
-    let mut txid: [u8; 32] = data[offset..offset + 32].try_into().unwrap();
+    let mut txid: [u8; 32] = data[offset..offset + 32]
+        .try_into()
+        .expect("32 bytes for txid");
     txid.reverse(); // Bitcoin uses reversed txid in serialization
     offset += 32;
 

@@ -94,21 +94,19 @@ impl CheckpointVerifier {
                 // Always verify checkpoint certification
                 if required_signatures == 0 {
                     return Err(AptosError::CheckpointFailed(
-                        "Required signatures must be > 0 for checkpoint verification".to_string()
+                        "Required signatures must be > 0 for checkpoint verification".to_string(),
                     ));
                 }
 
                 let is_certified = rpc.verify_checkpoint(version).await.map_err(|e| {
-                    AptosError::CheckpointFailed(format!(
-                        "Failed to verify checkpoint: {}",
-                        e
-                    ))
+                    AptosError::CheckpointFailed(format!("Failed to verify checkpoint: {}", e))
                 })?;
 
                 if !is_certified {
-                    return Err(AptosError::CheckpointFailed(
-                        format!("Checkpoint version {} is not certified by 2f+1 validators", version)
-                    ));
+                    return Err(AptosError::CheckpointFailed(format!(
+                        "Checkpoint version {} is not certified by 2f+1 validators",
+                        version
+                    )));
                 }
 
                 Ok(CheckpointInfo {
@@ -156,8 +154,12 @@ impl CheckpointVerifier {
         expected_event_data: &[u8],
         rpc: &dyn AptosRpc,
     ) -> AptosResult<bool> {
-        let tx = rpc.get_transaction_by_version(tx_version).await
-            .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get transaction: {}", e)))?;
+        let tx = rpc
+            .get_transaction_by_version(tx_version)
+            .await
+            .map_err(|e| {
+                AptosError::CheckpointFailed(format!("Failed to get transaction: {}", e))
+            })?;
         match tx {
             Some(tx) => {
                 if !tx.success {
@@ -177,7 +179,9 @@ impl CheckpointVerifier {
     /// # Arguments
     /// * `rpc` - RPC client for fetching epoch info
     pub async fn current_epoch_async(&self, rpc: &dyn AptosRpc) -> AptosResult<u64> {
-        let ledger = rpc.get_ledger_info().await
+        let ledger = rpc
+            .get_ledger_info()
+            .await
             .map_err(|e| AptosError::CheckpointFailed(format!("Failed to get ledger: {}", e)))?;
         Ok(ledger.epoch)
     }
@@ -189,7 +193,11 @@ impl CheckpointVerifier {
     /// # Arguments
     /// * `expected_epoch` - The epoch we expect the network to be in
     /// * `rpc` - RPC client for fetching current epoch
-    pub async fn is_epoch_passed_async(&self, expected_epoch: u64, rpc: &dyn AptosRpc) -> AptosResult<bool> {
+    pub async fn is_epoch_passed_async(
+        &self,
+        expected_epoch: u64,
+        rpc: &dyn AptosRpc,
+    ) -> AptosResult<bool> {
         let current = self.current_epoch_async(rpc).await?;
         Ok(current >= expected_epoch)
     }
@@ -221,7 +229,10 @@ mod tests {
         );
 
         let verifier = CheckpointVerifier::new();
-        let result = verifier.is_version_finalized_async(1500, &rpc, 3).await.unwrap();
+        let result = verifier
+            .is_version_finalized_async(1500, &rpc, 3)
+            .await
+            .unwrap();
         assert!(result.is_certified);
         assert_eq!(result.version, 1500);
         assert_eq!(result.epoch, 1);

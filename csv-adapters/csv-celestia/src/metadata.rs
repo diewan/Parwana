@@ -177,7 +177,9 @@ impl SanadMetadata {
         if let Some(expires) = self.expires_at {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| CelestiaError::MetadataValidationFailed(format!("Invalid timestamp: {}", e)))?
+                .map_err(|e| {
+                    CelestiaError::MetadataValidationFailed(format!("Invalid timestamp: {}", e))
+                })?
                 .as_secs();
             if now > expires {
                 return Err(CelestiaError::MetadataValidationFailed(

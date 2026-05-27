@@ -233,11 +233,17 @@ impl MockEthereumRpc {
     }
 
     pub fn add_block(&self, block: RpcBlock) {
-        self.blocks.lock().unwrap().insert(block.number, block);
+        self.blocks
+            .lock()
+            .expect("blocks mutex poisoned")
+            .insert(block.number, block);
     }
 
     pub fn add_transaction(&self, tx: RpcTransaction) {
-        self.transactions.lock().unwrap().insert(tx.hash, tx);
+        self.transactions
+            .lock()
+            .expect("transactions mutex poisoned")
+            .insert(tx.hash, tx);
     }
 
     pub fn set_gas_price(&mut self, price: u64) {
@@ -247,18 +253,21 @@ impl MockEthereumRpc {
     pub fn set_storage(&self, address: [u8; 20], key: [u8; 32], value: Vec<u8>) {
         self.storage_values
             .lock()
-            .unwrap()
+            .expect("storage_values mutex poisoned")
             .insert((address, key), value);
     }
 
     pub fn add_receipt(&self, tx_hash: [u8; 32], receipt: TransactionReceipt) {
-        self.receipts.lock().unwrap().insert(tx_hash, receipt);
+        self.receipts
+            .lock()
+            .expect("receipts mutex poisoned")
+            .insert(tx_hash, receipt);
     }
 
     pub fn set_state_root(&self, block_hash: [u8; 32], state_root: [u8; 32]) {
         self.state_roots
             .lock()
-            .unwrap()
+            .expect("state_roots mutex poisoned")
             .insert(block_hash, state_root);
     }
 }
@@ -285,10 +294,8 @@ impl EthereumRpc for MockEthereumRpc {
         _block_number: u64,
     ) -> Result<StorageProof, Box<dyn std::error::Error + Send + Sync>> {
         let storage_values = self.storage_values.lock().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Poison error: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!("Poison error: {}", e)))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let storage_proof: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = keys
@@ -297,10 +304,15 @@ impl EthereumRpc for MockEthereumRpc {
                 let value = storage_values
                     .get(&(address, *key))
                     .cloned()
-                    .ok_or_else(|| Box::new(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("Storage value not found for address {:?} key {:?}", address, key),
-                    )) as Box<dyn std::error::Error + Send + Sync>)?;
+                    .ok_or_else(|| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!(
+                                "Storage value not found for address {:?} key {:?}",
+                                address, key
+                            ),
+                        )) as Box<dyn std::error::Error + Send + Sync>
+                    })?;
                 Ok(SingleStorageProof {
                     key: *key,
                     value,
@@ -326,10 +338,8 @@ impl EthereumRpc for MockEthereumRpc {
         tx_hash: [u8; 32],
     ) -> Result<Option<TransactionReceipt>, Box<dyn std::error::Error + Send + Sync>> {
         let receipts = self.receipts.lock().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Poison error: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!("Poison error: {}", e)))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
         Ok(receipts.get(&tx_hash).cloned())
     }
@@ -339,10 +349,8 @@ impl EthereumRpc for MockEthereumRpc {
         block_hash: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let roots = self.state_roots.lock().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Poison error: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!("Poison error: {}", e)))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
         roots.get(&block_hash).copied().ok_or_else(
             || -> Box<dyn std::error::Error + Send + Sync> {
@@ -364,12 +372,13 @@ impl EthereumRpc for MockEthereumRpc {
         &self,
         tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
-        self.sent_transactions.lock().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Poison error: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
-        })?.push(tx_bytes);
+        self.sent_transactions
+            .lock()
+            .map_err(|e| {
+                Box::new(std::io::Error::other(format!("Poison error: {}", e)))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })?
+            .push(tx_bytes);
         Ok([0xAB; 32])
     }
 
@@ -402,12 +411,37 @@ impl EthereumRpc for MockEthereumRpc {
         Box::new(MockEthereumRpc {
             block_number: self.block_number,
             finalized_block: self.finalized_block,
-            storage_values: Mutex::new(self.storage_values.lock().unwrap().clone()),
-            receipts: Mutex::new(self.receipts.lock().unwrap().clone()),
-            sent_transactions: Mutex::new(self.sent_transactions.lock().unwrap().clone()),
-            state_roots: Mutex::new(self.state_roots.lock().unwrap().clone()),
-            blocks: Mutex::new(self.blocks.lock().unwrap().clone()),
-            transactions: Mutex::new(self.transactions.lock().unwrap().clone()),
+            storage_values: Mutex::new(
+                self.storage_values
+                    .lock()
+                    .expect("storage_values mutex poisoned")
+                    .clone(),
+            ),
+            receipts: Mutex::new(
+                self.receipts
+                    .lock()
+                    .expect("receipts mutex poisoned")
+                    .clone(),
+            ),
+            sent_transactions: Mutex::new(
+                self.sent_transactions
+                    .lock()
+                    .expect("sent_transactions mutex poisoned")
+                    .clone(),
+            ),
+            state_roots: Mutex::new(
+                self.state_roots
+                    .lock()
+                    .expect("state_roots mutex poisoned")
+                    .clone(),
+            ),
+            blocks: Mutex::new(self.blocks.lock().expect("blocks mutex poisoned").clone()),
+            transactions: Mutex::new(
+                self.transactions
+                    .lock()
+                    .expect("transactions mutex poisoned")
+                    .clone(),
+            ),
             gas_price: self.gas_price,
         })
     }
@@ -420,14 +454,24 @@ impl EthereumRpc for MockEthereumRpc {
         &self,
         block_number: u64,
     ) -> Result<Option<RpcBlock>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.blocks.lock().unwrap().get(&block_number).cloned())
+        Ok(self
+            .blocks
+            .lock()
+            .expect("blocks mutex poisoned")
+            .get(&block_number)
+            .cloned())
     }
 
     async fn get_transaction(
         &self,
         tx_hash: [u8; 32],
     ) -> Result<Option<RpcTransaction>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.transactions.lock().unwrap().get(&tx_hash).cloned())
+        Ok(self
+            .transactions
+            .lock()
+            .expect("transactions mutex poisoned")
+            .get(&tx_hash)
+            .cloned())
     }
 }
 
@@ -525,44 +569,56 @@ impl EthereumRpc for QuorumEthereumRpc {
                     .filter_map(|v| v.as_str().and_then(Self::decode_hex))
                     .collect()
             })
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "accountProof missing or invalid",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "accountProof missing or invalid",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         let balance = result
             .get("balance")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "balance missing",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "balance missing",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         let code_hash_hex = result
             .get("codeHash")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "codeHash missing",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "codeHash missing",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
         let mut code_hash = [0u8; 32];
         if let Some(bytes) = Self::decode_hex(code_hash_hex) {
             code_hash.copy_from_slice(&bytes[..32]);
         }
 
-        let nonce = result.get("nonce").and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "nonce missing",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+        let nonce = result
+            .get("nonce")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "nonce missing",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         let storage_hash_hex = result
             .get("storageHash")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "storageHash missing",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "storageHash missing",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
         let mut storage_hash = [0u8; 32];
         if let Some(bytes) = Self::decode_hex(storage_hash_hex) {
             storage_hash.copy_from_slice(&bytes[..32]);
@@ -584,30 +640,37 @@ impl EthereumRpc for QuorumEthereumRpc {
                                     .filter_map(|v| v.as_str().and_then(Self::decode_hex))
                                     .collect()
                             })
-                            .ok_or_else(|| Box::new(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                "proof array missing",
-                            )) as Box<dyn std::error::Error + Send + Sync>)?;
+                            .ok_or_else(|| {
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "proof array missing",
+                                ))
+                                    as Box<dyn std::error::Error + Send + Sync>
+                            })?;
 
                         let mut key = [0u8; 32];
                         if let Some(bytes) = Self::decode_hex(key_hex) {
                             key.copy_from_slice(&bytes[..32]);
                         }
 
-                        let value = Self::decode_hex(value_hex)
-                            .ok_or_else(|| Box::new(std::io::Error::new(
+                        let value = Self::decode_hex(value_hex).ok_or_else(|| {
+                            Box::new(std::io::Error::new(
                                 std::io::ErrorKind::InvalidData,
                                 format!("Failed to decode value hex: {}", value_hex),
-                            )) as Box<dyn std::error::Error + Send + Sync>)?;
+                            ))
+                                as Box<dyn std::error::Error + Send + Sync>
+                        })?;
 
                         Some(SingleStorageProof { key, value, proof })
                     })
                     .collect()
             })
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "storageProof missing or invalid",
-            )) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "storageProof missing or invalid",
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         Ok(StorageProof {
             account_proof,
@@ -849,7 +912,9 @@ impl EthereumRpc for QuorumEthereumRpc {
         let provider_count = self.client.provider_count();
         let providers: Vec<_> = (0..provider_count.max(1))
             .map(|_| {
-                csv_protocol::rpc::quorum_client::RpcProvider::new("http://localhost:8545".to_string())
+                csv_protocol::rpc::quorum_client::RpcProvider::new(
+                    "http://localhost:8545".to_string(),
+                )
             })
             .collect();
         Box::new(QuorumEthereumRpc {

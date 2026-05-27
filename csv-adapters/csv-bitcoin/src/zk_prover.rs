@@ -225,7 +225,9 @@ impl Sp1BtcSpvInput {
             }
 
             let hash = bitcoin::hashes::sha256d::Hash::hash(&concat[..]);
-            current = hash.as_byte_array()[..].try_into().unwrap();
+            current = hash.as_byte_array()[..]
+                .try_into()
+                .expect("32 bytes for hash");
         }
 
         // Final should match Merkle root in block header

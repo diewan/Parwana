@@ -11,7 +11,9 @@ use std::str::FromStr;
 ///
 /// This is the fundamental building block for commitments, sanad IDs,
 /// seal references, and all cryptographic operations in CSV.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {

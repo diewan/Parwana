@@ -25,9 +25,9 @@ use csv_protocol::seal_protocol::SealProtocol;
 // use csv_protocol::dag::DAGSegment;
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 
 use crate::address_utils::{format_address, parse_aptos_address};
 use crate::checkpoint::CheckpointVerifier;
@@ -37,10 +37,9 @@ use crate::proofs::{CommitmentEventBuilder, EventProofVerifier};
 use crate::rpc::AptosRpc;
 #[cfg(not(feature = "rpc"))]
 use crate::rpc::{AptosLedgerInfo, AptosTransaction};
+use crate::rpc::{AptosLedgerReader, AptosTransactionReader, AptosTransactionSubmitter};
 use crate::seal::SealRegistry;
 use crate::types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, AptosSealPoint};
-use crate::rpc::{AptosLedgerReader, AptosTransactionReader, AptosTransactionSubmitter};
-
 
 /// Aptos implementation of the SealProtocol trait
 pub struct AptosSealProtocol {
@@ -453,14 +452,18 @@ impl SealProtocol for AptosSealProtocol {
                 })?;
 
             // Submit signed transaction via REST API
-            let submit_result = self.rpc_as_transaction_submitter().submit_signed_transaction(tx_json)
+            let submit_result = self
+                .rpc_as_transaction_submitter()
+                .submit_signed_transaction(tx_json)
                 .await
                 .map_err(|e| {
                     ProtocolError::PublishFailed(format!("Failed to submit transaction: {}", e))
                 })?;
 
             // Wait for transaction confirmation
-            let tx = self.rpc_as_transaction_reader().wait_for_transaction(submit_result)
+            let tx = self
+                .rpc_as_transaction_reader()
+                .wait_for_transaction(submit_result)
                 .await
                 .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
@@ -522,7 +525,9 @@ impl SealProtocol for AptosSealProtocol {
 
         // Fetch transaction from the Aptos node by version
         #[cfg(feature = "rpc")]
-        let tx = self.rpc_as_transaction_reader().get_transaction(anchor.version)
+        let tx = self
+            .rpc_as_transaction_reader()
+            .get_transaction(anchor.version)
             .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!(
@@ -564,7 +569,9 @@ impl SealProtocol for AptosSealProtocol {
 
         // Fetch ledger info to verify the transaction is part of the ledger
         #[cfg(feature = "rpc")]
-        let ledger_info = self.rpc_as_ledger_reader().get_ledger_info()
+        let ledger_info = self
+            .rpc_as_ledger_reader()
+            .get_ledger_info()
             .await
             .map_err(|e| {
                 ProtocolError::InclusionProofFailed(format!("Failed to fetch ledger info: {}", e))
@@ -614,7 +621,8 @@ impl SealProtocol for AptosSealProtocol {
         #[cfg(feature = "rpc")]
         let is_certified = {
             let f_plus_one = self.config.f_plus_one();
-            match self.checkpoint_verifier
+            match self
+                .checkpoint_verifier
                 .is_version_finalized_async(anchor.version, self.rpc.as_ref(), f_plus_one)
                 .await
             {
@@ -632,7 +640,10 @@ impl SealProtocol for AptosSealProtocol {
         Ok(AptosFinalityProof::new(anchor.version, is_certified))
     }
 
-    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn enforce_seal(
+        &self,
+        seal: Self::SealPoint,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that an Aptos resource cannot be consumed more than once
         // by checking both local registry and on-chain resource state
@@ -693,7 +704,7 @@ impl SealProtocol for AptosSealProtocol {
         hasher.update(b"aptos-seal");
         // Include the value in the hash to generate different addresses for different seals
         if let Some(v) = value {
-            hasher.update(&v.to_le_bytes());
+            hasher.update(v.to_le_bytes());
         }
         let result = hasher.finalize();
         let mut addr = [0u8; 32];
@@ -783,13 +794,18 @@ impl SealProtocol for AptosSealProtocol {
         .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>)
     }
 
-    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn rollback(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         log::warn!(
             "Rollback requested for anchor at version {}",
             anchor.version
         );
         #[cfg(feature = "rpc")]
-        let current_version = self.rpc_as_ledger_reader().get_latest_version()
+        let current_version = self
+            .rpc_as_ledger_reader()
+            .get_latest_version()
             .await
             .map_err(|e| ProtocolError::NetworkError(e.to_string()))?;
 
@@ -843,7 +859,9 @@ impl AptosSealProtocol {
         self.rpc.as_ref()
     }
 
-    pub(crate) fn rpc_as_transaction_submitter(&self) -> &(dyn AptosTransactionSubmitter + Send + Sync) {
+    pub(crate) fn rpc_as_transaction_submitter(
+        &self,
+    ) -> &(dyn AptosTransactionSubmitter + Send + Sync) {
         self.rpc.as_ref()
     }
 

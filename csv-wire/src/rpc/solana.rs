@@ -13,11 +13,13 @@ impl TryFrom<SolanaRpcProof> for CanonicalProof {
     type Error = String;
 
     fn try_from(rpc_proof: SolanaRpcProof) -> Result<Self, String> {
-        let block_hash: [u8; 32] = rpc_proof.block_hash
+        let block_hash: [u8; 32] = rpc_proof
+            .block_hash
             .try_into()
             .map_err(|_| "Solana block_hash must be 32 bytes".to_string())?;
 
-        let state_root: [u8; 32] = rpc_proof.state_root
+        let state_root: [u8; 32] = rpc_proof
+            .state_root
             .try_into()
             .map_err(|_| "Solana state_root must be 32 bytes".to_string())?;
 

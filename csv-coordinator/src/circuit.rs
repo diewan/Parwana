@@ -93,12 +93,12 @@ impl CellCircuitBreaker {
             return false;
         }
 
-        if let Some(last_failure) = self.last_failure_time {
-            if last_failure.elapsed() >= self.config.timeout {
-                self.state = CircuitState::HalfOpen;
-                self.success_count = 0;
-                return true;
-            }
+        if let Some(last_failure) = self.last_failure_time
+            && last_failure.elapsed() >= self.config.timeout
+        {
+            self.state = CircuitState::HalfOpen;
+            self.success_count = 0;
+            return true;
         }
 
         false

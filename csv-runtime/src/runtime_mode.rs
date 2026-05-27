@@ -277,6 +277,8 @@ impl HealthMonitor {
 
         if unhealthy == 0 {
             self.current_health = RuntimeHealth::Healthy;
+        } else if unhealthy == total {
+            self.current_health = RuntimeHealth::Unsafe;
         } else {
             let reason = self.detect_degradation_reason();
             self.current_health = RuntimeHealth::Degraded { reason };
@@ -362,6 +364,49 @@ impl HealthMonitor {
     /// Manually set the runtime mode (for emergency overrides)
     pub fn set_mode(&mut self, mode: RuntimeMode) {
         self.mode = mode;
+    }
+
+    /// Get the current health status (public API surface).
+    pub fn status(&self) -> HealthStatus {
+        HealthStatus::new(self.current_health.clone())
+    }
+}
+
+/// Health status reported by the runtime.
+///
+/// This is a thin wrapper around [`RuntimeHealth`] that can be returned
+/// from the public API without exposing the observability crate directly.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HealthStatus(RuntimeHealth);
+
+impl HealthStatus {
+    /// Create a new `HealthStatus` from a `RuntimeHealth`.
+    pub fn new(health: RuntimeHealth) -> Self {
+        Self(health)
+    }
+
+    /// Return the underlying `RuntimeHealth`.
+    pub fn inner(&self) -> &RuntimeHealth {
+        &self.0
+    }
+
+    /// Returns `true` if the runtime is fully healthy.
+    pub fn is_healthy(&self) -> bool {
+        matches!(&self.0, RuntimeHealth::Healthy)
+    }
+}
+
+impl HealthStatus {
+    /// Healthy status — all components operational.
+    pub const HEALTHY: Self = Self(RuntimeHealth::Healthy);
+
+    /// Critical status — runtime is in unsafe mode.
+    pub const CRITICAL: Self = Self(RuntimeHealth::Unsafe);
+}
+
+impl Default for HealthStatus {
+    fn default() -> Self {
+        Self(RuntimeHealth::Healthy)
     }
 }
 

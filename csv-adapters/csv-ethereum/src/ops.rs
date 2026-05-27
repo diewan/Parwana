@@ -117,7 +117,7 @@ impl EthereumBackend {
                     fallback_rpc,
                     [0u8; 20],
                 )
-                .unwrap()
+                .expect("failed to create EthereumSealProtocol from fallback config")
             });
 
         Self {
@@ -1400,7 +1400,11 @@ impl ChainBackend for EthereumBackend {
 
         let mut contract_address = [0u8; 20];
         contract_address.copy_from_slice(&seal.id[..20]);
-        let slot_index = u64::from_le_bytes(seal.id[20..28].try_into().unwrap());
+        let slot_index = u64::from_le_bytes(
+            seal.id[20..28]
+                .try_into()
+                .expect("seal ID must be at least 28 bytes for slot_index extraction"),
+        );
 
         let nonce = seal.nonce.unwrap_or(0);
         let ethereum_seal =

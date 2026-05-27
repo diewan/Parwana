@@ -66,10 +66,7 @@ pub enum NegotiationError {
     InsufficientReorgProtection { required: u64, available: u64 },
 
     #[error("Insufficient validator trust: required {required}, available {available}")]
-    InsufficientValidatorTrust {
-        required: f32,
-        available: f32,
-    },
+    InsufficientValidatorTrust { required: f32, available: f32 },
 
     #[error("No suitable proof system available")]
     NoProofSystem,

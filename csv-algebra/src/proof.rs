@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 ///
 /// Canonical proof structures without wire encoding.
 /// No serde, no IO, no infrastructure dependencies.
-
+///
 /// A canonical proof structure.
 /// This is the protocol-level representation of a proof,
 /// independent of any chain-specific encoding.

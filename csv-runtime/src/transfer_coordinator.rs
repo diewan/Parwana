@@ -916,13 +916,13 @@ impl TransferCoordinator {
 
         // Verify the proof bundle using the canonical verifier.
         let signature_scheme = runtime_signature_scheme(proof_bundle.signature_scheme)?;
-        if let Some(expected_scheme) = adapter_registry.signature_scheme(&transfer.source_chain) {
-            if expected_scheme != signature_scheme {
-                return Err(TransferCoordinatorError::ProofVerificationFailed(format!(
-                    "Proof bundle signature scheme {:?} does not match source chain {} scheme {:?}",
-                    signature_scheme, transfer.source_chain, expected_scheme
-                )));
-            }
+        if let Some(expected_scheme) = adapter_registry.signature_scheme(&transfer.source_chain)
+            && expected_scheme != signature_scheme
+        {
+            return Err(TransferCoordinatorError::ProofVerificationFailed(format!(
+                "Proof bundle signature scheme {:?} does not match source chain {} scheme {:?}",
+                signature_scheme, transfer.source_chain, expected_scheme
+            )));
         }
 
         let seal_status = adapter_registry
@@ -954,7 +954,7 @@ impl TransferCoordinator {
             })),
             chain_data: None,
             native_proof_validated: true,
-            sanad_id: Some(transfer.sanad_id),
+            sanad_id: Some(csv_hash::SanadId(transfer.sanad_id)),
             lock_tx: Some(transfer.lock_tx_hash.clone()),
             lock_output_index: Some(transfer.lock_output_index),
             transition_id: Some(transfer.transition_id.clone()),
@@ -1698,29 +1698,28 @@ impl TransferCoordinator {
             .id
             .get(0..32)
             .map(|b| csv_hash::SanadId::new(b.try_into().unwrap_or([0u8; 32])));
-        if let Some(ref expected_sanad) = transfer.sanad_id {
-            if let Some(ref bound_sanad) = sanad_id_bound {
-                if bound_sanad.as_bytes() != expected_sanad.as_bytes() {
-                    return Err(TransferCoordinatorError::ProofVerificationFailed(
-                        "Proof seal does not bind to the transfer sanad_id".to_string(),
-                    ));
-                }
+        if let Some(ref bound_sanad) = sanad_id_bound {
+            let expected_sanad = csv_hash::SanadId(transfer.sanad_id);
+            if bound_sanad.as_bytes() != expected_sanad.as_bytes() {
+                return Err(TransferCoordinatorError::ProofVerificationFailed(
+                    "Proof seal does not bind to the transfer sanad_id".to_string(),
+                ));
             }
         }
 
-        if let Some(ref expected_lock_tx) = transfer.lock_tx_hash.as_slice().try_into().ok() {
-            let expected_lock_bytes = hex::encode(expected_lock_tx);
+        if transfer.lock_tx_hash.len() == 32 {
+            let expected_lock_bytes = hex::encode(&transfer.lock_tx_hash);
             let proof_lock_bytes = proof_bundle
                 .anchor_ref
                 .metadata
                 .get(0..expected_lock_bytes.len())
                 .map(|s| String::from_utf8_lossy(s).to_string());
-            if let Some(ref lock_bytes) = proof_lock_bytes {
-                if lock_bytes != expected_lock_bytes {
-                    return Err(TransferCoordinatorError::ProofVerificationFailed(
-                        "Proof anchor metadata does not bind to the lock transaction".to_string(),
-                    ));
-                }
+            if let Some(ref lock_bytes) = proof_lock_bytes
+                && lock_bytes.as_str() != expected_lock_bytes.as_str()
+            {
+                return Err(TransferCoordinatorError::ProofVerificationFailed(
+                    "Proof anchor metadata does not bind to the lock transaction".to_string(),
+                ));
             }
         }
 
@@ -1734,7 +1733,7 @@ impl TransferCoordinator {
             })),
             chain_data: None,
             native_proof_validated: true,
-            sanad_id: Some(transfer.sanad_id),
+            sanad_id: Some(csv_hash::SanadId(transfer.sanad_id)),
             lock_tx: Some(transfer.lock_tx_hash.clone()),
             lock_output_index: Some(transfer.lock_output_index),
             transition_id: Some(transfer.transition_id.clone()),
@@ -1953,8 +1952,13 @@ impl TransferCoordinator {
                 attempt: 2,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
-        self.execute_from_mint(&transfer.id, &mint_result.tx_hash, adapter_registry, runtime_ctx)
-            .await
+        self.execute_from_mint(
+            &transfer.id,
+            &mint_result.tx_hash,
+            adapter_registry,
+            runtime_ctx,
+        )
+        .await
     }
 
     /// Execute transfer from mint phase (skip mint broadcast, just confirm).
@@ -2000,7 +2004,8 @@ impl TransferCoordinator {
             })
             .map(|entry| registry_entry_to_transfer(entry, transfer_id.to_string()))
             .ok_or(TransferCoordinatorError::NotFound)?;
-        self.validate_recovery_context(&transfer, &runtime_ctx).await?;
+        self.validate_recovery_context(&transfer, &runtime_ctx)
+            .await?;
 
         let mint_result = adapter_registry
             .confirm_tx(&transfer.destination_chain, mint_tx_hash)
@@ -2128,9 +2133,7 @@ impl TransferCoordinator {
                 _ => {}
             }
 
-            let runtime_ctx = recovery_contexts
-                .context_for(&entry.transfer_id)
-                .await?;
+            let runtime_ctx = recovery_contexts.context_for(&entry.transfer_id).await?;
 
             match self
                 .resume_transfer(&entry.transfer_id, adapter_registry, runtime_ctx)
@@ -2269,10 +2272,10 @@ mod tests {
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
         ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
-            use ed25519_dalek::{Signer, SigningKey};
             use csv_hash::dag::{DAGNode, DAGSegment};
             use csv_hash::seal::{CommitAnchor, SealPoint};
             use csv_protocol::signature::SignatureScheme;
+            use ed25519_dalek::{Signer, SigningKey};
             let root_commitment = csv_hash::Hash::new([9u8; 32]);
             let signing_key = SigningKey::from_bytes(&[7u8; 32]);
             let signature = signing_key.sign(root_commitment.as_bytes());
@@ -2294,7 +2297,8 @@ mod tests {
                 vec![encoded_signature],
                 SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0)).unwrap(),
                 CommitAnchor::new(vec![0xCCu8; 32], 100, proof_bytes.clone()).unwrap(),
-                InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0).unwrap(),
+                InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0)
+                    .unwrap(),
                 csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             )
             .map_err(|e| crate::adapter_registry::AdapterError::Generic(e.to_string()))?)
@@ -2474,10 +2478,13 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
         let proof_bundle = TestAdapter::new()
-            .build_inclusion_proof(&expected_transfer, &LockResult {
-                tx_hash: hex::encode([0x11u8; 32]),
-                block_height: 100,
-            })
+            .build_inclusion_proof(
+                &expected_transfer,
+                &LockResult {
+                    tx_hash: hex::encode([0x11u8; 32]),
+                    block_height: 100,
+                },
+            )
             .await
             .unwrap();
         let payload = csv_codec::to_canonical_cbor(&proof_bundle).unwrap();
@@ -2539,10 +2546,13 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
         let bundle = TestAdapter::new()
-            .build_inclusion_proof(&expected_transfer, &LockResult {
-                tx_hash: hex::encode([0x11u8; 32]),
-                block_height: 100,
-            })
+            .build_inclusion_proof(
+                &expected_transfer,
+                &LockResult {
+                    tx_hash: hex::encode([0x11u8; 32]),
+                    block_height: 100,
+                },
+            )
             .await
             .unwrap();
         let payload = csv_codec::to_canonical_cbor(&bundle).unwrap();
@@ -2937,7 +2947,7 @@ mod tests {
         // Initially healthy
         assert_eq!(
             coordinator.health_status(),
-            crate::runtime_mode::HealthStatus::Healthy
+            crate::runtime_mode::HealthStatus::HEALTHY
         );
 
         // Record a failed health check
@@ -2951,7 +2961,7 @@ mod tests {
         // Should be critical (all checks are unhealthy)
         assert_eq!(
             coordinator.health_status(),
-            crate::runtime_mode::HealthStatus::Critical
+            crate::runtime_mode::HealthStatus::CRITICAL
         );
     }
 
@@ -3164,7 +3174,7 @@ mod tests {
         // Health status should be critical (all checks are unhealthy)
         assert_eq!(
             coordinator.health_status(),
-            crate::runtime_mode::HealthStatus::Critical
+            crate::runtime_mode::HealthStatus::CRITICAL
         );
 
         // Circuit breaker should be open after reorg
@@ -3530,7 +3540,7 @@ mod tests {
             .await;
         assert!(result.is_ok(), "Second execution should be idempotent");
 
-        // Try with different transfer ID but same lock_tx_hash (replay attempt)
+        // Try with different transfer ID but same sanad_id (replay attempt from same runtime)
         let replay_transfer = CrossChainTransfer {
             id: "test-replay".to_string(),
             source_chain: transfer.source_chain.clone(),
@@ -3543,8 +3553,8 @@ mod tests {
 
         let replay_lease = crate::lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*replay_transfer.sanad_id.as_bytes()),
-            epoch: 1,
-            owner_runtime_id: uuid::Uuid::new_v4(),
+            epoch: 2,
+            owner_runtime_id: lease.owner_runtime_id,
             acquired_at: std::time::SystemTime::now(),
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
@@ -3704,7 +3714,7 @@ mod tests {
         // Health status should be critical (all checks are unhealthy)
         assert_eq!(
             coordinator.health_status(),
-            crate::runtime_mode::HealthStatus::Critical
+            crate::runtime_mode::HealthStatus::CRITICAL
         );
 
         // Runtime mode should be unsafe

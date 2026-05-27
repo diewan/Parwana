@@ -91,7 +91,12 @@ impl MpcBatcher {
     /// * `min_batch_size` - Minimum before auto-batch (default: 2)
     /// * `max_wait_seconds` - Timeout for forcing batch (default: 300 = 5 min)
     /// * `max_queue_depth` - Maximum queue depth for backpressure (default: 1000)
-    pub fn new(batch_size: usize, min_batch_size: usize, max_wait_seconds: u64, max_queue_depth: usize) -> Self {
+    pub fn new(
+        batch_size: usize,
+        min_batch_size: usize,
+        max_wait_seconds: u64,
+        max_queue_depth: usize,
+    ) -> Self {
         Self {
             pending: Arc::new(Mutex::new(VecDeque::with_capacity(max_queue_depth))),
             batch_size: batch_size.max(2), // At least 2 for batching to make sense
@@ -121,7 +126,12 @@ impl MpcBatcher {
     ///
     /// Returns true if the batch is ready to publish (reached batch_size)
     /// Returns error if queue is full (backpressure)
-    pub fn queue(&self, commitment: Hash, seal: BitcoinSealPoint, request_id: String) -> Result<bool, String> {
+    pub fn queue(
+        &self,
+        commitment: Hash,
+        seal: BitcoinSealPoint,
+        request_id: String,
+    ) -> Result<bool, String> {
         let pending_commitment = PendingCommitment {
             commitment,
             seal,
@@ -334,11 +344,19 @@ mod tests {
         let commitment = Hash::new([1u8; 32]);
         let seal = BitcoinSealPoint::new([0u8; 32], 0, None);
 
-        assert!(!batcher.queue(commitment, seal.clone(), "test-1".to_string()).unwrap());
+        assert!(
+            !batcher
+                .queue(commitment, seal.clone(), "test-1".to_string())
+                .unwrap()
+        );
         assert_eq!(batcher.pending_count(), 1);
 
         // Second commitment should trigger batch ready
-        assert!(batcher.queue(commitment, seal, "test-2".to_string()).unwrap());
+        assert!(
+            batcher
+                .queue(commitment, seal, "test-2".to_string())
+                .unwrap()
+        );
         assert_eq!(batcher.pending_count(), 2);
     }
 
@@ -350,7 +368,9 @@ mod tests {
         for i in 0..3 {
             let commitment = Hash::new([i as u8; 32]);
             let seal = BitcoinSealPoint::new([0u8; 32], i, None);
-            batcher.queue(commitment, seal, format!("test-{}", i)).unwrap();
+            batcher
+                .queue(commitment, seal, format!("test-{}", i))
+                .unwrap();
         }
 
         // Build tree

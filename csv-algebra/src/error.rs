@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 
 /// Algebra-level errors.
-/// 
+///
 /// These are pure domain errors with no std::error::Error implementation
 /// (since this crate is no_std). They represent invalid state transitions,
 /// malformed data, or protocol violations at the algebraic level.

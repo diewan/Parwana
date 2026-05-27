@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use csv_admission::AdmissionController;
 use csv_observability::runtime_health::{DegradedReason, RuntimeHealth};
-use csv_runtime::{HealthMonitor, RuntimeMode, CircuitBreakerState};
+use csv_runtime::{CircuitBreakerState, HealthMonitor, RuntimeMode};
 
 use crate::config::Config;
 use crate::output;
@@ -43,7 +43,10 @@ fn cmd_status() -> Result<()> {
 
     output::kv("Health", health_display(&health));
     output::kv("Mode", mode_display(mode));
-    output::kv("Circuit Breaker", circuit_breaker_state_display(CircuitBreakerState::Closed));
+    output::kv(
+        "Circuit Breaker",
+        circuit_breaker_state_display(CircuitBreakerState::Closed),
+    );
 
     match &health {
         RuntimeHealth::Healthy => {
@@ -108,9 +111,18 @@ fn cmd_admission() -> Result<()> {
     let limits = controller.limits();
     let snapshot = controller.snapshot();
 
-    output::kv("Max In-Flight Transfers", &limits.max_in_flight_transfers.to_string());
-    output::kv("Max In-Flight Per Chain", &limits.max_in_flight_per_chain.to_string());
-    output::kv("Current In-Flight", &snapshot.in_flight_transfers.to_string());
+    output::kv(
+        "Max In-Flight Transfers",
+        &limits.max_in_flight_transfers.to_string(),
+    );
+    output::kv(
+        "Max In-Flight Per Chain",
+        &limits.max_in_flight_per_chain.to_string(),
+    );
+    output::kv(
+        "Current In-Flight",
+        &snapshot.in_flight_transfers.to_string(),
+    );
 
     if !snapshot.in_flight_by_chain.is_empty() {
         println!("\n  {}:", "In-Flight by Chain".bold());

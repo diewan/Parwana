@@ -120,27 +120,18 @@ mod tests {
     #[test]
     fn test_validate_zero_block_hash() {
         let proof = CanonicalProof::new(100, [0u8; 32], [2u8; 32], vec![vec![3u8; 32]]);
-        assert_eq!(
-            proof.validate(),
-            Err(ProofValidationError::ZeroBlockHash)
-        );
+        assert_eq!(proof.validate(), Err(ProofValidationError::ZeroBlockHash));
     }
 
     #[test]
     fn test_validate_zero_state_root() {
         let proof = CanonicalProof::new(100, [1u8; 32], [0u8; 32], vec![vec![3u8; 32]]);
-        assert_eq!(
-            proof.validate(),
-            Err(ProofValidationError::ZeroStateRoot)
-        );
+        assert_eq!(proof.validate(), Err(ProofValidationError::ZeroStateRoot));
     }
 
     #[test]
     fn test_validate_empty_proof_nodes() {
         let proof = CanonicalProof::new(100, [1u8; 32], [2u8; 32], vec![]);
-        assert_eq!(
-            proof.validate(),
-            Err(ProofValidationError::EmptyProofNodes)
-        );
+        assert_eq!(proof.validate(), Err(ProofValidationError::EmptyProofNodes));
     }
 }

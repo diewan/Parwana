@@ -274,7 +274,10 @@ impl StateProofVerifier {
         match rpc.get_resource(address, resource_type, None).await {
             Ok(Some(_)) => Ok(false), // Still exists, not consumed
             Ok(None) => Ok(true),     // Doesn't exist, was consumed
-            Err(e) => Err(AptosError::StateProofFailed(format!("Failed to verify resource consumption: {}", e))),
+            Err(e) => Err(AptosError::StateProofFailed(format!(
+                "Failed to verify resource consumption: {}",
+                e
+            ))),
         }
     }
 }
@@ -503,10 +506,16 @@ mod tests {
             },
         );
 
-        assert!(StateProofVerifier::verify_resource_exists_async([1u8; 32], "CSV::Seal", &rpc).await.unwrap());
+        assert!(
+            StateProofVerifier::verify_resource_exists_async([1u8; 32], "CSV::Seal", &rpc)
+                .await
+                .unwrap()
+        );
 
         assert!(
-            !StateProofVerifier::verify_resource_exists_async([99u8; 32], "CSV::Seal", &rpc).await.unwrap()
+            !StateProofVerifier::verify_resource_exists_async([99u8; 32], "CSV::Seal", &rpc)
+                .await
+                .unwrap()
         );
     }
 
@@ -523,12 +532,16 @@ mod tests {
 
         // Resource exists, not consumed
         assert!(
-            !StateProofVerifier::verify_resource_consumed_async([1u8; 32], "CSV::Seal", &rpc).await.unwrap()
+            !StateProofVerifier::verify_resource_consumed_async([1u8; 32], "CSV::Seal", &rpc)
+                .await
+                .unwrap()
         );
 
         // Resource doesn't exist, was consumed
         assert!(
-            StateProofVerifier::verify_resource_consumed_async([99u8; 32], "CSV::Seal", &rpc).await.unwrap()
+            StateProofVerifier::verify_resource_consumed_async([99u8; 32], "CSV::Seal", &rpc)
+                .await
+                .unwrap()
         );
     }
 
@@ -559,8 +572,16 @@ mod tests {
             },
         );
 
-        assert!(EventProofVerifier::verify_event_in_tx(100, &[0xAB, 0xCD], &rpc).await.unwrap());
-        assert!(!EventProofVerifier::verify_event_in_tx(100, &[0xFF], &rpc).await.unwrap());
+        assert!(
+            EventProofVerifier::verify_event_in_tx(100, &[0xAB, 0xCD], &rpc)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !EventProofVerifier::verify_event_in_tx(100, &[0xFF], &rpc)
+                .await
+                .unwrap()
+        );
     }
 
     #[test]

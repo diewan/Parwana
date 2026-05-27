@@ -416,7 +416,10 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Enforce seal by closing the account (consuming it)
-    async fn enforce_seal(&self, seal_point: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn enforce_seal(
+        &self,
+        seal_point: Self::SealPoint,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a PDA account cannot be consumed more than once
         // by checking both local registry and on-chain account state
@@ -501,7 +504,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create seal_ref from the first active seal or create a default one
         let seal_ref = {
-            let seals = self.active_seals.lock().unwrap();
+            let seals = self.active_seals.lock().expect("Seal mutex not poisoned");
             seals
                 .first()
                 .map(|s| unsafe {
@@ -574,7 +577,10 @@ impl SealProtocol for SolanaSealProtocol {
     }
 
     /// Handle rollback for reorgs
-    async fn rollback(&self, anchor_ref: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn rollback(
+        &self,
+        anchor_ref: Self::CommitAnchor,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Solana has very rare reorgs due to deterministic finality
         // But we still need to handle them
 

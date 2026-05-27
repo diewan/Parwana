@@ -1,11 +1,11 @@
-use crate::proof::CanonicalProof;
 use crate::finality::FinalityEvidence;
+use crate::proof::CanonicalProof;
 use crate::transfer::SealId;
 
 /// Marker trait — zero runtime cost, compile-time only
 pub trait TransferState: sealed::Sealed {}
-mod sealed { 
-    pub trait Sealed {} 
+mod sealed {
+    pub trait Sealed {}
 }
 
 // ── State structs ─────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@ mod sealed {
 pub struct Locked {
     pub seal_id: SealId,
     pub source_chain: u32,
-    pub dest_chain:   u32,
+    pub dest_chain: u32,
 }
 
 /// Proof construction underway.
@@ -39,7 +39,7 @@ pub struct AwaitingFinality {
 #[must_use]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofValidated {
-    pub proof:    CanonicalProof,
+    pub proof: CanonicalProof,
     pub evidence: FinalityEvidence,
 }
 
@@ -48,14 +48,14 @@ pub struct ProofValidated {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Minting {
     pub validated: ProofValidated,
-    pub mint_tx:   [u8; 32],
+    pub mint_tx: [u8; 32],
 }
 
 /// Terminal state: success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Completed {
-    pub mint_tx:   [u8; 32],
-    pub seal_id:   SealId,
+    pub mint_tx: [u8; 32],
+    pub seal_id: SealId,
 }
 
 /// Terminal state: reorg or failure.
@@ -66,30 +66,30 @@ pub struct RolledBack {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RollbackReason { 
-    Reorg, 
-    ProofInvalid, 
-    FinalityTimeout, 
-    MintFailed 
+pub enum RollbackReason {
+    Reorg,
+    ProofInvalid,
+    FinalityTimeout,
+    MintFailed,
 }
 
 // ── Sealed impls ──────────────────────────────────────────────────────────────
 
-impl sealed::Sealed for Locked          {}
-impl sealed::Sealed for ProofBuilding   {}
-impl sealed::Sealed for AwaitingFinality{}
-impl sealed::Sealed for ProofValidated  {}
-impl sealed::Sealed for Minting         {}
-impl sealed::Sealed for Completed      {}
-impl sealed::Sealed for RolledBack     {}
+impl sealed::Sealed for Locked {}
+impl sealed::Sealed for ProofBuilding {}
+impl sealed::Sealed for AwaitingFinality {}
+impl sealed::Sealed for ProofValidated {}
+impl sealed::Sealed for Minting {}
+impl sealed::Sealed for Completed {}
+impl sealed::Sealed for RolledBack {}
 
-impl TransferState for Locked          {}
-impl TransferState for ProofBuilding   {}
-impl TransferState for AwaitingFinality{}
-impl TransferState for ProofValidated  {}
-impl TransferState for Minting         {}
-impl TransferState for Completed      {}
-impl TransferState for RolledBack     {}
+impl TransferState for Locked {}
+impl TransferState for ProofBuilding {}
+impl TransferState for AwaitingFinality {}
+impl TransferState for ProofValidated {}
+impl TransferState for Minting {}
+impl TransferState for Completed {}
+impl TransferState for RolledBack {}
 
 // ── Transitions ───────────────────────────────────────────────────────────────
 // Each transition consumes self. The type system enforces the DAG.
@@ -98,54 +98,81 @@ impl TransferState for RolledBack     {}
 impl Locked {
     /// Begin proof construction.
     pub fn begin_proof(self) -> ProofBuilding {
-        ProofBuilding { locked: self, attempt: 0 }
+        ProofBuilding {
+            locked: self,
+            attempt: 0,
+        }
     }
 
     /// Source chain reorganized before proof started.
     pub fn reorg(self) -> RolledBack {
-        RolledBack { reason: RollbackReason::Reorg, seal_id: self.seal_id }
+        RolledBack {
+            reason: RollbackReason::Reorg,
+            seal_id: self.seal_id,
+        }
     }
 }
 
 impl ProofBuilding {
     /// Proof constructed, submit and await finality.
     pub fn submit_proof(self, proof: CanonicalProof, required: u64) -> AwaitingFinality {
-        AwaitingFinality { proof, required_confirmations: required }
+        AwaitingFinality {
+            proof,
+            required_confirmations: required,
+        }
     }
 
     /// Proof construction failed — retry or abandon.
     pub fn fail(self) -> RolledBack {
-        RolledBack { reason: RollbackReason::ProofInvalid, seal_id: self.locked.seal_id }
+        RolledBack {
+            reason: RollbackReason::ProofInvalid,
+            seal_id: self.locked.seal_id,
+        }
     }
 }
 
 impl AwaitingFinality {
     /// Verifier accepted proof + finality evidence.
     pub fn accept(self, evidence: FinalityEvidence) -> ProofValidated {
-        ProofValidated { proof: self.proof, evidence }
+        ProofValidated {
+            proof: self.proof,
+            evidence,
+        }
     }
 
     /// Finality window expired.
     pub fn timeout(self) -> RolledBack {
-        RolledBack { reason: RollbackReason::FinalityTimeout, seal_id: SealId([0u8; 32]) }
+        RolledBack {
+            reason: RollbackReason::FinalityTimeout,
+            seal_id: SealId([0u8; 32]),
+        }
     }
 }
 
 impl ProofValidated {
     /// Submit mint transaction to destination chain.
     pub fn mint(self, tx: [u8; 32]) -> Minting {
-        Minting { validated: self, mint_tx: tx }
+        Minting {
+            validated: self,
+            mint_tx: tx,
+        }
     }
 }
 
 impl Minting {
     /// Mint confirmed on destination chain.
     pub fn confirm(self) -> Completed {
-        Completed { mint_tx: self.mint_tx, seal_id: self.validated.proof.block_hash().into() }
+        Completed {
+            mint_tx: self.mint_tx,
+            seal_id: self.validated.proof.block_hash().into(),
+        }
     }
 
     /// Mint transaction failed.
     pub fn fail(self) -> RolledBack {
-        RolledBack { reason: RollbackReason::MintFailed, seal_id: SealId([0u8; 32]) }
+        RolledBack {
+            reason: RollbackReason::MintFailed,
+            seal_id: SealId([0u8; 32]),
+        }
     }
 }

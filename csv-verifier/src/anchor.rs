@@ -1,10 +1,9 @@
-/// Cryptographic anchor trait for chain state verification.
-/// 
-/// This is the only trust boundary accepted by this protocol.
-/// An implementation of this trait proves chain state WITHOUT trusting
-/// any RPC operator. Every implementation must be auditable against
-/// the chain's consensus spec.
-
+//! Cryptographic anchor trait for chain state verification.
+//!
+//! This is the only trust boundary accepted by this protocol.
+//! An implementation of this trait proves chain state WITHOUT trusting
+//! any RPC operator. Every implementation must be auditable against
+//! the chain's consensus spec.
 
 /// Error type for anchor verification failures.
 #[derive(Debug, thiserror::Error)]
@@ -72,7 +71,7 @@ pub struct CanonicalInclusionProof {
 }
 
 /// Structured finality guarantee.
-/// 
+///
 /// This is NOT a boolean config flag.
 /// It is a machine-readable proof-carrying constraint used by the
 /// orchestrator to make security decisions at runtime.
@@ -105,7 +104,7 @@ pub enum ProofSystem {
 }
 
 /// The only trust boundary accepted by this protocol.
-/// 
+///
 /// An implementation of this trait proves chain state WITHOUT trusting
 /// any RPC operator. Every implementation must be auditable against
 /// the chain's consensus spec.

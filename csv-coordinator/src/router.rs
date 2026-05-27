@@ -1,7 +1,7 @@
+use crate::cell::{CellConfig, CellError, CellTask, ChainCell, InboundTransfer};
+use csv_verifier::CryptographicAnchor;
 use std::collections::HashMap;
 use std::sync::Arc;
-use csv_verifier::CryptographicAnchor;
-use crate::cell::{ChainCell, CellConfig, CellTask, CellError, InboundTransfer};
 
 /// Error type for router operations.
 #[derive(Debug, thiserror::Error)]

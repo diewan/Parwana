@@ -50,11 +50,11 @@ use sha3::Digest;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
-use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, DeploymentStatus, SanadOperationResult, TransactionInfo,
     TransactionStatus,
 };
+use csv_protocol::proof_types::ProofBundle;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -152,7 +152,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Balance query failed: {}", e),
-            })
+        })
     }
 
     /// Get transaction information by hash.
@@ -169,7 +169,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Transaction query failed: {}", e),
-            })
+        })
     }
 
     /// Sign a transaction using the wallet's key identifier.
@@ -187,7 +187,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Transaction signing failed: {}", e),
-            })
+        })
     }
 
     /// Broadcast a signed transaction to the network.
@@ -205,7 +205,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Transaction broadcast failed: {}", e),
-            })
+        })
     }
 
     /// Build an inclusion proof for a commitment on the specified chain.
@@ -221,11 +221,13 @@ impl ChainRuntime {
     ) -> Result<csv_protocol::proof_types::InclusionProof, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
-        let result = adapter.build_inclusion_proof(commitment, block_height, anchor_id).await;
+        let result = adapter
+            .build_inclusion_proof(commitment, block_height, anchor_id)
+            .await;
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Proof generation failed: {}", e),
-            })
+        })
     }
 
     /// Deploy a lock contract to the specified chain.
@@ -244,7 +246,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Contract deployment failed: {}", e),
-            })
+        })
     }
 
     /// Verify contract deployment status.
@@ -261,7 +263,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Deployment verification failed: {}", e),
-            })
+        })
     }
 
     /// Create a new sanad on the specified chain.
@@ -277,11 +279,13 @@ impl ChainRuntime {
     ) -> Result<SanadOperationResult, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
-        let result = adapter.create_sanad(owner, asset_class, asset_id, metadata).await;
+        let result = adapter
+            .create_sanad(owner, asset_class, asset_id, metadata)
+            .await;
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Sanad creation failed: {}", e),
-            })
+        })
     }
 
     /// Consume a sanad on the specified chain.
@@ -299,7 +303,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Sanad consumption failed: {}", e),
-            })
+        })
     }
 
     /// Create a new seal on the specified chain.
@@ -332,7 +336,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Seal creation failed: {}", e),
-            })
+        })
     }
 
     /// Publish a commitment under a single-use seal.
@@ -366,11 +370,13 @@ impl ChainRuntime {
     ) -> Result<TransactionStatus, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
-        let result = adapter.confirm_transaction(tx_hash, required_confirmations, timeout_secs).await;
+        let result = adapter
+            .confirm_transaction(tx_hash, required_confirmations, timeout_secs)
+            .await;
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Transaction confirmation failed: {}", e),
-            })
+        })
     }
 
     /// Get fee estimate for the specified chain.
@@ -384,7 +390,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Fee estimate query failed: {}", e),
-            })
+        })
     }
 
     /// Get transaction count (nonce) for an address.
@@ -404,7 +410,7 @@ impl ChainRuntime {
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Failed to get transaction count: {}", e),
-            })
+        })
     }
 
     /// Build a contract call transaction.
@@ -672,7 +678,10 @@ impl ChainRuntime {
                 }
                 seal_check_data.is_consumed
             } else {
-                log::warn!("Rejecting proof for an unknown seal {}", hex::encode(seal_id));
+                log::warn!(
+                    "Rejecting proof for an unknown seal {}",
+                    hex::encode(seal_id)
+                );
                 true
             }
         };
@@ -715,12 +724,9 @@ impl ChainRuntime {
             CsvError::P2PError(format!("Failed to initialize Nostr transport: {}", e))
         })?;
 
-        transport
-            .broadcast_proof(proof_bundle)
-            .await
-            .map_err(|e| {
-                CsvError::P2PError(format!("Failed to broadcast proof to Nostr relays: {}", e))
-            })?;
+        transport.broadcast_proof(proof_bundle).await.map_err(|e| {
+            CsvError::P2PError(format!("Failed to broadcast proof to Nostr relays: {}", e))
+        })?;
 
         log::info!("Proof for chain {:?} broadcast via Nostr P2P", chain);
 

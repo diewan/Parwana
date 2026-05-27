@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
+use csv_hash::{ChainId, Hash, SanadId};
 use csv_protocol::transfer_state::{
-    TransferData, Locked, AwaitingFinality, ProofBuilding, ProofValidated
+    AwaitingFinality, Locked, ProofBuilding, ProofValidated, TransferData,
 };
-use csv_hash::{Hash, ChainId, SanadId};
+use serde::{Deserialize, Serialize};
 
 /// Wire format for transfer data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,15 +44,15 @@ impl TryFrom<TransferDataWire> for TransferData {
             return Err("transfer_id must be 32 bytes".to_string());
         };
 
-        let sanad_id_bytes = hex::decode(&wire.sanad_id)
-            .map_err(|e| format!("Invalid sanad_id hex: {}", e))?;
+        let sanad_id_bytes =
+            hex::decode(&wire.sanad_id).map_err(|e| format!("Invalid sanad_id hex: {}", e))?;
         let sanad_id = SanadId::from_bytes(&sanad_id_bytes);
 
         let source_chain = ChainId::new(&wire.source_chain.to_string());
         let destination_chain = ChainId::new(&wire.destination_chain.to_string());
 
-        let seal_point = hex::decode(&wire.seal_point)
-            .map_err(|e| format!("Invalid seal_point hex: {}", e))?;
+        let seal_point =
+            hex::decode(&wire.seal_point).map_err(|e| format!("Invalid seal_point hex: {}", e))?;
 
         let commitment_hash_bytes = hex::decode(&wire.commitment_hash)
             .map_err(|e| format!("Invalid commitment_hash hex: {}", e))?;
@@ -189,9 +189,8 @@ impl TryFrom<ProofValidatedWire> for ProofValidated {
 
     fn try_from(wire: ProofValidatedWire) -> Result<Self, String> {
         let data = wire.data.try_into()?;
-        let proof = hex::decode(&wire.proof)
-            .map_err(|e| format!("Invalid proof hex: {}", e))?;
-        
+        let proof = hex::decode(&wire.proof).map_err(|e| format!("Invalid proof hex: {}", e))?;
+
         let mut state = ProofValidated::new(data, proof);
         state.validated_at = wire.validated_at;
         Ok(state)

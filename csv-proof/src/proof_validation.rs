@@ -2,8 +2,8 @@
 //!
 //! This module provides proof validation primitives.
 
-use csv_protocol::proof::{FinalityProof, InclusionProof, ProofBundle};
 use csv_hash::Hash;
+use csv_protocol::proof::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Proof validator
 pub struct ProofValidator;

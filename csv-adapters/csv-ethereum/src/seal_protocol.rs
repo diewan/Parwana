@@ -9,12 +9,12 @@
 use async_trait::async_trait;
 use std::sync::Mutex;
 
-#[cfg(feature = "rpc")]
+#[cfg(all(feature = "rpc", not(test)))]
 use crate::finality::FinalityCheckerTrait;
 use csv_hash::Hash;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::commitment::Commitment;
 use csv_protocol::error::ProtocolError;
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::seal::CommitAnchor as CoreCommitAnchor;
 use csv_protocol::seal::SealPoint as CoreSealPoint;
 use csv_protocol::seal_protocol::SealProtocol;
@@ -103,9 +103,10 @@ impl EthereumSealProtocol {
     }
 
     fn verify_slot_available(&self, seal: &EthereumSealPoint) -> EthereumResult<()> {
-        let registry = self.seal_registry.lock().map_err(|e| {
-            EthereumError::ConfigError(format!("Poison error: {}", e))
-        })?;
+        let registry = self
+            .seal_registry
+            .lock()
+            .map_err(|e| EthereumError::ConfigError(format!("Poison error: {}", e)))?;
         if registry.is_seal_used(seal) {
             return Err(EthereumError::SlotUsed(
                 "Storage slot already consumed".to_string(),
@@ -168,15 +169,17 @@ impl EthereumSealProtocol {
         }
 
         // Step 6: Return anchor
-        let log_entry = receipt.logs.first().ok_or_else(|| {
-            ProtocolError::Generic("No logs in receipt".to_string())
-        })?;
+        let log_entry = receipt
+            .logs
+            .first()
+            .ok_or_else(|| ProtocolError::Generic("No logs in receipt".to_string()))?;
         let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
 
         // Mark seal as consumed
-        let registry = self.seal_registry.lock().map_err(|e| {
-            ProtocolError::Generic(format!("Poison error: {}", e))
-        })?;
+        let registry = self
+            .seal_registry
+            .lock()
+            .map_err(|e| ProtocolError::Generic(format!("Poison error: {}", e)))?;
         registry
             .mark_seal_used(&seal)
             .map_err(ProtocolError::from)?;
@@ -225,7 +228,9 @@ impl SealProtocol for EthereumSealProtocol {
                 })?;
 
             // Get the receipt and verify the SealUsed event
-            let receipt = self.rpc.get_transaction_receipt(tx_hash)
+            let receipt = self
+                .rpc
+                .get_transaction_receipt(tx_hash)
                 .await
                 .map_err(|e| {
                     Box::new(ProtocolError::NetworkError(e.to_string()))
@@ -251,10 +256,12 @@ impl SealProtocol for EthereumSealProtocol {
             }
 
             let log_entry = receipt.logs.first().ok_or_else(|| {
-                Box::new(ProtocolError::InclusionProofFailed("No logs in receipt".to_string()))
-                    as Box<dyn std::error::Error>
+                Box::new(ProtocolError::InclusionProofFailed(
+                    "No logs in receipt".to_string(),
+                )) as Box<dyn std::error::Error>
             })?;
-            let anchor = EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
+            let anchor =
+                EthereumCommitAnchor::new(tx_hash, receipt.block_number, log_entry.log_index);
 
             // Mark seal as consumed in local registry
             let registry = self.seal_registry.lock().map_err(|e| {
@@ -295,16 +302,20 @@ impl SealProtocol for EthereumSealProtocol {
                 .and_then(|any| any.downcast_ref::<EthereumNode>())
             {
                 // Get the block header for receipt root
-                let block_hash = self.rpc.get_block_hash(anchor.block_number)
-                    .await
-                    .map_err(|e| {
-                        Box::new(ProtocolError::InclusionProofFailed(format!(
-                            "Failed to get block hash: {}",
-                            e
-                        ))) as Box<dyn std::error::Error>
-                    })?;
+                let block_hash =
+                    self.rpc
+                        .get_block_hash(anchor.block_number)
+                        .await
+                        .map_err(|e| {
+                            Box::new(ProtocolError::InclusionProofFailed(format!(
+                                "Failed to get block hash: {}",
+                                e
+                            ))) as Box<dyn std::error::Error>
+                        })?;
 
-                let state_root = self.rpc.get_block_state_root(block_hash)
+                let state_root = self
+                    .rpc
+                    .get_block_state_root(block_hash)
                     .await
                     .map_err(|e| {
                         Box::new(ProtocolError::InclusionProofFailed(format!(
@@ -314,7 +325,9 @@ impl SealProtocol for EthereumSealProtocol {
                     })?;
 
                 // Get the receipt for the transaction
-                let receipt = self.rpc.get_transaction_receipt(anchor.tx_hash)
+                let receipt = self
+                    .rpc
+                    .get_transaction_receipt(anchor.tx_hash)
                     .await
                     .map_err(|e| {
                         Box::new(ProtocolError::InclusionProofFailed(format!(
@@ -411,7 +424,10 @@ impl SealProtocol for EthereumSealProtocol {
         }
     }
 
-    async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn enforce_seal(
+        &self,
+        seal: Self::SealPoint,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         // Rule G-02: Double-spend prevention
         // This method ensures that a seal cannot be used more than once
         // by checking both local registry and on-chain state via CSVLock contract
@@ -472,10 +488,7 @@ impl SealProtocol for EthereumSealProtocol {
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // Derive a seal from the CSVSeal contract address and a deterministic slot
         // The seal represents a nullifier slot in the contract's usedSeals mapping
-        let nonce = value.unwrap_or_else(|| {
-            // Default to 0 if no value provided - this is intentional for seal creation
-            0
-        });
+        let nonce = value.unwrap_or(0);
 
         Ok(EthereumSealPoint::new(self.csv_seal_address, 0, nonce))
     }
@@ -552,7 +565,10 @@ impl SealProtocol for EthereumSealProtocol {
         .map_err(|e| Box::new(ProtocolError::Generic(e.to_string())) as Box<dyn std::error::Error>)
     }
 
-    async fn rollback(&self, anchor: Self::CommitAnchor) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    async fn rollback(
+        &self,
+        anchor: Self::CommitAnchor,
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         #[cfg(feature = "rpc")]
         {
             let current = self.rpc.block_number().await.map_err(|e| {

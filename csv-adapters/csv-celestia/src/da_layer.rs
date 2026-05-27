@@ -325,7 +325,10 @@ where
 
         if self.should_use_ipfs(size) {
             // Store on IPFS and anchor CID on Celestia
-            let ipfs = self.ipfs_client.as_ref().unwrap();
+            let ipfs = self
+                .ipfs_client
+                .as_ref()
+                .expect("IPFS client must be present when IPFS is enabled");
             let cid = ipfs.put(&blob.data).await?;
 
             // Create anchor data (CID + metadata)

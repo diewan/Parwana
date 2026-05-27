@@ -446,13 +446,14 @@ impl CsvClient {
                     .chains
                     .get("ethereum")
                     .and_then(|chain| chain.contract_address.as_deref())
-                    .ok_or_else(|| CsvError::ConfigError(
-                        "Ethereum seal contract address must be configured".to_string(),
-                    ))?;
-                let address_bytes = hex::decode(address.trim_start_matches("0x"))
-                    .map_err(|e| CsvError::ConfigError(format!(
-                        "Invalid Ethereum seal contract address: {e}"
-                    )))?;
+                    .ok_or_else(|| {
+                        CsvError::ConfigError(
+                            "Ethereum seal contract address must be configured".to_string(),
+                        )
+                    })?;
+                let address_bytes = hex::decode(address.trim_start_matches("0x")).map_err(|e| {
+                    CsvError::ConfigError(format!("Invalid Ethereum seal contract address: {e}"))
+                })?;
                 let csv_seal_address: [u8; 20] = address_bytes.try_into().map_err(|_| {
                     CsvError::ConfigError(
                         "Ethereum seal contract address must contain 20 bytes".to_string(),
@@ -499,9 +500,11 @@ impl CsvClient {
                         .chains
                         .get("sui")
                         .and_then(|chain| chain.contract_address.clone())
-                        .ok_or_else(|| CsvError::ConfigError(
-                            "Sui seal package ID must be configured".to_string(),
-                        ))?,
+                        .ok_or_else(|| {
+                            CsvError::ConfigError(
+                                "Sui seal package ID must be configured".to_string(),
+                            )
+                        })?,
                 );
                 let rpc = csv_sui::node::SuiNode::new(&rpc_url);
                 _builder
@@ -567,9 +570,11 @@ impl CsvClient {
                         .chains
                         .get("solana")
                         .and_then(|chain| chain.program_id.clone())
-                        .ok_or_else(|| CsvError::ConfigError(
-                            "Solana CSV program ID must be configured".to_string(),
-                        ))?,
+                        .ok_or_else(|| {
+                            CsvError::ConfigError(
+                                "Solana CSV program ID must be configured".to_string(),
+                            )
+                        })?,
                     keypair: None,
                     commitment: Some("confirmed".to_string()),
                     max_retries: 3,

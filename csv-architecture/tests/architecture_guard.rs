@@ -142,10 +142,7 @@ fn nothing_new_depends_on_csv_core() {
         "csv-admission/src",
     ];
     for src_dir in &source_dirs {
-        let findings = scan_files(
-            &root.join(src_dir),
-            &["csv_core::", "use csv_core"],
-        );
+        let findings = scan_files(&root.join(src_dir), &["csv_core::", "use csv_core"]);
         assert!(
             findings.is_empty(),
             "{} must not import csv_core:\n{}",

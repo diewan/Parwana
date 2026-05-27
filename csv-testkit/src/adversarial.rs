@@ -63,6 +63,11 @@ impl AdversarialRunner {
             seal_registry: None,
             chain_data: None,
             native_proof_validated: false,
+            sanad_id: None,
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
         };
         self.verifier
             .verify_proof_bundle(bundle, &ctx)
@@ -170,7 +175,7 @@ impl ByzantineRpcReader {
     pub fn should_drop_response(&self, response_index: usize) -> bool {
         match self.fault_mode {
             ByzantineFaultMode::SelectiveCensorship { every_n } => {
-                response_index > 0 && response_index % every_n == 0
+                response_index > 0 && response_index.is_multiple_of(every_n)
             }
             _ => false,
         }
@@ -213,14 +218,16 @@ mod tests {
 
     #[test]
     fn test_byzantine_stale_height() {
-        let reader = ByzantineRpcReader::new(ByzantineFaultMode::StaleHeightInjection { lag_blocks: 10 });
+        let reader =
+            ByzantineRpcReader::new(ByzantineFaultMode::StaleHeightInjection { lag_blocks: 10 });
         let result = reader.simulate_block_height(100);
         assert_eq!(result, 90);
     }
 
     #[test]
     fn test_byzantine_selective_censorship() {
-        let reader = ByzantineRpcReader::new(ByzantineFaultMode::SelectiveCensorship { every_n: 3 });
+        let reader =
+            ByzantineRpcReader::new(ByzantineFaultMode::SelectiveCensorship { every_n: 3 });
         assert!(!reader.should_drop_response(0));
         assert!(!reader.should_drop_response(1));
         assert!(reader.should_drop_response(3));

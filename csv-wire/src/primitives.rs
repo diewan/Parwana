@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
-use csv_hash::{Hash, SanadId, Commitment};
+use csv_hash::{Commitment, Hash, SanadId};
+use serde::{Deserialize, Serialize};
 
 /// Wire format for hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,13 +19,12 @@ impl TryFrom<HashWire> for Hash {
     type Error = String;
 
     fn try_from(wire: HashWire) -> Result<Self, String> {
-        let bytes = hex::decode(&wire.bytes)
-            .map_err(|e| format!("Invalid hash hex: {}", e))?;
-        
+        let bytes = hex::decode(&wire.bytes).map_err(|e| format!("Invalid hash hex: {}", e))?;
+
         if bytes.len() != 32 {
             return Err("Hash must be 32 bytes".to_string());
         }
-        
+
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
         Ok(Hash::new(arr))
@@ -50,9 +49,8 @@ impl TryFrom<SanadIdWire> for SanadId {
     type Error = String;
 
     fn try_from(wire: SanadIdWire) -> Result<Self, String> {
-        let bytes = hex::decode(&wire.bytes)
-            .map_err(|e| format!("Invalid sanad_id hex: {}", e))?;
-        
+        let bytes = hex::decode(&wire.bytes).map_err(|e| format!("Invalid sanad_id hex: {}", e))?;
+
         Ok(SanadId::from_bytes(&bytes))
     }
 }
@@ -80,7 +78,7 @@ impl From<Commitment> for CommitmentWire {
             previous_commitment: hex::encode(commitment.previous_commitment.as_slice()),
             transition_payload_hash: hex::encode(commitment.transition_payload_hash.as_slice()),
             seal_id: hex::encode(commitment.seal_id.as_slice()),
-            domain_separator: hex::encode(&commitment.domain_separator),
+            domain_separator: hex::encode(commitment.domain_separator),
         }
     }
 }
@@ -90,8 +88,7 @@ impl TryFrom<CommitmentWire> for Commitment {
 
     fn try_from(wire: CommitmentWire) -> Result<Self, String> {
         let decode_hash = |hex_str: &str| -> Result<Hash, String> {
-            let bytes = hex::decode(hex_str)
-                .map_err(|e| format!("Invalid hex: {}", e))?;
+            let bytes = hex::decode(hex_str).map_err(|e| format!("Invalid hex: {}", e))?;
             if bytes.len() != 32 {
                 return Err("Hash must be 32 bytes".to_string());
             }
@@ -106,14 +103,14 @@ impl TryFrom<CommitmentWire> for Commitment {
         let previous_commitment = decode_hash(&wire.previous_commitment)?;
         let transition_payload_hash = decode_hash(&wire.transition_payload_hash)?;
         let seal_id = decode_hash(&wire.seal_id)?;
-        
+
         let domain_separator = hex::decode(&wire.domain_separator)
             .map_err(|e| format!("Invalid domain_separator hex: {}", e))?;
-        
+
         if domain_separator.len() != 32 {
             return Err("domain_separator must be 32 bytes".to_string());
         }
-        
+
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&domain_separator);
 

@@ -27,5 +27,10 @@ fn verification_context_builds_for_test_chains() {
         seal_registry: ctx.seal_registry,
         chain_data: ctx.chain_data,
         native_proof_validated: ctx.native_proof_validated,
+        sanad_id: ctx.sanad_id,
+        lock_tx: ctx.lock_tx,
+        lock_output_index: ctx.lock_output_index,
+        transition_id: ctx.transition_id,
+        destination_chain: ctx.destination_chain,
     };
 }

@@ -126,7 +126,7 @@ pub async fn mint_sanad_from_hex_key(
             AccountMeta::new_readonly(
                 "11111111111111111111111111111111"
                     .parse::<Pubkey>()
-                    .unwrap(),
+                    .expect("System program ID is a valid Pubkey"),
                 false,
             ), // system program
         ],

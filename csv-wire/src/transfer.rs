@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Transfer wire format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,7 +10,12 @@ pub struct TransferWire {
 }
 
 impl TransferWire {
-    pub fn new(transfer_id: [u8; 32], seal_id: [u8; 32], source_chain: u32, dest_chain: u32) -> Self {
+    pub fn new(
+        transfer_id: [u8; 32],
+        seal_id: [u8; 32],
+        source_chain: u32,
+        dest_chain: u32,
+    ) -> Self {
         Self {
             transfer_id: hex::encode(transfer_id),
             seal_id: hex::encode(seal_id),

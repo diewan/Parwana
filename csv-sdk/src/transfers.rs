@@ -194,10 +194,7 @@ pub struct TransferBuilder {
 }
 
 impl TransferBuilder {
-    pub(crate) fn new(
-        sanad_id: SanadId,
-        to_chain: ChainId,
-    ) -> Self {
+    pub(crate) fn new(sanad_id: SanadId, to_chain: ChainId) -> Self {
         Self {
             sanad_id,
             from_chain: ChainId::new("bitcoin"),

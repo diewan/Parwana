@@ -35,7 +35,8 @@ impl TapretCommitment {
         let mut payload = [0u8; 64];
         payload[..32].copy_from_slice(&self.protocol_id);
         payload[32..].copy_from_slice(self.commitment.as_bytes());
-        let push_bytes = PushBytesBuf::try_from(payload.to_vec()).unwrap();
+        let push_bytes =
+            PushBytesBuf::try_from(payload.to_vec()).expect("64-byte payload fits in PushBytesBuf");
         Builder::new()
             .push_opcode(OP_RETURN)
             .push_slice(push_bytes)

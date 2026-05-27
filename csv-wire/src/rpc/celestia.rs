@@ -14,11 +14,13 @@ impl TryFrom<CelestiaRpcProof> for CanonicalProof {
     type Error = String;
 
     fn try_from(rpc_proof: CelestiaRpcProof) -> Result<Self, String> {
-        let block_hash: [u8; 32] = rpc_proof.block_hash
+        let block_hash: [u8; 32] = rpc_proof
+            .block_hash
             .try_into()
             .map_err(|_| "Celestia block_hash must be 32 bytes".to_string())?;
 
-        let namespace: [u8; 32] = rpc_proof.namespace
+        let namespace: [u8; 32] = rpc_proof
+            .namespace
             .try_into()
             .map_err(|_| "Celestia namespace must be 32 bytes".to_string())?;
 
@@ -29,6 +31,9 @@ impl TryFrom<CelestiaRpcProof> for CanonicalProof {
             vec![rpc_proof.share_proof],
             4, // Celestia chain ID as u32
         )
-        .with_metadata("blob_index".to_string(), rpc_proof.blob_index.to_be_bytes().to_vec()))
+        .with_metadata(
+            "blob_index".to_string(),
+            rpc_proof.blob_index.to_be_bytes().to_vec(),
+        ))
     }
 }

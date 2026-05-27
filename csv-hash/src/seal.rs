@@ -3,8 +3,8 @@
 //! Seals represent single-use sanads to authorize state transitions.
 //! Anchors represent on-chain references containing commitments.
 
-use csv_codec::canonical::{from_canonical_cbor, to_canonical_cbor};
 use anyhow::Result;
+use csv_codec::canonical::{from_canonical_cbor, to_canonical_cbor};
 use std::vec::Vec;
 
 /// Maximum allowed size for seal identifiers (1KB)

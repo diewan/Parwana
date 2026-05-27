@@ -7,8 +7,8 @@
 #![allow(missing_docs)]
 
 use csv_hash::Hash;
-use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::finality::ChainCapabilities;
+use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 
 /// Cross-chain transfer data passed to adapters.

@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
 use csv_algebra::proof::CanonicalProof as AlgebraProof;
 use csv_algebra::proof::Metadata;
+use serde::{Deserialize, Serialize};
 
 /// Wire format for canonical proof.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,9 +19,12 @@ impl From<AlgebraProof> for CanonicalProofWire {
             block_height: proof.block_height,
             block_hash: hex::encode(proof.block_hash),
             state_root: hex::encode(proof.state_root),
-            proof_nodes: proof.proof_nodes.iter().map(|n| hex::encode(n)).collect(),
+            proof_nodes: proof.proof_nodes.iter().map(hex::encode).collect(),
             chain_id: proof.chain_id(),
-            metadata_fields: proof.metadata.fields.iter()
+            metadata_fields: proof
+                .metadata
+                .fields
+                .iter()
                 .map(|(k, v)| (k.clone(), hex::encode(v)))
                 .collect(),
         }
@@ -42,11 +45,15 @@ impl TryFrom<CanonicalProofWire> for AlgebraProof {
             .try_into()
             .map_err(|_| "state_root must be 32 bytes".to_string())?;
 
-        let proof_nodes = wire.proof_nodes.iter()
+        let proof_nodes = wire
+            .proof_nodes
+            .iter()
             .map(|n| hex::decode(n).map_err(|e| format!("Invalid proof_node hex: {}", e)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let metadata_fields = wire.metadata_fields.iter()
+        let metadata_fields = wire
+            .metadata_fields
+            .iter()
             .map(|(k, v)| hex::decode(v).map(|bytes| (k.clone(), bytes)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Invalid metadata field hex: {}", e))?;

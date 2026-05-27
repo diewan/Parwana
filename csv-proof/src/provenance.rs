@@ -25,5 +25,4 @@ impl ProofProvenance {
             timestamp,
         }
     }
-
 }

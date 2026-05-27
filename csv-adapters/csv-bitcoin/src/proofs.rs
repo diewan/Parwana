@@ -552,9 +552,7 @@ pub fn to_core_inclusion_proof(proof: &BitcoinInclusionProof) -> csv_proof::Incl
 }
 
 /// Convert core CSV inclusion proof to Bitcoin-specific type.
-pub fn from_core_inclusion_proof(
-    proof: &csv_proof::InclusionProof,
-) -> BitcoinInclusionProof {
+pub fn from_core_inclusion_proof(proof: &csv_proof::InclusionProof) -> BitcoinInclusionProof {
     let proof_bytes = &proof.proof_bytes;
     if proof_bytes.len() < 48 {
         return BitcoinInclusionProof::new(vec![], [0u8; 32], 0, 0);
@@ -572,9 +570,17 @@ pub fn from_core_inclusion_proof(
     let mut block_hash = [0u8; 32];
     block_hash.copy_from_slice(&proof_bytes[pos..pos + 32]);
     pos += 32;
-    let tx_index = u64::from_le_bytes(proof_bytes[pos..pos + 8].try_into().unwrap()) as u32;
+    let tx_index = u64::from_le_bytes(
+        proof_bytes[pos..pos + 8]
+            .try_into()
+            .expect("8 bytes for tx_index"),
+    ) as u32;
     pos += 8;
-    let block_height = u64::from_le_bytes(proof_bytes[pos..pos + 8].try_into().unwrap());
+    let block_height = u64::from_le_bytes(
+        proof_bytes[pos..pos + 8]
+            .try_into()
+            .expect("8 bytes for block_height"),
+    );
     BitcoinInclusionProof::new(merkle_branch, block_hash, tx_index, block_height)
 }
 
@@ -710,9 +716,13 @@ mod tests {
         proof_bytes.extend_from_slice(&[0xCD; 32]);
         proof_bytes.extend_from_slice(&5u64.to_le_bytes());
         proof_bytes.extend_from_slice(&100u64.to_le_bytes());
-        let core_proof =
-            csv_protocol::proof_types::InclusionProof::new(proof_bytes, CoreHash::new([1u8; 32]), 5, 100)
-                .unwrap();
+        let core_proof = csv_protocol::proof_types::InclusionProof::new(
+            proof_bytes,
+            CoreHash::new([1u8; 32]),
+            5,
+            100,
+        )
+        .unwrap();
         let bitcoin_proof = from_core_inclusion_proof(&core_proof);
         assert_eq!(bitcoin_proof.tx_index, 5);
         assert_eq!(bitcoin_proof.block_height, 100);

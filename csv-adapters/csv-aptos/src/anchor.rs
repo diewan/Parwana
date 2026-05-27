@@ -1,7 +1,7 @@
-/// Aptos cryptographic anchor implementation.
-/// 
-/// This implements the CryptographicAnchor trait for Aptos using
-/// HotStuff 2f+1 BLS quorum certificate verification.
+//! Aptos cryptographic anchor implementation.
+//!
+//! This implements the CryptographicAnchor trait for Aptos using
+//! HotStuff 2f+1 BLS quorum certificate verification.
 
 use csv_verifier::{
     AnchorError, CanonicalBlockHeader, CanonicalInclusionProof, CryptographicAnchor,
@@ -33,7 +33,7 @@ impl BlsVerifier {
         // 1. Parse the aggregate signature
         // 2. Verify it against the message using the signers' public keys
         // 3. Check that signers represent >= threshold fraction of voting power
-        
+
         // For now, return NotImplemented to indicate this needs real implementation
         Err(AnchorError::NotImplemented)
     }

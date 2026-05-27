@@ -12,12 +12,12 @@ use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use ed25519_dalek::{Verifier, VerifyingKey};
@@ -32,7 +32,7 @@ use crate::seal_protocol::SuiSealProtocol;
 
 /// Execute an async future using a dedicated thread to avoid nested runtime panics.
 /// CRITICAL FIX: Uses std::thread::spawn instead of creating nested Tokio runtimes.
-
+///
 /// Sui chain operations implementation
 ///
 /// This struct provides complete implementations of all chain operation traits
@@ -72,7 +72,7 @@ impl SuiBackend {
                 SuiConfig::default(),
                 Box::new(crate::rpc::MockSuiRpc::new(0)),
             )
-            .unwrap()
+            .expect("fallback SuiSealProtocol creation")
         });
 
         Self {
@@ -1251,7 +1251,7 @@ mod tests {
         // Verify signature
         let result = ops
             .verify_signature(message, &signature.to_bytes(), &verifying_key.to_bytes())
-            .unwrap();
+            .expect("verify valid signature");
         assert!(result);
 
         // Wrong message should fail
@@ -1262,7 +1262,7 @@ mod tests {
                 &signature.to_bytes(),
                 &verifying_key.to_bytes(),
             )
-            .unwrap();
+            .expect("verify invalid signature");
         assert!(!result);
     }
 }

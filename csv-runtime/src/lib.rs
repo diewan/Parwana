@@ -11,9 +11,9 @@
 
 // Re-exports from csv-coordinator
 pub use csv_coordinator::{
-    CapabilityNegotiator, ChainCell, CellConfig, CellCircuitBreaker, CellError, CellTask,
-    CircuitState, MemoryCeiling, NegotiatedPlan, NegotiationError, SecurityRequirements,
-    TransferRouter, RouterError, InboundTransfer,
+    CapabilityNegotiator, CellCircuitBreaker, CellConfig, CellError, CellTask, ChainCell,
+    CircuitState, InboundTransfer, MemoryCeiling, NegotiatedPlan, NegotiationError, RouterError,
+    SecurityRequirements, TransferRouter,
 };
 
 // Re-exports from csv-admission
@@ -23,7 +23,9 @@ pub use csv_admission::{
 
 // Backpressure management
 pub mod backpressure;
-pub use backpressure::{AdmissionLimits as BackpressureAdmissionLimits, BackpressureMode, BackpressureSink};
+pub use backpressure::{
+    AdmissionLimits as BackpressureAdmissionLimits, BackpressureMode, BackpressureSink,
+};
 
 // Legacy re-exports (to be migrated to focused crates)
 pub mod adapter_registry;
@@ -55,11 +57,11 @@ pub use config::{
 pub use error::{RuntimeError, TransferCoordinatorError};
 pub use event_bus::{EventBus, TransferEvent};
 pub use event_store::{EventStore, EventStoreError, InMemoryEventStore};
+#[cfg(feature = "persistent")]
+pub use execution_journal::RocksDbExecutionJournal;
 pub use execution_journal::{
     ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry,
 };
-#[cfg(feature = "persistent")]
-pub use execution_journal::RocksDbExecutionJournal;
 pub use failure_domain::{ClassifiedError, FailureDomain};
 pub use lease::{
     DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,

@@ -9,13 +9,13 @@ use crate::state::UnifiedStateManager;
 use anyhow::Result;
 use std::collections::HashMap;
 
+use csv_hash::ChainId;
 use csv_keys::{
     Mnemonic, MnemonicType,
     bip44::{derive_address_from_key, derive_all_chain_keys},
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
-use csv_hash::ChainId;
 
 /// Initialize wallet with one-command setup.
 pub fn cmd_init(
@@ -256,9 +256,8 @@ fn generate_ethereum(state: &mut UnifiedStateManager) -> Result<()> {
     rand::rngs::OsRng.fill_bytes(&mut key_bytes);
     let secret_key = SecretKey::new(key_bytes);
 
-    let address =
-        derive_address_from_key(secret_key.as_bytes(), &ChainId::new("ethereum"))
-            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    let address = derive_address_from_key(secret_key.as_bytes(), &ChainId::new("ethereum"))
+        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
     state.store_address(Chain::new("ethereum"), address.clone());
 

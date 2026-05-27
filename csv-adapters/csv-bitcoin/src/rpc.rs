@@ -6,9 +6,9 @@
 //! Test helpers are provided under `#[cfg(test)]` and **explicitly refuse**
 //! to broadcast transactions, returning errors instead of fabricated txids.
 
+use async_trait::async_trait;
 #[cfg(test)]
 use std::collections::HashSet;
-use async_trait::async_trait;
 
 /// UTXO information for a specific output
 #[derive(Debug, Clone)]

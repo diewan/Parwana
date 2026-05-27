@@ -1,8 +1,8 @@
 /// Pure replay detection types.
-/// 
+///
 /// Replay identifiers and nonce types.
 /// No serde, no IO, no infrastructure dependencies.
-
+///
 /// Unique identifier for replay detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReplayId(pub [u8; 32]);

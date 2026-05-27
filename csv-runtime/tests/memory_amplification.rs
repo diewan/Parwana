@@ -3,7 +3,7 @@
 //! These tests simulate high-volume RPC response scenarios to ensure
 //! the runtime can handle memory pressure without exhaustion.
 
-use csv_runtime::backpressure::{BackpressureSink, BackpressureMode};
+use csv_runtime::backpressure::{BackpressureMode, BackpressureSink};
 use csv_runtime::queue::TaskQueue;
 
 #[test]

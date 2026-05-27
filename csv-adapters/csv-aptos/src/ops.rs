@@ -12,12 +12,12 @@ use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::backend::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
 };
+use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use sha3::{Digest, Sha3_256};
@@ -65,7 +65,7 @@ impl AptosBackend {
                 },
                 Box::new(crate::rpc::MockAptosRpc::new(0)),
             )
-            .unwrap()
+            .expect("default AptosSealProtocol config must succeed")
         });
 
         // MED-DUP-03: Derive domain separator from SealProtocol instead of recomputing

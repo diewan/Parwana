@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use csv_hash::seal::SealPoint;
+use serde::{Deserialize, Serialize};
 
 /// Wire format for seal point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,10 +21,8 @@ impl TryFrom<SealPointWire> for SealPoint {
     type Error = String;
 
     fn try_from(wire: SealPointWire) -> Result<Self, String> {
-        let id = hex::decode(&wire.id)
-            .map_err(|e| format!("Invalid id hex: {}", e))?;
+        let id = hex::decode(&wire.id).map_err(|e| format!("Invalid id hex: {}", e))?;
 
-        SealPoint::new(id, wire.nonce)
-            .map_err(|e| e.to_string())
+        SealPoint::new(id, wire.nonce).map_err(|e| e.to_string())
     }
 }

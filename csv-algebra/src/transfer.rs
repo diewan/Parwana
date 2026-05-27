@@ -1,8 +1,8 @@
 /// Pure transfer types.
-/// 
+///
 /// These are the algebraic types for cross-chain transfers.
 /// No serde, no IO, no infrastructure dependencies.
-
+///
 /// Unique identifier for a transfer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TransferId(pub [u8; 32]);

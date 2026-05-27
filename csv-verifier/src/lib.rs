@@ -13,8 +13,7 @@ mod verifier;
 
 pub use anchor::{
     AnchorError, CanonicalBlockHeader, CanonicalInclusionProof, CryptographicAnchor,
-    FinalityGuarantee, ProofSystem, QuorumCertificate, ValidatorInfo, ValidatorSet,
-    VerifiedHeader,
+    FinalityGuarantee, ProofSystem, QuorumCertificate, ValidatorInfo, ValidatorSet, VerifiedHeader,
 };
 pub use chain_bundle::{
     ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier, DynChainProofVerifier,

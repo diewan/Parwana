@@ -15,9 +15,9 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use csv_codec;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
+use csv_protocol::proof_types::{FinalityProof, ProofBundle};
 
 #[cfg(feature = "rpc")]
 type SignedTransaction = (Vec<u8>, Vec<u8>, Vec<u8>);
@@ -38,7 +38,6 @@ use crate::rpc::SuiObject;
 use crate::rpc::SuiRpc;
 use crate::seal::SealRegistry;
 use crate::types::{SuiCommitAnchor, SuiFinalityProof, SuiInclusionProof, SuiSealPoint};
-
 
 /// Sui implementation of the SealProtocol trait
 pub struct SuiSealProtocol {
@@ -530,7 +529,8 @@ impl SealProtocol for SuiSealProtocol {
         );
 
         // Verify seal is available
-        self.verify_seal_available(&seal).await
+        self.verify_seal_available(&seal)
+            .await
             .map_err(ProtocolError::from)?;
 
         #[cfg(feature = "rpc")]
@@ -547,7 +547,8 @@ impl SealProtocol for SuiSealProtocol {
             // - Type arguments and call arguments (seal_id, commitment)
             // For production: use sui-sdk's transaction builder
             let (tx_bytes, signature, public_key) = self
-                .build_and_sign_move_call(&seal, *commitment.as_bytes()).await
+                .build_and_sign_move_call(&seal, *commitment.as_bytes())
+                .await
                 .map_err(|e| {
                     ProtocolError::PublishFailed(format!(
                         "Failed to build and sign transaction: {}",

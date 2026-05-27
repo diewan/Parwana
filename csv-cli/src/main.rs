@@ -151,7 +151,7 @@ enum Commands {
         action: commands::inspect::InspectAction,
     },
 
-   /// Schema registry tooling
+    /// Schema registry tooling
     Schema {
         #[command(subcommand)]
         action: commands::schema_cmd::SchemaAction,
@@ -216,7 +216,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Seal { action } => seals::execute(action, &config, &mut state),
         Commands::Test { action } => tests::execute(action, &config, &state),
         Commands::Validate { action } => validate::execute(action, &config, &state),
-      Commands::Inspect { action } => commands::inspect::execute(action),
+        Commands::Inspect { action } => commands::inspect::execute(action),
         Commands::Schema { action } => commands::schema_cmd::execute(action),
         Commands::Content { action } => commands::content::execute(action, &config),
         Commands::Runtime { action } => commands::runtime::execute(action, &config),

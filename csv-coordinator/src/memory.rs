@@ -1,4 +1,4 @@
-/// Memory ceiling enforcement for chain cells.
+//! Memory ceiling enforcement for chain cells.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -30,7 +30,8 @@ impl MemoryCeiling {
     }
 
     pub fn release(&self, bytes: u64) {
-        self.current_bytes.fetch_sub(bytes.saturating_sub(1), Ordering::Relaxed);
+        self.current_bytes
+            .fetch_sub(bytes.saturating_sub(1), Ordering::Relaxed);
     }
 
     pub fn current_usage(&self) -> u64 {

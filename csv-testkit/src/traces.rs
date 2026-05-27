@@ -81,9 +81,8 @@ impl CanonicalTrace {
     pub fn save(&self, name: &str) {
         let path = format!("csv-testkit/fixtures/{}.trace.json", name);
         let content = serde_json::to_string_pretty(self).unwrap();
-        std::fs::write(&path, content).unwrap_or_else(|_| {
-            panic!("Failed to save trace file: {}", path)
-        });
+        std::fs::write(&path, content)
+            .unwrap_or_else(|_| panic!("Failed to save trace file: {}", path));
     }
 
     /// Create a new empty canonical trace.
