@@ -47,6 +47,8 @@ pub struct TransferPhaseEntry {
     pub replay_id: csv_hash::ReplayIdHash,
     /// Hash of the proof bundle (if available)
     pub proof_hash: [u8; 32],
+    /// Canonical proof bundle bytes needed to resume after validation.
+    pub proof_payload: Option<Vec<u8>>,
     /// The transfer stage/phase
     pub phase: TransferStage,
     /// Timestamp when the entry was recorded
@@ -131,13 +133,14 @@ impl InMemoryJournal {
     }
 
     /// Get the latest phase for a transfer.
-    fn latest_phase_locked(&self, transfer_id: &str) -> Option<TransferStage> {
+    fn latest_entry_locked(&self, transfer_id: &str) -> Option<TransferPhaseEntry> {
         let guard = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         guard
             .iter()
+            .rev()
             .filter(|e| e.transfer_id == transfer_id)
-            .max_by_key(|e| e.ts)
-            .map(|e| e.phase)
+            .next()
+            .cloned()
     }
 }
 
@@ -159,6 +162,9 @@ pub trait ExecutionJournal: Send + Sync {
 
     /// Get the latest phase for a transfer.
     fn latest_phase(&self, transfer_id: &str) -> Result<Option<TransferStage>, JournalError>;
+
+    /// Get the latest durable recovery entry for a transfer.
+    fn latest_entry(&self, transfer_id: &str) -> Result<Option<TransferPhaseEntry>, JournalError>;
 }
 
 impl ExecutionJournal for InMemoryJournal {
@@ -171,7 +177,13 @@ impl ExecutionJournal for InMemoryJournal {
     }
 
     fn latest_phase(&self, transfer_id: &str) -> Result<Option<TransferStage>, JournalError> {
-        Ok(self.latest_phase_locked(transfer_id))
+        Ok(self
+            .latest_entry_locked(transfer_id)
+            .map(|entry| entry.phase))
+    }
+
+    fn latest_entry(&self, transfer_id: &str) -> Result<Option<TransferPhaseEntry>, JournalError> {
+        Ok(self.latest_entry_locked(transfer_id))
     }
 }
 
@@ -190,6 +202,7 @@ mod tests {
                 transfer_id: "test-1".to_string(),
                 replay_id: replay_id.clone(),
                 proof_hash,
+                proof_payload: None,
                 phase: TransferStage::Initialized,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Entered,
@@ -202,6 +215,7 @@ mod tests {
                 transfer_id: "test-1".to_string(),
                 replay_id,
                 proof_hash,
+                proof_payload: None,
                 phase: TransferStage::Initialized,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Completed,
@@ -225,6 +239,7 @@ mod tests {
                 transfer_id: "complete-1".to_string(),
                 replay_id: replay_id.clone(),
                 proof_hash,
+                proof_payload: None,
                 phase: TransferStage::Completed,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Completed,
@@ -238,6 +253,7 @@ mod tests {
                 transfer_id: "incomplete-1".to_string(),
                 replay_id,
                 proof_hash,
+                proof_payload: None,
                 phase: TransferStage::LockConfirmed,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Entered,
@@ -263,6 +279,7 @@ mod tests {
                     transfer_id: format!("transfer-{}", i),
                     replay_id: replay_id.clone(),
                     proof_hash,
+                    proof_payload: None,
                     phase: TransferStage::Initialized,
                     ts: SystemTime::now(),
                     outcome: PhaseOutcome::Entered,

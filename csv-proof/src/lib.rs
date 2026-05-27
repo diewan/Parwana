@@ -21,6 +21,7 @@ pub mod error;
 pub mod proof_composition;
 pub mod proof_dags;
 pub mod proof_validation;
+pub mod zk_proof;
 
 // Migrated from csv-core - these types are still here for now
 pub mod commitment_chain;

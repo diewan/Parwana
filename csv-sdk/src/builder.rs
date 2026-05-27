@@ -22,7 +22,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use csv_core::store::InMemorySealStore;
+use crate::local_store::InMemorySealStore;
 use csv_hash::chain_id::ChainId;
 
 use crate::config::Config;

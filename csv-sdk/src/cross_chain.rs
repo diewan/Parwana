@@ -4,7 +4,7 @@
 //! core cross-chain types and orchestrator ([`CrossChainTransfer`],
 //! [`StandardTransferVerifier`], [`CrossChainRegistry`], etc.).
 //!
-//! # Relationship with csv-core
+//! # Relationship with csv-protocol
 //!
 //! - `csv_protocol::cross_chain` — Core types (lock events, inclusion proofs,
 //!   finality proofs, transfer state machine, in-memory registry).
@@ -34,7 +34,7 @@
 //! ## Re-exports from csv_protocol::cross_chain
 //!
 //! For convenience, key types from `csv_protocol::cross_chain` are re-exported
-//! here so that SDK consumers don't need to depend on csv-core directly
+//! here so that SDK consumers don't need to assemble protocol internals directly
 //! for cross-chain operations.
 
 use csv_hash::Hash;
@@ -204,7 +204,7 @@ impl PersistentTransferRegistry {
     /// Load all transfers from SQLite into an in-memory `CrossChainRegistry`.
     ///
     /// This is the primary integration point (SC-02): it bridges the persistent
-    /// SQLite store with csv-core's in-memory registry so that `CrossChainTransfer`
+    /// SQLite store with csv-protocol's in-memory registry so that `CrossChainTransfer`
     /// can use fast BTreeMap lookups while benefiting from disk-backed durability.
     pub async fn load_into_registry(&self) -> Result<CrossChainRegistry, CrossChainError> {
         let rows = sqlx::query_as::<_, TransferInfo>(

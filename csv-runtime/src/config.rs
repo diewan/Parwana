@@ -1,12 +1,12 @@
 //! Operational Configuration Module
 //!
 //! This module separates operational configuration from protocol semantics.
-//! Protocol constants are immutable and defined in csv-core, while operational
+//! Protocol constants are immutable and defined in csv-protocol, while operational
 //! configuration is defined here and can be adjusted at runtime.
 //!
 //! # Separation of Concerns
 //!
-//! - **Protocol Semantics**: Immutable constants defined in csv-core (e.g., hash sizes, proof formats)
+//! - **Protocol Semantics**: Immutable constants defined in csv-protocol (e.g., hash sizes, proof formats)
 //! - **Operational Configuration**: Runtime-adjustable settings (e.g., retry counts, timeouts, RPC endpoints)
 //!
 //! This separation ensures that protocol changes require a version bump, while

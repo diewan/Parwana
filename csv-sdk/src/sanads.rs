@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use csv_core::store::SanadRecord;
+use crate::local_store::SanadRecord;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;

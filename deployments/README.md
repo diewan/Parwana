@@ -32,4 +32,4 @@ Set `VERIFIER_ADDRESS` when updating CSVMint constructor args.
 - [ ] `bytecode_hash` populated from `deployments/artifacts/*.bin`
 - [ ] `verified: true` after Etherscan / block explorer confirmation
 - [ ] `chains/ethereum.toml` `lock_contract_address` / `mint_contract_address` match manifest
-- [ ] `cargo test -p csv-core --test chains_load` passes
+- [ ] `CXXFLAGS="-include cstdint" cargo test --workspace --all-features` passes

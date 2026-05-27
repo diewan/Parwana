@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["csv-core"]
 
 members = [
     # Core crates (Phase 1 restructuring)
@@ -28,6 +29,7 @@ members = [
     "csv-p2p",
     "csv-observability",
     "csv-architecture",
+    "csv-examples",
     # Explorer sub-crates (optional local checkout)
     # "csv-explorer/shared",
     # "csv-explorer/storage",
@@ -73,7 +75,6 @@ sqlx = { version = "0.8", features = ["sqlite", "postgres", "_rt-tokio", "tls-ru
 config = "0.13"
 anyhow = "1.0"
 clap = { version = "4.4", features = ["derive"] }
-csv-core = { path = "csv-core" }
 async-graphql = "5.0"
 async-graphql-axum = "=5.0.6"
 axum = "0.6"

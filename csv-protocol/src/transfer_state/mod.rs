@@ -13,7 +13,7 @@
 //! ## States
 //!
 //! - **Locked**: Transfer is locked on source chain, awaiting proof
-//! - **AwaitingFinality**: Proof submitted, awaiting finality confirmation
+//! - **AwaitingFinality**: Lock confirmed, awaiting required source-chain finality
 //! - **ProofBuilding**: Building zero-knowledge proof
 //! - **ProofValidated**: Proof validated, ready for minting
 //! - **Minting**: Minting on destination chain
@@ -95,8 +95,8 @@ impl TransferData {
 /// # Stage Sequence
 ///
 /// ```text
-/// Initialized → LockSubmitted → LockConfirmed → ProofBuilding → ProofValidated
-///   → AwaitingFinality → MintSubmitted → MintConfirmed → Completed
+/// Initialized → LockSubmitted → LockConfirmed → AwaitingFinality → ProofBuilding
+///   → ProofValidated → MintSubmitted → MintConfirmed → Completed
 /// ```
 ///
 /// Terminal states: `Completed`, `RolledBack`, `Compromised`
@@ -110,12 +110,12 @@ pub enum TransferStage {
     LockSubmitted,
     /// Lock transaction confirmed on source chain
     LockConfirmed,
-    /// Proof building in progress
+    /// Awaiting finality on source chain
+    AwaitingFinality,
+    /// Proof building in progress after source finality is established
     ProofBuilding,
     /// Proof validated by canonical verifier
     ProofValidated,
-    /// Awaiting finality on source chain
-    AwaitingFinality,
     /// Mint transaction submitted to destination chain
     MintSubmitted,
     /// Mint transaction confirmed on destination chain
@@ -142,10 +142,10 @@ impl TransferStage {
         match self {
             TransferStage::Initialized => Some(TransferStage::LockSubmitted),
             TransferStage::LockSubmitted => Some(TransferStage::LockConfirmed),
-            TransferStage::LockConfirmed => Some(TransferStage::ProofBuilding),
+            TransferStage::LockConfirmed => Some(TransferStage::AwaitingFinality),
+            TransferStage::AwaitingFinality => Some(TransferStage::ProofBuilding),
             TransferStage::ProofBuilding => Some(TransferStage::ProofValidated),
-            TransferStage::ProofValidated => Some(TransferStage::AwaitingFinality),
-            TransferStage::AwaitingFinality => Some(TransferStage::MintSubmitted),
+            TransferStage::ProofValidated => Some(TransferStage::MintSubmitted),
             TransferStage::MintSubmitted => Some(TransferStage::MintConfirmed),
             TransferStage::MintConfirmed => Some(TransferStage::Completed),
             _ => None,
@@ -162,7 +162,6 @@ impl TransferStage {
         matches!(
             self,
             TransferStage::ProofValidated
-                | TransferStage::AwaitingFinality
                 | TransferStage::MintSubmitted
                 | TransferStage::MintConfirmed
                 | TransferStage::Completed

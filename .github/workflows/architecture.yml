@@ -19,7 +19,7 @@ jobs:
         run: cargo deny check graph
 
       - name: Run dependency DAG test
-        run: cargo test -p csv-architecture --test dep_graph_constitution
+        run: CXXFLAGS="-include cstdint" cargo test -p csv-architecture --test dep_graph_constitution
 
       - name: No tokio::runtime::Builder in adapters
         run: |
@@ -54,8 +54,39 @@ jobs:
             fi
           done
 
+      - name: Removed deployment template stays removed
+        run: test ! -d deployment
+
       - name: Run existing architecture guard tests
-        run: cargo test -p csv-architecture --test architecture_guard
+        run: CXXFLAGS="-include cstdint" cargo test -p csv-architecture --test architecture_guard
 
       - name: Run CLI architecture compliance tests
-        run: cargo test -p csv-cli --test architecture_compliance
+        run: CXXFLAGS="-include cstdint" cargo test -p csv-cli --test architecture_compliance
+
+  formal-verification:
+    name: Formal model check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download formal verification tools
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
+          curl --fail --location --silent --show-error \
+            --output /tmp/alloy.jar \
+            https://github.com/AlloyTools/org.alloytools.alloy/releases/download/v6.2.0/org.alloytools.alloy.dist.jar
+
+      - name: Check TLA+ models
+        run: |
+          java -cp /tmp/tla2tools.jar tlc2.TLC -deadlock -config formal/ReplaySafety.cfg formal/ReplaySafety.tla
+          java -cp /tmp/tla2tools.jar tlc2.TLC -config formal/Ownership.cfg formal/Ownership.tla
+
+      - name: Execute Alloy analyses
+        run: java -jar /tmp/alloy.jar exec -q -f -o /tmp/csv-alloy-replay -c '*' formal/alloy/ReplaySafety.als

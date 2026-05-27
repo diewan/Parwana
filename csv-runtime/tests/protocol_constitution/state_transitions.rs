@@ -16,9 +16,9 @@ fn forbidden_state_transitions_fail() {
     let expected_sequence = vec![
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
         TransferStage::Completed,
@@ -74,8 +74,8 @@ fn forbidden_state_transitions_fail() {
     );
     assert_eq!(
         next,
-        TransferStage::ProofBuilding,
-        "LockConfirmed must go forward to ProofBuilding"
+        TransferStage::AwaitingFinality,
+        "LockConfirmed must wait for source finality before building proof"
     );
 
     // 5. Verify that terminal states cannot transition to non-terminal states
@@ -115,9 +115,9 @@ fn state_machine_is_exhaustive() {
         TransferStage::Initialized,
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
         TransferStage::Completed,
@@ -150,9 +150,9 @@ fn state_machine_is_exhaustive() {
         TransferStage::Initialized,
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
     ];
@@ -163,7 +163,6 @@ fn state_machine_is_exhaustive() {
     // Verify proof_validated stages
     let proof_validated_stages = vec![
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
         TransferStage::Completed,
@@ -180,6 +179,7 @@ fn state_machine_is_exhaustive() {
         TransferStage::Initialized,
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
     ];
     for stage in &non_proof_validated_stages {
@@ -202,9 +202,9 @@ fn state_machine_is_exhaustive() {
         TransferStage::Initialized,
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
     ];
@@ -226,9 +226,9 @@ fn transition_legality_is_enforced() {
         TransferStage::Initialized,
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
     ];
@@ -258,9 +258,9 @@ fn transition_legality_is_enforced() {
     let all_non_terminal = vec![
         TransferStage::LockSubmitted,
         TransferStage::LockConfirmed,
+        TransferStage::AwaitingFinality,
         TransferStage::ProofBuilding,
         TransferStage::ProofValidated,
-        TransferStage::AwaitingFinality,
         TransferStage::MintSubmitted,
         TransferStage::MintConfirmed,
     ];

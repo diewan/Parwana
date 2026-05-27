@@ -1,0 +1,25 @@
+[package]
+name = "csv-examples"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+csv-sdk = { path = "../csv-sdk", features = ["all-chains", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[[example]]
+name = "gaming"
+path = "gaming.rs"
+
+[[example]]
+name = "parallel_verification"
+path = "parallel_verification.rs"
+
+[[example]]
+name = "performance"
+path = "performance.rs"
+
+[[example]]
+name = "subscriptions"
+path = "subscriptions.rs"

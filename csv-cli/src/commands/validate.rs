@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 use clap::Subcommand;
-use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::SignatureScheme;
+use csv_protocol::proof_types::ProofBundle;
 
 use crate::config::{Chain, Config};
 use crate::output;
@@ -242,7 +242,7 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
 
     output::progress(3, 5, "Performing cryptographic verification...");
 
-    // Full cryptographic verification using csv_core verifier
+    // Full cryptographic verification using the canonical verifier
     // Use state to check if seal has been consumed
     let _seal_ref_hex = hex::encode(&proof_bundle.seal_ref.id);
     let seal_registry = |seal_id: &[u8]| -> bool { state.is_seal_consumed(&hex::encode(seal_id)) };

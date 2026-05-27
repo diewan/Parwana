@@ -54,6 +54,6 @@
   },
   "checksums": {
     "abi_constitution": "docs/contracts/ABI_CONSTITUTION.md",
-    "canonical_events": "csv-core/src/events.rs"
+    "canonical_events": "csv-protocol/src/events.rs"
   }
 }

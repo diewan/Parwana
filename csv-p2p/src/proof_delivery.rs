@@ -285,7 +285,7 @@ impl ProofRouter {
         );
 
         // In production, this would:
-        // 1. Verify the proof using csv_core::verify_proof()
+        // 1. Verify the proof using the canonical verifier.
         // 2. Store in local database via csv-store
         // 3. Trigger any relevant cross-chain operations
         true

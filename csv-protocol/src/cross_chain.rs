@@ -444,6 +444,9 @@ pub struct CrossChainTransferProof {
 /// Entry in the cross-chain seal registry recording a completed transfer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HashEntry {
+    /// Runtime transfer identifier used for deterministic crash recovery.
+    #[serde(default)]
+    pub transfer_id: String,
     /// The Hash's unique ID (preserved across chains)
     pub sanad_id: Hash,
     /// Source chain identifier

@@ -11,7 +11,7 @@ The CLI is a **stateless client** that delegates all protocol authority to `csv-
 ```
 csv-cli (stateless)
   └── csv-runtime (holds all protocol authority)
-        ├── csv-protocol / csv-core
+        ├── csv-protocol
         └── csv-adapters (registered via AdapterRegistry)
 ```
 

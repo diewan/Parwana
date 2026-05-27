@@ -67,7 +67,7 @@ default = []
 # Real Groth16 pairing verification — feature-gated so the mock path is unreachable in production
 real-groth16 = ["dep:ark-bn254", "dep:ark-groth16", "dep:ark-serialize", "dep:ark-ec", "dep:ark-ff", "dep:ark-snark"]
 rpc = ["alloy", "alloy-sol-types", "alloy-contract", "csv-store", "reqwest", "url"]
-# quorum = ["csv-core/quorum", "reqwest", "url"]  # REMOVED: quorum moved out of core per implementation.md
+# quorum = ["reqwest", "url"]  # REMOVED: quorum support is not active in this adapter
 production = ["rpc"]
 test-utils = []
 

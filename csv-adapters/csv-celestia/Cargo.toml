@@ -24,6 +24,7 @@ csv-protocol = { path = "../../csv-protocol" }
 csv-hash = { path = "../../csv-hash" }
 csv-codec = { path = "../../csv-codec" }
 csv-proof = { path = "../../csv-proof" }
+csv-wire = { path = "../../csv-wire" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
@@ -53,8 +54,8 @@ async-trait.workspace = true
 default = []
 # Enables real RPC client (real JSON-RPC calls over HTTP to Tendermint)
 rpc = ["reqwest", "base64"]
-# Enables quorum-based RPC consensus support using csv-core's quorum feature
-# quorum = ["csv-core/quorum"]  # REMOVED: quorum moved out of core per implementation.md
+# Quorum-based RPC consensus support is not active in this adapter.
+# quorum = []  # REMOVED pending a protocol-level quorum interface.
 
 [dev-dependencies]
 rand = "0.8"

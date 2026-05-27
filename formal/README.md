@@ -12,11 +12,12 @@ with comprehensive invariants and theorem verification.
 ## Running
 
 ```bash
-# TLA+ (requires TLC in PATH)
-cd formal && tlc ReplaySafety.tla
+# TLA+ (requires tla2tools.jar)
+java -cp tla2tools.jar tlc2.TLC -deadlock -config formal/ReplaySafety.cfg formal/ReplaySafety.tla
+java -cp tla2tools.jar tlc2.TLC -config formal/Ownership.cfg formal/Ownership.tla
 
-# Alloy (requires Alloy Analyzer)
-alloy4 alloy/ReplaySafety.als
+# Alloy (requires the Alloy CLI distribution)
+java -jar alloy.jar exec -q -f -o /tmp/csv-alloy-replay -c '*' formal/alloy/ReplaySafety.als
 ```
 
 ## Verification

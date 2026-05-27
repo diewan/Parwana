@@ -444,7 +444,7 @@ pub struct QuorumEthereumRpc {
 #[cfg(any())]
 impl QuorumEthereumRpc {
     /// Create a new quorum-backed Ethereum RPC from providers.
-    pub fn new(providers: Vec<csv_core::rpc::quorum_client::RpcProvider>) -> Self {
+    pub fn new(providers: Vec<csv_protocol::rpc::quorum_client::RpcProvider>) -> Self {
         Self {
             client: QuorumClient::with_defaults(providers),
         }
@@ -849,7 +849,7 @@ impl EthereumRpc for QuorumEthereumRpc {
         let provider_count = self.client.provider_count();
         let providers: Vec<_> = (0..provider_count.max(1))
             .map(|_| {
-                csv_core::rpc::quorum_client::RpcProvider::new("http://localhost:8545".to_string())
+                csv_protocol::rpc::quorum_client::RpcProvider::new("http://localhost:8545".to_string())
             })
             .collect();
         Box::new(QuorumEthereumRpc {

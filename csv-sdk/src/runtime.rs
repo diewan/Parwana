@@ -7,7 +7,7 @@
 //!
 //! Following the Clean Architecture documented in `docs/ARCHITECTURE.md` and `docs/BLUEPRINT.md`:
 //!
-//! 1. **csv-core**: Defines `SealProtocol` trait (protocol primitives) and
+//! 1. **csv-protocol**: Defines `SealProtocol` trait (protocol primitives) and
 //!    `ChainBackend` trait (chain operations like ChainQuery, ChainSigner, etc.)
 //!
 //! 2. **csv-{chain}**: Each chain provides:

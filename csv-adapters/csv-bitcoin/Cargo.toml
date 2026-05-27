@@ -20,7 +20,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 csv-adapter-core = { path = "../csv-adapter-core" }
-csv-core = { path = "../../csv-core" }
 csv-protocol = { path = "../../csv-protocol" }
 csv-hash = { path = "../../csv-hash" }
 csv-verifier = { path = "../../csv-verifier" }

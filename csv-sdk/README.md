@@ -24,7 +24,7 @@ Unified SDK for the CSV (Client-Side Validation) protocol — single entry point
 ```
 csv-sdk (public facade)
   └── csv-runtime (orchestration + execution journal)
-        └── csv-protocol / csv-core (protocol types & traits)
+        └── csv-protocol (protocol types & traits)
               ├── csv-adapters/csv-bitcoin
               ├── csv-adapters/csv-ethereum
               ├── csv-adapters/csv-solana

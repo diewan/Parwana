@@ -12,7 +12,7 @@ use bitcoin::Network as BtcNetwork;
 use csv_bitcoin::mempool_rpc::MempoolSignetRpc;
 use csv_bitcoin::wallet::{Bip86Path, SealWallet};
 use csv_bitcoin::{BitcoinConfig, BitcoinSealProtocol, Network};
-use csv_core::Hash;
+use csv_hash::Hash;
 use csv_protocol::seal_protocol::SealProtocol;
 
 #[tokio::main]

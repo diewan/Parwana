@@ -24,7 +24,7 @@ use bitcoin::hashes::Hash as BitcoinHash;
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
 
-use csv_core::zk_proof::{ChainWitness, ProofSystem, ZkError, ZkProver, ZkSealProof};
+use csv_proof::zk_proof::{ChainWitness, ProofSystem, ZkError, ZkProver, ZkSealProof};
 use csv_protocol::version::builtin;
 
 /// Bitcoin SPV ZK Prover using SP1
@@ -73,7 +73,7 @@ impl BitcoinSpvProver {
         seal: &SealPoint,
         witness: &ChainWitness,
     ) -> Result<ZkSealProof, ZkError> {
-        use csv_core::zk_proof::{VerifierKey, ZkPublicInputs};
+        use csv_proof::zk_proof::{VerifierKey, ZkPublicInputs};
         use sha2::{Digest, Sha256};
 
         // Create a deterministic mock proof based on witness hash
@@ -92,7 +92,7 @@ impl BitcoinSpvProver {
         let verifier_key = VerifierKey::new(
             builtin::BITCOIN.clone(),
             vec![0u8; 64],
-            csv_core::zk_proof::ProofSystem::SP1,
+            csv_proof::zk_proof::ProofSystem::SP1,
             1,
         );
 

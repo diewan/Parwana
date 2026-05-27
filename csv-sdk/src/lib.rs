@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! csv-sdk (this crate)
-//! ├── csv-core       (always included)
+//! ├── csv-protocol   (always included)
 //! ├── csv-bitcoin    (optional, feature: "bitcoin")
 //! ├── csv-ethereum   (optional, feature: "ethereum")
 //! ├── csv-sui        (optional, feature: "sui")
@@ -71,6 +71,8 @@ pub mod config;
 pub mod cross_chain;
 pub mod error;
 pub mod events;
+pub mod local_store;
+pub mod mcp;
 pub mod prelude;
 pub mod proofs;
 pub mod runtime;
@@ -79,17 +81,17 @@ pub mod transfers;
 pub mod wallet;
 
 // Re-export core types from new modular crates (🔒 STABLE API only by default)
-pub use csv_protocol::transition::Transition;
 pub use csv_hash::Hash;
 pub use csv_hash::commitment::Commitment;
 pub use csv_hash::dag::{DAGNode, DAGSegment};
 pub use csv_hash::sanad::SanadId;
 pub use csv_hash::seal::{CommitAnchor, SealPoint};
-pub use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 pub use csv_protocol::error::ProtocolError;
 pub use csv_protocol::genesis::Genesis;
+pub use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
 pub use csv_protocol::seal_protocol::SealProtocol;
 pub use csv_protocol::state::{OwnedState, StateRef};
+pub use csv_protocol::transition::Transition;
 
 // Re-export canonical protocol types (🔒 STABLE + 🟡 BETA)
 pub use csv_hash::chain_id::ChainId;

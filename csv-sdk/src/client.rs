@@ -40,13 +40,13 @@ use crate::config::Config;
 use crate::error::CsvError;
 #[cfg(feature = "tokio")]
 use crate::events::EventStream;
+use crate::local_store::{InMemorySealStore, SanadRecord};
 use crate::proofs::ProofManager;
 use crate::runtime::ChainRuntime;
 use crate::sanads::SanadsManager;
 use crate::transfers::TransferManager;
 use crate::wallet::Wallet;
 use crate::wallet::WalletManager;
-use csv_core::store::{InMemorySealStore, SanadRecord, SanadStore};
 
 /// Handle to the underlying storage backend.
 pub enum StoreHandle {
@@ -112,7 +112,7 @@ impl StoreHandle {
         match self {
             StoreHandle::InMemory(store) => store
                 .has_sanad(sanad_id)
-                .map_err(|e: csv_core::store::StoreError| CsvError::StoreError(e.to_string())),
+                .map_err(|e| CsvError::StoreError(e.to_string())),
         }
     }
 }

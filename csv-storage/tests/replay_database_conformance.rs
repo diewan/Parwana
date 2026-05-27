@@ -82,6 +82,7 @@ async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
     // Test 11: store_transfer_entry and load_all_transfers
     let sanad_id = csv_hash::Hash::new([1u8; 32]);
     let entry = CrossChainRegistryEntry {
+        transfer_id: "conformance-transfer".to_string(),
         sanad_id,
         source_chain: csv_hash::chain_id::ChainId::new("bitcoin"),
         source_seal: csv_hash::seal::SealPoint {

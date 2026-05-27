@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 const AUTHORITY_CRATE_MANIFESTS: &[&str] = &[
     "csv-runtime/Cargo.toml",
     "csv-cli/Cargo.toml",
-    "csv-core/Cargo.toml",
     "csv-protocol/Cargo.toml",
 ];
 
@@ -47,6 +46,91 @@ fn authority_crates_do_not_depend_on_chain_adapters() {
             );
         }
     }
+}
+
+#[test]
+fn retired_csv_core_cannot_reenter_workspace_dependencies() {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(workspace_root().join("Cargo.toml"))
+        .exec()
+        .expect("cargo metadata must succeed");
+    let violations: Vec<_> = metadata
+        .packages
+        .iter()
+        .filter_map(|package| {
+            package
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.name == "csv-core")
+                .then(|| package.name.clone())
+        })
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "retired csv-core dependency is forbidden; migrate these crates: {}",
+        violations.join(", ")
+    );
+    assert!(
+        !metadata
+            .workspace_members
+            .iter()
+            .any(|id| id.repr.contains("csv-core")),
+        "csv-core must remain excluded from the workspace"
+    );
+
+    let source_violations: Vec<_> = metadata
+        .workspace_packages()
+        .iter()
+        .flat_map(|package| {
+            let crate_root = package
+                .manifest_path
+                .parent()
+                .expect("workspace package manifest must have a directory");
+            scan_files(
+                crate_root.join("src").as_std_path(),
+                &["use csv_core::", "csv_core::"],
+            )
+        })
+        .collect();
+    assert!(
+        source_violations.is_empty(),
+        "production source must not import retired csv-core:\n{}",
+        source_violations.join("\n")
+    );
+}
+
+#[test]
+fn recovery_paths_have_assertive_coverage() {
+    let root = workspace_root();
+    let runtime_tests =
+        fs::read_to_string(root.join("csv-runtime/src/transfer_coordinator.rs")).unwrap();
+    for required_test in [
+        "lock_confirmed_recovery_regenerates_proof_and_completes",
+        "awaiting_finality_recovery_rechecks_finality_and_completes",
+        "proof_building_recovery_regenerates_proof_and_completes",
+        "proof_validated_recovery_uses_persisted_payload_and_completes",
+        "proof_validated_recovery_rejects_missing_payload",
+        "proof_validated_recovery_rejects_malformed_payload",
+    ] {
+        assert!(
+            runtime_tests.contains(required_test),
+            "required recovery test `{required_test}` is missing"
+        );
+    }
+
+    let legacy_tests = root.join("csv-runtime/tests");
+    let permissive_assertions = scan_files(
+        &legacy_tests,
+        &[
+            "result.is_err() || matches!(result, Ok(_))",
+            "This test is a placeholder",
+        ],
+    );
+    assert!(
+        permissive_assertions.is_empty(),
+        "recovery tests must assert a deterministic outcome:\n{}",
+        permissive_assertions.join("\n")
+    );
 }
 
 #[test]

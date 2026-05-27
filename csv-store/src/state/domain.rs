@@ -57,7 +57,7 @@ pub struct SanadRecord {
 
 /// Status of a cross-chain transfer.
 ///
-/// Re-exported from csv_core for compatibility.
+/// Re-exported from csv-protocol for compatibility.
 /// Use [`csv_protocol::SimplifiedTransferStatus`] for the canonical definition.
 pub type TransferStatus = SimplifiedTransferStatus;
 

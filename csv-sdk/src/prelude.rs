@@ -29,7 +29,7 @@ pub use csv_hash::seal::SealPoint;
 pub use csv_protocol::proof_types::ProofBundle;
 
 // Agent-friendly types
-pub use csv_core::mcp::{ErrorSuggestion, FixAction};
+pub use crate::mcp::{ErrorSuggestion, FixAction};
 
 // Unified result type
 pub use crate::Result;

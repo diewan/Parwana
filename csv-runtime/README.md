@@ -14,7 +14,7 @@ Runtime orchestration engine for the CSV protocol. Manages transfer coordination
 
 ## Architecture
 
-`csv-runtime` depends only on `csv-protocol` (and `csv-core` during migration). It provides:
+`csv-runtime` depends on `csv-protocol` and orchestration support crates. It provides:
 
 - **TransferCoordinator** — Single source of truth for cross-chain transfer execution
 - **ExecutionJournal** — Phase-by-phase audit trail for crash-safe recovery
@@ -40,7 +40,6 @@ The runtime does not import chain adapters directly. Chain adapters register the
 ## Dependencies
 
 - `csv-protocol`: Protocol types and traits
-- `csv-core`: Legacy protocol types (being phased out)
 - `csv-admission`: Admission control and pressure boundaries
 - `csv-coordinator`: Per-chain execution cells
 - `csv-storage`: Storage backends

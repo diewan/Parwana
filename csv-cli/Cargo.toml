@@ -23,7 +23,6 @@ path = "src/main.rs"
 # No direct chain adapter dependencies - all operations go through csv-adapter
 csv-sdk = { path = "../csv-sdk", features = ["bitcoin", "ethereum", "sui", "aptos"] }
 csv-protocol = { path = "../csv-protocol" }
-csv-core = { path = "../csv-core" }
 csv-verifier = { path = "../csv-verifier" }
 csv-hash = { path = "../csv-hash" }
 csv-proof = { path = "../csv-proof" }

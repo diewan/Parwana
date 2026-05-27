@@ -2,7 +2,7 @@
 //!
 //! This module centralizes all policy decisions that were previously
 //! made by individual adapters. The runtime is the single authority for:
-//! - Finality depth requirements (sourced from csv-core protocol defaults)
+//! - Finality depth requirements (sourced from csv-protocol defaults)
 //! - RPC fallback behavior
 //! - Retry logic
 //! - Confirmation interpretation
@@ -23,7 +23,7 @@ use std::time::Duration;
 /// but may be overridden per-chain at runtime.
 #[derive(Debug, Clone)]
 pub struct RuntimePolicy {
-    /// Finality depth required for each chain (defaults from csv-core)
+    /// Finality depth required for each chain (defaults from csv-protocol)
     pub finality_depths: std::collections::HashMap<String, u64>,
 
     /// Whether to allow RPC fallback to simulated mode
@@ -99,7 +99,7 @@ impl RuntimePolicy {
 
     /// Get the required finality depth for a chain.
     ///
-    /// Uses the runtime's configured depth, falling back to csv-core protocol
+    /// Uses the runtime's configured depth, falling back to csv-protocol
     /// defaults if not explicitly set, then to 1 as absolute minimum.
     pub fn finality_depth_for_chain(&self, chain_id: &str) -> Option<u64> {
         self.finality_depths
@@ -189,7 +189,7 @@ mod tests {
         let mut policy = RuntimePolicy::new();
         // Remove bitcoin from runtime policy
         policy.finality_depths.remove("bitcoin");
-        // Should fall back to csv-core default
+        // Should fall back to csv-protocol default
         assert_eq!(policy.finality_depth_for_chain("bitcoin"), Some(6));
     }
 
