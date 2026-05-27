@@ -151,10 +151,31 @@ enum Commands {
         action: commands::inspect::InspectAction,
     },
 
-    /// Schema registry tooling
+   /// Schema registry tooling
     Schema {
         #[command(subcommand)]
         action: commands::schema_cmd::SchemaAction,
+    },
+
+    // ─── Content Management ───
+    /// Content tree management and selective disclosure
+    Content {
+        #[command(subcommand)]
+        action: commands::content::ContentAction,
+    },
+
+    // ─── Runtime Monitoring ───
+    /// Runtime monitoring and diagnostics
+    Runtime {
+        #[command(subcommand)]
+        action: commands::runtime::RuntimeAction,
+    },
+
+    // ─── Trust Management ───
+    /// Trust anchor and trust package management
+    Trust {
+        #[command(subcommand)]
+        action: commands::trust::TrustAction,
     },
 }
 
@@ -195,8 +216,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Seal { action } => seals::execute(action, &config, &mut state),
         Commands::Test { action } => tests::execute(action, &config, &state),
         Commands::Validate { action } => validate::execute(action, &config, &state),
-        Commands::Inspect { action } => commands::inspect::execute(action),
+      Commands::Inspect { action } => commands::inspect::execute(action),
         Commands::Schema { action } => commands::schema_cmd::execute(action),
+        Commands::Content { action } => commands::content::execute(action, &config),
+        Commands::Runtime { action } => commands::runtime::execute(action, &config),
+        Commands::Trust { action } => commands::trust::execute(action, &config),
     };
 
     // Save state

@@ -29,6 +29,10 @@ csv-proof = { path = "../csv-proof" }
 csv-schema = { path = "../csv-schema" }
 csv-store = { path = "../csv-store", features = ["clap"] }
 csv-keys = { path = "../csv-keys" }
+csv-runtime = { path = "../csv-runtime" }
+csv-admission = { path = "../csv-admission" }
+csv-observability = { path = "../csv-observability" }
+csv-content = { path = "../csv-content" }
 
 # CLI framework and utilities (no chain-specific crypto)
 clap = { version = "4", features = ["derive"] }
