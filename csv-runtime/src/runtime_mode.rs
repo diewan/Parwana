@@ -18,6 +18,7 @@
 //! - Manual operator commands
 //! - Automatic recovery detection
 
+use csv_observability::runtime_health::{DegradedReason, RuntimeHealth};
 use std::time::{Duration, SystemTime};
 
 /// Runtime operational mode
@@ -222,15 +223,15 @@ impl Default for CircuitBreaker {
     }
 }
 
-/// Runtime health status
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HealthStatus {
-    /// All systems operational
-    Healthy,
-    /// Some systems degraded but operational
-    Degraded,
-    /// Critical systems non-operational
-    Critical,
+/// Runtime health monitor that delegates to csv-observability.
+///
+/// This monitor tracks component health and maps it to the
+/// RuntimeHealth state from csv-observability.
+#[derive(Debug, Clone)]
+pub struct HealthMonitor {
+    current_health: RuntimeHealth,
+    checks: Vec<HealthCheck>,
+    mode: RuntimeMode,
 }
 
 /// Health check result for a specific component
@@ -246,22 +247,11 @@ pub struct HealthCheck {
     pub timestamp: SystemTime,
 }
 
-/// Runtime health monitor
-#[derive(Debug, Clone)]
-pub struct HealthMonitor {
-    /// Current overall health status
-    status: HealthStatus,
-    /// Individual component health checks
-    checks: Vec<HealthCheck>,
-    /// Current runtime mode
-    mode: RuntimeMode,
-}
-
 impl HealthMonitor {
     /// Create a new health monitor
     pub fn new() -> Self {
         Self {
-            status: HealthStatus::Healthy,
+            current_health: RuntimeHealth::Healthy,
             checks: Vec::new(),
             mode: RuntimeMode::Normal,
         }
@@ -269,44 +259,78 @@ impl HealthMonitor {
 
     /// Record a health check result
     pub fn record_check(&mut self, check: HealthCheck) {
-        // Remove any existing check for this component
         self.checks.retain(|c| c.component != check.component);
         self.checks.push(check);
-        self.update_status();
+        self.update_health();
         self.update_mode();
     }
 
-    /// Update overall health status based on component checks
-    fn update_status(&mut self) {
+    /// Update health state based on component checks
+    fn update_health(&mut self) {
         if self.checks.is_empty() {
-            self.status = HealthStatus::Healthy;
+            self.current_health = RuntimeHealth::Healthy;
             return;
         }
 
-        let unhealthy_count = self.checks.iter().filter(|c| !c.healthy).count();
-        let total_count = self.checks.len();
+        let unhealthy = self.checks.iter().filter(|c| !c.healthy).count();
+        let total = self.checks.len();
 
-        if unhealthy_count == 0 {
-            self.status = HealthStatus::Healthy;
-        } else if unhealthy_count < total_count {
-            self.status = HealthStatus::Degraded;
+        if unhealthy == 0 {
+            self.current_health = RuntimeHealth::Healthy;
         } else {
-            self.status = HealthStatus::Critical;
+            let reason = self.detect_degradation_reason();
+            self.current_health = RuntimeHealth::Degraded { reason };
         }
     }
 
-    /// Update runtime mode based on health status
+    /// Detect the primary reason for degradation
+    fn detect_degradation_reason(&self) -> DegradedReason {
+        for check in &self.checks {
+            if !check.healthy {
+                match check.component.as_str() {
+                    c if c.contains("rpc") || c.contains("provider") => {
+                        return DegradedReason::RpcDisagreement;
+                    }
+                    c if c.contains("quorum") => {
+                        return DegradedReason::QuorumCollapse;
+                    }
+                    c if c.contains("historical") || c.contains("continuity") => {
+                        return DegradedReason::HistoricalContinuityFailure;
+                    }
+                    c if c.contains("replay") => {
+                        return DegradedReason::ReplayRegistryUnavailable;
+                    }
+                    c if c.contains("event") || c.contains("persistence") => {
+                        return DegradedReason::EventPersistenceLag;
+                    }
+                    c if c.contains("clock") || c.contains("time") => {
+                        return DegradedReason::ClockDrift;
+                    }
+                    c if c.contains("partition") || c.contains("network") => {
+                        return DegradedReason::PartialPartition;
+                    }
+                    c if c.contains("trust") => {
+                        return DegradedReason::TrustPackageExpiry;
+                    }
+                    _ => return DegradedReason::RpcDisagreement,
+                }
+            }
+        }
+        DegradedReason::RpcDisagreement
+    }
+
+    /// Update runtime mode based on health state
     fn update_mode(&mut self) {
-        self.mode = match self.status {
-            HealthStatus::Healthy => RuntimeMode::Normal,
-            HealthStatus::Degraded => RuntimeMode::Degraded,
-            HealthStatus::Critical => RuntimeMode::Unsafe,
+        self.mode = match self.current_health {
+            RuntimeHealth::Healthy => RuntimeMode::Normal,
+            RuntimeHealth::Degraded { .. } => RuntimeMode::Degraded,
+            RuntimeHealth::Unsafe => RuntimeMode::Unsafe,
         };
     }
 
-    /// Get the current health status
-    pub fn status(&self) -> HealthStatus {
-        self.status.clone()
+    /// Get the current runtime health state
+    pub fn health(&self) -> RuntimeHealth {
+        self.current_health.clone()
     }
 
     /// Get the current runtime mode
@@ -331,7 +355,7 @@ impl HealthMonitor {
     /// Reset all health checks
     pub fn reset(&mut self) {
         self.checks.clear();
-        self.status = HealthStatus::Healthy;
+        self.current_health = RuntimeHealth::Healthy;
         self.mode = RuntimeMode::Normal;
     }
 
@@ -398,8 +422,9 @@ mod tests {
 
     #[test]
     fn test_health_monitor() {
+        use csv_observability::runtime_health::RuntimeHealth;
         let mut monitor = HealthMonitor::new();
-        assert_eq!(monitor.status(), HealthStatus::Healthy);
+        assert_eq!(monitor.health(), RuntimeHealth::Healthy);
         assert_eq!(monitor.mode(), RuntimeMode::Normal);
 
         monitor.record_check(HealthCheck {
@@ -408,7 +433,7 @@ mod tests {
             error: None,
             timestamp: SystemTime::now(),
         });
-        assert_eq!(monitor.status(), HealthStatus::Healthy);
+        assert_eq!(monitor.health(), RuntimeHealth::Healthy);
         assert_eq!(monitor.mode(), RuntimeMode::Normal);
 
         monitor.record_check(HealthCheck {
@@ -417,7 +442,7 @@ mod tests {
             error: Some("Connection failed".to_string()),
             timestamp: SystemTime::now(),
         });
-        assert_eq!(monitor.status(), HealthStatus::Degraded);
+        assert!(!matches!(monitor.health(), RuntimeHealth::Healthy));
         assert_eq!(monitor.mode(), RuntimeMode::Degraded);
 
         // Test manual mode override

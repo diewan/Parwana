@@ -52,6 +52,14 @@ impl CellCircuitBreaker {
         self.state == CircuitState::Open
     }
 
+    pub fn allow_request(&self) -> bool {
+        match self.state {
+            CircuitState::Closed => true,
+            CircuitState::HalfOpen => true,
+            CircuitState::Open => false,
+        }
+    }
+
     pub fn record_success(&mut self) {
         match self.state {
             CircuitState::Closed => {

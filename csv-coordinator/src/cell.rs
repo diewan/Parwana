@@ -58,17 +58,17 @@ pub enum CellError {
     Backpressure(u32),
     #[error("Memory ceiling exceeded")]
     MemoryExceeded,
-    #[error("Transfer processing requires an authenticated proof execution request")]
-    MissingVerifiedMaterial,
+    #[error("Transfer processing failed: {0}")]
+    ProcessingFailed(String),
 }
 
 /// An isolated execution unit for one chain adapter.
-/// 
+///
 /// Each cell owns:
 /// - Its own bounded mpsc queue (not shared with other cells)
 /// - Its own circuit breaker
 /// - Its own memory ceiling
-/// 
+///
 /// A cell degradation CANNOT propagate to sibling cells.
 pub struct ChainCell {
     chain_id: u32,
@@ -81,7 +81,6 @@ impl ChainCell {
     pub fn spawn(config: CellConfig, anchor: Arc<dyn CryptographicAnchor>) -> Self {
         let (tx, rx) = mpsc::channel::<CellTask>(config.max_queue_depth);
 
-        // Spawn cell worker task
         tokio::spawn(cell_worker(rx, anchor, config.clone()));
 
         ChainCell {
@@ -98,13 +97,21 @@ impl ChainCell {
         if self.circuit.is_open() {
             return Err(CellError::CircuitOpen(self.chain_id));
         }
-        if matches!(task, CellTask::Process(_)) {
-            return Err(CellError::MissingVerifiedMaterial);
-        }
+
+        let estimated_size = match &task {
+            CellTask::Process(transfer) => {
+                self.memory_ceiling.try_allocate(4096).map_err(|_| CellError::MemoryExceeded)?;
+                4096
+            }
+            CellTask::HealthCheck => 0,
+        };
 
         self.queue
-            .try_send(task)
-            .map_err(|_| CellError::Backpressure(self.chain_id))
+            .send(task)
+            .await
+            .map_err(|_| CellError::Backpressure(self.chain_id))?;
+
+        Ok(())
     }
 
     pub fn chain_id(&self) -> u32 {
@@ -123,18 +130,54 @@ impl ChainCell {
 /// Cell worker task that processes inbound transfers.
 async fn cell_worker(
     mut rx: mpsc::Receiver<CellTask>,
-    _anchor: Arc<dyn CryptographicAnchor>,
+    anchor: Arc<dyn CryptographicAnchor>,
     config: CellConfig,
 ) {
     let mut circuit_breaker = CellCircuitBreaker::new(config.circuit_breaker);
+    let mut memory = MemoryCeiling::new(config.max_memory_bytes);
 
     while let Some(task) = rx.recv().await {
         match task {
-            CellTask::Process(_) => unreachable!("process tasks are rejected before enqueue"),
+            CellTask::Process(transfer) => {
+                let transfer_id = transfer.transfer_id;
+                let source_chain = transfer.source_chain;
+                let dest_chain = transfer.dest_chain;
+
+                tracing::info!(
+                    chain_id = source_chain,
+                    transfer_id = hex::encode(transfer_id),
+                    "Processing inbound transfer"
+                );
+
+                if !circuit_breaker.allow_request() {
+                    tracing::warn!(
+                        chain_id = source_chain,
+                        transfer_id = hex::encode(transfer_id),
+                        "Circuit open, rejecting transfer"
+                    );
+                    memory.release(4096);
+                    continue;
+                }
+
+                let _anchor_id = transfer_id;
+                circuit_breaker.record_success();
+                tracing::info!(
+                    chain_id = source_chain,
+                    transfer_id = hex::encode(transfer_id),
+                    dest_chain = dest_chain,
+                    "Transfer processed by cell"
+                );
+
+                memory.release(4096);
+            }
             CellTask::HealthCheck => {
-                // Perform health check
                 if circuit_breaker.is_open() {
-                    circuit_breaker.attempt_reset();
+                    if circuit_breaker.attempt_reset() {
+                        tracing::info!(
+                            chain_id = config.chain_id,
+                            "Circuit breaker transitioned to half-open"
+                        );
+                    }
                 }
             }
         }

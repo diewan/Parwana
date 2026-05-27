@@ -14,6 +14,7 @@ csv-storage = { path = "../csv-storage" }
 csv-codec = { path = "../csv-codec" }
 csv-coordinator = { path = "../csv-coordinator" }
 csv-admission = { path = "../csv-admission" }
+csv-observability = { path = "../csv-observability" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tracing = "0.1"

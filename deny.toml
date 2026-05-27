@@ -101,3 +101,21 @@ from = "csv-verifier"
 to   = "serde"
 path = "serde::Serialize"
 message = "csv-verifier must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+
+[[graph.forbidden-edges]]
+# csv-runtime must not depend on csv-core (legacy crate)
+from = "csv-runtime"
+to   = "csv-core"
+message = "csv-runtime must not depend on csv-core. Use csv-protocol/csv-verifier/csv-storage instead."
+
+[[graph.forbidden-edges]]
+# csv-sdk must not depend on csv-core (legacy crate)
+from = "csv-sdk"
+to   = "csv-core"
+message = "csv-sdk must not depend on csv-core. Use csv-protocol/csv-verifier/csv-storage instead."
+
+[[graph.forbidden-edges]]
+# csv-cli must not depend on csv-core (legacy crate)
+from = "csv-cli"
+to   = "csv-core"
+message = "csv-cli must not depend on csv-core. Use csv-runtime instead."

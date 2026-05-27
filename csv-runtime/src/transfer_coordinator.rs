@@ -954,6 +954,11 @@ impl TransferCoordinator {
             })),
             chain_data: None,
             native_proof_validated: true,
+            sanad_id: Some(transfer.sanad_id),
+            lock_tx: Some(transfer.lock_tx_hash.clone()),
+            lock_output_index: Some(transfer.lock_output_index),
+            transition_id: Some(transfer.transition_id.clone()),
+            destination_chain: Some(transfer.destination_chain.clone()),
         };
 
         adapter_registry
@@ -1687,6 +1692,38 @@ impl TransferCoordinator {
                     transfer.source_chain
                 ))
             })?;
+
+        let sanad_id_bound = proof_bundle
+            .seal_ref
+            .id
+            .get(0..32)
+            .map(|b| csv_hash::SanadId::new(b.try_into().unwrap_or([0u8; 32])));
+        if let Some(ref expected_sanad) = transfer.sanad_id {
+            if let Some(ref bound_sanad) = sanad_id_bound {
+                if bound_sanad.as_bytes() != expected_sanad.as_bytes() {
+                    return Err(TransferCoordinatorError::ProofVerificationFailed(
+                        "Proof seal does not bind to the transfer sanad_id".to_string(),
+                    ));
+                }
+            }
+        }
+
+        if let Some(ref expected_lock_tx) = transfer.lock_tx_hash.as_slice().try_into().ok() {
+            let expected_lock_bytes = hex::encode(expected_lock_tx);
+            let proof_lock_bytes = proof_bundle
+                .anchor_ref
+                .metadata
+                .get(0..expected_lock_bytes.len())
+                .map(|s| String::from_utf8_lossy(s).to_string());
+            if let Some(ref lock_bytes) = proof_lock_bytes {
+                if lock_bytes != expected_lock_bytes {
+                    return Err(TransferCoordinatorError::ProofVerificationFailed(
+                        "Proof anchor metadata does not bind to the lock transaction".to_string(),
+                    ));
+                }
+            }
+        }
+
         let verification_context = VerificationContext {
             chain_id: transfer.source_chain.clone(),
             signature_scheme,
@@ -1697,6 +1734,11 @@ impl TransferCoordinator {
             })),
             chain_data: None,
             native_proof_validated: true,
+            sanad_id: Some(transfer.sanad_id),
+            lock_tx: Some(transfer.lock_tx_hash.clone()),
+            lock_output_index: Some(transfer.lock_output_index),
+            transition_id: Some(transfer.transition_id.clone()),
+            destination_chain: Some(transfer.destination_chain.clone()),
         };
         adapter_registry
             .validate_source_proof(&transfer.source_chain, transfer, proof_bundle)

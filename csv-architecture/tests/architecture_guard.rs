@@ -113,6 +113,49 @@ fn retired_csv_core_cannot_reenter_workspace_dependencies() {
 }
 
 #[test]
+fn nothing_new_depends_on_csv_core() {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(workspace_root().join("Cargo.toml"))
+        .exec()
+        .expect("cargo metadata must succeed");
+
+    for package in &metadata.packages {
+        for dep in &package.dependencies {
+            if dep.name == "csv-core" {
+                panic!(
+                    "{} must not depend on csv-core; migrate to csv-protocol/csv-verifier/csv-storage",
+                    package.name
+                );
+            }
+        }
+    }
+
+    let root = workspace_root();
+    let source_dirs = [
+        "csv-runtime/src",
+        "csv-sdk/src",
+        "csv-cli/src",
+        "csv-protocol/src",
+        "csv-verifier/src",
+        "csv-storage/src",
+        "csv-coordinator/src",
+        "csv-admission/src",
+    ];
+    for src_dir in &source_dirs {
+        let findings = scan_files(
+            &root.join(src_dir),
+            &["csv_core::", "use csv_core"],
+        );
+        assert!(
+            findings.is_empty(),
+            "{} must not import csv_core:\n{}",
+            src_dir,
+            findings.join("\n")
+        );
+    }
+}
+
+#[test]
 fn recovery_paths_have_assertive_coverage() {
     let root = workspace_root();
     let runtime_tests =

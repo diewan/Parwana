@@ -4,6 +4,7 @@
 /// This is the anti-corruption layer that prevents chain-specific semantics from leaking.
 
 pub mod aptos;
+pub mod bitcoin;
+pub mod celestia;
 pub mod ethereum;
 pub mod solana;
-pub mod bitcoin;

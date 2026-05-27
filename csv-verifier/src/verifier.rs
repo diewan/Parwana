@@ -368,6 +368,16 @@ pub struct VerificationContext {
     /// Whether the chain adapter has cryptographically validated inclusion,
     /// finality, and the proof's binding to the transfer being authorized.
     pub native_proof_validated: bool,
+    /// Sanad ID that the proof must bind to.
+    pub sanad_id: Option<csv_hash::SanadId>,
+    /// Lock transaction hash bytes (source chain lock tx).
+    pub lock_tx: Option<Vec<u8>>,
+    /// Lock output index on the source chain.
+    pub lock_output_index: Option<u32>,
+    /// Transition ID for the transfer being verified.
+    pub transition_id: Option<Vec<u8>>,
+    /// Destination chain identifier for cross-chain binding.
+    pub destination_chain: Option<String>,
 }
 
 /// Chain-specific verification data.
