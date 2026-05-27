@@ -5,7 +5,7 @@
 
 use csv_verifier::{
     AnchorError, CanonicalBlockHeader, CanonicalInclusionProof, CryptographicAnchor,
-    FinalityGuarantee, ValidatorInfo, ValidatorSet, VerifiedHeader,
+    FinalityGuarantee, ValidatorSet, VerifiedHeader,
 };
 
 /// Aptos-specific cryptographic anchor.
@@ -101,6 +101,7 @@ impl CryptographicAnchor for AptosAnchor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use csv_verifier::ValidatorInfo;
 
     #[test]
     fn test_aptos_anchor_creation() {

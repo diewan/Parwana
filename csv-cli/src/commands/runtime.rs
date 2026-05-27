@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use csv_admission::AdmissionController;
 use csv_observability::runtime_health::{DegradedReason, RuntimeHealth};
 use csv_runtime::{CircuitBreakerState, HealthMonitor, RuntimeMode};

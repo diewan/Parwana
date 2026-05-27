@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use clap::Subcommand;
-use csv_hash::Hash;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
@@ -154,7 +153,7 @@ fn cmd_status() -> Result<()> {
             output::kv("Expires", &expires);
 
             if let Some(sig) = &pkg.signature {
-                output::kv("Signature", &sig[..min(sig.len(), 16)].to_string() + "...");
+                output::kv("Signature", &format!("{}...", &sig[..min(sig.len(), 16)]));
             }
             if !pkg.signers.is_empty() {
                 output::kv("Signers", &format!("{} multi-sig", pkg.signers.len()));
@@ -403,10 +402,10 @@ fn timestamp_display(secs: u64) -> String {
 }
 
 fn expand_path(path: &str) -> String {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped).to_string_lossy().to_string();
-        }
+    if let Some(stripped) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(stripped).to_string_lossy().to_string();
     }
     path.to_string()
 }

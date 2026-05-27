@@ -2,12 +2,13 @@
 
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use csv_content::addressing::compute_content_address;
 use csv_content::attachments::{AttachmentRef, MediaType};
-use csv_content::claims::{Claim, ClaimPredicate, ContentRights};
-use csv_content::content_tree::{ContentProof, ContentTree, DisclosureProof, RedactedMerkleProof};
-use csv_content::encryption::{EncryptionDescriptor, EncryptionEnvelope, KeyAccess};
-use csv_content::participants::{Participant, ParticipantRole, ParticipantSet};
+use csv_content::claims::{Claim, ClaimPredicate};
+use csv_content::content_tree::{ContentTree, DisclosureProof};
+use csv_content::encryption::{EncryptionDescriptor, EncryptionEnvelope};
+use csv_content::participants::{Participant, ParticipantId, ParticipantRole};
 use csv_content::resource_accounting::VerificationLimit;
 
 use crate::config::Config;
@@ -206,7 +207,7 @@ fn cmd_create(input: &str, output: &str) -> Result<()> {
     println!("\n  {}:", "Content Addresses".bold());
     for (i, leaf) in leaves.iter().enumerate() {
         let address = compute_content_address(leaf);
-        println!("    Leaf {}: 0x{}", i, hex::encode(address));
+        println!("    Leaf {}: 0x{}", i, address.hash().to_hex());
     }
 
     Ok(())
@@ -274,7 +275,12 @@ fn cmd_verify(tree_file: &str, leaf_data: Option<&str>, leaf_index: Option<usize
     let cost = tree.verification_cost();
     let limit = VerificationLimit::conservative();
 
-    if cost.is_acceptable(&limit) {
+    if cost.is_acceptable(
+        limit.max_cpu,
+        limit.max_memory,
+        limit.max_io,
+        limit.max_recursion_depth as u32,
+    ) {
         output::success("Tree structure is valid");
     } else {
         output::warning("Tree verification cost exceeds conservative limit");
@@ -330,8 +336,8 @@ fn cmd_encrypt(tree_file: &str, key_id: &str, algorithm: &str) -> Result<()> {
     let descriptor = EncryptionDescriptor {
         algorithm: algorithm.to_string(),
         key_id: key_id.to_string(),
-        nonce: [0u8; 12], // In production, this would be a random nonce
-        aad: Vec::new(),
+        nonce: [0u8; 12].to_vec(), // In production, this would be a random nonce
+        aad: None,
     };
 
     output::progress(3, 3, "Encrypting subtree...");
@@ -428,7 +434,7 @@ fn cmd_attach_add(tree_file: &str, file: &str, media_type_str: &str) -> Result<(
     let content = std::fs::read_to_string(tree_file)
         .map_err(|e| anyhow::anyhow!("Failed to read tree file: {}", e))?;
 
-    let tree: ContentTree = serde_json::from_str(&content)
+    let _tree: ContentTree = serde_json::from_str(&content)
         .map_err(|e| anyhow::anyhow!("Failed to parse content tree: {}", e))?;
 
     let file_data = std::fs::read(file)
@@ -438,17 +444,23 @@ fn cmd_attach_add(tree_file: &str, file: &str, media_type_str: &str) -> Result<(
 
     let media_type = parse_media_type(media_type_str)?;
 
-    let attachment = AttachmentRef {
-        uri: file.to_string(),
+    let _attachment = AttachmentRef::new(
+        file,
         media_type,
-        size: file_data.len(),
-        hash: file_hash,
-    };
+        file_data.len() as u64,
+        file_hash.hash(),
+    )
+    .with_created_at(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
 
     output::kv("File", file);
     output::kv("Media Type", media_type_str);
     output::kv("Size", &file_data.len().to_string());
-    output::kv("Content Hash", &hex::encode(file_hash));
+    output::kv("Content Hash", &file_hash.hash().to_hex());
 
     output::success("Attachment reference created");
     output::info("In a full implementation, this would be embedded in the content tree metadata");
@@ -478,7 +490,7 @@ fn cmd_participants(action: ParticipantsAction) -> Result<()> {
     }
 }
 
-fn cmd_participants_add(tree_file: &str, key_hex: &str, role_str: &str) -> Result<()> {
+fn cmd_participants_add(_tree_file: &str, key_hex: &str, role_str: &str) -> Result<()> {
     output::header("Add Participant");
 
     let key_bytes = hex::decode(key_hex.trim_start_matches("0x"))
@@ -486,14 +498,19 @@ fn cmd_participants_add(tree_file: &str, key_hex: &str, role_str: &str) -> Resul
 
     let role = parse_role(role_str)?;
 
-    let participant = Participant {
-        public_key: key_bytes,
+    let participant_id = ParticipantId::new(&key_bytes);
+
+    let _participant = Participant {
+        id: participant_id.clone(),
         role,
+        public_key: key_bytes,
+        added_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
     };
 
-    let participant_id = ParticipantId::from_public_key(&participant.public_key);
-
-    output::kv("Participant ID", &hex::encode(participant_id.0));
+    output::kv("Participant ID", &hex::encode(participant_id.as_bytes()));
     output::kv("Role", role_str);
     output::kv(
         "Public Key",
@@ -537,15 +554,12 @@ fn cmd_claims(action: ClaimsAction) -> Result<()> {
     }
 }
 
-fn cmd_claims_create(tree_file: &str, predicate_str: &str, description: &str) -> Result<()> {
+fn cmd_claims_create(_tree_file: &str, predicate_str: &str, description: &str) -> Result<()> {
     output::header("Create Content Claim");
 
     let predicate = parse_predicate(predicate_str)?;
 
-    let claim = Claim {
-        predicate,
-        description: description.to_string(),
-    };
+    let claim = Claim::new("content", "verification target", predicate);
 
     let claim_json = serde_json::to_string_pretty(&claim)
         .map_err(|e| anyhow::anyhow!("Failed to serialize claim: {}", e))?;
@@ -583,7 +597,7 @@ fn parse_media_type(s: &str) -> Result<MediaType> {
         "pdf" | "application/pdf" => Ok(MediaType::Pdf),
         "png" | "image/png" => Ok(MediaType::Png),
         "jpeg" | "jpg" | "image/jpeg" => Ok(MediaType::Jpeg),
-        "csv" | "text/csv" => Ok(MediaType::Csv),
+        "csv" | "text/csv" => Ok(MediaType::Custom("text/csv".to_string())),
         _ => Err(anyhow::anyhow!("Unsupported media type: {}", s)),
     }
 }

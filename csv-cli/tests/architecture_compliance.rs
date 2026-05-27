@@ -195,6 +195,9 @@ fn test_commands_use_csv_sdk_runtime() {
             // - validate.rs: Validation utilities (uses csv-verifier)
             // - tests.rs: End-to-end testing utilities
             // - status.rs: Status checking (reads local state, no chain operations)
+            // - content.rs: Content tree management (local operations)
+            // - runtime.rs: Runtime diagnostics (reads local state)
+            // - trust.rs: Trust package management (local operations)
             let filename = path.file_name().unwrap_or_default().to_string_lossy();
             let needs_runtime = !matches!(
                 filename.as_ref(),
@@ -210,6 +213,9 @@ fn test_commands_use_csv_sdk_runtime() {
                     | "validate.rs"
                     | "tests.rs"
                     | "status.rs"
+                    | "content.rs"
+                    | "runtime.rs"
+                    | "trust.rs"
             );
 
             if needs_runtime && !uses_csv_sdk {
