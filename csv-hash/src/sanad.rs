@@ -1,13 +1,12 @@
 //! Sanad identifier types
 
 use crate::Hash;
-use serde::{Deserialize, Serialize};
 
 /// A unique Sanad identifier.
 ///
 /// Computed as `H(commitment || salt)` to ensure uniqueness
 /// even when the same state is committed to multiple times.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SanadId(pub Hash);
 
 impl SanadId {

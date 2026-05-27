@@ -42,3 +42,62 @@ message = "csv-algebra is synchronous and allocation-minimal. No async runtimes.
 from = "csv-algebra"
 to   = "reqwest"
 message = "csv-algebra has zero network dependencies."
+
+[[graph.forbidden-edges]]
+# L0-L4 internal crates must not use serde_json for wire encoding.
+# csv-wire owns all transport encoding. Use csv-wire wire types instead.
+from = "csv-hash"
+to   = "serde_json"
+message = "csv-hash must not use serde_json. Use csv-wire for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-protocol"
+to   = "serde_json"
+message = "csv-protocol must not use serde_json. Use csv-wire for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-proof"
+to   = "serde_json"
+message = "csv-proof must not use serde_json. Use csv-wire for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-verifier"
+to   = "serde_json"
+message = "csv-verifier must not use serde_json. Use csv-wire for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-schema"
+to   = "serde_json"
+message = "csv-schema must not use serde_json. Use csv-wire for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-content"
+to   = "serde_json"
+message = "csv-content must not use serde_json. Use csv-wire for transport encoding."
+
+[[graph.forbidden-edges]]
+# L0-L4 internal crates must not use serde directly for wire encoding.
+# csv-wire owns all serde and transport encoding.
+# Exception: serde derives are allowed for canonical serialization via csv-codec.
+from = "csv-hash"
+to   = "serde"
+path = "serde::Serialize"
+message = "csv-hash must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-protocol"
+to   = "serde"
+path = "serde::Serialize"
+message = "csv-protocol must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-proof"
+to   = "serde"
+path = "serde::Serialize"
+message = "csv-proof must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+
+[[graph.forbidden-edges]]
+from = "csv-verifier"
+to   = "serde"
+path = "serde::Serialize"
+message = "csv-verifier must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."

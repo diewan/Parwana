@@ -3,8 +3,8 @@
 //! Seals represent single-use sanads to authorize state transitions.
 //! Anchors represent on-chain references containing commitments.
 
-use crate::canonical::{CanonicalError, from_canonical_cbor, to_canonical_cbor};
-use serde::{Deserialize, Serialize};
+use csv_codec::canonical::{from_canonical_cbor, to_canonical_cbor};
+use anyhow::Result;
 use std::vec::Vec;
 
 /// Maximum allowed size for seal identifiers (1KB)
@@ -26,7 +26,7 @@ pub const MAX_ANCHOR_METADATA_SIZE: usize = 4096;
 /// - Ethereum: Contract address + storage slot
 /// - Sui: Object ID
 /// - Aptos: Resource address + key
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SealPoint {
     /// Chain-specific seal identifier
     pub id: Vec<u8>,
@@ -154,17 +154,17 @@ impl SealPoint {
     /// Manual `to_vec()` is forbidden in protocol-critical hashing.
     ///
     /// # Errors
-    /// Returns `CanonicalError::SerializationError` if encoding fails.
-    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, CanonicalError> {
-        to_canonical_cbor(self)
+    /// Returns `anyhow::Error::SerializationError` if encoding fails.
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, anyhow::Error> {
+        to_canonical_cbor(self).map_err(|e| anyhow::Error::msg(e.to_string()))
     }
 
     /// Deserialize from canonical CBOR bytes.
     ///
     /// # Errors
-    /// Returns `CanonicalError::DeserializationError` if decoding fails.
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CanonicalError> {
-        from_canonical_cbor(bytes)
+    /// Returns `anyhow::Error::DeserializationError` if decoding fails.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, anyhow::Error> {
+        from_canonical_cbor(bytes).map_err(|e| anyhow::Error::msg(e.to_string()))
     }
 }
 
@@ -176,7 +176,7 @@ impl SealPoint {
 /// - Bitcoin: Transaction ID + output index
 /// - Ethereum: Transaction hash + log index
 /// - Sui: Object ID + version
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CommitAnchor {
     /// Chain-specific anchor identifier
     pub anchor_id: Vec<u8>,
@@ -309,17 +309,17 @@ impl CommitAnchor {
     /// Manual `to_vec()` is forbidden in protocol-critical hashing.
     ///
     /// # Errors
-    /// Returns `CanonicalError::SerializationError` if encoding fails.
-    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, CanonicalError> {
-        to_canonical_cbor(self)
+    /// Returns `anyhow::Error::SerializationError` if encoding fails.
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, anyhow::Error> {
+        to_canonical_cbor(self).map_err(|e| anyhow::Error::msg(e.to_string()))
     }
 
     /// Deserialize from canonical CBOR bytes.
     ///
     /// # Errors
-    /// Returns `CanonicalError::DeserializationError` if decoding fails.
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CanonicalError> {
-        from_canonical_cbor(bytes)
+    /// Returns `anyhow::Error::DeserializationError` if decoding fails.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, anyhow::Error> {
+        from_canonical_cbor(bytes).map_err(|e| anyhow::Error::msg(e.to_string()))
     }
 }
 

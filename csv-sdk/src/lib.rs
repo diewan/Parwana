@@ -79,7 +79,7 @@ pub mod transfers;
 pub mod wallet;
 
 // Re-export core types from new modular crates (🔒 STABLE API only by default)
-pub use csv_core::transition::Transition;
+pub use csv_protocol::transition::Transition;
 pub use csv_hash::Hash;
 pub use csv_hash::commitment::Commitment;
 pub use csv_hash::dag::{DAGNode, DAGSegment};

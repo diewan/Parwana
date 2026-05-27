@@ -2730,6 +2730,7 @@ dependencies = [
  "csv-proof",
  "csv-protocol",
  "csv-verifier",
+ "csv-wire",
  "ed25519-dalek",
  "hex",
  "log",
@@ -2770,6 +2771,7 @@ dependencies = [
  "csv-protocol",
  "csv-store",
  "csv-verifier",
+ "csv-wire",
  "hex",
  "log",
  "rand 0.8.6",
@@ -2860,6 +2862,7 @@ dependencies = [
  "ciborium",
  "crc32fast",
  "serde",
+ "sha2",
  "thiserror 1.0.69",
 ]
 
@@ -2960,6 +2963,7 @@ dependencies = [
  "csv-protocol",
  "csv-store",
  "csv-verifier",
+ "csv-wire",
  "hex",
  "log",
  "rand 0.8.6",
@@ -2979,6 +2983,7 @@ dependencies = [
 name = "csv-hash"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bloomfilter",
  "ciborium",
  "crc32fast",
@@ -3081,6 +3086,7 @@ name = "csv-protocol"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bincode",
  "chrono",
  "ciborium",
  "csv-codec",
@@ -3198,6 +3204,7 @@ dependencies = [
  "csv-protocol",
  "csv-store",
  "csv-verifier",
+ "csv-wire",
  "ed25519-dalek",
  "futures-util",
  "hex",
@@ -3334,6 +3341,8 @@ name = "csv-wire"
 version = "0.1.0"
 dependencies = [
  "csv-algebra",
+ "csv-hash",
+ "csv-protocol",
  "hex",
  "serde",
  "serde_json",

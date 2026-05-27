@@ -1,7 +1,5 @@
 //! Chain identifier type
 
-use serde::{Deserialize, Serialize};
-
 /// A chain identifier.
 ///
 /// For the 100-chain goal, chain IDs are plain strings. This type is a thin
@@ -12,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 1. Create a new `csv-{chain}` crate implementing `ChainBackend`
 /// 2. The chain ID is specified in the chain's configuration file
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct ChainId(pub String);
 
 impl ChainId {

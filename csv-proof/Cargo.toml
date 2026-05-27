@@ -8,12 +8,12 @@ description = "CSV Proof - Thin re-export crate for backward compatibility"
 csv-protocol = { path = "../csv-protocol" }
 csv-hash = { path = "../csv-hash" }
 csv-codec = { path = "../csv-codec" }
-serde = { version = "1.0", features = ["derive"] }
 thiserror = "1"
 async-trait = "0.1"
 log = "0.4"
 hex = "0.4"
 sha2 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
 
 [lints]
 workspace = true

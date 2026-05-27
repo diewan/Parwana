@@ -46,7 +46,6 @@
 //! - [ ] No path exists to remove or modify recorded consumptions
 //! - [ ] Cross-chain seal identity collisions are properly handled
 
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::vec::Vec;
 
@@ -58,7 +57,7 @@ use crate::seal::SealPoint;
 use crate::{DomainSeparatedHash, ReplayRegistryDomain};
 
 /// A seal consumption event recording when and where a seal was used.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SealConsumption {
     /// Which chain enforced this consumption
     pub chain: ChainId,

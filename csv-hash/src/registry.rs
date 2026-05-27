@@ -16,10 +16,9 @@
 //! a hash from one domain is mistakenly used in another domain.
 
 use crate::Hash;
-use serde::{Deserialize, Serialize};
 
 /// Typed hash domain tags for CSV protocol (distinct from hash_registry::HashDomain)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TypedHashDomain {
     /// Sanad header hash
     SanadHeader,
@@ -74,7 +73,7 @@ impl TypedHashDomain {
 ///
 /// This type prevents hash confusion by ensuring content hashes are only
 /// used in their intended domain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ContentHash(Hash);
 
 impl ContentHash {
@@ -101,7 +100,7 @@ impl ContentHash {
 ///
 /// This type prevents hash confusion by ensuring proof hashes are only
 /// used in their intended domain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProofHash(Hash);
 
 impl ProofHash {
@@ -128,7 +127,7 @@ impl ProofHash {
 ///
 /// This type prevents hash confusion by ensuring seal hashes are only
 /// used in their intended domain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SealHash(Hash);
 
 impl SealHash {

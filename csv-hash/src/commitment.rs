@@ -10,7 +10,6 @@
 //! between clients. All commitments must use the V2 format. This format
 //! will not change without a version bump and backward-compatible migration.
 
-use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
 use crate::Hash;
@@ -50,7 +49,7 @@ pub const COMMITMENT_VERSION: u8 = 2;
 /// `"commitment-protocol-id"`) using [`csv_tagged_hash`]. This prevents
 /// cross-field collisions and ensures that different commitment versions
 /// produce different hashes even if their fields are otherwise identical.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Commitment {
     /// Commitment format version (MUST be `COMMITMENT_VERSION`)
     pub version: u8,
@@ -194,7 +193,7 @@ impl Commitment {
     /// If canonical serialization fails, returns deterministic error bytes so callers
     /// never panic while still getting a domain-separated value.
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        crate::canonical::to_canonical_cbor(self).unwrap_or_else(|err| {
+        csv_codec::canonical::to_canonical_cbor(self).unwrap_or_else(|err| {
             format!("commitment-canonical-serialization-error:{err}").into_bytes()
         })
     }

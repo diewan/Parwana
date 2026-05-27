@@ -9,9 +9,9 @@ csv-proof = { path = "../csv-proof" }
 csv-hash = { path = "../csv-hash" }
 csv-codec = { path = "../csv-codec" }
 csv-protocol = { path = "../csv-protocol" }
-serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 hex = "0.4.3"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 secp256k1 = { version = "0.28", features = ["rand-std"] }

@@ -1,0 +1,65 @@
+
+Now I have the full picture. Here's the gap list:
+
+**Protocol operations with zero CLI surface:**
+
+1. **Replay registry** — `csv-runtime::replay_db` / `csv-protocol::replay::registry` exist. `inspect replay` only decodes hex/CBOR locally. No command to query live registry, list consumed IDs, or check a specific replay ID's status.
+
+2. **Execution journal** — `csv-runtime::execution_journal` records every phase transition per transfer. No command to dump or tail the journal for a given transfer ID.
+
+3. **Crash recovery / resume** — `transfer_coordinator::resume_from_phase()` exists. No command to list stuck transfers by phase, or manually trigger resumption of an incomplete transfer.
+
+4. **Admission control & backpressure** — `csv-admission` and `csv-runtime::backpressure` are fully implemented. No command to inspect queue depth, pressure state, or current admission policy.
+
+5. **Event bus / event store** — `csv-runtime::event_bus`, `event_store`, `event_envelope` exist. No CLI for streaming or querying past protocol events.
+
+6. **Content tree and selective disclosure** — `csv-content` has Merkleized content trees, selective disclosure proofs, encryption envelopes, claims, and participant roles. No commands exist for any of it.
+
+7. **Trust package** — `csv-core::trust_package` handles offline verification bootstrapping. No create/export/import commands.
+
+8. **Runtime health** — `csv-core::runtime_health` and `csv-runtime::deployment_profile` exist. No `runtime status` or `runtime health` command.
+
+**Missing chain:**
+
+9. **Celestia** — `csv-adapters/csv-celestia` is a full adapter. The CLI `Chain` enum has bitcoin/ethereum/sui/aptos/solana only. Celestia is absent from every command including `test run`.
+
+10. **Solana missing from test matrix** — The `test run --all` pair matrix in `commands/tests.rs` covers bitcoin/sui/ethereum/aptos cross-pairs but never includes solana as source or destination.
+
+**Chain management:**
+
+11. **`chain_management.rs` is dead code** — `src/chain_management.rs` defines `ChainCommands` with `discover`, `validate`, and `create-template` subcommands. None are wired into the `Commands` enum in `main.rs`. They are unreachable.
+
+**Schema gaps:**
+
+12. **Schema registry queries missing** — `csv-schema::registry` supports list and versioned lookup. `schema` command has validate/compile/diff but no `list`, `show <name>`, or `history`.
+
+**Proof gaps:**
+
+13. **Live proof DAG query** — `inspect merkle` only reads a local file. No command to query a live transfer's proof DAG from the runtime by transfer ID.
+
+14. **MPC batch** — `csv-bitcoin::mpc_batch` exists. No CLI surface.
+
+**Transfer lifecycle:**
+
+15. **`cross-chain cancel`** — The state machine includes a `Compromised` terminal state. No cancel command exists, leaving no CLI path to abort a transfer that is stuck or adversarial.
+
+
+| # | Gap | Existing or New subcommand |
+|---|-----|---------------------------|
+| 1 | Replay registry live query | `csv inspect replay` — extend with `--live` flag querying runtime, add `--check <id>` |
+| 2 | Execution journal dump | `csv inspect journal --transfer-id <hex>` — new action under existing `inspect` |
+| 3 | Crash recovery / resume | `csv cross-chain resume --transfer-id <hex>` — new action under existing `cross-chain` |
+| 4 | Admission control & backpressure | `csv runtime status` — new top-level `runtime` subcommand, `status` action |
+| 5 | Event bus / event store | `csv runtime events --transfer-id <hex>` — new action under `runtime` |
+| 6 | Content tree & selective disclosure | `csv content` — new top-level subcommand (create, show, disclose, encrypt) |
+| 7 | Trust package | `csv validate offline` already exists but only reads a proof file — extend to `csv trust export/import/verify` as new actions under a new `trust` subcommand |
+| 8 | Runtime health | `csv runtime health` — new action under `runtime` (same new subcommand as #4 and #5) |
+| 9 | Celestia missing from Chain enum | No new subcommand — add `Celestia` variant to the `Chain` enum; surfaces across all existing commands automatically |
+| 10 | Solana absent from test matrix | No new subcommand — add solana pairs to the `pairs` vec in `cmd_run` in `commands/tests.rs` |
+| 11 | `chain_management.rs` dead code | `csv chain discover`, `csv chain validate`, `csv chain create-template` — wire existing `ChainCommands` variants into the `Commands::Chain` dispatch in `main.rs` |
+| 12 | Schema registry list/history | `csv schema list`, `csv schema show <name>`, `csv schema history <name>` — new actions under existing `schema` subcommand |
+| 13 | Live proof DAG query | `csv inspect dag --transfer-id <hex>` — new action under existing `inspect` |
+| 14 | MPC batch | `csv proof batch` — new action under existing `proof` subcommand |
+| 15 | `cross-chain cancel` | `csv cross-chain cancel --transfer-id <hex>` — new action under existing `cross-chain` |
+
+Three new top-level subcommands needed: `runtime` (covers #4, #5, #8), `content` (#6), `trust` (#7). Everything else extends an already-registered subcommand or is a code-only fix with no new commands.

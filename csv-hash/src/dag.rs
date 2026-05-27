@@ -3,13 +3,11 @@
 //! The DAG represents deterministic state transitions verified off-chain.
 //! Each node contains bytecode, witnesses, and validation data.
 
-use serde::{Deserialize, Serialize};
-
 use crate::Hash;
 use crate::csv_tagged_hash;
 
 /// A single node in the state transition DAG
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DAGNode {
     /// Unique identifier for this node
     pub node_id: Hash,
@@ -43,7 +41,7 @@ impl DAGNode {
 
     /// Compute the node hash using canonical serialization and tagged hashing
     pub fn hash(&self) -> Hash {
-        use csv_codec::to_canonical_cbor;
+        use csv_codec::canonical::to_canonical_cbor;
         let data = to_canonical_cbor(&(
             self.node_id,
             &self.bytecode,
@@ -57,7 +55,7 @@ impl DAGNode {
 }
 
 /// A segment of the state transition DAG
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DAGSegment {
     /// Nodes in this segment
     pub nodes: Vec<DAGNode>,

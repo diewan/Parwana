@@ -25,6 +25,7 @@ csv-hash = { path = "../../csv-hash" }
 csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
 csv-codec = { path = "../../csv-codec" }
+csv-wire = { path = "../../csv-wire" }
 csv-store = { path = "../../csv-store", optional = true }
 solana-sdk = "3.0"
 solana-program = "3.0"

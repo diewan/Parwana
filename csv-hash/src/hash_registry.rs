@@ -3,7 +3,6 @@
 //! This module defines the hash domains and hash types used in the CSV protocol.
 //! Migrated from csv-core/src/hash.rs as part of Phase 1 restructuring.
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::str::FromStr;
@@ -12,7 +11,7 @@ use std::str::FromStr;
 ///
 /// This is the fundamental building block for commitments, sanad IDs,
 /// seal references, and all cryptographic operations in CSV.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {
@@ -322,7 +321,7 @@ impl HashDomain {
 }
 
 /// Typed hash wrapper for seal hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SealHash(pub Hash);
 
 impl SealHash {
@@ -347,7 +346,7 @@ impl SealHash {
 }
 
 /// Typed hash wrapper for commitment hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CommitmentHash(pub Hash);
 
 impl CommitmentHash {
@@ -365,7 +364,7 @@ impl CommitmentHash {
 }
 
 /// Typed hash wrapper for Sanad ID hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SanadIdHash(pub Hash);
 
 impl SanadIdHash {
@@ -383,7 +382,7 @@ impl SanadIdHash {
 }
 
 /// Typed hash wrapper for nullifier hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct NullifierHash(pub Hash);
 
 impl NullifierHash {
@@ -401,7 +400,7 @@ impl NullifierHash {
 }
 
 /// Typed hash wrapper for replay ID hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ReplayIdHash(pub Hash);
 
 impl ReplayIdHash {
@@ -419,7 +418,7 @@ impl ReplayIdHash {
 }
 
 /// Typed hash wrapper for verification hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerificationHash(pub Hash);
 
 impl VerificationHash {
@@ -437,7 +436,7 @@ impl VerificationHash {
 }
 
 /// Typed hash wrapper for Merkle tree hashes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MerkleHash(pub Hash);
 
 impl MerkleHash {

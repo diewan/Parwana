@@ -5,7 +5,7 @@
 
 use crate::collections::HashMap;
 use core::sync::atomic::{AtomicU64, Ordering};
-use csv_hash::canonical::canonical_hash;
+use csv_codec::canonical::canonical_hash;
 use spin::RwLock;
 use std::sync::Arc;
 
@@ -207,9 +207,12 @@ impl SequentialVerifier {
         let elapsed = now_secs().saturating_sub(start);
 
         // Create a canonical hash from the proof for identification
-        let proof_hash = canonical_hash("csv.verification.proof.v1", proof).unwrap_or_else(|err| {
-            Hash::sha256(format!("performance-proof-hash-error:{err}").as_bytes())
+        let proof_hash_bytes = canonical_hash("csv.verification.proof.v1", proof).unwrap_or_else(|err| {
+            Hash::sha256(format!("performance-proof-hash-error:{err}").as_bytes()).as_bytes().to_vec()
         });
+        let mut hash_array = [0u8; 32];
+        hash_array.copy_from_slice(&proof_hash_bytes[..32]);
+        let proof_hash = Hash::new(hash_array);
 
         VerificationResult {
             proof_hash,

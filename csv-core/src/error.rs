@@ -1,7 +1,7 @@
 //! Error types for CSV adapters
 
 use crate::mcp::{FixAction, HasErrorSuggestion, error_codes};
-use csv_hash::canonical::CanonicalError;
+use csv_codec::error::CodecError;
 use thiserror::Error;
 
 /// Result type alias for adapter operations
@@ -365,12 +365,9 @@ impl HasErrorSuggestion for ProtocolError {
     }
 }
 
-impl From<CanonicalError> for ProtocolError {
-    fn from(err: CanonicalError) -> Self {
-        match err {
-            CanonicalError::SerializationError(msg) => ProtocolError::SerializationError(msg),
-            CanonicalError::DeserializationError(msg) => ProtocolError::SerializationError(msg),
-        }
+impl From<CodecError> for ProtocolError {
+    fn from(err: CodecError) -> Self {
+        ProtocolError::SerializationError(err.to_string())
     }
 }
 

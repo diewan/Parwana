@@ -15,7 +15,6 @@
 #![allow(dead_code)]
 #![allow(clippy::empty_line_after_doc_comments)]
 
-pub mod canonical;
 pub mod chain_id;
 pub mod commit_mux;
 pub mod commitment;
@@ -32,13 +31,8 @@ pub mod sanad;
 pub mod seal;
 pub mod tagged_hash;
 
-// Re-exports
-pub use canonical::cbor_tags;
-pub use canonical::{
-    CBOR_TAG_RANGE_END, CBOR_TAG_RANGE_START, CanonicalError, canonical_hash, from_canonical_cbor,
-    from_canonical_cbor_full, from_canonical_cbor_with_checksum, to_canonical_cbor,
-    to_canonical_cbor_with_checksum, to_canonical_cbor_with_tag,
-};
+// Re-export canonical serialization from csv-codec
+pub use csv_codec::canonical;
 pub use chain_id::ChainId;
 pub use commit_mux::{CommitMux, MerkleBranchNode, MuxLeaf, MuxProof, ProtocolId};
 pub use commitment::{COMMITMENT_VERSION, Commitment};

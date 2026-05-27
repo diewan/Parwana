@@ -25,7 +25,7 @@ pub mod versioning;
 
 // Re-exports
 pub use canonical::{
-    CBOR_TAG_RANGE_END, CBOR_TAG_RANGE_START, cbor_tags, from_canonical_cbor,
+    canonical_hash, CBOR_TAG_RANGE_END, CBOR_TAG_RANGE_START, cbor_tags, from_canonical_cbor,
     from_canonical_cbor_full, from_canonical_cbor_with_checksum, to_canonical_cbor,
     to_canonical_cbor_with_checksum, to_canonical_cbor_with_tag,
 };

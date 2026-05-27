@@ -88,11 +88,5 @@ impl From<csv_codec::CodecError> for ProtocolError {
     }
 }
 
-impl From<csv_hash::canonical::CanonicalError> for ProtocolError {
-    fn from(err: csv_hash::canonical::CanonicalError) -> Self {
-        ProtocolError::CodecError(err.to_string())
-    }
-}
-
 /// Result type for protocol operations
 pub type Result<T> = std::result::Result<T, ProtocolError>;
