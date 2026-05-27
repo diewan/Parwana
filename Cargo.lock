@@ -3094,6 +3094,7 @@ dependencies = [
  "csv-protocol",
  "csv-storage",
  "csv-verifier",
+ "ed25519-dalek",
  "hex",
  "rocksdb",
  "serde",

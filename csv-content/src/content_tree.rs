@@ -104,7 +104,10 @@ impl ContentTree {
         let leaf_hashes: Vec<Hash> = leaves.iter().map(|data| Self::hash_leaf(data)).collect();
 
         // Build canonical Merkle tree
-        let canonical = CanonicalMerkleTree::from_leaves(leaf_hashes.clone()).unwrap();
+        let canonical = match CanonicalMerkleTree::from_leaves(leaf_hashes.clone()) {
+            Some(canonical) => canonical,
+            None => return Self::empty(),
+        };
 
         Self {
             root_hash: canonical.root,
@@ -128,14 +131,7 @@ impl ContentTree {
 
     /// Hash a leaf value with domain separation.
     pub fn hash_leaf(data: &[u8]) -> Hash {
-        use csv_hash::HashDomain;
-        use csv_hash::tagged_hash::tagged_hash;
-
-        let mut combined = Vec::with_capacity(32 + data.len());
-        combined.extend_from_slice(&HashDomain::MerkleLeaf.as_bytes()[..]);
-        combined.extend_from_slice(data);
-
-        csv_hash::Hash::sha256(&combined)
+        CanonicalMerkleTree::hash_leaf(data)
     }
 
     /// Generate a Merkle proof for a leaf at the given index.
@@ -358,8 +354,6 @@ pub struct DisclosureProof {
     pub subtree_root: Hash,
     /// Proof that the subtree root is included in the content tree root.
     pub inclusion_proof: ContentProof,
-    /// Claims about the subtree content.
-    pub claims: Vec<ContentClaim>,
 }
 
 impl DisclosureProof {
@@ -371,31 +365,15 @@ impl DisclosureProof {
     /// # Returns
     /// True if the proof is valid
     pub fn verify(&self, content_root: Hash) -> bool {
+        if self.inclusion_proof.root_hash != content_root {
+            return false;
+        }
         // Verify the subtree root is included in the content tree
         if !self.inclusion_proof.verify(self.subtree_root) {
             return false;
         }
 
-        // Verify all claims
-        self.claims.iter().all(|claim| claim.verify())
-    }
-}
-
-/// A claim about content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContentClaim {
-    /// The field being claimed.
-    pub field: String,
-    /// The value of the field (may be hashed for privacy).
-    pub value_hash: Hash,
-    /// Whether this claim is verified.
-    pub verified: bool,
-}
-
-impl ContentClaim {
-    /// Verify this claim.
-    pub fn verify(&self) -> bool {
-        self.verified
+        true
     }
 }
 
@@ -437,6 +415,7 @@ pub struct EncryptedSubtreeProof {
 impl EncryptedSubtreeProof {
     /// Verify this encrypted subtree proof.
     pub fn verify(&self, content_root: Hash) -> bool {
-        self.inclusion_proof.verify(self.encrypted_root)
+        self.inclusion_proof.root_hash == content_root
+            && self.inclusion_proof.verify(self.encrypted_root)
     }
 }

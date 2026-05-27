@@ -1,6 +1,5 @@
 //! Tests for csv-content crate
 
-use csv_content::content_tree::ContentClaim;
 use csv_content::{
     AttachmentBudget, AttachmentRef, Claim, ClaimPredicate,
     ContentDisclosureProof as DisclosureProof, ContentRights, ContentTree, MediaType, Participant,
@@ -220,16 +219,9 @@ fn test_disclosure_proof_verify() {
     let tree = ContentTree::from_leaves(leaves);
     let proof = tree.proof(3).unwrap();
 
-    let claim = ContentClaim {
-        field: "name".to_string(),
-        value_hash: Hash([1u8; 32]),
-        verified: true,
-    };
-
     let disclosure = DisclosureProof {
         subtree_root: proof.leaf_hash,
         inclusion_proof: proof,
-        claims: vec![claim],
     };
 
     assert!(disclosure.verify(tree.root_hash));
@@ -239,22 +231,27 @@ fn test_disclosure_proof_verify() {
 fn test_disclosure_proof_verify_invalid() {
     let leaves = vec![b"leaf1".to_vec(), b"leaf2".to_vec()];
     let tree = ContentTree::from_leaves(leaves);
-    let proof = tree.proof(0).unwrap();
-
-    let claim = ContentClaim {
-        field: "name".to_string(),
-        value_hash: Hash([1u8; 32]),
-        verified: false, // Unverified claim
-    };
+    let mut proof = tree.proof(0).unwrap();
+    proof.root_hash = Hash([1u8; 32]);
 
     let disclosure = DisclosureProof {
         subtree_root: proof.leaf_hash,
         inclusion_proof: proof,
-        claims: vec![claim],
     };
 
-    // Should fail because claim is not verified
     assert!(!disclosure.verify(tree.root_hash));
+}
+
+#[test]
+fn test_disclosure_rejects_mismatched_content_root() {
+    let tree = ContentTree::from_leaves(vec![b"leaf1".to_vec(), b"leaf2".to_vec()]);
+    let proof = tree.proof(0).unwrap();
+    let disclosure = DisclosureProof {
+        subtree_root: proof.leaf_hash,
+        inclusion_proof: proof,
+    };
+
+    assert!(!disclosure.verify(Hash([0xEE; 32])));
 }
 
 // ============================================================================

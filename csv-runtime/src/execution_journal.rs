@@ -26,9 +26,10 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use csv_protocol::transfer_state::TransferStage;
+use serde::{Deserialize, Serialize};
 
 /// Outcome of a transfer phase execution
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PhaseOutcome {
     /// Phase was entered but not yet completed
     Entered,
@@ -39,7 +40,7 @@ pub enum PhaseOutcome {
 }
 
 /// A single entry in the execution journal
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransferPhaseEntry {
     /// Unique transfer identifier
     pub transfer_id: String,
@@ -82,8 +83,8 @@ impl core::fmt::Display for JournalError {
 
 impl std::error::Error for JournalError {}
 
-/// In-memory implementation of the execution journal for testing and
-/// non-persistent deployments.
+/// In-memory implementation of the execution journal for tests and ephemeral
+/// processes that do not execute recoverable mutations.
 pub struct InMemoryJournal {
     entries: std::sync::Mutex<Vec<TransferPhaseEntry>>,
     max_entries: usize,
@@ -105,11 +106,8 @@ impl InMemoryJournal {
             .lock()
             .map_err(|e| JournalError::Io(e.to_string()))?;
 
-        // Enforce capacity limit
         if guard.len() >= self.max_entries {
-            // Remove oldest entries to make room
-            let keep = self.max_entries / 2;
-            guard.drain(..keep);
+            return Err(JournalError::CapacityExceeded);
         }
 
         guard.push(entry);
@@ -184,6 +182,101 @@ impl ExecutionJournal for InMemoryJournal {
 
     fn latest_entry(&self, transfer_id: &str) -> Result<Option<TransferPhaseEntry>, JournalError> {
         Ok(self.latest_entry_locked(transfer_id))
+    }
+}
+
+/// RocksDB-backed append-only execution journal for production recovery.
+#[cfg(feature = "persistent")]
+pub struct RocksDbExecutionJournal {
+    db: rocksdb::DB,
+    next_sequence: std::sync::Mutex<u64>,
+}
+
+#[cfg(feature = "persistent")]
+impl RocksDbExecutionJournal {
+    const ENTRY_PREFIX: &'static [u8] = b"phase/";
+
+    /// Open or create a durable execution journal at `path`.
+    pub fn open(path: &str) -> Result<Self, JournalError> {
+        let mut options = rocksdb::Options::default();
+        options.create_if_missing(true);
+        let db = rocksdb::DB::open(&options, path).map_err(|e| JournalError::Io(e.to_string()))?;
+        let next_sequence = db
+            .prefix_iterator(Self::ENTRY_PREFIX)
+            .try_fold(0_u64, |count, item| {
+                item.map(|_| count + 1)
+                    .map_err(|e| JournalError::Io(e.to_string()))
+            })?;
+        Ok(Self {
+            db,
+            next_sequence: std::sync::Mutex::new(next_sequence),
+        })
+    }
+
+    fn entry_key(sequence: u64) -> Vec<u8> {
+        format!("phase/{sequence:020}").into_bytes()
+    }
+
+    fn entries(&self) -> Result<Vec<TransferPhaseEntry>, JournalError> {
+        self.db
+            .prefix_iterator(Self::ENTRY_PREFIX)
+            .map(|item| {
+                let (_, bytes) = item.map_err(|e| JournalError::Io(e.to_string()))?;
+                csv_codec::from_canonical_cbor(bytes.as_ref())
+                    .map_err(|e| JournalError::Serialization(e.to_string()))
+            })
+            .collect()
+    }
+
+    fn latest_entry_from(
+        entries: &[TransferPhaseEntry],
+        transfer_id: &str,
+    ) -> Option<TransferPhaseEntry> {
+        entries
+            .iter()
+            .rev()
+            .find(|entry| entry.transfer_id == transfer_id)
+            .cloned()
+    }
+}
+
+#[cfg(feature = "persistent")]
+impl ExecutionJournal for RocksDbExecutionJournal {
+    fn record(&self, entry: TransferPhaseEntry) -> Result<(), JournalError> {
+        let bytes = csv_codec::to_canonical_cbor(&entry)
+            .map_err(|e| JournalError::Serialization(e.to_string()))?;
+        let mut sequence = self
+            .next_sequence
+            .lock()
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        let key = Self::entry_key(*sequence);
+        self.db
+            .put(key, bytes)
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        *sequence += 1;
+        Ok(())
+    }
+
+    fn incomplete_transfers(&self) -> Result<Vec<TransferPhaseEntry>, JournalError> {
+        let entries = self.entries()?;
+        let mut latest = HashMap::new();
+        for entry in entries {
+            latest.insert(entry.transfer_id.clone(), entry);
+        }
+        Ok(latest
+            .into_values()
+            .filter(|entry| !entry.phase.is_terminal())
+            .collect())
+    }
+
+    fn latest_phase(&self, transfer_id: &str) -> Result<Option<TransferStage>, JournalError> {
+        Ok(self
+            .latest_entry(transfer_id)?
+            .map(|entry| entry.phase))
+    }
+
+    fn latest_entry(&self, transfer_id: &str) -> Result<Option<TransferPhaseEntry>, JournalError> {
+        Ok(Self::latest_entry_from(&self.entries()?, transfer_id))
     }
 }
 
@@ -272,8 +365,7 @@ mod tests {
         let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([1u8; 32]));
         let proof_hash = [0u8; 32];
 
-        // Fill beyond capacity
-        for i in 0..10 {
+        for i in 0..5 {
             journal
                 .record(TransferPhaseEntry {
                     transfer_id: format!("transfer-{}", i),
@@ -288,8 +380,47 @@ mod tests {
                 .unwrap();
         }
 
-        // Journal should have trimmed old entries
+        let result = journal.record(TransferPhaseEntry {
+            transfer_id: "transfer-over-capacity".to_string(),
+            replay_id,
+            proof_hash,
+            proof_payload: None,
+            phase: TransferStage::Initialized,
+            ts: SystemTime::now(),
+            outcome: PhaseOutcome::Entered,
+            attempt: 1,
+        });
+        assert_eq!(result, Err(JournalError::CapacityExceeded));
+
         let entries = journal.entries.lock().unwrap();
-        assert!(entries.len() <= 10);
+        assert_eq!(entries.len(), 5);
+    }
+
+    #[cfg(feature = "persistent")]
+    #[test]
+    fn durable_journal_recovers_proof_payload_after_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([4u8; 32]));
+        {
+            let journal = RocksDbExecutionJournal::open(path).unwrap();
+            journal
+                .record(TransferPhaseEntry {
+                    transfer_id: "recover-me".to_string(),
+                    replay_id,
+                    proof_hash: [8u8; 32],
+                    proof_payload: Some(vec![1, 2, 3]),
+                    phase: TransferStage::ProofValidated,
+                    ts: SystemTime::now(),
+                    outcome: PhaseOutcome::Completed,
+                    attempt: 1,
+                })
+                .unwrap();
+        }
+
+        let reopened = RocksDbExecutionJournal::open(path).unwrap();
+        let entry = reopened.latest_entry("recover-me").unwrap().unwrap();
+        assert_eq!(entry.phase, TransferStage::ProofValidated);
+        assert_eq!(entry.proof_payload, Some(vec![1, 2, 3]));
     }
 }

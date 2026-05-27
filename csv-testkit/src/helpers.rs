@@ -28,6 +28,7 @@ impl TestContext {
             current_block_height: Some(100),
             seal_registry: None,
             chain_data: None,
+            native_proof_validated: false,
         }
     }
 }

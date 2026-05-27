@@ -1,4 +1,4 @@
-//! Proof provenance stub module
+//! Provenance metadata for chain-sourced proof material.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,4 @@ impl ProofProvenance {
         }
     }
 
-    /// Check if verification is complete
-    pub fn is_verification_complete(&self) -> bool {
-        self.block_height > 0
-    }
 }

@@ -302,25 +302,6 @@ impl ChainRuntime {
             })
     }
 
-    /// Lock a sanad for cross-chain transfer.
-    ///
-    /// Delegates to ChainSanadOps::lock_sanad.
-    pub async fn lock_sanad(
-        &self,
-        chain: ChainId,
-        sanad_id: &SanadId,
-        destination_chain: &str,
-        owner_key_id: &str,
-    ) -> Result<SanadOperationResult, CsvError> {
-        let adapter = self.get_adapter(chain.clone()).await?;
-
-        let result = adapter.lock_sanad(sanad_id, destination_chain, owner_key_id).await;
-        result.map_err(|e| CsvError::ProtocolError {
-            chain: chain.clone(),
-            message: format!("Sanad lock failed: {}", e),
-            })
-    }
-
     /// Create a new seal on the specified chain.
     ///
     /// This is the primary runtime function for seal creation. It delegates to the
@@ -371,26 +352,6 @@ impl ChainRuntime {
             chain: chain.clone(),
             message: format!("Seal publishing failed: {}", e),
         })
-    }
-
-    /// Mint a sanad on the destination chain.
-    ///
-    /// Delegates to ChainSanadOps::mint_sanad.
-    pub async fn mint_sanad(
-        &self,
-        chain: ChainId,
-        source_chain: &str,
-        source_sanad_id: &SanadId,
-        lock_proof: &csv_protocol::proof_types::InclusionProof,
-        new_owner: &str,
-    ) -> Result<SanadOperationResult, CsvError> {
-        let adapter = self.get_adapter(chain.clone()).await?;
-
-        let result = adapter.mint_sanad(source_chain, source_sanad_id, lock_proof, new_owner).await;
-        result.map_err(|e| CsvError::ProtocolError {
-            chain: chain.clone(),
-            message: format!("Sanad mint failed: {}", e),
-            })
     }
 
     /// Confirm a transaction and check its finality status.
@@ -576,11 +537,14 @@ impl ChainRuntime {
         // Get the transaction info to build finality proof
         // For proof generation, we use the sanad_id as the lookup key
         let tx_hash_lookup = hex::encode(sanad_id.as_bytes());
-        let tx_info = adapter.get_transaction(tx_hash_lookup.as_str()).await;
-        let tx_hash = match &tx_info {
-            Ok(info) => info.hash.clone(),
-            Err(_) => hex::encode(sanad_id.as_bytes()), // Fallback to sanad_id as hex
-        };
+        let tx_hash = adapter
+            .get_transaction(tx_hash_lookup.as_str())
+            .await
+            .map_err(|e| CsvError::ProtocolError {
+                chain: chain.clone(),
+                message: format!("Failed to load proof anchor transaction: {e}"),
+            })?
+            .hash;
 
         // Build finality proof using the transaction hash
         let finality_proof =
@@ -658,6 +622,11 @@ impl ChainRuntime {
         sanad_id: &SanadId,
     ) -> Result<bool, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
+        if proof_bundle.seal_ref.id.as_slice() != sanad_id.as_bytes() {
+            return Err(CsvError::ProofVerificationFailed(
+                "proof seal is not bound to the expected sanad".to_string(),
+            ));
+        }
 
         let signature_scheme = adapter.signature_scheme();
         let commitment = csv_hash::Hash::new(*sanad_id.as_bytes());
@@ -703,12 +672,8 @@ impl ChainRuntime {
                 }
                 seal_check_data.is_consumed
             } else {
-                // Unknown seal - assume not consumed
-                log::debug!(
-                    "Seal {} not in pre-fetched data - assuming not consumed",
-                    hex::encode(seal_id)
-                );
-                false
+                log::warn!("Rejecting proof for an unknown seal {}", hex::encode(seal_id));
+                true
             }
         };
 
@@ -720,7 +685,7 @@ impl ChainRuntime {
                 sanad_id,
                 chain
             );
-            Ok(true)
+            Ok(result.is_valid)
         } else {
             log::warn!(
                 "Proof verification failed for sanad {:?} on {:?}: {:?}",
@@ -741,7 +706,7 @@ impl ChainRuntime {
     pub async fn broadcast_proof(
         &self,
         chain: ChainId,
-        proof: &csv_protocol::proof_types::InclusionProof,
+        proof_bundle: &ProofBundle,
     ) -> Result<(), CsvError> {
         use csv_p2p::{NostrTransport, ProofTransport};
 
@@ -750,28 +715,8 @@ impl ChainRuntime {
             CsvError::P2PError(format!("Failed to initialize Nostr transport: {}", e))
         })?;
 
-        // Build a minimal ProofBundle from the InclusionProof for broadcast
-        let proof_bundle = csv_protocol::proof_types::ProofBundle {
-            version: 1,
-            transition_dag: csv_hash::dag::DAGSegment::new(vec![], proof.block_hash),
-            signatures: vec![],
-            signature_scheme: csv_protocol::signature::SignatureScheme::Secp256k1,
-            seal_ref: csv_hash::seal::SealPoint::new(vec![], None)
-                .map_err(|e| CsvError::P2PError(format!("Failed to create seal ref: {}", e)))?,
-            anchor_ref: csv_hash::seal::CommitAnchor::new(
-                vec![],
-                proof.position,
-                chain.to_string().into_bytes(),
-            )
-            .map_err(|e| CsvError::P2PError(format!("Failed to create anchor ref: {}", e)))?,
-            inclusion_proof: proof.clone(),
-            finality_proof: csv_protocol::proof_types::FinalityProof::new(vec![], 1, true).map_err(|e| {
-                CsvError::P2PError(format!("Failed to create finality proof: {}", e))
-            })?,
-        };
-
         transport
-            .broadcast_proof(&proof_bundle)
+            .broadcast_proof(proof_bundle)
             .await
             .map_err(|e| {
                 CsvError::P2PError(format!("Failed to broadcast proof to Nostr relays: {}", e))

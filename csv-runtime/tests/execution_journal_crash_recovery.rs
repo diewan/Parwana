@@ -261,7 +261,7 @@ async fn test_journal_capacity_enforcement() {
             .unwrap();
     }
 
-    // Try to add 11th entry - should fail or evict
+    // Try to add 11th entry - audit history must never be evicted.
     let result = journal.record(TransferPhaseEntry {
         transfer_id: "transfer-10".to_string(),
         replay_id: replay_id(10),
@@ -273,7 +273,5 @@ async fn test_journal_capacity_enforcement() {
         attempt: 1,
     });
 
-    // The InMemoryJournal should handle capacity - either fail or evict
-    // For now, we just verify it doesn't panic
-    let _ = result;
+    assert_eq!(result, Err(csv_runtime::execution_journal::JournalError::CapacityExceeded));
 }

@@ -365,6 +365,9 @@ pub struct VerificationContext {
     pub seal_registry: Option<Box<dyn Fn(&[u8]) -> bool + Send + Sync>>,
     /// Chain-specific verification data (inclusion proofs, headers, etc.).
     pub chain_data: Option<ChainVerificationData>,
+    /// Whether the chain adapter has cryptographically validated inclusion,
+    /// finality, and the proof's binding to the transfer being authorized.
+    pub native_proof_validated: bool,
 }
 
 /// Chain-specific verification data.
@@ -438,12 +441,13 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         self.validate_dag_structure(bundle)?;
 
         // Step 2: Signature Verification
-        self.verify_signatures(bundle, context)?;
+        verify_bundle_signatures(bundle, context.signature_scheme)?;
 
         // Step 3: Seal Replay Check
         self.check_seal_replay(bundle, context)?;
 
         // Step 4: Inclusion Verification
+        validate_inclusion_proof(&bundle.inclusion_proof)?;
         self.verify_inclusion_proof(&bundle.anchor_ref, context)?;
 
         // Step 5: Finality Check
@@ -455,16 +459,20 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         // Step 7: Validate anchor reference integrity
         validate_anchor_reference(bundle)?;
 
+        if !context.native_proof_validated {
+            return Err(ProtocolError::InclusionProofFailed(
+                "chain-native proof validation evidence is required".to_string(),
+            ));
+        }
+
         Ok(VerificationResult::fully_verified())
     }
 
     fn verify_inclusion_proof(
         &self,
         anchor_ref: &csv_hash::seal::CommitAnchor,
-        context: &VerificationContext,
+        _context: &VerificationContext,
     ) -> Result<VerificationResult> {
-        // Chain-specific inclusion verification would be delegated to chain adapters
-        // For now, we perform basic validation
         if anchor_ref.anchor_id.is_empty() {
             return Err(ProtocolError::InvalidInput(
                 "anchor_id is empty".to_string(),
@@ -479,8 +487,6 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         block_height: u64,
         context: &VerificationContext,
     ) -> Result<VerificationResult> {
-        // Chain-specific finality verification would be delegated to chain adapters
-        // For now, we perform basic validation
         if let Some(current_height) = context.current_block_height {
             let confirmations = current_height.saturating_sub(block_height);
             if confirmations < context.required_confirmations {
@@ -514,27 +520,6 @@ impl CanonicalVerifierImpl {
         // Basic structure validation
         if bundle.transition_dag.nodes.is_empty() {
             return Err(ProtocolError::InvalidInput("DAG has no nodes".to_string()));
-        }
-
-        Ok(())
-    }
-
-    /// Verify all signatures in the proof bundle.
-    fn verify_signatures(&self, bundle: &ProofBundle, context: &VerificationContext) -> Result<()> {
-        if bundle.signatures.is_empty() {
-            return Err(ProtocolError::InvalidInput(
-                "No signatures present".to_string(),
-            ));
-        }
-
-        // Signature verification would use the signature scheme from context
-        // For now, we perform basic validation
-        for sig in &bundle.signatures {
-            if sig.is_empty() {
-                return Err(ProtocolError::SignatureVerificationFailed(
-                    "Empty signature".to_string(),
-                ));
-            }
         }
 
         Ok(())
@@ -890,13 +875,18 @@ fn validate_anchor_reference(bundle: &ProofBundle) -> Result<()> {
         ));
     }
 
-    // Verify anchor metadata contains proof reference data
-    // The metadata should either match the inclusion proof or contain a valid reference
-    let metadata_valid = !bundle.anchor_ref.metadata.is_empty()
-        || bundle.anchor_ref.metadata == bundle.inclusion_proof.proof_bytes;
-    if !metadata_valid {
-        // In production, you might want stricter matching
-        // For now, we allow flexibility for different proof formats
+    if bundle.anchor_ref.block_height != bundle.inclusion_proof.block_number {
+        return Err(ProtocolError::InclusionProofFailed(
+            "anchor height does not match inclusion proof block".to_string(),
+        ));
+    }
+
+    if bundle.anchor_ref.metadata.is_empty()
+        || bundle.anchor_ref.metadata != bundle.inclusion_proof.proof_bytes
+    {
+        return Err(ProtocolError::InclusionProofFailed(
+            "anchor metadata does not bind the inclusion proof".to_string(),
+        ));
     }
 
     Ok(())
@@ -1032,9 +1022,9 @@ mod tests {
             vec![signature],
             SealPoint::new(seal_id.clone(), Some(42))
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?,
-            CommitAnchor::new(seal_id, 100, vec![])
+            CommitAnchor::new(seal_id, 100, vec![0xCD; 32])
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?,
-            InclusionProof::new(vec![0xCD; 32], Hash::new([2u8; 32]), 0, 0)
+            InclusionProof::new(vec![0xCD; 32], Hash::new([2u8; 32]), 100, 0)
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?,
             {
                 let mut fp = FinalityProof::new(vec![0xAB; 16], 6, false)
@@ -1062,7 +1052,7 @@ mod tests {
     #[test]
     fn test_verify_proof_accepts_distinct_seal_and_anchor_ids() {
         let mut bundle = test_bundle_with_signatures().unwrap();
-        bundle.anchor_ref = CommitAnchor::new(vec![9u8; 32], 100, vec![0xAA, 0xBB])
+        bundle.anchor_ref = CommitAnchor::new(vec![9u8; 32], 100, vec![0xCD; 32])
             .map_err(|e| ProtocolError::Generic(e.to_string()))
             .unwrap();
 

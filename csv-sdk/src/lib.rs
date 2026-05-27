@@ -32,7 +32,6 @@
 //!     // Access managers
 //!     let sanads = client.sanads();
 //!     let transfers = client.transfers();
-//!     let proofs = client.proofs();
 //!
 //!     Ok(())
 //! }
@@ -74,7 +73,6 @@ pub mod events;
 pub mod local_store;
 pub mod mcp;
 pub mod prelude;
-pub mod proofs;
 pub mod runtime;
 pub mod sanads;
 pub mod transfers;
@@ -127,20 +125,5 @@ pub use runtime::{AdapterBuilder, ChainRuntime, RuntimeConfig, RuntimeManager};
 ///
 /// Equivalent to `Result<T, CsvError>`.
 pub type Result<T> = core::result::Result<T, CsvError>;
-
-// Re-export chain adapter crates for use by csv-wallet and csv-cli
-// This allows apps to access chain-specific types through csv-sdk,
-// respecting the Engineering Plan rule that apps must not import
-// csv-bitcoin/csv-ethereum/etc. directly.
-#[cfg(feature = "aptos")]
-pub use csv_aptos;
-#[cfg(feature = "bitcoin")]
-pub use csv_bitcoin;
-#[cfg(feature = "ethereum")]
-pub use csv_ethereum;
-#[cfg(feature = "solana")]
-pub use csv_solana;
-#[cfg(feature = "sui")]
-pub use csv_sui;
 
 // Note: TransferStatus is already re-exported from protocol_version module above

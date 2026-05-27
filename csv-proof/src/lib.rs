@@ -27,18 +27,9 @@ pub mod zk_proof;
 pub mod commitment_chain;
 pub mod commitments_ext;
 pub mod proof_material;
+pub mod provenance;
 
 // proof_types and proof modules removed - types now live in csv-protocol
-
-// Stub modules for protocol types to break cyclic dependency
-pub mod certification;
-pub mod chain_config;
-pub mod cross_chain;
-pub mod dag;
-pub mod events;
-pub mod provenance;
-pub mod replay_registry;
-pub mod signature;
 
 // Re-exports from csv-protocol (canonical location)
 pub use csv_protocol::proof_types::{
@@ -47,12 +38,16 @@ pub use csv_protocol::proof_types::{
     ProofBundle, ProofCategory, ProofPhase, ReplayId, ReplayProof, TransitionProof, ZKProof,
 };
 
-// Re-exports from csv-proof (types not yet migrated)
-pub use chain_config::{ChainCapabilities, EthereumFinalityStage, SolanaCommitmentGrade};
-pub use cross_chain::CrossChainTransferProof;
-pub use dag::DAGSegment;
+// Compatibility re-exports from their canonical crates.
+/// Backwards-compatible DAG import path backed by `csv-hash`.
+pub mod dag {
+    pub use csv_hash::dag::{DAGNode, DAGSegment};
+}
+pub use csv_hash::dag::DAGSegment;
+pub use csv_protocol::cross_chain::CrossChainTransferProof;
+pub use csv_protocol::events::{CsvEvent, EventIndexerRegistry};
+pub use csv_protocol::finality::{ChainCapabilities, EthereumFinalityStage, SolanaCommitmentGrade};
+pub use csv_protocol::replay::{ReplayKey, ReplayRegistryBackend};
+pub use csv_protocol::signature::SignatureScheme;
 pub use error::{ProofError, Result};
-pub use events::{CsvEvent, EventIndexerRegistry};
 pub use proof_dags::{ProofDag, ProofId, ProofNode};
-pub use replay_registry::{ReplayKey, ReplayRegistryBackend};
-pub use signature::SignatureScheme;

@@ -49,6 +49,19 @@ fn authority_crates_do_not_depend_on_chain_adapters() {
 }
 
 #[test]
+fn sdk_cannot_bypass_runtime_transfer_authority() {
+    let findings = scan_files(
+        &workspace_root().join("csv-sdk/src"),
+        &[".mint_sanad(", ".lock_sanad(", "mint_sanad_on_chain"],
+    );
+    assert!(
+        findings.is_empty(),
+        "csv-sdk must delegate cross-chain mutation authority to csv-runtime:\n{}",
+        findings.join("\n")
+    );
+}
+
+#[test]
 fn retired_csv_core_cannot_reenter_workspace_dependencies() {
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(workspace_root().join("Cargo.toml"))
@@ -111,6 +124,7 @@ fn recovery_paths_have_assertive_coverage() {
         "proof_validated_recovery_uses_persisted_payload_and_completes",
         "proof_validated_recovery_rejects_missing_payload",
         "proof_validated_recovery_rejects_malformed_payload",
+        "proof_validated_recovery_rejects_tampered_payload_digest",
     ] {
         assert!(
             runtime_tests.contains(required_test),

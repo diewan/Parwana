@@ -102,8 +102,18 @@ pub trait ChainProofPort: Send + Sync {
     async fn build_inclusion_proof(
         &self,
         chain_id: &str,
+        transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError>;
+
+    /// Cryptographically validate source-chain proof material and bind it to
+    /// the transfer whose mint is being authorized.
+    async fn validate_source_proof(
+        &self,
+        chain_id: &str,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
+    ) -> Result<(), AdapterError>;
 }
 
 /// Non-mutating read port.
@@ -143,8 +153,16 @@ pub trait AdapterRegistry: Send + Sync {
     async fn build_inclusion_proof(
         &self,
         chain_id: &str,
+        transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError>;
+
+    async fn validate_source_proof(
+        &self,
+        chain_id: &str,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
+    ) -> Result<(), AdapterError>;
 
     async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError>;
 
@@ -253,10 +271,22 @@ impl ChainProofPort for AdapterRegistryImpl {
     async fn build_inclusion_proof(
         &self,
         chain_id: &str,
+        transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
         self.adapter(chain_id)?
-            .build_inclusion_proof(lock_result)
+            .build_inclusion_proof(transfer, lock_result)
+            .await
+    }
+
+    async fn validate_source_proof(
+        &self,
+        chain_id: &str,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
+    ) -> Result<(), AdapterError> {
+        self.adapter(chain_id)?
+            .validate_source_proof(transfer, proof_bundle)
             .await
     }
 }
@@ -310,9 +340,19 @@ impl AdapterRegistry for AdapterRegistryImpl {
     async fn build_inclusion_proof(
         &self,
         chain_id: &str,
+        transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        ChainProofPort::build_inclusion_proof(self, chain_id, lock_result).await
+        ChainProofPort::build_inclusion_proof(self, chain_id, transfer, lock_result).await
+    }
+
+    async fn validate_source_proof(
+        &self,
+        chain_id: &str,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
+    ) -> Result<(), AdapterError> {
+        ChainProofPort::validate_source_proof(self, chain_id, transfer, proof_bundle).await
     }
 
     async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError> {
@@ -345,8 +385,14 @@ pub trait ChainAdapter: Send + Sync {
     ) -> Result<MintResult, AdapterError>;
     async fn build_inclusion_proof(
         &self,
+        transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError>;
+    async fn validate_source_proof(
+        &self,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
+    ) -> Result<(), AdapterError>;
     async fn check_seal_registry(&self, seal_id: &[u8])
     -> Result<SealRegistryStatus, AdapterError>;
     async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
@@ -408,6 +454,7 @@ mod tests {
 
         async fn build_inclusion_proof(
             &self,
+            transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
         ) -> Result<ProofBundle, AdapterError> {
             use csv_hash::dag::{DAGNode, DAGSegment};
@@ -424,12 +471,25 @@ mod tests {
             Ok(ProofBundle::new(
                 DAGSegment::new(vec![node], csv_hash::Hash::new([0u8; 32])),
                 vec![vec![0u8; 64]],
-                SealPoint::new(vec![0u8; 32], Some(0)).unwrap(),
+                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0)).unwrap(),
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
                 csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             )
             .unwrap())
+        }
+
+        async fn validate_source_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            proof_bundle: &ProofBundle,
+        ) -> Result<(), AdapterError> {
+            if proof_bundle.seal_ref.id != transfer.sanad_id.as_bytes() {
+                return Err(AdapterError::Generic(
+                    "proof does not bind the transfer sanad".to_string(),
+                ));
+            }
+            Ok(())
         }
 
         async fn check_seal_registry(

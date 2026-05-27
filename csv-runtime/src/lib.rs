@@ -58,6 +58,8 @@ pub use event_store::{EventStore, EventStoreError, InMemoryEventStore};
 pub use execution_journal::{
     ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry,
 };
+#[cfg(feature = "persistent")]
+pub use execution_journal::RocksDbExecutionJournal;
 pub use failure_domain::{ClassifiedError, FailureDomain};
 pub use lease::{
     DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,
@@ -73,7 +75,7 @@ pub use runtime_mode::{
     CircuitBreaker, CircuitBreakerConfig as RuntimeCircuitBreakerConfig, CircuitBreakerState,
     HealthMonitor, HealthStatus, RuntimeMode,
 };
-pub use transfer_coordinator::TransferCoordinator;
+pub use transfer_coordinator::{RecoveryContextProvider, TransferCoordinator};
 
 // Coordinator lease re-exports
 pub use coordinator_lease::{

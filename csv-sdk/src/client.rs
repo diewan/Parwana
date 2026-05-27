@@ -1,7 +1,7 @@
 //! Unified CSV client with builder pattern.
 //!
 //! The [`CsvClient`] is the main entry point for all CSV operations.
-//! It provides access to managers for sanads, transfers, proofs, wallet,
+//! It provides access to managers for sanads, transfers, wallet,
 //! and event streaming.
 //!
 //! # Example
@@ -19,7 +19,6 @@
 //!     // Access managers
 //!     let sanads = client.sanads();
 //!     let transfers = client.transfers();
-//!     let proofs = client.proofs();
 //!
 //!     // Stream events
 //!     let events = client.watch();
@@ -41,7 +40,6 @@ use crate::error::CsvError;
 #[cfg(feature = "tokio")]
 use crate::events::EventStream;
 use crate::local_store::{InMemorySealStore, SanadRecord};
-use crate::proofs::ProofManager;
 use crate::runtime::ChainRuntime;
 use crate::sanads::SanadsManager;
 use crate::transfers::TransferManager;
@@ -211,11 +209,6 @@ impl CsvClient {
             Arc::new(self.clone_ref()),
             Arc::new(self.chain_runtime.clone()),
         )
-    }
-
-    /// Get a [`ProofManager`] for generating and verifying proofs.
-    pub fn proofs(&self) -> ProofManager {
-        ProofManager::new(Arc::new(self.clone_ref()))
     }
 
     /// Get a [`WalletManager`] for wallet operations.
@@ -449,7 +442,22 @@ impl CsvClient {
                     lock_contract_address: None,
                     mint_contract_address: None,
                 };
-                let csv_seal_address = [0u8; 20]; // Default, should be configured
+                let address = _config
+                    .chains
+                    .get("ethereum")
+                    .and_then(|chain| chain.contract_address.as_deref())
+                    .ok_or_else(|| CsvError::ConfigError(
+                        "Ethereum seal contract address must be configured".to_string(),
+                    ))?;
+                let address_bytes = hex::decode(address.trim_start_matches("0x"))
+                    .map_err(|e| CsvError::ConfigError(format!(
+                        "Invalid Ethereum seal contract address: {e}"
+                    )))?;
+                let csv_seal_address: [u8; 20] = address_bytes.try_into().map_err(|_| {
+                    CsvError::ConfigError(
+                        "Ethereum seal contract address must contain 20 bytes".to_string(),
+                    )
+                })?;
                 let rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, csv_seal_address)
                     .await
                     .map_err(|e| CsvError::ProtocolError {
@@ -486,10 +494,14 @@ impl CsvClient {
                 };
                 let mut sui_config = csv_sui::config::SuiConfig::new(sui_network);
                 sui_config.rpc_url = rpc_url.clone();
-                // Seal contract package ID is required but not available - using placeholder
                 sui_config.seal_contract.package_id = Some(
-                    "0x0000000000000000000000000000000000000000000000000000000000000000"
-                        .to_string(),
+                    _config
+                        .chains
+                        .get("sui")
+                        .and_then(|chain| chain.contract_address.clone())
+                        .ok_or_else(|| CsvError::ConfigError(
+                            "Sui seal package ID must be configured".to_string(),
+                        ))?,
                 );
                 let rpc = csv_sui::node::SuiNode::new(&rpc_url);
                 _builder
@@ -551,7 +563,13 @@ impl CsvClient {
                 let sol_config = csv_solana::config::SolanaConfig {
                     network: sol_network,
                     rpc_url: rpc_url.clone(),
-                    csv_program_id: "CsvProgram11111111111111111111111111111111111".to_string(),
+                    csv_program_id: _config
+                        .chains
+                        .get("solana")
+                        .and_then(|chain| chain.program_id.clone())
+                        .ok_or_else(|| CsvError::ConfigError(
+                            "Solana CSV program ID must be configured".to_string(),
+                        ))?,
                     keypair: None,
                     commitment: Some("confirmed".to_string()),
                     max_retries: 3,

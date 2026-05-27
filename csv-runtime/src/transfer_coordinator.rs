@@ -13,8 +13,12 @@ use crate::coordinator_lease::{CoordinatorId, CoordinatorLease};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
 use crate::event_envelope::{EventType, RuntimeEventEnvelope};
-use crate::event_store::{EventStore, InMemoryEventStore};
-use crate::execution_journal::{ExecutionJournal, InMemoryJournal};
+use crate::event_store::EventStore;
+#[cfg(test)]
+use crate::event_store::InMemoryEventStore;
+use crate::execution_journal::ExecutionJournal;
+#[cfg(test)]
+use crate::execution_journal::InMemoryJournal;
 use crate::recovery::{CheckpointManager, TransferStage};
 use csv_admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
 use csv_hash::chain_id::ChainId;
@@ -181,18 +185,20 @@ pub struct TransferCoordinator {
     execution_journal: Box<dyn ExecutionJournal>,
     /// Admission controller for bounded runtime work
     admission_controller: AdmissionController,
+    /// Current lease observed for each transfer in this coordinator process.
+    active_execution_leases:
+        std::sync::Mutex<std::collections::HashMap<csv_hash::SanadId, crate::lease::TransferLease>>,
 }
 
 impl TransferCoordinator {
-    /// Create a new transfer coordinator with a default verifier and in-memory event store.
-    pub fn new(replay_db: Box<dyn ReplayDatabase>, event_bus: EventBus) -> Self {
+    /// Create an ephemeral coordinator for local tests.
+    #[cfg(test)]
+    fn new(replay_db: Box<dyn ReplayDatabase>, event_bus: EventBus) -> Self {
         Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
     }
 
-    /// Create a new transfer coordinator with a custom event store.
-    ///
-    /// This is the primary constructor. All other constructors delegate to this.
-    pub fn with_event_store(
+    #[cfg(test)]
+    fn with_event_store(
         replay_db: Box<dyn ReplayDatabase>,
         event_bus: EventBus,
         event_store: Box<dyn EventStore>,
@@ -216,49 +222,42 @@ impl TransferCoordinator {
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal: Box::new(InMemoryJournal::new(10000)),
             admission_controller: AdmissionController::default(),
+            active_execution_leases: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    /// Create a new transfer coordinator with a custom verifier.
+    /// Create a transfer coordinator with explicit durable stores and verifier.
     ///
-    /// This allows injecting a verifier with custom configuration for specific
-    /// deployment requirements (e.g., different proof size limits).
-    pub fn with_verifier(
+    /// Mutation-capable production callers must supply an execution journal
+    /// whose records survive process restarts.
+    pub fn with_stores(
         replay_db: Box<dyn ReplayDatabase>,
         event_bus: EventBus,
-        _verifier: CanonicalVerifierImpl,
-    ) -> Self {
-        Self::with_event_store(replay_db, event_bus, Box::new(InMemoryEventStore::new()))
-    }
-
-    /// Create a new transfer coordinator with a custom execution journal.
-    ///
-    /// This allows injecting a persistent journal implementation for production
-    /// deployments (e.g., RocksDB, PostgreSQL).
-    pub fn with_execution_journal(
-        replay_db: Box<dyn ReplayDatabase>,
-        event_bus: EventBus,
+        event_store: Box<dyn EventStore>,
         execution_journal: Box<dyn ExecutionJournal>,
+        verifier: CanonicalVerifierImpl,
+        coordinator_lease: Box<dyn CoordinatorLease>,
     ) -> Self {
         let runtime_id = CoordinatorId(Uuid::new_v4().to_string());
         Self {
             replay_db,
             event_bus,
-            event_store: Box::new(InMemoryEventStore::new()),
+            event_store,
             circuit_breaker: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::runtime_mode::CircuitBreaker::new(),
             )),
             health_monitor: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::runtime_mode::HealthMonitor::new(),
             )),
-            coordinator_lease: None,
+            coordinator_lease: Some(coordinator_lease),
             runtime_id,
             checkpoint_manager: std::sync::Arc::new(
                 std::sync::Mutex::new(CheckpointManager::new()),
             ),
-            verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
+            verifier: std::sync::Arc::new(verifier),
             execution_journal,
             admission_controller: AdmissionController::default(),
+            active_execution_leases: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -325,6 +324,39 @@ impl TransferCoordinator {
         Ok(())
     }
 
+    fn accept_execution_lease(
+        &self,
+        lease: &crate::lease::TransferLease,
+    ) -> Result<(), TransferCoordinatorError> {
+        let now = std::time::SystemTime::now();
+        let mut active = self
+            .active_execution_leases
+            .lock()
+            .map_err(|e| TransferCoordinatorError::LeaseViolation(e.to_string()))?;
+        if let Some(current) = active.get(&lease.transfer_id) {
+            if lease.epoch < current.epoch {
+                return Err(TransferCoordinatorError::LeaseViolation(
+                    "Lease epoch is stale for this transfer".to_string(),
+                ));
+            }
+            if lease.epoch == current.epoch {
+                if lease.owner_runtime_id == current.owner_runtime_id {
+                    return Ok(());
+                }
+                return Err(TransferCoordinatorError::LeaseViolation(
+                    "Lease epoch is already held by another runtime".to_string(),
+                ));
+            }
+            if current.is_active(now) && current.owner_runtime_id != lease.owner_runtime_id {
+                return Err(TransferCoordinatorError::LeaseViolation(
+                    "Active transfer lease cannot be superseded by another runtime".to_string(),
+                ));
+            }
+        }
+        active.insert(lease.transfer_id.clone(), lease.clone());
+        Ok(())
+    }
+
     /// Get the current health status
     pub fn health_status(&self) -> crate::runtime_mode::HealthStatus {
         self.health_monitor
@@ -348,7 +380,7 @@ impl TransferCoordinator {
     /// 2. Source chain capabilities permit cross-chain source
     /// 3. Destination chain capabilities permit mint
     ///
-    /// This function is the ONLY place that may call `mint_sanad_on_chain`.
+    /// This function is the only authority path permitted to request a destination mint.
     pub async fn execute(
         &self,
         transfer: CrossChainTransfer,
@@ -367,6 +399,11 @@ impl TransferCoordinator {
                 runtime_ctx.lease.owner_runtime_id, runtime_ctx.runtime_instance
             )));
         }
+        if runtime_ctx.lease.transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
+            return Err(TransferCoordinatorError::LeaseViolation(
+                "Lease does not authorize the transfer sanad".to_string(),
+            ));
+        }
 
         // Validate epoch to detect stale leases.
         // A lease with epoch 0 is considered stale — it was acquired before
@@ -381,6 +418,7 @@ impl TransferCoordinator {
                 "Lease is expired".to_string(),
             ));
         }
+        self.accept_execution_lease(&runtime_ctx.lease)?;
 
         let _admission_permit = self
             .admission_controller
@@ -870,7 +908,7 @@ impl TransferCoordinator {
 
         // Build the proof bundle using the source chain adapter
         let proof_bundle = adapter_registry
-            .build_inclusion_proof(&transfer.source_chain, &lock_result)
+            .build_inclusion_proof(&transfer.source_chain, &transfer, &lock_result)
             .await
             .map_err(|e: crate::adapter_registry::AdapterError| {
                 TransferCoordinatorError::ProofBuildFailed(e.to_string())
@@ -915,7 +953,13 @@ impl TransferCoordinator {
                 seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
             })),
             chain_data: None,
+            native_proof_validated: true,
         };
+
+        adapter_registry
+            .validate_source_proof(&transfer.source_chain, &transfer, &proof_bundle)
+            .await
+            .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
 
         match self
             .verifier
@@ -1330,6 +1374,22 @@ impl TransferCoordinator {
         self.coordinator_lease = Some(lease);
     }
 
+    /// Acquire or renew the process authority required before executing mutations.
+    pub async fn acquire_execution_authority(
+        &self,
+        ttl: std::time::Duration,
+    ) -> Result<u64, TransferCoordinatorError> {
+        let lease = self.coordinator_lease.as_ref().ok_or_else(|| {
+            TransferCoordinatorError::LeaseViolation(
+                "A distributed coordinator lease is required".to_string(),
+            )
+        })?;
+        lease
+            .acquire_or_renew(&self.runtime_id, ttl)
+            .await
+            .map_err(|e| TransferCoordinatorError::LeaseViolation(e.to_string()))
+    }
+
     /// Get the optional distributed coordinator lease backend.
     pub fn coordinator_lease(&self) -> Option<&dyn CoordinatorLease> {
         self.coordinator_lease.as_deref()
@@ -1467,6 +1527,11 @@ impl TransferCoordinator {
                                 .to_string(),
                         )
                     })?;
+                    if recovery_entry.proof_hash != proof_payload_hash(&proof_payload) {
+                        return Err(TransferCoordinatorError::ProofVerificationFailed(
+                            "Persisted proof payload does not match journal digest".to_string(),
+                        ));
+                    }
                     self.execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
                         .await
                 } else {
@@ -1502,7 +1567,7 @@ impl TransferCoordinator {
                     ));
                 }
                 let mint_tx_hash = hex::encode(entry.mint_tx_hash.as_bytes());
-                self.execute_from_mint(transfer_id, &mint_tx_hash, adapter_registry)
+                self.execute_from_mint(transfer_id, &mint_tx_hash, adapter_registry, runtime_ctx)
                     .await
             }
             crate::recovery::TransferStage::MintConfirmed => {
@@ -1556,6 +1621,12 @@ impl TransferCoordinator {
                 "Recovery requires an active lease owned by the calling runtime".to_string(),
             ));
         }
+        if runtime_ctx.lease.transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
+            return Err(TransferCoordinatorError::LeaseViolation(
+                "Recovery lease does not authorize the transfer sanad".to_string(),
+            ));
+        }
+        self.accept_execution_lease(&runtime_ctx.lease)?;
         let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
         if !self
             .replay_db
@@ -1625,7 +1696,12 @@ impl TransferCoordinator {
                 seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
             })),
             chain_data: None,
+            native_proof_validated: true,
         };
+        adapter_registry
+            .validate_source_proof(&transfer.source_chain, transfer, proof_bundle)
+            .await
+            .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
         let result = self
             .verifier
             .verify_proof_bundle(proof_bundle, &verification_context)
@@ -1705,7 +1781,7 @@ impl TransferCoordinator {
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         let proof_bundle = adapter_registry
-            .build_inclusion_proof(&transfer.source_chain, &lock_result)
+            .build_inclusion_proof(&transfer.source_chain, &transfer, &lock_result)
             .await
             .map_err(|e| TransferCoordinatorError::ProofBuildFailed(e.to_string()))?;
         self.verify_recovery_proof(
@@ -1835,7 +1911,7 @@ impl TransferCoordinator {
                 attempt: 2,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
-        self.execute_from_mint(&transfer.id, &mint_result.tx_hash, adapter_registry)
+        self.execute_from_mint(&transfer.id, &mint_result.tx_hash, adapter_registry, runtime_ctx)
             .await
     }
 
@@ -1858,6 +1934,7 @@ impl TransferCoordinator {
         transfer_id: &str,
         mint_tx_hash: &str,
         adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
         self.assert_single_active_coordinator(transfer_id).await?;
@@ -1881,6 +1958,7 @@ impl TransferCoordinator {
             })
             .map(|entry| registry_entry_to_transfer(entry, transfer_id.to_string()))
             .ok_or(TransferCoordinatorError::NotFound)?;
+        self.validate_recovery_context(&transfer, &runtime_ctx).await?;
 
         let mint_result = adapter_registry
             .confirm_tx(&transfer.destination_chain, mint_tx_hash)
@@ -1966,6 +2044,7 @@ impl TransferCoordinator {
     pub async fn resume_transfers(
         &self,
         adapter_registry: &dyn AdapterRegistry,
+        recovery_contexts: &dyn RecoveryContextProvider,
     ) -> Result<usize, TransferCoordinatorError> {
         let incomplete = self
             .execution_journal
@@ -2007,31 +2086,9 @@ impl TransferCoordinator {
                 _ => {}
             }
 
-            // Attempt to resume the transfer
-            // Create a minimal runtime context for resumption
-            let runtime_id_uuid = self
-                .runtime_id
-                .0
-                .parse()
-                .unwrap_or_else(|_| uuid::Uuid::new_v4());
-            let transfer_id_bytes = entry.transfer_id.as_bytes();
-            let mut transfer_id_array = [0u8; 32];
-            let len = transfer_id_bytes.len().min(32);
-            transfer_id_array[..len].copy_from_slice(&transfer_id_bytes[..len]);
-            let transfer_id_sanad = csv_hash::SanadId::new(transfer_id_array);
-            let runtime_ctx = crate::lease::RuntimeExecutionContext {
-                lease: crate::lease::TransferLease {
-                    transfer_id: transfer_id_sanad,
-                    epoch: 1,
-                    owner_runtime_id: runtime_id_uuid,
-                    acquired_at: std::time::SystemTime::now(),
-                    expires_at: std::time::SystemTime::now()
-                        .checked_add(std::time::Duration::from_secs(3600))
-                        .unwrap_or_else(|| std::time::SystemTime::now()),
-                },
-                runtime_instance: runtime_id_uuid,
-                policy: crate::policy::RuntimePolicy::default(),
-            };
+            let runtime_ctx = recovery_contexts
+                .context_for(&entry.transfer_id)
+                .await?;
 
             match self
                 .resume_transfer(&entry.transfer_id, adapter_registry, runtime_ctx)
@@ -2050,6 +2107,18 @@ impl TransferCoordinator {
 
         Ok(resumed)
     }
+}
+
+/// Supplies authenticated lease context for restart recovery.
+///
+/// Implementations must retrieve or acquire authority from durable runtime
+/// state. Journal contents alone never grant mutation authority.
+#[async_trait::async_trait]
+pub trait RecoveryContextProvider: Send + Sync {
+    async fn context_for(
+        &self,
+        transfer_id: &str,
+    ) -> Result<crate::lease::RuntimeExecutionContext, TransferCoordinatorError>;
 }
 
 #[cfg(test)]
@@ -2128,6 +2197,10 @@ mod tests {
             self.caps.clone()
         }
 
+        fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+            csv_protocol::signature::SignatureScheme::Ed25519
+        }
+
         async fn lock_sanad(
             &self,
             _transfer: &CrossChainTransfer,
@@ -2151,10 +2224,21 @@ mod tests {
 
         async fn build_inclusion_proof(
             &self,
+            transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
         ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
+            use ed25519_dalek::{Signer, SigningKey};
             use csv_hash::dag::{DAGNode, DAGSegment};
             use csv_hash::seal::{CommitAnchor, SealPoint};
+            use csv_protocol::signature::SignatureScheme;
+            let root_commitment = csv_hash::Hash::new([9u8; 32]);
+            let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+            let signature = signing_key.sign(root_commitment.as_bytes());
+            let mut encoded_signature = Vec::with_capacity(100);
+            encoded_signature.extend_from_slice(&32u32.to_le_bytes());
+            encoded_signature.extend_from_slice(signing_key.verifying_key().as_bytes());
+            encoded_signature.extend_from_slice(&signature.to_bytes());
+            let proof_bytes = vec![0xA5u8; 32];
             let node = DAGNode::new(
                 csv_hash::Hash::new([1u8; 32]),
                 vec![],
@@ -2162,15 +2246,29 @@ mod tests {
                 vec![],
                 vec![],
             );
-            Ok(ProofBundle::new(
-                DAGSegment::new(vec![node], csv_hash::Hash::new([0u8; 32])),
-                vec![vec![0u8; 64]],
-                SealPoint::new(vec![0u8; 32], Some(0)).unwrap(),
-                CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
-                InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
+            Ok(ProofBundle::with_signature_scheme(
+                SignatureScheme::Ed25519,
+                DAGSegment::new(vec![node], root_commitment),
+                vec![encoded_signature],
+                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0)).unwrap(),
+                CommitAnchor::new(vec![0xCCu8; 32], 100, proof_bytes.clone()).unwrap(),
+                InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0).unwrap(),
                 csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             )
             .map_err(|e| crate::adapter_registry::AdapterError::Generic(e.to_string()))?)
+        }
+
+        async fn validate_source_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            proof_bundle: &ProofBundle,
+        ) -> Result<(), crate::adapter_registry::AdapterError> {
+            if proof_bundle.seal_ref.id != transfer.sanad_id.as_bytes() {
+                return Err(crate::adapter_registry::AdapterError::Generic(
+                    "proof is not bound to the requested sanad".to_string(),
+                ));
+            }
+            Ok(())
         }
 
         async fn check_seal_registry(
@@ -2324,8 +2422,17 @@ mod tests {
 
     #[tokio::test]
     async fn proof_validated_recovery_uses_persisted_payload_and_completes() {
+        let expected_transfer = CrossChainTransfer {
+            id: "recover-transfer".to_string(),
+            source_chain: "test-chain".to_string(),
+            destination_chain: "test-chain".to_string(),
+            lock_tx_hash: vec![1u8; 32],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([44u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
         let proof_bundle = TestAdapter::new()
-            .build_inclusion_proof(&LockResult {
+            .build_inclusion_proof(&expected_transfer, &LockResult {
                 tx_hash: hex::encode([0x11u8; 32]),
                 block_height: 100,
             })
@@ -2375,6 +2482,51 @@ mod tests {
         assert!(matches!(
             result,
             Err(TransferCoordinatorError::ProofVerificationFailed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn proof_validated_recovery_rejects_tampered_payload_digest() {
+        let expected_transfer = CrossChainTransfer {
+            id: "recover-transfer".to_string(),
+            source_chain: "test-chain".to_string(),
+            destination_chain: "test-chain".to_string(),
+            lock_tx_hash: vec![1u8; 32],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([44u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
+        let bundle = TestAdapter::new()
+            .build_inclusion_proof(&expected_transfer, &LockResult {
+                tx_hash: hex::encode([0x11u8; 32]),
+                block_height: 100,
+            })
+            .await
+            .unwrap();
+        let payload = csv_codec::to_canonical_cbor(&bundle).unwrap();
+        let (coordinator, registry, transfer, runtime_ctx) =
+            recovery_fixture(TransferStage::ProofValidated, Some(payload.clone())).await;
+        coordinator
+            .execution_journal()
+            .record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer.id.clone(),
+                replay_id: csv_hash::ReplayIdHash(transfer.sanad_id),
+                proof_hash: [0xFF; 32],
+                proof_payload: Some(payload),
+                phase: TransferStage::ProofValidated,
+                ts: std::time::SystemTime::now(),
+                outcome: crate::execution_journal::PhaseOutcome::Completed,
+                attempt: 2,
+            })
+            .unwrap();
+
+        let result = coordinator
+            .resume_transfer(&transfer.id, &registry, runtime_ctx)
+            .await;
+        assert!(matches!(
+            result,
+            Err(TransferCoordinatorError::ProofVerificationFailed(message))
+                if message.contains("journal digest")
         ));
     }
 
@@ -2493,20 +2645,36 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
             ) -> Result<LockResult, crate::adapter_registry::AdapterError> {
-                unimplemented!()
+                Err(crate::adapter_registry::AdapterError::Generic(
+                    "Celestia is not a transfer source".to_string(),
+                ))
             }
             async fn mint_sanad(
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _p: &[u8],
             ) -> Result<MintResult, crate::adapter_registry::AdapterError> {
-                unimplemented!()
+                Err(crate::adapter_registry::AdapterError::Generic(
+                    "Celestia does not authorize destination mints".to_string(),
+                ))
             }
             async fn build_inclusion_proof(
                 &self,
+                _t: &RuntimeCrossChainTransfer,
                 _l: &LockResult,
             ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
-                unimplemented!()
+                Err(crate::adapter_registry::AdapterError::Generic(
+                    "Celestia is not a transfer proof source".to_string(),
+                ))
+            }
+            async fn validate_source_proof(
+                &self,
+                _t: &RuntimeCrossChainTransfer,
+                _p: &ProofBundle,
+            ) -> Result<(), crate::adapter_registry::AdapterError> {
+                Err(crate::adapter_registry::AdapterError::Generic(
+                    "Celestia is not a transfer proof source".to_string(),
+                ))
             }
             async fn check_seal_registry(
                 &self,
@@ -2515,7 +2683,9 @@ mod tests {
                 crate::adapter_registry::SealRegistryStatus,
                 crate::adapter_registry::AdapterError,
             > {
-                unimplemented!()
+                Err(crate::adapter_registry::AdapterError::Generic(
+                    "Celestia has no transfer seal registry".to_string(),
+                ))
             }
             async fn get_balance(
                 &self,
@@ -2823,11 +2993,9 @@ mod tests {
         let result = coordinator
             .execute(transfer.clone(), &registry, failover_ctx)
             .await;
-        // HA failover succeeds due to idempotent replay_db (already consumed entries return Ok)
-        // Lease ownership validation is a future enhancement
         assert!(
-            result.is_ok(),
-            "HA failover should succeed (idempotent): {:?}",
+            matches!(result, Err(TransferCoordinatorError::LeaseViolation(_))),
+            "A second runtime cannot reuse an active transfer lease: {:?}",
             result
         );
     }
@@ -3148,10 +3316,8 @@ mod tests {
                     .unwrap_or_else(|e| panic!("task panicked: {}", e)),
             );
         }
-        // Both succeed due to idempotent replay_db (already consumed entries return Ok)
-        // Lease conflict detection is a future enhancement
         let success_count = results.iter().filter(|r| r.is_ok()).count();
-        assert_eq!(success_count, 2, "Both should succeed (idempotent)");
+        assert_eq!(success_count, 1, "Only one runtime may own an active lease");
     }
 
     #[tokio::test]
@@ -3204,8 +3370,19 @@ mod tests {
 
             async fn build_inclusion_proof(
                 &self,
+                _transfer: &CrossChainTransfer,
                 _lock_result: &LockResult,
             ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
+                Err(crate::adapter_registry::AdapterError::Generic(
+                    "Malicious proof bundle detected".to_string(),
+                ))
+            }
+
+            async fn validate_source_proof(
+                &self,
+                _transfer: &CrossChainTransfer,
+                _proof_bundle: &ProofBundle,
+            ) -> Result<(), crate::adapter_registry::AdapterError> {
                 Err(crate::adapter_registry::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
@@ -3426,11 +3603,9 @@ mod tests {
         };
 
         let result = coordinator.execute(transfer, &registry, stale_ctx).await;
-        // Stale lease succeeds due to idempotent replay_db (already consumed entries return Ok)
-        // Epoch-based lease validation is a future enhancement
         assert!(
-            result.is_ok(),
-            "Stale lease should succeed (idempotent): {:?}",
+            matches!(result, Err(TransferCoordinatorError::LeaseViolation(_))),
+            "Stale lease must be rejected: {:?}",
             result
         );
     }

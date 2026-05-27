@@ -26,5 +26,6 @@ fn verification_context_builds_for_test_chains() {
         current_block_height: ctx.current_block_height,
         seal_registry: ctx.seal_registry,
         chain_data: ctx.chain_data,
+        native_proof_validated: ctx.native_proof_validated,
     };
 }

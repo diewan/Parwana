@@ -62,6 +62,7 @@ impl AdversarialRunner {
             current_block_height: Some(1000),
             seal_registry: None,
             chain_data: None,
+            native_proof_validated: false,
         };
         self.verifier
             .verify_proof_bundle(bundle, &ctx)

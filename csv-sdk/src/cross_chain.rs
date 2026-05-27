@@ -8,10 +8,8 @@
 //!
 //! - `csv_protocol::cross_chain` — Core types (lock events, inclusion proofs,
 //!   finality proofs, transfer state machine, in-memory registry).
-//! - `csv_sdk::cross_chain` — SDK extensions: SQLite-backed persistence
-//!   ([`PersistentTransferRegistry`]), chain-specific mint operations
-//!   ([`mint_sanad_on_chain`]), and integration between persistent storage
-//!   and the in-memory registry via [`load_into_registry`] / [`save_from_registry`].
+//! - `csv_sdk::cross_chain` — SDK extensions for SQLite-backed completed-transfer
+//!   persistence and integration with the in-memory query registry.
 //!
 //! ## Architecture
 //!
@@ -19,8 +17,6 @@
 //! csv_protocol::cross_chain::CrossChainTransfer (orchestrator)
 //!     ↕ loads/saves from
 //! csv_sdk::cross_chain::PersistentTransferRegistry (SQLite)
-//!     ↕ used by
-//! csv_sdk::cross_chain::mint_sanad_on_chain (chain adapter dispatch)
 //! ```
 //!
 //! ## Usage
@@ -37,11 +33,11 @@
 //! here so that SDK consumers don't need to assemble protocol internals directly
 //! for cross-chain operations.
 
+#[cfg(feature = "cross-chain-persist")]
 use csv_hash::Hash;
-use csv_hash::chain_id::ChainId;
-#[cfg(feature = "sqlite")]
+#[cfg(feature = "cross-chain-persist")]
 use csv_hash::seal::SealPoint;
-#[cfg(feature = "sqlite")]
+#[cfg(feature = "cross-chain-persist")]
 use csv_protocol::cross_chain::{CrossChainRegistry, CrossChainRegistryEntry};
 
 use crate::CsvError;
@@ -283,52 +279,17 @@ impl PersistentTransferRegistry {
                 .to_chain
                 .parse()
                 .map_err(|_| CrossChainError::Database("invalid to_chain".to_string()))?,
-            destination_seal: match row.mint_tx.as_ref() {
-                Some(mint) => parse_seal(mint).unwrap_or_else(|err| {
-                    log::error!(
-                        "Failed to parse destination seal from mint_tx: {}. \
-                         Transfer will require recovery/re-query of mint transaction.",
-                        err
-                    );
-                    // If mint_tx is present but parse fails, re-derive the seal from mint TX
-                    // by creating a SealPoint from the mint transaction hash bytes
-                    SealPoint::new(
-                        hex::decode(mint.trim_start_matches("0x"))
-                            .unwrap_or_else(|_| vec![0u8; 32]),
-                        None,
-                    )
-                    .unwrap_or_else(|_| {
-                        // Fallback: use the mint_tx hash directly as seal id
-                        // This allows recovery by re-querying the mint transaction
-                        SealPoint::new(
-                            hex::decode(mint.trim_start_matches("0x"))
-                                .unwrap_or_else(|_| vec![0u8; 32]),
-                            None,
-                        )
-                        .unwrap_or_else(|_| SealPoint {
-                            id: mint.as_bytes().to_vec(),
-                            nonce: None,
-                        })
-                    })
-                }),
-                None => {
-                    // mint_tx is NULL — this is a pending transfer (locked but not yet minted)
-                    // Store a recovery marker instead of a placeholder zero seal
-                    // The recovery mechanism will re-query the destination chain
-                    // once the mint transaction completes
-                    SealPoint {
-                        id: format!("pending_recovery_{}", row.sanad_id)
-                            .as_bytes()
-                            .to_vec(),
-                        nonce: None,
-                    }
-                }
-            },
+            destination_seal: parse_seal(row.mint_tx.as_deref().ok_or_else(|| {
+                CrossChainError::Database(
+                    "completed transfer is missing destination mint transaction".to_string(),
+                )
+            })?)?,
             lock_tx_hash: parse_hash(&row.lock_tx)?,
-            mint_tx_hash: match row.mint_tx.as_ref() {
-                Some(m) => parse_hash(m)?,
-                None => Hash::new([0u8; 32]),
-            },
+            mint_tx_hash: parse_hash(row.mint_tx.as_deref().ok_or_else(|| {
+                CrossChainError::Database(
+                    "completed transfer is missing destination mint hash".to_string(),
+                )
+            })?)?,
             timestamp: row.created_at.timestamp() as u64,
         })
     }
@@ -370,229 +331,4 @@ pub struct TransferInfo {
     pub mint_tx: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Execute a cross-chain transfer with persistence.
-///
-/// 1. Check if sanad already transferred (double-spend guard)
-/// 2. Mint on destination chain
-/// 3. Record in SQLite registry
-#[allow(clippy::too_many_arguments)]
-pub async fn mint_sanad_on_chain(
-    chain: ChainId,
-    rpc_url: &str,
-    contract: &str,
-    private_key: &str,
-    sanad_id: Hash,
-    commitment: Hash,
-    source_chain: u8,
-    source_seal_ref: Hash,
-) -> CrossChainResult<String> {
-    match chain.as_str() {
-        #[cfg(all(feature = "sui", feature = "rpc"))]
-        "sui" => {
-            use csv_sui::mint::mint_sanad;
-
-            mint_sanad(
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            )
-            .await
-            .map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
-        }
-
-        #[cfg(not(all(feature = "sui", feature = "rpc")))]
-        "sui" => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::FeatureNotEnabled(
-                "Sui cross-chain mint requires 'sui' and 'rpc' features.".to_string(),
-            ))
-        }
-
-        #[cfg(feature = "solana")]
-        "solana" => {
-            use csv_solana::mint::mint_sanad_from_hex_key;
-            let state_root = Hash::new([0u8; 32]);
-
-            mint_sanad_from_hex_key(
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                state_root,
-                source_chain,
-                source_seal_ref,
-            )
-            .await
-            .map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
-        }
-
-        #[cfg(not(feature = "solana"))]
-        "solana" => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::FeatureNotEnabled(
-                "Solana cross-chain mint requires 'solana' feature.".to_string(),
-            ))
-        }
-
-        #[cfg(feature = "bitcoin")]
-        "bitcoin" => {
-            use csv_bitcoin::MempoolSignetRpc;
-            use csv_bitcoin::mint::mint_sanad;
-
-            let _ = rpc_url;
-            let rpc = MempoolSignetRpc::new();
-
-            let tx_hash: Result<String, csv_bitcoin::error::BitcoinError> = mint_sanad(
-                rpc,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-                contract,
-            )
-            .await;
-
-            tx_hash.map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
-        }
-
-        #[cfg(not(feature = "bitcoin"))]
-        "bitcoin" => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::FeatureNotEnabled(
-                "Bitcoin cross-chain mint requires 'bitcoin' feature.".to_string(),
-            ))
-        }
-
-        #[cfg(feature = "ethereum")]
-        "ethereum" => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::ProtocolError(
-                "Direct SDK Ethereum mint is unavailable because the legacy ethers-based helper \
-                 was removed; use csv-runtime/EthereumBackend for Ethereum mint execution."
-                    .to_string(),
-            ))
-        }
-
-        #[cfg(not(feature = "ethereum"))]
-        "ethereum" => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::FeatureNotEnabled(
-                "Ethereum cross-chain mint requires 'ethereum' feature.".to_string(),
-            ))
-        }
-
-        #[cfg(feature = "aptos")]
-        "aptos" => {
-            use csv_aptos::mint::mint_sanad;
-
-            mint_sanad(
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            )
-            .await
-            .map_err(|e| CrossChainError::ProtocolError(format!("{:?}", e)))
-        }
-
-        #[cfg(not(feature = "aptos"))]
-        "aptos" => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::FeatureNotEnabled(
-                "Aptos cross-chain mint requires 'aptos' feature.".to_string(),
-            ))
-        }
-
-        _ => {
-            let _ = (
-                rpc_url,
-                contract,
-                private_key,
-                sanad_id,
-                commitment,
-                source_chain,
-                source_seal_ref,
-            );
-            Err(CrossChainError::ChainNotSupported(format!(
-                "Cross-chain mint not available for {:?}",
-                chain
-            )))
-        }
-    }
-}
-
-/// Check if cross-chain mint is supported for a given chain.
-pub fn is_mint_supported(chain: ChainId) -> bool {
-    match chain.as_str() {
-        #[cfg(all(feature = "sui", feature = "rpc"))]
-        "sui" => true,
-        #[cfg(feature = "solana")]
-        "solana" => true,
-        #[cfg(feature = "bitcoin")]
-        "bitcoin" => true,
-        #[cfg(feature = "ethereum")]
-        "ethereum" => true,
-        #[cfg(feature = "aptos")]
-        "aptos" => true,
-        _ => false,
-    }
 }

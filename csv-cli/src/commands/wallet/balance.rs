@@ -108,6 +108,8 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 finality_depth: cc.finality_depth as u32,
                 enabled: true,
                 xpub: wallet_xpub,
+                contract_address: cc.contract_address.clone(),
+                program_id: None,
             },
         );
     } else {
@@ -126,6 +128,8 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 finality_depth: 6,
                 enabled: true,
                 xpub: wallet_xpub,
+                contract_address: None,
+                program_id: None,
             },
         );
     }

@@ -85,6 +85,10 @@ pub struct ChainConfig {
     /// Extended public key for HD wallet derivation (Bitcoin xpub).
     /// Used to derive addresses and watch for transactions without spending.
     pub xpub: Option<String>,
+    /// Deployed seal or mint contract/package address required for mutation.
+    pub contract_address: Option<String>,
+    /// Deployed program identifier for program-based chains.
+    pub program_id: Option<String>,
 }
 
 impl Default for ChainConfig {
@@ -94,6 +98,8 @@ impl Default for ChainConfig {
             finality_depth: 6,
             enabled: false,
             xpub: None,
+            contract_address: None,
+            program_id: None,
         }
     }
 }

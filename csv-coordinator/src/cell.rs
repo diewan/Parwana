@@ -58,6 +58,8 @@ pub enum CellError {
     Backpressure(u32),
     #[error("Memory ceiling exceeded")]
     MemoryExceeded,
+    #[error("Transfer processing requires an authenticated proof execution request")]
+    MissingVerifiedMaterial,
 }
 
 /// An isolated execution unit for one chain adapter.
@@ -96,6 +98,9 @@ impl ChainCell {
         if self.circuit.is_open() {
             return Err(CellError::CircuitOpen(self.chain_id));
         }
+        if matches!(task, CellTask::Process(_)) {
+            return Err(CellError::MissingVerifiedMaterial);
+        }
 
         self.queue
             .try_send(task)
@@ -121,47 +126,11 @@ async fn cell_worker(
     _anchor: Arc<dyn CryptographicAnchor>,
     config: CellConfig,
 ) {
-    let memory_ceiling = MemoryCeiling::new(config.max_memory_bytes);
     let mut circuit_breaker = CellCircuitBreaker::new(config.circuit_breaker);
 
     while let Some(task) = rx.recv().await {
         match task {
-            CellTask::Process(transfer) => {
-                // Check circuit breaker before processing
-                if circuit_breaker.is_open() {
-                    tracing::warn!(
-                        "Circuit breaker open for chain {}, rejecting transfer",
-                        config.chain_id
-                    );
-                    continue;
-                }
-
-                // Estimate memory usage for this transfer
-                let estimated_memory = 1024; // 1KB per transfer (conservative estimate)
-
-                if let Err(e) = memory_ceiling.try_allocate(estimated_memory) {
-                    tracing::warn!(
-                        "Memory ceiling exceeded for chain {}: {}",
-                        config.chain_id,
-                        e
-                    );
-                    circuit_breaker.record_failure();
-                    continue;
-                }
-
-                tracing::info!(
-                    "Processing transfer {:?} on chain {}",
-                    transfer.transfer_id,
-                    config.chain_id
-                );
-
-                // TODO: Actual transfer processing logic here
-                // This would delegate to the appropriate chain adapter
-                // For now, we just simulate success
-
-                circuit_breaker.record_success();
-                memory_ceiling.release(estimated_memory);
-            }
+            CellTask::Process(_) => unreachable!("process tasks are rejected before enqueue"),
             CellTask::HealthCheck => {
                 // Perform health check
                 if circuit_breaker.is_open() {
