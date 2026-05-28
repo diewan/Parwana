@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
 use sha3::{Keccak256, Sha3_256};
+use blake2::{Blake2b512, Digest as Blake2Digest};
 use std::vec::Vec;
 
 use csv_hash::Hash;
@@ -26,6 +27,8 @@ pub enum CrossChainHashAlgorithm {
     Keccak256,
     /// SHA3-256
     Sha3_256,
+    /// Blake2b-256 (Sui native)
+    Blake2b256,
 }
 
 impl CrossChainHashAlgorithm {
@@ -36,7 +39,7 @@ impl CrossChainHashAlgorithm {
             "ethereum" => Ok(Self::Keccak256),
             "solana" => Ok(Self::Sha256),
             "aptos" => Ok(Self::Sha3_256),
-            "sui" => Ok(Self::Sha256),
+            "sui" => Ok(Self::Blake2b256),
             _ => Err(CrossChainError::UnsupportedChainPair(
                 chain.clone(),
                 chain.clone(),
@@ -70,6 +73,12 @@ impl CrossChainHashAlgorithm {
                 let mut hasher = Sha3_256::new();
                 hasher.update(bytes);
                 Hash::new(hasher.finalize().into())
+            }
+            Self::Blake2b256 => {
+                let mut hasher = Blake2b512::new();
+                Blake2Digest::update(&mut hasher, bytes);
+                let result = Blake2Digest::finalize(hasher);
+                Hash::new(result.as_slice()[0..32].try_into().unwrap())
             }
         }
     }
@@ -112,6 +121,12 @@ impl CrossChainHashAlgorithm {
             Self::Sha256 => Sha256::digest(bytes).into(),
             Self::Keccak256 => Keccak256::digest(bytes).into(),
             Self::Sha3_256 => Sha3_256::digest(bytes).into(),
+            Self::Blake2b256 => {
+                let mut hasher = Blake2b512::new();
+                Blake2Digest::update(&mut hasher, bytes);
+                let result = Blake2Digest::finalize(hasher);
+                result.as_slice()[0..32].try_into().unwrap()
+            }
         }
     }
 }
@@ -258,7 +273,7 @@ impl InclusionProof {
         match self {
             InclusionProof::Bitcoin(_) => CrossChainHashAlgorithm::DoubleSha256,
             InclusionProof::Ethereum(_) => CrossChainHashAlgorithm::Keccak256,
-            InclusionProof::Sui(_) => CrossChainHashAlgorithm::Sha256,
+            InclusionProof::Sui(_) => CrossChainHashAlgorithm::Blake2b256,
             InclusionProof::Aptos(_) => CrossChainHashAlgorithm::Sha3_256,
             InclusionProof::Solana(_) => CrossChainHashAlgorithm::Keccak256,
             InclusionProof::ZkSeal(proof) => proof.verifier_key.hash_algorithm,
