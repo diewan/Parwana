@@ -9,23 +9,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=contracts/csv_seal.move");
-    println!("cargo:rerun-if-changed=contracts/Move.toml");
+    println!("cargo:rerun-if-changed=sources/csv_seal.move");
+    println!("cargo:rerun-if-changed=sources/test_adversarial.move");
+    println!("cargo:rerun-if-changed=Move.toml");
 
     let out_dir = env::var("OUT_DIR").unwrap();
-    let contracts_dir = Path::new("contracts");
+    let project_dir = Path::new(".");
     let bytecode_out = PathBuf::from(&out_dir);
 
     // Try to compile with sui CLI if available
     if has_sui_cli() {
         println!("cargo:warning=Sui CLI detected, compiling Move packages...");
-        compile_with_sui(contracts_dir);
+        compile_with_sui(project_dir);
     } else {
         println!("cargo:warning=Sui CLI not found, checking for pre-compiled bytecode...");
     }
 
     // Generate bytecode constants
-    generate_bytecode_constants(&bytecode_out, contracts_dir);
+    generate_bytecode_constants(&bytecode_out, project_dir);
 }
 
 fn has_sui_cli() -> bool {
@@ -89,7 +90,7 @@ fn read_move_bytecode(contracts_dir: &Path) -> String {
     // the production build from proceeding with missing bytecode.
     //
     // To fix this error:
-    //   1. Run `sui move build` in contracts/ to compile the Move package
+    //   1. Run `sui move build` to compile the Move package
     //   2. Verify the compiled .mv file appears in build/
     //   3. Re-run the build
     //
@@ -101,7 +102,7 @@ fn read_move_bytecode(contracts_dir: &Path) -> String {
     } else {
         panic!(
             "Sui Move bytecode not found under {:?}.\n\
-             Run `sui move build` in contracts/ to compile packages first.\n\
+             Run `sui move build` to compile packages first.\n\
              Alternatively, set SKIP_SUI_BYTECODE=1 to skip this check.",
             build_dir
         );

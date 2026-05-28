@@ -1,10 +1,11 @@
 [package]
-name = "csv_seal"
-version = "0.1.0"
-edition = "2024.beta"
+name = "csv-seal"
+version = "0.0.1"
+edition = "2024"
 
 [dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "testnet" }
 
 [addresses]
 csv_seal = "0x0"
+sui = "0x2"
