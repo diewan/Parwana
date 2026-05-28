@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use clap::Subcommand;
-use colored::Colorize;
 
 use crate::config::{Chain, Config, Network};
 use crate::output;
@@ -50,11 +49,11 @@ pub enum ChainAction {
     },
 }
 
-pub fn execute(action: ChainAction, config: &Config) -> Result<()> {
+pub async fn execute(action: ChainAction, config: &Config) -> Result<()> {
     match action {
         ChainAction::List => cmd_list(config),
-        ChainAction::Status { chain } => cmd_status(&chain, config),
-        ChainAction::Info { chain } => cmd_info(&chain, config),
+        ChainAction::Status { chain } => cmd_status(&chain, config).await,
+        ChainAction::Info { chain } => cmd_info(&chain, config).await,
         ChainAction::SetRpc { chain, url } => cmd_set_rpc(chain, url, config),
         ChainAction::SetNetwork { chain, network } => cmd_set_network(chain, network, config),
         ChainAction::SetContract { chain, address } => cmd_set_contract(chain, address, config),
@@ -86,7 +85,7 @@ fn cmd_list(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
+async fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
     let chain_config = config.chain(chain)?;
 
     output::header(&format!("Chain: {}", chain));
@@ -113,81 +112,23 @@ fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
         output::kv("Default Fee", &fee.to_string());
     }
 
-    // Check RPC connectivity using csv-sdk runtime APIs
-    print!("\n  Checking RPC connectivity... ");
-    use csv_hash::ChainId;
-    use csv_sdk::CsvClient;
-
-    let protocol_chain = ChainId::new(chain.as_str());
-    match CsvClient::builder()
-        .with_chain(protocol_chain.clone())
-        .build()
-    {
-        Ok(client) => {
-            // Try to initialize the adapter to verify connectivity
-            match tokio::runtime::Runtime::new()
-                .map_err(|e| anyhow::anyhow!("Failed to create runtime: {}", e))
-                .and_then(|rt| {
-                    rt.block_on(async {
-                        client
-                            .init_adapters(csv_sdk::prelude::NetworkType::Testnet)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("Failed to initialize adapters: {}", e))
-                    })
-                }) {
-                Ok(_) => println!("{}", "Connected ✓".green()),
-                Err(e) => println!("{} ({})", "Failed ✗".red(), e),
-            }
-        }
-        Err(e) => {
-            println!("{} ({})", "Failed ✗".red(), e);
-        }
-    }
+    // Note: RPC connectivity check via SDK requires full adapter configuration
+    // including contract addresses. Use 'csv runtime health' for full connectivity checks.
+    println!();
 
     Ok(())
 }
 
-fn cmd_info(chain: &Chain, config: &Config) -> Result<()> {
+async fn cmd_info(chain: &Chain, config: &Config) -> Result<()> {
     let chain_config = config.chain(chain)?;
 
     output::header(&format!("RPC Info: {}", chain));
 
-    // Use csv-sdk runtime APIs to fetch chain info
-    use csv_hash::ChainId;
-    use csv_sdk::CsvClient;
+    output::kv("Endpoint", &chain_config.rpc_url);
+    output::kv("Network", &chain_config.network.to_string());
 
-    let protocol_chain = ChainId::new(chain.as_str());
-    match CsvClient::builder()
-        .with_chain(protocol_chain.clone())
-        .build()
-    {
-        Ok(client) => {
-            // Try to get chain info through runtime
-            match tokio::runtime::Runtime::new()
-                .map_err(|e| anyhow::anyhow!("Failed to create runtime: {}", e))
-                .and_then(|rt| {
-                    rt.block_on(async {
-                        client
-                            .init_adapters(csv_sdk::prelude::NetworkType::Testnet)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("Failed to initialize adapters: {}", e))
-                    })
-                }) {
-                Ok(_) => {
-                    output::kv("Endpoint", &chain_config.rpc_url);
-                    output::kv("Status", "Connected");
-                }
-                Err(e) => {
-                    output::kv("Endpoint", &chain_config.rpc_url);
-                    output::warning(&format!("Could not fetch chain info: {}", e));
-                }
-            }
-        }
-        Err(e) => {
-            output::kv("Endpoint", &chain_config.rpc_url);
-            output::warning(&format!("Failed to initialize client: {}", e));
-        }
-    }
+    // Note: For full chain connectivity checks, use 'csv runtime health'
+    output::info("Use 'csv runtime health' for connectivity checks");
 
     Ok(())
 }

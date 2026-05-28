@@ -19,7 +19,7 @@ This guide explains how to deploy the CSVSeal contract (merged lock + mint) to S
 
    ```bash
    export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_PROJECT_ID
-   export DEPLOYER_KEY=your_private_key_without_0x_prefix
+   export DEPLOYER_KEY=0xyour_private_key_with_0x_prefix
    export ETHERSCAN_API_KEY=your_etherscan_api_key  # Optional, for verification
    ```
 

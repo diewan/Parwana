@@ -169,8 +169,25 @@ fn cmd_status() -> Result<()> {
         }
         None => {
             output::warning("No trust package found");
-            output::info("Import a trust package to begin operation");
-            output::info("Use: csv trust import <file>");
+            println!();
+            output::info("Trust packages contain:");
+            println!("  • Genesis block hash for chain identity");
+            println!("  • Trusted checkpoint (block height + hash)");
+            println!("  • Validator set information (epoch, count)");
+            println!("  • Multi-sig signatures from trusted authorities");
+            println!();
+            output::info("Trust packages are required for:");
+            println!("  • Proof verification (ensuring chain data integrity)");
+            println!("  • Cross-chain transfer finality checks");
+            println!("  • Runtime safety (preventing chain reorg attacks)");
+            println!();
+            output::info("To import a trust package:");
+            println!("  csv trust import <trust-package.json>");
+            println!();
+            output::info("To create a trust package (for testing):");
+            println!("  Use the csv-runtime API or manually create JSON with:");
+            println!("  version, genesis_hash, trusted_checkpoint_height,");
+            println!("  trusted_checkpoint_hash, validator_epoch, validator_count");
         }
     }
 

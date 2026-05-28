@@ -27,8 +27,6 @@ use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
-#[cfg(feature = "rpc")]
-use crate::bindings::csv_seal::CsvSealClient;
 use crate::config::EthereumConfig;
 use crate::finality::FinalityChecker;
 use crate::proofs::{CommitmentEventBuilder, EventProofVerifier};
@@ -1059,13 +1057,13 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the lock transaction using generated Alloy bindings
-            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
-            let call = seal_client.lock_sanad_call(
-                alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
-                alloy_primitives::FixedBytes::<32>::from_slice(commitment),
-                dest_chain_id,
-                alloy_primitives::Bytes::from(owner_addr.to_vec()),
-            );
+            use crate::bindings::csv_seal::lockSanadCall;
+            let call = lockSanadCall {
+                sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
+                commitment: alloy_primitives::FixedBytes::<32>::from_slice(commitment),
+                destinationChain: dest_chain_id,
+                destinationOwner: alloy_primitives::Bytes::from(owner_addr.to_vec()),
+            };
 
             // Encode the calldata from the generated call struct
             let calldata = call.abi_encode();
@@ -1121,17 +1119,17 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the mint transaction using generated Alloy bindings
-            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
-            let call = seal_client.mint_sanad_call(
-                alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
-                alloy_primitives::FixedBytes::<32>::from_slice(commitment),
-                alloy_primitives::FixedBytes::<32>::from_slice(state_root),
-                source_chain_id,
-                alloy_primitives::Bytes::from(owner_addr.to_vec()),
-                alloy_primitives::Bytes::from(lock_proof.proof_bytes.clone()),
-                alloy_primitives::FixedBytes::<32>::from_slice(proof_root),
-                alloy_primitives::U256::from(0), // leafPosition
-            );
+            use crate::bindings::csv_seal::mintSanadCall;
+            let call = mintSanadCall {
+                sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
+                commitment: alloy_primitives::FixedBytes::<32>::from_slice(commitment),
+                stateRoot: alloy_primitives::FixedBytes::<32>::from_slice(state_root),
+                sourceChain: source_chain_id,
+                sourceSealPoint: alloy_primitives::Bytes::from(owner_addr.to_vec()),
+                proof: alloy_primitives::Bytes::from(lock_proof.proof_bytes.clone()),
+                proofRoot: alloy_primitives::FixedBytes::<32>::from_slice(proof_root),
+                leafPosition: alloy_primitives::U256::from(0),
+            };
 
             // Encode the calldata from the generated call struct
             let calldata = call.abi_encode();
@@ -1185,11 +1183,11 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the refund transaction using generated Alloy bindings
-            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
-            let call = seal_client.refund_sanad_call(
-                alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
-                alloy_primitives::FixedBytes::<32>::from_slice(&owner_hash),
-            );
+            use crate::bindings::csv_seal::refundSanadCall;
+            let call = refundSanadCall {
+                sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
+                destinationOwnerHash: alloy_primitives::FixedBytes::<32>::from_slice(&owner_hash),
+            };
 
             // Encode the calldata
             let calldata = call.abi_encode();
@@ -1246,10 +1244,10 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Try to query contract state to verify metadata was recorded
-            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
-            let _call = seal_client.get_lock_info_call(
-                alloy_primitives::FixedBytes::<32>::from_slice(&sanad_id_bytes),
-            );
+            use crate::bindings::csv_seal::getLockInfoCall;
+            let _call = getLockInfoCall {
+                sanadId: alloy_primitives::FixedBytes::<32>::from_slice(&sanad_id_bytes),
+            };
 
             // For now, return success noting that metadata was recorded at lock time
             Ok(SanadOperationResult {

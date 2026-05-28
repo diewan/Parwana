@@ -16,7 +16,7 @@
 #
 # Environment variables:
 #   SEPOLIA_RPC_URL - Sepolia RPC endpoint URL
-#   DEPLOYER_KEY - Private key of deployer account (without 0x prefix)
+#   DEPLOYER_KEY - Private key of deployer account (with 0x prefix)
 #   ETHERSCAN_API_KEY - Etherscan API key for contract verification (optional)
 
 set -e
@@ -50,7 +50,7 @@ fi
 
 if [ -z "$DEPLOYER_KEY" ]; then
     echo -e "${RED}Error: DEPLOYER_KEY environment variable not set${NC}"
-    echo "Example: export DEPLOYER_KEY=your_private_key_without_0x_prefix"
+    echo "Example: export DEPLOYER_KEY=0xyour_private_key_with_0x_prefix"
     exit 1
 fi
 
@@ -145,6 +145,5 @@ echo -e "${GREEN}=== Deployment completed successfully! ===${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Verify contract on Etherscan: https://sepolia.etherscan.io/address/$SEAL_ADDRESS"
-echo "2. Update bytecode_hash in deployment-manifest.json using a tool like `cast hash` or `forge inspect` to compute the deployed bytecode hash"
-echo "3. Set verifier address in CSVSeal constructor args if needed"
-echo "4. Mark contract as verified in deployment-manifest.json"
+echo "2. Set verifier address in CSVSeal constructor args if needed"
+echo "3. Mark contract as verified in deployment-manifest.json"

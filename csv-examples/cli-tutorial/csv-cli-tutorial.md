@@ -852,6 +852,8 @@ Create Content Claim
 
 ## Trust Management
 
+> **Note for first-time users:** Trust packages are required for production proof verification. For testing and development, you can skip trust package setup. The command will show an informational message explaining what trust packages contain and how to create/import one.
+
 ### Check Trust Package Status
 
 ```bash
@@ -988,6 +990,8 @@ Runtime Status
 ```
 
 ### Check Component Health
+
+> **Note for first-time users:** This command shows detailed health checks only when a runtime instance is actively running (e.g., during cross-chain transfers). For first-time setup, you'll see an informational message explaining what components are monitored.
 
 ```bash
 csv runtime health

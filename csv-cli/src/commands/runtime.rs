@@ -74,6 +74,18 @@ fn cmd_health() -> Result<()> {
     if checks.is_empty() {
         output::info("No health checks configured");
         output::info("Health checks are registered when the runtime starts");
+        println!();
+        output::info("The CSV runtime monitors these components:");
+        println!("  • RPC connectivity (per-chain)");
+        println!("  • Replay registry availability");
+        println!("  • Event persistence lag");
+        println!("  • Clock drift detection");
+        println!("  • Circuit breaker state");
+        println!("  • Admission control pressure");
+        println!();
+        output::info("To see runtime health, start a runtime instance with:");
+        println!("  csv cross-chain transfer --from <chain> --to <chain> ...");
+        println!("  or use csv runtime status for overall runtime state");
         return Ok(());
     }
 

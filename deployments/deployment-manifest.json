@@ -13,9 +13,9 @@
       "contracts": [
         {
           "name": "CSVSeal",
-          "address": "",
-          "deployment_tx": "",
-          "block_number": "0",
+          "address": "0x189BE35e28331E20481C100cA93fc9a96601E48f",
+          "deployment_tx": "0x214b63a95dbeb72b051dfb20effbf9312c8cafa61c80a3283b791bfee37ee883",
+          "block_number": "10941734",
           "bytecode_hash": "",
           "verified": false,
           "constructor_args": {
@@ -27,7 +27,7 @@
     },
     "solana": {
       "network": "devnet",
-      "program_id": "",
+      "program_id": "HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m",
       "verified": true
     },
     "sui": {

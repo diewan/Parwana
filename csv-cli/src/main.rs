@@ -205,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Dispatch commands
     let result = match cli.command {
-        Commands::Chain { action } => chain::execute(action, &config),
+        Commands::Chain { action } => chain::execute(action, &config).await,
         Commands::Wallet { action } => wallet::execute(action, &config, &mut state).await,
         Commands::Sanad { action } => sanads::execute(action, &config, &mut state).await,
         Commands::Proof { action } => {

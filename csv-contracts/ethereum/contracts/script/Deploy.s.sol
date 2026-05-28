@@ -26,10 +26,6 @@ contract Deploy is Script {
 
         vm.stopBroadcast();
 
-        // Generate deployment manifest
-        string memory manifest = _generateManifest(address(seal));
-        vm.writeLine("deployment_manifest.json", manifest);
-
         // Output for CI/state.json parsing
         console.log("\n=== DEPLOYMENT SUMMARY ===");
         console.log("CSVSeal:", address(seal));
@@ -38,27 +34,5 @@ contract Deploy is Script {
         console.log("==========================\n");
 
         sealAddr = address(seal);
-    }
-
-    /// @notice Generate a deployment manifest with contract addresses and metadata
-    /// @param sealAddr Address of the deployed CSVSeal contract
-    /// @return Manifest string in JSON format
-    function _generateManifest(address sealAddr) internal view returns (string memory) {
-        return string(
-            abi.encodePacked(
-                '{"version":',
-                vm.toString(VERSION),
-                ',"timestamp":',
-                vm.toString(block.timestamp),
-                ',"chainId":',
-                vm.toString(block.chainid),
-                ',"deployer":"',
-                vm.toString(msg.sender),
-                '","contracts":{',
-                '"CSVSeal":"',
-                vm.toString(sealAddr),
-                '"}}'
-            )
-        );
     }
 }
