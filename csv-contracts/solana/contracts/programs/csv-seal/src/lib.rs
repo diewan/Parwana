@@ -560,7 +560,7 @@ pub struct MintSanad<'info> {
         init,
         payer = owner,
         space = MintedSanad::SIZE,
-        seeds = [b"minted", &sanad_id],
+        seeds = [b"minted", sanad_id.as_ref()],
         bump
     )]
     pub minted_sanad: Account<'info, MintedSanad>,
