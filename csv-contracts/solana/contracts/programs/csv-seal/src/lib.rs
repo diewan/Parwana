@@ -213,11 +213,20 @@ pub mod csv_seal {
         proof_root: [u8; 32],
         leaf_position: u64,
     ) -> Result<()> {
+        // Input validation: 32-byte checks for hashes
+        require!(proof_root != [0u8; 32], CsvError::InvalidProof);
+
         // Verify cross-chain proof before minting
         verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position)?;
 
         let sanad = &mut ctx.accounts.sanad_account;
+        let minted_sanad = &mut ctx.accounts.minted_sanad;
         let owner = ctx.accounts.owner.key();
+
+        // Mark sanad_id as minted (replay protection)
+        minted_sanad.sanad_id = sanad_id;
+        minted_sanad.minted_at = Clock::get()?.unix_timestamp;
+        minted_sanad.bump = ctx.bumps.minted_sanad;
 
         sanad.owner = owner;
         sanad.sanad_id = sanad_id;
@@ -271,6 +280,9 @@ pub mod csv_seal {
             CsvError::RefundTimeoutNotExpired
         );
         require!(!lock.refunded, CsvError::AlreadyRefunded);
+
+        // Verify caller is the original owner (security: prevent unauthorized refunds)
+        require!(lock.owner == claimant, CsvError::NotAuthorized);
 
         // Create new sanad account
         sanad.owner = claimant;
@@ -541,6 +553,17 @@ pub struct MintSanad<'info> {
         bump
     )]
     pub sanad_account: Account<'info, SanadAccount>,
+    
+    /// MintedSanad PDA for replay protection (seeds: ["minted", sanad_id])
+    /// This account is created to mark the sanad_id as already minted
+    #[account(
+        init,
+        payer = owner,
+        space = MintedSanad::SIZE,
+        seeds = [b"minted", &sanad_id],
+        bump
+    )]
+    pub minted_sanad: Account<'info, MintedSanad>,
     
     #[account(mut)]
     pub owner: Signer<'info>,

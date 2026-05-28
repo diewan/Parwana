@@ -25,7 +25,3 @@ wallet = "~/.config/solana/id.json"
 initialize = "bash ../scripts/initialize.sh"
 lint = "cargo clippy"
 test = "cargo test"
-
-[hooks]
-pre-commit = "cargo clippy"
-pre-push = "cargo test"

@@ -112,3 +112,21 @@ impl LockRegistry {
     /// 8 (discriminator) + 32 (authority) + 4 (refund_timeout) + 4 (lock_count) + 1 (bump)
     pub const SIZE: usize = 8 + 32 + 4 + 4 + 1;
 }
+
+/// MintedSanad account for replay protection (PDA: ["minted", sanad_id])
+/// This prevents the same sanad_id from being minted multiple times
+#[account]
+pub struct MintedSanad {
+    /// Sanad identifier that was minted
+    pub sanad_id: [u8; 32],
+    /// When it was minted (Unix epoch seconds)
+    pub minted_at: i64,
+    /// PDA bump seed
+    pub bump: u8,
+}
+
+impl MintedSanad {
+    /// Space required for MintedSanad
+    /// 8 (discriminator) + 32 (sanad_id) + 8 (minted_at) + 1 (bump)
+    pub const SIZE: usize = 8 + 32 + 8 + 1;
+}

@@ -102,6 +102,8 @@ contract CSVLock {
     error InvalidSanadMetadata();
     error NotOwner();
     error ZeroAddress();
+    error InvalidProof();
+
 
     /// @notice Constructor to set immutable mint contract address and initialize owner
     /// @param _mintContract Address of the CSVMint contract
@@ -291,9 +293,7 @@ contract CSVLock {
         (bool success, bytes memory data) = mintContract.staticcall(
             abi.encodeWithSignature("isSanadMinted(bytes32)", sanadId)
         );
-        if (!success || data.length < 32) {
-            revert InvalidProof();
-        }
+        require(success && data.length >= 32, "Invalid mint contract response");
         bool isMinted = abi.decode(data, (bool));
         if (isMinted) {
             revert SanadAlreadyMinted();

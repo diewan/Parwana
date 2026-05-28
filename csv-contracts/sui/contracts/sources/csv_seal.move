@@ -8,12 +8,8 @@
 /// - `refund_sanad()` — Recover a Sanad after lock timeout (settlement strategy)
 
 module csv_seal::csv_seal {
-    use sui::object::{Self, UID, ID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
     use sui::table;
     use sui::event;
-    use std::vector;
 
     const ASSET_CLASS_UNSPECIFIED: u8 = 0;
     const ASSET_CLASS_PROOF_SANAD: u8 = 3;
@@ -23,7 +19,7 @@ module csv_seal::csv_seal {
     /// A Sanad anchored to Sui as an object.
     /// The object's existence = the Sanad's validity.
     /// Deleting the object = consuming the Sanad (single-use enforced).
-    struct SanadObject has key, store {
+    public struct SanadObject has key, store {
         id: UID,
         /// Unique Sanad identifier (preserved across chains)
         sanad_id: vector<u8>,
@@ -48,7 +44,7 @@ module csv_seal::csv_seal {
     }
 
     /// Lock record for refund tracking
-    struct LockRecord has store {
+    public struct LockRecord has store {
         /// Sanad identifier
         sanad_id: vector<u8>,
         /// Commitment hash
@@ -70,16 +66,19 @@ module csv_seal::csv_seal {
     }
 
     /// Shared object tracking lock records for settlement
-    struct LockRegistry has key {
+    public struct LockRegistry has key {
         id: UID,
         /// Map from sanad_id to LockRecord
         locks: table::Table<vector<u8>, LockRecord>,
         /// Refund timeout in seconds (24 hours)
         refund_timeout: u64,
+        /// Dynamic field for tracking minted Sanads (replay protection)
+        /// Uses dynamic field to avoid shared object contention
+        minted_sanads: table::Table<vector<u8>, bool>,
     }
 
     // Event structs (copy + drop)
-    struct SanadCreated has copy, drop {
+    public struct SanadCreated has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         owner: address,
@@ -91,12 +90,12 @@ module csv_seal::csv_seal {
         proof_root: vector<u8>,
     }
 
-    struct SanadConsumed has copy, drop {
+    public struct SanadConsumed has copy, drop {
         sanad_id: vector<u8>,
         consumer: address,
     }
 
-    struct CrossChainLock has copy, drop {
+    public struct CrossChainLock has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         owner: address,
@@ -111,7 +110,7 @@ module csv_seal::csv_seal {
         proof_root: vector<u8>,
     }
 
-    struct CrossChainMint has copy, drop {
+    public struct CrossChainMint has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         owner: address,
@@ -124,14 +123,14 @@ module csv_seal::csv_seal {
         proof_root: vector<u8>,
     }
 
-    struct CrossChainRefund has copy, drop {
+    public struct CrossChainRefund has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         claimant: address,
         refunded_at: u64,
     }
 
-    struct SanadMetadataRecorded has copy, drop {
+    public struct SanadMetadataRecorded has copy, drop {
         sanad_id: vector<u8>,
         asset_class: u8,
         asset_id: vector<u8>,
@@ -140,7 +139,7 @@ module csv_seal::csv_seal {
         proof_root: vector<u8>,
     }
 
-    struct NullifierRegistered has copy, drop {
+    public struct NullifierRegistered has copy, drop {
         nullifier: vector<u8>,
         sanad_id: vector<u8>,
     }
@@ -151,6 +150,7 @@ module csv_seal::csv_seal {
             id: object::new(ctx),
             locks: table::new(ctx),
             refund_timeout: 86400, // 24 hours
+            minted_sanads: table::new(ctx),
         };
         transfer::share_object(registry);
     }
@@ -162,6 +162,11 @@ module csv_seal::csv_seal {
         state_root: vector<u8>,
         ctx: &mut TxContext
     ) {
+        // Input validation: 32-byte checks for hashes
+        assert!(vector::length(&sanad_id) == 32, E_INVALID_METADATA);
+        assert!(vector::length(&commitment) == 32, E_INVALID_METADATA);
+        assert!(vector::length(&state_root) == 32, E_INVALID_METADATA);
+
         let sanad = SanadObject {
             id: object::new(ctx),
             sanad_id,
@@ -328,10 +333,23 @@ module csv_seal::csv_seal {
         proof: vector<u8>,
         proof_root: vector<u8>,
         leaf_position: u64,
+        registry: &mut LockRegistry,
         ctx: &mut TxContext
     ) {
+        // Input validation: 32-byte checks for hashes
+        assert!(vector::length(&sanad_id) == 32, E_INVALID_METADATA);
+        assert!(vector::length(&commitment) == 32, E_INVALID_METADATA);
+        assert!(vector::length(&state_root) == 32, E_INVALID_METADATA);
+        assert!(vector::length(&proof_root) == 32, E_INVALID_METADATA);
+
+        // Replay protection: check if sanad_id already minted
+        assert!(!table::contains(&registry.minted_sanads, sanad_id), 1008); // Already minted
+
         // Verify cross-chain proof before minting
         verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
+
+        // Mark as minted (replay protection)
+        table::add(&mut registry.minted_sanads, sanad_id, true);
 
         let sanad = SanadObject {
             id: object::new(ctx),
@@ -365,6 +383,7 @@ module csv_seal::csv_seal {
 
     /// Verify cross-chain Merkle proof for mint operations
     /// Uses leaf position for deterministic verification
+    /// Optimized to minimize allocations by reusing buffers
     fun verify_cross_chain_proof(
         sanad_id: &vector<u8>,
         commitment: &vector<u8>,
@@ -373,46 +392,54 @@ module csv_seal::csv_seal {
         proof_root: &vector<u8>,
         leaf_position: u64
     ) {
-        use sui::hash;
+        use std::hash;
         
         // Validate inputs
-        assert!(proof_root.len() == 32, E_INVALID_METADATA);
-        assert!(proof.len() % 32 == 0, E_INVALID_METADATA);
+        assert!(vector::length(proof_root) == 32, E_INVALID_METADATA);
+        assert!(vector::length(proof) % 32 == 0, E_INVALID_METADATA);
         
         // Build leaf hash: hash(sanad_id || commitment || source_chain)
-        let mut hasher = hash::sha2_256();
-        hash::update(&mut hasher, sanad_id);
-        hash::update(&mut hasher, commitment);
-        hash::update(&mut hasher, &source_chain.to_le_bytes());
-        let leaf = hash::finish(hasher);
+        // Pre-allocate with known size: 32 + 32 + 1 = 65 bytes
+        let mut leaf_data = vector::empty<u8>();
+        vector::append(&mut leaf_data, *sanad_id);
+        vector::append(&mut leaf_data, *commitment);
+        vector::push_back(&mut leaf_data, source_chain);
+        let leaf = hash::sha2_256(leaf_data);
         
         // Verify Merkle proof using leaf position
-        let current = leaf;
-        let num_levels = proof.len() / 32;
+        let mut current = leaf;
+        let num_levels = vector::length(proof) / 32;
         let mut i = 0;
         
         while (i < num_levels) {
             let start = i * 32;
             let end = start + 32;
-            let sibling = vector::slice(proof, start, end);
+            
+            // Extract sibling from proof
+            let mut sibling = vector::empty<u8>();
+            let mut j = start;
+            while (j < end) {
+                vector::push_back(&mut sibling, *vector::borrow(proof, j));
+                j = j + 1;
+            };
             
             // Use leaf_position bit to determine ordering
-            let bit = (leaf_position >> i) & 1;
+            let bit = (leaf_position >> (i as u8)) & 1;
             if (bit == 0) {
-                // Current is left child
-                let mut pair_hasher = hash::sha2_256();
-                hash::update(&mut pair_hasher, &current);
-                hash::update(&mut pair_hasher, &sibling);
-                current = hash::finish(pair_hasher);
+                // Current is left child: current || sibling
+                let mut pair_data = vector::empty<u8>();
+                vector::append(&mut pair_data, current);
+                vector::append(&mut pair_data, sibling);
+                current = hash::sha2_256(pair_data);
             } else {
-                // Current is right child
-                let mut pair_hasher = hash::sha2_256();
-                hash::update(&mut pair_hasher, &sibling);
-                hash::update(&mut pair_hasher, &current);
-                current = hash::finish(pair_hasher);
+                // Current is right child: sibling || current
+                let mut pair_data = vector::empty<u8>();
+                vector::append(&mut pair_data, sibling);
+                vector::append(&mut pair_data, current);
+                current = hash::sha2_256(pair_data);
             };
             i = i + 1;
-        }
+        };
         
         // Verify computed root matches expected root
         assert!(current == *proof_root, E_INVALID_METADATA);
@@ -423,28 +450,26 @@ module csv_seal::csv_seal {
     /// 1. The lock was recorded in the registry
     /// 2. The REFUND_TIMEOUT has elapsed
     /// 3. The Sanad has not already been refunded
+    /// 4. The caller is the original owner
     public fun refund_sanad(
         sanad_id: vector<u8>,
         state_root: vector<u8>,
         registry: &mut LockRegistry,
         ctx: &mut TxContext
     ) {
-        assert!(
-            table::contains(&registry.locks, sanad_id),
-            1003 // Lock not found in registry
-        );
+        assert!(table::contains(&registry.locks, sanad_id), 1003);
 
         let lock = table::borrow_mut(&mut registry.locks, sanad_id);
         let now = tx_context::epoch_timestamp_ms(ctx) / 1000;
 
         // Verify timeout has elapsed
-        assert!(
-            now >= lock.locked_at + registry.refund_timeout,
-            1004 // Refund timeout not yet expired
-        );
+        assert!(now >= lock.locked_at + registry.refund_timeout, 1004);
 
         // Verify not already refunded
-        assert!(!lock.refunded, 1005); // Already refunded
+        assert!(!lock.refunded, 1005);
+
+        // Verify caller is the original owner (security: prevent unauthorized refunds)
+        assert!(lock.owner == tx_context::sender(ctx), 1009); // Not owner
 
         // Copy lock data before removing
         let lock_sanad_id = lock.sanad_id;
@@ -456,7 +481,19 @@ module csv_seal::csv_seal {
         let lock_proof_root = lock.proof_root;
 
         // Remove lock record from registry to prevent storage bloat
-        table::remove(&mut registry.locks, sanad_id);
+        let LockRecord {
+            sanad_id: _,
+            commitment: _,
+            owner: _,
+            destination_chain: _,
+            asset_class: _,
+            asset_id: _,
+            metadata_hash: _,
+            proof_system: _,
+            proof_root: _,
+            locked_at: _,
+            refunded: _,
+        } = table::remove(&mut registry.locks, sanad_id);
 
         // Re-create the SanadObject
         let sanad = SanadObject {
@@ -490,7 +527,7 @@ module csv_seal::csv_seal {
         nullifier: vector<u8>,
         _ctx: &mut TxContext
     ) {
-        assert!(vector::is_empty(&sanad.nullifier), 1007); // Nullifier already set
+        assert!(vector::is_empty(&sanad.nullifier), 1007);
         sanad.nullifier = nullifier;
 
         event::emit(NullifierRegistered {

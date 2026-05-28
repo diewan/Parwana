@@ -42,6 +42,7 @@ module csv_seal::CSVSealV2 {
     use aptos_std::smart_table::{Self, SmartTable};
     use std::vector;
     use std::bcs;
+    use std::hash;
 
     const ASSET_CLASS_UNSPECIFIED: u8 = 0;
     const ASSET_CLASS_PROOF_SANAD: u8 = 3;
@@ -216,15 +217,6 @@ module csv_seal::CSVSealV2 {
     // =========================================================================
 
     /// Create a new seal resource at the signer's address with the given nonce.
-    ///
-    /// # Arguments
-    /// * `account` - Signer of the transaction (becomes seal owner)
-    /// * `nonce` - Unique nonce for replay resistance
-    ///
-    /// # Note
-    /// Only one seal can exist per address in this simple model.
-    /// For multiple seals per account, use the collection-based variant.
-    #[cmd]
     public entry fun create_seal(account: &signer, nonce: u64) {
         let addr = signer::address_of(account);
         assert!(!exists<Seal>(addr), EAnchorDataExists);
@@ -279,17 +271,6 @@ module csv_seal::CSVSealV2 {
     // =========================================================================
 
     /// Consume a seal and emit an AnchorEvent with the commitment.
-    /// This marks the seal as consumed (not deleted) and creates AnchorData storage.
-    ///
-    /// # Arguments
-    /// * `account` - Signer who owns the seal
-    /// * `commitment` - The 32-byte commitment hash to anchor
-    ///
-    /// # Effects
-    /// - Marks seal.consumed = true
-    /// - Creates AnchorData resource with commitment
-    /// - Emits AnchorEvent
-    #[cmd]
     public entry fun consume_seal(account: &signer, commitment: vector<u8>) {
         let seal_addr = signer::address_of(account);
         assert!(exists<Seal>(seal_addr), ESealNotFound);
@@ -453,6 +434,8 @@ module csv_seal::CSVSealV2 {
     struct LockRegistry has key {
         locks: SmartTable<vector<u8>, LockRecord>,
         refund_timeout: u64,
+        /// Track minted Sanads for replay protection (using SmartTable for efficiency)
+        minted_sanads: SmartTable<vector<u8>, bool>,
     }
 
     /// Initialize the LockRegistry (called once during deployment).
@@ -462,6 +445,7 @@ module csv_seal::CSVSealV2 {
         move_to(account, LockRegistry {
             locks: smart_table::new(),
             refund_timeout: 86400, // 24 hours in seconds
+            minted_sanads: smart_table::new(),
         });
     }
 
@@ -492,13 +476,19 @@ module csv_seal::CSVSealV2 {
         assert!(vector::length(commitment) == 32, EInvalidProof);
 
         // Build leaf hash: sha3_256(sanad_id || commitment || source_chain)
-        use std::hash;
-        let mut hasher = hash::sha3_256();
-        hash::update(&mut hasher, sanad_id);
-        hash::update(&mut hasher, commitment);
-        let chain_bytes: vector<u8> = vector::singleton(source_chain);
-        hash::update(&mut hasher, &chain_bytes);
-        let leaf = hash::finish(hasher);
+        let leaf_data = vector::empty<u8>();
+        let j = 0;
+        while (j < vector::length(sanad_id)) {
+            vector::push_back(&mut leaf_data, *vector::borrow(sanad_id, j));
+            j = j + 1;
+        };
+        let j = 0;
+        while (j < vector::length(commitment)) {
+            vector::push_back(&mut leaf_data, *vector::borrow(commitment, j));
+            j = j + 1;
+        };
+        vector::push_back(&mut leaf_data, source_chain);
+        let leaf = hash::sha3_256(leaf_data);
 
         // Verify Merkle proof using leaf position
         let current = leaf;
@@ -511,20 +501,38 @@ module csv_seal::CSVSealV2 {
             let sibling = vector::slice(proof, start, end);
 
             // Use leaf_position bit to determine ordering
-            let bit = (leaf_position >> i) & 1;
-            let mut pair_hasher = hash::sha3_256();
+            let bit = (leaf_position >> (i as u8)) & 1;
             if (bit == 0) {
                 // Current is left child
-                hash::update(&mut pair_hasher, &current);
-                hash::update(&mut pair_hasher, &sibling);
+                let pair_data = vector::empty<u8>();
+                let j = 0;
+                while (j < vector::length(&current)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&current, j));
+                    j = j + 1;
+                };
+                let j = 0;
+                while (j < vector::length(&sibling)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&sibling, j));
+                    j = j + 1;
+                };
+                current = hash::sha3_256(pair_data);
             } else {
                 // Current is right child
-                hash::update(&mut pair_hasher, &sibling);
-                hash::update(&mut pair_hasher, &current);
+                let pair_data = vector::empty<u8>();
+                let j = 0;
+                while (j < vector::length(&sibling)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&sibling, j));
+                    j = j + 1;
+                };
+                let j = 0;
+                while (j < vector::length(&current)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&current, j));
+                    j = j + 1;
+                };
+                current = hash::sha3_256(pair_data);
             };
-            current = hash::finish(pair_hasher);
             i = i + 1;
-        }
+        };
 
         // Verify computed root matches expected root
         assert!(current == *proof_root, EInvalidProof);
@@ -630,9 +638,23 @@ module csv_seal::CSVSealV2 {
         proof: vector<u8>,
         proof_root: vector<u8>,
         leaf_position: u64,
-    ) {
+    ) acquires LockRegistry {
+        // Input validation: 32-byte checks for hashes
+        assert!(vector::length(&sanad_id) == 32, EInvalidProof);
+        assert!(vector::length(&commitment) == 32, EInvalidProof);
+        assert!(vector::length(&proof_root) == 32, EInvalidProof);
+
+        // Replay protection: check if sanad_id already minted
+        let registry_addr = get_registry_addr();
+        assert!(exists<LockRegistry>(registry_addr), ESealNotFound);
+        let registry = borrow_global_mut<LockRegistry>(registry_addr);
+        assert!(!smart_table::contains(&registry.minted_sanads, copy sanad_id), ESealAlreadyConsumed);
+
         // Verify cross-chain proof before minting
         verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
+
+        // Mark as minted (replay protection)
+        smart_table::add(&mut registry.minted_sanads, sanad_id, true);
 
         let owner_addr = signer::address_of(account);
         assert!(!exists<Seal>(owner_addr), EAnchorDataExists);
@@ -708,11 +730,14 @@ module csv_seal::CSVSealV2 {
         assert!(exists<LockRegistry>(registry_addr), ESealNotFound);
         let registry = borrow_global_mut<LockRegistry>(registry_addr);
 
-        assert!(smart_table::contains(&registry.locks, sanad_id), ESealNotFound);
+        assert!(smart_table::contains(&registry.locks, copy sanad_id), ESealNotFound);
 
         // Verify not already refunded and timeout has elapsed
         let lock = smart_table::borrow_mut(&mut registry.locks, sanad_id);
         assert!(!lock.refunded, ESealAlreadyConsumed);
+
+        // Verify caller is the original owner (security: prevent unauthorized refunds)
+        assert!(lock.owner == claimant, ESealNotConsumed);
 
         let now = aptos_framework::timestamp::now_seconds();
         assert!(now >= lock.locked_at + registry.refund_timeout, ESealNotConsumed);
@@ -755,7 +780,7 @@ module csv_seal::CSVSealV2 {
             return false
         };
         let registry = borrow_global<LockRegistry>(registry_addr);
-        if (!smart_table::contains(&registry.locks, sanad_id)) {
+        if (!smart_table::contains(&registry.locks, copy sanad_id)) {
             return false
         };
         let lock = smart_table::borrow(&registry.locks, sanad_id);
@@ -764,12 +789,19 @@ module csv_seal::CSVSealV2 {
 
     /// Helper to generate commitment from sanad_id and nonce using SHA3-256.
     fun get_commitment_bytes(sanad_id: vector<u8>, nonce: u64): vector<u8> {
-        use std::hash;
-        let mut hasher = hash::sha3_256();
-        hash::update(&mut hasher, &sanad_id);
+        let data = vector::empty<u8>();
+        let j = 0;
+        while (j < vector::length(&sanad_id)) {
+            vector::push_back(&mut data, *vector::borrow(&sanad_id, j));
+            j = j + 1;
+        };
         let nonce_bytes = bcs::to_bytes(&nonce);
-        hash::update(&mut hasher, &nonce_bytes);
-        hash::finish(hasher)
+        let j = 0;
+        while (j < vector::length(&nonce_bytes)) {
+            vector::push_back(&mut data, *vector::borrow(&nonce_bytes, j));
+            j = j + 1;
+        };
+        hash::sha3_256(data)
     }
 
     // =========================================================================
@@ -777,8 +809,6 @@ module csv_seal::CSVSealV2 {
     // =========================================================================
 
     /// Initialize the module by creating the event handle.
-    /// Must be called once when deploying the module.
-    #[cmd]
     public entry fun initialize_module(account: &signer) {
         let addr = signer::address_of(account);
         assert!(!exists<AnchorEventHandle>(addr), EAnchorDataExists);

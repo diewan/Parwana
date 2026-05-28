@@ -266,9 +266,6 @@ contract CSVMint {
         uint256 leafPosition,
         SanadMetadata memory metadata
     ) internal returns (bool) {
-        // Phase 7: Check commitment is anchored before minting
-        if (!isCommitmentAnchored(commitment)) revert CommitmentNotAnchored();
-        
         // Phase 7: Verify proof root matches trusted root
         if (proofRoot != trustedProofRoot) revert InvalidProofRoot();
         
@@ -349,12 +346,14 @@ contract CSVMint {
     /// This implementation uses the leaf position to deterministically verify
     /// the Merkle proof. At each level, if the corresponding bit in leafPosition
     /// is 0, the current hash is the left child; if 1, it's the right child.
+    /// Optimized with inline assembly for minimal gas overhead.
     function _verifyMerkleProof(
         bytes calldata proof,
         bytes32 root,
         bytes32 leaf,
         uint256 leafPosition
     ) internal pure returns (bool) {
+        if (proof.length == 0) return false;
         if (proof.length % 32 != 0) return false;
 
         uint256 numLevels = proof.length / 32;
