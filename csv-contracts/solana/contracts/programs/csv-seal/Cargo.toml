@@ -18,5 +18,7 @@ idl-build = ["anchor-lang/idl-build"]
 [dependencies]
 anchor-lang = "1.0.0"
 solana-program = "1.18"
+blake2 = "0.10"
+sha3 = "0.10"
 
 [workspace]

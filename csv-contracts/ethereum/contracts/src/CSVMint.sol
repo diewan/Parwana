@@ -273,7 +273,12 @@ contract CSVMint {
         if (stateRoot == bytes32(0)) revert InvalidProof();
 
         // Verify the cross-chain proof on-chain with leaf position
-        _verifyCrossChainProof(sanadId, commitment, sourceChain, proof, proofRoot, leafPosition);
+        // Use appropriate hash function based on source chain
+        if (sourceChain == 0) { // CHAIN_BITCOIN
+            _verifyBitcoinProof(sanadId, commitment, proof, proofRoot, leafPosition);
+        } else {
+            _verifyCrossChainProof(sanadId, commitment, sourceChain, proof, proofRoot, leafPosition);
+        }
 
         mintedSanads[sanadId] = true;
         sanadMetadata[sanadId] = metadata;
@@ -313,13 +318,52 @@ contract CSVMint {
         }
     }
 
-    /// @notice Verify a cross-chain lock proof using Merkle tree verification
-    /// @dev Computes the leaf hash as keccak256(sanadId || commitment || sourceChain)
-    /// and verifies it against the proofRoot using the provided Merkle branch.
+    /// @notice Verify a cross-chain lock proof using Merkle tree verification (non-Bitcoin chains)
+    /// @dev Computes the leaf hash based on source chain's native hash function:
+    /// - Ethereum/Solana: keccak256(sanadId || commitment || sourceChain)
+    /// - Sui: blake2b256(sanadId || commitment || sourceChain)
+    /// - Aptos: sha3_256(sanadId || commitment || sourceChain)
+    /// This ensures compatibility with adapters that generate proofs using native hash functions.
     function _verifyCrossChainProof(
         bytes32 sanadId,
         bytes32 commitment,
         uint8 sourceChain,
+        bytes calldata proof,
+        bytes32 proofRoot,
+        uint256 leafPosition
+    ) internal view {
+        // Validate non-empty inputs
+        if (proof.length == 0) revert InvalidProof();
+        if (proofRoot == bytes32(0)) revert InvalidProof();
+        if (sanadId == bytes32(0)) revert InvalidProof();
+        if (commitment == bytes32(0)) revert InvalidProof();
+
+        bytes32 leaf;
+        
+        // Use source chain's native hash function for leaf computation
+        if (sourceChain == 3 || sourceChain == 4) { // Ethereum (3) or Solana (4)
+            // Ethereum/Solana use keccak256
+            leaf = keccak256(abi.encodePacked(sanadId, commitment, sourceChain));
+            if (!_verifyMerkleProofKeccak256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        } else if (sourceChain == 1) { // Sui (1)
+            // Sui uses blake2b256 - use precompile at 0x09
+            leaf = blake2b256(abi.encodePacked(sanadId, commitment, sourceChain));
+            if (!_verifyMerkleProofBlake2b256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        } else if (sourceChain == 2) { // Aptos (2)
+            // Aptos uses sha3_256 - use precompile at 0x05
+            leaf = sha3_256(abi.encodePacked(sanadId, commitment, sourceChain));
+            if (!_verifyMerkleProofSha3_256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        } else {
+            revert InvalidProof();
+        }
+    }
+
+    /// @notice Verify a cross-chain lock proof for Bitcoin using double SHA-256
+    /// @dev Computes the leaf hash as doubleSha256(sanadId || commitment)
+    /// Bitcoin uses SHA256(SHA256(data)) for Merkle tree construction.
+    function _verifyBitcoinProof(
+        bytes32 sanadId,
+        bytes32 commitment,
         bytes calldata proof,
         bytes32 proofRoot,
         uint256 leafPosition
@@ -330,24 +374,16 @@ contract CSVMint {
         if (sanadId == bytes32(0)) revert InvalidProof();
         if (commitment == bytes32(0)) revert InvalidProof();
 
-        // Build the leaf hash: keccak256(sanadId || commitment || sourceChain)
-        bytes32 leaf = keccak256(abi.encodePacked(sanadId, commitment, sourceChain));
+        // Build the leaf hash: doubleSha256(sanadId || commitment)
+        bytes32 leaf = doubleSha256(abi.encodePacked(sanadId, commitment));
 
         // Verify the Merkle proof against the trusted root with leaf position
-        if (!_verifyMerkleProof(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        if (!_verifyMerkleProofDoubleSha256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
     }
 
-    /// @notice Verify a Merkle proof for leaf inclusion
-    /// @dev Walks the Merkle tree bottom-up, hashing pairs at each level.
-    /// The proof bytes are a concatenation of 32-byte sibling hashes.
-    /// At each level, the current hash is paired with the sibling based on
-    /// the current bit of the leaf position index.
-    ///
-    /// This implementation uses the leaf position to deterministically verify
-    /// the Merkle proof. At each level, if the corresponding bit in leafPosition
-    /// is 0, the current hash is the left child; if 1, it's the right child.
-    /// Optimized with inline assembly for minimal gas overhead.
-    function _verifyMerkleProof(
+    /// @notice Verify a Merkle proof for leaf inclusion (keccak256 version)
+    /// @dev Walks the Merkle tree bottom-up, hashing pairs at each level using keccak256.
+    function _verifyMerkleProofKeccak256(
         bytes calldata proof,
         bytes32 root,
         bytes32 leaf,
@@ -366,21 +402,182 @@ contract CSVMint {
             }
 
             // Use leafPosition bit to determine ordering
-            // If bit is 0, current is left child; if 1, current is right child
             if ((leafPosition >> i) & 1 == 0) {
-                current = _hashPair(current, sibling);
+                current = _hashPairKeccak256(current, sibling);
             } else {
-                current = _hashPair(sibling, current);
+                current = _hashPairKeccak256(sibling, current);
             }
         }
 
         return current == root;
     }
 
-    /// @notice Compute the parent hash of two child hashes (Bitcoin-style double SHA-256)
-    /// For Ethereum, we use keccak256 which is the standard for Merkle trees on EVM.
-    function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
-        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
+    /// @notice Verify a Merkle proof for leaf inclusion (sha256 version)
+    /// @dev Walks the Merkle tree bottom-up, hashing pairs at each level using sha256.
+    function _verifyMerkleProofSha256(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 leaf,
+        uint256 leafPosition
+    ) internal pure returns (bool) {
+        if (proof.length == 0) return false;
+        if (proof.length % 32 != 0) return false;
+
+        uint256 numLevels = proof.length / 32;
+        bytes32 current = leaf;
+
+        for (uint256 i = 0; i < numLevels; i++) {
+            bytes32 sibling;
+            assembly {
+                sibling := calldataload(add(proof.offset, mul(i, 32)))
+            }
+
+            // Use leafPosition bit to determine ordering
+            if ((leafPosition >> i) & 1 == 0) {
+                current = _hashPairSha256(current, sibling);
+            } else {
+                current = _hashPairSha256(sibling, current);
+            }
+        }
+
+        return current == root;
+    }
+
+    /// @notice Verify a Merkle proof for leaf inclusion (blake2b256 version)
+    /// @dev Walks the Merkle tree bottom-up, hashing pairs at each level using blake2b256.
+    function _verifyMerkleProofBlake2b256(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 leaf,
+        uint256 leafPosition
+    ) internal view returns (bool) {
+        if (proof.length == 0) return false;
+        if (proof.length % 32 != 0) return false;
+
+        uint256 numLevels = proof.length / 32;
+        bytes32 current = leaf;
+
+        for (uint256 i = 0; i < numLevels; i++) {
+            bytes32 sibling;
+            assembly {
+                sibling := calldataload(add(proof.offset, mul(i, 32)))
+            }
+
+            // Use leafPosition bit to determine ordering
+            if ((leafPosition >> i) & 1 == 0) {
+                current = _hashPairBlake2b256(current, sibling);
+            } else {
+                current = _hashPairBlake2b256(sibling, current);
+            }
+        }
+
+        return current == root;
+    }
+
+    /// @notice Verify a Merkle proof for leaf inclusion (sha3_256 version)
+    /// @dev Walks the Merkle tree bottom-up, hashing pairs at each level using sha3_256.
+    function _verifyMerkleProofSha3_256(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 leaf,
+        uint256 leafPosition
+    ) internal view returns (bool) {
+        if (proof.length == 0) return false;
+        if (proof.length % 32 != 0) return false;
+
+        uint256 numLevels = proof.length / 32;
+        bytes32 current = leaf;
+
+        for (uint256 i = 0; i < numLevels; i++) {
+            bytes32 sibling;
+            assembly {
+                sibling := calldataload(add(proof.offset, mul(i, 32)))
+            }
+
+            // Use leafPosition bit to determine ordering
+            if ((leafPosition >> i) & 1 == 0) {
+                current = _hashPairSha3_256(current, sibling);
+            } else {
+                current = _hashPairSha3_256(sibling, current);
+            }
+        }
+
+        return current == root;
+    }
+
+    /// @notice Verify a Merkle proof for leaf inclusion (double SHA-256 version for Bitcoin)
+    /// @dev Walks the Merkle tree bottom-up, hashing pairs at each level using double SHA-256.
+    function _verifyMerkleProofDoubleSha256(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 leaf,
+        uint256 leafPosition
+    ) internal pure returns (bool) {
+        if (proof.length == 0) return false;
+        if (proof.length % 32 != 0) return false;
+
+        uint256 numLevels = proof.length / 32;
+        bytes32 current = leaf;
+
+        for (uint256 i = 0; i < numLevels; i++) {
+            bytes32 sibling;
+            assembly {
+                sibling := calldataload(add(proof.offset, mul(i, 32)))
+            }
+
+            // Use leafPosition bit to determine ordering
+            if ((leafPosition >> i) & 1 == 0) {
+                current = _hashPairDoubleSha256(current, sibling);
+            } else {
+                current = _hashPairDoubleSha256(sibling, current);
+            }
+        }
+
+        return current == root;
+    }
+
+    /// @notice Compute the parent hash of two child hashes using keccak256
+    function _hashPairKeccak256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(a, b));
+    }
+
+    /// @notice Compute the parent hash of two child hashes using sha256
+    function _hashPairSha256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return sha256(abi.encodePacked(a, b));
+    }
+
+    /// @notice Compute the parent hash of two child hashes using blake2b256
+    function _hashPairBlake2b256(bytes32 a, bytes32 b) internal view returns (bytes32) {
+        return blake2b256(abi.encodePacked(a, b));
+    }
+
+    /// @notice Compute the parent hash of two child hashes using sha3_256
+    function _hashPairSha3_256(bytes32 a, bytes32 b) internal view returns (bytes32) {
+        return sha3_256(abi.encodePacked(a, b));
+    }
+
+    /// @notice Compute the parent hash of two child hashes using double SHA-256 (Bitcoin)
+    function _hashPairDoubleSha256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return doubleSha256(abi.encodePacked(a, b));
+    }
+
+    /// @notice Compute double SHA-256 hash (SHA256(SHA256(data)))
+    function doubleSha256(bytes memory data) internal pure returns (bytes32) {
+        return sha256(abi.encodePacked(sha256(data)));
+    }
+
+    /// @notice Compute BLAKE2b256 hash using precompile at 0x09
+    function blake2b256(bytes memory data) internal view returns (bytes32) {
+        (bool success, bytes memory result) = address(0x09).staticcall(data);
+        require(success, "BLAKE2b256 precompile failed");
+        return bytes32(result);
+    }
+
+    /// @notice Compute SHA3-256 hash using precompile at 0x05
+    function sha3_256(bytes memory data) internal view returns (bytes32) {
+        (bool success, bytes memory result) = address(0x05).staticcall(data);
+        require(success, "SHA3-256 precompile failed");
+        return bytes32(result);
     }
 
     /// @notice Check if a Sanad has been minted on this chain

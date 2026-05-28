@@ -217,7 +217,12 @@ pub mod csv_seal {
         require!(proof_root != [0u8; 32], CsvError::InvalidProof);
 
         // Verify cross-chain proof before minting
-        verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position)?;
+        // Use appropriate hash function based on source chain
+        if source_chain == 0 { // CHAIN_BITCOIN
+            verify_bitcoin_proof(&sanad_id, &commitment, &proof, &proof_root, leaf_position)?;
+        } else {
+            verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position)?;
+        }
 
         let sanad = &mut ctx.accounts.sanad_account;
         let minted_sanad = &mut ctx.accounts.minted_sanad;
@@ -401,8 +406,9 @@ pub mod csv_seal {
     }
 }
 
-/// Verify cross-chain Merkle proof for mint operations
+/// Verify cross-chain Merkle proof for mint operations (non-Bitcoin chains)
 /// Uses leaf position for deterministic verification
+/// Uses source chain's native hash function for compatibility with adapters
 pub fn verify_cross_chain_proof(
     sanad_id: &[u8; 32],
     commitment: &[u8; 32],
@@ -411,7 +417,10 @@ pub fn verify_cross_chain_proof(
     proof_root: &[u8; 32],
     leaf_position: u64,
 ) -> Result<()> {
-    use solana_program::keccak::hashv;
+    use solana_program::hash::hashv;
+    use solana_program::keccak::hashv as keccak_hashv;
+    use blake2::{Blake2b512, Digest as Blake2Digest};
+    use sha3::{Sha3_256, Digest as Sha3Digest};
     
     // Validate inputs
     if proof_root == &[0u8; 32] {
@@ -421,9 +430,118 @@ pub fn verify_cross_chain_proof(
         return Err(CsvError::InvalidProof.into());
     }
     
-    // Build leaf hash: keccak256(sanad_id || commitment || source_chain)
-    let leaf_data: &[&[u8]] = &[sanad_id, commitment, &[source_chain]];
-    let leaf = hashv(leaf_data).to_bytes();
+    let leaf: [u8; 32];
+    
+    // Use source chain's native hash function for leaf computation
+    if source_chain == 3 || source_chain == 4 { // Ethereum (3) or Solana (4)
+        // Ethereum/Solana use keccak256
+        let leaf_data: &[&[u8]] = &[sanad_id, commitment, &[source_chain]];
+        leaf = keccak_hashv(leaf_data).to_bytes();
+    } else if source_chain == 1 { // Sui (1)
+        // Sui uses blake2b256
+        let mut hasher = Blake2b512::new();
+        Blake2Digest::update(&mut hasher, sanad_id);
+        Blake2Digest::update(&mut hasher, commitment);
+        Blake2Digest::update(&mut hasher, &[source_chain]);
+        let result = Blake2Digest::finalize(hasher);
+        leaf = result.as_slice()[0..32].try_into().unwrap();
+    } else if source_chain == 2 { // Aptos (2)
+        // Aptos uses sha3_256
+        let mut hasher = Sha3_256::new();
+        Sha3Digest::update(&mut hasher, sanad_id);
+        Sha3Digest::update(&mut hasher, commitment);
+        Sha3Digest::update(&mut hasher, &[source_chain]);
+        let result = Sha3Digest::finalize(hasher);
+        leaf = result.as_slice().try_into().unwrap();
+    } else {
+        return Err(CsvError::InvalidProof.into());
+    }
+    
+    // Verify Merkle proof using leaf position with appropriate hash function
+    let mut current = leaf;
+    let num_levels = proof.len() / 32;
+    
+    for i in 0..num_levels {
+        let start = i * 32;
+        let end = start + 32;
+        let sibling: [u8; 32] = proof[start..end].try_into().unwrap();
+        
+        // Use leaf_position bit to determine ordering
+        let bit = (leaf_position >> i) & 1;
+        if bit == 0 {
+            // Current is left child
+            if source_chain == 3 || source_chain == 4 {
+                let hash_data: &[&[u8]] = &[&current, &sibling];
+                current = keccak_hashv(hash_data).to_bytes();
+            } else if source_chain == 1 {
+                let mut hasher = Blake2b512::new();
+                Blake2Digest::update(&mut hasher, &current);
+                Blake2Digest::update(&mut hasher, &sibling);
+                let result = Blake2Digest::finalize(hasher);
+                current = result.as_slice()[0..32].try_into().unwrap();
+            } else if source_chain == 2 {
+                let mut hasher = Sha3_256::new();
+                Sha3Digest::update(&mut hasher, &current);
+                Sha3Digest::update(&mut hasher, &sibling);
+                let result = Sha3Digest::finalize(hasher);
+                current = result.as_slice().try_into().unwrap();
+            } else {
+                return Err(CsvError::InvalidProof.into());
+            }
+        } else {
+            // Current is right child
+            if source_chain == 3 || source_chain == 4 {
+                let hash_data: &[&[u8]] = &[&sibling, &current];
+                current = keccak_hashv(hash_data).to_bytes();
+            } else if source_chain == 1 {
+                let mut hasher = Blake2b512::new();
+                Blake2Digest::update(&mut hasher, &sibling);
+                Blake2Digest::update(&mut hasher, &current);
+                let result = Blake2Digest::finalize(hasher);
+                current = result.as_slice()[0..32].try_into().unwrap();
+            } else if source_chain == 2 {
+                let mut hasher = Sha3_256::new();
+                Sha3Digest::update(&mut hasher, &sibling);
+                Sha3Digest::update(&mut hasher, &current);
+                let result = Sha3Digest::finalize(hasher);
+                current = result.as_slice().try_into().unwrap();
+            } else {
+                return Err(CsvError::InvalidProof.into());
+            }
+        }
+    }
+    
+    // Verify computed root matches expected root
+    if current != *proof_root {
+        return Err(CsvError::InvalidProof.into());
+    }
+    
+    Ok(())
+}
+
+/// Verify cross-chain Merkle proof for Bitcoin (uses double SHA-256)
+/// Bitcoin uses SHA256(SHA256(data)) for Merkle tree construction
+pub fn verify_bitcoin_proof(
+    sanad_id: &[u8; 32],
+    commitment: &[u8; 32],
+    proof: &[u8],
+    proof_root: &[u8; 32],
+    leaf_position: u64,
+) -> Result<()> {
+    use solana_program::hash::hashv;
+    
+    // Validate inputs
+    if proof_root == &[0u8; 32] {
+        return Err(CsvError::InvalidProof.into());
+    }
+    if proof.len() % 32 != 0 {
+        return Err(CsvError::InvalidProof.into());
+    }
+    
+    // Build leaf hash: double_sha256(sanad_id || commitment)
+    let leaf_data: &[&[u8]] = &[sanad_id, commitment];
+    let first_hash = hashv(leaf_data).to_bytes();
+    let leaf = hashv(&[&first_hash]).to_bytes();
     
     // Verify Merkle proof using leaf position
     let mut current = leaf;
@@ -439,11 +557,13 @@ pub fn verify_cross_chain_proof(
         if bit == 0 {
             // Current is left child
             let hash_data: &[&[u8]] = &[&current, &sibling];
-            current = hashv(hash_data).to_bytes();
+            let first = hashv(hash_data).to_bytes();
+            current = hashv(&[&first]).to_bytes();
         } else {
             // Current is right child
             let hash_data: &[&[u8]] = &[&sibling, &current];
-            current = hashv(hash_data).to_bytes();
+            let first = hashv(hash_data).to_bytes();
+            current = hashv(&[&first]).to_bytes();
         }
     }
     

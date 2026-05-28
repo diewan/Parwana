@@ -1,22 +1,27 @@
-module csv_seal {
-    use std::string;
-    use sui::object;
-    use sui::tx_context;
-    use sui::transfer;
+module csv_seal::csv_seal {
+    use sui::bcs;
     use sui::event;
-    use sui::hash;
 
     /// Chain IDs for cross-chain transfers (must match other CSV contracts)
+    #[allow(unused_const)]
     const CHAIN_BITCOIN: u8 = 0;
+    #[allow(unused_const)]
     const CHAIN_SUI: u8 = 1;
+    #[allow(unused_const)]
     const CHAIN_APTOS: u8 = 2;
+    #[allow(unused_const)]
     const CHAIN_ETHEREUM: u8 = 3;
+    #[allow(unused_const)]
     const CHAIN_SOLANA: u8 = 4;
 
     /// Asset class constants
+    #[allow(unused_const)]
     const ASSET_CLASS_UNSPECIFIED: u8 = 0;
+    #[allow(unused_const)]
     const ASSET_CLASS_FUNGIBLE_TOKEN: u8 = 1;
+    #[allow(unused_const)]
     const ASSET_CLASS_NON_FUNGIBLE_TOKEN: u8 = 2;
+    #[allow(unused_const)]
     const ASSET_CLASS_PROOF_SANAD: u8 = 3;
 
     /// Proof system constants
@@ -26,12 +31,13 @@ module csv_seal {
     const ESEAL_ALREADY_CONSUMED: u64 = 0;
     const EINVALID_PROOF: u64 = 1;
     const EALREADY_LOCKED: u64 = 2;
+    #[allow(unused_const)]
     const EALREADY_MINTED: u64 = 3;
 
     /// A seal object that can be consumed exactly once.
     /// Seals are created by the contract owner and distributed to users
     /// who then consume them to anchor commitments.
-    struct Seal has key, store {
+    public struct Seal has key, store {
         id: object::UID,
         /// Unique Sanad identifier (preserved across chains)
         sanad_id: vector<u8>,
@@ -62,7 +68,8 @@ module csv_seal {
     }
 
     /// Lock record for refund support
-    struct LockRecord has key, store {
+    #[allow(unused_field)]
+    public struct LockRecord has key, store {
         id: object::UID,
         /// Sanad identifier
         sanad_id: vector<u8>,
@@ -81,7 +88,8 @@ module csv_seal {
     }
 
     /// Minted Sanad record for replay protection
-    struct MintedSanad has key, store {
+    #[allow(unused_field)]
+    public struct MintedSanad has key, store {
         id: object::UID,
         /// Sanad identifier that was minted
         sanad_id: vector<u8>,
@@ -90,17 +98,18 @@ module csv_seal {
     }
 
     /// Event emitted when a seal is consumed with a commitment.
-    struct AnchorEvent has copy, drop {
+    public struct AnchorEvent has copy, drop {
         /// The commitment hash being anchored
         commitment: vector<u8>,
         /// The object ID of the consumed seal
-        seal_id: address,
+        seal_id: sui::object::ID,
         /// Timestamp of the anchoring (Unix epoch milliseconds)
         timestamp_ms: u64,
     }
 
     /// Event emitted when a Sanad is created
-    struct SanadCreated has copy, drop {
+    #[allow(unused_field)]
+    public struct SanadCreated has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         owner: address,
@@ -108,7 +117,7 @@ module csv_seal {
     }
 
     /// Event emitted when a Sanad is consumed
-    struct SanadConsumed has copy, drop {
+    public struct SanadConsumed has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         consumer: address,
@@ -116,7 +125,7 @@ module csv_seal {
     }
 
     /// Event emitted when a Sanad is locked for cross-chain transfer
-    struct CrossChainLock has copy, drop {
+    public struct CrossChainLock has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         owner: address,
@@ -126,7 +135,7 @@ module csv_seal {
     }
 
     /// Event emitted when a Sanad is minted from cross-chain transfer
-    struct CrossChainMint has copy, drop {
+    public struct CrossChainMint has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         owner: address,
@@ -136,7 +145,8 @@ module csv_seal {
     }
 
     /// Event emitted when a locked Sanad is refunded
-    struct CrossChainRefund has copy, drop {
+    #[allow(unused_field)]
+    public struct CrossChainRefund has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
         claimant: address,
@@ -144,28 +154,32 @@ module csv_seal {
     }
 
     /// Event emitted when a nullifier is registered
-    struct NullifierRegistered has copy, drop {
+    #[allow(unused_field)]
+    public struct NullifierRegistered has copy, drop {
         nullifier: vector<u8>,
         sanad_id: vector<u8>,
         timestamp_ms: u64,
     }
 
     /// Event emitted when a proof is accepted
-    struct ProofAccepted has copy, drop {
+    #[allow(unused_field)]
+    public struct ProofAccepted has copy, drop {
         proof_root: vector<u8>,
         protocol_version: vector<u8>,
         timestamp_ms: u64,
     }
 
     /// Event emitted when a proof is rejected
-    struct ProofRejected has copy, drop {
+    #[allow(unused_field)]
+    public struct ProofRejected has copy, drop {
         proof_root: vector<u8>,
         reason: vector<u8>,
         timestamp_ms: u64,
     }
 
     /// Event emitted when a replay attack is detected
-    struct ReplayDetected has copy, drop {
+    #[allow(unused_field)]
+    public struct ReplayDetected has copy, drop {
         replay_id: vector<u8>,
         sanad_id: vector<u8>,
         timestamp_ms: u64,
@@ -277,16 +291,21 @@ module csv_seal {
         ctx: &mut tx_context::TxContext,
     ): Seal {
         // Verify cross-chain proof before minting
-        verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
+        // Use appropriate hash function based on source chain
+        if (source_chain == CHAIN_BITCOIN) {
+            verify_bitcoin_proof(&sanad_id, &commitment, &proof, &proof_root, leaf_position);
+        } else {
+            verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
+        };
 
         let timestamp_ms = tx_context::epoch(ctx) * 1000;
 
         event::emit(CrossChainMint {
-            sanad_id: sanad_id.clone(),
-            commitment: commitment.clone(),
+            sanad_id,
+            commitment,
             owner,
             source_chain,
-            source_seal_ref: source_seal_ref.clone(),
+            source_seal_ref,
             timestamp_ms,
         });
 
@@ -308,8 +327,9 @@ module csv_seal {
         }
     }
 
-    /// Verify cross-chain Merkle proof for mint operations
+    /// Verify cross-chain Merkle proof for mint operations (non-Bitcoin chains)
     /// Uses leaf position for deterministic verification
+    /// Uses source chain's native hash function for compatibility with adapters
     fun verify_cross_chain_proof(
         sanad_id: &vector<u8>,
         commitment: &vector<u8>,
@@ -318,29 +338,58 @@ module csv_seal {
         proof_root: &vector<u8>,
         leaf_position: u64,
     ) {
-        // Build leaf hash: keccak256(sanad_id || commitment || source_chain)
-        // Sui doesn't have native keccak256, so we use sha256 with domain separator
+        // Build leaf hash based on source chain's native hash function
         let mut leaf_data = vector::empty();
-        vector::append(&mut leaf_data, sanad_id);
-        vector::append(&mut leaf_data, commitment);
+        vector::append(&mut leaf_data, *sanad_id);
+        vector::append(&mut leaf_data, *commitment);
         let chain_bytes = bcs::to_bytes(&source_chain);
-        vector::append(&mut leaf_data, &chain_bytes);
+        vector::append(&mut leaf_data, chain_bytes);
         
-        let leaf_hash = keccak256_compat(&leaf_data);
+        let leaf_hash = if (source_chain == 1) { // Sui
+            // Sui uses blake2b256 (native)
+            sui::hash::blake2b256(&leaf_data)
+        } else if (source_chain == 3 || source_chain == 4) { // Ethereum (3) or Solana (4)
+            // Ethereum/Solana use keccak256 (native in Sui)
+            sui::hash::keccak256(&leaf_data)
+        } else if (source_chain == 2) { // Aptos (2)
+            // Aptos uses sha3_256 (native in Sui)
+            std::hash::sha3_256(leaf_data)
+        } else {
+            abort EINVALID_PROOF
+        };
+        
+        // Verify Merkle proof against proof root with appropriate hash function
+        let is_valid = verify_merkle_proof_with_hash(proof, proof_root, &leaf_hash, leaf_position, source_chain);
+        assert!(is_valid, EINVALID_PROOF);
+    }
+
+    /// Verify cross-chain Merkle proof for Bitcoin (uses double SHA-256)
+    fun verify_bitcoin_proof(
+        sanad_id: &vector<u8>,
+        commitment: &vector<u8>,
+        proof: &vector<u8>,
+        proof_root: &vector<u8>,
+        leaf_position: u64,
+    ) {
+        // Build leaf hash: double_sha256(sanad_id || commitment)
+        // Bitcoin uses double SHA-256 for Merkle tree construction
+        let mut leaf_data = vector::empty();
+        vector::append(&mut leaf_data, *sanad_id);
+        vector::append(&mut leaf_data, *commitment);
+        
+        let leaf_hash = double_sha256(&leaf_data);
         
         // Verify Merkle proof against proof root
         let is_valid = verify_merkle_proof(proof, proof_root, &leaf_hash, leaf_position);
         assert!(is_valid, EINVALID_PROOF);
     }
 
-    /// keccak256 compatibility layer for Sui
-    /// Uses sha256 with domain separator to match Ethereum/Solana behavior
-    fun keccak256_compat(data: &vector<u8>): vector<u8> {
-        let mut domain = b"csv.keccak256.compat";
-        let mut input = vector::empty();
-        vector::append(&mut input, domain);
-        vector::append(&mut input, data);
-        hash::sha256(&input)
+    /// double SHA-256 hash function for Bitcoin compatibility (Sui implementation)
+    /// Bitcoin uses SHA256(SHA256(data)) for Merkle tree construction
+    /// Sui has native sha2_256 function
+    fun double_sha256(data: &vector<u8>): vector<u8> {
+        let first = std::hash::sha2_256(*data);
+        std::hash::sha2_256(first)
     }
 
     /// Verify a Merkle proof for leaf inclusion
@@ -350,6 +399,17 @@ module csv_seal {
         root: &vector<u8>,
         leaf: &vector<u8>,
         leaf_position: u64,
+    ): bool {
+        verify_merkle_proof_with_hash(proof, root, leaf, leaf_position, 0) // Default to sha256
+    }
+
+    /// Verify a Merkle proof for leaf inclusion with source chain-specific hash function
+    fun verify_merkle_proof_with_hash(
+        proof: &vector<u8>,
+        root: &vector<u8>,
+        leaf: &vector<u8>,
+        leaf_position: u64,
+        source_chain: u8,
     ): bool {
         let proof_len = vector::length(proof);
         let root_len = vector::length(root);
@@ -372,18 +432,27 @@ module csv_seal {
                 j = j + 1;
             };
 
-            let bit = (leaf_position >> i) & 1;
+            let bit = ((leaf_position >> (i as u8)) & 1) as u8;
             let mut hash_input = vector::empty();
             
             if (bit == 0) {
-                vector::append(&mut hash_input, &current_hash);
-                vector::append(&mut hash_input, &sibling_hash);
+                vector::append(&mut hash_input, current_hash);
+                vector::append(&mut hash_input, sibling_hash);
             } else {
-                vector::append(&mut hash_input, &sibling_hash);
-                vector::append(&mut hash_input, &current_hash);
+                vector::append(&mut hash_input, sibling_hash);
+                vector::append(&mut hash_input, current_hash);
             };
 
-            current_hash = keccak256_compat(&hash_input);
+            // Use source chain's native hash function for Merkle tree traversal
+            current_hash = if (source_chain == 1) { // Sui
+                sui::hash::blake2b256(&hash_input)
+            } else if (source_chain == 3 || source_chain == 4) { // Ethereum (3) or Solana (4)
+                sui::hash::keccak256(&hash_input)
+            } else if (source_chain == 2) { // Aptos (2)
+                std::hash::sha3_256(hash_input)
+            } else {
+                sui::hash::blake2b256(&hash_input) // Default
+            };
             i = i + 1;
         };
 
@@ -412,7 +481,7 @@ module csv_seal {
     }
 
     /// Get the object ID of a seal.
-    public fun id(seal: &Seal): address {
+    public fun id(seal: &Seal): sui::object::ID {
         object::uid_to_inner(&seal.id)
     }
 

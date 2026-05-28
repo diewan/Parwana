@@ -38,7 +38,6 @@ module csv_seal::CSVSealV2 {
     use std::signer;
     use std::event;
     use std::account;
-    use std::object;
     use aptos_std::smart_table::{Self, SmartTable};
     use std::vector;
     use std::bcs;
@@ -52,7 +51,7 @@ module csv_seal::CSVSealV2 {
     // Cross-Chain Events (matching Ethereum version)
     // =========================================================================
 
-    /// Emitted when a new seal/Sanad is created.
+    // Emitted when a new seal/Sanad is created.
     #[event]
     struct SanadCreated has drop, store {
         sanad_id: vector<u8>,
@@ -65,14 +64,14 @@ module csv_seal::CSVSealV2 {
         proof_root: vector<u8>,
     }
 
-    /// Emitted when a seal/Sanad is consumed.
+    // Emitted when a seal/Sanad is consumed.
     #[event]
     struct SanadConsumed has drop, store {
         sanad_id: vector<u8>,
         consumer: address,
     }
 
-    /// Emitted when a Sanad is locked for cross-chain transfer.
+    // Emitted when a Sanad is locked for cross-chain transfer.
     #[event]
     struct CrossChainLock has drop, store {
         sanad_id: vector<u8>,
@@ -89,7 +88,7 @@ module csv_seal::CSVSealV2 {
         proof_root: vector<u8>,
     }
 
-    /// Emitted when a Sanad is minted from cross-chain proof.
+    // Emitted when a Sanad is minted from cross-chain proof.
     #[event]
     struct CrossChainMint has drop, store {
         sanad_id: vector<u8>,
@@ -104,7 +103,7 @@ module csv_seal::CSVSealV2 {
         proof_root: vector<u8>,
     }
 
-    /// Emitted when a Sanad is refunded after timeout.
+    // Emitted when a Sanad is refunded after timeout.
     #[event]
     struct CrossChainRefund has drop, store {
         sanad_id: vector<u8>,
@@ -113,7 +112,7 @@ module csv_seal::CSVSealV2 {
         refunded_at: u64,
     }
 
-    /// Emitted whenever token/NFT/proof metadata is attached to a Sanad.
+    // Emitted whenever token/NFT/proof metadata is attached to a Sanad.
     #[event]
     struct SanadMetadataRecorded has drop, store {
         sanad_id: vector<u8>,
@@ -124,7 +123,7 @@ module csv_seal::CSVSealV2 {
         proof_root: vector<u8>,
     }
 
-    /// Emitted when a nullifier is registered.
+    // Emitted when a nullifier is registered.
     #[event]
     struct NullifierRegistered has drop, store {
         nullifier: vector<u8>,
@@ -167,7 +166,7 @@ module csv_seal::CSVSealV2 {
     // Structs
     // =========================================================================
 
-    /// Anchor event emitted when a seal is consumed.
+    // Anchor event emitted when a seal is consumed.
     #[event]
     struct AnchorEvent has drop, store {
         /// The commitment hash being anchored (32 bytes).
@@ -458,10 +457,13 @@ module csv_seal::CSVSealV2 {
     // Cross-Chain Proof Verification
     // =========================================================================
 
-    /// Verify a cross-chain Merkle proof using keccak256 hashing and leaf position.
-    /// Computes leaf = keccak256(sanad_id || commitment || source_chain)
-    /// then walks up the tree using leaf_position to determine left/right ordering.
-    /// Uses keccak256 compatibility layer for cross-chain consistency with Ethereum and Solana.
+    /// Verify a cross-chain Merkle proof using source chain-specific hash functions (non-Bitcoin chains).
+    /// Uses native hash functions where available:
+    /// - Ethereum/Solana: keccak256 (native via aptos_std::aptos_hash::keccak256)
+    /// - Sui: blake2b256 (native via aptos_std::aptos_hash::blake2b_256)
+    /// - Aptos: sha3_256 (native via hash::sha3_256)
+    /// - SHA-256: sha2_256 (native via hash::sha2_256)
+    /// Note: All hash functions are now available natively in Aptos via aptos_std::aptos_hash
     fun verify_cross_chain_proof(
         sanad_id: &vector<u8>,
         commitment: &vector<u8>,
@@ -476,7 +478,7 @@ module csv_seal::CSVSealV2 {
         assert!(vector::length(sanad_id) == 32, EInvalidProof);
         assert!(vector::length(commitment) == 32, EInvalidProof);
 
-        // Build leaf hash: keccak256(sanad_id || commitment || source_chain)
+        // Build leaf hash using source chain's native hash function
         let leaf_data = vector::empty<u8>();
         let j = 0;
         while (j < vector::length(sanad_id)) {
@@ -489,7 +491,157 @@ module csv_seal::CSVSealV2 {
             j = j + 1;
         };
         vector::push_back(&mut leaf_data, source_chain);
-        let leaf = keccak256_compat(&leaf_data);
+        
+        let leaf = if (source_chain == 2) { // Aptos
+            // Aptos uses sha3_256 (native)
+            hash::sha3_256(leaf_data)
+        } else if (source_chain == 3 || source_chain == 4) { // Ethereum (3) or Solana (4)
+            // Ethereum/Solana use keccak256 (native via aptos_std::aptos_hash)
+            aptos_std::aptos_hash::keccak256(leaf_data)
+        } else if (source_chain == 1) { // Sui (1)
+            // Sui uses blake2b256 (native via aptos_std::aptos_hash)
+            aptos_std::aptos_hash::blake2b_256(leaf_data)
+        } else {
+            abort EInvalidProof
+        };
+
+        // Verify Merkle proof using leaf position with appropriate hash function
+        let is_valid = verify_merkle_proof_with_chain(proof, proof_root, &leaf, leaf_position, source_chain);
+        assert!(is_valid, EInvalidProof);
+    }
+
+    /// Verify a Merkle proof for leaf inclusion with source chain-specific hash function
+    fun verify_merkle_proof_with_chain(
+        proof: &vector<u8>,
+        root: &vector<u8>,
+        leaf: &vector<u8>,
+        leaf_position: u64,
+        source_chain: u8,
+    ): bool {
+        let proof_len = vector::length(proof);
+        let root_len = vector::length(root);
+        let leaf_len = vector::length(leaf);
+
+        // Validate inputs
+        if (proof_len == 0 || proof_len % 32 != 0) return false;
+        if (root_len != 32 || leaf_len != 32) return false;
+
+        let num_levels = proof_len / 32;
+        let current = *leaf;
+        let i = 0;
+
+        while (i < num_levels) {
+            let start = i * 32;
+            let end = start + 32;
+            let sibling = vector::slice(proof, start, end);
+
+            // Use leaf_position bit to determine ordering
+            let bit = (leaf_position >> (i as u8)) & 1;
+            if (bit == 0) {
+                // Current is left child
+                let pair_data = vector::empty<u8>();
+                let j = 0;
+                while (j < vector::length(&current)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&current, j));
+                    j = j + 1;
+                };
+                let j = 0;
+                while (j < vector::length(&sibling)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&sibling, j));
+                    j = j + 1;
+                };
+                current = hash_pair_with_chain(pair_data, source_chain);
+            } else {
+                // Current is right child
+                let pair_data = vector::empty<u8>();
+                let j = 0;
+                while (j < vector::length(&sibling)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&sibling, j));
+                    j = j + 1;
+                };
+                let j = 0;
+                while (j < vector::length(&current)) {
+                    vector::push_back(&mut pair_data, *vector::borrow(&current, j));
+                    j = j + 1;
+                };
+                current = hash_pair_with_chain(pair_data, source_chain);
+            };
+            i = i + 1;
+        };
+
+        // Verify computed root matches expected root
+        current == *root
+    }
+
+    /// Hash a pair using source chain's native hash function
+    fun hash_pair_with_chain(data: vector<u8>, source_chain: u8): vector<u8> {
+        // Use source chain's native hash function
+        if (source_chain == 3 || source_chain == 4) { // Ethereum (3) or Solana (4)
+            // Ethereum/Solana use keccak256 (native via aptos_std::aptos_hash)
+            aptos_std::aptos_hash::keccak256(data)
+        } else if (source_chain == 2) { // Aptos (2)
+            // Aptos uses sha3_256 (native)
+            hash::sha3_256(data)
+        } else if (source_chain == 1) { // Sui (1)
+            // Sui uses blake2b256 (native via aptos_std::aptos_hash)
+            aptos_std::aptos_hash::blake2b_256(data)
+        } else {
+            hash::sha3_256(data) // Default
+        }
+    }
+
+    /// sha3_256 hash function for cross-chain compatibility (Aptos-specific)
+    /// Aptos Move has sha3_256 natively
+    fun sha3_256_hash(data: &vector<u8>): vector<u8> {
+        let data_copy = *data;
+        hash::sha3_256(data_copy)
+    }
+
+    /// sha2_256 (SHA-256) hash function for cross-chain compatibility (Aptos-specific)
+    /// Aptos Move has sha2_256 natively
+    fun sha2_256_hash(data: &vector<u8>): vector<u8> {
+        let data_copy = *data;
+        hash::sha2_256(data_copy)
+    }
+
+    /// double SHA-256 hash function for Bitcoin compatibility (Aptos implementation)
+    /// Bitcoin uses SHA256(SHA256(data)) for Merkle tree construction
+    /// Aptos has sha2_256 natively
+    fun double_sha256(data: &vector<u8>): vector<u8> {
+        let data_copy = *data;
+        let first = hash::sha2_256(data_copy);
+        hash::sha2_256(first)
+    }
+
+    /// Verify a cross-chain Merkle proof for Bitcoin (uses double SHA-256).
+    /// Computes leaf = double_sha256(sanad_id || commitment)
+    /// Bitcoin uses SHA256(SHA256(data)) for Merkle tree construction.
+    fun verify_bitcoin_proof(
+        sanad_id: &vector<u8>,
+        commitment: &vector<u8>,
+        proof: &vector<u8>,
+        proof_root: &vector<u8>,
+        leaf_position: u64,
+    ) {
+        // Validate inputs
+        assert!(vector::length(proof_root) == 32, EInvalidProof);
+        assert!(vector::length(proof) % 32 == 0, EInvalidProof);
+        assert!(vector::length(sanad_id) == 32, EInvalidProof);
+        assert!(vector::length(commitment) == 32, EInvalidProof);
+
+        // Build leaf hash: double_sha256(sanad_id || commitment)
+        let leaf_data = vector::empty<u8>();
+        let j = 0;
+        while (j < vector::length(sanad_id)) {
+            vector::push_back(&mut leaf_data, *vector::borrow(sanad_id, j));
+            j = j + 1;
+        };
+        let j = 0;
+        while (j < vector::length(commitment)) {
+            vector::push_back(&mut leaf_data, *vector::borrow(commitment, j));
+            j = j + 1;
+        };
+        let leaf = double_sha256(&leaf_data);
 
         // Verify Merkle proof using leaf position
         let current = leaf;
@@ -516,7 +668,7 @@ module csv_seal::CSVSealV2 {
                     vector::push_back(&mut pair_data, *vector::borrow(&sibling, j));
                     j = j + 1;
                 };
-                current = keccak256_compat(&pair_data);
+                current = double_sha256(&pair_data);
             } else {
                 // Current is right child
                 let pair_data = vector::empty<u8>();
@@ -530,35 +682,13 @@ module csv_seal::CSVSealV2 {
                     vector::push_back(&mut pair_data, *vector::borrow(&current, j));
                     j = j + 1;
                 };
-                current = keccak256_compat(&pair_data);
+                current = double_sha256(&pair_data);
             };
             i = i + 1;
         };
 
         // Verify computed root matches expected root
         assert!(current == *proof_root, EInvalidProof);
-    }
-
-    /// keccak256 hash function for cross-chain compatibility
-    /// Matches Ethereum's keccak256 and Solana's hashv for consistent proof verification
-    /// Aptos Move doesn't have native keccak256, so we use sha3_256 as a fallback
-    /// with a domain separator to distinguish it from other uses.
-    fun keccak256_compat(data: &vector<u8>): vector<u8> {
-        let domain = b"csv.keccak256.compat";
-        let input = vector::empty<u8>();
-        let i = 0;
-        let len = vector::length(&domain);
-        while (i < len) {
-            vector::push_back(&mut input, *vector::borrow(&domain, i));
-            i = i + 1;
-        };
-        let j = 0;
-        let data_len = vector::length(data);
-        while (j < data_len) {
-            vector::push_back(&mut input, *vector::borrow(data, j));
-            j = j + 1;
-        };
-        hash::sha3_256(input)
     }
 
     // =========================================================================
@@ -674,7 +804,12 @@ module csv_seal::CSVSealV2 {
         assert!(!smart_table::contains(&registry.minted_sanads, copy sanad_id), ESealAlreadyConsumed);
 
         // Verify cross-chain proof before minting
-        verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
+        // Use appropriate hash function based on source chain
+        if (source_chain == 0) { // CHAIN_BITCOIN
+            verify_bitcoin_proof(&sanad_id, &commitment, &proof, &proof_root, leaf_position);
+        } else {
+            verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
+        };
 
         // Mark as minted (replay protection)
         smart_table::add(&mut registry.minted_sanads, sanad_id, true);
