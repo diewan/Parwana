@@ -8,7 +8,7 @@ use sha2::Digest;
 use csv_hash::ChainId;
 use csv_hash::Hash;
 
-use crate::config::{Chain, Config};
+use crate::config::{Chain, Config, Network};
 use crate::output;
 use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager};
 
@@ -65,7 +65,7 @@ pub async fn execute(
 async fn cmd_create(
     chain: Chain,
     value: Option<u64>,
-    _config: &Config,
+    config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header(&format!("Creating Sanad on {}", chain));
@@ -77,12 +77,79 @@ async fn cmd_create(
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
 
+    // Convert CLI config to SDK config format
+    let mut sdk_config = csv_sdk::config::Config::default();
+    sdk_config.network = match config.chain(&chain)?.network {
+        Network::Test => csv_sdk::config::Network::Testnet,
+        Network::Main => csv_sdk::config::Network::Mainnet,
+        Network::Dev => csv_sdk::config::Network::Devnet,
+    };
+
+    // Convert chain config to SDK format
+    let chain_cfg = config.chain(&chain)?;
+    let sdk_chain_config = csv_sdk::config::ChainConfig {
+        rpc: csv_sdk::config::RpcConfig {
+            url: chain_cfg.rpc_url.clone(),
+            api_key: None,
+            timeout_ms: 30000,
+            max_retries: 3,
+        },
+        finality_depth: chain_cfg.finality_depth as u32,
+        enabled: true,
+        xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
+        contract_address: chain_cfg.contract_address.clone(),
+        program_id: None,
+    };
+    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+
     // Build CSV client with the requested chain enabled
     let client = CsvClient::builder()
         .with_chain(core_chain.clone())
+        .with_config(sdk_config)
         .with_store_backend(StoreBackend::InMemory)
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
+
+    // Initialize chain adapters for the configured network
+    let network_type = match config.chain(&chain)?.network {
+        Network::Test => csv_sdk::client::NetworkType::Testnet,
+        Network::Main => csv_sdk::client::NetworkType::Mainnet,
+        Network::Dev => csv_sdk::client::NetworkType::Testnet, // Dev uses testnet
+    };
+
+    // Derive private key from wallet mnemonic for chains that require signing
+    let mut private_keys = std::collections::HashMap::new();
+    if chain.as_str() == "ethereum" || chain.as_str() == "bitcoin" || chain.as_str() == "solana" || chain.as_str() == "sui" || chain.as_str() == "aptos" {
+        // Check if mnemonic is stored in wallet
+        let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first with 'csv wallet init' or 'csv wallet import'.")
+        })?;
+
+        // Re-derive the mnemonic to get the seed
+        let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+        let seed = mnemonic.to_seed(None);
+        let mut seed_array = [0u8; 64];
+        seed_array.copy_from_slice(seed.as_bytes());
+
+        // Derive keys for all chains (account 0)
+        let keys = csv_keys::bip44::derive_all_chain_keys(&seed_array, 0);
+
+        // Find the key for the requested chain
+        let core_chain = csv_hash::ChainId::new(chain.as_str());
+        let secret_key = keys
+            .get(&core_chain)
+            .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
+
+        // Format as hex with 0x prefix
+        let hex_key = format!("0x{}", hex::encode(secret_key.as_bytes()));
+        private_keys.insert(chain.as_str().to_string(), Some(hex_key));
+    }
+
+    client
+        .init_adapters(network_type, private_keys)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize chain adapters: {}", e))?;
 
     // Generate a commitment for the sanad
     let commitment_bytes: [u8; 32] = {

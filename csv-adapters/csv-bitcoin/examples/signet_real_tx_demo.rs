@@ -68,6 +68,7 @@ async fn main() {
         publication_timeout_seconds: 300,
         rpc_url: "https://mempool.space/signet".to_string(),
         xpub: None,
+        private_key: None,
     };
 
     let required_depth = config.finality_depth;

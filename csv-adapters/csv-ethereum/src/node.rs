@@ -394,16 +394,16 @@ mod real_rpc_impl {
                 .filter(|s| !s.is_empty() && *s != "null")
                 .and_then(|s| parse_hex_bytes20(s).ok());
 
-            let status = receipt["status"]
+            let status_str = receipt["status"]
                 .as_str()
-                .ok_or("Missing status field")?
-                .parse::<u64>()
+                .ok_or("Missing status field")?;
+            let status = parse_hex_u64(status_str)
                 .map_err(|e| format!("Invalid status: {}", e))?;
 
-            let block_number = receipt["blockNumber"]
+            let block_number_str = receipt["blockNumber"]
                 .as_str()
-                .ok_or("Missing blockNumber field")?
-                .parse::<u64>()
+                .ok_or("Missing blockNumber field")?;
+            let block_number = parse_hex_u64(block_number_str)
                 .map_err(|e| format!("Invalid blockNumber: {}", e))?;
 
             let block_hash = receipt["blockHash"]
@@ -411,10 +411,10 @@ mod real_rpc_impl {
                 .ok_or("Missing blockHash field")?;
             let block_hash = parse_hex_bytes32(block_hash).map_err(|e| e.to_string())?;
 
-            let gas_used = receipt["gasUsed"]
+            let gas_used_str = receipt["gasUsed"]
                 .as_str()
-                .ok_or("Missing gasUsed field")?
-                .parse::<u64>()
+                .ok_or("Missing gasUsed field")?;
+            let gas_used = parse_hex_u64(gas_used_str)
                 .map_err(|e| format!("Invalid gasUsed: {}", e))?;
 
             let success = status == 1;
@@ -597,7 +597,42 @@ mod real_rpc_impl {
         }
     }
 
+    /// Wait for a transaction receipt with polling and timeout
+    pub async fn wait_for_transaction_receipt(
+        rpc: &EthereumNode,
+        tx_hash: [u8; 32],
+        timeout_secs: u64,
+    ) -> Result<TransactionReceipt, Box<dyn std::error::Error + Send + Sync>> {
+        let start = std::time::Instant::now();
+        let poll_interval = std::time::Duration::from_secs(2);
+
+        println!("[Ethereum] Waiting for transaction receipt (timeout: {}s)...", timeout_secs);
+
+        loop {
+            if let Some(receipt) = rpc.get_transaction_receipt(tx_hash).await? {
+                println!("[Ethereum] Receipt received:");
+                println!("[Ethereum]   Status: {}", if receipt.success { "SUCCESS" } else { "FAILED" });
+                println!("[Ethereum]   Block number: {}", receipt.block_number);
+                println!("[Ethereum]   Gas used: {}", receipt.gas_used);
+                println!("[Ethereum]   Logs count: {}", receipt.logs.len());
+                if !receipt.success {
+                    println!("[Ethereum]   Transaction reverted - this explains why there are no logs");
+                }
+                return Ok(receipt);
+            }
+
+            // Check timeout
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs) {
+                return Err(format!("Transaction receipt not found after {} seconds", timeout_secs).into());
+            }
+
+            // Wait before next poll
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
     /// Publishes a seal consumption transaction: builds calldata -> signs -> broadcasts -> returns tx hash.
+    /// For Sanad creation, this calls lockSanad (public function) instead of markSealUsed (owner-only).
     pub async fn publish(
         rpc: &EthereumNode,
         seal: &EthereumSealPoint,
@@ -610,17 +645,33 @@ mod real_rpc_impl {
 
         let chain_id = rpc.chain_id.ok_or("Chain ID not available")?;
 
-        // Step 1: Build the calldata
-        let calldata = CsvSealAbi::encode_mark_seal_used(seal.seal_id, commitment);
+        println!("[Ethereum] Building transaction for lockSanad...");
+        println!("[Ethereum]   Seal ID: 0x{}", hex::encode(seal.seal_id));
+        println!("[Ethereum]   Commitment: 0x{}", hex::encode(commitment));
+        println!("[Ethereum]   Chain ID: {}", chain_id);
+
+        // Step 1: Build the calldata for lockSanad (public function)
+        // For simple Sanad creation, we use destination chain 0 (Bitcoin) and empty destination owner
+        let calldata = CsvSealAbi::encode_lock_sanad(
+            seal.seal_id,
+            commitment,
+            0, // destination chain (Bitcoin as placeholder)
+            &[0u8; 20], // destination owner (placeholder address)
+        );
+
+        println!("[Ethereum]   Calldata length: {} bytes", calldata.len());
+        println!("[Ethereum]   Function selector: 0x{}", hex::encode(&calldata[..4]));
 
         // Step 2: Get current nonce
         let signer_addr = format!("0x{}", hex::encode(signer.address()));
+        println!("[Ethereum]   Signer address: {}", signer_addr);
         let nonce_str = rpc
             .rpc_call("eth_getTransactionCount", json!([signer_addr, "latest"]))
             .await?;
         let nonce_str = nonce_str.as_str().ok_or("Invalid nonce response")?;
         let nonce = u64::from_str_radix(nonce_str.trim_start_matches("0x"), 16)
             .map_err(|e| format!("Failed to parse nonce: {}", e))?;
+        println!("[Ethereum]   Nonce: {}", nonce);
 
         // Step 3: Get gas prices
         let gas_prices = rpc.rpc_call("eth_gasPrice", json!([])).await?;
@@ -629,6 +680,8 @@ mod real_rpc_impl {
             .map_err(|e| format!("Failed to parse gas price: {}", e))?;
         let max_fee_per_gas = base_fee.saturating_mul(15) / 10; // 150% of base
         let max_priority_fee_per_gas = (base_fee / 10).max(1_000_000_000); // At least 1 gwei
+        println!("[Ethereum]   Base gas price: {} wei", base_fee);
+        println!("[Ethereum]   Max fee per gas: {} wei", max_fee_per_gas);
 
         // Step 4: Build the typed EIP-1559 transaction (pre-signing RLP without signature)
         let _tx_hash = keccak256(&calldata);
@@ -639,12 +692,15 @@ mod real_rpc_impl {
             nonce,
             max_fee_per_gas,
             max_priority_fee_per_gas,
-            gas_limit: 100_000, // Reasonable default for a simple contract call
+            gas_limit: 300_000, // Increased for lockSanad which updates multiple storage slots
             to: TxKind::Call(rpc.csv_seal_address),
             value: U256::ZERO,
             input: alloy::primitives::Bytes::from(calldata.clone()),
             access_list: Default::default(),
         };
+
+        println!("[Ethereum]   Contract address: 0x{}", hex::encode(rpc.csv_seal_address));
+        println!("[Ethereum]   Gas limit: 300,000");
 
         // Sign the transaction using SignableTransaction trait + SignerSync
         use alloy::consensus::SignableTransaction;
@@ -658,6 +714,8 @@ mod real_rpc_impl {
             .sign_hash_sync(&sig_hash)
             .map_err(|e| format!("Failed to sign transaction: {}", e))?;
 
+        println!("[Ethereum] Transaction signed successfully");
+
         // Convert to signed transaction
         let signed_tx = tx.into_signed(signature);
 
@@ -665,9 +723,13 @@ mod real_rpc_impl {
         let tx_envelope = TxEnvelope::Eip1559(signed_tx);
         let tx_bytes = tx_envelope.encoded_2718();
 
+        println!("[Ethereum]   Encoded tx length: {} bytes", tx_bytes.len());
+
         // Step 5: Broadcast
+        println!("[Ethereum] Broadcasting transaction...");
         let tx_hex = format!("0x{}", hex::encode(&tx_bytes));
         let hash_str = rpc.send_raw_tx_raw(&tx_hex).await?;
+        println!("[Ethereum] Transaction hash: 0x{}", hash_str.trim_start_matches("0x"));
         let bytes = hex::decode(hash_str.trim_start_matches("0x"))
             .map_err(|e| format!("Invalid hex response: {}", e))?;
         if bytes.len() != 32 {
@@ -678,48 +740,89 @@ mod real_rpc_impl {
         Ok(arr)
     }
 
-    /// Legacy: Build and send a raw transaction that calls `markSealUsed` on the CSVSeal contract.
+    /// Legacy: Build and send a raw transaction that calls `lockSanad` on the CSVSeal contract.
     /// Expects pre-signed transaction bytes. For signing + sending, use `publish()`.
     pub async fn publish_seal_consumption(
         rpc: &dyn EthereumRpc,
         seal: &EthereumSealPoint,
         commitment: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
-        let calldata = CsvSealAbi::encode_mark_seal_used(seal.seal_id, commitment);
+        let calldata = CsvSealAbi::encode_lock_sanad(
+            seal.seal_id,
+            commitment,
+            0, // destination chain (Bitcoin as placeholder)
+            &[0u8; 20], // destination owner (placeholder address)
+        );
         rpc.send_raw_transaction(calldata).await
     }
 
-    /// Verify that a transaction receipt contains a valid `SealUsed` event.
+    /// Verify that a transaction receipt contains a valid `CrossChainLock` or `SealUsed` event.
+    /// The CrossChainLock event signature is: event CrossChainLock(bytes32 indexed sanadId, bytes32 indexed commitment, ...)
+    /// - topics[0]: event signature
+    /// - topics[1]: indexed sanadId (seal_id)
+    /// - topics[2]: indexed commitment
+    /// - data: other fields (destinationChain, destinationOwner, etc.)
     pub fn verify_seal_consumption_in_receipt(
         receipt: &TransactionReceipt,
         seal_id: [u8; 32],
         commitment: [u8; 32],
         csv_seal_address: [u8; 20],
     ) -> bool {
-        let expected_sig = CsvSealAbi::seal_used_event_signature();
+        let cross_chain_sig = CsvSealAbi::cross_chain_lock_event_signature();
+        let seal_used_sig = CsvSealAbi::seal_used_event_signature();
 
-        for log in &receipt.logs {
+        println!("[Ethereum] Verifying events in receipt...");
+        println!("[Ethereum]   Expected seal_id: 0x{}", hex::encode(seal_id));
+        println!("[Ethereum]   Expected commitment: 0x{}", hex::encode(commitment));
+        println!("[Ethereum]   Expected CrossChainLock sig: 0x{}", hex::encode(cross_chain_sig));
+        println!("[Ethereum]   Expected SealUsed sig: 0x{}", hex::encode(seal_used_sig));
+        println!("[Ethereum]   Logs in receipt: {}", receipt.logs.len());
+
+        for (i, log) in receipt.logs.iter().enumerate() {
+            println!("[Ethereum]   Log #{}:", i);
+            println!("[Ethereum]     Address: 0x{}", hex::encode(log.address));
+            println!("[Ethereum]     Topics: {} topics", log.topics.len());
+            for (j, topic) in log.topics.iter().enumerate() {
+                println!("[Ethereum]       Topic {}: 0x{}", j, hex::encode(topic));
+            }
+            println!("[Ethereum]     Data length: {} bytes", log.data.len());
+            if log.data.len() > 0 {
+                println!("[Ethereum]     Data (first 64 bytes): 0x{}", hex::encode(&log.data[..log.data.len().min(64)]));
+            }
+
             if log.address != csv_seal_address {
-                continue;
-            }
-            if log.topics.is_empty() || log.topics[0] != expected_sig {
-                continue;
-            }
-            if log.data.len() < 64 {
+                println!("[Ethereum]     -> Address mismatch, skipping");
                 continue;
             }
 
-            let mut event_seal_id = [0u8; 32];
-            event_seal_id.copy_from_slice(&log.data[..32]);
+            // Check for CrossChainLock event (emitted by lockSanad)
+            if log.topics.len() >= 3 && log.topics[0] == cross_chain_sig {
+                println!("[Ethereum]     -> CrossChainLock event signature matches");
+                // topics[1] = indexed sanadId, topics[2] = indexed commitment
+                if log.topics[1] == seal_id && log.topics[2] == commitment {
+                    println!("[Ethereum]     -> CrossChainLock event verified!");
+                    return true;
+                }
+                println!("[Ethereum]     -> CrossChainLock event: seal_id or commitment mismatch");
+            }
 
-            let mut event_commitment = [0u8; 32];
-            event_commitment.copy_from_slice(&log.data[32..64]);
-
-            if event_seal_id == seal_id && event_commitment == commitment {
-                return true;
+            // Also check for SealUsed event (emitted by markSealUsed and lockSanad)
+            if log.topics.len() >= 2 && log.topics[0] == seal_used_sig {
+                println!("[Ethereum]     -> SealUsed event signature matches");
+                if log.topics[1] == seal_id && log.data.len() >= 32 {
+                    let mut event_commitment = [0u8; 32];
+                    event_commitment.copy_from_slice(&log.data[..32]);
+                    if event_commitment == commitment {
+                        println!("[Ethereum]     -> SealUsed event verified!");
+                        return true;
+                    }
+                    println!("[Ethereum]     -> SealUsed event: commitment mismatch");
+                }
+                println!("[Ethereum]     -> SealUsed event: seal_id mismatch or data too short");
             }
         }
 
+        println!("[Ethereum]   No matching events found");
         false
     }
 }
@@ -727,5 +830,5 @@ mod real_rpc_impl {
 #[cfg(feature = "rpc")]
 pub use real_rpc_impl::{
     AlloyRpcError, EthereumNode, publish, publish_seal_consumption,
-    verify_seal_consumption_in_receipt,
+    verify_seal_consumption_in_receipt, wait_for_transaction_receipt,
 };

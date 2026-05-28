@@ -449,7 +449,7 @@ impl ChainRuntime {
     }
 
     /// Get the adapter for the specified chain.
-    async fn get_adapter(&self, chain: ChainId) -> Result<Arc<dyn ChainBackend>, CsvError> {
+    pub async fn get_adapter(&self, chain: ChainId) -> Result<Arc<dyn ChainBackend>, CsvError> {
         #[cfg(feature = "tokio")]
         let adapters = self.adapters.lock().await;
         #[cfg(not(feature = "tokio"))]

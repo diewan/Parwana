@@ -25,6 +25,12 @@ fn seal_used_signature() -> [u8; 32] {
     compute_keccak256(b"SealUsed(bytes32,bytes32)")
 }
 
+/// The `CrossChainLock` event signature: keccak256("CrossChainLock(bytes32,bytes32,address,uint8,bytes,bytes32,uint8,bytes32,bytes32,uint8,bytes32)")
+/// Computed at runtime, cached for repeated use.
+fn cross_chain_lock_signature() -> [u8; 32] {
+    compute_keccak256(b"CrossChainLock(bytes32,bytes32,address,uint8,bytes,bytes32,uint8,bytes32,bytes32,uint8,bytes32)")
+}
+
 /// The CSVSeal contract interface
 ///
 /// Seal identifiers are 32-byte values. When consumed, they emit a LOG event
@@ -38,14 +44,50 @@ impl CsvSealAbi {
         seal_used_signature()
     }
 
-    /// Encode the `markSealUsed(sealId, commitment)` calldata
-    pub fn encode_mark_seal_used(seal_id: [u8; 32], commitment: [u8; 32]) -> Vec<u8> {
-        // Function selector: keccak256("markSealUsed(bytes32,bytes32)")[:4]
-        let selector = compute_keccak256(b"markSealUsed(bytes32,bytes32)");
-        let mut calldata = Vec::with_capacity(4 + 32 + 32);
+    /// The `CrossChainLock` event signature (keccak256 of "CrossChainLock(...)")
+    pub fn cross_chain_lock_event_signature() -> [u8; 32] {
+        cross_chain_lock_signature()
+    }
+
+    /// Encode the `lockSanad(sanadId, commitment, destinationChain, destinationOwner)` calldata
+    /// This is the public function for creating/locking a Sanad on Ethereum
+    pub fn encode_lock_sanad(
+        sanad_id: [u8; 32],
+        commitment: [u8; 32],
+        destination_chain: u8,
+        destination_owner: &[u8],
+    ) -> Vec<u8> {
+        // Function selector: keccak256("lockSanad(bytes32,bytes32,uint8,bytes)")[:4]
+        let selector = compute_keccak256(b"lockSanad(bytes32,bytes32,uint8,bytes)");
+        let dest_owner_len = destination_owner.len();
+        let mut calldata = Vec::with_capacity(4 + 32 + 32 + 32 + 32 + dest_owner_len);
         calldata.extend_from_slice(&selector[..4]);
-        calldata.extend_from_slice(&seal_id);
+        
+        // sanadId (offset 0x20)
+        calldata.extend_from_slice(&sanad_id);
+        
+        // commitment (offset 0x40)
         calldata.extend_from_slice(&commitment);
+        
+        // destinationChain (offset 0x60)
+        let mut chain_bytes = [0u8; 32];
+        chain_bytes[31] = destination_chain;
+        calldata.extend_from_slice(&chain_bytes);
+        
+        // destinationOwner offset (offset 0x80)
+        let mut offset_bytes = [0u8; 32];
+        let offset: u32 = 0x80;
+        offset_bytes[28..].copy_from_slice(&offset.to_be_bytes());
+        calldata.extend_from_slice(&offset_bytes);
+        
+        // destinationOwner data (at offset 0x80)
+        let mut len_bytes = [0u8; 32];
+        // Length is encoded as a 32-byte big-endian integer
+        let len = dest_owner_len as u64;
+        len_bytes[24..].copy_from_slice(&len.to_be_bytes());
+        calldata.extend_from_slice(&len_bytes);
+        calldata.extend_from_slice(destination_owner);
+        
         calldata
     }
 

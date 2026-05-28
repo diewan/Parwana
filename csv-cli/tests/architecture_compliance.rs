@@ -198,6 +198,7 @@ fn test_commands_use_csv_sdk_runtime() {
             // - content.rs: Content tree management (local operations)
             // - runtime.rs: Runtime diagnostics (reads local state)
             // - trust.rs: Trust package management (local operations)
+            // - chain.rs: Chain configuration management (no chain operations)
             let filename = path.file_name().unwrap_or_default().to_string_lossy();
             let needs_runtime = !matches!(
                 filename.as_ref(),
@@ -216,6 +217,7 @@ fn test_commands_use_csv_sdk_runtime() {
                     | "content.rs"
                     | "runtime.rs"
                     | "trust.rs"
+                    | "chain.rs"
             );
 
             if needs_runtime && !uses_csv_sdk {

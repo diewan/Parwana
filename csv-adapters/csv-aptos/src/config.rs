@@ -153,6 +153,9 @@ pub struct AptosConfig {
     pub transaction: TransactionConfig,
     /// CSVSeal contract deployment details.
     pub seal_contract: SealContractConfig,
+    /// Optional private key for transaction signing (hex format).
+    /// Required for spending transactions. Not stored in config for security.
+    pub private_key: Option<String>,
 }
 
 impl Default for AptosConfig {
@@ -165,6 +168,7 @@ impl Default for AptosConfig {
             checkpoint: CheckpointConfig::default(),
             transaction: TransactionConfig::default(),
             seal_contract: SealContractConfig::default(),
+            private_key: None,
         }
     }
 }

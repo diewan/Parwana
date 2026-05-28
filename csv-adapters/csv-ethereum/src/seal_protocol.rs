@@ -205,7 +205,7 @@ impl SealProtocol for EthereumSealProtocol {
 
         #[cfg(feature = "rpc")]
         {
-            use crate::node::{EthereumNode, publish, verify_seal_consumption_in_receipt};
+            use crate::node::{EthereumNode, publish, verify_seal_consumption_in_receipt, wait_for_transaction_receipt};
 
             // Downcast to EthereumNode for the publish flow
             let real_rpc = self
@@ -227,19 +227,12 @@ impl SealProtocol for EthereumSealProtocol {
                         as Box<dyn std::error::Error>
                 })?;
 
-            // Get the receipt and verify the SealUsed event
-            let receipt = self
-                .rpc
-                .get_transaction_receipt(tx_hash)
+            // Wait for the transaction receipt with polling (up to 120 seconds for testnet)
+            let receipt = wait_for_transaction_receipt(real_rpc, tx_hash, 120)
                 .await
                 .map_err(|e| {
-                    Box::new(ProtocolError::NetworkError(e.to_string()))
+                    Box::new(ProtocolError::PublishFailed(e.to_string()))
                         as Box<dyn std::error::Error>
-                })?
-                .ok_or_else(|| {
-                    Box::new(ProtocolError::PublishFailed(
-                        "Transaction receipt not found".to_string(),
-                    )) as Box<dyn std::error::Error>
                 })?;
 
             let has_valid_event = verify_seal_consumption_in_receipt(

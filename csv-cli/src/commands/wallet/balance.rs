@@ -167,7 +167,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
     // Execute async operations using the existing tokio runtime
     let balance_info = async {
         client
-            .init_adapters(network)
+            .init_adapters(network, std::collections::HashMap::new())
             .await
             .map_err(|e| csv_sdk::CsvError::ProtocolError {
                 chain: core_chain.clone(),

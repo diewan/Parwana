@@ -14,6 +14,9 @@ pub struct BitcoinConfig {
     /// Optional xpub for HD wallet derivation (BIP-86)
     /// If None, adapter operates in query-only mode or requires external signing
     pub xpub: Option<String>,
+    /// Optional private key for transaction signing (hex format, WIF, or base58)
+    /// Required for spending transactions. Not stored in config for security.
+    pub private_key: Option<String>,
 }
 
 /// Bitcoin network type
@@ -83,6 +86,7 @@ impl Default for BitcoinConfig {
             publication_timeout_seconds: 3600, // 1 hour
             rpc_url: "http://127.0.0.1:8332".to_string(),
             xpub: None,
+            private_key: None,
         }
     }
 }

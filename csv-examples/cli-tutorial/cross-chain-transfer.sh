@@ -75,11 +75,11 @@ echo "  Destination Owner: (will be extracted from wallet)"
 echo ""
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Check Source Chain Status" "Verifies connection to Ethereum Sepolia testnet" "csv chain status --chain ethereum"
+    prompt_step "Check Source Chain Status" "Verifies connection to Ethereum Sepolia testnet" "csv chain status ethereum"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Check Destination Chain Status" "Verifies connection to Sui testnet" "csv chain status --chain sui"
+    prompt_step "Check Destination Chain Status" "Verifies connection to Sui testnet" "csv chain status sui"
 fi
 
 if [ -z "$SKIP_ALL" ]; then

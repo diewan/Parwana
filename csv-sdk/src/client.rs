@@ -286,11 +286,15 @@ impl CsvClient {
     /// # Arguments
     ///
     /// * `network` - Network type (Mainnet or Testnet) to configure RPC endpoints
+    /// * `private_keys` - Optional map of chain to private key in hex format (with or without 0x prefix)
+    ///                   Only needed if performing transactions that require signing.
+    ///                   The private keys are NOT stored in config.
     ///
     /// # Example
     ///
     /// ```ignore
     /// use csv_sdk::prelude::*;
+    /// use std::collections::HashMap;
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<()> {
@@ -301,7 +305,11 @@ impl CsvClient {
     ///         .build()?;
     ///
     ///     // Initialize adapters for all enabled chains on testnet
-    ///     client.init_adapters(NetworkType::Testnet).await?;
+    ///     // Pass private keys interactively (not stored in config)
+    ///     let mut keys = HashMap::new();
+    ///     keys.insert("ethereum", Some("0x..."));
+    ///     keys.insert("bitcoin", Some("..."));
+    ///     client.init_adapters(NetworkType::Testnet, keys).await?;
     ///
     ///     // Now you can use the runtime
     ///     let balance = client.chain_runtime()
@@ -311,12 +319,13 @@ impl CsvClient {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn init_adapters(&self, network: NetworkType) -> Result<(), CsvError> {
+    pub async fn init_adapters(&self, network: NetworkType, private_keys: std::collections::HashMap<String, Option<String>>) -> Result<(), CsvError> {
         let mut failed_chains: Vec<String> = Vec::new();
 
         for chain in &self.enabled_chains {
+            let private_key = private_keys.get(chain.as_str()).and_then(|k| k.as_deref());
             let adapter_result =
-                Self::build_adapter_for_chain(chain.clone(), &self.config, network).await;
+                Self::build_adapter_for_chain(chain.clone(), &self.config, network, private_key).await;
 
             match adapter_result {
                 Ok(Some(adapter)) => {
@@ -354,11 +363,19 @@ impl CsvClient {
         Ok(())
     }
 
+    /// Initialize and register chain adapters for all enabled chains (without signer).
+    ///
+    /// This is a convenience method for chains that don't require signing.
+    pub async fn init_adapters_simple(&self, network: NetworkType) -> Result<(), CsvError> {
+        self.init_adapters(network, std::collections::HashMap::new()).await
+    }
+
     /// Build an adapter for a specific chain.
     async fn build_adapter_for_chain(
         chain: ChainId,
         _config: &crate::config::Config,
         network: NetworkType,
+        private_key: Option<&str>,
     ) -> Result<Option<std::sync::Arc<dyn csv_protocol::backend::ChainBackend>>, CsvError> {
         let _builder = crate::runtime::AdapterBuilder::new();
         let _is_testnet = matches!(network, NetworkType::Testnet);
@@ -391,6 +408,7 @@ impl CsvClient {
                     publication_timeout_seconds: 3600,
                     rpc_url: rpc_url.clone(),
                     xpub: _config.chains.get("bitcoin").and_then(|c| c.xpub.clone()),
+                    private_key: private_key.map(|k| k.to_string()),
                 };
                 // Create RPC client - this uses reqwest::blocking which needs its own runtime
                 // We must create it outside any async context to avoid runtime conflicts
@@ -458,12 +476,20 @@ impl CsvClient {
                         "Ethereum seal contract address must contain 20 bytes".to_string(),
                     )
                 })?;
-                let rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, csv_seal_address)
+                let mut rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, csv_seal_address)
                     .await
                     .map_err(|e| CsvError::ProtocolError {
                         chain: ChainId::new("ethereum"),
                         message: format!("Failed to create Ethereum RPC client: {}", e),
                     })?;
+
+                // Configure signer if private key is provided
+                if let Some(private_key) = private_key {
+                    rpc = rpc.with_signer(private_key).map_err(|e| CsvError::ProtocolError {
+                        chain: ChainId::new("ethereum"),
+                        message: format!("Failed to configure Ethereum signer: {}", e),
+                    })?;
+                }
                 _builder
                     .ethereum_from_config(
                         eth_config,
@@ -505,6 +531,10 @@ impl CsvClient {
                             )
                         })?,
                 );
+                // Convert hex string to Vec<u8> for Sui
+                sui_config.signer_private_key = private_key.and_then(|k| {
+                    hex::decode(k.trim_start_matches("0x")).ok()
+                });
                 let rpc = csv_sui::node::SuiNode::new(&rpc_url);
                 _builder
                     .sui_from_config(sui_config, Box::new(rpc) as Box<dyn csv_sui::rpc::SuiRpc>)
@@ -532,6 +562,7 @@ impl CsvClient {
                         csv_aptos::config::AptosNetwork::Mainnet
                     },
                     rpc_url: rpc_url.clone(),
+                    private_key: private_key.map(|k| k.to_string()),
                     ..Default::default()
                 };
                 let rpc = csv_aptos::node::AptosNode::new(&rpc_url);
@@ -574,7 +605,7 @@ impl CsvClient {
                                 "Solana CSV program ID must be configured".to_string(),
                             )
                         })?,
-                    keypair: None,
+                    keypair: private_key.map(|k| k.to_string()),
                     commitment: Some("confirmed".to_string()),
                     max_retries: 3,
                     timeout_seconds: 30,
