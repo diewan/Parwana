@@ -129,9 +129,17 @@ if [ -f "Published.toml" ] && grep -q "\[published.${NETWORK}\]" "Published.toml
     echo "  1. Upgrade existing package (keeps same Package ID)"
     echo "  2. Force fresh publish (removes publication tracking, creates new Package ID)"
     echo ""
-    # Default to upgrade for safety
-    echo "Upgrading existing package..."
-    PUBLISH_CMD="upgrade"
+    read -p "Choose option (1 or 2): " CHOICE
+    if [ "$CHOICE" = "2" ]; then
+        PUBLISH_CMD="publish"
+        echo "Forcing fresh publish..."
+        # Remove publication entry to allow fresh publish
+        echo "Removing publication tracking from Published.toml..."
+        sed -i "/\[published\.${NETWORK}\]/,/^$/d" Published.toml 2>/dev/null || true
+    else
+        PUBLISH_CMD="upgrade"
+        echo "Upgrading existing package..."
+    fi
 else
     PUBLISH_CMD="publish"
 fi
@@ -206,8 +214,8 @@ fi
 
 # Extract package ID from output (if not already set from fallback)
 if [ -z "$PACKAGE_ID" ]; then
-    # Filter out log lines (starting with timestamp) to get clean JSON
-    CLEAN_JSON=$(echo "$PUBLISH_OUTPUT" | grep -v '^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T' 2>/dev/null || echo "$PUBLISH_OUTPUT")
+    # Filter out non-JSON lines (log messages) to get clean JSON
+    CLEAN_JSON=$(echo "$PUBLISH_OUTPUT" | grep -v '^\[' | grep -v '^INCLUDING' | grep -v '^BUILDING' 2>/dev/null || echo "$PUBLISH_OUTPUT")
     PACKAGE_ID=$(echo "$CLEAN_JSON" | python3 -c "
 import sys, json
 try:
@@ -234,6 +242,59 @@ if [ -z "$PACKAGE_ID" ]; then
     exit 1
 fi
 
+# Update Move.toml with the deployed package ID
+echo "Updating Move.toml with deployed package ID..."
+if [ -f "Move.toml" ]; then
+    if command -v sed &>/dev/null; then
+        sed -i "s/^csv_seal = \"0x0\"/csv_seal = \"${PACKAGE_ID}\"/" Move.toml
+        echo "Move.toml updated: csv_seal = ${PACKAGE_ID}"
+    else
+        echo "WARNING: sed not found, cannot auto-update Move.toml"
+        echo "Please manually update Move.toml: csv_seal = \"${PACKAGE_ID}\""
+    fi
+else
+    echo "WARNING: Move.toml not found"
+fi
+
+# Update deployment manifest
+echo "Updating deployment manifest..."
+MANIFEST_PATH="../../../deployments/deployment-manifest.json"
+if [ -f "$MANIFEST_PATH" ]; then
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+import sys
+from datetime import datetime
+
+try:
+    with open('$MANIFEST_PATH', 'r') as f:
+        manifest = json.load(f)
+    
+    # Update sui deployment info
+    if 'deployments' in manifest and 'sui' in manifest['deployments']:
+        manifest['deployments']['sui']['network'] = '$NETWORK'
+        manifest['deployments']['sui']['package_id'] = '$PACKAGE_ID'
+        manifest['deployments']['sui']['verified'] = True
+        manifest['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    
+    with open('$MANIFEST_PATH', 'w') as f:
+        json.dump(manifest, f, indent=2)
+    
+    print('Deployment manifest updated successfully')
+except Exception as e:
+    print(f'ERROR updating manifest: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+        echo "Manifest updated: sui.package_id = ${PACKAGE_ID}"
+    else
+        echo "WARNING: python3 not found, cannot auto-update deployment manifest"
+        echo "Please manually update $MANIFEST_PATH"
+        echo "Set deployments.sui.package_id = ${PACKAGE_ID}"
+    fi
+else
+    echo "WARNING: Deployment manifest not found at $MANIFEST_PATH"
+fi
+
 echo ""
 echo "=== DEPLOYMENT SUMMARY ==="
 echo "Package ID: ${PACKAGE_ID}"
@@ -242,19 +303,7 @@ echo "Module: csv_seal::csv_seal"
 echo "=========================="
 echo ""
 echo "Next steps:"
-echo "1. Update Move.toml: csv_seal = \"${PACKAGE_ID}\""
-echo "2. Initialize LockRegistry:"
-echo "   sui client call --package ${PACKAGE_ID} --module csv_seal --function create_registry --gas-budget 10000000"
+echo "Use create_seal to create new seals or mint_sanad for cross-chain transfers"
 echo ""
 
-# Initialize the LockRegistry
-echo "Initializing LockRegistry..."
-"$SUI" client call \
-    --package "$PACKAGE_ID" \
-    --module csv_seal \
-    --function create_registry \
-    --gas-budget 10000000 \
-    --json 2>&1 | tee "scripts/registry-init-${NETWORK}.json" | tail -3
-
-echo ""
 echo "Deployment complete!"

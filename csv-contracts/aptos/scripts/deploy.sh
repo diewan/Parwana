@@ -220,6 +220,45 @@ if [ "$INIT_SUCCESS" = false ]; then
     fi
 fi
 
+# Update deployment manifest
+echo "Updating deployment manifest..."
+MANIFEST_PATH="../../../deployments/deployment-manifest.json"
+if [ -f "$MANIFEST_PATH" ]; then
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+import sys
+from datetime import datetime
+
+try:
+    with open('$MANIFEST_PATH', 'r') as f:
+        manifest = json.load(f)
+    
+    # Update aptos deployment info
+    if 'deployments' in manifest and 'aptos' in manifest['deployments']:
+        manifest['deployments']['aptos']['network'] = '$NETWORK'
+        manifest['deployments']['aptos']['module_address'] = '$PACKAGE_ID'
+        manifest['deployments']['aptos']['verified'] = True
+        manifest['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    
+    with open('$MANIFEST_PATH', 'w') as f:
+        json.dump(manifest, f, indent=2)
+    
+    print('Deployment manifest updated successfully')
+except Exception as e:
+    print(f'ERROR updating manifest: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+        echo "Manifest updated: aptos.module_address = ${PACKAGE_ID}"
+    else
+        echo "WARNING: python3 not found, cannot auto-update deployment manifest"
+        echo "Please manually update $MANIFEST_PATH"
+        echo "Set deployments.aptos.module_address = ${PACKAGE_ID}"
+    fi
+else
+    echo "WARNING: Deployment manifest not found at $MANIFEST_PATH"
+fi
+
 # Cleanup temp directory and .aptos
 if [ -n "${TEMP_DIR:-}" ] && [ -d "${TEMP_DIR}" ]; then
     rm -rf "${TEMP_DIR}"

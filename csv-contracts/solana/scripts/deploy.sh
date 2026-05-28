@@ -171,8 +171,8 @@ if [ $deploy_exit_code -ne 0 ]; then
     fi
 fi
 
-# Extract program ID from the output
-program_id=$(echo "$deploy_output" | grep -oP 'Program Id: \K[0-9A-Za-z]{32,44}' || echo "")
+# Extract program ID from the output (handle both "Program Id:" and "Program ID:")
+program_id=$(echo "$deploy_output" | grep -oP 'Program ID?: \K[0-9A-Za-z]{32,44}' || echo "")
 
 if [ -z "$program_id" ]; then
     # Try to get from Anchor.toml or keypair (use explicit keypair and url)
@@ -220,6 +220,45 @@ else
         echo "Note: Registry initialization may require manual execution:"
         echo "  anchor run initialize --provider.cluster ${NETWORK}"
     }
+fi
+
+# Update deployment manifest
+echo "Updating deployment manifest..."
+MANIFEST_PATH="../../../deployments/deployment-manifest.json"
+if [ -f "$MANIFEST_PATH" ]; then
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+import sys
+from datetime import datetime
+
+try:
+    with open('$MANIFEST_PATH', 'r') as f:
+        manifest = json.load(f)
+    
+    # Update solana deployment info
+    if 'deployments' in manifest and 'solana' in manifest['deployments']:
+        manifest['deployments']['solana']['network'] = '$NETWORK'
+        manifest['deployments']['solana']['program_id'] = '$program_id'
+        manifest['deployments']['solana']['verified'] = True
+        manifest['updated_at'] = datetime.now(datetime.UTC).isoformat() + 'Z'
+    
+    with open('$MANIFEST_PATH', 'w') as f:
+        json.dump(manifest, f, indent=2)
+    
+    print('Deployment manifest updated successfully')
+except Exception as e:
+    print(f'ERROR updating manifest: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+        echo "Manifest updated: solana.program_id = ${program_id}"
+    else
+        echo "WARNING: python3 not found, cannot auto-update deployment manifest"
+        echo "Please manually update $MANIFEST_PATH"
+        echo "Set deployments.solana.program_id = ${program_id}"
+    fi
+else
+    echo "WARNING: Deployment manifest not found at $MANIFEST_PATH"
 fi
 
 echo ""

@@ -6,6 +6,6 @@ version = "1.0.0"
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "testnet" }
 
 [addresses]
-csv_seal = "0x4e8e35b340112baca1ca18e422da4c7d447d17fa560fbfd0e0c24de3de239b1b"
+csv_seal = "d9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e"
 aptos_framework = "0x1"
-CSV = "0x4e8e35b340112baca1ca18e422da4c7d447d17fa560fbfd0e0c24de3de239b1b"  # Will be set to deploying account address
+CSV = "d9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e"

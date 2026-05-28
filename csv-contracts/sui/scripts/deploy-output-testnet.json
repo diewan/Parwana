@@ -1,0 +1,170 @@
+[NOTE] Dependencies on Sui, MoveStdlib, Bridge, DeepBook, and SuiSystem are automatically added, but this feature is disabled for your package because you have explicitly included dependencies on Sui. Consider removing these dependencies from `Move.toml`.
+INCLUDING DEPENDENCY MoveStdlib
+INCLUDING DEPENDENCY Sui
+BUILDING csv-seal
+{
+  "digest": "B4MdpXr8FNQFotNpqCCVCCJRYjaFgSN4weAzuPYVkFs",
+  "transaction": {
+    "data": {
+      "messageVersion": "v1",
+      "transaction": {
+        "kind": "ProgrammableTransaction",
+        "inputs": [
+          {
+            "type": "pure",
+            "valueType": "address",
+            "value": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+          }
+        ],
+        "transactions": [
+          {
+            "Publish": [
+              "0x0000000000000000000000000000000000000000000000000000000000000001",
+              "0x0000000000000000000000000000000000000000000000000000000000000002"
+            ]
+          },
+          {
+            "TransferObjects": [
+              [
+                {
+                  "Result": 0
+                }
+              ],
+              {
+                "Input": 0
+              }
+            ]
+          }
+        ]
+      },
+      "sender": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1",
+      "gasData": {
+        "payment": [
+          {
+            "objectId": "0x7fe6d295c870b89a9738ff7b107d768d0d8b07029392ef72ec37aae0aa20897c",
+            "version": 349181683,
+            "digest": "D5CBXieiZcfSWo7ZSkE7vNHw2Nf1tBhCYrNmu4PRDUpp"
+          }
+        ],
+        "owner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1",
+        "price": "1000",
+        "budget": "500000000"
+      }
+    },
+    "txSignatures": [
+      "AGSP9+wembwkk9g3p1OuCRCsWEnzCSbo35h1xR+pJpyyiD9xJMsqZrIuDzG/ytZw4EHLQ37ZXMrDeF7d7IdnGQyHVdc8lmzxb5OZ5LU07raEvF0Tek2VsQ1YEONYezIBUA=="
+    ]
+  },
+  "effects": {
+    "messageVersion": "v1",
+    "status": {
+      "status": "success"
+    },
+    "executedEpoch": "1113",
+    "gasUsed": {
+      "computationCost": "1000000",
+      "storageCost": "36267200",
+      "storageRebate": "978120",
+      "nonRefundableStorageFee": "9880"
+    },
+    "modifiedAtVersions": [
+      {
+        "objectId": "0x7fe6d295c870b89a9738ff7b107d768d0d8b07029392ef72ec37aae0aa20897c",
+        "sequenceNumber": "349181683"
+      }
+    ],
+    "transactionDigest": "B4MdpXr8FNQFotNpqCCVCCJRYjaFgSN4weAzuPYVkFs",
+    "created": [
+      {
+        "owner": "Immutable",
+        "reference": {
+          "objectId": "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21",
+          "version": 1,
+          "digest": "3j5LrkkrYB9HpKdp6y8QPFYhs4y9kUbHtwHGoN3AaP2u"
+        }
+      },
+      {
+        "owner": {
+          "AddressOwner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+        },
+        "reference": {
+          "objectId": "0x88dfc19391f8a2fff7547ced790cda703005154e26bd7d2add2b10b59cad0ef9",
+          "version": 349181684,
+          "digest": "9KftbtRuuUqoB2htYv8Yox9JN1WP4u6sTWeW15eStMNq"
+        }
+      }
+    ],
+    "mutated": [
+      {
+        "owner": {
+          "AddressOwner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+        },
+        "reference": {
+          "objectId": "0x7fe6d295c870b89a9738ff7b107d768d0d8b07029392ef72ec37aae0aa20897c",
+          "version": 349181684,
+          "digest": "Ep58XFNKJuuAGqUnGvdpBuCbpS38Q9M9HbgZVRZDNuQw"
+        }
+      }
+    ],
+    "gasObject": {
+      "owner": {
+        "AddressOwner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+      },
+      "reference": {
+        "objectId": "0x7fe6d295c870b89a9738ff7b107d768d0d8b07029392ef72ec37aae0aa20897c",
+        "version": 349181684,
+        "digest": "Ep58XFNKJuuAGqUnGvdpBuCbpS38Q9M9HbgZVRZDNuQw"
+      }
+    },
+    "dependencies": [
+      "3hsYrvtFXZfSy9vD6aiL5mNo7cSWC3aHndPM7sZ44X1Y",
+      "BEVGeVYcUJfuAzBof6yW816Rq6hZD1kUCEoPkAr49pyf"
+    ]
+  },
+  "objectChanges": [
+    {
+      "type": "published",
+      "packageId": "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21",
+      "version": "1",
+      "digest": "3j5LrkkrYB9HpKdp6y8QPFYhs4y9kUbHtwHGoN3AaP2u",
+      "modules": [
+        "csv_seal",
+        "test_adversarial"
+      ]
+    },
+    {
+      "type": "mutated",
+      "sender": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1",
+      "owner": {
+        "AddressOwner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+      },
+      "objectType": "0x2::coin::Coin<0x2::sui::SUI>",
+      "objectId": "0x7fe6d295c870b89a9738ff7b107d768d0d8b07029392ef72ec37aae0aa20897c",
+      "version": "349181684",
+      "previousVersion": "349181683",
+      "digest": "Ep58XFNKJuuAGqUnGvdpBuCbpS38Q9M9HbgZVRZDNuQw"
+    },
+    {
+      "type": "created",
+      "sender": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1",
+      "owner": {
+        "AddressOwner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+      },
+      "objectType": "0x2::package::UpgradeCap",
+      "objectId": "0x88dfc19391f8a2fff7547ced790cda703005154e26bd7d2add2b10b59cad0ef9",
+      "version": "349181684",
+      "digest": "9KftbtRuuUqoB2htYv8Yox9JN1WP4u6sTWeW15eStMNq"
+    }
+  ],
+  "balanceChanges": [
+    {
+      "owner": {
+        "AddressOwner": "0x6cc73fe3fb68a2592e43d551cc6792019434405bdaa922413cbc82ac7f9a08f1"
+      },
+      "coinType": "0x2::sui::SUI",
+      "amount": "-36289080"
+    }
+  ],
+  "timestampMs": "1779936657827",
+  "checkpoint": "341908924"
+}

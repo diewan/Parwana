@@ -8,3 +8,5 @@ optimizer_runs = 200
 via_ir = true
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[rpc_endpoints]
+sepolia = "https://sepolia.infura.io/v3"

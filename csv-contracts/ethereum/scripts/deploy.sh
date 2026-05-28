@@ -30,6 +30,12 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}=== CSV Protocol Contract Deployment Script ===${NC}"
 echo ""
 
+# Load .env file if it exists
+if [ -f "../.env" ]; then
+    echo "Loading environment variables from .env..."
+    export $(cat ../.env | grep -v '^#' | xargs)
+fi
+
 # Check prerequisites
 if ! command -v forge &> /dev/null; then
     echo -e "${RED}Error: Foundry not found. Please install Foundry from https://getfoundry.sh/${NC}"
@@ -91,11 +97,12 @@ if [ ! -f "$RUN_FILE" ]; then
     exit 1
 fi
 
-# Extract contract addresses
+# Extract contract addresses and deployment info
 LOCK_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVLock") | .contractAddress] | first' $RUN_FILE)
 MINT_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVMint") | .contractAddress] | first' $RUN_FILE)
-DEPLOYMENT_TX=$(jq -r '[.receipts[0].transactionHash] | first' $RUN_FILE)
-BLOCK_NUMBER=$(jq -r '[.receipts[0].blockNumber] | first' $RUN_FILE)
+DEPLOYMENT_TX=$(jq -r '[.transactions[] | select(.transactionType == "CREATE") | .hash] | first' $RUN_FILE)
+BLOCK_NUMBER_HEX=$(jq -r '[.receipts[] | .blockNumber] | first' $RUN_FILE)
+BLOCK_NUMBER=$(printf "%d" $BLOCK_NUMBER_HEX)
 
 echo -e "${YELLOW}CSVLock address: ${LOCK_ADDRESS}${NC}"
 echo -e "${YELLOW}CSVMint address: ${MINT_ADDRESS}${NC}"
