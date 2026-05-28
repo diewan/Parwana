@@ -28,9 +28,7 @@ use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
 #[cfg(feature = "rpc")]
-use crate::bindings::csv_lock::CsvLockClient;
-#[cfg(feature = "rpc")]
-use crate::bindings::csv_mint::CsvMintClient;
+use crate::bindings::csv_seal::CsvSealClient;
 use crate::config::EthereumConfig;
 use crate::finality::FinalityChecker;
 use crate::proofs::{CommitmentEventBuilder, EventProofVerifier};
@@ -57,10 +55,8 @@ pub struct EthereumBackend {
     /// Seal contract ABI for sanad operations
     #[allow(dead_code)]
     seal_contract: CsvSealAbi,
-    /// Lock contract address (for sanad operations)
-    lock_contract_address: Option<[u8; 20]>,
-    /// Mint contract address (for sanad operations)
-    mint_contract_address: Option<[u8; 20]>,
+    /// Seal contract address (for sanad operations - merged lock + mint)
+    contract_address: Option<[u8; 20]>,
     /// Event proof verifier
     #[allow(dead_code)]
     proof_verifier: EventProofVerifier,
@@ -126,8 +122,7 @@ impl EthereumBackend {
             domain_separator: domain,
             finality_checker,
             seal_contract: CsvSealAbi,
-            lock_contract_address: config.lock_contract_address,
-            mint_contract_address: config.mint_contract_address,
+            contract_address: config.contract_address,
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: Arc::new(seal),
@@ -143,41 +138,24 @@ impl EthereumBackend {
             domain_separator: seal.domain(),
             finality_checker: seal.finality_checker_clone(),
             seal_contract: CsvSealAbi,
-            lock_contract_address: seal.config_clone().lock_contract_address,
-            mint_contract_address: seal.config_clone().mint_contract_address,
+            contract_address: seal.config_clone().contract_address,
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: seal,
         })
     }
 
-    /// Set the lock contract address for sanad operations
-    pub fn with_lock_contract(mut self, address: [u8; 20]) -> Self {
-        self.lock_contract_address = Some(address);
+    /// Set the seal contract address for sanad operations
+    pub fn with_contract(mut self, address: [u8; 20]) -> Self {
+        self.contract_address = Some(address);
         self
     }
 
-    /// Set the mint contract address for sanad operations
-    pub fn with_mint_contract(mut self, address: [u8; 20]) -> Self {
-        self.mint_contract_address = Some(address);
-        self
-    }
-
-    /// Get the lock contract address if set
-    fn lock_contract(&self) -> ChainOpResult<[u8; 20]> {
-        self.lock_contract_address.ok_or_else(|| {
+    /// Get the seal contract address if set
+    fn contract(&self) -> ChainOpResult<[u8; 20]> {
+        self.contract_address.ok_or_else(|| {
             ChainOpError::InvalidInput(
-                "Lock contract address not configured. Set it with with_lock_contract()"
-                    .to_string(),
-            )
-        })
-    }
-
-    /// Get the mint contract address if set
-    fn mint_contract(&self) -> ChainOpResult<[u8; 20]> {
-        self.mint_contract_address.ok_or_else(|| {
-            ChainOpError::InvalidInput(
-                "Mint contract address not configured. Set it with with_mint_contract()"
+                "Seal contract address not configured. Set it with with_contract()"
                     .to_string(),
             )
         })
@@ -843,15 +821,15 @@ impl ChainDeployer for EthereumBackend {
         // 3. Standard deployment patterns used in production
         // 4. Ability to use deployment scripts with proper configuration
         //
-        // To deploy the CSVLock contract:
+        // To deploy the CSVSeal contract (merged lock + mint):
         // 1. Navigate to csv-contracts/ethereum/contracts
-        // 2. Run: forge script script/DeployLock.s.sol --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast
+        // 2. Run: forge script script/DeploySeal.s.sol --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast
         // 3. Copy the deployed address
-        // 4. Configure the backend with the deployed address via EthereumConfig.lock_contract_address
+        // 4. Configure the backend with the deployed address via EthereumConfig.contract_address
         Err(ChainOpError::FeatureNotEnabled(
             "Contract deployment is delegated to Foundry/forge for security and tooling benefits. \
-             Deploy contracts manually using: forge script script/DeployLock.s.sol --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast \
-             Then configure the deployed address in EthereumConfig.lock_contract_address".to_string()
+             Deploy contracts manually using: forge script script/DeploySeal.s.sol --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast \
+             Then configure the deployed address in EthereumConfig.contract_address".to_string()
         ))
     }
 
@@ -860,8 +838,9 @@ impl ChainDeployer for EthereumBackend {
         _admin_address: &str,
         _config: serde_json::Value,
     ) -> ChainOpResult<DeploymentStatus> {
+        // Lock and mint contracts have been merged into CSVSeal
         Err(ChainOpError::FeatureNotEnabled(
-            "Contract deployment is not supported. Deploy contracts manually using Foundry/forge and provide the address.".to_string()
+            "Lock and mint contracts have been merged into CSVSeal. Use deploy_lock_contract to deploy the unified contract.".to_string()
         ))
     }
 
@@ -1067,7 +1046,7 @@ impl ChainSanadOps for EthereumBackend {
         destination_chain: &str,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let lock_contract = self.lock_contract()?;
+        let contract = self.contract()?;
         let sanad_id_bytes = sanad_id.0.as_bytes();
         let commitment = sanad_id_bytes;
 
@@ -1080,8 +1059,8 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the lock transaction using generated Alloy bindings
-            let lock_client = CsvLockClient::new(alloy_primitives::Address::from(lock_contract));
-            let call = lock_client.lock_sanad_call(
+            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
+            let call = seal_client.lock_sanad_call(
                 alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
                 alloy_primitives::FixedBytes::<32>::from_slice(commitment),
                 dest_chain_id,
@@ -1093,7 +1072,7 @@ impl ChainSanadOps for EthereumBackend {
 
             // Build and sign transaction using Alloy
             let tx_hash = self
-                .build_sign_and_send_transaction(lock_contract, &calldata, owner_key_id)
+                .build_sign_and_send_transaction(contract, &calldata, owner_key_id)
                 .await?;
 
             // Wait for receipt
@@ -1108,14 +1087,14 @@ impl ChainSanadOps for EthereumBackend {
                 metadata: serde_json::json!({
                     "operation": "lock",
                     "destination_chain": destination_chain,
-                    "contract": hex::encode(lock_contract),
+                    "contract": hex::encode(contract),
                 }),
             })
         }
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = (lock_contract, commitment, dest_chain_id, owner_addr);
+            let _ = (contract, commitment, dest_chain_id, owner_addr);
             Err(ChainOpError::FeatureNotEnabled(
                 "Sanad locking requires the 'rpc' feature for transaction signing. \
                  Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
@@ -1131,7 +1110,7 @@ impl ChainSanadOps for EthereumBackend {
         lock_proof: &CoreInclusionProof,
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let mint_contract = self.mint_contract()?;
+        let contract = self.contract()?;
         let sanad_id_bytes = source_sanad_id.0.as_bytes();
         let commitment = sanad_id_bytes;
         let state_root = lock_proof.block_hash.as_bytes();
@@ -1142,8 +1121,8 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the mint transaction using generated Alloy bindings
-            let mint_client = CsvMintClient::new(alloy_primitives::Address::from(mint_contract));
-            let call = mint_client.mint_sanad_call(
+            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
+            let call = seal_client.mint_sanad_call(
                 alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
                 alloy_primitives::FixedBytes::<32>::from_slice(commitment),
                 alloy_primitives::FixedBytes::<32>::from_slice(state_root),
@@ -1159,7 +1138,7 @@ impl ChainSanadOps for EthereumBackend {
 
             // Build and sign transaction
             let tx_hash = self
-                .build_sign_and_send_transaction(mint_contract, &calldata, new_owner)
+                .build_sign_and_send_transaction(contract, &calldata, new_owner)
                 .await?;
 
             // Wait for receipt
@@ -1175,14 +1154,14 @@ impl ChainSanadOps for EthereumBackend {
                     "operation": "mint",
                     "source_chain": source_chain,
                     "new_owner": new_owner,
-                    "contract": hex::encode(mint_contract),
+                    "contract": hex::encode(contract),
                 }),
             })
         }
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = (mint_contract, owner_addr);
+            let _ = (contract, owner_addr);
             Err(ChainOpError::FeatureNotEnabled(
                 "Sanad minting requires the 'rpc' feature for transaction signing. \
                  Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
@@ -1196,7 +1175,7 @@ impl ChainSanadOps for EthereumBackend {
         sanad_id: &SanadId,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let lock_contract = self.lock_contract()?;
+        let contract = self.contract()?;
         let sanad_id_bytes = sanad_id.0.as_bytes();
 
         // Compute destination owner hash for verification
@@ -1206,8 +1185,8 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the refund transaction using generated Alloy bindings
-            let lock_client = CsvLockClient::new(alloy_primitives::Address::from(lock_contract));
-            let call = lock_client.refund_sanad_call(
+            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
+            let call = seal_client.refund_sanad_call(
                 alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
                 alloy_primitives::FixedBytes::<32>::from_slice(&owner_hash),
             );
@@ -1217,7 +1196,7 @@ impl ChainSanadOps for EthereumBackend {
 
             // Build and sign transaction
             let tx_hash = self
-                .build_sign_and_send_transaction(lock_contract, &calldata, owner_key_id)
+                .build_sign_and_send_transaction(contract, &calldata, owner_key_id)
                 .await?;
 
             // Wait for receipt
@@ -1231,14 +1210,14 @@ impl ChainSanadOps for EthereumBackend {
                 chain_id: self.config.network.chain_id().to_string(),
                 metadata: serde_json::json!({
                     "operation": "refund",
-                    "contract": hex::encode(lock_contract),
+                    "contract": hex::encode(contract),
                 }),
             })
         }
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = (lock_contract, owner_hash);
+            let _ = (contract, owner_hash);
             Err(ChainOpError::FeatureNotEnabled(
                 "Sanad refund requires the 'rpc' feature for transaction signing. \
                  Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
@@ -1261,14 +1240,14 @@ impl ChainSanadOps for EthereumBackend {
         let _ = owner_key_id;
 
         // Check if sanad is locked (metadata would have been recorded then)
-        let lock_contract = self.lock_contract()?;
+        let contract = self.contract()?;
         let sanad_id_bytes = *sanad_id.0.as_bytes();
 
         #[cfg(feature = "rpc")]
         {
             // Try to query contract state to verify metadata was recorded
-            let lock_client = CsvLockClient::new(alloy_primitives::Address::from(lock_contract));
-            let _call = lock_client.get_lock_info_call(
+            let seal_client = CsvSealClient::new(alloy_primitives::Address::from(contract));
+            let _call = seal_client.get_lock_info_call(
                 alloy_primitives::FixedBytes::<32>::from_slice(&sanad_id_bytes),
             );
 
@@ -1282,14 +1261,14 @@ impl ChainSanadOps for EthereumBackend {
                 metadata: serde_json::json!({
                     "operation": "record_metadata",
                     "note": "On Ethereum, metadata is recorded during lockSanad operation",
-                    "contract": hex::encode(lock_contract),
+                    "contract": hex::encode(contract),
                 }),
             })
         }
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = lock_contract;
+            let _ = contract;
             Err(ChainOpError::FeatureNotEnabled(
                 "Metadata verification requires the 'rpc' feature. \
                  Note: On Ethereum, metadata is recorded during the lock operation."
@@ -1304,7 +1283,7 @@ impl ChainSanadOps for EthereumBackend {
         expected_state: &str,
     ) -> ChainOpResult<bool> {
         // Query the CSV seal contract for the seal state using eth_call
-        let lock_contract = self.lock_contract()?;
+        let contract = self.contract()?;
         let commitment = sanad_id.0.as_bytes();
         let mut commitment_array = [0u8; 32];
         let copy_len = commitment.len().min(32);
@@ -1441,8 +1420,7 @@ mod tests {
             use_checkpoint_finality: true,
             rpc_url: "http://127.0.0.1:8545".to_string(),
             private_key: None,
-            lock_contract_address: None,
-            mint_contract_address: None,
+            contract_address: None,
         };
         let ops = EthereumBackend::new(rpc, config);
         assert_eq!(ops.config.network.chain_id(), 1);
@@ -1457,8 +1435,7 @@ mod tests {
             use_checkpoint_finality: true,
             rpc_url: "http://127.0.0.1:8545".to_string(),
             private_key: None,
-            lock_contract_address: None,
-            mint_contract_address: None,
+            contract_address: None,
         };
         let ops = EthereumBackend::new(rpc, config);
 

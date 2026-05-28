@@ -1,38 +1,27 @@
 {
-  "manifest_version": "1.0.0",
-  "protocol_version": "0.1.0",
+  "manifest_version": "2.0.0",
+  "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-05-28T16:52:07.194471Z",
+  "updated_at": "2026-05-28T18:00:00.000000Z",
   "deployments": {
     "ethereum": {
       "network": "sepolia",
       "chain_id": 11155111,
-      "deployment_block": "10854941",
-      "deployment_timestamp": "2026-05-28T12:41:00Z",
-      "verified": true,
+      "deployment_block": "0",
+      "deployment_timestamp": "2026-05-28T18:00:00Z",
+      "verified": false,
       "contracts": [
         {
-          "name": "CSVLock",
-          "address": "0xac1E3Bd5FB767C6B6b23Ac19309FF3d1739D0fD2",
-          "deployment_tx": "0x207adfb8c99bbdf8622c6582e92b3a0b8ebaa9a01a06e0bc13caa89d482b2b1c",
-          "block_number": "10854941",
+          "name": "CSVSeal",
+          "address": "",
+          "deployment_tx": "",
+          "block_number": "0",
           "bytecode_hash": "",
-          "verified": true,
+          "verified": false,
           "constructor_args": {
-            "mintContract": "0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820"
-          }
-        },
-        {
-          "name": "CSVMint",
-          "address": "0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820",
-          "deployment_tx": "0xa0f2a5d8ac19d3ebcb23a9d8e376a900e2371d9e7afc232c5c22694ff6090625",
-          "block_number": "10854941",
-          "bytecode_hash": "",
-          "verified": true,
-          "constructor_args": {
-            "lockContract": "0xac1E3Bd5FB767C6B6b23Ac19309FF3d1739D0fD2",
             "verifier": ""
-          }
+          },
+          "note": "Merged lock + mint contract. Redeploy with: forge script script/Deploy.s.sol --rpc-url $SEPOLIA_RPC_URL --private-key $DEPLOYER_KEY --broadcast"
         }
       ]
     },

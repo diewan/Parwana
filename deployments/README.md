@@ -22,14 +22,14 @@ cd csv-contracts/ethereum
 
 ```bash
 cd csv-contracts/ethereum/scripts
-cargo run --bin update_manifest -- <lock> <mint> <tx> <block>
+cargo run --bin update_manifest -- <seal_address> <tx> <block>
 ```
 
-Set `VERIFIER_ADDRESS` when updating CSVMint constructor args.
+Set `VERIFIER_ADDRESS` when updating CSVSeal constructor args.
 
 ## Verification Checklist
 
 - [ ] `bytecode_hash` populated from `deployments/artifacts/*.bin`
 - [ ] `verified: true` after Etherscan / block explorer confirmation
-- [ ] `chains/ethereum.toml` `lock_contract_address` / `mint_contract_address` match manifest
+- [ ] `chains/ethereum.toml` `contract_address` matches manifest
 - [ ] `CXXFLAGS="-include cstdint" cargo test --workspace --all-features` passes

@@ -13,10 +13,8 @@ pub struct EthereumConfig {
     pub rpc_url: String,
     /// Optional private key hex (for signing/deployment; may be None for read-only)
     pub private_key: Option<String>,
-    /// Lock contract address for cross-chain transfers
-    pub lock_contract_address: Option<[u8; 20]>,
-    /// Mint contract address for cross-chain transfers
-    pub mint_contract_address: Option<[u8; 20]>,
+    /// Seal contract address for cross-chain transfers (merged lock + mint)
+    pub contract_address: Option<[u8; 20]>,
 }
 
 /// Ethereum network type
@@ -71,8 +69,7 @@ impl Default for EthereumConfig {
             use_checkpoint_finality: true,
             rpc_url: "http://127.0.0.1:8545".to_string(),
             private_key: None,
-            lock_contract_address: None,
-            mint_contract_address: None,
+            contract_address: None,
         }
     }
 }

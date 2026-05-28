@@ -1,7 +1,7 @@
 #!/bin/bash
 # Deployment Script for CSV Contracts on Sepolia
 #
-# This script deploys CSVLock and CSVMint contracts to Sepolia testnet
+# This script deploys the CSVSeal contract (merged lock + mint) to Sepolia testnet
 # and updates the deployment manifest and chain configuration.
 #
 # Prerequisites:
@@ -97,15 +97,13 @@ if [ ! -f "$RUN_FILE" ]; then
     exit 1
 fi
 
-# Extract contract addresses and deployment info
-LOCK_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVLock") | .contractAddress] | first' $RUN_FILE)
-MINT_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVMint") | .contractAddress] | first' $RUN_FILE)
+# Extract contract address and deployment info
+SEAL_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVSeal") | .contractAddress] | first' $RUN_FILE)
 DEPLOYMENT_TX=$(jq -r '[.transactions[] | select(.transactionType == "CREATE") | .hash] | first' $RUN_FILE)
 BLOCK_NUMBER_HEX=$(jq -r '[.receipts[] | .blockNumber] | first' $RUN_FILE)
 BLOCK_NUMBER=$(printf "%d" $BLOCK_NUMBER_HEX)
 
-echo -e "${YELLOW}CSVLock address: ${LOCK_ADDRESS}${NC}"
-echo -e "${YELLOW}CSVMint address: ${MINT_ADDRESS}${NC}"
+echo -e "${YELLOW}CSVSeal address: ${SEAL_ADDRESS}${NC}"
 echo -e "${YELLOW}Deployment TX: ${DEPLOYMENT_TX}${NC}"
 echo -e "${YELLOW}Block number: ${BLOCK_NUMBER}${NC}"
 
@@ -116,35 +114,29 @@ echo -e "${GREEN}=== Updating deployment manifest ===${NC}"
 
 # Update deployment-manifest.json (relative to csv-contracts/ethereum/)
 MANIFEST="../../../deployments/deployment-manifest.json"
-jq --arg lock "$LOCK_ADDRESS" \
-   --arg mint "$MINT_ADDRESS" \
+jq --arg seal "$SEAL_ADDRESS" \
    --arg tx "$DEPLOYMENT_TX" \
    --arg block "$BLOCK_NUMBER" \
    --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
    '
-   (.deployments.ethereum.contracts[] | select(.name == "CSVLock") | .address) = $lock |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVLock") | .deployment_tx) = $tx |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVLock") | .block_number) = $block |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVLock") | .constructor_args.mintContract) = $mint |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVMint") | .address) = $mint |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVMint") | .deployment_tx) = $tx |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVMint") | .block_number) = $block |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVMint") | .constructor_args.lockContract) = $lock |
+   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .address) = $seal |
+   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .deployment_tx) = $tx |
+   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .block_number) = $block |
+   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .constructor_args.verifier) = "" |
    .deployments.ethereum.deployment_block = $block |
-   .deployments.ethereum.deployment_timestamp = $timestamp
+   .deployments.ethereum.deployment_timestamp = $timestamp |
+   .deployments.ethereum.verified = true
    ' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
 echo "Deployment manifest updated successfully!"
 
 # Update chains/ethereum.toml (relative to csv-contracts/ethereum/)
 CHAINS_CONFIG="../../../chains/ethereum.toml"
 if [ -f "$CHAINS_CONFIG" ]; then
-    sed -i "s/lock_contract_address = \".*\"/lock_contract_address = \"$LOCK_ADDRESS\"/" "$CHAINS_CONFIG"
-    sed -i "s/mint_contract_address = \".*\"/mint_contract_address = \"$MINT_ADDRESS\"/" "$CHAINS_CONFIG"
+    sed -i "s/contract_address = \".*\"/contract_address = \"$SEAL_ADDRESS\"/" "$CHAINS_CONFIG"
     echo "chains/ethereum.toml updated successfully!"
 fi
 
-echo -e "${YELLOW}CSVLock address: ${LOCK_ADDRESS}${NC}"
-echo -e "${YELLOW}CSVMint address: ${MINT_ADDRESS}${NC}"
+echo -e "${YELLOW}CSVSeal address: ${SEAL_ADDRESS}${NC}"
 echo -e "${YELLOW}Deployment TX: ${DEPLOYMENT_TX}${NC}"
 echo -e "${YELLOW}Block number: ${BLOCK_NUMBER}${NC}"
 
@@ -152,8 +144,7 @@ echo ""
 echo -e "${GREEN}=== Deployment completed successfully! ===${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Verify contracts on Etherscan: https://sepolia.etherscan.io/address/$LOCK_ADDRESS"
-echo "2. Verify contracts on Etherscan: https://sepolia.etherscan.io/address/$MINT_ADDRESS"
-echo "3. Update bytecode_hash in deployment-manifest.json using a tool like `cast hash` or `forge inspect` to compute the deployed bytecode hash"
-echo "4. Set verifier address in CSVMint constructor args if needed"
-echo "5. Mark contracts as verified in deployment-manifest.json"
+echo "1. Verify contract on Etherscan: https://sepolia.etherscan.io/address/$SEAL_ADDRESS"
+echo "2. Update bytecode_hash in deployment-manifest.json using a tool like `cast hash` or `forge inspect` to compute the deployed bytecode hash"
+echo "3. Set verifier address in CSVSeal constructor args if needed"
+echo "4. Mark contract as verified in deployment-manifest.json"

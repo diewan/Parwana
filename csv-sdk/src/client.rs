@@ -439,8 +439,7 @@ impl CsvClient {
                     use_checkpoint_finality: !_is_testnet,
                     rpc_url: rpc_url.clone(),
                     private_key: None,
-                    lock_contract_address: None,
-                    mint_contract_address: None,
+                    contract_address: None,
                 };
                 let address = _config
                     .chains
