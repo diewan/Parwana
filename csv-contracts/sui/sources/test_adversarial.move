@@ -9,11 +9,8 @@
 //! 6. partial_event_replay - Omit 1 event from event bundle
 //! 7. duplicate_mint_proof - Submit valid mint proof twice
 
+#[allow(unused_function)]
 module csv_seal::test_adversarial {
-    use sui::test_utils;
-    use sui::tx_context;
-    use std::vector;
-    use csv_seal::csv_seal;
 
     /// Test 1: double_consume - Submit same proof bundle twice
     /// Expected: Second tx must abort with EALREADY_CONSUMED
@@ -108,7 +105,7 @@ module csv_seal::test_adversarial {
     fun flip_byte_in_proof(proof: vector<u8>, index: u64): vector<u8> {
         let mut result = proof;
         // Flip byte at index
-        result[index] = result[index] ^ 0xFF;
+        *vector::borrow_mut(&mut result, index) = *vector::borrow(&result, index) ^ 0xFF;
         result
     }
     

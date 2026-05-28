@@ -117,14 +117,14 @@ echo ""
 
 # Build the package
 echo "Building Move package..."
-"$SUI" move build --path contracts 2>&1 | tail -5
+"$SUI" move build 2>&1 | tail -5
 echo ""
 
 # Publish to testnet
 echo "Publishing to ${NETWORK}..."
 
 # Check if already published - offer to upgrade or use --with-unpublished-dependencies
-if [ -f "contracts/Published.toml" ] && grep -q "\[published.${NETWORK}\]" "contracts/Published.toml" 2>/dev/null; then
+if [ -f "Published.toml" ] && grep -q "\[published.${NETWORK}\]" "Published.toml" 2>/dev/null; then
     echo "Package already published to ${NETWORK}. Options:"
     echo "  1. Upgrade existing package (keeps same Package ID)"
     echo "  2. Force fresh publish (removes publication tracking, creates new Package ID)"
@@ -138,11 +138,11 @@ fi
 
 set +e
 if [ "$PUBLISH_CMD" = "upgrade" ]; then
-    PUBLISH_OUTPUT=$("$SUI" client upgrade contracts \
+    PUBLISH_OUTPUT=$("$SUI" client upgrade \
         --gas-budget 500000000 \
         --json 2>&1)
 else
-    PUBLISH_OUTPUT=$("$SUI" client publish contracts \
+    PUBLISH_OUTPUT=$("$SUI" client publish \
         --gas-budget 500000000 \
         --json 2>&1)
 fi
@@ -165,10 +165,10 @@ if [ $PUBLISH_EXIT -ne 0 ]; then
         echo ""
         echo "1. USE EXISTING PACKAGE (recommended for testing)"
         echo "   The package is already deployed and functional."
-        echo "   Package ID: $(grep 'published-at' contracts/Published.toml | head -1 | cut -d'"' -f2)"
+        echo "   Package ID: $(grep 'published-at' Published.toml | head -1 | cut -d'"' -f2)"
         echo ""
         echo "2. FORCE FRESH PUBLISH (creates new package ID)"
-        echo "   rm contracts/Published.toml"
+        echo "   rm Published.toml"
         echo "   csv contract deploy sui"
         echo ""
         echo "3. USE ORIGINAL PUBLISHER"
@@ -176,8 +176,8 @@ if [ $PUBLISH_EXIT -ne 0 ]; then
         echo "============================================================"
         echo ""
         # For now, extract and use the existing package ID
-        if [ -f "contracts/Published.toml" ]; then
-            EXISTING_PACKAGE=$(grep 'published-at' contracts/Published.toml 2>/dev/null | head -1 | cut -d'"' -f2)
+        if [ -f "Published.toml" ]; then
+            EXISTING_PACKAGE=$(grep 'published-at' Published.toml 2>/dev/null | head -1 | cut -d'"' -f2)
             if [ -n "$EXISTING_PACKAGE" ]; then
                 echo "Using existing published package: $EXISTING_PACKAGE"
                 PACKAGE_ID="$EXISTING_PACKAGE"
@@ -191,7 +191,7 @@ if [ $PUBLISH_EXIT -ne 0 ]; then
                 echo "=========================="
                 echo ""
                 echo "The package is already deployed and can be used."
-                echo "To deploy a fresh instance: rm contracts/Published.toml"
+                echo "To deploy a fresh instance: rm Published.toml"
                 exit 0
             fi
         fi
