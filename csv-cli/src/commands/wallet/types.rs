@@ -50,11 +50,45 @@ pub enum WalletAction {
         address: Option<String>,
     },
     /// List all wallet addresses
-    List,
+    List {
+        /// Chain name (optional, lists all chains if not specified)
+        #[arg(value_enum)]
+        chain: Option<Chain>,
+        /// Account number (default: 0)
+        #[arg(short, long, default_value = "0")]
+        account: u32,
+        /// Address index (default: 0)
+        #[arg(short, long, default_value = "0")]
+        index: u32,
+    },
     /// Show hex-encoded private key for a chain (derived from mnemonic)
     PrivateKey {
         /// Chain name
         #[arg(value_enum)]
         chain: Chain,
+    },
+    /// Get a funding address for the specified chain
+    Address {
+        /// Chain name
+        #[arg(value_enum)]
+        chain: Chain,
+        /// Account number (default: 0)
+        #[arg(short, long, default_value = "0")]
+        account: u32,
+        /// Address index (default: 0)
+        #[arg(short, long, default_value = "0")]
+        index: u32,
+    },
+    /// Scan wallet for UTXOs on the specified chain
+    Scan {
+        /// Chain name
+        #[arg(value_enum)]
+        chain: Chain,
+        /// Account number to scan (default: 0)
+        #[arg(short, long, default_value = "0")]
+        account: u32,
+        /// Gap limit for address scanning (default: 20)
+        #[arg(short, long, default_value = "20")]
+        gap_limit: usize,
     },
 }

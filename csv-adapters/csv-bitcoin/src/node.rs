@@ -319,6 +319,22 @@ pub mod real_rpc {
                 auth: self.auth.clone(),
             })
         }
+
+        async fn get_utxo_scriptpubkey(
+            &self,
+            txid: [u8; 32],
+            vout: u32,
+        ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+            let txid = Txid::from_byte_array(txid);
+            let tx_out = self.client.get_tx_out(&txid, vout, Some(true))?;
+
+            if let Some(output) = tx_out {
+                let script_pubkey_hex = hex::encode(&output.script_pub_key.asm);
+                Ok(Some(script_pubkey_hex))
+            } else {
+                Ok(None)
+            }
+        }
     }
 
     /// Real RPC error type

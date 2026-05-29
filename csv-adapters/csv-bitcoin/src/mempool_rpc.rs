@@ -31,6 +31,7 @@ const INITIAL_BACKOFF: Duration = Duration::from_secs(2);
 pub struct MempoolSignetRpc {
     client: Client,
     base_url: String,
+    api_key: Option<String>,
 }
 
 impl MempoolSignetRpc {
@@ -41,6 +42,11 @@ impl MempoolSignetRpc {
 
     /// Create with a custom base URL (for self-hosted mempool instances)
     pub fn with_url(base_url: String) -> Self {
+        Self::with_url_and_key(base_url, None)
+    }
+
+    /// Create with a custom base URL and optional API key
+    pub fn with_url_and_key(base_url: String, api_key: Option<String>) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -52,7 +58,7 @@ impl MempoolSignetRpc {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self { client, base_url }
+        Self { client, base_url, api_key }
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -80,6 +86,7 @@ impl MempoolSignetRpc {
     ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
         let client = self.client.clone();
         let url = url.to_string();
+        let api_key = self.api_key.clone();
 
         let mut last_err = None;
         let mut backoff = INITIAL_BACKOFF;
@@ -97,14 +104,30 @@ impl MempoolSignetRpc {
                 backoff *= 2;
             }
 
-            match client.get(&url).send().await {
+            let mut request = client.get(&url);
+            if let Some(key) = &api_key {
+                request = request.header("x-api-key", key);
+            }
+
+            match request.send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    return resp.json::<T>().await.map_err(|e| e.into());
+                    let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| e.into())?;
+                    eprintln!("RAW MEMPOOL REST RESPONSE: url={}, body={}", url, text);
+                    return serde_json::from_str::<T>(&text).map_err(|e| {
+                        eprintln!("MEMPOOL REST: Failed to deserialize response from {}: {}", url, e);
+                        e.into()
+                    });
                 }
                 Ok(resp) => {
-                    last_err = Some(format!("HTTP {} at {}", resp.status(), url).into());
+                    let status = resp.status();
+                    let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                        format!("HTTP {} at {}: failed to read error text: {}", status, url, e).into()
+                    })?;
+                    eprintln!("MEMPOOL REST ERROR: HTTP {}, url={}, body={}", status, url, error_text);
+                    last_err = Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
                 }
                 Err(e) => {
+                    eprintln!("MEMPOOL REST NETWORK ERROR: url={}, error={}", url, e);
                     last_err = Some(format!("Network error at {}: {}", url, e).into());
                 }
             }
@@ -435,6 +458,7 @@ impl BitcoinRpc for MempoolSignetRpc {
         Box::new(MempoolSignetRpc {
             client: self.client.clone(),
             base_url: self.base_url.clone(),
+            api_key: self.api_key.clone(),
         })
     }
 
@@ -467,6 +491,30 @@ impl BitcoinRpc for MempoolSignetRpc {
             .collect();
         Ok(result)
     }
+
+    async fn get_utxo_scriptpubkey(
+        &self,
+        txid: [u8; 32],
+        vout: u32,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let txid_hex = hex::encode(txid);
+        let url = format!("{}/tx/{}", self.base_url, txid_hex);
+        eprintln!("MEMPOOL RPC: Fetching scriptPubKey for txid={}, vout={} from {}", txid_hex, vout, url);
+        
+        let tx_detail: TxDetail = self.get_with_retry(&url).await
+            .map_err(|e| {
+                eprintln!("MEMPOOL RPC: Failed to decode TxDetail from {}: {}", url, e);
+                e
+            })?;
+
+        if let Some(output) = tx_detail.vout.get(vout as usize) {
+            eprintln!("MEMPOOL RPC: Found scriptPubKey for vout {}: {}", vout, output.scriptpubkey);
+            Ok(Some(output.scriptpubkey.clone()))
+        } else {
+            eprintln!("MEMPOOL RPC: vout {} not found in transaction (has {} outputs)", vout, tx_detail.vout.len());
+            Ok(None)
+        }
+    }
 }
 
 /// Block info response from mempool.space
@@ -497,40 +545,63 @@ pub struct TxStatus {
 /// Transaction detail response
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TxDetail {
+    #[serde(default)]
     pub txid: String,
+    #[serde(default)]
     pub version: u32,
+    #[serde(default)]
     pub locktime: u64,
+    #[serde(default)]
     pub vin: Vec<TxInput>,
+    #[serde(default)]
     pub vout: Vec<TxOutput>,
+    #[serde(default)]
     pub size: u64,
+    #[serde(default)]
     pub weight: u64,
+    #[serde(default)]
     pub fee: u64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TxInput {
+    #[serde(default)]
     pub txid: String,
+    #[serde(default)]
     pub vout: u32,
+    #[serde(default)]
     pub prevout: Option<TxPrevout>,
+    #[serde(default)]
     pub scriptsig: String,
+    #[serde(default)]
     pub is_coinbase: bool,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TxOutput {
+    #[serde(default)]
     pub scriptpubkey: String,
+    #[serde(default)]
     pub scriptpubkey_asm: String,
+    #[serde(default)]
     pub scriptpubkey_type: String,
+    #[serde(default)]
     pub scriptpubkey_address: String,
+    #[serde(default)]
     pub value: u64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TxPrevout {
+    #[serde(default)]
     pub scriptpubkey: String,
+    #[serde(default)]
     pub scriptpubkey_asm: String,
+    #[serde(default)]
     pub scriptpubkey_type: String,
+    #[serde(default)]
     pub scriptpubkey_address: String,
+    #[serde(default)]
     pub value: u64,
 }
 

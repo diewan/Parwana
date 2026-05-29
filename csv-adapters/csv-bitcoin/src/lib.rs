@@ -36,8 +36,10 @@ pub mod zk_prover;
 #[cfg(feature = "signet-rest")]
 pub mod mempool_rpc;
 
+pub mod json_rpc;
+
 pub use bip341::{Bip341Error, TaprootOutput, derive_output_key, generate_test_keypair};
-pub use config::{BitcoinConfig, Network};
+pub use config::{BitcoinConfig, BitcoinRpcBackend, Network};
 pub use rpc::BitcoinRpc;
 pub use seal_protocol::BitcoinSealProtocol;
 pub use sp1_guest::{
@@ -70,3 +72,5 @@ pub use node::real_rpc::{BitcoinNode, TxInfo};
 
 #[cfg(feature = "signet-rest")]
 pub use mempool_rpc::MempoolSignetRpc;
+
+pub use json_rpc::BitcoinJsonRpc;

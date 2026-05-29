@@ -67,6 +67,16 @@ pub trait BitcoinRpc: Send + Sync {
         Err("Bitcoin RPC implementation does not support fee estimation".into())
     }
 
+    /// Get the scriptPubKey for a specific UTXO output
+    async fn get_utxo_scriptpubkey(
+        &self,
+        txid: [u8; 32],
+        vout: u32,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let _ = (txid, vout);
+        Err("Bitcoin RPC implementation does not support scriptPubKey fetching".into())
+    }
+
     /// Clone the RPC client into a new boxed trait object.
     /// Required for the runtime pattern to share RPC across operations.
     fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync>;
@@ -159,6 +169,15 @@ impl BitcoinRpc for TestBitcoinRpc {
             })
             .collect();
         Ok(utxos)
+    }
+
+    async fn get_utxo_scriptpubkey(
+        &self,
+        _txid: [u8; 32],
+        _vout: u32,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        // For testing, return a dummy scriptPubKey
+        Ok(Some("5120ec0eaaefbcc12b0b0f13ae06f3c4190b047c469fa4ffa60df3a0319fd28f02fe".to_string()))
     }
 
     fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync> {

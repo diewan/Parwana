@@ -1,8 +1,8 @@
 chain_id = "bitcoin-signet"
 chain_name = "bitcoin-signet"
-default_network = "testnet"
-rpc_endpoints = ["https://mempool.space/signet/api"]
-block_explorer_urls = ["https://mempool.space/signet"]
+default_network = "signet"
+rpc_endpoints = ["${BITCOIN_RPC_URL:-https://mempool.space/signet/api}"]
+block_explorer_urls = ["https://mempool.space/signet", "https://blockstream.info/signet"]
 start_block = 0
 
 [finality_guarantee]

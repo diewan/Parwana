@@ -62,24 +62,24 @@ impl CsvSealAbi {
         let dest_owner_len = destination_owner.len();
         let mut calldata = Vec::with_capacity(4 + 32 + 32 + 32 + 32 + dest_owner_len);
         calldata.extend_from_slice(&selector[..4]);
-        
+
         // sanadId (offset 0x20)
         calldata.extend_from_slice(&sanad_id);
-        
+
         // commitment (offset 0x40)
         calldata.extend_from_slice(&commitment);
-        
+
         // destinationChain (offset 0x60)
         let mut chain_bytes = [0u8; 32];
         chain_bytes[31] = destination_chain;
         calldata.extend_from_slice(&chain_bytes);
-        
+
         // destinationOwner offset (offset 0x80)
         let mut offset_bytes = [0u8; 32];
         let offset: u32 = 0x80;
         offset_bytes[28..].copy_from_slice(&offset.to_be_bytes());
         calldata.extend_from_slice(&offset_bytes);
-        
+
         // destinationOwner data (at offset 0x80)
         let mut len_bytes = [0u8; 32];
         // Length is encoded as a 32-byte big-endian integer
@@ -87,7 +87,24 @@ impl CsvSealAbi {
         len_bytes[24..].copy_from_slice(&len.to_be_bytes());
         calldata.extend_from_slice(&len_bytes);
         calldata.extend_from_slice(destination_owner);
-        
+
+        calldata
+    }
+
+    /// Encode the `markSealUsed(sealId, commitment)` calldata
+    /// This function consumes a seal and emits a SealUsed event
+    pub fn encode_mark_seal_used(seal_id: [u8; 32], commitment: [u8; 32]) -> Vec<u8> {
+        // Function selector: keccak256("markSealUsed(bytes32,bytes32)")[:4]
+        let selector = compute_keccak256(b"markSealUsed(bytes32,bytes32)");
+        let mut calldata = Vec::with_capacity(4 + 32 + 32);
+        calldata.extend_from_slice(&selector[..4]);
+
+        // sealId (offset 0x20)
+        calldata.extend_from_slice(&seal_id);
+
+        // commitment (offset 0x40)
+        calldata.extend_from_slice(&commitment);
+
         calldata
     }
 

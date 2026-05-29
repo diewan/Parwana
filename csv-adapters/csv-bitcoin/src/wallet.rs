@@ -5,7 +5,7 @@
 #[cfg(test)]
 use bitcoin::Txid;
 use bitcoin::{
-    Address, Network, OutPoint,
+    Address, Network, OutPoint, ScriptBuf,
     bip32::{DerivationPath as BitcoinDerivationPath, Xpriv, Xpub},
     key::TapTweak,
     secp256k1::{self, Secp256k1, SecretKey, XOnlyPublicKey},
@@ -27,6 +27,10 @@ const HARDENED: u32 = 0x8000_0000;
 
 /// BIP-86 purpose for single-key P2TR
 const BIP86_PURPOSE: u32 = 86;
+
+/// Minimum UTXO value in satoshis (10,000 sats = 0.0001 BTC)
+/// Prevents using dust/tiny UTXOs that are economically unviable
+const MINIMUM_UTXO_SAT: u64 = 10_000;
 
 /// Coin type: 0 for mainnet, 1 for testnet/signet/regtest
 fn coin_type(network: &Network) -> u32 {
@@ -84,6 +88,8 @@ pub struct WalletUtxo {
     pub path: Bip86Path,
     pub reserved: bool,
     pub reserved_for: Option<String>,
+    /// Actual scriptPubKey from blockchain (for correct sighash calculation)
+    pub script_pubkey: Option<ScriptBuf>,
 }
 
 /// Derived Taproot key with spending info
@@ -242,6 +248,10 @@ impl SealWallet {
     }
 
     pub fn add_utxo(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path) {
+        self.add_utxo_with_scriptpubkey(outpoint, amount_sat, path, None);
+    }
+
+    pub fn add_utxo_with_scriptpubkey(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>) {
         self.utxos.lock().unwrap_or_else(|e| e.into_inner()).insert(
             outpoint,
             WalletUtxo {
@@ -250,6 +260,7 @@ impl SealWallet {
                 path,
                 reserved: false,
                 reserved_for: None,
+                script_pubkey,
             },
         );
     }
@@ -277,7 +288,7 @@ impl SealWallet {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .values()
-            .filter(|u| !u.reserved)
+            .filter(|u| !u.reserved && u.amount_sat >= MINIMUM_UTXO_SAT)
             .cloned()
             .collect();
         available.sort_by_key(|utxo| std::cmp::Reverse(utxo.amount_sat));

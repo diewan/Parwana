@@ -45,6 +45,9 @@ pub mod replay_db;
 pub mod runtime_mode;
 pub mod transfer_coordinator;
 
+// Wallet operations (facade over chain adapters)
+pub mod wallet;
+
 // Legacy re-exports (orchestration only)
 pub use adapter_registry::{
     AdapterRegistryImpl, ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,

@@ -17,11 +17,13 @@ csv-admission = { path = "../csv-admission" }
 csv-observability = { path = "../csv-observability" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
+anyhow = "1"
 tracing = "0.1"
 async-trait = "0.1"
 uuid = { version = "1.1", features = ["v4", "serde"] }
 serde_json = "1.0"
 hex = "0.4"
+reqwest = { version = "0.12", features = ["json"] }
 sqlx = { version = "0.8.2", features = ["postgres", "_rt-tokio", "tls-rustls", "chrono", "uuid"], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 

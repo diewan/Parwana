@@ -46,22 +46,59 @@ pub async fn cmd_balance(
 }
 
 /// List all wallets.
-pub fn cmd_list(_config: &Config, state: &mut UnifiedStateManager) -> Result<()> {
+pub fn cmd_list(
+    chain_filter: Option<Chain>,
+    account: u32,
+    index: u32,
+    config: &Config,
+    state: &mut UnifiedStateManager,
+) -> Result<()> {
     output::header("Wallet Addresses");
 
-    let chains = vec![
-        Chain::new("bitcoin"),
-        Chain::new("ethereum"),
-        Chain::new("sui"),
-        Chain::new("aptos"),
-        Chain::new("solana"),
-    ];
+    let chains = if let Some(ref chain) = chain_filter {
+        vec![chain.clone()]
+    } else {
+        vec![
+            Chain::new("bitcoin"),
+            Chain::new("ethereum"),
+            Chain::new("sui"),
+            Chain::new("aptos"),
+            Chain::new("solana"),
+        ]
+    };
 
     let mut found_any = false;
     for chain in chains {
-        if let Some(address) = state.get_address(&chain) {
-            output::kv(&format!("{}", chain), address);
-            found_any = true;
+        // For Bitcoin, derive address from mnemonic using account and index
+        if chain.as_str() == "bitcoin" {
+            if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
+                let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+                    .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+                let seed = mnemonic.to_seed(None);
+                let seed_array = *seed.as_bytes();
+
+                // Use csv-coordinator for wallet operations (architecture compliant)
+                let network = match config.chain(&chain)?.network {
+                    crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
+                    crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
+                    crate::config::Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
+                };
+                let address = csv_coordinator::wallet::bitcoin::derive_funding_address(
+                    &seed_array,
+                    network,
+                    account,
+                    index,
+                ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+                output::kv(&format!("{} (account {}, index {})", chain, account, index), &address);
+                found_any = true;
+            }
+        } else {
+            // For other chains, use stored address
+            if let Some(address) = state.get_address(&chain) {
+                output::kv(&format!("{}", chain), address);
+                found_any = true;
+            }
         }
     }
 
@@ -110,6 +147,9 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 xpub: wallet_xpub,
                 contract_address: cc.contract_address.clone(),
                 program_id: None,
+                account: 0,
+                index: 0,
+                utxos: Vec::new(),
             },
         );
     } else {
@@ -130,6 +170,9 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 xpub: wallet_xpub,
                 contract_address: None,
                 program_id: None,
+                account: 0,
+                index: 0,
+                utxos: Vec::new(),
             },
         );
     }

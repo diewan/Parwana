@@ -89,6 +89,30 @@ pub struct ChainConfig {
     pub contract_address: Option<String>,
     /// Deployed program identifier for program-based chains.
     pub program_id: Option<String>,
+    /// Account index for HD wallet derivation (Bitcoin only, default: 0)
+    pub account: u32,
+    /// Address index for HD wallet derivation (Bitcoin only, default: 0)
+    pub index: u32,
+    /// Pre-loaded UTXOs for Bitcoin wallet (for persistence across commands)
+    pub utxos: Vec<UtxoConfig>,
+}
+
+/// UTXO configuration for Bitcoin wallet (for SDK config)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UtxoConfig {
+    /// Transaction ID (hex)
+    pub txid: String,
+    /// Output index
+    pub vout: u32,
+    /// Value in satoshis
+    pub value: u64,
+    /// Account index
+    pub account: u32,
+    /// Address index
+    pub index: u32,
+    /// ScriptPubKey (hex) from blockchain for correct sighash calculation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_pubkey: Option<String>,
 }
 
 impl Default for ChainConfig {
@@ -100,6 +124,9 @@ impl Default for ChainConfig {
             xpub: None,
             contract_address: None,
             program_id: None,
+            account: 0,
+            index: 0,
+            utxos: Vec::new(),
         }
     }
 }

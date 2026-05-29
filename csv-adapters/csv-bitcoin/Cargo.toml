@@ -41,12 +41,12 @@ bip32 = { version = "0.5", features = ["std", "mnemonic"] }
 serde_json = "1.0"
 log = "0.4"
 base64 = "0.22"
-reqwest = { version = "0.12", features = ["json"], optional = true }
+reqwest = { version = "0.12", features = ["json"] }
 
 [features]
 default = []
 rpc = ["bitcoincore-rpc", "dep:csv-store", "csv-store?/sqlite"]
-signet-rest = ["reqwest", "dep:csv-store", "csv-store?/browser-storage"]
+signet-rest = ["dep:csv-store", "csv-store?/browser-storage"]
 production = ["rpc"]
 sp1-guest = []
 

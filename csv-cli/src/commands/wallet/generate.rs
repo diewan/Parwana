@@ -190,7 +190,6 @@ fn generate_wallet_for_chain(
 
 fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result<()> {
     use csv_keys::bip39::{BitcoinNetwork, derive_xpub};
-    use csv_keys::bip44::derive_address_from_key;
     use csv_keys::file_keystore::FileKeystore;
     use csv_keys::memory::{Passphrase, SecretKey};
 
@@ -207,37 +206,34 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
     // Derive BIP-86 xpub (safe to share, can derive addresses but not spend)
     let bitcoin_network = match network {
         Network::Main => BitcoinNetwork::Mainnet,
-        Network::Test => BitcoinNetwork::Testnet,
-        Network::Dev => BitcoinNetwork::Testnet,
+        Network::Test => BitcoinNetwork::Signet,
+        Network::Dev => BitcoinNetwork::Regtest,
     };
-    let _xpub = derive_xpub(seed.as_bytes(), bitcoin_network, 0)
+    let xpub = derive_xpub(seed.as_bytes(), bitcoin_network, 0)
         .map_err(|e| anyhow::anyhow!("Failed to derive xpub: {}", e))?;
 
-    // Derive first address from seed using existing bip44 utility
-    let address = derive_address_from_key(seed.as_bytes(), &ChainId::new("bitcoin"))
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Use csv-coordinator for wallet operations (architecture compliant)
+    let runtime_network = match network {
+        Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
+        Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
+        Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
+    };
+    let address = csv_coordinator::wallet::bitcoin::derive_funding_address(
+        seed.as_bytes(),
+        runtime_network,
+        0,
+        0,
+    ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
+    // Update unified storage with new mnemonic and address
+    state.storage.wallet.mnemonic = Some(mnemonic_str.clone());
     state.store_address(Chain::new("bitcoin"), address.clone());
-
-    // Store private key in keystore for future signing
-    let mut keystore = FileKeystore::new(None)?;
-    let passphrase = Passphrase::new("default");
-    // Derive a 32-byte private key from the seed for signing
-    let mut key_bytes = [0u8; 32];
-    key_bytes.copy_from_slice(&seed.as_bytes()[..32]);
-    let secret_key = SecretKey::new(key_bytes);
-    keystore.store_key(
-        "bitcoin-0",
-        "bitcoin",
-        Some("Bitcoin Account (account 0)"),
-        &secret_key,
-        &passphrase,
-    )?;
 
     output::header("Bitcoin Wallet Generated");
     output::kv("Network", &network.to_string());
     output::kv("Address", &address);
-    output::kv("Derivation Path", "m/86'/0'/0'/0/0 (BIP-86 Taproot)");
+    output::kv("Derivation Path", "m/86'/1'/0'/0/0 (BIP-86 Taproot)");
+    output::kv("Xpub", &xpub);
 
     println!();
     output::warning(

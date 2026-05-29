@@ -298,7 +298,7 @@ fn generate_explorer_links(
 
     // Source chain explorer
     let source_explorer = match source_chain {
-        "bitcoin" => "https://blockstream.info/testnet",
+        "bitcoin" => "https://blockstream.info/signet",
         "ethereum" => "https://sepolia.etherscan.io",
         "sui" => "https://suiscan.xyz/testnet",
         "aptos" => "https://explorer.aptoslabs.com",
@@ -308,7 +308,7 @@ fn generate_explorer_links(
 
     // Destination chain explorer
     let dest_explorer = match dest_chain {
-        "bitcoin" => "https://blockstream.info/testnet",
+        "bitcoin" => "https://blockstream.info/signet",
         "ethereum" => "https://sepolia.etherscan.io",
         "sui" => "https://suiscan.xyz/testnet",
         "aptos" => "https://explorer.aptoslabs.com",

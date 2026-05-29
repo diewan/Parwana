@@ -8,6 +8,7 @@ pub mod circuit;
 pub mod memory;
 pub mod negotiation;
 pub mod router;
+pub mod wallet;
 
 pub use cell::InboundTransfer;
 pub use cell::{CellConfig, CellError, CellTask, ChainCell};

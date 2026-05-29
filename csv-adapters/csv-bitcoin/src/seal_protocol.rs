@@ -65,6 +65,7 @@ impl BitcoinSealProtocol {
         config: BitcoinConfig,
         rpc: Box<dyn BitcoinRpc + Send + Sync>,
     ) -> BitcoinResult<Self> {
+        eprintln!("BITCOIN ADAPTER LAYER: from_config called - RPC URL: {}, Account: {}, Index: {}", config.rpc_url, config.account, config.index);
         // Validate configuration
         config
             .validate()
@@ -81,17 +82,55 @@ impl BitcoinSealProtocol {
         protocol_id[..4].copy_from_slice(&magic);
         let tx_builder = CommitmentTxBuilder::new(protocol_id, config.finality_depth as u64);
 
-        // Create wallet from xpub if provided, otherwise generate random for testing
-        let wallet = match &config.xpub {
-            Some(xpub_str) => SealWallet::from_xpub(xpub_str, config.network.to_bitcoin_network())
-                .map_err(|e| {
-                    BitcoinError::RpcError(format!("Wallet creation from xpub failed: {}", e))
-                })?,
-            None => {
+        // Create wallet from seed if provided, otherwise from xpub, otherwise error
+        let wallet = if let Some(seed_hex) = &config.seed {
+            // Decode hex seed (128 hex chars = 64 bytes)
+            let seed_bytes = hex::decode(seed_hex.trim_start_matches("0x"))
+                .map_err(|e| BitcoinError::RpcError(format!("Invalid seed hex: {}", e)))?;
+            if seed_bytes.len() != 64 {
                 return Err(BitcoinError::RpcError(
-                    "BitcoinSealProtocol::from_config requires xpub; refusing to generate a random production wallet".to_string(),
+                    format!("Seed must be 64 bytes (128 hex chars), got {} bytes", seed_bytes.len())
                 ));
             }
+            let mut seed_array = [0u8; 64];
+            seed_array.copy_from_slice(&seed_bytes);
+            let wallet = SealWallet::from_seed(&seed_array, config.network.to_bitcoin_network())
+                .map_err(|e| BitcoinError::RpcError(format!("Wallet creation from seed failed: {}", e)))?;
+
+            // Load UTXOs from config if available
+            for utxo_config in &config.utxos {
+                if let Ok(txid_bytes) = hex::decode(&utxo_config.txid) {
+                    if txid_bytes.len() == 32 {
+                        let mut txid_array = [0u8; 32];
+                        txid_array.copy_from_slice(&txid_bytes);
+                        let hash = bitcoin::hashes::Hash::from_byte_array(txid_array);
+                        let outpoint = bitcoin::OutPoint {
+                            txid: bitcoin::Txid::from_raw_hash(hash),
+                            vout: utxo_config.vout,
+                        };
+                        let path = crate::wallet::Bip86Path::external(utxo_config.account, utxo_config.index);
+                        
+                        // Decode scriptPubKey if available
+                        let script_pubkey = utxo_config.script_pubkey.as_ref()
+                            .and_then(|spk_hex| hex::decode(spk_hex).ok())
+                            .map(|bytes| bitcoin::ScriptBuf::from(bytes));
+                        
+                        wallet.add_utxo_with_scriptpubkey(outpoint, utxo_config.value, path, script_pubkey);
+                        log::info!("Loaded UTXO {}:{} ({} sats) from config", &utxo_config.txid, utxo_config.vout, utxo_config.value);
+                    }
+                }
+            }
+
+            wallet
+        } else if let Some(xpub_str) = &config.xpub {
+            SealWallet::from_xpub(xpub_str, config.network.to_bitcoin_network())
+                .map_err(|e| {
+                    BitcoinError::RpcError(format!("Wallet creation from xpub failed: {}", e))
+                })?
+        } else {
+            return Err(BitcoinError::RpcError(
+                "BitcoinSealProtocol::from_config requires either seed or xpub; refusing to generate a random production wallet".to_string(),
+            ));
         };
 
         log::info!(
@@ -102,6 +141,7 @@ impl BitcoinSealProtocol {
             magic[2],
             magic[3]
         );
+        eprintln!("BITCOIN ADAPTER LAYER: BitcoinSealProtocol initialized with RPC URL: {}", config.rpc_url);
 
         Ok(Self {
             config,
@@ -214,9 +254,16 @@ impl BitcoinSealProtocol {
             .unwrap_or(0)
     }
 
-    /// Get a reference to the wallet
-    pub fn wallet(&self) -> &SealWallet {
-        &self.wallet
+    /// Get a mutable reference to the wallet
+    pub fn wallet_mut(&mut self) -> &mut SealWallet {
+        &mut self.wallet
+    }
+
+    /// Add UTXOs to the wallet from persisted state
+    pub fn add_utxos_from_state(&mut self, utxos: Vec<(bitcoin::OutPoint, u64, crate::wallet::Bip86Path)>) {
+        for (outpoint, value, path) in utxos {
+            self.wallet.add_utxo(outpoint, value, path);
+        }
     }
 
     /// Get a mutable reference to the tx_builder
@@ -233,7 +280,7 @@ impl BitcoinSealProtocol {
             .next_seal_index
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let path = crate::wallet::Bip86Path::external(0, *next_index);
+        let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index + *next_index);
 
         // Derive the Taproot key for this path
         let key = self
@@ -485,6 +532,24 @@ impl SealProtocol for BitcoinSealProtocol {
                 ))
             })?;
 
+            // Final UTXO validation immediately before broadcast to catch race conditions
+            log::info!("Final validation: checking UTXO {}:{} is unspent before broadcast", hex::encode(outpoint.txid), outpoint.vout);
+            
+            let is_unspent = rpc.is_utxo_unspent(seal.txid, seal.vout).await
+                .map_err(|e| ProtocolError::PublishFailed(format!("Failed to check UTXO status before broadcast: {}", e)))?;
+            
+            if !is_unspent {
+                return Err(Box::new(ProtocolError::PublishFailed(format!(
+                    "UTXO {}:{} is already spent or missing on-chain. Please refresh UTXOs with 'csv wallet scan' or fund the address.",
+                    hex::encode(outpoint.txid), outpoint.vout
+                ))));
+            }
+
+            // Fetch and validate the actual on-chain scriptPubKey (what the node expects)
+            let onchain_spk = rpc.get_utxo_scriptpubkey(seal.txid, seal.vout).await
+                .map_err(|e| ProtocolError::PublishFailed(format!("Failed to fetch UTXO scriptPubKey from RPC: {}. This usually means the RPC endpoint is incompatible (e.g., blockstream.info instead of mempool.space) or the UTXO doesn't exist. Check your BITCOIN_RPC_URL environment variable.", e)))?;
+            log::info!("On-chain scriptPubKey for UTXO: {:?}", onchain_spk);
+
             // Build and sign the Taproot commitment transaction
             let tx_result = self
                 .tx_builder
@@ -495,6 +560,15 @@ impl SealProtocol for BitcoinSealProtocol {
                     None, // No change path — single UTXO, single output
                 )
                 .map_err(|e| ProtocolError::PublishFailed(e.to_string()))?;
+
+            // Log transaction details for debugging
+            log::info!("Built transaction: txid={}, input_txid={}, input_vout={}, input_value={}, output_value={}", 
+                hex::encode(tx_result.txid),
+                hex::encode(utxo.outpoint.txid),
+                utxo.outpoint.vout,
+                utxo.amount_sat,
+                tx_result.tapret_output.amount_sat);
+            log::info!("Raw transaction length: {} bytes", tx_result.raw_tx.len());
 
             // Broadcast the signed transaction via RPC
             let broadcast_txid = rpc

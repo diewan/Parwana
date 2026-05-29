@@ -371,6 +371,7 @@ impl CsvClient {
     }
 
     /// Build an adapter for a specific chain.
+    #[allow(unused_variables)]
     async fn build_adapter_for_chain(
         chain: ChainId,
         _config: &crate::config::Config,
@@ -384,7 +385,7 @@ impl CsvClient {
             #[cfg(all(feature = "bitcoin", feature = "rpc"))]
             "bitcoin" => {
                 log::info!("Building Bitcoin adapter for {:?} network", network);
-                let rpc_url = _config
+                let config_rpc_url = _config
                     .chains
                     .get("bitcoin")
                     .map(|c| c.rpc.url.clone())
@@ -396,26 +397,85 @@ impl CsvClient {
                             "https://mempool.space/api".to_string()
                         }
                     });
+                eprintln!("SDK LAYER: RPC URL from SDK config: {}", config_rpc_url);
+                let rpc_url = config_rpc_url;
                 let btc_network = if _is_testnet {
                     csv_bitcoin::Network::Signet
                 } else {
                     csv_bitcoin::Network::Mainnet
                 };
                 log::info!("Building Bitcoin adapter with RPC URL: {}", rpc_url);
+                let chain_config = _config.chains.get("bitcoin");
+                let mut utxos = Vec::new();
+                if let Some(cc) = chain_config {
+                    // Convert UTXO records from SDK config to Bitcoin adapter config
+                    for utxo in &cc.utxos {
+                        eprintln!("DEBUG SDK: Received UTXO from CLI: txid={}, vout={}", utxo.txid, utxo.vout);
+                        utxos.push(csv_bitcoin::config::UtxoConfig {
+                            txid: utxo.txid.clone(),
+                            vout: utxo.vout,
+                            value: utxo.value,
+                            account: utxo.account,
+                            index: utxo.index,
+                            script_pubkey: utxo.script_pubkey.clone(),
+                        });
+                    }
+                }
+
                 let btc_config = csv_bitcoin::config::BitcoinConfig {
                     network: btc_network,
                     finality_depth: 6,
                     publication_timeout_seconds: 3600,
                     rpc_url: rpc_url.clone(),
-                    xpub: _config.chains.get("bitcoin").and_then(|c| c.xpub.clone()),
-                    private_key: private_key.map(|k| k.to_string()),
+                    rpc_backend: csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc, // Default to JSON-RPC, will be auto-detected by with_env_rpc
+                    api_key: None, // Will be loaded by with_env_rpc if using Tatum
+                    xpub: chain_config.and_then(|c| c.xpub.clone()),
+                    private_key: None, // Not used when seed is provided
+                    seed: private_key.map(|k| k.to_string()), // Pass seed for Bitcoin
+                    account: chain_config.map(|c| c.account).unwrap_or(0),
+                    index: chain_config.map(|c| c.index).unwrap_or(0),
+                    utxos,
                 };
+                eprintln!("SDK LAYER: BitcoinConfig before with_env_rpc - RPC URL: {}, Account: {}, Index: {}", btc_config.rpc_url, btc_config.account, btc_config.index);
+                let btc_config = btc_config.with_env_rpc().map_err(|e| CsvError::ProtocolError {
+                    chain: chain.clone(),
+                    message: format!("Failed to apply env RPC override: {}", e),
+                })?; // Override RPC URL from environment variable if set
+                
+                // Auto-detect backend type from URL if not already set correctly
+                let btc_config = btc_config.auto_detect_backend();
+                eprintln!("SDK LAYER: BitcoinConfig after with_env_rpc - RPC URL: {}, backend: {:?}", btc_config.rpc_url, btc_config.rpc_backend);
+                // Mark private_key as intentionally unused for Bitcoin (we use seed instead)
+                let _ = private_key;
                 // Create RPC client - this uses reqwest::blocking which needs its own runtime
                 // We must create it outside any async context to avoid runtime conflicts
+                let api_key = btc_config.api_key.clone();
+                let final_rpc_url = btc_config.rpc_url.clone();
+                let rpc_backend = btc_config.rpc_backend;
+                eprintln!("SDK LAYER: Creating RPC client with URL: {}, backend: {:?}", final_rpc_url, rpc_backend);
+                
+                // Create RPC client based on explicit backend type (not URL heuristics)
                 let rpc = std::thread::spawn(move || {
-                    Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url(
-                        rpc_url,
-                    )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
+                    match rpc_backend {
+                        csv_bitcoin::BitcoinRpcBackend::MempoolRest => {
+                            eprintln!("SDK LAYER: Using MempoolSignetRpc (REST API)");
+                            Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url_and_key(
+                                final_rpc_url,
+                                api_key,
+                            )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
+                        }
+                        csv_bitcoin::BitcoinRpcBackend::BlockstreamRest => {
+                            eprintln!("SDK LAYER: Using MempoolSignetRpc (Blockstream REST API)");
+                            Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url_and_key(
+                                final_rpc_url,
+                                api_key,
+                            )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
+                        }
+                        csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc => {
+                            eprintln!("SDK LAYER: Using BitcoinJsonRpc (JSON-RPC API)");
+                            Box::new(csv_bitcoin::BitcoinJsonRpc::new(final_rpc_url)) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
+                        }
+                    }
                 })
                 .join()
                 .map_err(|e| CsvError::ProtocolError {

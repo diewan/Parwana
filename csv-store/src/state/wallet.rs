@@ -82,6 +82,29 @@ pub struct WalletConfig {
     /// Individual accounts (one per chain or multiple).
     #[serde(default)]
     pub accounts: Vec<WalletAccount>,
+    /// UTXOs for Bitcoin wallet (persisted across commands).
+    #[serde(default)]
+    pub utxos: Vec<UtxoRecord>,
+}
+
+/// UTXO record for Bitcoin wallet persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UtxoRecord {
+    /// Transaction ID (hex).
+    pub txid: String,
+    /// Output index.
+    pub vout: u32,
+    /// Value in satoshis.
+    pub value: u64,
+    /// Account index.
+    pub account: u32,
+    /// Address index.
+    pub index: u32,
+    /// Derivation path.
+    pub derivation_path: String,
+    /// ScriptPubKey (hex) from blockchain - required for correct sighash calculation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_pubkey: Option<String>,
 }
 
 impl WalletConfig {

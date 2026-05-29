@@ -133,11 +133,24 @@ impl Default for Config {
     fn default() -> Self {
         let mut chains = HashMap::new();
 
-        // Bitcoin Signet (default dev network)
+        // Bitcoin Signet (default dev network) - use environment variable if available
+        // Checks environment variables in priority order:
+        // 1. BITCOIN_RPC_URL (generic)
+        // 2. BITCOIN_ALCHEMY_SIGNET_HTTP_RPC (Alchemy)
+        // 3. BITCOIN_ANKR_SIGNET_HTTP_RPC (Ankr)
+        // 4. BITCOIN_TATUM_SIGNET_JSON_RPC (Tatum JSON-RPC)
+        // 5. BITCOIN_TATUM_SIGNET_REST_RPC (Tatum REST)
+        let bitcoin_rpc = std::env::var("BITCOIN_RPC_URL")
+            .or_else(|_| std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC"))
+            .or_else(|_| std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC"))
+            .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_JSON_RPC"))
+            .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_REST_RPC"))
+            .unwrap_or_else(|_| "https://mempool.space/signet/api/".to_string());
+
         chains.insert(
             ChainId::new("bitcoin"),
             ChainConfig {
-                rpc_url: "https://mempool.space/signet/api/".to_string(),
+                rpc_url: bitcoin_rpc,
                 network: Network::Test,
                 contract_address: None, // UTXO-native, no contract
                 chain_id: None,

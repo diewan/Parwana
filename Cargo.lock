@@ -2828,6 +2828,7 @@ dependencies = [
  "colored",
  "csv-admission",
  "csv-content",
+ "csv-coordinator",
  "csv-hash",
  "csv-keys",
  "csv-observability",
@@ -2896,10 +2897,18 @@ dependencies = [
 name = "csv-coordinator"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bitcoin 0.32.9",
+ "csv-aptos",
+ "csv-bitcoin",
+ "csv-ethereum",
  "csv-protocol",
  "csv-storage",
+ "csv-sui",
  "csv-verifier",
  "hex",
+ "reqwest 0.12.28",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -3089,6 +3098,7 @@ dependencies = [
 name = "csv-runtime"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "csv-admission",
@@ -3102,6 +3112,7 @@ dependencies = [
  "csv-verifier",
  "ed25519-dalek",
  "hex",
+ "reqwest 0.12.28",
  "rocksdb",
  "serde",
  "serde_json",

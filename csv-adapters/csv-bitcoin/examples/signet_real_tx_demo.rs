@@ -67,8 +67,14 @@ async fn main() {
         finality_depth: 1, // Signet blocks come fast, 1 conf is enough for demo
         publication_timeout_seconds: 300,
         rpc_url: "https://mempool.space/signet".to_string(),
+        rpc_backend: csv_bitcoin::BitcoinRpcBackend::MempoolRest,
+        api_key: None,
         xpub: None,
         private_key: None,
+        seed: None,
+        account: 0,
+        index: 0,
+        utxos: Vec::new(),
     };
 
     let required_depth = config.finality_depth;
@@ -79,7 +85,7 @@ async fn main() {
 
     // Step 1: Create seal from first UTXO
     println!("\n--- Creating seal from real UTXO ---");
-    let utxos = adapter.wallet().list_utxos();
+    let utxos = adapter.wallet.list_utxos();
     let first_utxo = &utxos[0];
     let (seal, path) = adapter
         .fund_seal(first_utxo.outpoint)
