@@ -31,3 +31,5 @@ supports_zk_proofs = false
 chain_role = "Settlement"
 
 [custom_settings]
+# Module address where CSVSeal is deployed
+module_address = "0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e"

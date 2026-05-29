@@ -18,16 +18,25 @@ The Bitcoin chain has been successfully migrated from direct CLI chain adapter u
 ## Migration Status
 
 ### Completed
+
 - ✅ Bitcoin: Wallet operations (derive address, scan UTXOs with wallet integration) moved to csv-coordinator
 - ✅ Bitcoin: UTXO validation moved to csv-coordinator
 - ✅ Bitcoin: CLI uses csv-coordinator for all Bitcoin operations
+- ✅ Ethereum: Wallet operations (derive address) moved to csv-coordinator
+- ✅ Sui: Wallet operations (derive address) moved to csv-coordinator
+- ✅ Aptos: Wallet operations (derive address) moved to csv-coordinator
+- ✅ Solana: Wallet operations (derive address) moved to csv-coordinator
 - ✅ Architecture compliance: No direct chain adapter dependencies in CLI/runtime
+- ✅ CLI uses csv-coordinator for all chain wallet operations
+- ✅ Private key derivation fixed: Using BIP-44 chain-specific keys instead of raw seed
+- ✅ Sui signing key configuration: Ed25519 SigningKey properly configured
+- ✅ Sui signer address configuration: Signer address derived and set on RPC client
+- ✅ Aptos signing key configuration: Ed25519 SigningKey properly configured
 
 ### Pending
-- ⏳ Ethereum: Wallet operations in CLI
-- ⏳ Sui: Wallet operations in CLI
-- ⏳ Aptos: Wallet operations in CLI
-- ⏳ Celestia: Wallet operations in CLI
+
+- ⏳ Celestia: Not yet implemented in codebase
+- ⏳ Contract deployment: Seal contracts need to be deployed on testnets for sanad creation to work
 
 ## Migration Steps per Chain
 
@@ -38,11 +47,13 @@ For each chain (Ethereum, Sui, Aptos, Celestia):
 **File**: `csv-coordinator/src/wallet.rs`
 
 Add chain-specific wallet module with:
+
 - `derive_funding_address(seed, network, account, index) -> Result<String>`
 - `scan_utxos_with_wallet(seed, network, account, gap_limit, rpc_url) -> Result<(Wallet, Vec<WalletUtxo>)>`
 - `validate_utxo_onchain(txid, vout, rpc_url) -> Result<(bool, bool, bool, Option<Value>)>` (if applicable)
 
 **Dependencies to add to csv-coordinator/Cargo.toml**:
+
 ```toml
 [dependencies]
 csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }
@@ -62,6 +73,7 @@ celestia = ["csv-celestia"]
 **File**: `csv-coordinator/src/lib.rs`
 
 Add wallet module exports:
+
 ```rust
 pub mod wallet;
 ```
@@ -71,6 +83,7 @@ pub mod wallet;
 **File**: `csv-runtime/src/wallet.rs` (create if doesn't exist)
 
 Re-export coordinator wallet operations:
+
 ```rust
 pub use csv_coordinator::wallet;
 ```
@@ -78,6 +91,7 @@ pub use csv_coordinator::wallet;
 **File**: `csv-runtime/src/lib.rs`
 
 Add wallet module:
+
 ```rust
 pub mod wallet;
 ```
@@ -85,12 +99,14 @@ pub mod wallet;
 ### Step 4: Update CLI Commands
 
 **Files to update**:
+
 - `csv-cli/src/commands/wallet/mod.rs` (cmd_scan, cmd_fund_address)
 - `csv-cli/src/commands/wallet/balance.rs` (cmd_balance)
 - `csv-cli/src/commands/wallet/generate.rs` (generate_ethereum, generate_sui, generate_aptos)
 - `csv-cli/src/commands/sanads.rs` (cmd_create validation logic)
 
 **Changes**:
+
 - Replace direct chain adapter imports with csv-coordinator calls
 - Remove on-chain validation from CLI (let SDK/adapter handle it)
 - Use csv-coordinator for address derivation and UTXO scanning
@@ -100,11 +116,13 @@ pub mod wallet;
 **File**: `csv-cli/Cargo.toml`
 
 Add coordinator features:
+
 ```toml
 csv-coordinator = { path = "../csv-coordinator", features = ["bitcoin", "ethereum", "sui", "aptos", "celestia"] }
 ```
 
 Remove direct chain adapter dependencies (if present):
+
 ```toml
 # Remove these if they exist:
 # csv-ethereum = { path = "../csv-adapters/csv-ethereum" }
@@ -135,21 +153,25 @@ CXXFLAGS="-include cstdint" cargo test -p csv-cli test_no_reqwest_chain_operatio
 ## Chain-Specific Considerations
 
 ### Ethereum
+
 - Use csv-ethereum wallet for address derivation
 - ERC-20 token support may need special handling
 - Gas estimation and fee calculation should remain in SDK/adapter
 
 ### Sui
+
 - Use csv-sui wallet for address derivation
 - Sui Move objects may have different UTXO semantics
 - Consider Sui-specific validation logic
 
 ### Aptos
+
 - Use csv-aptos wallet for address derivation
 - Aptos account model differs from Bitcoin UTXO model
 - May need different scanning approach
 
 ### Celestia
+
 - Use csv-celestia wallet for address derivation
 - Celestia's data availability focus may require different validation
 

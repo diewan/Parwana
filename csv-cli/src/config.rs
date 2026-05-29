@@ -156,6 +156,7 @@ impl Default for Config {
                 chain_id: None,
                 finality_depth: 6,
                 default_fee: Some(10), // 10 sat/vB
+                program_id: None,
             },
         );
 
@@ -169,6 +170,7 @@ impl Default for Config {
                 chain_id: Some(11155111),
                 finality_depth: 15,
                 default_fee: Some(20_000_000_000), // 20 gwei
+                program_id: None,
             },
         );
 
@@ -178,10 +180,11 @@ impl Default for Config {
             ChainConfig {
                 rpc_url: "https://fullnode.testnet.sui.io:443".to_string(),
                 network: Network::Test,
-                contract_address: None, // Not deployed yet
+                contract_address: Some("0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string()),
                 chain_id: None,
                 finality_depth: 1, // Checkpoint certified
                 default_fee: Some(1000),
+                program_id: None,
             },
         );
 
@@ -191,10 +194,11 @@ impl Default for Config {
             ChainConfig {
                 rpc_url: "https://fullnode.testnet.aptoslabs.com/v1".to_string(),
                 network: Network::Test,
-                contract_address: None, // Not deployed yet
+                contract_address: Some("0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e".to_string()),
                 chain_id: None,
                 finality_depth: 1, // HotStuff consensus
                 default_fee: Some(100),
+                program_id: None,
             },
         );
 
@@ -208,6 +212,7 @@ impl Default for Config {
                 chain_id: None,
                 finality_depth: 32,      // Solana finality
                 default_fee: Some(5000), // 5000 lamports
+                program_id: Some("HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string()),
             },
         );
 
@@ -239,10 +244,21 @@ impl Config {
             let content = std::fs::read_to_string(&path)?;
             let mut config: Config = toml::from_str(&content)?;
 
-            // Merge missing chains from defaults
+            // Merge missing chains and fields from defaults
             let defaults = Config::default();
-            for (chain, chain_config) in defaults.chains {
-                config.chains.entry(chain).or_insert(chain_config);
+            for (chain, default_chain_config) in defaults.chains {
+                if let Some(existing_chain_config) = config.chains.get_mut(&chain) {
+                    // Merge missing fields from defaults
+                    if existing_chain_config.program_id.is_none() {
+                        existing_chain_config.program_id = default_chain_config.program_id;
+                    }
+                    if existing_chain_config.contract_address.is_none() {
+                        existing_chain_config.contract_address = default_chain_config.contract_address;
+                    }
+                } else {
+                    // Add missing chain
+                    config.chains.insert(chain, default_chain_config);
+                }
             }
 
             Ok(config)
@@ -647,6 +663,7 @@ rpc_url = "missing bracket"
             chain_id: Some(12345),
             finality_depth: 10,
             default_fee: Some(1000),
+            program_id: None,
         };
         config.set_chain(ChainId::new("solana"), new_chain);
 

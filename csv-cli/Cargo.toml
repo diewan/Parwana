@@ -21,7 +21,7 @@ path = "src/main.rs"
 [dependencies]
 # Phase 5 Compliant: Use only runtime and core types
 # No direct chain adapter dependencies - all operations go through csv-adapter
-csv-sdk = { path = "../csv-sdk", features = ["bitcoin", "ethereum", "sui", "aptos", "rpc"] }
+csv-sdk = { path = "../csv-sdk", features = ["bitcoin", "ethereum", "sui", "aptos", "solana"] }
 csv-protocol = { path = "../csv-protocol" }
 csv-verifier = { path = "../csv-verifier" }
 csv-hash = { path = "../csv-hash" }
@@ -30,7 +30,7 @@ csv-schema = { path = "../csv-schema" }
 csv-store = { path = "../csv-store", features = ["clap"] }
 csv-keys = { path = "../csv-keys" }
 csv-runtime = { path = "../csv-runtime" }
-csv-coordinator = { path = "../csv-coordinator", features = ["bitcoin"] }
+csv-coordinator = { path = "../csv-coordinator", features = ["bitcoin", "ethereum", "sui", "aptos", "solana"] }
 csv-admission = { path = "../csv-admission" }
 csv-observability = { path = "../csv-observability" }
 csv-content = { path = "../csv-content" }

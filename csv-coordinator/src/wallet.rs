@@ -337,17 +337,187 @@ pub mod bitcoin {
 /// Ethereum wallet operations
 #[cfg(feature = "ethereum")]
 pub mod ethereum {
-    // TODO: Implement Ethereum wallet operations
+    use csv_hash::ChainId;
+    use csv_keys::bip44::derive_address_from_key;
+    use csv_keys::bip44::derive_all_chain_keys;
+
+    /// Network type for wallet operations
+    #[derive(Debug, Clone, Copy)]
+    pub enum Network {
+        Main,
+        Test,
+        Dev,
+    }
+
+    /// Derive an Ethereum funding address from seed
+    pub fn derive_funding_address(
+        seed: &[u8],
+        _network: Network,
+        account: u32,
+        _index: u32,
+    ) -> anyhow::Result<String> {
+        // Convert seed slice to array
+        let mut seed_array = [0u8; 64];
+        if seed.len() >= 64 {
+            seed_array.copy_from_slice(&seed[..64]);
+        } else {
+            return Err(anyhow::anyhow!("Seed must be at least 64 bytes"));
+        }
+
+        // Derive keys for all chains
+        let keys = derive_all_chain_keys(&seed_array, account);
+
+        // Get the key for Ethereum
+        let core_chain = ChainId::new("ethereum");
+        let key = keys
+            .get(&core_chain)
+            .ok_or_else(|| anyhow::anyhow!("Failed to derive key for ethereum"))?;
+
+        // Derive address from key
+        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+        Ok(address)
+    }
 }
 
 /// Sui wallet operations
 #[cfg(feature = "sui")]
 pub mod sui {
-    // TODO: Implement Sui wallet operations
+    use csv_hash::ChainId;
+    use csv_keys::bip44::derive_address_from_key;
+    use csv_keys::bip44::derive_all_chain_keys;
+
+    /// Network type for wallet operations
+    #[derive(Debug, Clone, Copy)]
+    pub enum Network {
+        Main,
+        Test,
+        Dev,
+    }
+
+    /// Derive a Sui funding address from seed
+    pub fn derive_funding_address(
+        seed: &[u8],
+        _network: Network,
+        account: u32,
+        _index: u32,
+    ) -> anyhow::Result<String> {
+        // Convert seed slice to array
+        let mut seed_array = [0u8; 64];
+        if seed.len() >= 64 {
+            seed_array.copy_from_slice(&seed[..64]);
+        } else {
+            return Err(anyhow::anyhow!("Seed must be at least 64 bytes"));
+        }
+
+        // Derive keys for all chains
+        let keys = derive_all_chain_keys(&seed_array, account);
+
+        // Get the key for Sui
+        let core_chain = ChainId::new("sui");
+        let key = keys
+            .get(&core_chain)
+            .ok_or_else(|| anyhow::anyhow!("Failed to derive key for sui"))?;
+
+        // Derive address from key
+        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+        Ok(address)
+    }
 }
 
 /// Aptos wallet operations
 #[cfg(feature = "aptos")]
 pub mod aptos {
-    // TODO: Implement Aptos wallet operations
+    use csv_hash::ChainId;
+    use csv_keys::bip44::derive_address_from_key;
+    use csv_keys::bip44::derive_all_chain_keys;
+
+    /// Network type for wallet operations
+    #[derive(Debug, Clone, Copy)]
+    pub enum Network {
+        Main,
+        Test,
+        Dev,
+    }
+
+    /// Derive an Aptos funding address from seed
+    pub fn derive_funding_address(
+        seed: &[u8],
+        _network: Network,
+        account: u32,
+        _index: u32,
+    ) -> anyhow::Result<String> {
+        // Convert seed slice to array
+        let mut seed_array = [0u8; 64];
+        if seed.len() >= 64 {
+            seed_array.copy_from_slice(&seed[..64]);
+        } else {
+            return Err(anyhow::anyhow!("Seed must be at least 64 bytes"));
+        }
+
+        // Derive keys for all chains
+        let keys = derive_all_chain_keys(&seed_array, account);
+
+        // Get the key for Aptos
+        let core_chain = ChainId::new("aptos");
+        let key = keys
+            .get(&core_chain)
+            .ok_or_else(|| anyhow::anyhow!("Failed to derive key for aptos"))?;
+
+        // Derive address from key
+        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+        Ok(address)
+    }
+}
+
+/// Solana wallet operations
+#[cfg(feature = "solana")]
+pub mod solana {
+    use csv_hash::ChainId;
+    use csv_keys::bip44::derive_address_from_key;
+    use csv_keys::bip44::derive_all_chain_keys;
+
+    /// Network type for wallet operations
+    #[derive(Debug, Clone, Copy)]
+    pub enum Network {
+        Main,
+        Test,
+        Dev,
+    }
+
+    /// Derive a Solana funding address from seed
+    pub fn derive_funding_address(
+        seed: &[u8],
+        _network: Network,
+        account: u32,
+        _index: u32,
+    ) -> anyhow::Result<String> {
+        // Convert seed slice to array
+        let mut seed_array = [0u8; 64];
+        if seed.len() >= 64 {
+            seed_array.copy_from_slice(&seed[..64]);
+        } else {
+            return Err(anyhow::anyhow!("Seed must be at least 64 bytes"));
+        }
+
+        // Derive keys for all chains
+        let keys = derive_all_chain_keys(&seed_array, account);
+
+        // Get the key for Solana
+        let core_chain = ChainId::new("solana");
+        let key = keys
+            .get(&core_chain)
+            .ok_or_else(|| anyhow::anyhow!("Failed to derive key for solana"))?;
+
+        // Derive address from key
+        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+        Ok(address)
+    }
 }

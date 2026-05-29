@@ -591,11 +591,47 @@ impl CsvClient {
                             )
                         })?,
                 );
-                // Convert hex string to Vec<u8> for Sui
-                sui_config.signer_private_key = private_key.and_then(|k| {
-                    hex::decode(k.trim_start_matches("0x")).ok()
-                });
-                let rpc = csv_sui::node::SuiNode::new(&rpc_url);
+                // Convert hex string to Vec<u8> for Sui and derive signer address
+                let signer_address = if let Some(pk) = private_key {
+                    let cleaned = pk.trim_start_matches("0x");
+                    if let Ok(key_bytes) = hex::decode(cleaned) {
+                        sui_config.signer_private_key = Some(key_bytes.clone());
+                        if key_bytes.len() == 32 {
+                            use ed25519_dalek::SigningKey;
+                            let key_array: [u8; 32] = key_bytes
+                                .try_into()
+                                .map_err(|_| CsvError::ConfigError(
+                                    "Invalid Sui private key length".to_string()
+                                ))?;
+                            let signing_key = SigningKey::from_bytes(&key_array);
+                            let public_key = signing_key.verifying_key();
+                            let signer_addr = format!("0x{}", hex::encode(public_key.as_bytes()));
+                            sui_config.signer_address = Some(signer_addr.clone());
+                            
+                            // Parse signer address bytes for RPC client
+                            let signer_addr_bytes = hex::decode(signer_addr.trim_start_matches("0x"))
+                                .map_err(|e| CsvError::ConfigError(format!("Invalid signer address: {}", e)))?;
+                            let signer_addr_array: [u8; 32] = signer_addr_bytes.try_into()
+                                .map_err(|_| CsvError::ConfigError("Signer address must be 32 bytes".to_string()))?;
+                            Some(signer_addr_array)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    sui_config.signer_private_key = None;
+                    None
+                };
+                
+                // Create SuiNode with signer address if available
+                let rpc = if let Some(signer_addr_array) = signer_address {
+                    csv_sui::node::SuiNode::with_signer_address(&rpc_url, signer_addr_array)
+                } else {
+                    csv_sui::node::SuiNode::new(&rpc_url)
+                };
+                
                 _builder
                     .sui_from_config(sui_config, Box::new(rpc) as Box<dyn csv_sui::rpc::SuiRpc>)
                     .await
@@ -615,7 +651,35 @@ impl CsvClient {
                             "https://api.mainnet.aptoslabs.com/v1".to_string()
                         }
                     });
-                let aptos_config = csv_aptos::AptosConfig {
+                
+                // Derive signer address from private key if available
+                let signer_address = if let Some(pk) = private_key {
+                    let cleaned = pk.trim().trim_start_matches("0x");
+                    if let Ok(key_bytes) = hex::decode(cleaned) {
+                        if key_bytes.len() == 32 {
+                            use ed25519_dalek::SigningKey;
+                            let key_array: [u8; 32] = key_bytes
+                                .try_into()
+                                .map_err(|_| CsvError::ConfigError(
+                                    "Invalid Aptos private key length".to_string()
+                                ))?;
+                            let signing_key = SigningKey::from_bytes(&key_array);
+                            let public_key = signing_key.verifying_key();
+                            let signer_addr_bytes = public_key.as_bytes();
+                            let mut addr_array = [0u8; 32];
+                            addr_array.copy_from_slice(signer_addr_bytes);
+                            Some(addr_array)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                let mut aptos_config = csv_aptos::AptosConfig {
                     network: if _is_testnet {
                         csv_aptos::config::AptosNetwork::Testnet
                     } else {
@@ -625,7 +689,22 @@ impl CsvClient {
                     private_key: private_key.map(|k| k.to_string()),
                     ..Default::default()
                 };
-                let rpc = csv_aptos::node::AptosNode::new(&rpc_url);
+                // Set module_address from config if available
+                if let Some(contract_address) = _config
+                    .chains
+                    .get("aptos")
+                    .and_then(|chain| chain.contract_address.clone())
+                {
+                    aptos_config.seal_contract.module_address = contract_address;
+                }
+                
+                // Create AptosNode with signer address if available
+                let rpc = if let Some(signer_addr) = signer_address {
+                    csv_aptos::node::AptosNode::with_signer_address(&rpc_url, signer_addr)
+                } else {
+                    csv_aptos::node::AptosNode::new(&rpc_url)
+                };
+                
                 _builder
                     .aptos_from_config(
                         aptos_config,
@@ -653,6 +732,38 @@ impl CsvClient {
                 } else {
                     csv_solana::config::Network::Mainnet
                 };
+                
+                // Convert hex private key to base58 keypair for Solana
+                let keypair_base58 = if let Some(pk) = private_key {
+                    let cleaned = pk.trim().trim_start_matches("0x");
+                    if let Ok(key_bytes) = hex::decode(cleaned) {
+                        if key_bytes.len() == 32 {
+                            use ed25519_dalek::SigningKey;
+                            let key_array: [u8; 32] = key_bytes
+                                .try_into()
+                                .map_err(|_| CsvError::ConfigError(
+                                    "Invalid Solana private key length".to_string()
+                                ))?;
+                            let signing_key = SigningKey::from_bytes(&key_array);
+                            let public_key = signing_key.verifying_key();
+                            
+                            // Solana keypair is 64 bytes: [secret_key(32) || public_key(32)]
+                            let mut keypair_bytes = [0u8; 64];
+                            keypair_bytes[..32].copy_from_slice(&key_array);
+                            keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
+                            
+                            // Encode in base58
+                            Some(bs58::encode(keypair_bytes).into_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
                 let sol_config = csv_solana::config::SolanaConfig {
                     network: sol_network,
                     rpc_url: rpc_url.clone(),
@@ -665,7 +776,7 @@ impl CsvClient {
                                 "Solana CSV program ID must be configured".to_string(),
                             )
                         })?,
-                    keypair: private_key.map(|k| k.to_string()),
+                    keypair: keypair_base58,
                     commitment: Some("confirmed".to_string()),
                     max_retries: 3,
                     timeout_seconds: 30,

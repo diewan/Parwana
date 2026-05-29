@@ -31,3 +31,5 @@ supports_zk_proofs = true
 chain_role = "Settlement"
 
 [custom_settings]
+# Contract address where CSVSeal is deployed
+contract_address = "0x189BE35e28331E20481C100cA93fc9a96601E48f"

@@ -67,6 +67,8 @@ pub struct ChainConfig {
     pub finality_depth: u64,
     /// Default gas price / fee rate.
     pub default_fee: Option<u64>,
+    /// Program ID for program-based chains (Solana, etc.).
+    pub program_id: Option<String>,
 }
 
 impl ChainConfig {
@@ -84,6 +86,7 @@ impl ChainConfig {
                 chain_id: None,
                 finality_depth: 6,
                 default_fee: Some(10),
+                program_id: None,
             },
             "ethereum" => Self {
                 rpc_url: match network {
@@ -100,6 +103,7 @@ impl ChainConfig {
                 },
                 finality_depth: 12,
                 default_fee: Some(20_000_000_000),
+                program_id: None,
             },
             "sui" => Self {
                 rpc_url: match network {
@@ -108,10 +112,11 @@ impl ChainConfig {
                     Network::Main => "https://fullnode.mainnet.sui.io:443".to_string(),
                 },
                 network: *network,
-                contract_address: None,
+                contract_address: Some("0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string()),
                 chain_id: None,
                 finality_depth: 1,
                 default_fee: Some(1000),
+                program_id: None,
             },
             "aptos" => Self {
                 rpc_url: match network {
@@ -120,10 +125,11 @@ impl ChainConfig {
                     Network::Main => "https://fullnode.mainnet.aptoslabs.com/v1".to_string(),
                 },
                 network: *network,
-                contract_address: None,
+                contract_address: Some("0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e".to_string()),
                 chain_id: None,
                 finality_depth: 100,
                 default_fee: Some(100),
+                program_id: None,
             },
             "solana" => Self {
                 rpc_url: match network {
@@ -136,6 +142,7 @@ impl ChainConfig {
                 chain_id: None,
                 finality_depth: 32,
                 default_fee: Some(5000),
+                program_id: Some("HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string()),
             },
             _ => Self {
                 rpc_url: String::new(),
@@ -144,6 +151,7 @@ impl ChainConfig {
                 chain_id: None,
                 finality_depth: 1,
                 default_fee: None,
+                program_id: None,
             },
         }
     }

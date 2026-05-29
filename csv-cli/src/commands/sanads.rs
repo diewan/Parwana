@@ -297,7 +297,7 @@ async fn cmd_create(
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
         contract_address: chain_cfg.contract_address.clone(),
-        program_id: None,
+        program_id: chain_cfg.program_id.clone(),
         account,
         index,
         utxos: bitcoin_utxos.clone().unwrap_or_default().into_iter().map(|(txid, vout, value, scriptpubkey_hex): (String, u32, u64, Option<String>)| {
@@ -339,10 +339,20 @@ async fn cmd_create(
     let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
         .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
     let seed = mnemonic.to_seed(None);
-    let seed_hex = hex::encode(seed.as_bytes());
+    let seed_array = *seed.as_bytes();
+
+    // Derive chain-specific private key using BIP-44
+    let keys = csv_keys::bip44::derive_all_chain_keys(&seed_array, account);
+    let core_chain = ChainId::new(chain.as_str());
+    let secret_key = keys
+        .get(&core_chain)
+        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
+
+    // Use the chain-specific private key (32 bytes) instead of the raw seed (64 bytes)
+    let private_key_hex = hex::encode(secret_key.as_bytes());
 
     let mut private_keys = std::collections::HashMap::new();
-    private_keys.insert(chain.as_str().to_string(), Some(seed_hex));
+    private_keys.insert(chain.as_str().to_string(), Some(private_key_hex));
 
     eprintln!("CLI LAYER: Initializing adapters with network type: {:?}", network_type);
     client.init_adapters(network_type, private_keys).await

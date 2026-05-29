@@ -28,6 +28,7 @@ type RpcResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 pub struct AptosNode {
     client: Client,
     rpc_url: String,
+    signer_address: Option<[u8; 32]>,
 }
 
 #[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
@@ -37,6 +38,16 @@ impl AptosNode {
         Self {
             client: Client::new(),
             rpc_url: rpc_url.trim_end_matches('/').to_string(),
+            signer_address: None,
+        }
+    }
+
+    /// Create a new Aptos RPC client with a configured signer address
+    pub fn with_signer_address(rpc_url: &str, signer_address: [u8; 32]) -> Self {
+        Self {
+            client: Client::new(),
+            rpc_url: rpc_url.trim_end_matches('/').to_string(),
+            signer_address: Some(signer_address),
         }
     }
 
@@ -519,7 +530,13 @@ impl AptosSignerIdentity for AptosNode {
         &self,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            Err("CapabilityUnavailable: sender_address requires a configured signer.                  Use AptosNode with an external key management system or                  configure a signer address explicitly.".into())
+            if let Some(addr) = self.signer_address {
+                Ok(addr)
+            } else {
+                Err("CapabilityUnavailable: sender_address requires a configured signer. \
+                 Use AptosNode::with_signer_address() to configure the signer address."
+                    .into())
+            }
         })
     }
 }
@@ -588,7 +605,11 @@ impl AptosCheckpointVerifier for AptosNode {
 #[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 impl AptosRpc for AptosNode {
     fn clone_boxed(&self) -> Box<dyn AptosRpc> {
-        Box::new(AptosNode::new(&self.rpc_url))
+        Box::new(AptosNode {
+            client: Client::new(),
+            rpc_url: self.rpc_url.clone(),
+            signer_address: self.signer_address,
+        })
     }
 }
 

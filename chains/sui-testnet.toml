@@ -31,3 +31,5 @@ supports_zk_proofs = false
 chain_role = "Settlement"
 
 [custom_settings]
+# Package ID where CSVSeal module is deployed
+package_id = "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21"

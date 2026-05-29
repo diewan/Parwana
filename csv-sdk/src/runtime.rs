@@ -855,11 +855,25 @@ impl AdapterBuilder {
         use csv_sui::ops::SuiBackend;
         use csv_sui::seal_protocol::SuiSealProtocol;
 
-        let seal =
-            SuiSealProtocol::from_config(config, rpc).map_err(|e| CsvError::ProtocolError {
+        let mut seal =
+            SuiSealProtocol::from_config(config.clone(), rpc).map_err(|e| CsvError::ProtocolError {
                 chain: ChainId::new("sui"),
                 message: format!("Failed to create Sui seal protocol: {}", e),
             })?;
+
+        // Configure signing key if private key is provided in config
+        if let Some(private_key_bytes) = config.signer_private_key {
+            if private_key_bytes.len() == 32 {
+                use ed25519_dalek::SigningKey;
+                let key_array: [u8; 32] = private_key_bytes
+                    .try_into()
+                    .map_err(|_| CsvError::ConfigError(
+                        "Invalid Sui private key length".to_string()
+                    ))?;
+                let signing_key = SigningKey::from_bytes(&key_array);
+                seal = seal.with_signing_key(signing_key);
+            }
+        }
 
         let operations = SuiBackend::from_seal_protocol(Arc::new(seal)).map_err(|e| {
             CsvError::ProtocolError {
@@ -881,11 +895,28 @@ impl AdapterBuilder {
         use csv_aptos::ops::AptosBackend;
         use csv_aptos::seal_protocol::AptosSealProtocol;
 
-        let seal =
-            AptosSealProtocol::from_config(config, rpc).map_err(|e| CsvError::ProtocolError {
+        let mut seal =
+            AptosSealProtocol::from_config(config.clone(), rpc).map_err(|e| CsvError::ProtocolError {
                 chain: ChainId::new("aptos"),
                 message: format!("Failed to create Aptos seal protocol: {}", e),
             })?;
+
+        // Configure signing key if private key is provided in config
+        if let Some(ref private_key_hex) = config.private_key {
+            let cleaned = private_key_hex.trim().trim_start_matches("0x");
+            if let Ok(key_bytes) = hex::decode(cleaned) {
+                if key_bytes.len() == 32 {
+                    use ed25519_dalek::SigningKey;
+                    let key_array: [u8; 32] = key_bytes
+                        .try_into()
+                        .map_err(|_| CsvError::ConfigError(
+                            "Invalid Aptos private key length".to_string()
+                        ))?;
+                    let signing_key = SigningKey::from_bytes(&key_array);
+                    seal = seal.with_signing_key(signing_key);
+                }
+            }
+        }
 
         let operations = AptosBackend::from_seal_protocol(Arc::new(seal)).map_err(|e| {
             CsvError::ProtocolError {

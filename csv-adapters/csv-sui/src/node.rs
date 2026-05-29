@@ -18,6 +18,7 @@ use crate::rpc::{
 pub struct SuiNode {
     client: Client,
     rpc_url: String,
+    signer_address: Option<[u8; 32]>,
 }
 
 impl SuiNode {
@@ -30,6 +31,20 @@ impl SuiNode {
         Self {
             client,
             rpc_url: rpc_url.to_string(),
+            signer_address: None,
+        }
+    }
+
+    /// Create a new Sui RPC client with a configured signer address
+    pub fn with_signer_address(rpc_url: &str, signer_address: [u8; 32]) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| panic!("Failed to build HTTP client: {}", e));
+        Self {
+            client,
+            rpc_url: rpc_url.to_string(),
+            signer_address: Some(signer_address),
         }
     }
 
@@ -312,14 +327,15 @@ impl SuiRpc for SuiNode {
     }
 
     async fn sender_address(&self) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
-        // This method requires a configured signer with a known address
-        // The SuiNode does not store signing keys - they must be provided externally
-        Err(
-            "CapabilityUnavailable: sender_address requires a configured signer. \
-             Use SuiNode with an external key management system or \
-             configure a signer address explicitly."
-                .into(),
-        )
+        if let Some(addr) = self.signer_address {
+            Ok(addr)
+        } else {
+            Err(
+                "CapabilityUnavailable: sender_address requires a configured signer. \
+                 Use SuiNode::with_signer_address() to configure the signer address."
+                    .into(),
+            )
+        }
     }
 
     async fn get_gas_objects(
@@ -450,6 +466,7 @@ impl SuiRpc for SuiNode {
         Box::new(SuiNode {
             client,
             rpc_url: self.rpc_url.clone(),
+            signer_address: self.signer_address,
         })
     }
 }
