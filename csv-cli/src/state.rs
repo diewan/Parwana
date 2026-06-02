@@ -124,6 +124,11 @@ impl UnifiedStateManager {
         Ok(())
     }
 
+    /// Passphrase used to decrypt the loaded CLI state.
+    pub fn passphrase(&self) -> &str {
+        &self.passphrase
+    }
+
     // --- Sanads Management ---
 
     /// Add a Sanad to tracking

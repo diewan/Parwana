@@ -341,38 +341,44 @@ async fn cmd_create(
     let seed = mnemonic.to_seed(None);
     let seed_array = *seed.as_bytes();
 
-    // Derive chain-specific private key using BIP-44
-    let keys = csv_keys::bip44::derive_all_chain_keys(&seed_array, account);
-    let core_chain = ChainId::new(chain.as_str());
-    let secret_key = keys
-        .get(&core_chain)
-        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
-
     // For Bitcoin, use the raw 64-byte BIP-39 seed instead of the derived 32-byte private key
     // BitcoinSealProtocol::from_config requires 64-byte seed for HD wallet derivation
     let key_hex = if chain.as_str() == "bitcoin" {
         log::info!("BITCOIN: Using 64-byte BIP-39 seed for HD wallet derivation");
         hex::encode(seed_array)
     } else {
-        log::info!("{}: Using derived 32-byte private key", chain.as_str().to_uppercase());
+        let (secret_key, key_source) =
+            signing_key_for_chain(&chain, account, &seed_array, state)?;
+        log::info!(
+            "{}: Using {} 32-byte private key",
+            chain.as_str().to_uppercase(),
+            key_source
+        );
         let pk_hex = hex::encode(secret_key.as_bytes());
         log::info!("CLI LAYER: Private key (first 8 bytes): 0x{}", &pk_hex[..16]);
-        
-        // Derive and log the address for Aptos
+
+        // Derive and verify the signer address for Aptos.
         if chain.as_str() == "aptos" {
-            use sha3::{Digest, Sha3_256};
-            use ed25519_dalek::SigningKey;
-            let key_array: [u8; 32] = *secret_key.as_bytes();
-            let signing_key = SigningKey::from_bytes(&key_array);
-            let public_key = signing_key.verifying_key().to_bytes();
-            let mut data = public_key.to_vec();
-            data.push(0x00); // Ed25519 single key scheme
-            let hash = Sha3_256::digest(&data);
-            let address = format!("0x{}", hex::encode(&hash[..32]));
+            let address = csv_keys::bip44::derive_address_from_key(
+                secret_key.as_bytes(),
+                &ChainId::new("aptos"),
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to derive Aptos signer address: {}", e))?;
             log::info!("CLI LAYER: Derived Aptos address from private key: {}", address);
-            log::info!("CLI LAYER: Public key (first 8 bytes): 0x{}", hex::encode(&public_key[..8]));
+
+            if let Some(stored_address) = state.get_address(&chain) {
+                if normalize_address(stored_address) != normalize_address(&address) {
+                    anyhow::bail!(
+                        "Aptos signer address mismatch: wallet balance is checking {}, \
+                         but sanad create would sign as {}. Import or generate the wallet key \
+                         for the funded address, or fund the signer address.",
+                        stored_address,
+                        address
+                    );
+                }
+            }
         }
-        
+
         pk_hex
     };
 
@@ -526,6 +532,58 @@ async fn cmd_create(
     }
 
     Ok(())
+}
+
+fn signing_key_for_chain(
+    chain: &Chain,
+    account: u32,
+    seed_array: &[u8; 64],
+    state: &UnifiedStateManager,
+) -> Result<(csv_keys::memory::SecretKey, &'static str)> {
+    if chain.as_str() == "aptos" {
+        if let Some(secret_key) = load_keystore_key(chain, account, state)? {
+            return Ok((secret_key, "keystore"));
+        }
+    }
+
+    let mut keys = csv_keys::bip44::derive_all_chain_keys(seed_array, account);
+    let core_chain = ChainId::new(chain.as_str());
+    let secret_key = keys
+        .remove(&core_chain)
+        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
+
+    Ok((secret_key, "mnemonic-derived"))
+}
+
+fn load_keystore_key(
+    chain: &Chain,
+    account: u32,
+    state: &UnifiedStateManager,
+) -> Result<Option<csv_keys::memory::SecretKey>> {
+    let mut key_ids = Vec::new();
+    if let Some(wallet_account) = state.get_account(chain) {
+        if let Some(keystore_ref) = &wallet_account.keystore_ref {
+            key_ids.push(keystore_ref.clone());
+        }
+    }
+    key_ids.push(format!("{}-{}", chain.as_str(), account));
+
+    let keystore = csv_keys::file_keystore::FileKeystore::new(None)?;
+    let passphrase = csv_keys::memory::Passphrase::new(state.passphrase().to_string());
+
+    for key_id in key_ids {
+        match keystore.retrieve_key(&key_id, &passphrase) {
+            Ok(secret_key) => return Ok(Some(secret_key)),
+            Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
+            Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
+        }
+    }
+
+    Ok(None)
+}
+
+fn normalize_address(address: &str) -> String {
+    address.trim().trim_start_matches("0x").to_ascii_lowercase()
 }
 
 fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
