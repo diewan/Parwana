@@ -280,6 +280,8 @@ fn keypair_from_hex_key_id(key_id: &str) -> ChainOpResult<solana_sdk::signature:
     let secret_key: [u8; 32] = key_bytes
         .try_into()
         .map_err(|_| ChainOpError::SigningError("Invalid Solana secret key".to_string()))?;
+
+    // Use new_from_array which takes a 32-byte secret key directly
     Ok(solana_sdk::signature::Keypair::new_from_array(secret_key))
 }
 

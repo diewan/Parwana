@@ -132,7 +132,7 @@ impl Default for SealContractConfig {
     fn default() -> Self {
         Self {
             module_address: "0x1".to_string(),
-            module_name: "csv_seal".to_string(),
+            module_name: "CSVSealV2".to_string(),
             seal_resource: "Seal".to_string(),
         }
     }

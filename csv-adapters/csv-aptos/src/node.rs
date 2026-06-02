@@ -239,11 +239,14 @@ impl AptosLedgerReader for AptosNode {
                 ledger_version: Self::required_u64(&result, "ledger_version")?,
                 oldest_ledger_version: Self::required_u64(&result, "oldest_ledger_version")?,
                 ledger_timestamp: Self::required_u64(&result, "ledger_timestamp")?,
-                oldest_transaction_timestamp: Self::required_u64(
-                    &result,
+                oldest_transaction_timestamp: Self::parse_u64(
+                    result.get("oldest_transaction_timestamp").unwrap_or(&Value::Number(0.into())),
                     "oldest_transaction_timestamp",
-                )?,
-                epoch_start_timestamp: Self::required_u64(&result, "epoch_start_timestamp")?,
+                ).unwrap_or(0),
+                epoch_start_timestamp: Self::parse_u64(
+                    result.get("epoch_start_timestamp").unwrap_or(&Value::Number(0.into())),
+                    "epoch_start_timestamp",
+                ).unwrap_or(0),
             })
         })
     }

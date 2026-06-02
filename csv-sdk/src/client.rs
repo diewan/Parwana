@@ -653,11 +653,14 @@ impl CsvClient {
                     });
                 
                 // Derive signer address from private key if available
+                // In Aptos, address = last 32 bytes of sha3-256(public_key + 0x00)
                 let signer_address = if let Some(pk) = private_key {
                     let cleaned = pk.trim().trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
                         if key_bytes.len() == 32 {
                             use ed25519_dalek::SigningKey;
+                            use sha3::{Digest, Sha3_256};
+                            log::info!("SDK LAYER: Private key (first 8 bytes): 0x{}", hex::encode(&key_bytes[..8]));
                             let key_array: [u8; 32] = key_bytes
                                 .try_into()
                                 .map_err(|_| CsvError::ConfigError(
@@ -665,9 +668,19 @@ impl CsvClient {
                                 ))?;
                             let signing_key = SigningKey::from_bytes(&key_array);
                             let public_key = signing_key.verifying_key();
-                            let signer_addr_bytes = public_key.as_bytes();
+                            let public_key_bytes = public_key.as_bytes();
+
+                            log::info!("SDK LAYER: Public key (first 8 bytes): 0x{}", hex::encode(&public_key_bytes[..8]));
+
+                            // Aptos address derivation: sha3-256(public_key || 0x00), take last 32 bytes
+                            let mut hasher = Sha3_256::new();
+                            hasher.update(public_key_bytes);
+                            hasher.update(&[0x00u8]); // Scheme byte for Ed25519
+                            let hash = hasher.finalize();
                             let mut addr_array = [0u8; 32];
-                            addr_array.copy_from_slice(signer_addr_bytes);
+                            addr_array.copy_from_slice(&hash[..32]);
+
+                            log::info!("SDK LAYER: Derived Aptos signer address: 0x{}", hex::encode(addr_array));
                             Some(addr_array)
                         } else {
                             None

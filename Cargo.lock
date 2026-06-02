@@ -987,13 +987,13 @@ dependencies = [
 
 [[package]]
 name = "aptos-sdk"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f82609406c1586c4f50b01483e1a5af66b394a60de9cf433fd78a3cede9a089d"
+checksum = "552ce7d662b715cc5be17feeebffcf4ce7110730f71364bd4b0adbf67ab247b1"
 dependencies = [
  "anyhow",
  "aptos-bcs",
- "aws-lc-sys 0.38.0",
+ "aws-lc-sys 0.39.1",
  "bip39",
  "const-hex",
  "ed25519-dalek",
@@ -1602,9 +1602,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.38.0"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4321e568ed89bb5a7d291a7f37997c2c0df89809d7b6d12062c81ddb54aa782e"
+checksum = "83a25cf98105baa966497416dbd42565ce3a8cf8dbfd59803ec9ad46f3126399"
 dependencies = [
  "cc",
  "cmake",
@@ -2724,6 +2724,7 @@ dependencies = [
  "aptos-sdk",
  "async-trait",
  "base64 0.22.1",
+ "bcs",
  "chrono",
  "csv-adapter-core",
  "csv-hash",

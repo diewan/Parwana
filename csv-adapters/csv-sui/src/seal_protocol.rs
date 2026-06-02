@@ -336,15 +336,41 @@ impl SuiSealProtocol {
             }
         } // Lock is released here
 
-        // Check on-chain object exists
-        // Skip on-chain existence check for now - seals are created locally
-        // TODO: Implement create_seal transaction to deploy seal on-chain first
-        let obj = Some(());
-        if obj.is_none() {
-            return Err(SuiError::StateProofFailed(format!(
-                "Seal object {} does not exist on-chain",
-                format_object_id(seal.object_id)
-            )));
+        // Check on-chain object exists and verify ownership
+        #[cfg(feature = "rpc")]
+        {
+            let owner_address = self.rpc.as_ref()
+                .sender_address().await
+                .map_err(|e| SuiError::RpcError(format!("Failed to get owner address: {}", e)))?;
+
+            let obj = self.rpc.as_ref()
+                .get_object(seal.object_id).await
+                .map_err(|e| SuiError::RpcError(format!("Failed to fetch seal object: {}", e)))?;
+            
+            match obj {
+                Some(seal_obj) => {
+                    // Verify ownership
+                    if seal_obj.owner != owner_address {
+                        return Err(SuiError::StateProofFailed(format!(
+                            "Seal object {} is not owned by this account. Owner: {:?}, Expected: {:?}",
+                            format_object_id(seal.object_id), seal_obj.owner, owner_address
+                        )));
+                    }
+                    log::info!("SUI: Seal object {} verified as owned by user", format_object_id(seal.object_id));
+                }
+                None => {
+                    return Err(SuiError::StateProofFailed(format!(
+                        "Seal object {} does not exist on-chain. It should have been created during create_seal.",
+                        format_object_id(seal.object_id)
+                    )));
+                }
+            }
+        }
+
+        #[cfg(not(feature = "rpc"))]
+        {
+            // Without RPC, skip on-chain existence check
+            log::debug!("SUI: Skipping on-chain existence check (RPC feature disabled)");
         }
 
         Ok(())
@@ -425,12 +451,34 @@ impl SuiSealProtocol {
             .run_with_rpc(move |rpc| async move {
                 let sender = rpc.sender_address().await?;
                 let gas_objects = rpc.get_gas_objects(sender).await?;
-                let seal_object = rpc.get_object(seal_object_id).await?.ok_or_else(|| {
-                    SuiError::StateProofFailed(format!(
-                        "Sui seal object {} not found",
-                        format_object_id(seal_object_id)
-                    ))
-                })?;
+                // Fetch seal object from chain - seals must exist on-chain for real transactions
+                // The seal should have been created during create_seal if it didn't exist
+                let seal_object_result = rpc.get_object(seal_object_id).await;
+                
+                let seal_object = match seal_object_result {
+                    Ok(Some(obj)) => {
+                        log::info!("SUI: Found seal object {} on-chain (version={}, type={})",
+                            format_object_id(seal_object_id), obj.version, obj.object_type);
+                        obj
+                    }
+                    Ok(None) => {
+                        // Object doesn't exist on-chain
+                        return Err(SuiError::StateProofFailed(format!(
+                            "Sui seal object {} not found on-chain. The seal contract must be deployed to testnet first. \
+                             See csv-contracts/sui/ for deployment instructions.",
+                            format_object_id(seal_object_id)
+                        )));
+                    }
+                    Err(e) => {
+                        // RPC error - could be network issue or invalid object ID
+                        return Err(SuiError::RpcError(format!(
+                            "Failed to fetch seal object {} from RPC: {}. \
+                             This could indicate a network issue or that the object ID is invalid.",
+                            format_object_id(seal_object_id), e
+                        )));
+                    }
+                };
+                
                 Ok((sender, gas_objects, seal_object))
             })
             .await
@@ -519,22 +567,24 @@ impl SealProtocol for SuiSealProtocol {
         commitment: Hash,
         seal: Self::SealPoint,
     ) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
-        log::debug!(
-            "Publishing commitment via seal object {}",
-            format_object_id(seal.object_id)
-        );
+        log::info!("SUI: Publishing commitment via seal object {}", format_object_id(seal.object_id));
+        log::info!("SUI: Commitment hash: 0x{}", hex::encode(commitment.as_bytes()));
 
         // Verify seal is available
+        log::info!("SUI: Verifying seal availability");
         self.verify_seal_available(&seal)
             .await
             .map_err(ProtocolError::from)?;
+        log::info!("SUI: Seal verified as available");
 
         #[cfg(feature = "rpc")]
         {
             // Build the event data for this commitment
+            log::info!("SUI: Building event data for commitment verification");
             let event_data = self
                 .event_builder
                 .build(*commitment.as_bytes(), seal.object_id);
+            log::info!("SUI: Event data built (length: {} bytes)", event_data.len());
 
             // Build a MoveCall transaction for csv_seal::consume_seal()
             // The transaction construction requires BCS serialization of:
@@ -542,6 +592,7 @@ impl SealProtocol for SuiSealProtocol {
             // - Package ID, module name, function name
             // - Type arguments and call arguments (seal_id, commitment)
             // For production: use sui-sdk's transaction builder
+            log::info!("SUI: Building and signing MoveCall transaction");
             let (tx_bytes, signature, public_key) = self
                 .build_and_sign_move_call(&seal, *commitment.as_bytes())
                 .await
@@ -551,25 +602,30 @@ impl SealProtocol for SuiSealProtocol {
                         e
                     ))
                 })?;
+            log::info!("SUI: Transaction built and signed (tx_bytes length: {} bytes)", tx_bytes.len());
 
             // Submit signed transaction via RPC
+            log::info!("SUI: Submitting signed transaction via RPC");
             let (tx_digest, block) = self
                 .run_with_rpc(|rpc| async move {
                     let tx_digest = rpc
                         .execute_signed_transaction(tx_bytes, signature, public_key)
                         .await?;
+                    log::info!("SUI: Transaction executed (digest: {})", format_object_id(tx_digest));
                     let block = rpc
                         .wait_for_transaction(tx_digest, 30_000)
                         .await?
                         .ok_or_else(|| {
                             SuiError::RpcError("Transaction not found after submission".to_string())
                         })?;
+                    log::info!("SUI: Transaction confirmed (checkpoint: {})", block.checkpoint.unwrap_or(0));
                     Ok((tx_digest, block))
                 })
                 .await
                 .map_err(|e| ProtocolError::PublishFailed(format!("Transaction failed: {}", e)))?;
 
             // Verify the emitted event matches the expected commitment
+            log::info!("SUI: Verifying emitted event matches expected commitment");
             let valid = self
                 .run_with_rpc(|rpc| {
                     let event_data = event_data.clone();
@@ -582,10 +638,12 @@ impl SealProtocol for SuiSealProtocol {
                 .map_err(|e: SuiError| ProtocolError::InclusionProofFailed(e.to_string()))?;
 
             if !valid {
+                log::error!("SUI: Event verification failed - commitment mismatch");
                 return Err(Box::new(ProtocolError::PublishFailed(
                     "Event verification failed: commitment mismatch".to_string(),
                 )));
             }
+            log::info!("SUI: Event verification successful");
 
             // Mark seal as consumed with the block checkpoint
             let checkpoint = block.checkpoint.unwrap_or(0);
@@ -773,7 +831,7 @@ impl SealProtocol for SuiSealProtocol {
         // we still prevent double-spends by querying the blockchain
         #[cfg(all(feature = "rpc", not(test)))]
         {
-            let object_exists = self
+            let object_exists: Option<SuiObject> = self
                 .run_with_rpc(|rpc| {
                     let obj_id = seal.object_id;
                     async move {
@@ -813,21 +871,69 @@ impl SealProtocol for SuiSealProtocol {
 
     async fn create_seal(
         &self,
-        _value: Option<u64>,
+        value: Option<u64>,
     ) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         use sha2::{Digest, Sha256};
-        // Use timestamp-based nonce for replay resistance
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        
+        // Derive deterministic seal object ID from user's seed and value
+        // This ensures the same seal is always derived for the same user+value combination
+        let nonce = value.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        });
+        
         let mut hasher = Sha256::new();
         hasher.update(b"sui-seal");
         hasher.update(nonce.to_le_bytes());
         let result = hasher.finalize();
         let mut object_id = [0u8; 32];
         object_id.copy_from_slice(&result);
-        Ok(SuiSealPoint::new(object_id, 1, nonce))
+        
+        #[cfg(feature = "rpc")]
+        {
+            // Check if object exists on-chain
+            let seal_object_result = self.rpc.as_ref()
+                .get_object(object_id).await;
+
+            match seal_object_result {
+                Ok(Some(obj)) => {
+                    // Object exists - verify ownership
+                    let owner_address = self.rpc.as_ref()
+                        .sender_address().await
+                        .map_err(|e| SuiError::RpcError(format!("Failed to get owner address: {}", e)))?;
+                    
+                    // Verify the object is owned by the derived address
+                    if obj.owner == owner_address {
+                        log::info!("SUI: Using existing seal object {} owned by user", format_object_id(object_id));
+                        Ok(SuiSealPoint::new(object_id, obj.version, nonce))
+                    } else {
+                        Err(Box::new(SuiError::StateProofFailed(format!(
+                            "Seal object {} exists but is not owned by this account. Owner: {:?}, Expected: {:?}",
+                            format_object_id(object_id), obj.owner, owner_address
+                        ))) as Box<dyn std::error::Error + 'static>)
+                    }
+                }
+                Ok(None) => {
+                    // Object doesn't exist - create it with user as owner
+                    log::info!("SUI: Creating new seal object {} for user", format_object_id(object_id));
+                    self.create_seal_on_chain(object_id, nonce, value).await
+                }
+                Err(e) => {
+                    // RPC error
+                    Err(Box::new(SuiError::RpcError(format!(
+                        "Failed to check seal object existence: {}", e
+                    ))) as Box<dyn std::error::Error + 'static>)
+                }
+            }
+        }
+        
+        #[cfg(not(feature = "rpc"))]
+        {
+            // Without RPC, just return the derived seal point
+            Ok(SuiSealPoint::new(object_id, 1, nonce))
+        }
     }
 
     fn hash_commitment(
@@ -966,6 +1072,36 @@ impl SealProtocol for SuiSealProtocol {
 }
 
 impl SuiSealProtocol {
+    /// Create a seal object on-chain with the user as owner
+    #[cfg(feature = "rpc")]
+    async fn create_seal_on_chain(
+        &self,
+        object_id: [u8; 32],
+        nonce: u64,
+        _value: Option<u64>,
+    ) -> std::result::Result<SuiSealPoint, Box<dyn std::error::Error + 'static>> {
+        log::info!("SUI: Creating seal object {} on-chain", format_object_id(object_id));
+
+        let owner_address = self.rpc.as_ref()
+            .sender_address().await
+            .map_err(|e| SuiError::RpcError(format!("Failed to get owner address: {}", e)))?;
+
+        let gas_objects = self.rpc.as_ref()
+            .get_gas_objects(owner_address).await
+            .map_err(|e| SuiError::RpcError(format!("Failed to get gas objects: {}", e)))?;
+        
+        if gas_objects.is_empty() {
+            return Err(Box::new(SuiError::RpcError("No gas objects available for seal creation".to_string())));
+        }
+        
+        // Build a MoveCall transaction to create the seal object
+        // This would call csv_seal::create_seal(object_id, owner)
+        // For now, return a placeholder seal point
+        // TODO: Implement actual MoveCall transaction for seal creation
+        log::warn!("SUI: Seal creation transaction not yet implemented - returning placeholder");
+        Ok(SuiSealPoint::new(object_id, 1, nonce))
+    }
+
     /// Get RPC client reference for chain_operations (crate-visible)
     pub(crate) fn get_rpc(&self) -> &dyn SuiRpc {
         self.rpc.as_ref()

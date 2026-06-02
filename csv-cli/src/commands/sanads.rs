@@ -348,11 +348,36 @@ async fn cmd_create(
         .get(&core_chain)
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
 
-    // Use the chain-specific private key (32 bytes) instead of the raw seed (64 bytes)
-    let private_key_hex = hex::encode(secret_key.as_bytes());
+    // For Bitcoin, use the raw 64-byte BIP-39 seed instead of the derived 32-byte private key
+    // BitcoinSealProtocol::from_config requires 64-byte seed for HD wallet derivation
+    let key_hex = if chain.as_str() == "bitcoin" {
+        log::info!("BITCOIN: Using 64-byte BIP-39 seed for HD wallet derivation");
+        hex::encode(seed_array)
+    } else {
+        log::info!("{}: Using derived 32-byte private key", chain.as_str().to_uppercase());
+        let pk_hex = hex::encode(secret_key.as_bytes());
+        log::info!("CLI LAYER: Private key (first 8 bytes): 0x{}", &pk_hex[..16]);
+        
+        // Derive and log the address for Aptos
+        if chain.as_str() == "aptos" {
+            use sha3::{Digest, Sha3_256};
+            use ed25519_dalek::SigningKey;
+            let key_array: [u8; 32] = *secret_key.as_bytes();
+            let signing_key = SigningKey::from_bytes(&key_array);
+            let public_key = signing_key.verifying_key().to_bytes();
+            let mut data = public_key.to_vec();
+            data.push(0x00); // Ed25519 single key scheme
+            let hash = Sha3_256::digest(&data);
+            let address = format!("0x{}", hex::encode(&hash[..32]));
+            log::info!("CLI LAYER: Derived Aptos address from private key: {}", address);
+            log::info!("CLI LAYER: Public key (first 8 bytes): 0x{}", hex::encode(&public_key[..8]));
+        }
+        
+        pk_hex
+    };
 
     let mut private_keys = std::collections::HashMap::new();
-    private_keys.insert(chain.as_str().to_string(), Some(private_key_hex));
+    private_keys.insert(chain.as_str().to_string(), Some(key_hex));
 
     eprintln!("CLI LAYER: Initializing adapters with network type: {:?}", network_type);
     client.init_adapters(network_type, private_keys).await
@@ -376,6 +401,9 @@ async fn cmd_create(
 
     // For Bitcoin, use existing UTXOs instead of creating new seals
     let (seal, selected_utxo_ref) = if chain.as_str() == "bitcoin" {
+        log::info!("BITCOIN: Creating sanad using UTXO-based seal (HD wallet mode)");
+        output::info("BITCOIN: Selecting UTXO for seal creation");
+        
         // Select the largest UTXO from the loaded state to avoid dust/tiny amounts
         let selected_utxo = bitcoin_utxos.as_ref()
             .and_then(|utxos: &Vec<(String, u32, u64, Option<String>)>| {
@@ -386,9 +414,11 @@ async fn cmd_create(
             })
             .ok_or_else(|| anyhow::anyhow!("No UTXOs available. Run 'csv wallet scan --chain bitcoin' first."))?;
 
+        log::info!("BITCOIN: Selected UTXO {}:{} ({} sats)", &selected_utxo.0, selected_utxo.1, selected_utxo.2);
         output::info(&format!("Using UTXO {}:{} ({} sats) for seal", &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
 
         // Convert txid to bytes
+        log::info!("BITCOIN: Converting txid to bytes");
         let txid_bytes = hex::decode(&selected_utxo.0)
             .map_err(|e| anyhow::anyhow!("Invalid txid: {}", e))?;
         if txid_bytes.len() != 32 {
@@ -398,6 +428,7 @@ async fn cmd_create(
         txid_array.copy_from_slice(&txid_bytes);
 
         // Create a seal from the UTXO
+        log::info!("BITCOIN: Creating seal point from UTXO");
         let mut id_bytes = Vec::with_capacity(36);
         id_bytes.extend_from_slice(&txid_array);
         id_bytes.extend_from_slice(&selected_utxo.1.to_le_bytes());
@@ -406,26 +437,35 @@ async fn cmd_create(
             id: id_bytes,
             nonce: Some(selected_utxo.2),
         };
+        log::info!("BITCOIN: Seal point created (id length: {} bytes, nonce: {} sats)", seal.id.len(), selected_utxo.2);
 
         (seal, Some((selected_utxo.0.clone(), selected_utxo.1)))
     } else {
         // For other chains, use the normal create_seal flow
+        log::info!("{}: Creating seal via chain adapter", chain.as_str().to_uppercase());
         let seal = runtime
             .create_seal(core_chain.clone(), value)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create seal: {}", e))?;
+        log::info!("{}: Seal created successfully", chain.as_str().to_uppercase());
         (seal, None)
     };
 
     // Step 2: Publish the commitment under the seal
+    log::info!("{}: Publishing commitment under seal", chain.as_str().to_uppercase());
+    output::info(&format!("Publishing commitment to {}...", chain.as_str()));
     let anchor = runtime
         .publish_seal(core_chain.clone(), seal.clone(), commitment)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to publish seal: {}", e))?;
+    log::info!("{}: Commitment published successfully (anchor_id: 0x{})", 
+        chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
+    output::info(&format!("Commitment published to {}", chain.as_str()));
 
     // For Bitcoin, mark the used UTXO as spent in wallet state to prevent reuse
     if chain.as_str() == "bitcoin" {
         if let Some((used_txid, used_vout)) = selected_utxo_ref {
+            log::info!("BITCOIN: Marking UTXO {}:{} as spent in wallet state", &used_txid, used_vout);
             // Remove the spent UTXO from wallet state
             state.storage.wallet.utxos.retain(|u| !(u.txid == used_txid && u.vout == used_vout));
             state.save()?;

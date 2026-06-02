@@ -10,8 +10,22 @@ use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
-use solana_system_interface::instruction as system_instruction;
+use solana_sdk::instruction::Instruction;
 use std::str::FromStr;
+
+// System instruction data for CreateAccount
+fn create_account_instruction_data(
+    lamports: u64,
+    space: u64,
+    owner: &Pubkey,
+) -> Vec<u8> {
+    let mut data = Vec::with_capacity(4 + 8 + 8 + 32);
+    data.extend_from_slice(&0u32.to_le_bytes()); // CreateAccount discriminator
+    data.extend_from_slice(&lamports.to_le_bytes());
+    data.extend_from_slice(&space.to_le_bytes());
+    data.extend_from_slice(owner.as_ref());
+    data
+}
 
 use crate::config::SolanaConfig;
 use crate::error::{SolanaError, SolanaResult};
@@ -220,10 +234,16 @@ impl SealProtocol for SolanaSealProtocol {
             .map_err(|e| SolanaError::Rpc(format!("Failed to get recent blockhash: {}", e)))?;
 
         // Create system program instruction to transfer lamports and create account
-        let create_account_ix = system_instruction::create_account(
-            &owner, &seal_pda, lamports, 32,     // data size for seal
-            &owner, // owner program
-        );
+        // System program ID is well-known: 11111111111111111111111111111111
+        let system_program_id = Pubkey::from_str("11111111111111111111111111111111").unwrap();
+        let create_account_ix = Instruction {
+            program_id: system_program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(owner, true),
+                solana_sdk::instruction::AccountMeta::new(seal_pda, false),
+            ],
+            data: create_account_instruction_data(lamports, 32, &owner),
+        };
 
         // Build transaction
         let mut transaction = solana_sdk::transaction::Transaction::new_with_payer(
@@ -232,8 +252,8 @@ impl SealProtocol for SolanaSealProtocol {
         );
         transaction.message.recent_blockhash = recent_blockhash;
 
-        // Sign transaction
-        transaction.sign(&[&wallet.keypair], recent_blockhash);
+        // Sign transaction with partial_sign to handle missing signers gracefully
+        transaction.partial_sign(&[&wallet.keypair], recent_blockhash);
 
         // Send transaction via RPC
         let signature = rpc
@@ -262,6 +282,10 @@ impl SealProtocol for SolanaSealProtocol {
         hash: Hash,
         seal_point: Self::SealPoint,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
+        log::info!("SOLANA: Publishing commitment to seal account");
+        log::info!("SOLANA: Seal account: {}", seal_point.account);
+        log::info!("SOLANA: Commitment hash: 0x{}", hex::encode(hash.as_bytes()));
+        
         let rpc = self.check_rpc()?;
         let wallet = self
             .wallet
@@ -269,18 +293,25 @@ impl SealProtocol for SolanaSealProtocol {
             .ok_or_else(|| SolanaError::Wallet("No wallet configured".to_string()))?;
 
         let owner = wallet.pubkey();
+        log::info!("SOLANA: Wallet owner: {}", owner);
+        
         let commitment_pda = self.derive_commitment_pda(&hash)?;
+        log::info!("SOLANA: Commitment PDA: {}", commitment_pda);
 
         // Get recent blockhash
+        log::info!("SOLANA: Fetching recent blockhash");
         let recent_blockhash = rpc
             .get_recent_blockhash()
             .map_err(|e| SolanaError::Rpc(format!("Failed to get recent blockhash: {}", e)))?;
+        log::info!("SOLANA: Recent blockhash: {}", recent_blockhash);
 
         // Build instruction data with discriminator and commitment hash
+        log::info!("SOLANA: Building instruction data");
         let mut instruction_data = vec![INSTRUCTION_PUBLISH_COMMITMENT];
         instruction_data.extend_from_slice(hash.as_bytes());
 
         // Create instruction to publish commitment to the seal account
+        log::info!("SOLANA: Creating publish instruction");
         let publish_ix = solana_sdk::instruction::Instruction::new_with_bytes(
             seal_point.account, // seal program
             &instruction_data,
@@ -292,27 +323,36 @@ impl SealProtocol for SolanaSealProtocol {
         );
 
         // Build transaction
+        log::info!("SOLANA: Building transaction");
         let mut transaction =
             solana_sdk::transaction::Transaction::new_with_payer(&[publish_ix], Some(&owner));
         transaction.message.recent_blockhash = recent_blockhash;
 
         // Sign transaction
+        log::info!("SOLANA: Signing transaction with wallet keypair");
         transaction.sign(&[&wallet.keypair], recent_blockhash);
+        log::info!("SOLANA: Transaction signed successfully");
 
         // Send transaction via RPC
+        log::info!("SOLANA: Sending transaction via RPC");
         let signature = rpc
             .send_transaction(&transaction)
             .map_err(|e| SolanaError::Rpc(format!("Failed to send transaction: {}", e)))?;
+        log::info!("SOLANA: Transaction sent (signature: {})", signature);
 
         // Wait for confirmation
+        log::info!("SOLANA: Waiting for transaction confirmation");
         let _status = rpc
             .wait_for_confirmation(&signature)
             .map_err(|e| SolanaError::Rpc(format!("Transaction confirmation failed: {}", e)))?;
+        log::info!("SOLANA: Transaction confirmed");
 
         // Get slot information
+        log::info!("SOLANA: Fetching latest slot");
         let slot = rpc
             .get_latest_slot()
             .map_err(|e| SolanaError::Rpc(format!("Failed to get slot: {}", e)))?;
+        log::info!("SOLANA: Latest slot: {}", slot);
 
         let anchor_ref = SolanaCommitAnchor {
             signature,
