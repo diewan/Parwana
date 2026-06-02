@@ -7,7 +7,9 @@ use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 
+use csv_coordinator::wallet::bitcoin;
 use csv_hash::ChainId;
+use csv_keys::Mnemonic;
 use csv_sdk::CsvClient;
 use csv_sdk::StoreBackend;
 
@@ -18,7 +20,34 @@ pub async fn cmd_balance(
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
-    let address = address.or_else(|| state.get_address(&chain).map(|s| s.to_string()));
+    // For Bitcoin, derive address from mnemonic if no explicit address is provided
+    let address = if chain.as_str() == "bitcoin" && address.is_none() {
+        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
+            let mnemonic = Mnemonic::from_phrase(mnemonic_phrase)
+                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+            let seed = mnemonic.to_seed(None);
+            let seed_array = *seed.as_bytes();
+
+            let network = match config.chain(&chain)?.network {
+                crate::config::Network::Main => bitcoin::Network::Main,
+                crate::config::Network::Test => bitcoin::Network::Test,
+                crate::config::Network::Dev => bitcoin::Network::Dev,
+            };
+
+            let derived_address = bitcoin::derive_funding_address(
+                &seed_array,
+                network,
+                0, // account 0
+                0, // index 0
+            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+            Some(derived_address)
+        } else {
+            state.get_address(&chain).map(|s| s.to_string())
+        }
+    } else {
+        address.or_else(|| state.get_address(&chain).map(|s| s.to_string()))
+    };
 
     if let Some(addr) = address {
         output::header(&format!("{} Balance", chain));
@@ -146,7 +175,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 enabled: true,
                 xpub: wallet_xpub,
                 contract_address: cc.contract_address.clone(),
-                program_id: None,
+                program_id: cc.program_id.clone(),
                 account: 0,
                 index: 0,
                 utxos: Vec::new(),
@@ -169,7 +198,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 enabled: true,
                 xpub: wallet_xpub,
                 contract_address: None,
-                program_id: None,
+                program_id: config.chain(&core_chain).ok().and_then(|c| c.program_id.clone()),
                 account: 0,
                 index: 0,
                 utxos: Vec::new(),

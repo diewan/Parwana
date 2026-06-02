@@ -357,28 +357,6 @@ async fn cmd_create(
         let pk_hex = hex::encode(secret_key.as_bytes());
         log::info!("CLI LAYER: Private key (first 8 bytes): 0x{}", &pk_hex[..16]);
 
-        // Derive and verify the signer address for Aptos.
-        if chain.as_str() == "aptos" {
-            let address = csv_keys::bip44::derive_address_from_key(
-                secret_key.as_bytes(),
-                &ChainId::new("aptos"),
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to derive Aptos signer address: {}", e))?;
-            log::info!("CLI LAYER: Derived Aptos address from private key: {}", address);
-
-            if let Some(stored_address) = state.get_address(&chain) {
-                if normalize_address(stored_address) != normalize_address(&address) {
-                    anyhow::bail!(
-                        "Aptos signer address mismatch: wallet balance is checking {}, \
-                         but sanad create would sign as {}. Import or generate the wallet key \
-                         for the funded address, or fund the signer address.",
-                        stored_address,
-                        address
-                    );
-                }
-            }
-        }
-
         pk_hex
     };
 
@@ -540,10 +518,9 @@ fn signing_key_for_chain(
     seed_array: &[u8; 64],
     state: &UnifiedStateManager,
 ) -> Result<(csv_keys::memory::SecretKey, &'static str)> {
-    if chain.as_str() == "aptos" {
-        if let Some(secret_key) = load_keystore_key(chain, account, state)? {
-            return Ok((secret_key, "keystore"));
-        }
+    // Try keystore first for all chains (not just Aptos)
+    if let Some(secret_key) = load_keystore_key(chain, account, state)? {
+        return Ok((secret_key, "keystore"));
     }
 
     let mut keys = csv_keys::bip44::derive_all_chain_keys(seed_array, account);
@@ -568,22 +545,22 @@ fn load_keystore_key(
     }
     key_ids.push(format!("{}-{}", chain.as_str(), account));
 
-    let keystore = csv_keys::file_keystore::FileKeystore::new(None)?;
+    let mut keystore = csv_keys::file_keystore::FileKeystore::new(None)?;
     let passphrase = csv_keys::memory::Passphrase::new(state.passphrase().to_string());
 
     for key_id in key_ids {
         match keystore.retrieve_key(&key_id, &passphrase) {
             Ok(secret_key) => return Ok(Some(secret_key)),
             Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
+            Err(csv_keys::file_keystore::FileKeystoreError::InvalidPassphrase) => {
+                // Key exists but wrong passphrase - fall back to mnemonic derivation
+                log::warn!("Keystore key '{}' exists but decryption failed (wrong passphrase), falling back to mnemonic derivation", key_id);
+            }
             Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
         }
     }
 
     Ok(None)
-}
-
-fn normalize_address(address: &str) -> String {
-    address.trim().trim_start_matches("0x").to_ascii_lowercase()
 }
 
 fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {

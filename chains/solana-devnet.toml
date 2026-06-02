@@ -4,6 +4,7 @@ default_network = "testnet"
 rpc_endpoints = ["https://api.devnet.solana.com"]
 block_explorer_urls = ["https://explorer.solana.com/?cluster=devnet"]
 start_block = 0
+program_id = "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj"
 
 [finality_guarantee]
 max_reorg_depth = 32
@@ -31,6 +32,3 @@ chain_role = "Settlement"
 
 [capabilities.finality_model.OptimisticWithSlotExpiry]
 slots = 32
-
-[custom_settings]
-program_id = "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj"

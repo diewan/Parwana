@@ -3,6 +3,12 @@
 //! Uses csv-keys file keystore for encrypted key storage.
 //! Mnemonics and private keys are encrypted with user passphrase.
 
+//! To add a new chain:
+//! Add coin_type to csv-keys/src/bip44.rs:coin_type()
+//! Add to derive_all_chain_keys() list in bip44.rs
+//! Add address derivation to derive_address_from_key() in bip44.rs
+//! Same mnemonic automatically derives keys for the new chain
+
 use crate::config::{Chain, Config, Network};
 use crate::output;
 use crate::state::UnifiedStateManager;
@@ -100,6 +106,9 @@ pub fn cmd_init(
 }
 
 /// Generate a single wallet for a specific chain.
+///
+/// This requires an existing mnemonic from `wallet init` or `wallet import`.
+/// It derives the key for the specified chain and stores it in the keystore.
 pub fn cmd_generate(
     chain: Chain,
     network: Network,
@@ -108,10 +117,10 @@ pub fn cmd_generate(
 ) -> Result<()> {
     match chain.as_str() {
         "bitcoin" => generate_bitcoin(network, state),
-        "ethereum" => generate_ethereum(state),
-        "sui" => generate_sui(state),
-        "aptos" => generate_aptos(state),
-        "solana" => generate_solana(state),
+        "ethereum" => generate_from_mnemonic(&chain, network, state),
+        "sui" => generate_from_mnemonic(&chain, network, state),
+        "aptos" => generate_from_mnemonic(&chain, network, state),
+        "solana" => generate_from_mnemonic(&chain, network, state),
         _ => Err(anyhow::anyhow!("Unknown chain: {}", chain)),
     }
 }
@@ -186,30 +195,28 @@ fn generate_wallet_for_chain(
     Ok(address)
 }
 
-// Individual chain generators (for non-mnemonic wallet generation)
+// Individual chain generators (derive from existing mnemonic)
 
 fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result<()> {
-    use csv_keys::bip39::{BitcoinNetwork, derive_xpub};
-    use csv_keys::file_keystore::FileKeystore;
-    use csv_keys::memory::{Passphrase, SecretKey};
+    // Check if mnemonic exists
+    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No mnemonic found. Run 'csv wallet init' first to generate a mnemonic.")
+    })?;
 
-    // Generate a BIP-39 mnemonic for HD wallet derivation
-    let mnemonic_type = MnemonicType::Words12;
-    let mnemonic = Mnemonic::generate(mnemonic_type);
-    let mnemonic_str = mnemonic.as_str().to_string();
-
-    // Convert mnemonic to 64-byte seed
-    let mnemonic_obj = csv_keys::bip39::Mnemonic::from_phrase(&mnemonic_str)
-        .map_err(|e| anyhow::anyhow!("Invalid mnemonic: {}", e))?;
-    let seed = mnemonic_obj.to_seed(None);
+    // Convert mnemonic to seed
+    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+    let seed = mnemonic.to_seed(None);
+    let seed_array = *seed.as_bytes();
 
     // Derive BIP-86 xpub (safe to share, can derive addresses but not spend)
+    use csv_keys::bip39::{BitcoinNetwork, derive_xpub};
     let bitcoin_network = match network {
         Network::Main => BitcoinNetwork::Mainnet,
         Network::Test => BitcoinNetwork::Signet,
         Network::Dev => BitcoinNetwork::Regtest,
     };
-    let xpub = derive_xpub(seed.as_bytes(), bitcoin_network, 0)
+    let xpub = derive_xpub(&seed_array, bitcoin_network, 0)
         .map_err(|e| anyhow::anyhow!("Failed to derive xpub: {}", e))?;
 
     // Use csv-coordinator for wallet operations (architecture compliant)
@@ -219,14 +226,13 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
         Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
     };
     let address = csv_coordinator::wallet::bitcoin::derive_funding_address(
-        seed.as_bytes(),
+        &seed_array,
         runtime_network,
         0,
         0,
     ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
-    // Update unified storage with new mnemonic and address
-    state.storage.wallet.mnemonic = Some(mnemonic_str.clone());
+    // Store address in state
     state.store_address(Chain::new("bitcoin"), address.clone());
 
     output::header("Bitcoin Wallet Generated");
@@ -236,109 +242,74 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
     output::kv("Xpub", &xpub);
 
     println!();
-    output::warning(
-        "Your mnemonic phrase has been generated. Use 'csv wallet export' to view it securely.",
-    );
+    output::info("Wallet derived from your existing mnemonic.");
 
     Ok(())
 }
 
-fn generate_ethereum(state: &mut UnifiedStateManager) -> Result<()> {
-    use csv_keys::bip44::derive_address_from_key;
-    use csv_keys::memory::SecretKey;
-    use rand::RngCore;
+/// Generate a wallet for a specific chain from the existing mnemonic.
+fn generate_from_mnemonic(
+    chain: &Chain,
+    _network: Network,
+    state: &mut UnifiedStateManager,
+) -> Result<()> {
+    // Check if mnemonic exists
+    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No mnemonic found. Run 'csv wallet init' first to generate a mnemonic.")
+    })?;
 
-    let mut key_bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key_bytes);
-    let secret_key = SecretKey::new(key_bytes);
+    // Convert mnemonic to seed
+    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+    let seed = mnemonic.to_seed(None);
+    let seed_array = *seed.as_bytes();
 
-    let address = derive_address_from_key(secret_key.as_bytes(), &ChainId::new("ethereum"))
+    // Derive key for the requested chain
+    let core_chain = ChainId::new(chain.as_str());
+    let keys = derive_all_chain_keys(&seed_array, 0);
+    let secret_key = keys
+        .get(&core_chain)
+        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
+
+    // Derive address from key
+    let address = derive_address_from_key(secret_key.as_bytes(), &core_chain)
         .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
-    state.store_address(Chain::new("ethereum"), address.clone());
+    // Store private key in encrypted file keystore
+    use csv_keys::file_keystore::FileKeystore;
+    use csv_keys::memory::Passphrase;
 
-    output::header("Ethereum Wallet Generated");
+    let key_id = format!("{}-0", chain.to_string().to_lowercase());
+    let mut keystore = FileKeystore::new(None)?;
+    let passphrase = Passphrase::new(state.passphrase().to_string());
+
+    keystore.store_key(
+        &key_id,
+        &chain.to_string().to_lowercase(),
+        Some(&format!("{} Account (account 0)", chain)),
+        secret_key,
+        &passphrase,
+    )?;
+
+    // Store address in state with derivation path
+    let (purpose, coin_type) = match chain.as_str() {
+        "ethereum" => ("44", "60"),
+        "sui" => ("44", "784"),
+        "aptos" => ("44", "637"),
+        "solana" => ("44", "501"),
+        _ => ("44", "0"),
+    };
+    let derivation_path = format!("m/{}/{}'/0'/0/0", purpose, coin_type);
+    state.store_address_with_derivation(chain.clone(), address.clone(), Some(derivation_path.clone()));
+
+    output::header(&format!("{} Wallet Generated", chain));
     output::kv("Address", &address);
+    output::kv("Derivation Path", &derivation_path);
+    output::kv("Keystore ID", &key_id);
 
     println!();
-    output::warning(
-        "Your private key has been generated. Use 'csv wallet export' to view it securely.",
-    );
-
-    Ok(())
-}
-
-fn generate_sui(state: &mut UnifiedStateManager) -> Result<()> {
-    use csv_keys::bip44::derive_address_from_key;
-    use csv_keys::memory::SecretKey;
-    use rand::RngCore;
-
-    let mut key_bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key_bytes);
-    let secret_key = SecretKey::new(key_bytes);
-
-    let address = derive_address_from_key(secret_key.as_bytes(), &ChainId::new("sui"))
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-
-    state.store_address(Chain::new("sui"), address.clone());
-
-    output::header("Sui Wallet Generated");
-    output::kv("Address", &address);
-
-    println!();
-    output::warning(
-        "Your private key has been generated. Use 'csv wallet export' to view it securely.",
-    );
-
-    Ok(())
-}
-
-fn generate_aptos(state: &mut UnifiedStateManager) -> Result<()> {
-    use csv_keys::bip44::derive_address_from_key;
-    use csv_keys::memory::SecretKey;
-    use rand::RngCore;
-
-    let mut key_bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key_bytes);
-    let secret_key = SecretKey::new(key_bytes);
-
-    let address = derive_address_from_key(secret_key.as_bytes(), &ChainId::new("aptos"))
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-
-    state.store_address(Chain::new("aptos"), address.clone());
-
-    output::header("Aptos Wallet Generated");
-    output::kv("Address", &address);
-
-    println!();
-    output::warning(
-        "Your private key has been generated. Use 'csv wallet export' to view it securely.",
-    );
-
-    Ok(())
-}
-
-fn generate_solana(state: &mut UnifiedStateManager) -> Result<()> {
-    use csv_keys::bip44::derive_address_from_key;
-    use csv_keys::memory::SecretKey;
-    use rand::RngCore;
-
-    let mut key_bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key_bytes);
-    let secret_key = SecretKey::new(key_bytes);
-
-    let address = derive_address_from_key(secret_key.as_bytes(), &ChainId::new("solana"))
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-
-    state.store_address(Chain::new("solana"), address.clone());
-
-    output::header("Solana Wallet Generated");
-    output::kv("Address", &address);
-
-    println!();
-    output::warning(
-        "Your private key has been generated. Use 'csv wallet export' to view it securely.",
-    );
+    output::info("Wallet derived from your existing mnemonic.");
+    output::info("Private key stored in encrypted keystore.");
 
     Ok(())
 }
