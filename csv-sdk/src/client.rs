@@ -777,18 +777,21 @@ impl CsvClient {
                     None
                 };
                 
+                let program_id_from_config = _config
+                    .chains
+                    .get("solana")
+                    .and_then(|chain| chain.program_id.clone())
+                    .ok_or_else(|| {
+                        CsvError::ConfigError(
+                            "Solana CSV program ID must be configured".to_string(),
+                        )
+                    })?;
+                log::info!("SDK: Solana program_id from config: {}", program_id_from_config);
+
                 let sol_config = csv_solana::config::SolanaConfig {
                     network: sol_network,
                     rpc_url: rpc_url.clone(),
-                    csv_program_id: _config
-                        .chains
-                        .get("solana")
-                        .and_then(|chain| chain.program_id.clone())
-                        .ok_or_else(|| {
-                            CsvError::ConfigError(
-                                "Solana CSV program ID must be configured".to_string(),
-                            )
-                        })?,
+                    csv_program_id: program_id_from_config,
                     keypair: keypair_base58,
                     commitment: Some("confirmed".to_string()),
                     max_retries: 3,
