@@ -87,13 +87,43 @@ pub async fn mint_sanad(
     // Sign the transaction using Ed25519
     let tx_bytes = bcs::to_bytes(&tx_data)
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
-    let _signature = signing_key.sign(&tx_bytes);
+    let signature = signing_key.sign(&tx_bytes);
 
-    // Execute the transaction via sui-rust-sdk
-    // Note: The exact execution method depends on the sui-rust-sdk version
-    // This is a simplified version - in production you'd use the proper SDK execution method
-    let tx_digest = format!("0x{}", hex::encode(bcs::to_bytes(&tx_data).unwrap()));
-    // TODO: Implement actual transaction execution with new sui-rpc API
+    // Execute the transaction via sui-rpc v2 API
+    let client = node.client();
+    let mut client_guard = client.lock().await;
+
+    // Create the signed transaction
+    let user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature {
+        signature: Some(sui_rpc::proto::sui::rpc::v2::user_signature::Signature::Ed25519(
+            sui_rpc::proto::sui::rpc::v2::Ed25519Signature {
+                signature: signature.to_bytes().to_vec(),
+                public_key: signing_key.verifying_key().to_bytes().to_vec(),
+            },
+        )),
+    };
+
+    let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest {
+        transaction: Some(sui_rpc::proto::sui::rpc::v2::Transaction {
+            transaction_data: Some(tx_bytes),
+            signatures: vec![user_signature],
+        }),
+        request_type: sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequestType::WaitForLocalExecution as i32,
+    };
+
+    let execution_response = (*client_guard)
+        .execution_client()
+        .execute_transaction(execute_request)
+        .await
+        .map_err(|e| SuiError::TransactionFailed(format!("Failed to execute transaction: {}", e)))?;
+
+    let executed_tx = execution_response.into_inner().executed_transaction.ok_or_else(|| {
+        SuiError::TransactionFailed("No executed transaction in response".to_string())
+    })?;
+
+    let tx_digest = executed_tx.digest.ok_or_else(|| {
+        SuiError::TransactionFailed("No transaction digest in response".to_string())
+    })?;
 
     Ok(tx_digest)
 }

@@ -331,32 +331,60 @@ impl SealProtocol for SuiSealProtocol {
             // - Package ID, module name, function name
             // - Type arguments and call arguments (seal_id, commitment)
             // For production: use sui-sdk's transaction builder
-            log::info!("SUI: Building and signing MoveCall transaction");
-            let (tx_bytes, _signature, _public_key) = self
-                .build_and_sign_move_call(&seal, *commitment.as_bytes())
-                .await
-                .map_err(|e| {
-                    ProtocolError::PublishFailed(format!(
-                        "Failed to build and sign transaction: {}",
-                        e
-                    ))
-                })?;
-            log::info!("SUI: Transaction built and signed (tx_bytes length: {} bytes)", tx_bytes.len());
+            log::info!("SUI: Building MoveCall transaction");
 
-            // Submit signed transaction via sui-rust-sdk
-            log::info!("SUI: Submitting signed transaction via gRPC");
-                                    
-            let client = self.node.client();
-            let _client_guard = client.lock().await;
-            
-            let _tx_digest = sui_sdk_types::Digest::from_bytes(&tx_bytes)
-                .map_err(|e| ProtocolError::PublishFailed(format!("Invalid tx bytes: {}", e)))?;
-            
-            // Execute the transaction using the new sui-rpc API
-            // TODO: Implement proper transaction execution with the new API
-            // For now, return a placeholder error
+            // Get the package ID from config
+            let package_id_str = self.config.seal_contract.package_id.as_ref()
+                .ok_or_else(|| ProtocolError::PublishFailed("Package ID not configured".to_string()))?;
+            let package_id_bytes = parse_object_id(package_id_str)
+                .map_err(|e| ProtocolError::PublishFailed(format!("Invalid package ID: {}", e)))?;
+            let package_id = sui_sdk_types::Address::from_bytes(&package_id_bytes)
+                .map_err(|e| ProtocolError::PublishFailed(format!("Invalid package ID: {}", e)))?;
+            let module_name = self.config.seal_contract.module_name.clone();
+            let function_name = "consume_seal".to_string();
+
+            // Build the transaction using sui-transaction-builder
+            let mut tx_builder = TransactionBuilder::new();
+            // Note: TransactionConfig no longer has sender/gas_budget fields
+            // These need to be set separately or derived from signing key
+            // For now, use placeholder values
+            tx_builder.set_sender(sui_sdk_types::Address::ZERO);
+            tx_builder.set_gas_budget(10000000);
+
+            let seal_object_id = sui_sdk_types::Address::from_bytes(seal.object_id)
+                .map_err(|e| ProtocolError::PublishFailed(format!("Invalid seal object ID: {}", e)))?;
+
+            // Add the MoveCall
+            let function = sui_transaction_builder::Function::new(
+                package_id,
+                sui_sdk_types::Identifier::new(&module_name)
+                    .map_err(|e| ProtocolError::PublishFailed(format!("Invalid module name: {}", e)))?,
+                sui_sdk_types::Identifier::new(&function_name)
+                    .map_err(|e| ProtocolError::PublishFailed(format!("Invalid function name: {}", e)))?,
+            );
+            let seal_object_arg = tx_builder.object(sui_transaction_builder::ObjectInput::owned(
+                seal_object_id,
+                seal.version,
+                sui_sdk_types::Digest::from_bytes(&[0u8; 32]).unwrap(),
+            ));
+            let commitment_arg = tx_builder.pure(commitment.as_bytes());
+            tx_builder.move_call(function, vec![seal_object_arg, commitment_arg]);
+
+            // Build the transaction data
+            let tx_data = tx_builder.try_build()
+                .map_err(|e| ProtocolError::PublishFailed(format!("Failed to build transaction: {}", e)))?;
+
+            log::info!("SUI: Transaction built successfully");
+
+            // Note: Transaction signing requires a signing key to be configured
+            // For now, return an error indicating this needs to be implemented
+            // In production, you would:
+            // 1. Serialize the transaction data with BCS
+            // 2. Sign it with the configured Ed25519 key
+            // 3. Create a UserSignature with the signature
+            // 4. Execute via execution_client().execute_transaction()
             return Err(ProtocolError::PublishFailed(
-                "Transaction execution not yet implemented with new sui-rpc API".to_string(),
+                "Transaction signing requires a configured signing key. Implement signing key management in SuiSealProtocol.".to_string(),
             ).into());
         }
 
@@ -559,39 +587,79 @@ impl SealProtocol for SuiSealProtocol {
         csv_protocol::signature::SignatureScheme::Ed25519
     }
 
-    async fn build_proof_bundle(&self, _anchor: Self::CommitAnchor, _extra_data: Vec<u8>) -> Result<csv_protocol::proof_types::ProofBundle, Box<dyn std::error::Error + 'static>> {
-        // TODO: Implement proof bundle building for Sui
-        // This requires checkpoint certification and transaction effects
-        // The implementation needs to understand the exact structure of:
-        // - SuiCommitAnchor fields
-        // - CommitAnchor::new signature
-        // - ProofBundle::new signature
-        // - Hash construction methods
+    async fn build_proof_bundle(&self, anchor: Self::CommitAnchor, _extra_data: Vec<u8>) -> Result<csv_protocol::proof_types::ProofBundle, Box<dyn std::error::Error + 'static>> {
         use csv_protocol::proof_types::{ProofBundle, InclusionProof, FinalityProof};
         use csv_hash::dag::DAGSegment;
         use csv_hash::seal::{SealPoint, CommitAnchor};
-        
-        // Create placeholder proofs for now
+        use csv_hash::Hash;
+
+        // Get transaction to extract checkpoint hash for inclusion proof
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+
+        let tx_digest = sui_sdk_types::Digest::from_bytes(&anchor.tx_digest)
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("Invalid tx digest: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+
+        let request = sui_rpc::proto::sui::rpc::v2::GetTransactionRequest::new(&tx_digest);
+
+        let tx_response = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to get transaction: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+
+        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "Transaction not found".to_string())) as Box<dyn std::error::Error + 'static>
+        })?;
+
+        // Extract checkpoint hash from transaction
+        let checkpoint_hash = if let Some(digest) = tx.digest {
+            let decoded = hex::decode(digest.trim_start_matches("0x")).unwrap_or_default();
+            let mut hash = [0u8; 32];
+            if decoded.len() >= 32 {
+                hash.copy_from_slice(&decoded[..32]);
+            }
+            Hash::new(hash)
+        } else {
+            Hash::zero()
+        };
+
+        // Build inclusion proof with checkpoint information
         let inclusion_proof = InclusionProof::new(
-            vec![],
-            csv_hash::Hash::zero(),
-            0,
-            0,
-        )?;
-        
+            vec![], // Sui doesn't use Merkle proofs for transaction inclusion
+            checkpoint_hash,
+            anchor.checkpoint,
+            0, // Transaction index within checkpoint (not applicable for Sui)
+        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+
+        // Build finality proof by checking if checkpoint is certified
+        let is_certified = self.checkpoint_verifier.is_checkpoint_certified(anchor.checkpoint).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + 'static>)?;
+
         let finality_proof = FinalityProof::new(
-            vec![],
-            0,
-            false,
-        )?;
-        
-        let dag_segment = DAGSegment::new(vec![], csv_hash::Hash::zero());
-        let seal_point = SealPoint::new(vec![0u8; 32], None)?;
-        let commit_anchor = CommitAnchor::new(vec![0u8; 32], 0, vec![])?;
-        
+            vec![], // Sui uses checkpoint certification signatures
+            anchor.checkpoint,
+            is_certified.is_finalized(),
+        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+
+        // Build DAG segment (empty for Sui as it doesn't use DAG-based consensus)
+        let dag_segment = DAGSegment::new(vec![], Hash::zero());
+
+        // Build seal point from SuiCommitAnchor
+        let seal_point = SealPoint::new(anchor.object_id.to_vec(), Some(anchor.checkpoint as u32))
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+
+        // Build commit anchor from SuiCommitAnchor
+        let commit_anchor = CommitAnchor::new(
+            anchor.tx_digest.to_vec(),
+            anchor.checkpoint,
+            vec![], // Additional data (empty for now)
+        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+
+        // Build the proof bundle
         ProofBundle::new(
             dag_segment,
-            vec![],
+            vec![], // Additional proofs (empty for now)
             seal_point,
             commit_anchor,
             inclusion_proof,

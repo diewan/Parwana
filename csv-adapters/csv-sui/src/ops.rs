@@ -234,12 +234,25 @@ impl ChainQuery for SuiBackend {
                 .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?
                 .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?;
             
+            // Build token information from balance response
+            // Sui uses coin objects, so we extract the coin type and balance
+            let tokens = if let Some(coin_type) = balance.coin_type {
+                vec![csv_protocol::backend::TokenBalance {
+                    symbol: "SUI".to_string(), // Default to SUI for native token
+                    decimals: 9, // SUI has 9 decimals
+                    balance: balance.balance.unwrap_or(0),
+                    address: coin_type,
+                }]
+            } else {
+                vec![]
+            };
+
             Ok(BalanceInfo {
                 address: address.to_string(),
                 total: balance.balance.unwrap_or(0),
                 available: balance.balance.unwrap_or(0), // Assume all is available for now
                 locked: 0,
-                tokens: vec![], // Token information requires TokenBalance struct
+                tokens,
             })
         }
         
@@ -272,7 +285,18 @@ impl ChainQuery for SuiBackend {
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
             ChainOpError::InvalidInput("Transaction not found in response".to_string())
         })?;
-        
+
+        // Extract sender from transaction
+        let sender = tx.sender.map(|s| s.to_string()).unwrap_or_default();
+
+        // Extract gas cost from effects
+        let fee = tx.effects.as_ref()
+            .and_then(|e| e.gas_cost.as_ref())
+            .map(|g| g.computation_cost + g.storage_cost + g.non_refundable_storage_fee);
+
+        // Extract raw transaction data
+        let raw_data = tx.raw_tx.clone();
+
         Ok(TransactionInfo {
             hash: hash.to_string(),
             status: if tx.effects.is_some() {
@@ -285,11 +309,11 @@ impl ChainQuery for SuiBackend {
             },
             block_height: tx.checkpoint,
             timestamp: tx.timestamp.map(|t| t.seconds as u64),
-            sender: String::new(), // Sender would need to be extracted from transaction.raw_tx
+            sender,
             recipient: None, // Sui transactions don't have a single recipient; they can have multiple outputs
             amount: None, // Amount would need to be extracted from specific transaction effects
-            fee: None, // Fee would need to be extracted from effects.gas_cost
-            raw_data: None, // Raw data would need to be extracted from transaction.raw_tx
+            fee,
+            raw_data,
         })
     }
 
@@ -816,35 +840,332 @@ impl ChainProofProvider for SuiBackend {
 impl ChainSanadOps for SuiBackend {
     async fn create_sanad(
         &self,
-        _owner: &str,
-        _asset_class: &str,
-        _asset_id: &str,
+        owner: &str,
+        asset_class: &str,
+        asset_id: &str,
         _metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad creation not yet implemented for Sui".to_string(),
-        ))
+        use ed25519_dalek::Signer;
+        use sui_sdk_types::{Address, Identifier};
+        use sui_transaction_builder::TransactionBuilder;
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        // Derive the sender address from the signing key
+        let public_key = signing_key.verifying_key();
+        let pubkey_bytes = public_key.as_bytes();
+
+        // Sui address is derived from public key using SHA2-256
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(pubkey_bytes);
+        let mut addr_bytes = [0u8; 32];
+        addr_bytes.copy_from_slice(&hash[..32]);
+        let sender_address = Address::from_bytes(addr_bytes)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
+
+        // Get the package ID from config (if available)
+        let package_id_str = self.config.seal_contract.package_id.as_ref()
+            .ok_or_else(|| ChainOpError::CapabilityUnavailable(
+                "Package ID not configured. Deploy the CSV contract first.".to_string()
+            ))?;
+        let package_id_bytes = parse_object_id(package_id_str)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+        let package_id = Address::from_bytes(&package_id_bytes)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+
+        let client = self.node.client();
+        let _client_guard = client.lock().await;
+
+        // Build the transaction using sui-transaction-builder
+        let mut tx_builder = TransactionBuilder::new();
+        tx_builder.set_sender(sender_address);
+        tx_builder.set_gas_budget(10000000);
+
+        // Add the MoveCall to create the sanad
+        let function = sui_transaction_builder::Function::new(
+            package_id,
+            Identifier::new("csv_sanad").unwrap(),
+            Identifier::new("create").unwrap(),
+        );
+        let owner_arg = tx_builder.pure(owner.as_bytes());
+        let asset_class_arg = tx_builder.pure(asset_class);
+        let asset_id_arg = tx_builder.pure(asset_id);
+        tx_builder.move_call(
+            function,
+            vec![owner_arg, asset_class_arg, asset_id_arg],
+        );
+
+        // Build the transaction data
+        let tx_data = tx_builder.try_build()
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to build transaction: {}", e)))?;
+
+        // Sign the transaction using Ed25519
+        let tx_bytes = bcs::to_bytes(&tx_data)
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
+        let signature = signing_key.sign(&tx_bytes);
+
+        // Execute the transaction via sui-rpc v2 API
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+
+        // Create the signed transaction
+        let user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature {
+            signature: Some(sui_rpc::proto::sui::rpc::v2::user_signature::Signature::Ed25519(
+                sui_rpc::proto::sui::rpc::v2::Ed25519Signature {
+                    signature: signature.to_bytes().to_vec(),
+                    public_key: signing_key.verifying_key().to_bytes().to_vec(),
+                },
+            )),
+        };
+
+        let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest {
+            transaction: Some(sui_rpc::proto::sui::rpc::v2::Transaction {
+                transaction_data: Some(tx_bytes),
+                signatures: vec![user_signature],
+            }),
+            request_type: sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequestType::WaitForLocalExecution as i32,
+        };
+
+        let execution_response = (*client_guard)
+            .execution_client()
+            .execute_transaction(execute_request)
+            .await
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to execute transaction: {}", e)))?;
+
+        let executed_tx = execution_response.into_inner().executed_transaction.ok_or_else(|| {
+            ChainOpError::TransactionFailed("No executed transaction in response".to_string())
+        })?;
+
+        let tx_digest = executed_tx.digest.ok_or_else(|| {
+            ChainOpError::TransactionFailed("No transaction digest in response".to_string())
+        })?;
+
+        Ok(SanadOperationResult {
+            transaction_hash: tx_digest,
+            sanad_id: None, // Would be extracted from transaction effects
+            status: "success".to_string(),
+        })
     }
 
     async fn consume_sanad(
         &self,
-        _sanad_id: &SanadId,
+        sanad_id: &SanadId,
         _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad consumption not yet implemented for Sui".to_string(),
-        ))
+        use ed25519_dalek::Signer;
+        use sui_sdk_types::{Address, Identifier};
+        use sui_transaction_builder::TransactionBuilder;
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        // Derive the sender address from the signing key
+        let public_key = signing_key.verifying_key();
+        let pubkey_bytes = public_key.as_bytes();
+
+        // Sui address is derived from public key using SHA2-256
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(pubkey_bytes);
+        let mut addr_bytes = [0u8; 32];
+        addr_bytes.copy_from_slice(&hash[..32]);
+        let sender_address = Address::from_bytes(addr_bytes)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
+
+        // Get the package ID from config (if available)
+        let package_id_str = self.config.seal_contract.package_id.as_ref()
+            .ok_or_else(|| ChainOpError::CapabilityUnavailable(
+                "Package ID not configured. Deploy the CSV contract first.".to_string()
+            ))?;
+        let package_id_bytes = parse_object_id(package_id_str)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+        let package_id = Address::from_bytes(&package_id_bytes)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+
+        let client = self.node.client();
+        let _client_guard = client.lock().await;
+
+        // Build the transaction using sui-transaction-builder
+        let mut tx_builder = TransactionBuilder::new();
+        tx_builder.set_sender(sender_address);
+        tx_builder.set_gas_budget(10000000);
+
+        // Add the MoveCall to consume the sanad
+        let function = sui_transaction_builder::Function::new(
+            package_id,
+            Identifier::new("csv_sanad").unwrap(),
+            Identifier::new("consume").unwrap(),
+        );
+        let sanad_id_arg = tx_builder.pure(sanad_id.as_bytes());
+        tx_builder.move_call(function, vec![sanad_id_arg]);
+
+        // Build the transaction data
+        let tx_data = tx_builder.try_build()
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to build transaction: {}", e)))?;
+
+        // Sign the transaction using Ed25519
+        let tx_bytes = bcs::to_bytes(&tx_data)
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
+        let signature = signing_key.sign(&tx_bytes);
+
+        // Execute the transaction via sui-rpc v2 API
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+
+        // Create the signed transaction
+        let user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature {
+            signature: Some(sui_rpc::proto::sui::rpc::v2::user_signature::Signature::Ed25519(
+                sui_rpc::proto::sui::rpc::v2::Ed25519Signature {
+                    signature: signature.to_bytes().to_vec(),
+                    public_key: signing_key.verifying_key().to_bytes().to_vec(),
+                },
+            )),
+        };
+
+        let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest {
+            transaction: Some(sui_rpc::proto::sui::rpc::v2::Transaction {
+                transaction_data: Some(tx_bytes),
+                signatures: vec![user_signature],
+            }),
+            request_type: sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequestType::WaitForLocalExecution as i32,
+        };
+
+        let execution_response = (*client_guard)
+            .execution_client()
+            .execute_transaction(execute_request)
+            .await
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to execute transaction: {}", e)))?;
+
+        let executed_tx = execution_response.into_inner().executed_transaction.ok_or_else(|| {
+            ChainOpError::TransactionFailed("No executed transaction in response".to_string())
+        })?;
+
+        let tx_digest = executed_tx.digest.ok_or_else(|| {
+            ChainOpError::TransactionFailed("No transaction digest in response".to_string())
+        })?;
+
+        Ok(SanadOperationResult {
+            transaction_hash: tx_digest,
+            sanad_id: Some(*sanad_id),
+            status: "success".to_string(),
+        })
     }
 
     async fn lock_sanad(
         &self,
-        _sanad_id: &SanadId,
-        _destination_chain: &str,
+        sanad_id: &SanadId,
+        destination_chain: &str,
         _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad locking not yet implemented for Sui".to_string(),
-        ))
+        use ed25519_dalek::Signer;
+        use sui_sdk_types::{Address, Identifier};
+        use sui_transaction_builder::TransactionBuilder;
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        // Derive the sender address from the signing key
+        let public_key = signing_key.verifying_key();
+        let pubkey_bytes = public_key.as_bytes();
+
+        // Sui address is derived from public key using SHA2-256
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(pubkey_bytes);
+        let mut addr_bytes = [0u8; 32];
+        addr_bytes.copy_from_slice(&hash[..32]);
+        let sender_address = Address::from_bytes(addr_bytes)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
+
+        // Get the package ID from config (if available)
+        let package_id_str = self.config.seal_contract.package_id.as_ref()
+            .ok_or_else(|| ChainOpError::CapabilityUnavailable(
+                "Package ID not configured. Deploy the CSV contract first.".to_string()
+            ))?;
+        let package_id_bytes = parse_object_id(package_id_str)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+        let package_id = Address::from_bytes(&package_id_bytes)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+
+        let client = self.node.client();
+        let _client_guard = client.lock().await;
+
+        // Build the transaction using sui-transaction-builder
+        let mut tx_builder = TransactionBuilder::new();
+        tx_builder.set_sender(sender_address);
+        tx_builder.set_gas_budget(10000000);
+
+        // Add the MoveCall to lock the sanad
+        let function = sui_transaction_builder::Function::new(
+            package_id,
+            Identifier::new("csv_sanad").unwrap(),
+            Identifier::new("lock").unwrap(),
+        );
+        let sanad_id_arg = tx_builder.pure(sanad_id.as_bytes());
+        let destination_chain_arg = tx_builder.pure(destination_chain.as_bytes());
+        tx_builder.move_call(function, vec![sanad_id_arg, destination_chain_arg]);
+
+        // Build the transaction data
+        let tx_data = tx_builder.try_build()
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to build transaction: {}", e)))?;
+
+        // Sign the transaction using Ed25519
+        let tx_bytes = bcs::to_bytes(&tx_data)
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
+        let signature = signing_key.sign(&tx_bytes);
+
+        // Execute the transaction via sui-rpc v2 API
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+
+        // Create the signed transaction
+        let user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature {
+            signature: Some(sui_rpc::proto::sui::rpc::v2::user_signature::Signature::Ed25519(
+                sui_rpc::proto::sui::rpc::v2::Ed25519Signature {
+                    signature: signature.to_bytes().to_vec(),
+                    public_key: signing_key.verifying_key().to_bytes().to_vec(),
+                },
+            )),
+        };
+
+        let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest {
+            transaction: Some(sui_rpc::proto::sui::rpc::v2::Transaction {
+                transaction_data: Some(tx_bytes),
+                signatures: vec![user_signature],
+            }),
+            request_type: sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequestType::WaitForLocalExecution as i32,
+        };
+
+        let execution_response = (*client_guard)
+            .execution_client()
+            .execute_transaction(execute_request)
+            .await
+            .map_err(|e| ChainOpError::TransactionFailed(format!("Failed to execute transaction: {}", e)))?;
+
+        let executed_tx = execution_response.into_inner().executed_transaction.ok_or_else(|| {
+            ChainOpError::TransactionFailed("No executed transaction in response".to_string())
+        })?;
+
+        let tx_digest = executed_tx.digest.ok_or_else(|| {
+            ChainOpError::TransactionFailed("No transaction digest in response".to_string())
+        })?;
+
+        Ok(SanadOperationResult {
+            transaction_hash: tx_digest,
+            sanad_id: Some(*sanad_id),
+            status: "success".to_string(),
+        })
     }
 
     async fn mint_sanad(
