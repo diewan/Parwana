@@ -29,7 +29,7 @@ csv-proof = { path = "../csv-proof" }
 csv-schema = { path = "../csv-schema" }
 csv-store = { path = "../csv-store", features = ["clap"] }
 csv-keys = { path = "../csv-keys" }
-csv-runtime = { path = "../csv-runtime" }
+csv-runtime = { path = "../csv-runtime", default-features = false }
 csv-coordinator = { path = "../csv-coordinator", features = ["bitcoin", "ethereum", "sui", "aptos", "solana"] }
 csv-admission = { path = "../csv-admission" }
 csv-observability = { path = "../csv-observability" }

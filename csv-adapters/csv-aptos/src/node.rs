@@ -431,12 +431,28 @@ impl AptosTransactionReader for AptosNode {
                     .get(&format!("/transactions/by_hash/{}", hash_hex))
                     .await
                 {
+                    // Check if transaction is found
                     if result.get("hash").is_some() {
-                        let tx = Self::parse_transaction(&result)?;
-                        if tx.success {
-                            return Ok(tx);
-                        } else {
-                            return Err(format!("Transaction failed: {}", tx.vm_status).into());
+                        // Try to parse the transaction
+                        match Self::parse_transaction(&result) {
+                            Ok(tx) => {
+                                if tx.success {
+                                    return Ok(tx);
+                                } else {
+                                    return Err(format!("Transaction failed: {}", tx.vm_status).into());
+                                }
+                            }
+                            Err(e) => {
+                                // If parsing fails due to missing required fields, transaction might still be pending
+                                let error_str = e.to_string();
+                                if error_str.contains("missing") || error_str.contains("invalid") {
+                                    // Transaction is still pending, continue waiting
+                                    log::debug!("Transaction still pending ({}), continuing to wait", error_str);
+                                } else {
+                                    // Other parsing error, return it
+                                    return Err(e);
+                                }
+                            }
                         }
                     }
                 }

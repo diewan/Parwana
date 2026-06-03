@@ -4,10 +4,11 @@
 //! using the sui-rust-sdk crates.
 
 use sha2::Digest;
+use std::sync::Arc;
 
 use crate::config::SuiConfig;
 use crate::error::SuiError;
-use crate::rpc::SuiRpc;
+use crate::node::SuiNode;
 
 /// Result of a successful Move package deployment.
 pub struct PackageDeployment {
@@ -27,8 +28,8 @@ pub struct PackageDeployment {
 pub struct PackageDeployer {
     /// Sui configuration.
     config: SuiConfig,
-    /// RPC client for blockchain communication.
-    rpc: Box<dyn SuiRpc>,
+    /// Sui gRPC client.
+    node: Arc<SuiNode>,
 }
 
 impl PackageDeployer {
@@ -36,9 +37,9 @@ impl PackageDeployer {
     ///
     /// # Arguments
     /// * `config` - Sui configuration including network and signer info
-    /// * `rpc` - RPC client for blockchain communication
-    pub fn new(config: SuiConfig, rpc: Box<dyn SuiRpc>) -> Self {
-        Self { config, rpc }
+    /// * `node` - Sui gRPC client
+    pub fn new(config: SuiConfig, node: Arc<SuiNode>) -> Self {
+        Self { config, node }
     }
 
     /// Deploy a Move package to the Sui blockchain.
@@ -54,29 +55,40 @@ impl PackageDeployer {
         package_bytes: &[u8],
         gas_budget: u64,
     ) -> Result<PackageDeployment, SuiError> {
-        let signer_address = self.config.signer_address.as_deref().ok_or_else(|| {
-            SuiError::ConfigurationError("signer_address is required for deployment".to_string())
+        use sui_rpc::api::ReadApi;
+        use sui_sdk_types::base_types::SuiAddress;
+        use sui_transaction_builder::TransactionBuilder;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::ConfigurationError(format!("Failed to lock client: {}", e))
         })?;
-
-        let signer_bytes = hex::decode(signer_address.strip_prefix("0x").unwrap_or(signer_address))
-            .map_err(|e| SuiError::SerializationError(format!("Invalid signer address: {}", e)))?;
-
-        let mut package_id = [0u8; 32];
-        package_id.copy_from_slice(&signer_bytes[..32.min(signer_bytes.len())]);
-
-        let modules: Vec<String> = package_bytes.chunks(64).map(hex::encode).take(10).collect();
-
-        let tx_digest = format!(
-            "0x{}",
-            hex::encode(&sha2::Sha256::digest(package_bytes)[..16])
+        
+        // Build the transaction using sui-transaction-builder
+        let mut tx_builder = TransactionBuilder::new(
+            self.config.transaction.sender,
+            gas_budget,
         );
-
-        Ok(PackageDeployment {
-            package_id,
-            transaction_digest: tx_digest,
-            gas_used: gas_budget / 2,
-            modules,
-            dependencies: Vec::new(),
-        })
+        
+        // Add the publish command
+        tx_builder.publish(package_bytes.to_vec())
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to build publish transaction: {}", e)))?;
+        
+        // Build the transaction data
+        let tx_data = tx_builder.build()
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to build transaction: {}", e)))?;
+        
+        // Sign the transaction (this requires proper signing key management)
+        // For now, return an error indicating signing key management is needed
+        return Err(SuiError::ConfigurationError(
+            "Transaction signing requires proper signing key management. Implement signing key handling.".to_string(),
+        ));
+        
+        // Once signing is implemented, the flow would be:
+        // 1. Sign the transaction with the private key
+        // 2. Execute the transaction via sui-rust-sdk
+        // 3. Wait for confirmation
+        // 4. Extract package ID from transaction effects
+        // 5. Return PackageDeployment
     }
 }

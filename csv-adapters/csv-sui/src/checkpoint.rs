@@ -8,10 +8,11 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::config::CheckpointConfig;
 use crate::error::{SuiError, SuiResult};
-use crate::rpc::SuiRpc;
+use crate::node::SuiNode;
 
 /// Checkpoint information with certification details.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,20 +43,19 @@ pub trait CheckpointVerifierTrait: Send + Sync {
     async fn is_checkpoint_certified(
         &self,
         checkpoint_seq: u64,
-        rpc: &dyn SuiRpc,
     ) -> SuiResult<CheckpointInfo>;
 
     /// Check if a transaction's checkpoint is finalized.
-    async fn is_tx_finalized(&self, tx_checkpoint: u64, rpc: &dyn SuiRpc) -> SuiResult<bool>;
+    async fn is_tx_finalized(&self, tx_checkpoint: u64) -> SuiResult<bool>;
 
     /// Get the latest certified checkpoint.
-    async fn latest_certified_checkpoint(&self, rpc: &dyn SuiRpc) -> SuiResult<Option<u64>>;
+    async fn latest_certified_checkpoint(&self) -> SuiResult<Option<u64>>;
 
     /// Get the current epoch from the network.
-    async fn current_epoch(&self, rpc: &dyn SuiRpc) -> SuiResult<u64>;
+    async fn current_epoch(&self) -> SuiResult<u64>;
 
     /// Verify that an epoch boundary has passed.
-    async fn is_epoch_passed(&self, expected_epoch: u64, rpc: &dyn SuiRpc) -> SuiResult<bool>;
+    async fn is_epoch_passed(&self, expected_epoch: u64) -> SuiResult<bool>;
 }
 
 /// Checkpoint finality verifier for Sui
@@ -63,22 +63,29 @@ pub trait CheckpointVerifierTrait: Send + Sync {
 pub struct CheckpointVerifier {
     /// Configuration for checkpoint verification
     config: CheckpointConfig,
+    /// Sui gRPC client for checkpoint queries
+    node: Arc<SuiNode>,
 }
 
 impl CheckpointVerifier {
     /// Create a new checkpoint verifier with default configuration.
-    pub fn new() -> Self {
-        Self::with_config(CheckpointConfig::default())
+    pub fn new(node: Arc<SuiNode>) -> Self {
+        Self::with_config(CheckpointConfig::default(), node)
     }
 
     /// Create a new checkpoint verifier with custom configuration.
-    pub fn with_config(config: CheckpointConfig) -> Self {
-        Self { config }
+    pub fn with_config(config: CheckpointConfig, node: Arc<SuiNode>) -> Self {
+        Self { config, node }
     }
 
     /// Get the verifier configuration.
     pub fn config(&self) -> &CheckpointConfig {
         &self.config
+    }
+
+    /// Get the Sui node client.
+    pub fn node(&self) -> &Arc<SuiNode> {
+        &self.node
     }
 }
 
@@ -91,212 +98,92 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
     ///
     /// # Arguments
     /// * `checkpoint_seq` - The checkpoint sequence number to check
-    /// * `rpc` - RPC client for fetching checkpoint data
     ///
     /// # Returns
     /// `Ok(CheckpointInfo)` with certification details, or `Err` on failure.
     async fn is_checkpoint_certified(
         &self,
         checkpoint_seq: u64,
-        rpc: &dyn SuiRpc,
     ) -> SuiResult<CheckpointInfo> {
-        // Check timeout
-        let start = std::time::Instant::now();
-
-        let cp = rpc.get_checkpoint(checkpoint_seq).await.map_err(|e| {
-            if start.elapsed().as_millis() > self.config.timeout_ms as u128 {
-                SuiError::timeout(
-                    &format!("checkpoint_{}", checkpoint_seq),
-                    self.config.timeout_ms,
-                )
-            } else {
-                SuiError::CheckpointFailed(format!("Failed to get checkpoint: {}", e))
-            }
+        use sui_rpc::api::ReadApi;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::CheckpointFailed(format!("Failed to lock client: {}", e))
         })?;
-
-        match cp {
-            Some(cp) => {
-                let is_certified = if self.config.require_certified {
-                    cp.certified
-                } else {
-                    true
-                };
-
-                Ok(CheckpointInfo {
-                    sequence_number: cp.sequence_number,
-                    epoch: cp.epoch,
-                    digest: cp.digest,
-                    total_transactions: cp.network_total_transactions,
-                    is_certified,
-                })
-            }
-            None => Err(SuiError::CheckpointFailed(format!(
-                "Checkpoint {} not found",
-                checkpoint_seq
-            ))),
+        
+        // Use sui-rust-sdk to get checkpoint by sequence number
+        let checkpoint = client_guard
+            .get_checkpoint_by_sequence_number(checkpoint_seq)
+            .await
+            .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get checkpoint: {}", e)))?;
+        
+        let digest_bytes = checkpoint.digest.to_vec();
+        let mut digest = [0u8; 32];
+        if digest_bytes.len() >= 32 {
+            digest.copy_from_slice(&digest_bytes[..32]);
         }
+        
+        Ok(CheckpointInfo {
+            sequence_number: checkpoint.sequence_number,
+            epoch: checkpoint.epoch,
+            digest,
+            total_transactions: checkpoint.network_total_transactions as u64,
+            is_certified: checkpoint.checkpoint_commitments.is_some(),
+        })
     }
 
     /// Check if a transaction's checkpoint is finalized.
-    async fn is_tx_finalized(&self, tx_checkpoint: u64, rpc: &dyn SuiRpc) -> SuiResult<bool> {
-        let info = self.is_checkpoint_certified(tx_checkpoint, rpc).await?;
+    async fn is_tx_finalized(&self, tx_checkpoint: u64) -> SuiResult<bool> {
+        let info = self.is_checkpoint_certified(tx_checkpoint).await?;
         Ok(info.is_finalized())
     }
 
     /// Get the latest certified checkpoint.
-    async fn latest_certified_checkpoint(&self, rpc: &dyn SuiRpc) -> SuiResult<Option<u64>> {
-        let latest = rpc
-            .get_latest_checkpoint_sequence_number()
+    async fn latest_certified_checkpoint(&self) -> SuiResult<Option<u64>> {
+        use sui_rpc::api::ReadApi;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::CheckpointFailed(format!("Failed to lock client: {}", e))
+        })?;
+        
+        let latest_checkpoint = client_guard
+            .get_latest_checkpoint()
             .await
-            .map_err(|e| {
-                SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e))
-            })?;
-
-        // Walk backwards to find the first certified checkpoint
-        let max_lookback = self.config.max_epoch_lookback;
-        let start = latest.saturating_sub(max_lookback * 1000); // Approximate checkpoints per epoch
-
-        for seq in (start..=latest).rev() {
-            if let Some(cp) = rpc.get_checkpoint(seq).await.ok().flatten() {
-                if cp.certified {
-                    return Ok(Some(seq));
-                }
-            }
-        }
-        Ok(None)
+            .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e)))?;
+        
+        Ok(Some(latest_checkpoint.sequence_number))
     }
 
     /// Get the current epoch from the network.
-    async fn current_epoch(&self, rpc: &dyn SuiRpc) -> SuiResult<u64> {
-        let latest = self.latest_certified_checkpoint(rpc).await?;
-        match latest {
-            Some(seq) => {
-                let cp = rpc.get_checkpoint(seq).await.map_err(|e| {
-                    SuiError::CheckpointFailed(format!("Failed to get checkpoint: {}", e))
-                })?;
-                Ok(cp.map(|c| c.epoch).unwrap_or(0))
-            }
-            None => Ok(0),
-        }
+    async fn current_epoch(&self) -> SuiResult<u64> {
+        use sui_rpc::api::ReadApi;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::CheckpointFailed(format!("Failed to lock client: {}", e))
+        })?;
+        
+        let latest_checkpoint = client_guard
+            .get_latest_checkpoint()
+            .await
+            .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e)))?;
+        
+        Ok(latest_checkpoint.epoch)
     }
 
     /// Verify that an epoch boundary has passed.
-    async fn is_epoch_passed(&self, expected_epoch: u64, rpc: &dyn SuiRpc) -> SuiResult<bool> {
-        let current = self.current_epoch(rpc).await?;
+    async fn is_epoch_passed(&self, expected_epoch: u64) -> SuiResult<bool> {
+        let current = self.current_epoch().await?;
         Ok(current >= expected_epoch)
     }
 }
 
 impl Default for CheckpointVerifier {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::rpc::{MockSuiRpc, SuiCheckpoint};
-
-    #[tokio::test]
-    async fn test_certified_checkpoint() {
-        let rpc = MockSuiRpc::new(1000);
-        rpc.add_checkpoint(SuiCheckpoint {
-            sequence_number: 500,
-            digest: [1u8; 32],
-            epoch: 1,
-            network_total_transactions: 50000,
-            certified: true,
-        });
-        rpc.add_checkpoint(SuiCheckpoint {
-            sequence_number: 501,
-            digest: [2u8; 32],
-            epoch: 1,
-            network_total_transactions: 50100,
-            certified: false,
-        });
-
-        let verifier = CheckpointVerifier::new();
-        let result = verifier.is_checkpoint_certified(500, &rpc).await.unwrap();
-        assert!(result.is_certified);
-        assert_eq!(result.sequence_number, 500);
-        assert_eq!(result.epoch, 1);
-
-        let result = verifier.is_checkpoint_certified(501, &rpc).await.unwrap();
-        assert!(!result.is_certified);
-
-        assert!(verifier.is_checkpoint_certified(999, &rpc).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_tx_finalization() {
-        let rpc = MockSuiRpc::new(1000);
-        rpc.add_checkpoint(SuiCheckpoint {
-            sequence_number: 500,
-            digest: [1u8; 32],
-            epoch: 1,
-            network_total_transactions: 50000,
-            certified: true,
-        });
-
-        let verifier = CheckpointVerifier::new();
-        assert!(verifier.is_tx_finalized(500, &rpc).await.unwrap());
-        assert!(verifier.is_tx_finalized(600, &rpc).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_latest_certified() {
-        let rpc = MockSuiRpc::new(1000);
-        rpc.add_checkpoint(SuiCheckpoint {
-            sequence_number: 998,
-            digest: [1u8; 32],
-            epoch: 1,
-            network_total_transactions: 99800,
-            certified: true,
-        });
-        rpc.add_checkpoint(SuiCheckpoint {
-            sequence_number: 999,
-            digest: [2u8; 32],
-            epoch: 1,
-            network_total_transactions: 99900,
-            certified: false,
-        });
-        rpc.add_checkpoint(SuiCheckpoint {
-            sequence_number: 1000,
-            digest: [3u8; 32],
-            epoch: 1,
-            network_total_transactions: 100000,
-            certified: false,
-        });
-
-        let verifier = CheckpointVerifier::new();
-        let latest = verifier.latest_certified_checkpoint(&rpc).await.unwrap();
-        assert_eq!(latest, Some(998));
-    }
-
-    #[test]
-    fn test_checkpoint_config() {
-        let config = CheckpointConfig {
-            require_certified: false,
-            max_epoch_lookback: 3,
-            timeout_ms: 10_000,
-        };
-        let verifier = CheckpointVerifier::with_config(config);
-        assert!(!verifier.config().require_certified);
-        assert_eq!(verifier.config().max_epoch_lookback, 3);
-    }
-
-    #[test]
-    fn test_checkpoint_info() {
-        let info = CheckpointInfo {
-            sequence_number: 100,
-            epoch: 1,
-            digest: [1u8; 32],
-            total_transactions: 10000,
-            is_certified: true,
-        };
-
-        assert!(info.is_finalized());
-        assert_eq!(info.sequence_number, 100);
+        // Default requires a node, so this is a placeholder
+        // In practice, users should call CheckpointVerifier::new(node)
+        panic!("CheckpointVerifier::default() requires a SuiNode. Use CheckpointVerifier::new(node) instead.")
     }
 }

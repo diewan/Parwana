@@ -8,8 +8,7 @@ Sui adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend
 
 ## Features
 
-- **rpc** — Sui JSON-RPC support
-- **sui-sdk-deploy** — Full Sui SDK for deployment
+- **rpc** — Sui gRPC support via sui-rust-sdk
 
 ## Architecture Role
 
@@ -29,11 +28,11 @@ Sui adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend
 
 ## Dependencies
 
-- `sui-sdk`: Sui SDK
 - `csv-protocol`: Protocol types and traits
 - `csv-proof`: Proof types
 - `csv-hash`: Hash types
 - `thiserror`: Error handling
+- `sui-rust-sdk`: Official Sui Rust SDK with gRPC client (rpc feature)
 
 ## License
 

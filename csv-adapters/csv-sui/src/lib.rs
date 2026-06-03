@@ -44,7 +44,6 @@ pub mod error;
 pub mod mint;
 pub mod ops;
 pub mod proofs;
-pub mod rpc;
 pub mod seal;
 pub mod seal_protocol;
 pub mod signatures;
@@ -67,9 +66,6 @@ pub use proofs::{
     CommitmentEventBuilder, EventProof, EventProofVerifier, StateProof, StateProofVerifier,
     TransactionProof,
 };
-#[cfg(test)]
-pub use rpc::MockSuiRpc;
-pub use rpc::{SuiCheckpoint, SuiEvent, SuiLedgerInfo, SuiObject, SuiRpc, SuiTransactionBlock};
 pub use seal::{SealRecord, SealRegistry, SealStore};
 pub use types::{SuiCommitAnchor, SuiFinalityProof, SuiInclusionProof, SuiSealPoint};
 

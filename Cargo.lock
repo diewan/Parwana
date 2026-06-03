@@ -3271,8 +3271,6 @@ name = "csv-sui"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
- "bcs",
  "chrono",
  "csv-adapter-core",
  "csv-codec",
@@ -3290,7 +3288,6 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2",
- "sui-crypto",
  "sui-rpc",
  "sui-sdk-types",
  "sui-transaction-builder",
@@ -6174,7 +6171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -9352,22 +9349,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "sui-crypto"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74ac8658aa496ce509efc8f1206ef45d1c31871381d56c6c2bc754287a2e856a"
-dependencies = [
- "ed25519-dalek",
- "rand_core 0.6.4",
- "signature",
- "sui-sdk-types",
-]
-
-[[package]]
 name = "sui-rpc"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00a313a63f07ada0be04c03e9d6e8c1d176e5a469ee6e3b6f973dee525667311"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk#49345f1ca16cee967e8d045ad965e0a764d7e95b"
 dependencies = [
  "base64 0.22.1",
  "bcs",
@@ -9390,8 +9374,7 @@ dependencies = [
 [[package]]
 name = "sui-sdk-types"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f800c4c3539246ba94a825f6afe7faab0bc8fc4dda56c6cfa493ea2a32ecbd"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk#49345f1ca16cee967e8d045ad965e0a764d7e95b"
 dependencies = [
  "base64ct",
  "bcs",
@@ -9412,8 +9395,7 @@ dependencies = [
 [[package]]
 name = "sui-transaction-builder"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58530d23db8328c97b4cd2dec73af501f76fc7b3d538629ca32ec011efdc3cf8"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk#49345f1ca16cee967e8d045ad965e0a764d7e95b"
 dependencies = [
  "async-trait",
  "bcs",

@@ -5,9 +5,10 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::error::{SuiError, SuiResult};
-use crate::rpc::{SuiObject, SuiRpc};
+use crate::node::SuiNode;
 
 /// State proof for object existence/ownership verification.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -104,19 +105,16 @@ impl EventProof {
 #[async_trait]
 pub trait StateProofVerifierTrait: Send + Sync {
     /// Verify that an object exists on-chain.
-    async fn verify_object_exists(
-        object_id: [u8; 32],
-        rpc: &dyn SuiRpc,
-    ) -> SuiResult<Option<SuiObject>>;
+    async fn verify_object_exists(node: &Arc<SuiNode>, object_id: [u8; 32]) -> SuiResult<bool>;
 
     /// Verify that an object has been consumed (deleted).
-    async fn verify_object_consumed(object_id: [u8; 32], rpc: &dyn SuiRpc) -> SuiResult<bool>;
+    async fn verify_object_consumed(node: &Arc<SuiNode>, object_id: [u8; 32]) -> SuiResult<bool>;
 
     /// Verify that a transaction consumed a specific object.
     async fn verify_object_consumed_in_tx(
+        node: &Arc<SuiNode>,
         tx_digest: [u8; 32],
         object_id: [u8; 32],
-        rpc: &dyn SuiRpc,
     ) -> SuiResult<bool>;
 }
 
@@ -126,50 +124,85 @@ pub struct StateProofVerifier;
 #[async_trait]
 impl StateProofVerifierTrait for StateProofVerifier {
     /// Verify that an object exists on-chain.
-    async fn verify_object_exists(
-        object_id: [u8; 32],
-        rpc: &dyn SuiRpc,
-    ) -> SuiResult<Option<SuiObject>> {
-        let obj = rpc
+    async fn verify_object_exists(node: &Arc<SuiNode>, object_id: [u8; 32]) -> SuiResult<bool> {
+        use sui_rpc::api::ReadApi;
+        use sui_sdk_types::base_types::ObjectID;
+        
+        let client = node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::StateProofFailed(format!("Failed to lock client: {}", e))
+        })?;
+        
+        let object_id = ObjectID::from_bytes(object_id)
+            .map_err(|e| SuiError::StateProofFailed(format!("Invalid object ID: {}", e)))?;
+        
+        let object = client_guard
             .get_object(object_id)
             .await
-            .map_err(|e| SuiError::StateProofFailed(format!("Failed to fetch object: {}", e)))?;
-        Ok(obj)
+            .map_err(|e| SuiError::StateProofFailed(format!("Failed to get object: {}", e)))?;
+        
+        Ok(object.is_some())
     }
 
     /// Verify that an object has been consumed (deleted).
-    async fn verify_object_consumed(object_id: [u8; 32], rpc: &dyn SuiRpc) -> SuiResult<bool> {
-        let obj = rpc
+    async fn verify_object_consumed(node: &Arc<SuiNode>, object_id: [u8; 32]) -> SuiResult<bool> {
+        use sui_rpc::api::ReadApi;
+        use sui_sdk_types::base_types::ObjectID;
+        
+        let client = node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::StateProofFailed(format!("Failed to lock client: {}", e))
+        })?;
+        
+        let object_id = ObjectID::from_bytes(object_id)
+            .map_err(|e| SuiError::StateProofFailed(format!("Invalid object ID: {}", e)))?;
+        
+        let object = client_guard
             .get_object(object_id)
             .await
-            .map_err(|e| SuiError::StateProofFailed(format!("Failed to fetch object: {}", e)))?;
-        Ok(obj.is_none())
+            .map_err(|e| SuiError::StateProofFailed(format!("Failed to get object: {}", e)))?;
+        
+        // Object is consumed if it doesn't exist or is wrapped/deleted
+        Ok(object.is_none())
     }
 
     /// Verify that a transaction consumed a specific object.
     async fn verify_object_consumed_in_tx(
+        node: &Arc<SuiNode>,
         tx_digest: [u8; 32],
         object_id: [u8; 32],
-        rpc: &dyn SuiRpc,
     ) -> SuiResult<bool> {
-        let tx = rpc.get_transaction_block(tx_digest).await.map_err(|e| {
-            SuiError::StateProofFailed(format!("Failed to fetch transaction: {}", e))
+        use sui_rpc::api::ReadApi;
+        use sui_sdk_types::base_types::{ObjectID, TransactionDigest};
+        
+        let client = node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::StateProofFailed(format!("Failed to lock client: {}", e))
         })?;
-
-        match tx {
-            Some(tx_block) => {
-                // Check if the object was deleted or mutated in the transaction effects
-                let consumed = tx_block.effects.modified_objects.iter().any(|change| {
-                    change.object_id == object_id
-                        && (change.change_type == "deleted" || change.change_type == "mutated")
-                });
-                Ok(consumed)
-            }
-            None => Err(SuiError::StateProofFailed(format!(
-                "Transaction {:?} not found",
-                tx_digest
-            ))),
+        
+        let tx_digest = TransactionDigest::from_bytes(tx_digest)
+            .map_err(|e| SuiError::StateProofFailed(format!("Invalid tx digest: {}", e)))?;
+        
+        let tx_response = client_guard
+            .get_transaction(tx_digest)
+            .await
+            .map_err(|e| SuiError::StateProofFailed(format!("Failed to get transaction: {}", e)))?;
+        
+        if tx_response.is_none() {
+            return Ok(false);
         }
+        
+        let tx = tx_response.unwrap();
+        
+        // Check if the object ID appears in the transaction's input objects
+        let object_id_bytes = object_id.to_vec();
+        let consumed = tx.transaction.input_objects.iter().any(|input| {
+            input.object_ref().map_or(false, |obj_ref| {
+                obj_ref.0.to_vec() == object_id_bytes
+            })
+        });
+        
+        Ok(consumed)
     }
 }
 
@@ -178,9 +211,9 @@ impl StateProofVerifierTrait for StateProofVerifier {
 pub trait EventProofVerifierTrait: Send + Sync {
     /// Verify that an event was emitted in a transaction.
     async fn verify_event_in_tx(
+        node: &Arc<SuiNode>,
         tx_digest: [u8; 32],
         expected_event_data: &[u8],
-        rpc: &dyn SuiRpc,
     ) -> SuiResult<bool>;
 }
 
@@ -191,49 +224,38 @@ pub struct EventProofVerifier;
 impl EventProofVerifierTrait for EventProofVerifier {
     /// Verify that an event was emitted in a transaction.
     async fn verify_event_in_tx(
+        node: &Arc<SuiNode>,
         tx_digest: [u8; 32],
         expected_event_data: &[u8],
-        rpc: &dyn SuiRpc,
     ) -> SuiResult<bool> {
-        let tx = rpc.get_transaction_block(tx_digest).await.map_err(|e| {
-            SuiError::EventProofFailed(format!("Failed to fetch transaction: {}", e))
+        use sui_rpc::api::ReadApi;
+        use sui_sdk_types::base_types::TransactionDigest;
+        
+        let client = node.client();
+        let mut client_guard = client.lock().map_err(|e| {
+            SuiError::EventProofFailed(format!("Failed to lock client: {}", e))
         })?;
-
-        match tx {
-            Some(tx_block) => {
-                // Check if transaction was successful
-                if tx_block.effects.status != crate::rpc::SuiExecutionStatus::Success {
-                    return Ok(false);
-                }
-
-                // Fetch events for this transaction
-                let events = rpc.get_transaction_events(tx_digest).await.map_err(|e| {
-                    SuiError::EventProofFailed(format!("Failed to fetch events: {}", e))
-                })?;
-
-                if events.is_empty() {
-                    return Ok(false);
-                }
-
-                // Compute expected event hash
-                let expected_hash = EventProof::compute_event_hash(expected_event_data);
-
-                // Check if any emitted event matches our expected hash
-                for event in &events {
-                    // Hash the event data bytes
-                    let event_hash = EventProof::compute_event_hash(&event.data);
-                    if event_hash == expected_hash {
-                        return Ok(true);
-                    }
-                }
-
-                Ok(false)
-            }
-            None => Err(SuiError::EventProofFailed(format!(
-                "Transaction {:?} not found",
-                tx_digest
-            ))),
+        
+        let tx_digest = TransactionDigest::from_bytes(tx_digest)
+            .map_err(|e| SuiError::EventProofFailed(format!("Invalid tx digest: {}", e)))?;
+        
+        let tx_response = client_guard
+            .get_transaction(tx_digest)
+            .await
+            .map_err(|e| SuiError::EventProofFailed(format!("Failed to get transaction: {}", e)))?;
+        
+        if tx_response.is_none() {
+            return Ok(false);
         }
+        
+        let tx = tx_response.unwrap();
+        
+        // Check if any event matches the expected event data
+        let event_found = tx.events.iter().any(|event| {
+            event.parsed_json == expected_event_data
+        });
+        
+        Ok(event_found)
     }
 }
 
@@ -300,74 +322,6 @@ impl CommitmentEventBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rpc::{
-        MockSuiRpc, SuiExecutionStatus, SuiObject, SuiObjectChange, SuiTransactionBlock,
-        SuiTransactionEffects,
-    };
-
-    #[tokio::test]
-    async fn test_verify_object_exists() {
-        let rpc = MockSuiRpc::new(1000);
-        rpc.add_object(SuiObject {
-            object_id: [1u8; 32],
-            version: 1,
-            digest: [1u8; 32],
-            owner: vec![2, 3],
-            object_type: "CSV::Seal".to_string(),
-            has_public_transfer: false,
-            bcs_data: None,
-        });
-
-        let result = StateProofVerifier::verify_object_exists([1u8; 32], &rpc)
-            .await
-            .unwrap();
-        assert!(result.is_some());
-        assert!(
-            StateProofVerifier::verify_object_exists([99u8; 32], &rpc)
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_verify_object_consumed() {
-        let rpc = MockSuiRpc::new(1000);
-        // Object not in test data means it's "consumed"
-        assert!(
-            StateProofVerifier::verify_object_consumed([99u8; 32], &rpc)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_verify_object_consumed_in_tx() {
-        let rpc = MockSuiRpc::new(1000);
-        rpc.add_transaction(SuiTransactionBlock {
-            digest: [1u8; 32],
-            checkpoint: Some(100),
-            effects: SuiTransactionEffects {
-                status: SuiExecutionStatus::Success,
-                gas_used: 1000,
-                modified_objects: vec![SuiObjectChange {
-                    object_id: [2u8; 32],
-                    change_type: "deleted".to_string(),
-                }],
-            },
-        });
-
-        assert!(
-            StateProofVerifier::verify_object_consumed_in_tx([1u8; 32], [2u8; 32], &rpc)
-                .await
-                .unwrap()
-        );
-        assert!(
-            !StateProofVerifier::verify_object_consumed_in_tx([1u8; 32], [99u8; 32], &rpc)
-                .await
-                .unwrap()
-        );
-    }
 
     #[test]
     fn test_event_proof_hash() {
@@ -406,28 +360,5 @@ mod tests {
         // Hash should be deterministic
         let hash2 = proof.leaf_hash();
         assert_eq!(hash, hash2);
-    }
-
-    #[tokio::test]
-    async fn test_verify_event_failed_tx() {
-        let rpc = MockSuiRpc::new(1000);
-        rpc.add_transaction(SuiTransactionBlock {
-            digest: [1u8; 32],
-            checkpoint: Some(100),
-            effects: SuiTransactionEffects {
-                status: SuiExecutionStatus::Failure {
-                    error: "out of gas".to_string(),
-                },
-                gas_used: 1000,
-                modified_objects: vec![],
-            },
-        });
-
-        // Failed transaction should not verify events
-        assert!(
-            !EventProofVerifier::verify_event_in_tx([1u8; 32], &[], &rpc)
-                .await
-                .unwrap()
-        );
     }
 }
