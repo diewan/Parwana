@@ -45,11 +45,22 @@ pub struct SuiBackend {
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     seal_protocol: Arc<SuiSealProtocol>,
+    /// Ed25519 signing key for transaction signing (optional)
+    signing_key: Option<ed25519_dalek::SigningKey>,
 }
 
 impl SuiBackend {
     /// Create new Sui chain operations from config
     pub fn new(config: SuiConfig, node: Arc<SuiNode>) -> Self {
+        Self::with_signing_key(config, node, None)
+    }
+
+    /// Create new Sui chain operations from config with signing key
+    pub fn with_signing_key(
+        config: SuiConfig,
+        node: Arc<SuiNode>,
+        signing_key: Option<ed25519_dalek::SigningKey>,
+    ) -> Self {
         let mut domain = [0u8; 32];
         domain[..8].copy_from_slice(b"CSV-SUI-");
         let chain_id = config.chain_id().as_bytes();
@@ -74,6 +85,7 @@ impl SuiBackend {
             domain_separator: domain,
             event_builder,
             seal_protocol: Arc::new(seal),
+            signing_key,
         }
     }
 
@@ -86,7 +98,31 @@ impl SuiBackend {
             domain_separator: seal.get_domain_separator(),
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
+            signing_key: None,
         })
+    }
+
+    /// Create from SuiSealProtocol with signing key
+    pub fn from_seal_protocol_with_key(
+        seal: Arc<SuiSealProtocol>,
+        node: Arc<SuiNode>,
+        signing_key: ed25519_dalek::SigningKey,
+    ) -> ChainOpResult<Self> {
+        let (module_addr, event_type) = seal.event_builder_config();
+        Ok(Self {
+            config: seal.config.clone(),
+            node,
+            domain_separator: seal.get_domain_separator(),
+            event_builder: CommitmentEventBuilder::new(module_addr, event_type),
+            seal_protocol: seal,
+            signing_key: Some(signing_key),
+        })
+    }
+
+    /// Set the signing key for transaction operations
+    pub fn with_key(mut self, signing_key: ed25519_dalek::SigningKey) -> Self {
+        self.signing_key = Some(signing_key);
+        self
     }
 
     /// Parse Sui address from string
@@ -111,11 +147,21 @@ impl SuiBackend {
         format!("0x{}", hex::encode(addr))
     }
 
-    fn sign_transaction_bytes(&self, _tx_bytes: &[u8]) -> ChainOpResult<(Vec<u8>, Vec<u8>)> {
-        // TODO: Implement using sui-rust-sdk transaction signing
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sui transaction signing not yet implemented with sui-rust-sdk".to_string(),
-        ))
+    fn sign_transaction_bytes(&self, tx_bytes: &[u8]) -> ChainOpResult<(Vec<u8>, Vec<u8>)> {
+        use ed25519_dalek::Signer;
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        // Sign the transaction bytes using Ed25519
+        let signature = signing_key.sign(tx_bytes);
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        Ok((signature.to_bytes().to_vec(), public_key.to_vec()))
     }
 
     /// Build a lock transaction for Sui
@@ -269,12 +315,21 @@ impl ChainQuery for SuiBackend {
 
 #[async_trait]
 impl ChainSigner for SuiBackend {
-    async fn sign_transaction(&self, _tx_data: &[u8]) -> ChainOpResult<Vec<u8>> {
-        // Transaction signing requires proper signing key management
-        // This would use the configured signing key to sign the transaction
-        Err(ChainOpError::CapabilityUnavailable(
-            "Transaction signing requires proper signing key management. Implement signing key handling.".to_string(),
-        ))
+    async fn sign_transaction(&self, tx_data: &[u8]) -> ChainOpResult<Vec<u8>> {
+        use ed25519_dalek::Signer;
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        // Sign the transaction bytes using Ed25519
+        let signature = signing_key.sign(tx_data);
+
+        // Return signature bytes (64 bytes for Ed25519)
+        Ok(signature.to_bytes().to_vec())
     }
 
     async fn verify_signature(
@@ -340,13 +395,24 @@ impl ChainDeployer for SuiBackend {
         _constructor_args: Vec<Vec<u8>>,
     ) -> ChainOpResult<String> {
         use crate::deploy::PackageDeployer;
-        
-        let deployer = PackageDeployer::new(self.config.clone(), Arc::clone(&self.node));
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        let deployer = PackageDeployer::with_signing_key(
+            self.config.clone(),
+            Arc::clone(&self.node),
+            signing_key.clone(),
+        );
         let deployment = deployer
             .deploy_package(contract_code, 10000000)
             .await
             .map_err(|e| ChainOpError::DeploymentFailed(format!("Deployment failed: {}", e)))?;
-        
+
         Ok(deployment.transaction_digest)
     }
 }
@@ -440,22 +506,29 @@ impl ChainSanadOps for SuiBackend {
         source_seal: SealPoint,
     ) -> ChainOpResult<SanadOperationResult> {
         use crate::mint::mint_sanad;
-        
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
         let package_id = self.config.seal_contract.package_id.as_ref()
             .ok_or_else(|| ChainOpError::ConfigurationError("Package ID not configured".to_string()))?;
-        
+
         let tx_digest = mint_sanad(
             &self.node,
             package_id,
-            "", // private key - would need proper key management
+            signing_key,
             sanad_id,
             commitment,
             source_chain,
-            Hash::new(source_seal.object_id.to_vec()),
+            Hash::new(source_seal.id),
         )
         .await
         .map_err(|e| ChainOpError::TransactionFailed(format!("Minting failed: {}", e)))?;
-        
+
         Ok(SanadOperationResult {
             tx_hash: tx_digest,
             status: "pending".to_string(),
