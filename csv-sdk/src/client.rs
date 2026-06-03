@@ -625,15 +625,12 @@ impl CsvClient {
                     None
                 };
                 
-                // Create SuiNode with signer address if available
-                let rpc = if let Some(signer_addr_array) = signer_address {
-                    csv_sui::node::SuiNode::with_signer_address(&rpc_url, signer_addr_array)
-                } else {
-                    csv_sui::node::SuiNode::new(&rpc_url)
-                };
+                // Create SuiNode
+                let node = csv_sui::node::SuiNode::new(&rpc_url)
+                    .map_err(|e| CsvError::ConfigError(format!("Failed to create Sui node: {}", e)))?;
                 
                 _builder
-                    .sui_from_config(sui_config, Box::new(rpc) as Box<dyn csv_sui::rpc::SuiRpc>)
+                    .sui_from_config(sui_config, std::sync::Arc::new(node))
                     .await
                     .map(Some)
             }

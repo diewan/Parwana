@@ -850,19 +850,19 @@ impl AdapterBuilder {
     pub async fn sui_from_config(
         &self,
         config: csv_sui::config::SuiConfig,
-        rpc: Box<dyn csv_sui::rpc::SuiRpc>,
+        node: std::sync::Arc<csv_sui::node::SuiNode>,
     ) -> Result<Arc<dyn ChainBackend>, CsvError> {
         use csv_sui::ops::SuiBackend;
         use csv_sui::seal_protocol::SuiSealProtocol;
 
-        let mut seal =
-            SuiSealProtocol::from_config(config.clone(), rpc).map_err(|e| CsvError::ProtocolError {
+        let seal =
+            SuiSealProtocol::from_config(config.clone(), Arc::clone(&node)).map_err(|e| CsvError::ProtocolError {
                 chain: ChainId::new("sui"),
                 message: format!("Failed to create Sui seal protocol: {}", e),
             })?;
 
         // Configure signing key if private key is provided in config
-        if let Some(private_key_bytes) = config.signer_private_key {
+        let operations = if let Some(private_key_bytes) = config.signer_private_key {
             if private_key_bytes.len() == 32 {
                 use ed25519_dalek::SigningKey;
                 let key_array: [u8; 32] = private_key_bytes
@@ -871,16 +871,28 @@ impl AdapterBuilder {
                         "Invalid Sui private key length".to_string()
                     ))?;
                 let signing_key = SigningKey::from_bytes(&key_array);
-                seal = seal.with_signing_key(signing_key);
+                SuiBackend::from_seal_protocol_with_key(Arc::new(seal), node, signing_key).map_err(|e| {
+                    CsvError::ProtocolError {
+                        chain: ChainId::new("sui"),
+                        message: format!("Failed to create Sui chain operations: {}", e),
+                    }
+                })?
+            } else {
+                SuiBackend::from_seal_protocol(Arc::new(seal), node).map_err(|e| {
+                    CsvError::ProtocolError {
+                        chain: ChainId::new("sui"),
+                        message: format!("Failed to create Sui chain operations: {}", e),
+                    }
+                })?
             }
-        }
-
-        let operations = SuiBackend::from_seal_protocol(Arc::new(seal)).map_err(|e| {
-            CsvError::ProtocolError {
-                chain: ChainId::new("sui"),
-                message: format!("Failed to create Sui chain operations: {}", e),
-            }
-        })?;
+        } else {
+            SuiBackend::from_seal_protocol(Arc::new(seal), node).map_err(|e| {
+                CsvError::ProtocolError {
+                    chain: ChainId::new("sui"),
+                    message: format!("Failed to create Sui chain operations: {}", e),
+                }
+            })?
+        };
 
         Ok(Arc::new(operations))
     }

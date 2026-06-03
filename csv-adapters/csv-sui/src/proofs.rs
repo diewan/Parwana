@@ -121,6 +121,7 @@ pub trait StateProofVerifierTrait: Send + Sync {
 /// Verifier for state proofs (object existence/ownership).
 pub struct StateProofVerifier;
 
+#[cfg(feature = "rpc")]
 #[async_trait]
 impl StateProofVerifierTrait for StateProofVerifier {
     /// Verify that an object exists on-chain.
