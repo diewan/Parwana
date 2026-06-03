@@ -85,7 +85,7 @@ std = []
 # Chain features
 bitcoin = ["dep:csv-bitcoin", "dep:bitcoin", "csv-bitcoin/signet-rest"]
 ethereum = ["dep:csv-ethereum", "csv-ethereum/rpc"]
-sui = ["dep:csv-sui", "csv-sui/rpc", "dep:ed25519-dalek"]
+sui = ["dep:csv-sui", "dep:ed25519-dalek"]
 aptos = ["dep:csv-aptos", "csv-aptos/rpc", "dep:ed25519-dalek"]
 solana = ["dep:csv-solana", "csv-solana/rpc"]
 all-chains = ["bitcoin", "ethereum", "sui", "aptos", "solana"]

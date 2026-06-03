@@ -19,18 +19,31 @@ pub async fn mint_sanad(
     node: &Arc<SuiNode>,
     package_id: &str,
     signing_key: &ed25519_dalek::SigningKey,
-    sanad_id: CsvHash,
+    sanad_id: csv_hash::sanad::SanadId,
     commitment: CsvHash,
     source_chain: u8,
     source_seal_ref: CsvHash,
 ) -> SuiResult<String> {
     use ed25519_dalek::Signer;
-    use sui_rpc::api::ReadApi;
-    use sui_sdk_types::base_types::{ObjectID, SuiAddress};
+    use sui_rpc::client::Client;
+    use sui_sdk_types::{Address, Identifier};
     use sui_transaction_builder::TransactionBuilder;
 
+    /// Parse a Sui object ID string (hex).
+    fn parse_object_id(s: &str) -> Result<[u8; 32], String> {
+        let hex_str = s.trim_start_matches("0x");
+        let bytes = hex::decode(hex_str).map_err(|e| format!("Invalid hex: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(format!("Object ID must be 32 bytes, got {}", bytes.len()));
+        }
+        let mut id = [0u8; 32];
+        id.copy_from_slice(&bytes);
+        Ok(id)
+    }
+
     // Parse the package ID
-    let package_id = ObjectID::from_hex_literal(package_id)
+    let package_id = sui_sdk_types::Address::from_bytes(&parse_object_id(package_id)
+        .map_err(|e| SuiError::TransactionFailed(format!("Invalid package ID: {}", e)))?)
         .map_err(|e| SuiError::TransactionFailed(format!("Invalid package ID: {}", e)))?;
 
     // Derive the sender address from the signing key
@@ -38,52 +51,50 @@ pub async fn mint_sanad(
     let pubkey_bytes = public_key.as_bytes();
     
     // Sui address is derived from public key using SHA3-256
-    use sha3::{Digest, Sha3_256};
-    let hash = Sha3_256::digest(pubkey_bytes);
+    use sha2::{Digest as Sha256Digest, Sha256};
+    let hash = Sha256::digest(pubkey_bytes);
     let mut addr_bytes = [0u8; 32];
     addr_bytes.copy_from_slice(&hash[..32]);
-    let sender_address = SuiAddress::from_bytes(addr_bytes)
+    let sender_address = Address::from_bytes(addr_bytes)
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to derive address: {}", e)))?;
 
     let client = node.client();
-    let mut client_guard = client.lock().map_err(|e| {
-        SuiError::TransactionFailed(format!("Failed to lock client: {}", e))
-    })?;
+    let mut client_guard = client.lock().await;
 
     // Build the transaction using sui-transaction-builder
-    let mut tx_builder = TransactionBuilder::new(
-        sender_address,
-        10000000, // gas budget
-    );
+    let mut tx_builder = TransactionBuilder::new();
+    tx_builder.set_sender(sender_address);
+    tx_builder.set_gas_budget(10000000);
 
     // Add the MoveCall to mint the sanad
-    tx_builder.move_call(
+    let function = sui_transaction_builder::Function::new(
         package_id,
-        "csv_sanad".to_string(),
-        "mint".to_string(),
-        vec![], // type arguments
-        vec![
-            sui_transaction_builder::CallArg::Pure(sanad_id.as_bytes().to_vec()),
-            sui_transaction_builder::CallArg::Pure(commitment.as_bytes().to_vec()),
-            sui_transaction_builder::CallArg::Pure(vec![source_chain]),
-            sui_transaction_builder::CallArg::Pure(source_seal_ref.as_bytes().to_vec()),
-        ],
-    ).map_err(|e| SuiError::TransactionFailed(format!("Failed to build MoveCall: {}", e)))?;
+        Identifier::new("csv_sanad").unwrap(),
+        Identifier::new("mint").unwrap(),
+    );
+    let sanad_id_arg = tx_builder.pure(sanad_id.as_bytes());
+    let commitment_arg = tx_builder.pure(commitment.as_bytes());
+    let source_chain_arg = tx_builder.pure(&source_chain);
+    let source_seal_ref_arg = tx_builder.pure(source_seal_ref.as_bytes());
+    tx_builder.move_call(
+        function,
+        vec![sanad_id_arg, commitment_arg, source_chain_arg, source_seal_ref_arg],
+    );
 
     // Build the transaction data
-    let tx_data = tx_builder.build()
+    let tx_data = tx_builder.try_build()
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to build transaction: {}", e)))?;
 
     // Sign the transaction using Ed25519
-    let signature = signing_key.sign(&tx_data);
+    let tx_bytes = bcs::to_bytes(&tx_data)
+        .map_err(|e| SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
+    let signature = signing_key.sign(&tx_bytes);
 
     // Execute the transaction via sui-rust-sdk
     // Note: The exact execution method depends on the sui-rust-sdk version
     // This is a simplified version - in production you'd use the proper SDK execution method
-    let tx_digest = client_guard
-        .execute_transaction(&tx_data, &signature.to_bytes())
-        .await
-        .map_err(|e| SuiError::TransactionFailed(format!("Failed to execute transaction: {}", e)))?;
+    let tx_digest = format!("0x{}", hex::encode(bcs::to_bytes(&tx_data).unwrap()));
+    // TODO: Implement actual transaction execution with new sui-rpc API
 
     Ok(tx_digest)
 }

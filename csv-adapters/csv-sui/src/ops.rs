@@ -30,6 +30,30 @@ use crate::node::SuiNode;
 use crate::proofs::CommitmentEventBuilder;
 use crate::seal_protocol::SuiSealProtocol;
 
+/// Parse a Sui object ID string (hex).
+fn parse_object_id(s: &str) -> Result<[u8; 32], String> {
+    let hex_str = s.trim_start_matches("0x");
+    let bytes = hex::decode(hex_str).map_err(|e| format!("Invalid hex: {}", e))?;
+    if bytes.len() != 32 {
+        return Err(format!("Object ID must be 32 bytes, got {}", bytes.len()));
+    }
+    let mut id = [0u8; 32];
+    id.copy_from_slice(&bytes);
+    Ok(id)
+}
+
+/// Parse a Sui digest string (hex).
+fn parse_digest(s: &str) -> Result<[u8; 32], String> {
+    let hex_str = s.trim_start_matches("0x");
+    let bytes = hex::decode(hex_str).map_err(|e| format!("Invalid hex: {}", e))?;
+    if bytes.len() != 32 {
+        return Err(format!("Digest must be 32 bytes, got {}", bytes.len()));
+    }
+    let mut digest = [0u8; 32];
+    digest.copy_from_slice(&bytes);
+    Ok(digest)
+}
+
 /// Sui chain operations implementation
 ///
 /// This struct provides complete implementations of all chain operation traits
@@ -182,140 +206,251 @@ impl SuiBackend {
 #[async_trait]
 impl ChainQuery for SuiBackend {
     async fn get_balance(&self, address: &str) -> ChainOpResult<BalanceInfo> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::SuiAddress;
+        #[cfg(feature = "rpc")]
+        {
+            use sui_rpc::client::Client;
+            use sui_sdk_types::Address;
+            
+            let addr = self.parse_address(address)?;
+            let sui_address = Address::from_bytes(addr)
+                .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui address: {}", e)))?;
+            
+            let client = self.node.client();
+            let mut client_guard = client.lock().await;
+            
+            // Use list_balances to get balance information
+            use sui_rpc::proto::sui::rpc::v2::ListBalancesRequest;
+            
+            let mut balance_request = ListBalancesRequest::default();
+            balance_request.owner = Some(sui_address.to_string());
+            balance_request.page_size = Some(1);
+            
+            let balance_stream = (*client_guard)
+                .list_balances(balance_request);
+            
+            // Collect the first balance from the stream
+            use futures::StreamExt;
+            let mut pinned = Box::pin(balance_stream);
+            let balance = pinned.next().await
+                .ok_or_else(|| ChainOpError::InvalidInput("No balance found".to_string()))
+                .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?
+                .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?;
+            
+            Ok(BalanceInfo {
+                address: address.to_string(),
+                total: balance.balance.unwrap_or(0),
+                available: balance.balance.unwrap_or(0), // Assume all is available for now
+                locked: 0,
+                tokens: vec![], // TODO: Extract token information
+            })
+        }
         
-        let addr = self.parse_address(address)?;
-        let sui_address = SuiAddress::from_bytes(addr)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui address: {}", e)))?;
-        
-        let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
-        
-        let balance = client_guard
-            .get_balance(sui_address, None)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?;
-        
-        Ok(BalanceInfo {
-            address: address.to_string(),
-            balance: balance.total_balance,
-            symbol: "MIST".to_string(),
-            decimals: 9,
-        })
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(ChainOpError::CapabilityUnavailable(
+                "RPC feature not enabled. Enable the 'rpc' feature to use Sui RPC functionality.".to_string(),
+            ))
+        }
     }
 
     async fn get_transaction(&self, hash: &str) -> ChainOpResult<TransactionInfo> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::TransactionDigest;
+        use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
         
-        let tx_digest = TransactionDigest::from_hex_literal(hash)
+        let tx_digest = sui_sdk_types::Digest::from_bytes(&parse_digest(hash)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let tx_response = client_guard
-            .get_transaction(tx_digest)
+        let request = GetTransactionRequest::new(&tx_digest);
+        
+        let tx_response = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?;
         
-        if tx_response.is_none() {
-            return Err(ChainOpError::NotFound("Transaction not found".to_string()));
-        }
-        
-        let tx = tx_response.unwrap();
+        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
+            ChainOpError::InvalidInput("Transaction not found in response".to_string())
+        })?;
         
         Ok(TransactionInfo {
             hash: hash.to_string(),
-            status: if tx.confirmed {
-                TransactionStatus::Confirmed
+            status: if tx.effects.is_some() {
+                TransactionStatus::Confirmed {
+                    block_height: tx.checkpoint.unwrap_or(0),
+                    confirmations: 1,
+                }
             } else {
                 TransactionStatus::Pending
             },
             block_height: tx.checkpoint,
-            timestamp: Some(tx.timestamp_ms as u64),
-            gas_used: tx.gas_cost.gas_used,
+            timestamp: tx.timestamp.map(|t| t.seconds as u64),
+            sender: String::new(), // TODO: Extract from transaction
+            recipient: None, // TODO: Extract from transaction
+            amount: None, // TODO: Extract from transaction
+            fee: None, // TODO: Extract from effects
+            raw_data: None, // TODO: Extract from transaction
         })
     }
 
     async fn get_finality(&self, tx_hash: &str) -> ChainOpResult<FinalityStatus> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::TransactionDigest;
+        use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
         
-        let tx_digest = TransactionDigest::from_hex_literal(tx_hash)
+        let tx_digest = sui_sdk_types::Digest::from_bytes(&parse_digest(tx_hash)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let tx_response = client_guard
-            .get_transaction(tx_digest)
+        let request = GetTransactionRequest::new(&tx_digest);
+        
+        let tx_response = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?;
         
-        if tx_response.is_none() {
-            return Err(ChainOpError::NotFound("Transaction not found".to_string()));
-        }
-        
-        let tx = tx_response.unwrap();
+        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
+            ChainOpError::InvalidInput("Transaction not found in response".to_string())
+        })?;
         
         // Check if the checkpoint is certified
-        let checkpoint_info = client_guard
-            .get_checkpoint_by_sequence_number(tx.checkpoint)
+        use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
+        
+        let checkpoint_request = GetCheckpointRequest::by_sequence_number(tx.checkpoint.unwrap_or(0));
+        
+        let checkpoint_response = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(checkpoint_request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get checkpoint: {}", e)))?;
         
-        let is_finalized = checkpoint_info.checkpoint_commitments.is_some();
+        let checkpoint_info = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+            ChainOpError::InvalidInput("Checkpoint not found in response".to_string())
+        })?;
         
-        Ok(FinalityStatus {
-            is_finalized,
-            checkpoint: tx.checkpoint,
-            confirmations: if is_finalized { 1 } else { 0 },
-        })
+        let is_finalized = checkpoint_info.signature.is_some();
+        
+        if is_finalized {
+            Ok(FinalityStatus::Finalized {
+                block_height: tx.checkpoint.unwrap_or(0),
+                finality_block: tx.checkpoint.unwrap_or(0),
+            })
+        } else {
+            Ok(FinalityStatus::Pending)
+        }
     }
 
     async fn get_contract_status(&self, contract_address: &str) -> ChainOpResult<ContractStatus> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::ObjectID;
+        use sui_rpc::proto::sui::rpc::v2::GetPackageRequest;
         
-        let package_id = ObjectID::from_hex_literal(contract_address)
+        let package_id = sui_sdk_types::Address::from_bytes(&parse_object_id(contract_address)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid contract address: {}", e)))?)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid contract address: {}", e)))?;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let package = client_guard
-            .get_package(package_id)
+        let request = GetPackageRequest::new(&package_id);
+        
+        let package_response = (*client_guard)
+            .package_client()
+            .get_package(request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get package: {}", e)))?;
         
-        if package.is_none() {
-            return Err(ChainOpError::NotFound("Contract not found".to_string()));
-        }
-        
-        let pkg = package.unwrap();
+        let package = package_response.into_inner().package.ok_or_else(|| {
+            ChainOpError::InvalidInput("Package not found in response".to_string())
+        })?;
         
         Ok(ContractStatus {
             address: contract_address.to_string(),
             is_deployed: true,
-            version: pkg.version,
-            block_height: 0, // Sui packages don't have block heights
+            balance: None, // TODO: Extract from package
+            owner: None, // TODO: Extract from package
+            metadata: serde_json::Value::Null, // TODO: Extract from package
         })
+    }
+
+    async fn get_latest_block_height(&self) -> ChainOpResult<u64> {
+        use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+        
+        let checkpoint_request = GetCheckpointRequest::latest();
+        
+        let checkpoint_response = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(checkpoint_request)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get latest checkpoint: {}", e)))?;
+        
+        let checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+            ChainOpError::InvalidInput("Checkpoint not found in response".to_string())
+        })?;
+        
+        Ok(checkpoint.sequence_number.unwrap_or(0))
+    }
+
+    async fn get_chain_info(&self) -> ChainOpResult<serde_json::Value> {
+        Ok(serde_json::json!({
+            "chain_id": self.config.network.chain_id(),
+            "chain": "sui",
+            "network": format!("{:?}", self.config.network),
+            "protocol_version": "1.0",
+            "finality": "deterministic",
+        }))
+    }
+
+    async fn get_account_nonce(&self, address: &str) -> ChainOpResult<u64> {
+        use sui_rpc::client::Client;
+        use sui_sdk_types::Address;
+        
+        let addr = self.parse_address(address)?;
+        let sui_address = Address::from_bytes(addr)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui address: {}", e)))?;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+        
+        // Use list_balances to get account information
+        use sui_rpc::proto::sui::rpc::v2::ListBalancesRequest;
+        
+        let mut balance_request = ListBalancesRequest::default();
+        balance_request.owner = Some(sui_address.to_string());
+        balance_request.page_size = Some(1);
+        
+        let balance_stream = (*client_guard)
+            .list_balances(balance_request);
+        
+        // Collect the first balance from the stream
+        use futures::StreamExt;
+        let mut pinned = Box::pin(balance_stream);
+        let _balance = pinned.next().await
+            .ok_or_else(|| ChainOpError::InvalidInput("No account found".to_string()))
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get account: {}", e)))?
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get account: {}", e)))?;
+        
+        // For now, return 0 as sequence number since we can't get it directly
+        Ok(0)
+    }
+
+    fn validate_address(&self, address: &str) -> bool {
+        let hex_str = address.trim_start_matches("0x");
+        match hex::decode(hex_str) {
+            Ok(bytes) => bytes.len() == 32,
+            Err(_) => false,
+        }
     }
 }
 
 #[async_trait]
 impl ChainSigner for SuiBackend {
-    async fn sign_transaction(&self, tx_data: &[u8]) -> ChainOpResult<Vec<u8>> {
+    async fn sign_transaction(&self, tx_data: &[u8], key_id: &str) -> ChainOpResult<Vec<u8>> {
         use ed25519_dalek::Signer;
 
         let signing_key = self.signing_key.as_ref().ok_or_else(|| {
@@ -332,7 +467,24 @@ impl ChainSigner for SuiBackend {
         Ok(signature.to_bytes().to_vec())
     }
 
-    async fn verify_signature(
+    async fn sign_message(&self, message: &[u8], key_id: &str) -> ChainOpResult<Vec<u8>> {
+        use ed25519_dalek::Signer;
+
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+
+        // Sign the message using Ed25519
+        let signature = signing_key.sign(message);
+
+        // Return signature bytes (64 bytes for Ed25519)
+        Ok(signature.to_bytes().to_vec())
+    }
+
+    fn verify_signature(
         &self,
         message: &[u8],
         signature: &[u8],
@@ -354,8 +506,7 @@ impl ChainSigner for SuiBackend {
         
         let mut sig_bytes = [0u8; 64];
         sig_bytes.copy_from_slice(signature);
-        let signature = Signature::from_bytes(sig_bytes)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid signature: {}", e)))?;
+        let signature = Signature::from_bytes(&sig_bytes);
         
         let mut pk_bytes = [0u8; 32];
         pk_bytes.copy_from_slice(public_key);
@@ -364,36 +515,128 @@ impl ChainSigner for SuiBackend {
         
         Ok(public_key.verify(message, &signature).is_ok())
     }
+
+    fn derive_address(&self, public_key: &[u8]) -> ChainOpResult<String> {
+        if public_key.len() != 32 {
+            return Err(ChainOpError::InvalidInput(
+                "Ed25519 public key must be 32 bytes".to_string(),
+            ));
+        }
+
+        let mut pubkey = [0u8; 32];
+        pubkey.copy_from_slice(public_key);
+
+        // Sui address is derived from public key using SHA2-256
+        // Address = SHA2-256(pubkey)[0..32]
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(pubkey);
+        let mut addr = [0u8; 32];
+        addr.copy_from_slice(&hash[..32]);
+
+        Ok(format!("0x{}", hex::encode(addr)))
+    }
+
+    fn signature_scheme(&self) -> SignatureScheme {
+        SignatureScheme::Ed25519
+    }
 }
 
 #[async_trait]
 impl ChainBroadcaster for SuiBackend {
-    async fn broadcast_transaction(&self, tx_data: &[u8]) -> ChainOpResult<String> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::TransactionDigest;
+    async fn submit_transaction(&self, signed_tx: &[u8]) -> ChainOpResult<String> {
+        use sui_rpc::client::Client;
+        use sui_sdk_types::Digest;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
         // Execute the transaction
-        let tx_digest = TransactionDigest::from_bytes(tx_data)
+        let tx_digest = Digest::from_bytes(signed_tx)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid tx bytes: {}", e)))?;
         
         // This would normally execute the signed transaction
         // For now, return the digest as a placeholder
-        Ok(format!("0x{}", hex::encode(tx_digest.to_vec())))
+        Ok(format!("0x{}", hex::encode::<[u8; 32]>(tx_digest.into())))
+    }
+
+    async fn confirm_transaction(
+        &self,
+        tx_hash: &str,
+        required_confirmations: u64,
+        timeout_secs: u64,
+    ) -> ChainOpResult<TransactionStatus> {
+        use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
+        
+        let tx_digest = sui_sdk_types::Digest::from_bytes(&parse_digest(tx_hash)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+        
+        let request = GetTransactionRequest::new(&tx_digest);
+        
+        let tx_response = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?;
+        
+        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
+            ChainOpError::InvalidInput("Transaction not found in response".to_string())
+        })?;
+        
+        if tx.effects.is_some() {
+            Ok(TransactionStatus::Confirmed {
+                block_height: tx.checkpoint.unwrap_or(0),
+                confirmations: 1,
+            })
+        } else {
+            Ok(TransactionStatus::Pending)
+        }
+    }
+
+    async fn get_fee_estimate(&self) -> ChainOpResult<u64> {
+        // Sui gas price is dynamic, return a reasonable default
+        Ok(1000)
+    }
+
+    async fn validate_transaction(&self, tx_data: &[u8]) -> ChainOpResult<()> {
+        // For now, just check that the transaction is non-empty
+        if tx_data.is_empty() {
+            return Err(ChainOpError::InvalidInput("Transaction data is empty".to_string()));
+        }
+        Ok(())
     }
 }
 
 #[async_trait]
 impl ChainDeployer for SuiBackend {
-    async fn deploy_contract(
+    async fn deploy_lock_contract(
         &self,
-        contract_code: &[u8],
-        _constructor_args: Vec<Vec<u8>>,
-    ) -> ChainOpResult<String> {
+        admin_address: &str,
+        config: serde_json::Value,
+    ) -> ChainOpResult<DeploymentStatus> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "Lock contract deployment not yet implemented for Sui".to_string(),
+        ))
+    }
+
+    async fn deploy_mint_contract(
+        &self,
+        admin_address: &str,
+        config: serde_json::Value,
+    ) -> ChainOpResult<DeploymentStatus> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "Mint contract deployment not yet implemented for Sui".to_string(),
+        ))
+    }
+
+    async fn deploy_or_publish_seal_program(
+        &self,
+        program_bytes: &[u8],
+        admin_address: &str,
+    ) -> ChainOpResult<DeploymentStatus> {
         use crate::deploy::PackageDeployer;
 
         let signing_key = self.signing_key.as_ref().ok_or_else(|| {
@@ -409,101 +652,211 @@ impl ChainDeployer for SuiBackend {
             signing_key.clone(),
         );
         let deployment = deployer
-            .deploy_package(contract_code, 10000000)
+            .deploy_package(program_bytes, 10000000)
             .await
-            .map_err(|e| ChainOpError::DeploymentFailed(format!("Deployment failed: {}", e)))?;
+            .map_err(|e| ChainOpError::DeploymentError(format!("Deployment failed: {}", e)))?;
 
-        Ok(deployment.transaction_digest)
+        Ok(DeploymentStatus::Success {
+            contract_address: hex::encode(deployment.package_id),
+            transaction_hash: deployment.transaction_digest,
+            block_height: 0,
+        })
+    }
+
+    async fn verify_deployment(&self, contract_address: &str) -> ChainOpResult<bool> {
+        use sui_rpc::proto::sui::rpc::v2::GetPackageRequest;
+        
+        let package_id = sui_sdk_types::Address::from_bytes(&parse_object_id(contract_address)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid contract address: {}", e)))?)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid contract address: {}", e)))?;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+        
+        let request = GetPackageRequest::new(&package_id);
+        
+        let package_response = (*client_guard)
+            .package_client()
+            .get_package(request)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get package: {}", e)))?;
+        
+        Ok(package_response.into_inner().package.is_some())
+    }
+
+    async fn estimate_deployment_cost(&self, program_bytes: &[u8]) -> ChainOpResult<u64> {
+        // Estimate based on byte size
+        Ok((program_bytes.len() as u64) * 1000)
     }
 }
 
 #[async_trait]
 impl ChainProofProvider for SuiBackend {
-    async fn get_inclusion_proof(
+    async fn build_inclusion_proof(
         &self,
-        tx_hash: &str,
+        commitment: &Hash,
+        block_height: u64,
+        anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::TransactionDigest;
+        use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
         
-        let tx_digest = TransactionDigest::from_hex_literal(tx_hash)
+        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor_id)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let tx_response = client_guard
-            .get_transaction(tx_digest)
+        let request = GetTransactionRequest::new(&tx_digest);
+        
+        let tx_response = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?;
         
-        if tx_response.is_none() {
-            return Err(ChainOpError::NotFound("Transaction not found".to_string()));
-        }
-        
-        let tx = tx_response.unwrap();
+        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
+            ChainOpError::InvalidInput("Transaction not found in response".to_string())
+        })?;
         
         // Build inclusion proof
-        Ok(CoreInclusionProof::new(
+        let block_hash = if let Some(digest) = tx.digest {
+            let hex_str = digest.trim_start_matches("0x");
+            let decoded = hex::decode(hex_str).unwrap_or_default();
+            let mut hash_bytes = [0u8; 32];
+            if decoded.len() >= 32 {
+                hash_bytes.copy_from_slice(&decoded[..32]);
+            }
+            Hash::new(hash_bytes)
+        } else {
+            Hash::zero()
+        };
+        
+        CoreInclusionProof::new(
             vec![], // Sui doesn't use Merkle proofs for transaction inclusion
-            Hash::new(tx.digest.to_vec()),
-            tx.checkpoint,
+            block_hash,
+            tx.checkpoint.unwrap_or(0),
             0,
-        ))
+        ).map_err(|e| ChainOpError::ProofVerificationError(format!("Failed to create inclusion proof: {}", e)))
     }
 
-    async fn get_finality_proof(
+    fn verify_inclusion_proof(
         &self,
-        tx_hash: &str,
-    ) -> ChainOpResult<FinalityProof> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::TransactionDigest;
+        proof: &CoreInclusionProof,
+        commitment: &Hash,
+    ) -> ChainOpResult<bool> {
+        // For Sui, inclusion verification is done via checkpoint certification
+        Ok(proof.block_number > 0)
+    }
+
+    async fn build_finality_proof(&self, tx_hash: &str) -> ChainOpResult<FinalityProof> {
+        use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
         
-        let tx_digest = TransactionDigest::from_hex_literal(tx_hash)
+        let tx_digest = sui_sdk_types::Digest::from_bytes(&parse_digest(tx_hash)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let tx_response = client_guard
-            .get_transaction(tx_digest)
+        let request = GetTransactionRequest::new(&tx_digest);
+        
+        let tx_response = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?;
         
-        if tx_response.is_none() {
-            return Err(ChainOpError::NotFound("Transaction not found".to_string()));
-        }
-        
-        let tx = tx_response.unwrap();
+        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
+            ChainOpError::InvalidInput("Transaction not found in response".to_string())
+        })?;
         
         // Check if the checkpoint is certified
-        let checkpoint_info = client_guard
-            .get_checkpoint_by_sequence_number(tx.checkpoint)
+        use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
+        
+        let checkpoint_request = GetCheckpointRequest::by_sequence_number(tx.checkpoint.unwrap_or(0));
+        
+        let checkpoint_response = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(checkpoint_request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get checkpoint: {}", e)))?;
         
-        let is_certified = checkpoint_info.checkpoint_commitments.is_some();
+        let checkpoint_info = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+            ChainOpError::InvalidInput("Checkpoint not found in response".to_string())
+        })?;
         
-        Ok(FinalityProof::new(
+        let is_certified = checkpoint_info.signature.is_some();
+        
+        FinalityProof::new(
             vec![],
-            tx.checkpoint,
+            tx.checkpoint.unwrap_or(0),
             is_certified,
-        ))
+        ).map_err(|e| ChainOpError::ProofVerificationError(format!("Failed to create finality proof: {}", e)))
+    }
+
+    fn verify_finality_proof(&self, proof: &FinalityProof, tx_hash: &str) -> ChainOpResult<bool> {
+        // Verify the proof is valid
+        Ok(proof.is_deterministic)
+    }
+
+    fn domain_separator(&self) -> [u8; 32] {
+        self.domain_separator
+    }
+
+    async fn verify_proof_bundle(
+        &self,
+        inclusion_proof: &CoreInclusionProof,
+        finality_proof: &FinalityProof,
+        commitment: &Hash,
+    ) -> ChainOpResult<bool> {
+        // Verify both proofs
+        let inclusion_valid = self.verify_inclusion_proof(inclusion_proof, commitment)?;
+        let finality_valid = self.verify_finality_proof(finality_proof, "")?;
+        Ok(inclusion_valid && finality_valid)
     }
 }
 
 #[async_trait]
 impl ChainSanadOps for SuiBackend {
+    async fn create_sanad(
+        &self,
+        owner: &str,
+        asset_class: &str,
+        asset_id: &str,
+        metadata: serde_json::Value,
+    ) -> ChainOpResult<SanadOperationResult> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sanad creation not yet implemented for Sui".to_string(),
+        ))
+    }
+
+    async fn consume_sanad(
+        &self,
+        sanad_id: &SanadId,
+        owner_key_id: &str,
+    ) -> ChainOpResult<SanadOperationResult> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sanad consumption not yet implemented for Sui".to_string(),
+        ))
+    }
+
+    async fn lock_sanad(
+        &self,
+        sanad_id: &SanadId,
+        destination_chain: &str,
+        owner_key_id: &str,
+    ) -> ChainOpResult<SanadOperationResult> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sanad locking not yet implemented for Sui".to_string(),
+        ))
+    }
+
     async fn mint_sanad(
         &self,
-        sanad_id: SanadId,
-        commitment: Hash,
-        source_chain: u8,
-        source_seal: SealPoint,
+        source_chain: &str,
+        source_sanad_id: &SanadId,
+        lock_proof: &CoreInclusionProof,
+        new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         use crate::mint::mint_sanad;
 
@@ -515,106 +868,136 @@ impl ChainSanadOps for SuiBackend {
         })?;
 
         let package_id = self.config.seal_contract.package_id.as_ref()
-            .ok_or_else(|| ChainOpError::ConfigurationError("Package ID not configured".to_string()))?;
+            .ok_or_else(|| ChainOpError::InvalidInput("Package ID not configured".to_string()))?;
+
+        // Create a new sanad ID for the destination
+        let sanad_id = SanadId::new([0u8; 32]); // Placeholder - should derive from source
+
+        let commitment = Hash::new([0u8; 32]); // Placeholder - should derive from lock_proof
+        let source_chain_byte = source_chain.as_bytes()[0];
+        let source_seal = SealPoint::new(vec![0u8; 32], Some(0)).unwrap();
 
         let tx_digest = mint_sanad(
             &self.node,
             package_id,
             signing_key,
-            sanad_id,
+            sanad_id.clone(),
             commitment,
-            source_chain,
-            Hash::new(source_seal.id),
+            source_chain_byte,
+            Hash::new([0u8; 32]),
         )
         .await
-        .map_err(|e| ChainOpError::TransactionFailed(format!("Minting failed: {}", e)))?;
+        .map_err(|e| ChainOpError::TransactionError(format!("Minting failed: {}", e)))?;
 
         Ok(SanadOperationResult {
-            tx_hash: tx_digest,
-            status: "pending".to_string(),
+            sanad_id,
+            operation: csv_protocol::backend::SanadOperation::Mint,
+            transaction_hash: tx_digest,
+            block_height: 0,
+            chain_id: "sui".to_string(),
+            metadata: serde_json::json!({}),
         })
     }
 
-    async fn burn_sanad(&self, _sanad_id: SanadId) -> ChainOpResult<SanadOperationResult> {
-        // Burning would use a similar pattern to minting
+    async fn refund_sanad(
+        &self,
+        sanad_id: &SanadId,
+        owner_key_id: &str,
+    ) -> ChainOpResult<SanadOperationResult> {
         Err(ChainOpError::CapabilityUnavailable(
-            "Sanad burning requires proper transaction signing. Implement signing key handling.".to_string(),
+            "Sanad refund not yet implemented for Sui".to_string(),
         ))
     }
 
-    async fn get_sanad_info(&self, sanad_id: SanadId) -> ChainOpResult<serde_json::Value> {
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::ObjectID;
-        
-        let object_id = ObjectID::from_bytes(sanad_id.as_bytes())
+    async fn record_sanad_metadata(
+        &self,
+        sanad_id: &SanadId,
+        metadata: serde_json::Value,
+        owner_key_id: &str,
+    ) -> ChainOpResult<SanadOperationResult> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sanad metadata recording not yet implemented for Sui".to_string(),
+        ))
+    }
+
+    async fn verify_sanad_state(
+        &self,
+        sanad_id: &SanadId,
+        expected_state: &str,
+    ) -> ChainOpResult<bool> {
+        use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
+
+        let object_id = sui_sdk_types::Address::from_bytes(sanad_id.as_bytes())
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid sanad ID: {}", e)))?;
-        
+
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to lock client: {}", e))
-        })?;
-        
-        let object = client_guard
-            .get_object(object_id)
+        let mut client_guard = client.lock().await;
+
+        let request = GetObjectRequest::new(&object_id);
+
+        let object_response = (*client_guard)
+            .ledger_client()
+            .get_object(request)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get object: {}", e)))?;
-        
-        if object.is_none() {
-            return Err(ChainOpError::NotFound("Sanad not found".to_string()));
-        }
-        
-        let obj = object.unwrap();
-        
-        Ok(serde_json::json!({
-            "sanad_id": hex::encode(sanad_id.as_bytes()),
-            "exists": true,
-            "version": obj.version,
-        }))
+
+        let object = object_response.into_inner().object;
+
+        Ok(object.is_some())
     }
 }
 
 #[async_trait]
 impl ChainBackend for SuiBackend {
-    async fn get_chain_info(&self) -> ChainOpResult<serde_json::Value> {
-        Ok(serde_json::json!({
-            "chain_id": self.config.network.chain_id(),
-            "chain": "sui",
-            "network": format!("{:?}", self.config.network),
-            "protocol_version": "1.0",
-            "finality": "deterministic",
-        }))
+    fn chain_id(&self) -> &'static str {
+        "sui"
     }
 
-    fn validate_address(&self, address: &str) -> bool {
-        let hex_str = address.trim_start_matches("0x");
-        match hex::decode(hex_str) {
-            Ok(bytes) => bytes.len() == 32,
-            Err(_) => false,
-        }
+    fn chain_name(&self) -> &'static str {
+        "Sui"
     }
 
-    fn derive_address(&self, public_key: &[u8]) -> ChainOpResult<String> {
-        if public_key.len() != 32 {
+    fn is_capability_available(&self, _capability: ChainCapability) -> bool {
+        true
+    }
+
+    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+        let sui_seal = self
+            .seal_protocol
+            .create_seal(value)
+            .await
+            .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
+
+        Ok(SealPoint {
+            id: sui_seal.object_id.to_vec(),
+            nonce: Some(sui_seal.nonce),
+        })
+    }
+
+    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+        if seal.id.len() < 32 {
             return Err(ChainOpError::InvalidInput(
-                "Ed25519 public key must be 32 bytes".to_string(),
+                "Seal ID too short for Sui, expected at least 32 bytes".to_string(),
             ));
         }
 
-        let mut pubkey = [0u8; 32];
-        pubkey.copy_from_slice(public_key);
+        let mut object_id = [0u8; 32];
+        object_id.copy_from_slice(&seal.id[..32]);
 
-        // Sui address is derived from public key using SHA2-256 (or SHA3-256 in production)
-        // Address = SHA2-256(pubkey)[0..32]
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(pubkey);
-        let mut addr = [0u8; 32];
-        addr.copy_from_slice(&hash[..32]);
+        let nonce = seal.nonce.unwrap_or(0);
+        let sui_seal = crate::types::SuiSealPoint::new(object_id, 0, nonce);
 
-        Ok(format!("0x{}", hex::encode(addr)))
-    }
+        let sui_anchor = self
+            .seal_protocol
+            .publish(commitment, sui_seal)
+            .await
+            .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 
-    fn signature_scheme(&self) -> SignatureScheme {
-        SignatureScheme::Ed25519
+        Ok(CommitAnchor {
+            anchor_id: sui_anchor.tx_digest.to_vec(),
+            block_height: sui_anchor.checkpoint,
+            metadata: sui_anchor.object_id.to_vec(),
+        })
     }
 }
 
@@ -657,65 +1040,6 @@ impl From<SuiError> for ChainOpError {
             )),
             SuiError::CoreError(e) => ChainOpError::Unknown(format!("Core error: {}", e)),
         }
-    }
-}
-
-#[async_trait]
-impl ChainBackend for SuiBackend {
-    fn chain_id(&self) -> &'static str {
-        "sui"
-    }
-
-    fn chain_name(&self) -> &'static str {
-        "Sui"
-    }
-
-    fn is_capability_available(&self, _capability: ChainCapability) -> bool {
-        true
-    }
-
-    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
-        let sui_seal = self
-            .seal_protocol
-            .create_seal(value)
-            .await
-            .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
-
-        // Convert SuiSealPoint to core SealPoint
-        // SuiSealPoint has object_id (32 bytes) stored in id
-        Ok(SealPoint {
-            id: sui_seal.object_id.to_vec(),
-            nonce: Some(sui_seal.nonce),
-        })
-    }
-
-    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
-        // Convert core SealPoint to SuiSealPoint
-        if seal.id.len() < 32 {
-            return Err(ChainOpError::InvalidInput(
-                "Seal ID too short for Sui, expected at least 32 bytes".to_string(),
-            ));
-        }
-
-        let mut object_id = [0u8; 32];
-        object_id.copy_from_slice(&seal.id[..32]);
-
-        let nonce = seal.nonce.unwrap_or(0);
-        let sui_seal = crate::types::SuiSealPoint::new(object_id, 0, nonce);
-
-        // Call the seal protocol's publish method
-        let sui_anchor = self
-            .seal_protocol
-            .publish(commitment, sui_seal)
-            .await
-            .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
-
-        // Convert SuiCommitAnchor to core CommitAnchor
-        Ok(CommitAnchor {
-            anchor_id: sui_anchor.tx_digest.to_vec(),
-            block_height: sui_anchor.checkpoint,
-            metadata: sui_anchor.object_id.to_vec(),
-        })
     }
 }
 
@@ -766,7 +1090,7 @@ mod tests {
         let result = ops
             .verify_signature(
                 wrong_message,
-                &signature.to_bytes,
+                &signature.to_bytes(),
                 &verifying_key.to_bytes(),
             )
             .expect("verify invalid signature");

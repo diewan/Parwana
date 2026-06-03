@@ -105,31 +105,41 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
         &self,
         checkpoint_seq: u64,
     ) -> SuiResult<CheckpointInfo> {
-        use sui_rpc::api::ReadApi;
+        use sui_rpc::client::Client;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            SuiError::CheckpointFailed(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
         // Use sui-rust-sdk to get checkpoint by sequence number
-        let checkpoint = client_guard
-            .get_checkpoint_by_sequence_number(checkpoint_seq)
+        use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
+        
+        let checkpoint_request = GetCheckpointRequest::by_sequence_number(checkpoint_seq);
+        
+        let checkpoint_response = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(checkpoint_request)
             .await
             .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get checkpoint: {}", e)))?;
         
-        let digest_bytes = checkpoint.digest.to_vec();
+        let checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+            SuiError::CheckpointFailed("Checkpoint not found in response".to_string())
+        })?;
+        
+        let digest_bytes = checkpoint.digest.map(|d| hex::decode(d.trim_start_matches("0x"))).unwrap_or(Ok(vec![])).unwrap_or_default();
         let mut digest = [0u8; 32];
         if digest_bytes.len() >= 32 {
             digest.copy_from_slice(&digest_bytes[..32]);
         }
         
+        let epoch = checkpoint.summary.as_ref().and_then(|s| s.epoch).unwrap_or(0);
+        let is_certified = checkpoint.signature.is_some();
+        
         Ok(CheckpointInfo {
-            sequence_number: checkpoint.sequence_number,
-            epoch: checkpoint.epoch,
+            sequence_number: checkpoint.sequence_number.unwrap_or(0),
+            epoch,
             digest,
-            total_transactions: checkpoint.network_total_transactions as u64,
-            is_certified: checkpoint.checkpoint_commitments.is_some(),
+            total_transactions: checkpoint.summary.as_ref().and_then(|s| s.total_network_transactions).unwrap_or(0),
+            is_certified,
         })
     }
 
@@ -141,36 +151,52 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
 
     /// Get the latest certified checkpoint.
     async fn latest_certified_checkpoint(&self) -> SuiResult<Option<u64>> {
-        use sui_rpc::api::ReadApi;
+        use sui_rpc::client::Client;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            SuiError::CheckpointFailed(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let latest_checkpoint = client_guard
-            .get_latest_checkpoint()
+        // Use sui-rust-sdk to get latest checkpoint
+        use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
+        
+        let checkpoint_request = GetCheckpointRequest::latest();
+        
+        let checkpoint_response = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(checkpoint_request)
             .await
             .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e)))?;
         
-        Ok(Some(latest_checkpoint.sequence_number))
+        let latest_checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+            SuiError::CheckpointFailed("Checkpoint not found in response".to_string())
+        })?;
+        
+        Ok(Some(latest_checkpoint.sequence_number.unwrap_or(0)))
     }
 
     /// Get the current epoch from the network.
     async fn current_epoch(&self) -> SuiResult<u64> {
-        use sui_rpc::api::ReadApi;
+        use sui_rpc::client::Client;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            SuiError::CheckpointFailed(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
         
-        let latest_checkpoint = client_guard
-            .get_latest_checkpoint()
+        // Use sui-rust-sdk to get latest checkpoint
+        use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
+        
+        let checkpoint_request = GetCheckpointRequest::latest();
+        
+        let checkpoint_response = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(checkpoint_request)
             .await
             .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e)))?;
         
-        Ok(latest_checkpoint.epoch)
+        let latest_checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+            SuiError::CheckpointFailed("Checkpoint not found in response".to_string())
+        })?;
+        
+        Ok(latest_checkpoint.summary.as_ref().and_then(|s| s.epoch).unwrap_or(0))
     }
 
     /// Verify that an epoch boundary has passed.

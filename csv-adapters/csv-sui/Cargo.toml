@@ -35,8 +35,10 @@ log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 serde_bytes = "0.11"
+bcs = "0.1.6"
 
 # Sui Rust SDK for gRPC-based RPC client
+# Updated to use latest API structure
 sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk", package = "sui-rpc", optional = true }
 sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk", package = "sui-sdk-types", optional = true }
 sui-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk", package = "sui-transaction-builder", optional = true }
@@ -44,6 +46,7 @@ tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 async-trait.workspace = true
 rand = "0.8"
+futures = "0.3"
 
 [features]
 default = []

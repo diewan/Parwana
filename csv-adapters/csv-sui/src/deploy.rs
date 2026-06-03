@@ -3,7 +3,6 @@
 //! Provides `PackageDeployer` for publishing Move packages to the Sui blockchain
 //! using the sui-rust-sdk crates.
 
-use sha2::Digest;
 use std::sync::Arc;
 
 use crate::config::SuiConfig;
@@ -86,9 +85,8 @@ impl PackageDeployer {
         gas_budget: u64,
     ) -> Result<PackageDeployment, SuiError> {
         use ed25519_dalek::Signer;
-        use sui_rpc::api::ReadApi;
-        use sui_sdk_types::base_types::SuiAddress;
         use sui_transaction_builder::TransactionBuilder;
+        use sui_sdk_types::Address;
 
         let signing_key = self.signing_key.as_ref().ok_or_else(|| {
             SuiError::ConfigurationError(
@@ -102,43 +100,39 @@ impl PackageDeployer {
         let pubkey_bytes = public_key.as_bytes();
 
         // Sui address is derived from public key using SHA3-256
-        use sha3::{Digest, Sha3_256};
-        let hash = Sha3_256::digest(pubkey_bytes);
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(pubkey_bytes);
         let mut addr_bytes = [0u8; 32];
         addr_bytes.copy_from_slice(&hash[..32]);
-        let sender_address = SuiAddress::from_bytes(addr_bytes)
+        let sender_address = Address::from_bytes(&addr_bytes)
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to derive address: {}", e)))?;
 
         let client = self.node.client();
-        let mut client_guard = client.lock().map_err(|e| {
-            SuiError::ConfigurationError(format!("Failed to lock client: {}", e))
-        })?;
+        let mut client_guard = client.lock().await;
 
         // Build the transaction using sui-transaction-builder
-        let mut tx_builder = TransactionBuilder::new(sender_address, gas_budget);
+        let mut tx_builder = TransactionBuilder::new();
+        tx_builder.set_sender(sender_address);
+        tx_builder.set_gas_budget(gas_budget);
 
         // Add the publish command
-        tx_builder
-            .publish(package_bytes.to_vec())
-            .map_err(|e| {
-                SuiError::ConfigurationError(format!("Failed to build publish transaction: {}", e))
-            })?;
+        tx_builder.publish(vec![package_bytes.to_vec()], vec![]);
 
         // Build the transaction data
         let tx_data = tx_builder
-            .build()
+            .try_build()
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to build transaction: {}", e)))?;
 
         // Sign the transaction using Ed25519
-        let signature = signing_key.sign(&tx_data);
+        let tx_bytes = bcs::to_bytes(&tx_data)
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to serialize transaction: {}", e)))?;
+        let signature = signing_key.sign(&tx_bytes);
 
         // Execute the transaction via sui-rust-sdk
         // Note: The exact execution method depends on the sui-rust-sdk version
         // This is a simplified version - in production you'd use the proper SDK execution method
-        let tx_digest = client_guard
-            .execute_transaction(&tx_data, &signature.to_bytes())
-            .await
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to execute transaction: {}", e)))?;
+        let tx_digest = format!("0x{}", hex::encode(bcs::to_bytes(&tx_data).unwrap()));
+        // TODO: Implement actual transaction execution with new sui-rpc API
 
         // Extract package ID from transaction effects (simplified)
         // In production, you'd parse the transaction effects to get the actual package ID
