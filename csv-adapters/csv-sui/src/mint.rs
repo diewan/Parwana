@@ -25,7 +25,6 @@ pub async fn mint_sanad(
     source_seal_ref: CsvHash,
 ) -> SuiResult<String> {
     use ed25519_dalek::Signer;
-    use sui_rpc::client::Client;
     use sui_sdk_types::{Address, Identifier};
     use sui_transaction_builder::TransactionBuilder;
 
@@ -59,7 +58,7 @@ pub async fn mint_sanad(
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to derive address: {}", e)))?;
 
     let client = node.client();
-    let mut client_guard = client.lock().await;
+    let _client_guard = client.lock().await;
 
     // Build the transaction using sui-transaction-builder
     let mut tx_builder = TransactionBuilder::new();
@@ -88,7 +87,7 @@ pub async fn mint_sanad(
     // Sign the transaction using Ed25519
     let tx_bytes = bcs::to_bytes(&tx_data)
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
-    let signature = signing_key.sign(&tx_bytes);
+    let _signature = signing_key.sign(&tx_bytes);
 
     // Execute the transaction via sui-rust-sdk
     // Note: The exact execution method depends on the sui-rust-sdk version

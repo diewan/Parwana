@@ -105,8 +105,6 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
         &self,
         checkpoint_seq: u64,
     ) -> SuiResult<CheckpointInfo> {
-        use sui_rpc::client::Client;
-        
         let client = self.node.client();
         let mut client_guard = client.lock().await;
         
@@ -151,8 +149,6 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
 
     /// Get the latest certified checkpoint.
     async fn latest_certified_checkpoint(&self) -> SuiResult<Option<u64>> {
-        use sui_rpc::client::Client;
-        
         let client = self.node.client();
         let mut client_guard = client.lock().await;
         
@@ -176,8 +172,6 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
 
     /// Get the current epoch from the network.
     async fn current_epoch(&self) -> SuiResult<u64> {
-        use sui_rpc::client::Client;
-        
         let client = self.node.client();
         let mut client_guard = client.lock().await;
         

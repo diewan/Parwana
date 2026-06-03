@@ -24,7 +24,6 @@ use ed25519_dalek::{Verifier, VerifyingKey};
 use std::sync::Arc;
 
 use crate::config::SuiConfig;
-use crate::deploy::{PackageDeployer, PackageDeployment};
 use crate::error::SuiError;
 use crate::node::SuiNode;
 use crate::proofs::CommitmentEventBuilder;
@@ -208,7 +207,6 @@ impl ChainQuery for SuiBackend {
     async fn get_balance(&self, address: &str) -> ChainOpResult<BalanceInfo> {
         #[cfg(feature = "rpc")]
         {
-            use sui_rpc::client::Client;
             use sui_sdk_types::Address;
             
             let addr = self.parse_address(address)?;
@@ -216,7 +214,7 @@ impl ChainQuery for SuiBackend {
                 .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui address: {}", e)))?;
             
             let client = self.node.client();
-            let mut client_guard = client.lock().await;
+            let client_guard = client.lock().await;
             
             // Use list_balances to get balance information
             use sui_rpc::proto::sui::rpc::v2::ListBalancesRequest;
@@ -241,7 +239,7 @@ impl ChainQuery for SuiBackend {
                 total: balance.balance.unwrap_or(0),
                 available: balance.balance.unwrap_or(0), // Assume all is available for now
                 locked: 0,
-                tokens: vec![], // TODO: Extract token information
+                tokens: vec![], // Token information requires TokenBalance struct
             })
         }
         
@@ -287,11 +285,11 @@ impl ChainQuery for SuiBackend {
             },
             block_height: tx.checkpoint,
             timestamp: tx.timestamp.map(|t| t.seconds as u64),
-            sender: String::new(), // TODO: Extract from transaction
-            recipient: None, // TODO: Extract from transaction
-            amount: None, // TODO: Extract from transaction
-            fee: None, // TODO: Extract from effects
-            raw_data: None, // TODO: Extract from transaction
+            sender: String::new(), // Sender would need to be extracted from transaction.raw_tx
+            recipient: None, // Sui transactions don't have a single recipient; they can have multiple outputs
+            amount: None, // Amount would need to be extracted from specific transaction effects
+            fee: None, // Fee would need to be extracted from effects.gas_cost
+            raw_data: None, // Raw data would need to be extracted from transaction.raw_tx
         })
     }
 
@@ -362,16 +360,19 @@ impl ChainQuery for SuiBackend {
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get package: {}", e)))?;
         
-        let package = package_response.into_inner().package.ok_or_else(|| {
+        let _package = package_response.into_inner().package.ok_or_else(|| {
             ChainOpError::InvalidInput("Package not found in response".to_string())
         })?;
         
         Ok(ContractStatus {
             address: contract_address.to_string(),
             is_deployed: true,
-            balance: None, // TODO: Extract from package
-            owner: None, // TODO: Extract from package
-            metadata: serde_json::Value::Null, // TODO: Extract from package
+            balance: None, // Balance would need to be extracted from package modules
+            owner: None, // Owner would need to be extracted from package upgrade capability
+            metadata: serde_json::json!({
+                "package_id": contract_address,
+                "modules": _package.modules.len(),
+            }),
         })
     }
 
@@ -407,7 +408,6 @@ impl ChainQuery for SuiBackend {
     }
 
     async fn get_account_nonce(&self, address: &str) -> ChainOpResult<u64> {
-        use sui_rpc::client::Client;
         use sui_sdk_types::Address;
         
         let addr = self.parse_address(address)?;
@@ -415,7 +415,7 @@ impl ChainQuery for SuiBackend {
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui address: {}", e)))?;
         
         let client = self.node.client();
-        let mut client_guard = client.lock().await;
+        let client_guard = client.lock().await;
         
         // Use list_balances to get account information
         use sui_rpc::proto::sui::rpc::v2::ListBalancesRequest;
@@ -450,7 +450,7 @@ impl ChainQuery for SuiBackend {
 
 #[async_trait]
 impl ChainSigner for SuiBackend {
-    async fn sign_transaction(&self, tx_data: &[u8], key_id: &str) -> ChainOpResult<Vec<u8>> {
+    async fn sign_transaction(&self, tx_data: &[u8], _key_id: &str) -> ChainOpResult<Vec<u8>> {
         use ed25519_dalek::Signer;
 
         let signing_key = self.signing_key.as_ref().ok_or_else(|| {
@@ -467,7 +467,7 @@ impl ChainSigner for SuiBackend {
         Ok(signature.to_bytes().to_vec())
     }
 
-    async fn sign_message(&self, message: &[u8], key_id: &str) -> ChainOpResult<Vec<u8>> {
+    async fn sign_message(&self, message: &[u8], _key_id: &str) -> ChainOpResult<Vec<u8>> {
         use ed25519_dalek::Signer;
 
         let signing_key = self.signing_key.as_ref().ok_or_else(|| {
@@ -544,11 +544,7 @@ impl ChainSigner for SuiBackend {
 #[async_trait]
 impl ChainBroadcaster for SuiBackend {
     async fn submit_transaction(&self, signed_tx: &[u8]) -> ChainOpResult<String> {
-        use sui_rpc::client::Client;
         use sui_sdk_types::Digest;
-        
-        let client = self.node.client();
-        let mut client_guard = client.lock().await;
         
         // Execute the transaction
         let tx_digest = Digest::from_bytes(signed_tx)
@@ -562,8 +558,8 @@ impl ChainBroadcaster for SuiBackend {
     async fn confirm_transaction(
         &self,
         tx_hash: &str,
-        required_confirmations: u64,
-        timeout_secs: u64,
+        _required_confirmations: u64,
+        _timeout_secs: u64,
     ) -> ChainOpResult<TransactionStatus> {
         use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
         
@@ -614,8 +610,8 @@ impl ChainBroadcaster for SuiBackend {
 impl ChainDeployer for SuiBackend {
     async fn deploy_lock_contract(
         &self,
-        admin_address: &str,
-        config: serde_json::Value,
+        _admin_address: &str,
+        _config: serde_json::Value,
     ) -> ChainOpResult<DeploymentStatus> {
         Err(ChainOpError::CapabilityUnavailable(
             "Lock contract deployment not yet implemented for Sui".to_string(),
@@ -624,8 +620,8 @@ impl ChainDeployer for SuiBackend {
 
     async fn deploy_mint_contract(
         &self,
-        admin_address: &str,
-        config: serde_json::Value,
+        _admin_address: &str,
+        _config: serde_json::Value,
     ) -> ChainOpResult<DeploymentStatus> {
         Err(ChainOpError::CapabilityUnavailable(
             "Mint contract deployment not yet implemented for Sui".to_string(),
@@ -635,7 +631,7 @@ impl ChainDeployer for SuiBackend {
     async fn deploy_or_publish_seal_program(
         &self,
         program_bytes: &[u8],
-        admin_address: &str,
+        _admin_address: &str,
     ) -> ChainOpResult<DeploymentStatus> {
         use crate::deploy::PackageDeployer;
 
@@ -694,8 +690,8 @@ impl ChainDeployer for SuiBackend {
 impl ChainProofProvider for SuiBackend {
     async fn build_inclusion_proof(
         &self,
-        commitment: &Hash,
-        block_height: u64,
+        _commitment: &Hash,
+        _block_height: u64,
         anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
         use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
@@ -742,7 +738,7 @@ impl ChainProofProvider for SuiBackend {
     fn verify_inclusion_proof(
         &self,
         proof: &CoreInclusionProof,
-        commitment: &Hash,
+        _commitment: &Hash,
     ) -> ChainOpResult<bool> {
         // For Sui, inclusion verification is done via checkpoint certification
         Ok(proof.block_number > 0)
@@ -794,7 +790,7 @@ impl ChainProofProvider for SuiBackend {
         ).map_err(|e| ChainOpError::ProofVerificationError(format!("Failed to create finality proof: {}", e)))
     }
 
-    fn verify_finality_proof(&self, proof: &FinalityProof, tx_hash: &str) -> ChainOpResult<bool> {
+    fn verify_finality_proof(&self, proof: &FinalityProof, _tx_hash: &str) -> ChainOpResult<bool> {
         // Verify the proof is valid
         Ok(proof.is_deterministic)
     }
@@ -820,10 +816,10 @@ impl ChainProofProvider for SuiBackend {
 impl ChainSanadOps for SuiBackend {
     async fn create_sanad(
         &self,
-        owner: &str,
-        asset_class: &str,
-        asset_id: &str,
-        metadata: serde_json::Value,
+        _owner: &str,
+        _asset_class: &str,
+        _asset_id: &str,
+        _metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
         Err(ChainOpError::CapabilityUnavailable(
             "Sanad creation not yet implemented for Sui".to_string(),
@@ -832,8 +828,8 @@ impl ChainSanadOps for SuiBackend {
 
     async fn consume_sanad(
         &self,
-        sanad_id: &SanadId,
-        owner_key_id: &str,
+        _sanad_id: &SanadId,
+        _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         Err(ChainOpError::CapabilityUnavailable(
             "Sanad consumption not yet implemented for Sui".to_string(),
@@ -842,9 +838,9 @@ impl ChainSanadOps for SuiBackend {
 
     async fn lock_sanad(
         &self,
-        sanad_id: &SanadId,
-        destination_chain: &str,
-        owner_key_id: &str,
+        _sanad_id: &SanadId,
+        _destination_chain: &str,
+        _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         Err(ChainOpError::CapabilityUnavailable(
             "Sanad locking not yet implemented for Sui".to_string(),
@@ -854,9 +850,9 @@ impl ChainSanadOps for SuiBackend {
     async fn mint_sanad(
         &self,
         source_chain: &str,
-        source_sanad_id: &SanadId,
-        lock_proof: &CoreInclusionProof,
-        new_owner: &str,
+        _source_sanad_id: &SanadId,
+        _lock_proof: &CoreInclusionProof,
+        _new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         use crate::mint::mint_sanad;
 
@@ -875,7 +871,7 @@ impl ChainSanadOps for SuiBackend {
 
         let commitment = Hash::new([0u8; 32]); // Placeholder - should derive from lock_proof
         let source_chain_byte = source_chain.as_bytes()[0];
-        let source_seal = SealPoint::new(vec![0u8; 32], Some(0)).unwrap();
+        let _source_seal = SealPoint::new(vec![0u8; 32], Some(0)).unwrap();
 
         let tx_digest = mint_sanad(
             &self.node,
@@ -901,8 +897,8 @@ impl ChainSanadOps for SuiBackend {
 
     async fn refund_sanad(
         &self,
-        sanad_id: &SanadId,
-        owner_key_id: &str,
+        _sanad_id: &SanadId,
+        _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         Err(ChainOpError::CapabilityUnavailable(
             "Sanad refund not yet implemented for Sui".to_string(),
@@ -911,9 +907,9 @@ impl ChainSanadOps for SuiBackend {
 
     async fn record_sanad_metadata(
         &self,
-        sanad_id: &SanadId,
-        metadata: serde_json::Value,
-        owner_key_id: &str,
+        _sanad_id: &SanadId,
+        _metadata: serde_json::Value,
+        _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         Err(ChainOpError::CapabilityUnavailable(
             "Sanad metadata recording not yet implemented for Sui".to_string(),
@@ -923,7 +919,7 @@ impl ChainSanadOps for SuiBackend {
     async fn verify_sanad_state(
         &self,
         sanad_id: &SanadId,
-        expected_state: &str,
+        _expected_state: &str,
     ) -> ChainOpResult<bool> {
         use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 
