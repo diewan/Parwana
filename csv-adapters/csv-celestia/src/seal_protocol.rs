@@ -246,7 +246,7 @@ where
         let finality = self.verify_finality(anchor.clone()).await?;
 
         let seal_ref =
-            csv_hash::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height))
+            csv_hash::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height), None)
                 .map_err(|e| {
                     Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,

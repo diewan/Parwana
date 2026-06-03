@@ -9,25 +9,29 @@ pub struct SuiSealPoint {
     pub object_id: [u8; 32],
     /// Object version
     pub version: u64,
+    /// Object digest (base58 string) - required for transaction input validation
+    pub digest: String,
     /// Nonce for replay resistance
     pub nonce: u64,
 }
 
 impl SuiSealPoint {
     /// Create a new Sui seal reference
-    pub fn new(object_id: [u8; 32], version: u64, nonce: u64) -> Self {
+    pub fn new(object_id: [u8; 32], version: u64, digest: String, nonce: u64) -> Self {
         Self {
             object_id,
             version,
+            digest,
             nonce,
         }
     }
 
     /// Serialize to bytes
     pub fn to_vec(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32 + 8 + 8);
+        let mut out = Vec::with_capacity(32 + 8 + self.digest.len() + 8);
         out.extend_from_slice(&self.object_id);
         out.extend_from_slice(&self.version.to_le_bytes());
+        out.extend_from_slice(self.digest.as_bytes());
         out.extend_from_slice(&self.nonce.to_le_bytes());
         out
     }
@@ -102,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_seal_ref_creation() {
-        let seal = SuiSealPoint::new([1u8; 32], 1, 42);
+        let seal = SuiSealPoint::new([1u8; 32], 1, "test_digest".to_string(), 42);
         assert_eq!(seal.version, 1);
     }
 

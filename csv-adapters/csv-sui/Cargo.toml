@@ -37,6 +37,9 @@ ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 serde_bytes = "0.11"
 bcs = "0.1.6"
 bytes = "1.5"
+blake2 = "0.10"
+prost-types = "0.14"
+base64 = "0.22"
 
 # Sui Rust SDK for gRPC-based RPC client
 # Updated to use latest API structure

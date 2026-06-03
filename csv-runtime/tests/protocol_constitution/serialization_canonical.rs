@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 #[test]
 fn serialization_is_canonical() {
     // 1. Same input always produces same canonical CBOR output
-    let seal = SealPoint::new(vec![0xAA; 16], Some(42)).unwrap();
+    let seal = SealPoint::new(vec![0xAA; 16], Some(42), None).unwrap();
     let cbor1 = to_canonical_cbor(&seal).expect("seal serialization");
     let cbor2 = to_canonical_cbor(&seal).expect("seal serialization");
     let cbor3 = to_canonical_cbor(&seal).expect("seal serialization");
@@ -61,7 +61,7 @@ fn serialization_is_canonical() {
     );
 
     // 5. Commitment canonical serialization
-    let seal2 = SealPoint::new(vec![0xFF; 16], Some(1)).unwrap();
+    let seal2 = SealPoint::new(vec![0xFF; 16], Some(1), None).unwrap();
     let commitment = Commitment::simple(
         Hash::new([10u8; 32]),
         Hash::new([20u8; 32]),
@@ -81,7 +81,7 @@ fn serialization_is_canonical() {
     let bundle = ProofBundle::new(
         DAGSegment::new(vec![node.clone()], Hash::new([99u8; 32])),
         vec![vec![0xDE; 16]],
-        SealPoint::new(vec![1, 2, 3], Some(42)).unwrap(),
+        SealPoint::new(vec![1, 2, 3], Some(42), None).unwrap(),
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),

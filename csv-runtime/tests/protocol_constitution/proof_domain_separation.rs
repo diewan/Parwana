@@ -111,7 +111,7 @@ fn all_proofs_are_domain_separated() {
     let bundle = ProofBundle::new(
         DAGSegment::new(vec![], Hash::zero()),
         vec![vec![0xDE; 16]],
-        SealPoint::new(vec![1, 2, 3], Some(42)).unwrap(),
+        SealPoint::new(vec![1, 2, 3], Some(42), None).unwrap(),
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),
@@ -133,7 +133,7 @@ fn all_proofs_are_domain_separated() {
     let bundle2 = ProofBundle::new(
         DAGSegment::new(vec![], Hash::new([1u8; 32])), // different root
         vec![vec![0xDE; 16]],
-        SealPoint::new(vec![1, 2, 3], Some(42)).unwrap(),
+        SealPoint::new(vec![1, 2, 3], Some(42), None).unwrap(),
         CommitAnchor::new(vec![4, 5, 6], 100, vec![]).unwrap(),
         InclusionProof::new(vec![], Hash::zero(), 0, 0).unwrap(),
         FinalityProof::new(vec![], 6, false).unwrap(),

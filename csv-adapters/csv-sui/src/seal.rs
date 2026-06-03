@@ -263,7 +263,7 @@ mod tests {
     use super::*;
 
     fn test_seal() -> SuiSealPoint {
-        SuiSealPoint::new([1u8; 32], 1, 0)
+        SuiSealPoint::new([1u8; 32], 1, String::new(), 0)
     }
 
     #[test]
@@ -298,8 +298,8 @@ mod tests {
     #[test]
     fn test_different_seals() {
         let mut registry = SealRegistry::new();
-        let seal1 = SuiSealPoint::new([1u8; 32], 1, 0);
-        let seal2 = SuiSealPoint::new([2u8; 32], 1, 0);
+        let seal1 = SuiSealPoint::new([1u8; 32], 1, String::new(), 0);
+        let seal2 = SuiSealPoint::new([2u8; 32], 1, String::new(), 0);
 
         registry.mark_seal_used(&seal1, 100).unwrap();
         registry.mark_seal_used(&seal2, 200).unwrap();
@@ -312,8 +312,8 @@ mod tests {
     #[test]
     fn test_same_object_different_version() {
         let mut registry = SealRegistry::new();
-        let seal1 = SuiSealPoint::new([1u8; 32], 1, 0);
-        let seal2 = SuiSealPoint::new([1u8; 32], 2, 0);
+        let seal1 = SuiSealPoint::new([1u8; 32], 1, String::new(), 0);
+        let seal2 = SuiSealPoint::new([1u8; 32], 2, String::new(), 0);
 
         registry.mark_seal_used(&seal1, 100).unwrap();
         registry.mark_seal_used(&seal2, 200).unwrap();

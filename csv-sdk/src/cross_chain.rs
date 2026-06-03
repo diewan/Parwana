@@ -264,7 +264,7 @@ impl PersistentTransferRegistry {
         let parse_seal = |hex: &str| -> Result<SealPoint, CrossChainError> {
             let bytes = hex::decode(hex.trim_start_matches("0x"))
                 .map_err(|e| CrossChainError::Database(format!("invalid seal hex: {}", e)))?;
-            SealPoint::new(bytes, None)
+            SealPoint::new(bytes, None, None)
                 .map_err(|e| CrossChainError::Database(format!("invalid seal: {}", e)))
         };
 

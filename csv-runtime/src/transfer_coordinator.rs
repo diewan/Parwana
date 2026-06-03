@@ -97,11 +97,13 @@ fn transfer_to_registry_entry(
         source_seal: SealPoint {
             id: source_seal_id,
             nonce: None,
+            version: None,
         },
         destination_chain: ChainId::new(&transfer.destination_chain),
         destination_seal: SealPoint {
             id: vec![], // Will be filled after mint
             nonce: None,
+            version: None,
         },
         lock_tx_hash: hash_from_tx_bytes(&transfer.lock_tx_hash)?,
         transition_id: transfer.transition_id.clone(),
@@ -2295,7 +2297,7 @@ mod tests {
                 SignatureScheme::Ed25519,
                 DAGSegment::new(vec![node], root_commitment),
                 vec![encoded_signature],
-                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0)).unwrap(),
+                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None).unwrap(),
                 CommitAnchor::new(vec![0xCCu8; 32], 100, proof_bytes.clone()).unwrap(),
                 InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0)
                     .unwrap(),

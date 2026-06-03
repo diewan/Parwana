@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct SealPointWire {
     pub id: String,
     pub nonce: Option<u64>,
+    pub version: Option<u64>,
 }
 
 impl From<SealPoint> for SealPointWire {
@@ -13,6 +14,7 @@ impl From<SealPoint> for SealPointWire {
         Self {
             id: hex::encode(&seal.id),
             nonce: seal.nonce,
+            version: seal.version,
         }
     }
 }
@@ -23,6 +25,6 @@ impl TryFrom<SealPointWire> for SealPoint {
     fn try_from(wire: SealPointWire) -> Result<Self, String> {
         let id = hex::decode(&wire.id).map_err(|e| format!("Invalid id hex: {}", e))?;
 
-        SealPoint::new(id, wire.nonce).map_err(|e| e.to_string())
+        SealPoint::new(id, wire.nonce, wire.version).map_err(|e| e.to_string())
     }
 }

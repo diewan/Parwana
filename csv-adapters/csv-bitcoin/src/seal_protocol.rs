@@ -725,7 +725,7 @@ impl SealProtocol for BitcoinSealProtocol {
         transition_payload_hash: Hash,
         seal_point: &Self::SealPoint,
     ) -> Hash {
-        let core_seal = CoreSealPoint::new(seal_point.txid.to_vec(), seal_point.nonce)
+        let core_seal = CoreSealPoint::new(seal_point.txid.to_vec(), seal_point.nonce, None)
             .expect("valid seal reference");
         Commitment::simple(
             contract_id,
@@ -745,7 +745,7 @@ impl SealProtocol for BitcoinSealProtocol {
         let inclusion = self.verify_inclusion(anchor.clone()).await?;
         let finality = self.verify_finality(anchor.clone()).await?;
 
-        let seal_ref = CoreSealPoint::new(anchor.txid.to_vec(), Some(0))
+        let seal_ref = CoreSealPoint::new(anchor.txid.to_vec(), Some(0), None)
             .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let anchor_ref = CoreCommitAnchor::new(anchor.txid.to_vec(), anchor.block_height, vec![])

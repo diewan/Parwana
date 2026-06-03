@@ -578,7 +578,7 @@ impl ChainRuntime {
         let proof_bundle = ProofBundle::new(
             dag_segment,
             vec![], // Signatures will be added by the caller
-            csv_hash::seal::SealPoint::new(seal_id.clone(), None).map_err(|e| {
+            csv_hash::seal::SealPoint::new(seal_id.clone(), None, None).map_err(|e| {
                 CsvError::ProtocolError {
                     chain: chain.clone(),
                     message: format!("Failed to create seal ref: {}", e),

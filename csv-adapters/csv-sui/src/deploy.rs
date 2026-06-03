@@ -99,21 +99,33 @@ impl PackageDeployer {
         let public_key = signing_key.verifying_key();
         let pubkey_bytes = public_key.as_bytes();
 
-        // Sui address is derived from public key using SHA2-256
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(pubkey_bytes);
-        let mut addr_bytes = [0u8; 32];
-        addr_bytes.copy_from_slice(&hash[..32]);
-        let sender_address = Address::from_bytes(&addr_bytes)
+        // Sui address is derived from public key using Blake2b with 0x00 prefix
+        use blake2::Digest as Blake2Digest;
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(pubkey_bytes);
+        let hash: [u8; 32] = hasher.finalize().into();
+        let sender_address = Address::from_bytes(&hash)
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to derive address: {}", e)))?;
 
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
+        // Fetch gas objects for the sender address
+        let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
+            .await
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to fetch gas objects: {}", e)))?;
+
+        if gas_objects.is_empty() {
+            return Err(SuiError::ConfigurationError("No gas objects found".to_string()));
+        }
+
         // Build the transaction using sui-transaction-builder
         let mut tx_builder = TransactionBuilder::new();
         tx_builder.set_sender(sender_address);
         tx_builder.set_gas_budget(gas_budget);
+        tx_builder.add_gas_objects(gas_objects);
 
         // Add the publish command
         tx_builder.publish(vec![package_bytes.to_vec()], vec![]);
@@ -123,38 +135,81 @@ impl PackageDeployer {
             .try_build()
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to build transaction: {}", e)))?;
 
-        // Serialize transaction to BCS
+        // Use proper Sui signing digest with intent scope
+        let signing_digest = tx_data.signing_digest();
+        let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
+
+        // Serialize transaction to BCS for execution
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to serialize transaction: {}", e)))?;
 
-        // Sign the transaction using Ed25519
-        let signature = signing_key.sign(&tx_bytes);
-        let sig_bytes = signature.to_bytes().to_vec();
-
         // Execute the transaction via sui-rpc
         let client = self.node.client();
-        let _client_guard = client.lock().await;
+        let mut client_guard = client.lock().await;
 
-        // Use the sui-rpc client's execute_transaction method
-        // The sui-rust-sdk requires constructing the proper proto types
-        // For now, return a mock digest since the proto API is complex
-        let mut hasher = Sha256::new();
-        hasher.update(&tx_bytes);
-        hasher.update(&sig_bytes);
-        let result = hasher.finalize();
+        // Build the ExecuteTransactionRequest
+        use sui_rpc::proto::sui::rpc::v2::{ExecuteTransactionRequest, Transaction, UserSignature};
+        use sui_sdk_types::SimpleSignature;
+
+        // Convert the transaction data to sui-sdk-types Transaction
+        // The bcs field expects Bcs type
+        let mut sui_transaction = Transaction::default();
+        sui_transaction.bcs = Some(tx_bytes.clone().into());
+
+        // Build the UserSignature using sui-sdk-types SimpleSignature
+        // This properly BCS-encodes the signature with the correct structure
+        let pubkey_bytes = public_key.as_bytes().to_vec();
+        let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|e| SuiError::ConfigurationError(format!("Invalid signature bytes: {:?}", e)))?;
+        let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|e| SuiError::ConfigurationError(format!("Invalid public key bytes: {:?}", e)))?;
+        let simple_sig = SimpleSignature::Ed25519 {
+            signature: sig_array.into(),
+            public_key: pubkey_array.into(),
+        };
+        let sig_bcs = bcs::to_bytes(&simple_sig)
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to serialize signature: {}", e)))?;
+        let mut user_signature = UserSignature::default();
+        user_signature.bcs = Some(sig_bcs.into());
+
+        // Build the ExecuteTransactionRequest
+        let mut execute_request = ExecuteTransactionRequest::default();
+        execute_request.transaction = Some(sui_transaction);
+        execute_request.signatures = vec![user_signature];
+
+        // Execute the transaction
+        let execution_response = (*client_guard)
+            .execution_client()
+            .execute_transaction(execute_request)
+            .await
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to execute transaction: {}", e)))?;
+
+        let executed_tx = execution_response.into_inner().transaction
+            .ok_or_else(|| SuiError::ConfigurationError("No transaction in response".to_string()))?;
+
+        // Extract the transaction digest from the response
+        let tx_digest_str = executed_tx.digest
+            .ok_or_else(|| SuiError::ConfigurationError("No transaction digest in response".to_string()))?;
+        let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
+            .map_err(|e| SuiError::ConfigurationError(format!("Invalid digest hex: {}", e)))?;
         let mut digest_array = [0u8; 32];
-        digest_array.copy_from_slice(&result[..32]);
+        digest_array.copy_from_slice(&digest_bytes[..32]);
 
         // Extract package ID from transaction effects
         // For now, use a deterministic hash as fallback since TransactionEffects structure is complex
+        use sha2::Sha256;
         let mut hasher2 = Sha256::new();
         hasher2.update(&digest_array);
         let result2 = hasher2.finalize();
         let mut package_id = [0u8; 32];
         package_id.copy_from_slice(&result2[..32]);
 
-        // Extract gas used - simplified for now since we don't have executed_tx
-        let gas_used = gas_budget;
+        // Extract gas used from effects if available
+        let gas_used = if let Some(effects) = executed_tx.effects {
+            effects.gas_used.map(|g| {
+                g.computation_cost.unwrap_or(0) + g.storage_cost.unwrap_or(0) + g.non_refundable_storage_fee.unwrap_or(0)
+            }).unwrap_or(gas_budget)
+        } else {
+            gas_budget
+        };
 
         // Extract module names from effects - simplified for now
         let modules = vec!["csv_seal".to_string()];

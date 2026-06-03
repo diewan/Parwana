@@ -860,6 +860,7 @@ impl ChainBackend for SolanaBackend {
         Ok(SealPoint {
             id: solana_seal.account.to_bytes().to_vec(),
             nonce: None,
+            version: None,
         })
     }
 

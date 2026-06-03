@@ -493,7 +493,7 @@ impl SealProtocol for EthereumSealProtocol {
         transition_payload_hash: Hash,
         seal_ref: &Self::SealPoint,
     ) -> Hash {
-        let core_seal = CoreSealPoint::new(seal_ref.to_vec(), Some(seal_ref.nonce))
+        let core_seal = CoreSealPoint::new(seal_ref.to_vec(), Some(seal_ref.nonce), None)
             .expect("valid seal reference");
         Commitment::simple(
             contract_id,
@@ -517,7 +517,7 @@ impl SealProtocol for EthereumSealProtocol {
             csv_codec::from_canonical_cbor(&transition_dag)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-        let seal_ref = CoreSealPoint::new(anchor.tx_hash.to_vec(), Some(anchor.log_index))
+        let seal_ref = CoreSealPoint::new(anchor.tx_hash.to_vec(), Some(anchor.log_index), None)
             .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
         let anchor_ref =

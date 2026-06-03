@@ -522,11 +522,13 @@ impl SealProtocol for SolanaSealProtocol {
                     csv_protocol::seal::SealPoint::new_unchecked(
                         s.account.to_bytes().to_vec(),
                         Some(s.lamports),
+                        None,
                     )
                 })
                 .unwrap_or_else(|| unsafe {
                     csv_protocol::seal::SealPoint::new_unchecked(
                         anchor_ref.signature.as_ref()[..32].to_vec(),
+                        None,
                         None,
                     )
                 })

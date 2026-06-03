@@ -17,7 +17,7 @@ fn replay_is_impossible() {
     let mut registry = SealNullifier::new();
 
     // Create a seal
-    let seal = SealPoint::new(vec![0x01; 16], None).unwrap();
+    let seal = SealPoint::new(vec![0x01; 16], None, None).unwrap(),
     let sanad_id = SanadId::new([0xCD; 32]);
     let chain = ChainId::new("bitcoin");
 
@@ -146,7 +146,7 @@ fn cross_chain_replay_is_prevented() {
     let mut registry = SealNullifier::new();
 
     // Same seal consumed on Bitcoin
-    let seal = SealPoint::new(vec![0x01; 16], None).unwrap();
+    let seal = SealPoint::new(vec![0x01; 16], None, None).unwrap(),
     let sanad_id = SanadId::new([0xCD; 32]);
     let btc_chain = ChainId::new("bitcoin");
 
@@ -194,7 +194,7 @@ fn cross_chain_replay_is_prevented() {
 fn rollback_replay_is_detected() {
     let mut registry = SealNullifier::new();
 
-    let seal = SealPoint::new(vec![0x02; 16], None).unwrap();
+    let seal = SealPoint::new(vec![0x02; 16], None, None).unwrap();
     let sanad_id = SanadId::new([0x11; 32]);
     let chain = ChainId::new("bitcoin");
 

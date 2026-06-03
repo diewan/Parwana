@@ -471,7 +471,7 @@ mod tests {
             Ok(ProofBundle::new(
                 DAGSegment::new(vec![node], csv_hash::Hash::new([0u8; 32])),
                 vec![vec![0u8; 64]],
-                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0)).unwrap(),
+                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None).unwrap(),
                 CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
                 InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
                 csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),

@@ -318,7 +318,7 @@ fn cmd_verify(
         let dag_node = DAGNode::new(dag_root, vec![], vec![], vec![], vec![]);
         let dag_segment = DAGSegment::new(vec![dag_node], dag_root);
 
-        let seal_ref = SealPoint::new(seal_id.clone(), None)
+        let seal_ref = SealPoint::new(seal_id.clone(), None, None)
             .map_err(|e| anyhow::anyhow!("Failed to create seal ref: {}", e))?;
 
         let anchor_ref = CommitAnchor::new(seal_id, anchor_height, inclusion_proof_bytes.clone())

@@ -605,7 +605,16 @@ impl CsvClient {
                                 ))?;
                             let signing_key = SigningKey::from_bytes(&key_array);
                             let public_key = signing_key.verifying_key();
-                            let signer_addr = format!("0x{}", hex::encode(public_key.as_bytes()));
+                            let pubkey_bytes = public_key.as_bytes();
+                            
+                            // Sui address is derived from public key using Blake2b with 0x00 prefix
+                            use blake2::Digest as Blake2Digest;
+                            use blake2::Blake2b;
+                            let mut hasher = Blake2b::new();
+                            hasher.update([0x00]); // Sui address prefix
+                            hasher.update(pubkey_bytes);
+                            let hash: [u8; 32] = hasher.finalize().into();
+                            let signer_addr = format!("0x{}", hex::encode(hash));
                             sui_config.signer_address = Some(signer_addr.clone());
                             
                             // Parse signer address bytes for RPC client

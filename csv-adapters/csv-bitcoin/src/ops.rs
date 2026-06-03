@@ -2206,6 +2206,7 @@ impl ChainBackend for BitcoinBackend {
         Ok(SealPoint {
             id: id_bytes,
             nonce: bitcoin_seal.nonce,
+            version: None,
         })
     }
 

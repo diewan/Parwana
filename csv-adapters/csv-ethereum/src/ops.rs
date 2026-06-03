@@ -1364,6 +1364,7 @@ impl ChainBackend for EthereumBackend {
         Ok(SealPoint {
             id: id_bytes,
             nonce: Some(ethereum_seal.nonce),
+            version: None,
         })
     }
 

@@ -41,6 +41,7 @@ pub mod checkpoint;
 pub mod config;
 pub mod deploy;
 pub mod error;
+pub mod gas_utils;
 pub mod mint;
 pub mod ops;
 pub mod proofs;

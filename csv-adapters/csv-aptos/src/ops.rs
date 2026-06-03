@@ -875,6 +875,7 @@ impl ChainBackend for AptosBackend {
         Ok(SealPoint {
             id: aptos_seal.account_address.to_vec(),
             nonce: Some(aptos_seal.nonce),
+            version: None,
         })
     }
 

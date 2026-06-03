@@ -32,7 +32,7 @@ impl TestProofBundle {
         .expect("Valid finality proof data");
 
         let transition_dag = DAGSegment::new(vec![], Hash::new([4u8; 32]));
-        let seal_ref = SealPoint::new(vec![5u8; 32], Some(42)).unwrap();
+        let seal_ref = SealPoint::new(vec![5u8; 32], Some(42), None).unwrap();
         let anchor_ref = CommitAnchor::new(vec![6u8; 32], 100, vec![]).unwrap();
 
         ProofBundle::new(

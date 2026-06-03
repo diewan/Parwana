@@ -297,7 +297,7 @@ mod tests {
 
     fn make_genesis_commitment(contract_id: Hash) -> Commitment {
         let domain = [0u8; 32];
-        let seal = SealPoint::new(vec![0x01], None).unwrap();
+        let seal = SealPoint::new(vec![0x01], None, None).unwrap();
         Commitment::new(
             Hash::new([0xC0; 32]),
             Hash::new([0u8; 32]),
@@ -311,7 +311,7 @@ mod tests {
 
     fn make_commitment(contract_id: Hash, previous_commitment: Hash, seal_id: u8) -> Commitment {
         let domain = [0u8; 32];
-        let seal = SealPoint::new(vec![seal_id], None).unwrap();
+        let seal = SealPoint::new(vec![seal_id], None, None).unwrap();
         Commitment::new(
             Hash::new([0xC0; 32]),
             Hash::new([0u8; 32]),

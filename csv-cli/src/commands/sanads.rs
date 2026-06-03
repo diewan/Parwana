@@ -357,6 +357,13 @@ async fn cmd_create(
         let pk_hex = hex::encode(secret_key.as_bytes());
         log::info!("CLI LAYER: Private key (first 8 bytes): 0x{}", &pk_hex[..16]);
 
+        // Derive and log the address for this key
+        let core_chain = csv_hash::ChainId::new(chain.as_str());
+        if let Ok(address) = csv_keys::bip44::derive_address_from_key(secret_key.as_bytes(), &core_chain) {
+            log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
+            eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
+        }
+
         pk_hex
     };
 
@@ -420,6 +427,7 @@ async fn cmd_create(
         let seal = csv_hash::seal::SealPoint {
             id: id_bytes,
             nonce: Some(selected_utxo.2),
+            version: None,
         };
         log::info!("BITCOIN: Seal point created (id length: {} bytes, nonce: {} sats)", seal.id.len(), selected_utxo.2);
 

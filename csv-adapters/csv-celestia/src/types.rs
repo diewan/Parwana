@@ -82,7 +82,7 @@ impl CelestiaSealPoint {
 
     /// Convert to core SealPoint
     pub fn to_core_seal(&self) -> csv_hash::seal::SealPoint {
-        csv_hash::seal::SealPoint::new(self.proof_id.to_bytes().to_vec(), Some(self.height))
+        csv_hash::seal::SealPoint::new(self.proof_id.to_bytes().to_vec(), Some(self.height), None)
             .unwrap_or_else(|_| {
                 // SAFETY: We're falling back to unchecked creation only when the safe API fails,
                 // and the data is derived from valid internal state.
@@ -90,6 +90,7 @@ impl CelestiaSealPoint {
                     csv_hash::seal::SealPoint::new_unchecked(
                         self.proof_id.to_bytes().to_vec(),
                         Some(self.height),
+                        None,
                     )
                 }
             })

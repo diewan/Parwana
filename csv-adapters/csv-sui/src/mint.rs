@@ -49,21 +49,33 @@ pub async fn mint_sanad(
     let public_key = signing_key.verifying_key();
     let pubkey_bytes = public_key.as_bytes();
 
-    // Sui address is derived from public key using SHA2-256
-    use sha2::{Digest as Sha256Digest, Sha256};
-    let hash = Sha256::digest(pubkey_bytes);
-    let mut addr_bytes = [0u8; 32];
-    addr_bytes.copy_from_slice(&hash[..32]);
-    let sender_address = Address::from_bytes(addr_bytes)
+    // Sui address is derived from public key using Blake2b with 0x00 prefix
+    use blake2::Digest as Blake2Digest;
+    use blake2::Blake2b;
+    let mut hasher = Blake2b::new();
+    hasher.update([0x00]); // Sui address prefix
+    hasher.update(pubkey_bytes);
+    let hash: [u8; 32] = hasher.finalize().into();
+    let sender_address = Address::from_bytes(&hash)
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to derive address: {}", e)))?;
 
     let client = node.client();
     let _client_guard = client.lock().await;
 
+    // Fetch gas objects for the sender address
+    let gas_objects = crate::gas_utils::fetch_gas_objects(node, &sender_address)
+        .await
+        .map_err(|e| SuiError::TransactionFailed(format!("Failed to fetch gas objects: {}", e)))?;
+
+    if gas_objects.is_empty() {
+        return Err(SuiError::TransactionFailed("No gas objects found".to_string()));
+    }
+
     // Build the transaction using sui-transaction-builder
     let mut tx_builder = TransactionBuilder::new();
     tx_builder.set_sender(sender_address);
     tx_builder.set_gas_budget(10000000);
+    tx_builder.add_gas_objects(gas_objects);
 
     // Add the MoveCall to mint the sanad
     let function = sui_transaction_builder::Function::new(
@@ -84,19 +96,20 @@ pub async fn mint_sanad(
     let tx_data = tx_builder.try_build()
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to build transaction: {}", e)))?;
 
-    // Serialize transaction to BCS
+    // Use proper Sui signing digest with intent scope
+    let signing_digest = tx_data.signing_digest();
+    let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
+
+    // Serialize transaction to BCS for execution
     let tx_bytes = bcs::to_bytes(&tx_data)
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
-
-    // Sign the transaction using Ed25519
-    let signature = signing_key.sign(&tx_bytes);
-    let sig_bytes = signature.to_bytes().to_vec();
 
     // Execute the transaction via sui-rpc
     let client = node.client();
     let _client_guard = client.lock().await;
 
     // Use a simplified execution approach since the proto API is complex
+    use sha2::Sha256;
     let mut hasher = Sha256::new();
     hasher.update(&tx_bytes);
     hasher.update(&sig_bytes);

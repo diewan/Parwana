@@ -9,6 +9,7 @@
 //! - ChainSanadOps: Sanad management operations
 
 use async_trait::async_trait;
+use blake2::Digest as Blake2Digest;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
@@ -556,14 +557,15 @@ impl ChainSigner for SuiBackend {
         let mut pubkey = [0u8; 32];
         pubkey.copy_from_slice(public_key);
 
-        // Sui address is derived from public key using SHA2-256
-        // Address = SHA2-256(pubkey)[0..32]
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(pubkey);
-        let mut addr = [0u8; 32];
-        addr.copy_from_slice(&hash[..32]);
+        // Sui address is derived from public key using Blake2b with 0x00 prefix
+        // Address = Blake2b([0x00] || pubkey)[0..32]
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(pubkey);
+        let hash: [u8; 32] = hasher.finalize().into();
 
-        Ok(format!("0x{}", hex::encode(addr)))
+        Ok(format!("0x{}", hex::encode(&hash[..])))
     }
 
     fn signature_scheme(&self) -> SignatureScheme {
@@ -586,39 +588,48 @@ impl ChainBroadcaster for SuiBackend {
         // Derive the sender address from the signing key
         let public_key = signing_key.verifying_key();
         let pubkey_bytes = public_key.as_bytes();
+        log::info!("SUI: Public key (first 8 bytes): 0x{}", hex::encode(&pubkey_bytes[..8]));
 
-        // Sui address is derived from public key using SHA2-256
-        use sha2::{Digest as Sha256Digest, Sha256};
-        let hash = Sha256::digest(pubkey_bytes);
-        let mut addr_bytes = [0u8; 32];
-        addr_bytes.copy_from_slice(&hash[..32]);
-        let sender_address = sui_sdk_types::Address::from_bytes(&addr_bytes)
+        // Sui address is derived from public key using Blake2b with 0x00 prefix
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(pubkey_bytes);
+        let hash: [u8; 32] = hasher.finalize().into();
+        let sender_address = sui_sdk_types::Address::from_bytes(&hash)
             .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
+        log::info!("SUI: Derived sender address from signing key: {}", sender_address);
+
+        // Fetch gas objects for the sender address
+        let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch gas objects: {}", e)))?;
 
         // Build a simple transaction for submission
         use sui_transaction_builder::TransactionBuilder;
         let mut tx_builder = TransactionBuilder::new();
         tx_builder.set_sender(sender_address);
         tx_builder.set_gas_budget(10000000);
+        tx_builder.add_gas_objects(gas_objects);
 
         // Build the transaction data
         let tx_data = tx_builder.try_build()
             .map_err(|e| ChainOpError::RpcError(format!("Failed to build transaction: {}", e)))?;
 
-        // Serialize transaction to BCS
+        // Use proper Sui signing digest with intent scope
+        let signing_digest = tx_data.signing_digest();
+        let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
+
+        // Serialize transaction to BCS for execution
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| ChainOpError::RpcError(format!("Failed to serialize transaction: {}", e)))?;
-
-        // Sign the transaction using Ed25519
-        let signature = signing_key.sign(&tx_bytes);
-        let sig_bytes = signature.to_bytes().to_vec();
 
         // Execute the transaction via sui-rpc
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
         // Use a simplified execution approach since the proto API is complex
-        let mut hasher = Sha256::new();
+        let mut hasher = sha2::Sha256::new();
         hasher.update(&tx_bytes);
         hasher.update(&sig_bytes);
         let result = hasher.finalize();
@@ -908,12 +919,13 @@ impl ChainSanadOps for SuiBackend {
         let public_key = signing_key.verifying_key();
         let pubkey_bytes = public_key.as_bytes();
 
-        // Sui address is derived from public key using SHA2-256
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(pubkey_bytes);
-        let mut addr_bytes = [0u8; 32];
-        addr_bytes.copy_from_slice(&hash[..32]);
-        let sender_address = Address::from_bytes(addr_bytes)
+        // Sui address is derived from public key using Blake2b with 0x00 prefix
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(pubkey_bytes);
+        let hash: [u8; 32] = hasher.finalize().into();
+        let sender_address = Address::from_bytes(&hash)
             .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
 
         // Get the package ID from config (if available)
@@ -926,6 +938,11 @@ impl ChainSanadOps for SuiBackend {
         let package_id = Address::from_bytes(&package_id_bytes)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
 
+        // Fetch gas objects for the sender address
+        let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch gas objects: {}", e)))?;
+
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
@@ -933,6 +950,7 @@ impl ChainSanadOps for SuiBackend {
         let mut tx_builder = TransactionBuilder::new();
         tx_builder.set_sender(sender_address);
         tx_builder.set_gas_budget(10000000);
+        tx_builder.add_gas_objects(gas_objects);
 
         // Add the MoveCall to create the sanad
         let function = sui_transaction_builder::Function::new(
@@ -952,20 +970,20 @@ impl ChainSanadOps for SuiBackend {
         let tx_data = tx_builder.try_build()
             .map_err(|e| ChainOpError::RpcError(format!("Failed to build transaction: {}", e)))?;
 
-        // Serialize transaction to BCS
+        // Use proper Sui signing digest with intent scope
+        let signing_digest = tx_data.signing_digest();
+        let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
+
+        // Serialize transaction to BCS for execution
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| ChainOpError::RpcError(format!("Failed to serialize transaction: {}", e)))?;
-
-        // Sign the transaction using Ed25519
-        let signature = signing_key.sign(&tx_bytes);
-        let sig_bytes = signature.to_bytes().to_vec();
 
         // Execute the transaction via sui-rpc
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
         // Use a simplified execution approach since the proto API is complex
-        let mut hasher = Sha256::new();
+        let mut hasher = sha2::Sha256::new();
         hasher.update(&tx_bytes);
         hasher.update(&sig_bytes);
         let result = hasher.finalize();
@@ -1009,12 +1027,13 @@ impl ChainSanadOps for SuiBackend {
         let public_key = signing_key.verifying_key();
         let pubkey_bytes = public_key.as_bytes();
 
-        // Sui address is derived from public key using SHA2-256
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(pubkey_bytes);
-        let mut addr_bytes = [0u8; 32];
-        addr_bytes.copy_from_slice(&hash[..32]);
-        let sender_address = Address::from_bytes(addr_bytes)
+        // Sui address is derived from public key using Blake2b with 0x00 prefix
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(pubkey_bytes);
+        let hash: [u8; 32] = hasher.finalize().into();
+        let sender_address = Address::from_bytes(&hash)
             .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
 
         // Get the package ID from config (if available)
@@ -1027,6 +1046,11 @@ impl ChainSanadOps for SuiBackend {
         let package_id = Address::from_bytes(&package_id_bytes)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
 
+        // Fetch gas objects for the sender address
+        let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch gas objects: {}", e)))?;
+
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
@@ -1034,6 +1058,7 @@ impl ChainSanadOps for SuiBackend {
         let mut tx_builder = TransactionBuilder::new();
         tx_builder.set_sender(sender_address);
         tx_builder.set_gas_budget(10000000);
+        tx_builder.add_gas_objects(gas_objects);
 
         // Add the MoveCall to consume the sanad
         let function = sui_transaction_builder::Function::new(
@@ -1048,20 +1073,20 @@ impl ChainSanadOps for SuiBackend {
         let tx_data = tx_builder.try_build()
             .map_err(|e| ChainOpError::RpcError(format!("Failed to build transaction: {}", e)))?;
 
-        // Serialize transaction to BCS
+        // Use proper Sui signing digest with intent scope
+        let signing_digest = tx_data.signing_digest();
+        let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
+
+        // Serialize transaction to BCS for execution
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| ChainOpError::RpcError(format!("Failed to serialize transaction: {}", e)))?;
-
-        // Sign the transaction using Ed25519
-        let signature = signing_key.sign(&tx_bytes);
-        let sig_bytes = signature.to_bytes().to_vec();
 
         // Execute the transaction via sui-rpc
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
         // Use a simplified execution approach since the proto API is complex
-        let mut hasher = Sha256::new();
+        let mut hasher = sha2::Sha256::new();
         hasher.update(&tx_bytes);
         hasher.update(&sig_bytes);
         let result = hasher.finalize();
@@ -1086,7 +1111,6 @@ impl ChainSanadOps for SuiBackend {
         _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         use ed25519_dalek::Signer;
-        use sha2::{Digest, Sha256};
         use sui_sdk_types::{Address, Identifier};
         use sui_transaction_builder::TransactionBuilder;
 
@@ -1096,6 +1120,24 @@ impl ChainSanadOps for SuiBackend {
                     .to_string(),
             )
         })?;
+
+        // Derive the sender address from the signing key
+        let public_key = signing_key.verifying_key();
+        let pubkey_bytes = public_key.as_bytes();
+
+        // Sui address is derived from public key using Blake2b with 0x00 prefix
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(pubkey_bytes);
+        let hash: [u8; 32] = hasher.finalize().into();
+        let sender_address = Address::from_bytes(&hash)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
+
+        // Fetch gas objects for the sender address
+        let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch gas objects: {}", e)))?;
 
         // Build lock transaction
         let package_id_str = self.config.seal_contract.package_id.as_ref()
@@ -1108,8 +1150,9 @@ impl ChainSanadOps for SuiBackend {
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
 
         let mut tx_builder = TransactionBuilder::new();
-        tx_builder.set_sender(Address::ZERO);
+        tx_builder.set_sender(sender_address);
         tx_builder.set_gas_budget(10000000);
+        tx_builder.add_gas_objects(gas_objects);
 
         let sanad_id_bytes = sanad_id.as_bytes();
         let sanad_object_id = Address::from_bytes(sanad_id_bytes)
@@ -1132,17 +1175,20 @@ impl ChainSanadOps for SuiBackend {
         let tx_data = tx_builder.try_build()
             .map_err(|e| ChainOpError::RpcError(format!("Failed to build transaction: {}", e)))?;
 
+        // Use proper Sui signing digest with intent scope
+        let signing_digest = tx_data.signing_digest();
+        let _sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
+
+        // Serialize transaction to BCS for execution
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| ChainOpError::RpcError(format!("Failed to serialize transaction: {}", e)))?;
-
-        let _signature = signing_key.sign(&tx_bytes);
 
         // Execute transaction via sui-rpc
         let client = self.node.client();
         let _client_guard = client.lock().await;
 
         // Use a simplified execution approach since the proto API is complex
-        let mut hasher = Sha256::new();
+        let mut hasher = sha2::Sha256::new();
         hasher.update(&tx_bytes);
         let result = hasher.finalize();
         let mut digest_array = [0u8; 32];
@@ -1194,7 +1240,7 @@ impl ChainSanadOps for SuiBackend {
 
         let commitment = Hash::new([0u8; 32]); // Placeholder - should derive from lock_proof
         let source_chain_byte = source_chain.as_bytes()[0];
-        let _source_seal = SealPoint::new(vec![0u8; 32], Some(0)).unwrap();
+        let _source_seal = SealPoint::new(vec![0u8; 32], Some(0), None).unwrap();
 
         let tx_digest = mint_sanad(
             &self.node,
@@ -1302,6 +1348,7 @@ impl ChainBackend for SuiBackend {
         Ok(SealPoint {
             id: sui_seal.object_id.to_vec(),
             nonce: Some(sui_seal.nonce),
+            version: Some(sui_seal.version),
         })
     }
 
@@ -1316,7 +1363,11 @@ impl ChainBackend for SuiBackend {
         object_id.copy_from_slice(&seal.id[..32]);
 
         let nonce = seal.nonce.unwrap_or(0);
-        let sui_seal = crate::types::SuiSealPoint::new(object_id, 0, nonce);
+        let version = seal.version.unwrap_or(0);
+        // csv-protocol SealPoint doesn't have digest field, use empty string
+        // In production, this should be fetched from the chain
+        let digest = String::new();
+        let sui_seal = crate::types::SuiSealPoint::new(object_id, version, digest, nonce);
 
         let sui_anchor = self
             .seal_protocol

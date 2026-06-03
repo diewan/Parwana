@@ -32,6 +32,8 @@ pub struct SealPoint {
     pub id: Vec<u8>,
     /// Optional nonce for replay resistance
     pub nonce: Option<u64>,
+    /// Version number (chain-specific, e.g., Sui object version)
+    pub version: Option<u64>,
 }
 
 impl SealPoint {
@@ -40,17 +42,18 @@ impl SealPoint {
     /// # Arguments
     /// * `id` - Chain-specific seal identifier (max 1KB)
     /// * `nonce` - Optional nonce for replay resistance
+    /// * `version` - Optional version number (chain-specific)
     ///
     /// # Errors
     /// Returns an error if the id exceeds the maximum allowed size
-    pub fn new(id: Vec<u8>, nonce: Option<u64>) -> Result<Self, &'static str> {
+    pub fn new(id: Vec<u8>, nonce: Option<u64>, version: Option<u64>) -> Result<Self, &'static str> {
         if id.len() > MAX_SEAL_ID_SIZE {
             return Err("id exceeds maximum allowed size (1KB)");
         }
         if id.is_empty() {
             return Err("id cannot be empty");
         }
-        Ok(Self { id, nonce })
+        Ok(Self { id, nonce, version })
     }
 
     /// Create a new SealPoint without validation.
@@ -63,8 +66,8 @@ impl SealPoint {
     ///
     /// Violating these requirements causes undefined behavior in downstream code
     /// that assumes valid seal IDs (e.g., hash map lookups, size assertions).
-    pub unsafe fn new_unchecked(id: Vec<u8>, nonce: Option<u64>) -> Self {
-        Self { id, nonce }
+    pub unsafe fn new_unchecked(id: Vec<u8>, nonce: Option<u64>, version: Option<u64>) -> Self {
+        Self { id, nonce, version }
     }
 
     /// Serialize to bytes (DEPRECATED - use to_canonical_bytes for protocol-critical paths)
@@ -73,17 +76,24 @@ impl SealPoint {
     /// This method is deprecated for protocol-critical hashing. Use `to_canonical_bytes()` instead.
     /// Manual serialization is forbidden in protocol-critical hashing paths per AUDIT.md.
     ///
-    /// Format: `[nonce_flag(1) | nonce_bytes(8 if flag=1) | id_len(varuint) | id]`
+    /// Format: `[nonce_flag(1) | nonce_bytes(8 if flag=1) | version_flag(1) | version_bytes(8 if flag=1) | id_len(varuint) | id]`
     /// The nonce_flag is 1 for `Some(nonce)`, 0 for `None`.
+    /// The version_flag is 1 for `Some(version)`, 0 for `None`.
     #[deprecated(
         since = "1.0.0",
         note = "Use to_canonical_bytes() for protocol-critical paths"
     )]
     pub fn to_vec(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(9 + self.id.len());
+        let mut out = Vec::with_capacity(10 + self.id.len());
         if let Some(nonce) = self.nonce {
             out.push(1);
             out.extend_from_slice(&nonce.to_le_bytes());
+        } else {
+            out.push(0);
+        }
+        if let Some(version) = self.version {
+            out.push(1);
+            out.extend_from_slice(&version.to_le_bytes());
         } else {
             out.push(0);
         }
@@ -128,6 +138,32 @@ impl SealPoint {
             _ => return Err("invalid nonce flag"),
         };
 
+        let version = match bytes[pos] {
+            0 => {
+                pos += 1;
+                None
+            }
+            1 => {
+                pos += 1;
+                if bytes.len() < pos + 8 {
+                    return Err("insufficient bytes for version");
+                }
+                let version_bytes = [
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                    bytes[pos + 4],
+                    bytes[pos + 5],
+                    bytes[pos + 6],
+                    bytes[pos + 7],
+                ];
+                pos += 8;
+                Some(u64::from_le_bytes(version_bytes))
+            }
+            _ => return Err("invalid version flag"),
+        };
+
         if bytes.len() < pos + 4 {
             return Err("insufficient bytes for id length");
         }
@@ -145,7 +181,7 @@ impl SealPoint {
             return Err("id exceeds maximum allowed size (1KB)");
         }
 
-        Ok(Self { id, nonce })
+        Ok(Self { id, nonce, version })
     }
 
     /// Serialize to canonical CBOR bytes for hashing.
@@ -329,14 +365,15 @@ mod tests {
 
     #[test]
     fn test_seal_point_creation() {
-        let seal = SealPoint::new(vec![1, 2, 3], Some(42)).unwrap();
+        let seal = SealPoint::new(vec![1, 2, 3], Some(42), Some(1)).unwrap();
         assert_eq!(seal.id, vec![1, 2, 3]);
         assert_eq!(seal.nonce, Some(42));
+        assert_eq!(seal.version, Some(1));
     }
 
     #[test]
     fn test_seal_point_to_vec_roundtrip() {
-        let seal = SealPoint::new(vec![1, 2, 3], Some(42)).unwrap();
+        let seal = SealPoint::new(vec![1, 2, 3], Some(42), Some(1)).unwrap();
         let bytes = seal.to_vec();
         let restored = SealPoint::from_bytes(&bytes).unwrap();
         assert_eq!(seal, restored);
@@ -345,12 +382,12 @@ mod tests {
     #[test]
     fn test_seal_point_too_large() {
         let large_id = vec![0u8; 1025];
-        assert!(SealPoint::new(large_id, None).is_err());
+        assert!(SealPoint::new(large_id, None, None).is_err());
     }
 
     #[test]
     fn test_seal_point_empty_id() {
-        assert!(SealPoint::new(vec![], None).is_err());
+        assert!(SealPoint::new(vec![], None, None).is_err());
     }
 
     #[test]
@@ -388,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_canonical_bytes_roundtrip() {
-        let seal = SealPoint::new(vec![1, 2, 3], Some(42)).unwrap();
+        let seal = SealPoint::new(vec![1, 2, 3], Some(42), Some(1)).unwrap();
         let bytes = seal.to_canonical_bytes().unwrap();
         let restored = SealPoint::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(seal, restored);

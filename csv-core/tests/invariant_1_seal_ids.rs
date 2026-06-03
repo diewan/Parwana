@@ -58,15 +58,15 @@ mod tests {
     #[test]
     fn test_new_unchecked_accepts_verified_data() {
         let verified_id = vec![0xABu8, 0xCD];
-        let seal = unsafe { SealPoint::new_unchecked(verified_id, None) };
+        let seal = unsafe { SealPoint::new_unchecked(verified_id, None, None) };
         assert!(!seal.id.is_empty(), "new_unchecked should preserve data");
     }
 
     /// Property: Seal IDs are unique for different inputs
     #[test]
     fn test_seal_uniqueness() {
-        let seal1 = SealPoint::new(vec![1u8; 32], Some(1)).unwrap();
-        let seal2 = SealPoint::new(vec![2u8; 32], Some(2)).unwrap();
+        let seal1 = SealPoint::new(vec![1u8; 32], Some(1), None).unwrap();
+        let seal2 = SealPoint::new(vec![2u8; 32], Some(2), None).unwrap();
         assert_ne!(
             seal1.id, seal2.id,
             "Different inputs must produce different seal IDs"

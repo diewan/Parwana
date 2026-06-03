@@ -872,7 +872,7 @@ impl SealProtocol for AptosSealProtocol {
         seal_point: &Self::SealPoint,
     ) -> Hash {
         let core_seal =
-            CoreSealPoint::new(seal_point.account_address.to_vec(), Some(seal_point.nonce))
+            CoreSealPoint::new(seal_point.account_address.to_vec(), Some(seal_point.nonce), None)
                 .expect("valid seal reference");
         Commitment::simple(
             contract_id,
@@ -891,7 +891,7 @@ impl SealProtocol for AptosSealProtocol {
     ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let inclusion = self.verify_inclusion(anchor.clone()).await?;
         let finality = self.verify_finality(anchor.clone()).await?;
-        let seal_ref = CoreSealPoint::new(anchor.event_handle.to_vec(), Some(anchor.version))
+        let seal_ref = CoreSealPoint::new(anchor.event_handle.to_vec(), Some(anchor.version), None)
             .map_err(|e| {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;
