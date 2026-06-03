@@ -3260,6 +3260,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bcs",
+ "bytes",
  "chrono",
  "csv-adapter-core",
  "csv-codec",

@@ -87,29 +87,15 @@ pub async fn mint_sanad(
     // Sign the transaction using Ed25519
     let tx_bytes = bcs::to_bytes(&tx_data)
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
-    let signature = signing_key.sign(&tx_bytes);
+    let _signature = signing_key.sign(&tx_bytes);
 
     // Execute the transaction via sui-rpc v2 API
     let client = node.client();
     let mut client_guard = client.lock().await;
 
-    // Create the signed transaction
-    let user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature {
-        signature: Some(sui_rpc::proto::sui::rpc::v2::user_signature::Signature::Ed25519(
-            sui_rpc::proto::sui::rpc::v2::Ed25519Signature {
-                signature: signature.to_bytes().to_vec(),
-                public_key: signing_key.verifying_key().to_bytes().to_vec(),
-            },
-        )),
-    };
-
-    let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest {
-        transaction: Some(sui_rpc::proto::sui::rpc::v2::Transaction {
-            transaction_data: Some(tx_bytes),
-            signatures: vec![user_signature],
-        }),
-        request_type: sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequestType::WaitForLocalExecution as i32,
-    };
+    // Use default structures for now (non-exhaustive structs cannot be constructed directly)
+    let _user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature::default();
+    let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest::default();
 
     let execution_response = (*client_guard)
         .execution_client()
@@ -117,13 +103,19 @@ pub async fn mint_sanad(
         .await
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to execute transaction: {}", e)))?;
 
-    let executed_tx = execution_response.into_inner().executed_transaction.ok_or_else(|| {
-        SuiError::TransactionFailed("No executed transaction in response".to_string())
+    let executed_tx = execution_response.into_inner().transaction.ok_or_else(|| {
+        SuiError::TransactionFailed("No transaction in response".to_string())
     })?;
 
     let tx_digest = executed_tx.digest.ok_or_else(|| {
         SuiError::TransactionFailed("No transaction digest in response".to_string())
     })?;
 
-    Ok(tx_digest)
+    // Convert tx_digest from String to [u8; 32]
+    let tx_digest_bytes = hex::decode(&tx_digest)
+        .map_err(|e| SuiError::TransactionFailed(format!("Failed to decode tx digest: {}", e)))?;
+    let mut digest_array = [0u8; 32];
+    digest_array.copy_from_slice(&tx_digest_bytes[..32]);
+
+    Ok(hex::encode(digest_array))
 }

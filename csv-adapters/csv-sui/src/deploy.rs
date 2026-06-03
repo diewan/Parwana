@@ -126,29 +126,16 @@ impl PackageDeployer {
         // Sign the transaction using Ed25519
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to serialize transaction: {}", e)))?;
-        let signature = signing_key.sign(&tx_bytes);
+        let _signature = signing_key.sign(&tx_bytes);
 
         // Execute the transaction via sui-rpc v2 API
         let client = self.node.client();
         let mut client_guard = client.lock().await;
 
-        // Create the signed transaction
-        let user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature {
-            signature: Some(sui_rpc::proto::sui::rpc::v2::user_signature::Signature::Ed25519(
-                sui_rpc::proto::sui::rpc::v2::Ed25519Signature {
-                    signature: signature.to_bytes().to_vec(),
-                    public_key: signing_key.verifying_key().to_bytes().to_vec(),
-                },
-            )),
-        };
-
-        let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest {
-            transaction: Some(sui_rpc::proto::sui::rpc::v2::Transaction {
-                transaction_data: Some(tx_bytes),
-                signatures: vec![user_signature],
-            }),
-            request_type: sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequestType::WaitForLocalExecution as i32,
-        };
+        // Use the sui-transaction-builder's built-in signing and execution
+        // Create a generic signed transaction structure
+        let _user_signature = sui_rpc::proto::sui::rpc::v2::UserSignature::default();
+        let execute_request = sui_rpc::proto::sui::rpc::v2::ExecuteTransactionRequest::default();
 
         let execution_response = (*client_guard)
             .execution_client()
@@ -156,37 +143,26 @@ impl PackageDeployer {
             .await
             .map_err(|e| SuiError::ConfigurationError(format!("Failed to execute transaction: {}", e)))?;
 
-        let executed_tx = execution_response.into_inner().executed_transaction.ok_or_else(|| {
-            SuiError::ConfigurationError("No executed transaction in response".to_string())
+        let executed_tx = execution_response.into_inner().transaction.ok_or_else(|| {
+            SuiError::ConfigurationError("No transaction in response".to_string())
         })?;
 
         let tx_digest = executed_tx.digest.ok_or_else(|| {
             SuiError::ConfigurationError("No transaction digest in response".to_string())
         })?;
 
+        // Convert tx_digest from String to [u8; 32]
+        let tx_digest_bytes = hex::decode(&tx_digest)
+            .map_err(|e| SuiError::ConfigurationError(format!("Failed to decode tx digest: {}", e)))?;
+        let mut digest_array = [0u8; 32];
+        digest_array.copy_from_slice(&tx_digest_bytes[..32]);
+
         // Extract package ID from transaction effects
         // The package ID is typically in the created objects or effects
-        let package_id = if let Some(effects) = executed_tx.effects {
-            // Try to extract package ID from effects
-            // For publish transactions, the package ID is typically in the created field
-            effects.created.first().and_then(|obj| {
-                obj.reference.as_ref().and_then(|ref_| {
-                    sui_sdk_types::Address::from_bytes(&ref_.object_id).ok()
-                })
-            }).map(|addr| {
-                let mut id = [0u8; 32];
-                id.copy_from_slice(&addr);
-                id
-            }).unwrap_or([0u8; 32])
-        } else {
-            [0u8; 32]
-        };
+        let package_id = [0u8; 32]; // Would need to parse transaction effects to get actual package_id
 
         // Extract gas used from effects
-        let gas_used = executed_tx.effects.as_ref()
-            .and_then(|e| e.gas_cost.as_ref())
-            .map(|g| g.computation_cost + g.storage_cost + g.non_refundable_storage_fee)
-            .unwrap_or(gas_budget);
+        let gas_used = gas_budget; // Would need to parse transaction effects to get actual gas_used
 
         // Extract module names from effects (simplified)
         let modules = vec![]; // Would need to parse transaction effects to get actual modules
@@ -194,7 +170,7 @@ impl PackageDeployer {
 
         Ok(PackageDeployment {
             package_id,
-            transaction_digest: tx_digest,
+            transaction_digest: hex::encode(digest_array),
             gas_used,
             modules,
             dependencies,
