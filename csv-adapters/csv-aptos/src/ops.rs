@@ -659,14 +659,92 @@ impl ChainSanadOps for AptosBackend {
         sanad_id: &SanadId,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let _ = sanad_id;
         let _ = owner_key_id;
 
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad consumption requires signed transaction. \
-             Construct and submit a transaction to consume the seal resource."
-                .to_string(),
-        ))
+        #[cfg(feature = "rpc")]
+        {
+            use csv_protocol::backend::SanadOperation;
+            use crate::types::AptosSealPoint;
+
+            // The sanad_id is the commitment hash
+            let commitment = *sanad_id.as_bytes();
+
+            log::info!("APTOS: Consuming sanad with commitment: {}", hex::encode(commitment));
+
+            // Create a seal point - for consume, the seal is at the signer's address
+            // The actual address will be derived from the signing key in build_and_sign_entry_function
+            let seal = AptosSealPoint {
+                account_address: [0u8; 32], // Will be derived from signing key
+                resource_type: "0x1::csv_seal::Seal".to_string(),
+                nonce: 0u64,
+            };
+
+            // Build and sign the consume_seal transaction using the seal protocol
+            let (signed_tx, _event_data) = self
+                .seal_protocol
+                .build_and_sign_entry_function(&seal, commitment)
+                .await
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!(
+                        "Failed to build and sign consume_seal transaction: {}",
+                        e
+                    ))
+                })?;
+
+            log::info!("APTOS: Built and signed consume_seal transaction");
+
+            // Submit the signed transaction via RPC
+            log::info!("APTOS: Submitting consume_seal transaction");
+            let tx_hash = self
+                .rpc
+                .submit_signed_transaction(signed_tx)
+                .await
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
+                })?;
+
+            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+
+            // Wait for transaction confirmation
+            log::info!("APTOS: Waiting for transaction confirmation");
+            let tx = match self.rpc.wait_for_transaction(tx_hash).await {
+                Ok(tx) => tx,
+                Err(e) => {
+                    // Timeout or error waiting - try to get transaction status directly
+                    log::warn!("APTOS: Timeout waiting for transaction, querying status directly");
+                    // Try to get transaction by hash (if RPC supports it) or return error with tx hash
+                    return Err(ChainOpError::Timeout(format!(
+                        "Timeout waiting for transaction confirmation. Transaction hash: {}. Check explorer for status.",
+                        hex::encode(tx_hash)
+                    )));
+                }
+            };
+
+            if !tx.success {
+                return Err(ChainOpError::TransactionError(format!(
+                    "Transaction failed with VM status: {}",
+                    tx.vm_status
+                )));
+            }
+
+            log::info!("APTOS: Transaction confirmed successfully");
+
+            Ok(SanadOperationResult {
+                sanad_id: sanad_id.clone(),
+                operation: SanadOperation::Consume,
+                transaction_hash: hex::encode(tx_hash),
+                block_height: tx.version,
+                chain_id: "aptos".to_string(),
+                metadata: serde_json::json!({}),
+            })
+        }
+
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(ChainOpError::CapabilityUnavailable(
+                "Sanad consumption requires RPC feature. Enable with --features rpc".to_string(),
+            ))
+        }
     }
 
     async fn lock_sanad(

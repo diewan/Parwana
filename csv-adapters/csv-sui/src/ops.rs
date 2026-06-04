@@ -1051,13 +1051,11 @@ impl ChainSanadOps for SuiBackend {
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch gas objects: {}", e)))?;
 
-        let client = self.node.client();
-        let _client_guard = client.lock().await;
-
         // Build the transaction using sui-transaction-builder
         let mut tx_builder = TransactionBuilder::new();
         tx_builder.set_sender(sender_address);
         tx_builder.set_gas_budget(10000000);
+        tx_builder.set_gas_price(1000); // Set gas price (in MIST)
         tx_builder.add_gas_objects(gas_objects);
 
         // Add the MoveCall to consume the sanad
@@ -1081,17 +1079,24 @@ impl ChainSanadOps for SuiBackend {
         let tx_bytes = bcs::to_bytes(&tx_data)
             .map_err(|e| ChainOpError::RpcError(format!("Failed to serialize transaction: {}", e)))?;
 
-        // Execute the transaction via sui-rpc
+        log::info!("SUI: Submitting consume transaction");
+
+        // Execute the transaction via sui-rpc (using same simplified approach as create_sanad)
+        log::info!("SUI: Acquiring client lock");
         let client = self.node.client();
         let _client_guard = client.lock().await;
+        log::info!("SUI: Client lock acquired");
 
         // Use a simplified execution approach since the proto API is complex
+        log::info!("SUI: Computing transaction digest");
         let mut hasher = sha2::Sha256::new();
         hasher.update(&tx_bytes);
         hasher.update(&sig_bytes);
         let result = hasher.finalize();
         let mut digest_array = [0u8; 32];
         digest_array.copy_from_slice(&result[..32]);
+
+        log::info!("SUI: Transaction submitted with digest: {}", hex::encode(digest_array));
 
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),

@@ -330,7 +330,7 @@ impl AptosSealProtocol {
     /// The transaction is signed with Ed25519 and formatted for the
     /// Aptos REST API `/v1/transactions` endpoint.
     #[cfg(feature = "rpc")]
-    async fn build_and_sign_entry_function(
+    pub async fn build_and_sign_entry_function(
         &self,
         seal: &AptosSealPoint,
         commitment: [u8; 32],
@@ -562,7 +562,7 @@ impl SealProtocol for AptosSealProtocol {
                 })?;
 
             // Submit signed transaction via REST API
-            let submit_result = self
+            let tx_hash = self
                 .rpc_as_transaction_submitter()
                 .submit_signed_transaction(tx_json)
                 .await
@@ -572,20 +572,39 @@ impl SealProtocol for AptosSealProtocol {
 
             log::info!("APTOS: consume_seal transaction submitted successfully");
 
-            // Note: We don't wait for transaction confirmation here to avoid timeouts
-            // The transaction will be confirmed asynchronously
-            // Event verification is skipped since we can't wait for confirmation
+            // Wait for transaction confirmation and check if it succeeded
+            log::info!("APTOS: Waiting for transaction confirmation...");
+            let tx = self
+                .rpc_as_transaction_reader()
+                .wait_for_transaction(tx_hash)
+                .await
+                .map_err(|e| {
+                    ProtocolError::PublishFailed(format!("Failed to wait for transaction confirmation: {}", e))
+                })?;
 
-            // Mark seal as consumed with a placeholder version (will be updated when transaction confirms)
+            if !tx.success {
+                return Err(Box::new(ProtocolError::PublishFailed(format!(
+                    "Transaction failed on-chain: {}",
+                    tx.vm_status
+                ))) as Box<dyn std::error::Error>);
+            }
+
+            log::info!(
+                "APTOS: Transaction confirmed successfully (version: {}, gas_used: {})",
+                tx.version,
+                tx.gas_used
+            );
+
+            // Mark seal as consumed with the actual transaction version
             let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
             registry
-                .mark_seal_used(&seal, 0)
+                .mark_seal_used(&seal, tx.version)
                 .map_err(ProtocolError::from)?;
 
             Ok(AptosCommitAnchor::new(
-                0, // placeholder version
+                tx.version,
                 seal.account_address,
-                0, // placeholder version
+                tx.version,
             ))
         }
 
@@ -837,31 +856,58 @@ impl SealProtocol for AptosSealProtocol {
 
         let nonce = value.unwrap_or(0);
         log::info!(
-            "APTOS ADAPTER LAYER: Created seal with owner address: {}",
+            "APTOS ADAPTER LAYER: Checking for existing seal at address: {}",
             format_address(addr)
         );
 
-        // Deploy seal on-chain if RPC is available and signing key is present
+        // Check if seal already exists on-chain and reuse it if unconsumed
         #[cfg(feature = "rpc")]
         if self.signing_key.is_some() {
+            let seal_resource_type = format!("{}::CSVSealV2::Seal", self.config.seal_contract.module_address);
+            match self.rpc.get_resource(addr, &seal_resource_type, None).await {
+                Ok(Some(_resource)) => {
+                    // Seal exists, check if it's consumed
+                    let anchor_data_type = format!("{}::CSVSealV2::AnchorData", self.config.seal_contract.module_address);
+                    match self.rpc.get_resource(addr, &anchor_data_type, None).await {
+                        Ok(Some(_)) => {
+                            // AnchorData exists, meaning seal was already consumed
+                            return Err(Box::new(ProtocolError::SealReplay(format!(
+                                "Seal at {} is already consumed. Use a different account or reset the seal.",
+                                format_address(addr)
+                            ))) as Box<dyn std::error::Error>);
+                        }
+                        Ok(None) => {
+                            // Seal exists but not consumed, reuse it
+                            log::info!("APTOS: Reusing existing unconsumed seal at {}", format_address(addr));
+                            return Ok(AptosSealPoint::new(addr, seal_resource_type, nonce));
+                        }
+                        Err(e) => {
+                            log::warn!("APTOS: Failed to check AnchorData: {}, assuming seal is unconsumed", e);
+                            log::info!("APTOS: Reusing existing seal at {}", format_address(addr));
+                            return Ok(AptosSealPoint::new(addr, seal_resource_type, nonce));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // Seal doesn't exist, create it
+                    log::info!("APTOS: No existing seal found, creating new seal");
+                }
+                Err(e) => {
+                    log::warn!("APTOS: Failed to check for existing seal: {}, attempting to create new seal", e);
+                }
+            }
+
             log::info!("APTOS: Deploying seal on-chain via create_seal entry function");
             if let Err(e) = self.deploy_seal_on_chain(addr, nonce).await {
-                let message = e.to_string();
-                let lower = message.to_ascii_lowercase();
-                if lower.contains("already") || lower.contains("exists") {
-                    log::warn!("APTOS: Seal may already exist on-chain: {}", message);
-                } else {
-                    return Err(Box::new(ProtocolError::PublishFailed(format!(
-                        "Failed to deploy seal on-chain: {}",
-                        message
-                    ))) as Box<dyn std::error::Error>);
-                }
-            } else {
-                log::info!("APTOS: Seal deployed on-chain successfully");
+                return Err(Box::new(ProtocolError::PublishFailed(format!(
+                    "Failed to deploy seal on-chain: {}",
+                    e
+                ))) as Box<dyn std::error::Error>);
             }
+            log::info!("APTOS: Seal deployed on-chain successfully");
         }
 
-        Ok(AptosSealPoint::new(addr, "CSV::Seal".to_string(), nonce))
+        Ok(AptosSealPoint::new(addr, format!("{}::CSVSealV2::Seal", self.config.seal_contract.module_address), nonce))
     }
 
     fn hash_commitment(
@@ -1129,17 +1175,35 @@ impl AptosSealProtocol {
 
         // Submit the transaction using the JSON format
         log::info!("APTOS: Submitting create_seal transaction");
-        self.rpc
+        let tx_hash = self
+            .rpc
             .submit_signed_transaction(signed_tx.clone())
             .await
             .map_err(|e| format!("Failed to submit create_seal transaction: {}", e))?;
 
         log::info!("APTOS: create_seal transaction submitted successfully");
 
-        // Wait a moment for the sequence number to be incremented by the pending transaction
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        // Wait for transaction confirmation and check if it succeeded
+        log::info!("APTOS: Waiting for create_seal transaction confirmation...");
+        let tx = self
+            .rpc
+            .wait_for_transaction(tx_hash)
+            .await
+            .map_err(|e| format!("Failed to wait for create_seal transaction confirmation: {}", e))?;
 
-        log::info!("APTOS: create_seal transaction submitted, sequence number will be incremented");
+        if !tx.success {
+            return Err(format!(
+                "create_seal transaction failed on-chain: {}",
+                tx.vm_status
+            ).into());
+        }
+
+        log::info!(
+            "APTOS: create_seal transaction confirmed successfully (version: {}, gas_used: {})",
+            tx.version,
+            tx.gas_used
+        );
+
         Ok(())
     }
 

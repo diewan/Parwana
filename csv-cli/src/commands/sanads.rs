@@ -49,6 +49,9 @@ pub enum SanadAction {
     },
     /// Consume a Sanad (seal consumption)
     Consume {
+        /// Chain name
+        #[arg(short, long, value_enum)]
+        chain: Chain,
         /// Sanad ID (hex)
         sanad_id: String,
     },
@@ -66,7 +69,7 @@ pub async fn execute(
         SanadAction::Show { sanad_id } => cmd_show(sanad_id, state),
         SanadAction::List { chain } => cmd_list(chain, state),
         SanadAction::Transfer { sanad_id, to } => cmd_transfer(sanad_id, to, state),
-        SanadAction::Consume { sanad_id } => cmd_consume(sanad_id, state),
+        SanadAction::Consume { chain, sanad_id } => cmd_consume(chain, sanad_id, config, state).await,
     }
 }
 
@@ -651,9 +654,127 @@ fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> R
     Ok(())
 }
 
-fn cmd_consume(sanad_id: String, _state: &UnifiedStateManager) -> Result<()> {
-    output::header("Consuming Sanad");
-    output::kv("Sanad ID", &sanad_id);
-    output::info("This will consume the seal and make the Sanad unusable");
+async fn cmd_consume(
+    chain: Chain,
+    sanad_id: String,
+    config: &Config,
+    state: &mut UnifiedStateManager,
+) -> Result<()> {
+    output::header(&format!("Consuming Sanad on {}", chain));
+
+    // Parse sanad_id from hex
+    let sanad_id_bytes = hex::decode(sanad_id.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    if sanad_id_bytes.len() != 32 {
+        return Err(anyhow::anyhow!("Sanad ID must be 32 bytes ({} bytes provided)", sanad_id_bytes.len()));
+    }
+    let mut sanad_id_array = [0u8; 32];
+    sanad_id_array.copy_from_slice(&sanad_id_bytes);
+    let sanad_id = csv_hash::sanad::SanadId::from_bytes(&sanad_id_array);
+
+    output::kv("Sanad ID", &hex::encode(sanad_id.as_bytes()));
+
+    // Check if sanad exists in local state
+    let tracked_sanad = state.get_sanad(&hex::encode(sanad_id.as_bytes()));
+    if tracked_sanad.is_none() {
+        output::warning("Sanad not found in local tracking");
+        output::info("This Sanad may exist on-chain but hasn't been tracked locally");
+        return Err(anyhow::anyhow!("Sanad not found in local state. Use 'csv sanad list' to see tracked Sanads."));
+    }
+
+    // Use the runtime to consume the sanad
+    use csv_sdk::CsvClient;
+    use csv_sdk::StoreBackend;
+
+    // Map CLI Chain to protocol ChainId
+    let core_chain = ChainId::new(chain.as_str());
+
+    // Convert CLI config to SDK config format
+    let mut sdk_config = csv_sdk::config::Config::default();
+    sdk_config.network = match config.chain(&chain)?.network {
+        Network::Test => csv_sdk::config::Network::Testnet,
+        Network::Main => csv_sdk::config::Network::Mainnet,
+        Network::Dev => csv_sdk::config::Network::Devnet,
+    };
+
+    // Convert chain config to SDK format
+    let chain_cfg = config.chain(&chain)?;
+    let sdk_chain_config = csv_sdk::config::ChainConfig {
+        rpc: csv_sdk::config::RpcConfig {
+            url: chain_cfg.rpc_url.clone(),
+            api_key: None,
+            timeout_ms: 30000,
+            max_retries: 3,
+        },
+        finality_depth: chain_cfg.finality_depth as u32,
+        enabled: true,
+        xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
+        contract_address: chain_cfg.contract_address.clone(),
+        program_id: chain_cfg.program_id.clone(),
+        account: 0,
+        index: 0,
+        utxos: Vec::new(),
+    };
+    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+
+    // Build CSV client with the requested chain enabled
+    let client = CsvClient::builder()
+        .with_chain(core_chain.clone())
+        .with_config(sdk_config)
+        .with_store_backend(StoreBackend::InMemory)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
+
+    // Initialize chain adapters for the configured network
+    let network_type = match config.chain(&chain)?.network {
+        Network::Test => csv_sdk::client::NetworkType::Testnet,
+        Network::Main => csv_sdk::client::NetworkType::Mainnet,
+        Network::Dev => csv_sdk::client::NetworkType::Testnet, // Dev uses testnet
+    };
+
+    // Derive private key from wallet mnemonic
+    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
+    })?;
+
+    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+    let seed = mnemonic.to_seed(None);
+    let seed_array = *seed.as_bytes();
+
+    // For Bitcoin, use the raw 64-byte BIP-39 seed
+    let key_hex = if chain.as_str() == "bitcoin" {
+        hex::encode(seed_array)
+    } else {
+        let (secret_key, _key_source) = signing_key_for_chain(&chain, 0, &seed_array, state)?;
+        hex::encode(secret_key.as_bytes())
+    };
+
+    let mut private_keys = std::collections::HashMap::new();
+    private_keys.insert(chain.as_str().to_string(), Some(key_hex));
+
+    client.init_adapters(network_type, private_keys).await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize chain adapters: {}", e))?;
+
+    let runtime = client.chain_runtime();
+
+    // Consume the sanad via the runtime
+    output::info(&format!("Consuming sanad on {}...", chain));
+    let result = runtime
+        .consume_sanad(core_chain.clone(), &sanad_id, "default")
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to consume sanad: {}", e))?;
+
+    output::kv("Status", "Consumed successfully");
+    output::kv("Transaction Hash", &result.transaction_hash);
+    output::kv("Block Height", &result.block_height.to_string());
+
+    // Update sanad status in local state
+    if let Some(tracked) = state.storage.sanads.iter_mut().find(|s| s.id == hex::encode(sanad_id.as_bytes())) {
+        tracked.status = SanadStatus::Consumed;
+        state.save()?;
+        output::info("Sanad status updated in local state");
+    }
+
     Ok(())
 }
