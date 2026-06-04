@@ -1030,7 +1030,7 @@ mod tests {
                 Hash::zero(),
             ),
             vec![signature],
-            SealPoint::new(seal_id.clone(), Some(42))
+            SealPoint::new(seal_id.clone(), Some(42), None)
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?,
             CommitAnchor::new(seal_id, 100, vec![0xCD; 32])
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?,

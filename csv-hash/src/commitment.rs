@@ -224,7 +224,7 @@ mod tests {
             Hash::new([1u8; 32]),
             Hash::new([2u8; 32]),
             Hash::new([3u8; 32]),
-            &SealPoint::new(vec![4u8; 16], Some(42)).unwrap(),
+            &SealPoint::new(vec![4u8; 16], Some(42), None).unwrap(),
             [5u8; 32],
         )
     }
@@ -242,7 +242,7 @@ mod tests {
             Hash::new([1u8; 32]),
             Hash::new([2u8; 32]),
             Hash::new([3u8; 32]),
-            &SealPoint::new(vec![4u8; 16], Some(42)).unwrap(),
+            &SealPoint::new(vec![4u8; 16], Some(42), None).unwrap(),
             [5u8; 32],
         );
         assert!(commitment.is_genesis());
@@ -256,7 +256,7 @@ mod tests {
             Hash::new([3u8; 32]),
             Hash::new([4u8; 32]),
             Hash::new([5u8; 32]),
-            &SealPoint::new(vec![6u8; 16], Some(42)).unwrap(),
+            &SealPoint::new(vec![6u8; 16], Some(42), None).unwrap(),
             [7u8; 32],
         );
         assert!(!commitment.is_genesis());

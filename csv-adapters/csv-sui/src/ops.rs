@@ -1464,7 +1464,7 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
 
         let message = b"test message";
-        let _signature = signing_key.sign(message);
+        let signature = signing_key.sign(message);
 
         // Verify signature
         let result = ops

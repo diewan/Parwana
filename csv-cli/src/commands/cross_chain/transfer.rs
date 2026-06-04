@@ -46,7 +46,7 @@ pub async fn cmd_transfer(
     let sanad_id_hash = Hash::new(sanad_bytes);
 
     // Check if we have the sanad
-    if state.get_sanad(&sanad_id_hash.to_string()).is_none() {
+    if state.get_sanad(&sanad_id_hash.to_hex()).is_none() {
         return Err(anyhow::anyhow!(
             "Sanad {} not found in local state",
             sanad_id_hash

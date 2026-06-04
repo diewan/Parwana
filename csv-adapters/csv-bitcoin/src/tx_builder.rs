@@ -445,10 +445,8 @@ mod tests {
         assert!(result.fee_sat > 0);
         assert_eq!(result.input_value_sat, 1_000_000);
         assert!(result.raw_tx.len() >= result.tx.vsize());
-        assert_eq!(
-            result.tapret_output.amount_sat,
-            result.input_value_sat - result.fee_sat
-        );
+        // Commitment output uses minimal value (dust + buffer)
+        assert_eq!(result.tapret_output.amount_sat, 1330);
     }
 
     #[test]

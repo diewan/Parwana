@@ -338,7 +338,7 @@ mod tests {
     fn make_consumption(chain: ChainId, seal_bytes: Vec<u8>, sanad_id: SanadId) -> SealConsumption {
         SealConsumption {
             chain,
-            seal_ref: SealPoint::new(seal_bytes, None).unwrap(),
+            seal_ref: SealPoint::new(seal_bytes, None, None).unwrap(),
             sanad_id,
             block_height: 100,
             tx_hash: Hash::new([0xAB; 32]),
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn test_seal_status_unconsumed() {
         let registry = SealNullifier::new();
-        let seal = SealPoint::new(vec![0x01], None).unwrap();
+        let seal = SealPoint::new(vec![0x01], None, None).unwrap();
 
         assert!(matches!(
             registry.check_seal_status(&seal),
@@ -415,7 +415,7 @@ mod tests {
     fn test_seal_status_consumed() {
         let mut registry = SealNullifier::new();
         let sanad_id = SanadId(Hash::new([0xCD; 32]));
-        let seal = SealPoint::new(vec![0x01], None).unwrap();
+        let seal = SealPoint::new(vec![0x01], None, None).unwrap();
 
         let consumption = make_consumption(ChainId::new("bitcoin"), vec![0x01], sanad_id);
         registry.record_consumption(consumption).unwrap();
@@ -432,7 +432,7 @@ mod tests {
     fn test_seal_status_double_spent() {
         let mut registry = SealNullifier::new();
         let sanad_id = SanadId(Hash::new([0xCD; 32]));
-        let seal = SealPoint::new(vec![0x01], None).unwrap();
+        let seal = SealPoint::new(vec![0x01], None, None).unwrap();
         let seal_bytes = vec![0x01];
 
         // Consume on Bitcoin
@@ -817,7 +817,7 @@ mod optimized_tests {
     fn make_consumption(chain: ChainId, seal_bytes: Vec<u8>, sanad_id: SanadId) -> SealConsumption {
         SealConsumption {
             chain,
-            seal_ref: SealPoint::new(seal_bytes, None).unwrap(),
+            seal_ref: SealPoint::new(seal_bytes, None, None).unwrap(),
             sanad_id,
             block_height: 100,
             tx_hash: Hash::new([0xAB; 32]),
@@ -843,7 +843,7 @@ mod optimized_tests {
     #[test]
     fn test_optimized_registry_bloom_filter_negative_lookup() {
         let mut registry = OptimizedSealNullifier::new();
-        let seal = SealPoint::new(vec![0x99], None).unwrap();
+        let seal = SealPoint::new(vec![0x99], None, None).unwrap();
 
         let status = registry.check_seal_status(&seal);
         assert!(matches!(status, SealStatus::Unconsumed));
@@ -884,7 +884,7 @@ mod optimized_tests {
     fn test_optimized_registry_status_caching() {
         let mut registry = OptimizedSealNullifier::new();
         let sanad_id = SanadId(Hash::new([0xCD; 32]));
-        let seal = SealPoint::new(vec![0x01], None).unwrap();
+        let seal = SealPoint::new(vec![0x01], None, None).unwrap();
 
         let _ = registry.check_seal_status(&seal);
 
@@ -900,7 +900,7 @@ mod optimized_tests {
     fn test_optimized_registry_is_seal_consumed() {
         let mut registry = OptimizedSealNullifier::new();
         let sanad_id = SanadId(Hash::new([0xCD; 32]));
-        let seal = SealPoint::new(vec![0x01], None).unwrap();
+        let seal = SealPoint::new(vec![0x01], None, None).unwrap();
 
         assert!(!registry.is_seal_consumed(&seal));
 
@@ -923,7 +923,7 @@ mod optimized_tests {
         registry.rebuild_bloom_filter();
 
         for i in 0..100u8 {
-            let seal = SealPoint::new(vec![i], None).unwrap();
+            let seal = SealPoint::new(vec![i], None, None).unwrap();
             assert!(
                 registry.is_seal_consumed(&seal),
                 "Seal {} should be consumed",
@@ -931,7 +931,7 @@ mod optimized_tests {
             );
         }
 
-        let unconsumed = SealPoint::new(vec![0xFF], None).unwrap();
+        let unconsumed = SealPoint::new(vec![0xFF], None, None).unwrap();
         assert!(!registry.is_seal_consumed(&unconsumed));
     }
 }

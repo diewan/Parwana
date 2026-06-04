@@ -174,12 +174,12 @@ mod tests {
             vec![
                 StateAssignment::new(
                     10,
-                    SealPoint::new(vec![0xAA; 16], Some(1)).unwrap(),
+                    SealPoint::new(vec![0xAA; 16], Some(1), None).unwrap(),
                     600u64.to_le_bytes().to_vec(),
                 ), // 600 to seal A
                 StateAssignment::new(
                     10,
-                    SealPoint::new(vec![0xBB; 16], Some(2)).unwrap(),
+                    SealPoint::new(vec![0xBB; 16], Some(2), None).unwrap(),
                     400u64.to_le_bytes().to_vec(),
                 ), // 400 to seal B (change)
             ],
@@ -231,7 +231,7 @@ mod tests {
         let t2 = test_transition();
         t1.owned_outputs.push(StateAssignment::new(
             10,
-            SealPoint::new(vec![0xCC; 16], Some(3)).unwrap(),
+            SealPoint::new(vec![0xCC; 16], Some(3), None).unwrap(),
             vec![100],
         ));
         assert_ne!(t1.hash(), t2.hash());
@@ -292,7 +292,7 @@ mod tests {
             vec![], // no inputs
             vec![StateAssignment::new(
                 10,
-                SealPoint::new(vec![0xAA; 16], Some(1)).unwrap(),
+                SealPoint::new(vec![0xAA; 16], Some(1), None).unwrap(),
                 1000u64.to_le_bytes().to_vec(),
             )],
             vec![],

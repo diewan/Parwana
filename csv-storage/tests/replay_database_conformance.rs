@@ -88,11 +88,13 @@ async fn test_replay_database_conformance(db: &dyn ReplayDatabase) {
         source_seal: csv_hash::seal::SealPoint {
             id: vec![1, 2, 3, 4],
             nonce: None,
+            version: None,
         },
         destination_chain: csv_hash::chain_id::ChainId::new("ethereum"),
         destination_seal: csv_hash::seal::SealPoint {
             id: vec![],
             nonce: None,
+            version: None,
         },
         lock_tx_hash: csv_hash::Hash::new([2u8; 32]),
         transition_id: vec![3, 4, 5, 6],

@@ -777,12 +777,22 @@ impl ChainDeployer for BitcoinChainDeployer {
 /// Bitcoin implementation of ChainSanadOps trait
 pub struct BitcoinChainSanadOps {
     adapter: BitcoinSealProtocol,
+    rpc: Option<Box<dyn BitcoinRpc + Send + Sync>>,
 }
 
 impl BitcoinChainSanadOps {
     /// Create a new Bitcoin chain sanad ops instance
     pub fn new(adapter: BitcoinSealProtocol) -> Self {
-        Self { adapter }
+        Self {
+            adapter,
+            rpc: None,
+        }
+    }
+
+    /// Create with RPC client for broadcasting
+    pub fn with_rpc(mut self, rpc: Box<dyn BitcoinRpc + Send + Sync>) -> Self {
+        self.rpc = Some(rpc);
+        self
     }
 
     /// Build refund transaction after CSV timeout
@@ -818,13 +828,70 @@ impl BitcoinChainSanadOps {
     /// Sign and broadcast refund transaction
     async fn sign_and_broadcast_refund(
         &self,
-        _tx: bitcoin::Transaction,
+        tx: bitcoin::Transaction,
         _owner_key: &[u8],
     ) -> ChainOpResult<String> {
-        // Sign and broadcast via RPC
-        Err(ChainOpError::CapabilityUnavailable(
-            "Refund transaction signing requires wallet integration".to_string(),
-        ))
+        // Get the wallet and UTXO from the adapter
+        let wallet = &self.adapter.wallet;
+        let rpc = self.rpc.as_ref().ok_or_else(|| {
+            ChainOpError::RpcError("No RPC client configured for broadcasting".to_string())
+        })?;
+
+        // Get the first input's outpoint to find the corresponding UTXO
+        let input_outpoint = &tx.input.first()
+            .ok_or_else(|| ChainOpError::InvalidInput("Transaction has no inputs".to_string()))?
+            .previous_output;
+
+        // Find the UTXO in the wallet
+        let utxo = wallet.get_utxo(input_outpoint)
+            .ok_or_else(|| ChainOpError::InvalidInput(
+                format!("UTXO {}:{} not found in wallet", input_outpoint.txid, input_outpoint.vout)
+            ))?;
+
+        // Calculate sighash for the transaction
+        let derived_key = wallet.derive_key(&utxo.path)
+            .map_err(|e| ChainOpError::SigningError(format!("Failed to derive key: {}", e)))?;
+
+        // Use the actual scriptPubKey from the UTXO if available
+        let derived_spk = derived_key.address.script_pubkey();
+        let input_script_pubkey = utxo.script_pubkey
+            .as_ref()
+            .unwrap_or(&derived_spk);
+
+        let sighash = bitcoin::sighash::SighashCache::new(&tx)
+            .taproot_key_spend_signature_hash(
+                0,
+                &bitcoin::sighash::Prevouts::All(&[&bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(utxo.amount_sat),
+                    script_pubkey: input_script_pubkey.clone(),
+                }]),
+                bitcoin::sighash::TapSighashType::Default,
+            )
+            .map_err(|e| ChainOpError::SigningError(format!("Sighash failed: {}", e)))?;
+
+        let mut sighash_bytes = [0u8; 32];
+        sighash_bytes.copy_from_slice(sighash.as_ref());
+
+        // Sign with the wallet
+        let schnorr_sig = wallet
+            .sign_taproot_keypath(&utxo.path, &sighash_bytes)
+            .map_err(|e| ChainOpError::SigningError(format!("Signing failed: {}", e)))?;
+
+        // Build the witness
+        let witness = bitcoin::Witness::from_slice(&[schnorr_sig.as_slice()]);
+
+        // Create signed transaction
+        let mut signed_tx = tx.clone();
+        signed_tx.input[0].witness = witness;
+
+        // Serialize and broadcast
+        let raw_tx = bitcoin::consensus::encode::serialize(&signed_tx);
+        let txid = rpc
+            .send_raw_transaction(raw_tx)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to broadcast: {}", e)))?;
+
+        Ok(hex::encode(txid))
     }
 
     /// Build a lock transaction for cross-chain transfer
@@ -834,8 +901,19 @@ impl BitcoinChainSanadOps {
         dest_hash: &bitcoin_hashes::sha256d::Hash,
         _owner_key: &[u8],
     ) -> Result<bitcoin::Transaction, String> {
-        let _ = dest_hash;
-        let lock_script = bitcoin::ScriptBuf::new();
+        // Get the UTXO from the wallet to know the amount
+        let wallet = &self.adapter.wallet;
+        let utxo = wallet.get_utxo(&seal_outpoint)
+            .ok_or_else(|| format!("UTXO {}:{} not found in wallet", seal_outpoint.txid, seal_outpoint.vout))?;
+
+        // Calculate fee (1 input, 1 output)
+        let fee = 500; // Simple fee estimate for lock transaction
+        let lock_amount = utxo.amount_sat.saturating_sub(fee);
+
+        // Create OP_RETURN output with destination hash for cross-chain proof
+        // Format: OP_RETURN OP_PUSH32 <dest_hash>
+        let lock_script = bitcoin::ScriptBuf::new_op_return(dest_hash.as_byte_array());
+
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::from_height(0)
@@ -843,11 +921,11 @@ impl BitcoinChainSanadOps {
             input: vec![bitcoin::TxIn {
                 previous_output: seal_outpoint,
                 script_sig: bitcoin::ScriptBuf::new(),
-                sequence: bitcoin::Sequence::from_consensus(144),
+                sequence: bitcoin::Sequence::from_consensus(0xffffffff), // Disable RBF for lock
                 witness: bitcoin::Witness::new(),
             }],
             output: vec![bitcoin::TxOut {
-                value: bitcoin::Amount::from_sat(546),
+                value: bitcoin::Amount::from_sat(lock_amount),
                 script_pubkey: lock_script,
             }],
         };
@@ -857,12 +935,70 @@ impl BitcoinChainSanadOps {
     /// Sign and broadcast a lock transaction
     async fn sign_and_broadcast_lock(
         &self,
-        _tx: bitcoin::Transaction,
+        tx: bitcoin::Transaction,
         _owner_key: &[u8],
     ) -> ChainOpResult<String> {
-        Err(ChainOpError::CapabilityUnavailable(
-            "Lock transaction signing requires wallet integration".to_string(),
-        ))
+        // Get the wallet and UTXO from the adapter
+        let wallet = &self.adapter.wallet;
+        let rpc = self.rpc.as_ref().ok_or_else(|| {
+            ChainOpError::RpcError("No RPC client configured for broadcasting".to_string())
+        })?;
+
+        // Get the first input's outpoint to find the corresponding UTXO
+        let input_outpoint = &tx.input.first()
+            .ok_or_else(|| ChainOpError::InvalidInput("Transaction has no inputs".to_string()))?
+            .previous_output;
+
+        // Find the UTXO in the wallet
+        let utxo = wallet.get_utxo(input_outpoint)
+            .ok_or_else(|| ChainOpError::InvalidInput(
+                format!("UTXO {}:{} not found in wallet", input_outpoint.txid, input_outpoint.vout)
+            ))?;
+
+        // Calculate sighash for the transaction
+        let derived_key = wallet.derive_key(&utxo.path)
+            .map_err(|e| ChainOpError::SigningError(format!("Failed to derive key: {}", e)))?;
+
+        // Use the actual scriptPubKey from the UTXO if available
+        let derived_spk = derived_key.address.script_pubkey();
+        let input_script_pubkey = utxo.script_pubkey
+            .as_ref()
+            .unwrap_or(&derived_spk);
+
+        let sighash = bitcoin::sighash::SighashCache::new(&tx)
+            .taproot_key_spend_signature_hash(
+                0,
+                &bitcoin::sighash::Prevouts::All(&[&bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(utxo.amount_sat),
+                    script_pubkey: input_script_pubkey.clone(),
+                }]),
+                bitcoin::sighash::TapSighashType::Default,
+            )
+            .map_err(|e| ChainOpError::SigningError(format!("Sighash failed: {}", e)))?;
+
+        let mut sighash_bytes = [0u8; 32];
+        sighash_bytes.copy_from_slice(sighash.as_ref());
+
+        // Sign with the wallet
+        let schnorr_sig = wallet
+            .sign_taproot_keypath(&utxo.path, &sighash_bytes)
+            .map_err(|e| ChainOpError::SigningError(format!("Signing failed: {}", e)))?;
+
+        // Build the witness
+        let witness = bitcoin::Witness::from_slice(&[schnorr_sig.as_slice()]);
+
+        // Create signed transaction
+        let mut signed_tx = tx.clone();
+        signed_tx.input[0].witness = witness;
+
+        // Serialize and broadcast
+        let raw_tx = bitcoin::consensus::encode::serialize(&signed_tx);
+        let txid = rpc
+            .send_raw_transaction(raw_tx)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to broadcast: {}", e)))?;
+
+        Ok(hex::encode(txid))
     }
 
     /// Build metadata recording transaction with OP_RETURN
