@@ -111,15 +111,6 @@ impl CommitmentTxBuilder {
         let secp = wallet.secp();
         let seal_key = wallet.derive_key(&seal_utxo.path)?;
 
-        log::info!(
-            "seal_key.address (P2TR, tweak=None): {}",
-            seal_key.address
-        );
-        log::info!(
-            "seal_key.address script_pubkey: {}",
-            hex::encode(seal_key.address.script_pubkey().as_bytes())
-        );
-
         // Calculate fee (1 input, 1 output)
         let fee = self.calculate_fee(1, 1);
         let commitment_value_sat = seal_utxo.amount_sat.saturating_sub(fee);
@@ -150,15 +141,6 @@ impl CommitmentTxBuilder {
         let output_key = taproot_spend_info.output_key();
         let address = Address::p2tr_tweaked(output_key, wallet.network());
 
-        log::info!(
-            "output address (P2TR, tweak=tapret): {}",
-            address
-        );
-        log::info!(
-            "output address script_pubkey: {}",
-            hex::encode(address.script_pubkey().as_bytes())
-        );
-
         // CRITICAL FIX: For plain P2TR input spending, the sighash must use the ACTUAL on-chain prevout scriptPubKey
         // which is the simple P2TR (tweak=None), NOT the tapret output scriptPubKey.
         // The UTXO was funded to seal_key.address (simple P2TR), so that's what we use for sighash.
@@ -171,11 +153,6 @@ impl CommitmentTxBuilder {
             sequence: RBF_SEQUENCE,
             witness: bitcoin::Witness::new(),
         };
-
-        log::info!("Building transaction with input: txid={}, vout={}, value={}", 
-            hex::encode(seal_utxo.outpoint.txid), seal_utxo.outpoint.vout, seal_utxo.amount_sat);
-        log::info!("Input script_pubkey: {:?}", seal_utxo.script_pubkey);
-        log::info!("Derived address script_pubkey: {}", hex::encode(seal_key.address.script_pubkey().as_bytes()));
 
         let outputs = vec![TxOut {
             value: Amount::from_sat(commitment_value_sat),
@@ -197,15 +174,6 @@ impl CommitmentTxBuilder {
             .as_ref()
             .unwrap_or(&derived_script_pubkey);
 
-        log::info!(
-            "input_script_pubkey used for sighash: {}",
-            hex::encode(input_script_pubkey.as_bytes())
-        );
-        log::info!(
-            "Are input and output script_pubkeys equal: {}",
-            *input_script_pubkey == address.script_pubkey()
-        );
-        
         let sighash = bitcoin::sighash::SighashCache::new(&unsigned_tx)
             .taproot_key_spend_signature_hash(
                 0,
@@ -224,9 +192,6 @@ impl CommitmentTxBuilder {
         let schnorr_sig = wallet
             .sign_taproot_keypath(&seal_utxo.path, &sighash_bytes)
             .map_err(|e| TxBuilderError::WalletError(e.to_string()))?;
-
-        log::info!("Schnorr signature length: {} bytes", schnorr_sig.len());
-        log::info!("Sighash: {}", hex::encode(sighash_bytes));
 
         // Build the witness: [64-byte Schnorr signature]
         let witness = bitcoin::Witness::from_slice(&[schnorr_sig.as_slice()]);

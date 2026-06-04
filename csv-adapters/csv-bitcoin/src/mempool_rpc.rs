@@ -58,6 +58,9 @@ impl MempoolSignetRpc {
             .build()
             .expect("Failed to create HTTP client");
 
+        // Strip trailing slashes to avoid double slashes in URL construction
+        let base_url = base_url.trim_end_matches('/').to_string();
+
         Self { client, base_url, api_key }
     }
 
@@ -109,12 +112,10 @@ impl MempoolSignetRpc {
                 request = request.header("x-api-key", key);
             }
 
-            match request.send().await {
+       match request.send().await {
                 Ok(resp) if resp.status().is_success() => {
                     let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| e.into())?;
-                    eprintln!("RAW MEMPOOL REST RESPONSE: url={}, body={}", url, text);
                     return serde_json::from_str::<T>(&text).map_err(|e| {
-                        eprintln!("MEMPOOL REST: Failed to deserialize response from {}: {}", url, e);
                         e.into()
                     });
                 }
@@ -123,11 +124,9 @@ impl MempoolSignetRpc {
                     let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
                         format!("HTTP {} at {}: failed to read error text: {}", status, url, e).into()
                     })?;
-                    eprintln!("MEMPOOL REST ERROR: HTTP {}, url={}, body={}", status, url, error_text);
                     last_err = Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
                 }
                 Err(e) => {
-                    eprintln!("MEMPOOL REST NETWORK ERROR: url={}, error={}", url, e);
                     last_err = Some(format!("Network error at {}: {}", url, e).into());
                 }
             }
@@ -400,7 +399,11 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
+        // Mempool.space API expects txid in display format (reversed bytes)
+        // Seal protocol passes internal byte order txids, so reverse for API
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         let spend_url = format!("{}/tx/{}/outspend/{}", self.base_url, txid_hex, vout);
         let spend_status: OutSpendStatus = self.get_with_retry(&spend_url).await?;
         Ok(!spend_status.spent)
@@ -424,7 +427,11 @@ impl BitcoinRpc for MempoolSignetRpc {
         &self,
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
+        // Mempool.space API expects txid in display format (reversed bytes)
+        // Seal protocol passes internal byte order txids, so reverse for API
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
 
         match self.get_tx_status(&txid_hex).await {
             Ok(status) => {
@@ -475,6 +482,8 @@ impl BitcoinRpc for MempoolSignetRpc {
                 let txid_bytes = hex::decode(&u.txid).ok()?;
                 let mut txid = [0u8; 32];
                 txid.copy_from_slice(&txid_bytes);
+                // Mempool.space API returns txids in display format (reversed bytes)
+                // Keep as-is - seal protocol handles conversion to internal byte order
                 let confirmations = if u.status.confirmed {
                     let bh = u.status.block_height.unwrap_or(current_height as u32) as u64;
                     current_height.saturating_sub(bh) + 1
@@ -497,21 +506,23 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
+        // Mempool.space /tx/{txid} endpoint expects display format (reversed bytes)
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         let url = format!("{}/tx/{}", self.base_url, txid_hex);
-        eprintln!("MEMPOOL RPC: Fetching scriptPubKey for txid={}, vout={} from {}", txid_hex, vout, url);
+        
+        log::debug!("Fetching scriptPubKey for txid: {} (internal), vout: {}, URL: {}", hex::encode(txid), vout, url);
         
         let tx_detail: TxDetail = self.get_with_retry(&url).await
             .map_err(|e| {
-                eprintln!("MEMPOOL RPC: Failed to decode TxDetail from {}: {}", url, e);
+                log::error!("Failed to fetch tx details for txid {} (display: {}): {}", hex::encode(txid), txid_hex, e);
                 e
             })?;
 
         if let Some(output) = tx_detail.vout.get(vout as usize) {
-            eprintln!("MEMPOOL RPC: Found scriptPubKey for vout {}: {}", vout, output.scriptpubkey);
             Ok(Some(output.scriptpubkey.clone()))
         } else {
-            eprintln!("MEMPOOL RPC: vout {} not found in transaction (has {} outputs)", vout, tx_detail.vout.len());
             Ok(None)
         }
     }

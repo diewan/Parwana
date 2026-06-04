@@ -392,9 +392,11 @@ impl CsvClient {
                     .filter(|url| !url.is_empty())
                     .unwrap_or_else(|| {
                         if _is_testnet {
-                            "https://mempool.space/signet/api".to_string()
+                            std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC")
+                                .unwrap_or_else(|_| "https://bitcoin-signet.g.alchemy.com/v2/".to_string())
                         } else {
-                            "https://mempool.space/api".to_string()
+                            std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
+                                .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string())
                         }
                     });
                 eprintln!("SDK LAYER: RPC URL from SDK config: {}", config_rpc_url);
@@ -410,7 +412,6 @@ impl CsvClient {
                 if let Some(cc) = chain_config {
                     // Convert UTXO records from SDK config to Bitcoin adapter config
                     for utxo in &cc.utxos {
-                        eprintln!("DEBUG SDK: Received UTXO from CLI: txid={}, vout={}", utxo.txid, utxo.vout);
                         utxos.push(csv_bitcoin::config::UtxoConfig {
                             txid: utxo.txid.clone(),
                             vout: utxo.vout,
@@ -511,14 +512,6 @@ impl CsvClient {
                 } else {
                     csv_ethereum::config::Network::Mainnet
                 };
-                let eth_config = csv_ethereum::config::EthereumConfig {
-                    network: eth_network,
-                    finality_depth: if _is_testnet { 15 } else { 12 },
-                    use_checkpoint_finality: !_is_testnet,
-                    rpc_url: rpc_url.clone(),
-                    private_key: None,
-                    contract_address: None,
-                };
                 let address = _config
                     .chains
                     .get("ethereum")
@@ -536,6 +529,14 @@ impl CsvClient {
                         "Ethereum seal contract address must contain 20 bytes".to_string(),
                     )
                 })?;
+                let eth_config = csv_ethereum::config::EthereumConfig {
+                    network: eth_network,
+                    finality_depth: if _is_testnet { 15 } else { 12 },
+                    use_checkpoint_finality: !_is_testnet,
+                    rpc_url: rpc_url.clone(),
+                    private_key: None,
+                    contract_address: Some(csv_seal_address),
+                };
                 let mut rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, csv_seal_address)
                     .await
                     .map_err(|e| CsvError::ProtocolError {

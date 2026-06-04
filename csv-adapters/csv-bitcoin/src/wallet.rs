@@ -379,6 +379,14 @@ impl SealWallet {
             .collect()
     }
 
+    /// Clear all UTXOs from the wallet (for refreshing from chain)
+    pub fn clear_utxos(&self) {
+        self.utxos
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
     /// Scan the blockchain for UTXOs belonging to this wallet's addresses
     ///
     /// This method checks all derived addresses up to `address_gap_limit` consecutive

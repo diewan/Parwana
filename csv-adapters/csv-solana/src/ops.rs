@@ -667,14 +667,78 @@ impl ChainSanadOps for SolanaBackend {
         sanad_id: &SanadId,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let _ = sanad_id;
-        let _ = owner_key_id;
+        use csv_protocol::backend::SanadOperation;
+        use sha2::Digest;
+        use solana_sdk::instruction::AccountMeta;
+        use solana_sdk::instruction::Instruction;
+        use solana_sdk::message::Message;
+        use solana_sdk::signature::Signer;
+        use solana_sdk::transaction::Transaction;
 
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad consumption requires signed transaction. \
-             Construct and submit a transaction to close the seal account."
-                .to_string(),
-        ))
+        let keypair = keypair_from_hex_key_id(owner_key_id)?;
+        let consumer_pubkey = keypair.pubkey();
+
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|_| ChainOpError::InvalidInput("Invalid CSV program ID".to_string()))?;
+
+        let active_seals = self.seal_protocol.get_active_seals();
+        let seal = active_seals
+            .iter()
+            .find(|s| {
+                if let Some(seed) = &s.seed {
+                    seed.as_slice() == sanad_id.as_bytes()
+                } else {
+                    false
+                }
+            })
+            .ok_or_else(|| {
+                ChainOpError::InvalidInput(format!(
+                    "No active seal found for sanad_id {}. Create a sanad first.",
+                    hex::encode(sanad_id.as_bytes())
+                ))
+            })?;
+
+        let consume_discriminator: [u8; 8] = {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(b"global:consume_seal");
+            let hash = hasher.finalize();
+            hash.as_slice()[..8].try_into().unwrap()
+        };
+
+        let mut instruction_data = Vec::with_capacity(8);
+        instruction_data.extend_from_slice(&consume_discriminator);
+
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(seal.account, false),
+                AccountMeta::new_readonly(consumer_pubkey, true),
+            ],
+            data: instruction_data,
+        };
+
+        let recent_blockhash = self.rpc()
+            .get_recent_blockhash()
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get recent blockhash: {}", e)))?;
+
+        let message = Message::new(&[instruction], Some(&keypair.pubkey()));
+        let transaction = Transaction::new(&[&keypair], message, recent_blockhash);
+
+        let sig = self.rpc()
+            .send_transaction(&transaction)
+            .map_err(|e| ChainOpError::TransactionError(format!("Failed to send consume transaction: {}", e)))?;
+
+        Ok(SanadOperationResult {
+            sanad_id: sanad_id.clone(),
+            operation: SanadOperation::Consume,
+            transaction_hash: sig.to_string(),
+            block_height: 0,
+            chain_id: "solana".to_string(),
+            metadata: serde_json::json!({
+                "operation": "consume",
+                "seal_account": seal.account.to_string(),
+            }),
+        })
     }
 
     async fn lock_sanad(

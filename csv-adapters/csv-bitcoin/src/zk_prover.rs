@@ -252,7 +252,7 @@ mod tests {
     fn test_mock_proof_generation() {
         let prover = BitcoinSpvProver::new();
 
-        let seal = SealPoint::new(vec![0xAB; 32], Some(42)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(42), None).unwrap();
         let witness = ChainWitness {
             chain: builtin::BITCOIN.clone(),
             block_hash: Hash::new([1u8; 32]),
@@ -276,7 +276,7 @@ mod tests {
     fn test_wrong_chain_fails() {
         let prover = BitcoinSpvProver::new();
 
-        let seal = SealPoint::new(vec![0xAB; 32], Some(42)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(42), None).unwrap();
         let witness = ChainWitness {
             chain: ChainId::new("ethereum"), // Wrong chain
             block_hash: Hash::new([1u8; 32]),
@@ -295,7 +295,7 @@ mod tests {
     fn test_missing_inclusion_proof_fails() {
         let prover = BitcoinSpvProver::new();
 
-        let seal = SealPoint::new(vec![0xAB; 32], Some(42)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(42), None).unwrap();
         let witness = ChainWitness {
             chain: builtin::BITCOIN.clone(),
             block_hash: Hash::new([1u8; 32]),

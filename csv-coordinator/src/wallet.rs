@@ -7,7 +7,7 @@
 #[cfg(feature = "bitcoin")]
 pub mod bitcoin {
     use csv_bitcoin;
-    use bitcoin::{Network as BtcNetwork, OutPoint, Txid};
+    use bitcoin::{hashes::Hash, Network as BtcNetwork, OutPoint, Txid};
 
     /// Network type for wallet operations
     #[derive(Debug, Clone, Copy)]
@@ -136,17 +136,21 @@ pub mod bitcoin {
                                 None
                             };
 
-                            // Create OutPoint
-                            let txid_bytes = hex::decode(txid)
-                                .map_err(|e| anyhow::anyhow!("Failed to decode txid: {}", e))?;
-                            if txid_bytes.len() != 32 {
-                                continue;
-                            }
-                            let mut txid_array = [0u8; 32];
-                            txid_array.copy_from_slice(&txid_bytes);
-                            let hash = bitcoin::hashes::Hash::from_byte_array(txid_array);
+                            // Create OutPoint - mempool.space returns txids in display format (reversed bytes)
+                            // Reverse to get internal byte order for Txid construction
+                            let txid_bytes = match hex::decode(txid) {
+                                Ok(bytes) if bytes.len() == 32 => {
+                                    let mut arr = [0u8; 32];
+                                    arr.copy_from_slice(&bytes);
+                                    arr
+                                },
+                                _ => continue,
+                            };
+                            let mut internal_txid = txid_bytes;
+                            internal_txid.reverse();
+                            let txid_hash = Txid::from_byte_array(internal_txid);
                             let outpoint = OutPoint {
-                                txid: Txid::from_raw_hash(hash),
+                                txid: txid_hash,
                                 vout,
                             };
 

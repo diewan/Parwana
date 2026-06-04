@@ -51,9 +51,6 @@ impl BitcoinJsonRpc {
         method: &str,
         params: Vec<Value>,
     ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
-        eprintln!("JSON-RPC CALL: method={}, params={:?}", method, params);
-        eprintln!("JSON-RPC CALL: url={}", self.rpc_url);
-        
         let mut last_err = None;
         let mut backoff = INITIAL_BACKOFF;
 
@@ -76,8 +73,6 @@ impl BitcoinJsonRpc {
                 "method": method,
                 "params": params
             });
-            
-            eprintln!("JSON-RPC REQUEST: attempt={}, body={}", attempt, request_body);
 
             let mut req = self.client.post(&self.rpc_url).json(&request_body);
 
@@ -92,13 +87,10 @@ impl BitcoinJsonRpc {
                     let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
                         format!("Failed to read JSON-RPC response body: {}", e).into()
                     })?;
-                    eprintln!("RAW JSON-RPC RESPONSE BODY: {}", text);
 
                     let response: JsonRpcResponse<T> = serde_json::from_str(&text).map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
                         format!("Failed to parse JSON-RPC response: {}", e).into()
                     })?;
-
-                    eprintln!("JSON-RPC RESPONSE: success, result={:?}", response.result);
 
                     if let Some(error) = response.error {
                         return Err(format!("JSON-RPC error: {}", error.message.unwrap_or_else(|| "unknown error".to_string())).into());
@@ -113,7 +105,6 @@ impl BitcoinJsonRpc {
                     let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
                         format!("HTTP {} at {}: failed to read error text: {}", status, self.rpc_url, e).into()
                     })?;
-                    eprintln!("JSON-RPC ERROR: HTTP {}, body={}", status, error_text);
                     
                     // Classify errors: permanent vs transient
                     // Permanent errors should not be retried
@@ -123,14 +114,12 @@ impl BitcoinJsonRpc {
                          status == reqwest::StatusCode::BAD_REQUEST);
                     
                     if is_permanent {
-                        eprintln!("JSON-RPC ERROR: Permanent error detected (HTTP {}), no retry", status);
                         return Err(format!("Permanent HTTP {} at {}: {}", status, self.rpc_url, error_text).into());
                     }
                     
                     last_err = Some(format!("HTTP {} at {}: {}", status, self.rpc_url, error_text).into());
                 }
                 Err(e) => {
-                    eprintln!("JSON-RPC NETWORK ERROR: {}", e);
                     // Network errors are typically transient (timeouts, connection issues)
                     last_err = Some(format!("Network error at {}: {}", self.rpc_url, e).into());
                 }
@@ -164,25 +153,26 @@ impl BitcoinRpc for BitcoinJsonRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
-        eprintln!("JSON-RPC CHECK UTXO UNSPENT: txid={}, vout={}, url={}", txid_hex, vout, self.rpc_url);
+        // RPC expects display format (reversed bytes)
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         
         // Try to get the transaction to see if it exists
         let _tx_result: Value = self.call("getrawtransaction", vec![
             Value::from(txid_hex.clone()),
             Value::from(false), // verbose=false
         ]).await?;
-        eprintln!("JSON-RPC CHECK UTXO UNSPENT: transaction exists");
 
         // Transaction exists, now check if the output is spent
         // Using gettxout to check if output is still unspent
-        let _txout_result: Value = self.call("gettxout", vec![
+        // gettxout returns null if the output is spent or doesn't exist
+        let txout_result: Option<Value> = self.call("gettxout", vec![
             Value::from(txid_hex),
             Value::from(vout),
         ]).await?;
-        eprintln!("JSON-RPC CHECK UTXO UNSPENT: output exists (unspent)");
 
-        Ok(true) // Output exists and is unspent
+        Ok(txout_result.is_some())
     }
 
     async fn send_raw_transaction(
@@ -190,15 +180,15 @@ impl BitcoinRpc for BitcoinJsonRpc {
         tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let tx_hex = hex::encode(&tx_bytes);
-        eprintln!("JSON-RPC SUBMIT TRANSACTION: tx_hex={}, tx_bytes_len={}", tx_hex, tx_bytes.len());
-        eprintln!("JSON-RPC SUBMIT TRANSACTION: url={}", self.rpc_url);
         
         let txid_hex: String = self.call("sendrawtransaction", vec![Value::from(tx_hex.clone())]).await?;
-        eprintln!("JSON-RPC SUBMIT TRANSACTION: txid={}", txid_hex);
         
         let txid_bytes = hex::decode(txid_hex.trim())?;
         let mut result = [0u8; 32];
+        // RPC returns txid in display format (reversed bytes)
+        // Reverse to get internal byte order for consistent storage
         result.copy_from_slice(&txid_bytes);
+        result.reverse();
         Ok(result)
     }
 
@@ -206,10 +196,17 @@ impl BitcoinRpc for BitcoinJsonRpc {
         &self,
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
+        // RPC expects display format (reversed bytes)
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         
-        // Try to get transaction with verbose output
-        let tx: Value = self.call("gettransaction", vec![Value::from(txid_hex)]).await?;
+        // Use getrawtransaction with verbose=true instead of gettransaction
+        // gettransaction is wallet-specific and doesn't work with non-wallet RPC providers
+        let tx: Value = self.call("getrawtransaction", vec![
+            Value::from(txid_hex),
+            Value::from(true), // verbose=true
+        ]).await?;
 
         if let Some(confirmations) = tx.get("confirmations").and_then(|c: &Value| c.as_u64()) {
             return Ok(confirmations);
@@ -239,7 +236,10 @@ impl BitcoinRpc for BitcoinJsonRpc {
                 
                 let txid_bytes = hex::decode(txid_hex).ok()?;
                 let mut txid = [0u8; 32];
+                // listunspent returns txids in display format (reversed bytes)
+                // Reverse to get internal byte order for consistent storage
                 txid.copy_from_slice(&txid_bytes);
+                txid.reverse();
                 
                 Some(UtxoInfo {
                     txid,
@@ -258,8 +258,10 @@ impl BitcoinRpc for BitcoinJsonRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
-        eprintln!("JSON-RPC GET SCRIPTPUBKEY: txid={}, vout={}, url={}", txid_hex, vout, self.rpc_url);
+        // RPC expects display format (reversed bytes)
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         
         // Get transaction with verbose output
         let tx: Value = self.call("getrawtransaction", vec![
@@ -267,21 +269,16 @@ impl BitcoinRpc for BitcoinJsonRpc {
             Value::from(true), // verbose=true
         ]).await?;
 
-        eprintln!("JSON-RPC GET SCRIPTPUBKEY: transaction has {} outputs", 
-            tx.get("vout").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0));
-
         if let Some(vout_array) = tx.get("vout").and_then(|v| v.as_array()) {
             if let Some(output) = vout_array.get(vout as usize) {
                 if let Some(script_pubkey) = output.get("scriptPubKey") {
                     if let Some(hex) = script_pubkey.get("hex").and_then(|h| h.as_str()) {
-                        eprintln!("JSON-RPC GET SCRIPTPUBKEY: found scriptPubKey for vout {}: {}", vout, hex);
                         return Ok(Some(hex.to_string()));
                     }
                 }
             }
         }
         
-        eprintln!("JSON-RPC GET SCRIPTPUBKEY: scriptPubKey not found for vout {}", vout);
         Ok(None)
     }
 

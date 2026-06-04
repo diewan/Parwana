@@ -95,6 +95,11 @@ mod real_rpc_impl {
             (*self.csv_seal_address).0
         }
 
+        /// Get a reference to the configured signer, if any
+        pub fn signer(&self) -> Option<&PrivateKeySigner> {
+            self.signer.as_ref()
+        }
+
         /// Set the signer private key for transaction signing
         pub fn with_signer(mut self, private_key_hex: &str) -> Result<Self, AlloyRpcError> {
             let bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
@@ -652,8 +657,9 @@ mod real_rpc_impl {
 
         // Step 1: Build the calldata for lockSanad (public function)
         // For simple Sanad creation, we use destination chain 0 (Bitcoin) and empty destination owner
+        // The sanadId is the commitment hash (not the seal_id which contains contract_address + slot_index + nonce)
         let calldata = CsvSealAbi::encode_lock_sanad(
-            seal.seal_id,
+            commitment,
             commitment,
             0, // destination chain (Bitcoin as placeholder)
             &[0u8; 20], // destination owner (placeholder address)
@@ -741,14 +747,14 @@ mod real_rpc_impl {
     }
 
     /// Legacy: Build and send a raw transaction that calls `lockSanad` on the CSVSeal contract.
-    /// Expects pre-signed transaction bytes. For signing + sending, use `publish()`.
+   /// Expects pre-signed transaction bytes. For signing + sending, use `publish()`.
     pub async fn publish_seal_consumption(
         rpc: &dyn EthereumRpc,
-        seal: &EthereumSealPoint,
+        _seal: &EthereumSealPoint,
         commitment: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let calldata = CsvSealAbi::encode_lock_sanad(
-            seal.seal_id,
+            commitment,
             commitment,
             0, // destination chain (Bitcoin as placeholder)
             &[0u8; 20], // destination owner (placeholder address)

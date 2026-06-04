@@ -114,11 +114,9 @@ async fn cmd_create(
         }
     }
 
-    // For Bitcoin, load UTXOs from unified state and validate they're still unspent
+    // For Bitcoin, always refresh UTXOs from chain before creating a sanad
     let bitcoin_utxos: Option<Vec<(String, u32, u64, Option<String>)>> = if chain.as_str() == "bitcoin" {
-        output::info("Loading UTXOs from wallet state...");
-
-        // Derive the expected address for this account/index to validate UTXOs belong to it
+        // Derive the expected address for this account/index
         let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
             anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
         })?;
@@ -141,130 +139,81 @@ async fn cmd_create(
         ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
         output::kv("Expected Address", &expected_address);
-        output::info("Validating UTXOs belong to this address...");
+        output::info("Refreshing UTXOs from blockchain...");
 
-        // Load UTXOs from unified state that match the account/index
-        let matching_utxos: Vec<_> = state.storage.wallet.utxos.iter()
-            .filter(|u| u.account == account && u.index == index)
-            .collect();
+        // Clear old UTXOs for this account before scanning
+        state.storage.wallet.utxos.retain(|u| u.account != account);
 
-        // Check if we need to auto-scan (no UTXOs or stale UTXOs without script_pubkey)
-        let needs_scan = matching_utxos.is_empty() ||
-            matching_utxos.iter().any(|u| u.script_pubkey.is_none());
+        // Perform the scan
+        let (_wallet, wallet_utxos) = csv_coordinator::wallet::bitcoin::scan_utxos_with_wallet(
+            &seed_array,
+            network,
+            account,
+            20, // gap_limit
+            &config.chain(&chain)?.rpc_url,
+        ).await.map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
 
-        if needs_scan {
-            output::info("No UTXOs found or UTXOs missing script_pubkey - auto-scanning wallet...");
+        let mut total_utxos = 0;
+        let mut total_value = 0u64;
 
-            // Perform the scan
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
-                crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
-                crate::config::Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
-            };
-            let (_wallet, wallet_utxos) = csv_coordinator::wallet::bitcoin::scan_utxos_with_wallet(
-                &seed_array,
-                network,
+        for utxo in &wallet_utxos {
+            output::info(&format!("  Discovered UTXO {}:{} ({} sats)", &utxo.txid[..16], utxo.vout, utxo.value));
+
+            // Add UTXO to unified state for persistence with script_pubkey
+            let utxo_record = csv_store::state::wallet::UtxoRecord {
+                txid: utxo.txid.clone(),
+                vout: utxo.vout,
+                value: utxo.value,
                 account,
-                20, // gap_limit
-                &config.chain(&chain)?.rpc_url,
-            ).await.map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
+                index: 0,
+                derivation_path: format!("m/86'/1'/{}'/0/0", account),
+                script_pubkey: utxo.scriptpubkey_hex.clone(),
+            };
+            state.storage.wallet.utxos.push(utxo_record);
 
-            // Clear old UTXOs for this account before adding new ones
-            state.storage.wallet.utxos.retain(|u| u.account != account);
-
-            let mut total_utxos = 0;
-            let mut total_value = 0u64;
-
-            for utxo in wallet_utxos {
-                output::info(&format!("  Discovered UTXO {}:{} ({} sats)", &utxo.txid[..16], utxo.vout, utxo.value));
-
-                // Add UTXO to unified state for persistence with script_pubkey
-                let utxo_record = csv_store::state::wallet::UtxoRecord {
-                    txid: utxo.txid.clone(),
-                    vout: utxo.vout,
-                    value: utxo.value,
-                    account,
-                    index: 0, // TODO: track actual index from derivation_path
-                    derivation_path: format!("m/86'/1'/{}'/0/0", account),
-                    script_pubkey: utxo.scriptpubkey_hex,
-                };
-                state.storage.wallet.utxos.push(utxo_record);
-
-                total_utxos += 1;
-                total_value += utxo.value;
-            }
-
-            state.save()?;
-
-            output::kv("Total UTXOs discovered", &total_utxos.to_string());
-            output::kv("Total value", &format!("{} sats", total_value));
-
-            if total_utxos == 0 {
-                return Err(anyhow::anyhow!("No UTXOs found on-chain. Send Bitcoin to the funding address first."));
-            }
+            total_utxos += 1;
+            total_value += utxo.value;
         }
 
-        // Reload matching UTXOs after potential scan
-        let matching_utxos: Vec<_> = state.storage.wallet.utxos.iter()
-            .filter(|u| u.account == account && u.index == index)
-            .collect();
+        state.save()?;
 
-        if !matching_utxos.is_empty() {
-            output::info(&format!("Found {} UTXO(s) in wallet state for account {}, index {}", matching_utxos.len(), account, index));
+        output::kv("Total UTXOs discovered", &total_utxos.to_string());
+        output::kv("Total value", &format!("{} sats", total_value));
 
-            let mut utxos_to_add = Vec::new();
+        if total_utxos == 0 {
+            return Err(anyhow::anyhow!("No UTXOs found on-chain. Send Bitcoin to the funding address first."));
+        }
 
-            for utxo in matching_utxos {
-                // Skip UTXOs below minimum threshold (10,000 sats)
-                if utxo.value < 10_000 {
-                    output::warning(&format!("  UTXO {}:{} ({} sats) is below minimum threshold (10,000 sats), skipping", &utxo.txid[..16], utxo.vout, utxo.value));
-                    continue;
-                }
+        // Filter UTXOs: skip dust and validate they're still unspent
+        let rpc_url = config.chain(&chain)?.rpc_url.clone();
+        let mut utxos_to_add = Vec::new();
 
-                output::info(&format!("  Loaded UTXO {}:{} ({} sats)", &utxo.txid[..16], utxo.vout, utxo.value));
+        for utxo in wallet_utxos {
+            // Skip UTXOs below minimum threshold (10,000 sats)
+            if utxo.value < 10_000 {
+                continue;
+            }
 
-                log::info!(
-                    "UTXO {}:{} script_pubkey from state: {:?}",
-                    utxo.txid, utxo.vout, utxo.script_pubkey
-                );
-
-                // Validate UTXO is still unspent on-chain before attempting to use it
-                let rpc_url = config.chain(&chain)?.rpc_url.clone();
-                match csv_coordinator::wallet::bitcoin::validate_utxo_onchain(&utxo.txid, utxo.vout, &rpc_url).await {
-                    Ok((tx_exists, is_confirmed, is_unspent, _)) => {
-                        if !tx_exists {
-                            output::warning(&format!("  UTXO {}:{} transaction not found on-chain, skipping", &utxo.txid[..16], utxo.vout));
-                            continue;
-                        }
-                        if !is_confirmed {
-                            output::warning(&format!("  UTXO {}:{} transaction not confirmed yet, skipping", &utxo.txid[..16], utxo.vout));
-                            continue;
-                        }
-                        if !is_unspent {
-                            output::warning(&format!("  UTXO {}:{} already spent on-chain, removing from state and skipping", &utxo.txid[..16], utxo.vout));
-                            continue;
-                        }
-                    }
-                    Err(e) => {
-                        output::warning(&format!("  Failed to validate UTXO {}:{} on-chain: {}, skipping", &utxo.txid[..16], utxo.vout, e));
+            // Validate UTXO is still unspent on-chain
+            match csv_coordinator::wallet::bitcoin::validate_utxo_onchain(&utxo.txid, utxo.vout, &rpc_url).await {
+                Ok((tx_exists, is_confirmed, is_unspent, _)) => {
+                    if !tx_exists || !is_confirmed || !is_unspent {
                         continue;
                     }
                 }
-
-                // SDK/adapter will handle on-chain validation
-                // Pass script_pubkey if available for correct sighash calculation
-                utxos_to_add.push((utxo.txid.clone(), utxo.vout, utxo.value, utxo.script_pubkey.clone()));
+                Err(_) => {
+                    continue;
+                }
             }
 
-            if utxos_to_add.is_empty() {
-                output::warning(&format!("No valid unspent UTXOs found. Run 'csv wallet scan --chain bitcoin --account {}' to refresh UTXOs.", account));
-                None
-            } else {
-                Some(utxos_to_add)
-            }
-        } else {
-            output::warning(&format!("No UTXOs found in wallet state for account {}, index {}. Run 'csv wallet scan --chain bitcoin --account {}' to discover UTXOs.", account, index, account));
+            utxos_to_add.push((utxo.txid.clone(), utxo.vout, utxo.value, utxo.scriptpubkey_hex));
+        }
+
+        if utxos_to_add.is_empty() {
+            output::warning(&format!("No valid unspent UTXOs found after refresh. Send Bitcoin to {} first.", expected_address));
             None
+        } else {
+            Some(utxos_to_add)
         }
     } else {
         None
@@ -304,8 +253,6 @@ async fn cmd_create(
         account,
         index,
         utxos: bitcoin_utxos.clone().unwrap_or_default().into_iter().map(|(txid, vout, value, scriptpubkey_hex): (String, u32, u64, Option<String>)| {
-            // Debug: print the txid being passed to SDK
-            eprintln!("DEBUG: Passing UTXO to SDK: txid={}, vout={}", txid, vout);
             csv_sdk::config::UtxoConfig {
                 txid: txid.clone(),
                 vout,
@@ -395,7 +342,6 @@ async fn cmd_create(
 
     // For Bitcoin, use existing UTXOs instead of creating new seals
     let (seal, selected_utxo_ref) = if chain.as_str() == "bitcoin" {
-        log::info!("BITCOIN: Creating sanad using UTXO-based seal (HD wallet mode)");
         output::info("BITCOIN: Selecting UTXO for seal creation");
         
         // Select the largest UTXO from the loaded state to avoid dust/tiny amounts
@@ -408,11 +354,9 @@ async fn cmd_create(
             })
             .ok_or_else(|| anyhow::anyhow!("No UTXOs available. Run 'csv wallet scan --chain bitcoin' first."))?;
 
-        log::info!("BITCOIN: Selected UTXO {}:{} ({} sats)", &selected_utxo.0, selected_utxo.1, selected_utxo.2);
         output::info(&format!("Using UTXO {}:{} ({} sats) for seal", &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
 
         // Convert txid to bytes
-        log::info!("BITCOIN: Converting txid to bytes");
         let txid_bytes = hex::decode(&selected_utxo.0)
             .map_err(|e| anyhow::anyhow!("Invalid txid: {}", e))?;
         if txid_bytes.len() != 32 {
@@ -422,7 +366,6 @@ async fn cmd_create(
         txid_array.copy_from_slice(&txid_bytes);
 
         // Create a seal from the UTXO
-        log::info!("BITCOIN: Creating seal point from UTXO");
         let mut id_bytes = Vec::with_capacity(36);
         id_bytes.extend_from_slice(&txid_array);
         id_bytes.extend_from_slice(&selected_utxo.1.to_le_bytes());
@@ -432,7 +375,6 @@ async fn cmd_create(
             nonce: Some(selected_utxo.2),
             version: None,
         };
-        log::info!("BITCOIN: Seal point created (id length: {} bytes, nonce: {} sats)", seal.id.len(), selected_utxo.2);
 
         (seal, Some((selected_utxo.0.clone(), selected_utxo.1)))
     } else {
@@ -460,11 +402,9 @@ async fn cmd_create(
     // For Bitcoin, mark the used UTXO as spent in wallet state to prevent reuse
     if chain.as_str() == "bitcoin" {
         if let Some((used_txid, used_vout)) = selected_utxo_ref {
-            log::info!("BITCOIN: Marking UTXO {}:{} as spent in wallet state", &used_txid, used_vout);
             // Remove the spent UTXO from wallet state
             state.storage.wallet.utxos.retain(|u| !(u.txid == used_txid && u.vout == used_vout));
             state.save()?;
-            output::info(&format!("Marked UTXO {}:{} as spent", &used_txid[..16], used_vout));
         }
     }
 

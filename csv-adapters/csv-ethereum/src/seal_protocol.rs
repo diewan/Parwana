@@ -155,9 +155,10 @@ impl EthereumSealProtocol {
             })?;
 
         // Step 5: Verify LOG event
+        // The sanadId in the event is the commitment hash (not the seal_id which contains contract_address + slot_index + nonce)
         let has_valid_event = verify_seal_consumption_in_receipt(
             &receipt,
-            seal.seal_id,
+            *commitment.as_bytes(),
             *commitment.as_bytes(),
             self.csv_seal_address,
         );
@@ -237,7 +238,7 @@ impl SealProtocol for EthereumSealProtocol {
 
             let has_valid_event = verify_seal_consumption_in_receipt(
                 &receipt,
-                seal.seal_id,
+                *commitment.as_bytes(),
                 *commitment.as_bytes(),
                 self.csv_seal_address,
             );

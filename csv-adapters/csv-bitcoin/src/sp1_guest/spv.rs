@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_sp1_input_creation() {
-        let seal = SealPoint::new(vec![0xAB; 32], Some(0)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(0), None).unwrap();
         let input = Sp1BtcSpvInput::new(
             vec![0x01, 0x00, 0x00, 0x00], // Simplified tx data
             vec![[0xCD; 32]],             // Single merkle branch node
@@ -251,7 +251,7 @@ mod tests {
         // Set merkle root in header (bytes 36-68)
         header[36..68].copy_from_slice(&[0x12; 32]);
 
-        let seal = SealPoint::new(vec![0xAB; 32], Some(0)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(0), None).unwrap();
         let input = Sp1BtcSpvInput::new(
             vec![0x01; 4],
             vec![],
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn test_txid_computation() {
         // Same data should produce same txid
-        let seal = SealPoint::new(vec![0xAB; 32], Some(0)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(0), None).unwrap();
         let input1 = Sp1BtcSpvInput::new(
             vec![0x01, 0x02, 0x03],
             vec![],
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_verify_bitcoin_spv_fails_with_invalid_header() {
         // This should fail because the block header hash won't match
-        let seal = SealPoint::new(vec![0xAB; 32], Some(0)).unwrap();
+        let seal = SealPoint::new(vec![0xAB; 32], Some(0), None).unwrap();
         let input = Sp1BtcSpvInput::new(
             vec![0x01; 4],
             vec![],

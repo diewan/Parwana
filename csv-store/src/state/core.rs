@@ -78,8 +78,10 @@ impl ChainConfig {
             "bitcoin" => Self {
                 rpc_url: match network {
                     Network::Dev => "http://localhost:18443".to_string(),
-                    Network::Test => "https://mempool.space/signet/api/".to_string(),
-                    Network::Main => "https://mempool.space/api/".to_string(),
+                    Network::Test => std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC")
+                        .unwrap_or_else(|_| "https://bitcoin-signet.g.alchemy.com/v2/".to_string()),
+                    Network::Main => std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
+                        .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string()),
                 },
                 network: *network,
                 contract_address: None,

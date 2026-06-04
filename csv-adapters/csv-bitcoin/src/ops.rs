@@ -1421,6 +1421,21 @@ impl BitcoinBackend {
             .first()
             .ok_or_else(|| ChainOpError::InvalidInput("No funding UTXO selected".to_string()))?;
 
+        // Validate UTXO is still unspent before building transaction (race condition check)
+        let txid_bytes = funding_utxo.outpoint.txid.to_byte_array();
+        let is_unspent = self
+            .rpc
+            .is_utxo_unspent(txid_bytes, funding_utxo.outpoint.vout)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to check UTXO status: {}", e)))?;
+        
+        if !is_unspent {
+            return Err(ChainOpError::InvalidInput(
+                format!("Selected UTXO {}:{} is already spent or does not exist", 
+                    hex::encode(funding_utxo.outpoint.txid), funding_utxo.outpoint.vout)
+            ));
+        }
+
         // Build the publication transaction from an actual wallet UTXO. The
         // wallet signing path fills the witness before broadcast.
         let tx = Transaction {
@@ -1706,13 +1721,76 @@ impl ChainSanadOps for BitcoinBackend {
         asset_id: &str,
         metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
-        // Sanad creation requires HD wallet with xpub
-        // This would need to be done through the anchor layer directly
-        // For runtime operations, we return capability unavailable
-        let _ = (owner, asset_class, asset_id, metadata);
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad creation requires HD wallet. Use BitcoinSealProtocol directly for seal operations.".to_string()
-        ))
+        use sha2::{Digest, Sha256};
+
+        let commitment_bytes: [u8; 32] = {
+            let mut hasher = Sha256::new();
+            hasher.update(b"commitment-");
+            hasher.update(owner.as_bytes());
+            hasher.update(asset_class.as_bytes());
+            hasher.update(asset_id.as_bytes());
+            if let Some(meta_str) = metadata.as_str() {
+                hasher.update(meta_str.as_bytes());
+            }
+            let now_nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            hasher.update(now_nanos.to_le_bytes());
+            hasher.finalize().into()
+        };
+        let commitment = Hash::new(commitment_bytes);
+
+        let wallet = &self.seal_protocol.wallet;
+        
+        if let Err(e) = self.seal_protocol.scan_wallet_for_utxos(0, 20).await {
+            log::warn!("Failed to refresh UTXOs before sanad creation: {}", e);
+        }
+        
+        let available_utxos = wallet.list_utxos();
+        let spendable: Vec<_> = available_utxos
+            .iter()
+            .filter(|u| !u.reserved && u.amount_sat >= 10_000)
+            .collect();
+
+        if spendable.is_empty() {
+            return Err(ChainOpError::InvalidInput(
+                "No spendable UTXOs found. Fund the Bitcoin address and scan with 'csv wallet scan'.".to_string()
+            ));
+        }
+
+        let selected = &spendable[0];
+        let outpoint = bitcoin::OutPoint::new(
+            selected.outpoint.txid,
+            selected.outpoint.vout,
+        );
+
+        let (seal, _path) = self.seal_protocol.fund_seal(outpoint)
+            .map_err(|e| ChainOpError::TransactionError(format!("Failed to fund seal: {}", e)))?;
+
+        let seal_txid = hex::encode(seal.txid);
+        let seal_vout = seal.vout;
+        let seal_nonce = seal.nonce.unwrap_or(0);
+
+        let anchor = self.seal_protocol
+            .publish(commitment, seal)
+            .await
+            .map_err(|e| ChainOpError::TransactionError(format!("Failed to publish commitment: {}", e)))?;
+
+        Ok(SanadOperationResult {
+            sanad_id: SanadId(commitment),
+            operation: SanadOperation::Create,
+            transaction_hash: hex::encode(anchor.txid),
+            block_height: anchor.block_height,
+            chain_id: "bitcoin".to_string(),
+            metadata: serde_json::json!({
+                "owner": owner,
+                "asset_class": asset_class,
+                "asset_id": asset_id,
+                "seal_outpoint": format!("{}:{}", seal_txid, seal_vout),
+                "seal_nonce": seal_nonce,
+            }),
+        })
     }
 
     async fn consume_sanad(
@@ -1720,8 +1798,8 @@ impl ChainSanadOps for BitcoinBackend {
         _sanad_id: &SanadId,
         _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad consumption requires wallet. Use BitcoinSealProtocol directly for seal operations.".to_string()
+        Err(ChainOpError::UnsupportedChain(
+            "Bitcoin does not support sanad consumption. Bitcoin sanads are consumed when the commitment is published.".to_string()
         ))
     }
 

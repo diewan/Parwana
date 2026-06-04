@@ -242,19 +242,24 @@ impl EthereumBackend {
         &self,
         to: [u8; 20],
         calldata: &[u8],
-        signer_key: &str,
+        _signer_key: &str,
     ) -> ChainOpResult<[u8; 32]> {
         use alloy::consensus::{SignableTransaction, TxEip1559, TxEnvelope};
         use alloy::eips::eip2718::Encodable2718;
         use alloy::primitives::{Address, Bytes, TxKind, U256};
         use alloy::signers::SignerSync;
-        use alloy::signers::local::PrivateKeySigner;
-        use std::str::FromStr;
 
-        // Parse the signer key
-        let key_clean = signer_key.trim_start_matches("0x");
-        let signer = PrivateKeySigner::from_str(key_clean)
-            .map_err(|e| ChainOpError::SigningError(format!("Invalid private key: {}", e)))?;
+        // Get signer from RPC client (set via with_signer during initialization)
+        let signer = self
+            .rpc()
+            .as_any()
+            .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
+            .and_then(|node| node.signer())
+            .ok_or_else(|| {
+                ChainOpError::SigningError(
+                    "No signer configured - call with_signer() on the RPC client first".to_string(),
+                )
+            })?;
 
         // Get sender address
         let sender: Address = signer.address();
@@ -1023,19 +1028,40 @@ impl ChainSanadOps for EthereumBackend {
         sanad_id: &SanadId,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let _ = sanad_id;
-        let _ = owner_key_id;
+        let contract = self.contract()?;
+        let sanad_id_bytes = sanad_id.0.as_bytes();
 
-        // Consuming a sanad:
-        // 1. Call consumeSeal on the CSV seal contract
-        // 2. Provide the commitment and nullifier
-        // 3. Contract verifies and marks as consumed
+        #[cfg(feature = "rpc")]
+        {
+            let calldata = crate::seal_contract::CsvSealAbi::encode_mark_seal_used(*sanad_id_bytes, *sanad_id_bytes);
 
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad consumption requires a signed transaction to the CSV seal contract. \
-             Construct and submit a transaction calling the consumeSeal function."
-                .to_string(),
-        ))
+            let tx_hash = self
+                .build_sign_and_send_transaction(contract, &calldata, owner_key_id)
+                .await?;
+
+            let receipt = self.wait_for_receipt(&tx_hash).await?;
+
+            Ok(SanadOperationResult {
+                sanad_id: sanad_id.clone(),
+                operation: SanadOperation::Consume,
+                transaction_hash: hex::encode(tx_hash),
+                block_height: receipt.block_number,
+                chain_id: self.config.network.chain_id().to_string(),
+                metadata: serde_json::json!({
+                    "operation": "consume",
+                    "contract": hex::encode(contract),
+                }),
+            })
+        }
+
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(ChainOpError::FeatureNotEnabled(
+                "Sanad consumption requires the 'rpc' feature for transaction signing. \
+                 Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
+                    .to_string(),
+            ))
+        }
     }
 
     async fn lock_sanad(

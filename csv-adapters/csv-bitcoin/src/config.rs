@@ -178,7 +178,6 @@ impl BitcoinConfig {
     /// changes the transport type (e.g., from REST to JSON-RPC), it will return an error
     /// unless the backend type is also explicitly specified.
     pub fn with_env_rpc(mut self) -> Result<Self, String> {
-        eprintln!("BITCOIN ADAPTER LAYER: with_env_rpc called - current RPC URL: {}, backend: {:?}", self.rpc_url, self.rpc_backend);
         let rpc_url = std::env::var("BITCOIN_RPC_URL")
             .or_else(|_| std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC"))
             .or_else(|_| std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC"))
@@ -186,29 +185,17 @@ impl BitcoinConfig {
             .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_REST_RPC"))
             .ok();
 
-        eprintln!("BITCOIN ADAPTER LAYER: Environment variable BITCOIN_RPC_URL value: {:?}", std::env::var("BITCOIN_RPC_URL"));
-
         if let Some(url) = rpc_url {
-            eprintln!("BITCOIN ADAPTER LAYER: Overriding RPC URL from env: {}", url);
-            
             // Detect backend type from new URL
             let detected_backend = BitcoinRpcBackend::detect_from_url(&url);
             
             // Validate that the new URL is compatible with the current backend type
-            if let Err(e) = self.rpc_backend.validate_url(&url) {
+            if let Err(_e) = self.rpc_backend.validate_url(&url) {
                 // If validation fails, try to detect the correct backend type
                 if let Some(detected) = detected_backend {
-                    eprintln!("BITCOIN ADAPTER LAYER: URL '{}' is incompatible with backend {:?}, but detected backend {:?}", 
-                        url, self.rpc_backend, detected);
-                    eprintln!("BITCOIN ADAPTER LAYER: WARNING: Automatically switching backend from {:?} to {:?}", 
-                        self.rpc_backend, detected);
                     self.rpc_backend = detected;
                 } else {
-                    // Unknown endpoint - warn user
-                    eprintln!("BITCOIN ADAPTER LAYER: ERROR: {}", e);
-                    eprintln!("BITCOIN ADAPTER LAYER: URL '{}' does not match any known backend pattern.", url);
-                    eprintln!("BITCOIN ADAPTER LAYER: Please explicitly set rpc_backend in your config or use a known endpoint.");
-                    return Err(format!("RPC URL '{}' is incompatible with backend {:?}: {}", url, self.rpc_backend, e));
+                    return Err(format!("RPC URL '{}' is incompatible with backend {:?}", url, self.rpc_backend));
                 }
             }
             
@@ -218,10 +205,7 @@ impl BitcoinConfig {
             if url.contains("tatum.io") {
                 self.api_key = std::env::var("TATUM_SIGNET_API_KEY").ok();
             }
-        } else {
-            eprintln!("BITCOIN ADAPTER LAYER: No BITCOIN_RPC_URL env var found, keeping current URL: {}", self.rpc_url);
         }
-        eprintln!("BITCOIN ADAPTER LAYER: Final RPC URL after with_env_rpc: {}, backend: {:?}", self.rpc_url, self.rpc_backend);
         Ok(self)
     }
 
@@ -257,13 +241,8 @@ impl BitcoinConfig {
     pub fn auto_detect_backend(mut self) -> Self {
         if let Some(detected) = BitcoinRpcBackend::detect_from_url(&self.rpc_url) {
             if detected != self.rpc_backend {
-                eprintln!("BITCOIN ADAPTER LAYER: Auto-detecting backend from {:?} to {:?} based on URL: {}", 
-                    self.rpc_backend, detected, self.rpc_url);
                 self.rpc_backend = detected;
             }
-        } else {
-            eprintln!("BITCOIN ADAPTER LAYER: WARNING: Could not auto-detect backend from URL: {}, using configured backend: {:?}", 
-                self.rpc_url, self.rpc_backend);
         }
         self
     }
