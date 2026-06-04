@@ -153,11 +153,43 @@ async fn cmd_create(
             &config.chain(&chain)?.rpc_url,
         ).await.map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
 
+        // Filter UTXOs: skip dust and validate they're still unspent BEFORE adding to state
+        let rpc_url = config.chain(&chain)?.rpc_url.clone();
+        let mut utxos_to_add = Vec::new();
         let mut total_utxos = 0;
         let mut total_value = 0u64;
 
-        for utxo in &wallet_utxos {
+        for utxo in wallet_utxos {
             output::info(&format!("  Discovered UTXO {}:{} ({} sats)", &utxo.txid[..16], utxo.vout, utxo.value));
+
+            // Skip UTXOs below minimum threshold (10,000 sats)
+            if utxo.value < 10_000 {
+                output::info(&format!("    Skipping dust UTXO ({} sats < 10,000)", utxo.value));
+                continue;
+            }
+
+            // Validate UTXO is still unspent on-chain BEFORE adding to state
+            match csv_coordinator::wallet::bitcoin::validate_utxo_onchain(&utxo.txid, utxo.vout, &rpc_url).await {
+                Ok((tx_exists, is_confirmed, is_unspent, _)) => {
+                    if !tx_exists {
+                        output::warning(&format!("    Skipping UTXO - transaction not found on-chain"));
+                        continue;
+                    }
+                    if !is_confirmed {
+                        output::warning(&format!("    Skipping UTXO - transaction not confirmed"));
+                        continue;
+                    }
+                    if !is_unspent {
+                        output::warning(&format!("    Skipping UTXO - already spent"));
+                        continue;
+                    }
+                    output::info(&format!("    UTXO validated - adding to wallet state"));
+                }
+                Err(e) => {
+                    output::warning(&format!("    Skipping UTXO - validation failed: {}", e));
+                    continue;
+                }
+            }
 
             // Add UTXO to unified state for persistence with script_pubkey
             let utxo_record = csv_store::state::wallet::UtxoRecord {
@@ -171,42 +203,19 @@ async fn cmd_create(
             };
             state.storage.wallet.utxos.push(utxo_record);
 
+            utxos_to_add.push((utxo.txid.clone(), utxo.vout, utxo.value, utxo.scriptpubkey_hex));
+
             total_utxos += 1;
             total_value += utxo.value;
         }
 
         state.save()?;
 
-        output::kv("Total UTXOs discovered", &total_utxos.to_string());
+        output::kv("Total validated UTXOs", &total_utxos.to_string());
         output::kv("Total value", &format!("{} sats", total_value));
 
         if total_utxos == 0 {
-            return Err(anyhow::anyhow!("No UTXOs found on-chain. Send Bitcoin to the funding address first."));
-        }
-
-        // Filter UTXOs: skip dust and validate they're still unspent
-        let rpc_url = config.chain(&chain)?.rpc_url.clone();
-        let mut utxos_to_add = Vec::new();
-
-        for utxo in wallet_utxos {
-            // Skip UTXOs below minimum threshold (10,000 sats)
-            if utxo.value < 10_000 {
-                continue;
-            }
-
-            // Validate UTXO is still unspent on-chain
-            match csv_coordinator::wallet::bitcoin::validate_utxo_onchain(&utxo.txid, utxo.vout, &rpc_url).await {
-                Ok((tx_exists, is_confirmed, is_unspent, _)) => {
-                    if !tx_exists || !is_confirmed || !is_unspent {
-                        continue;
-                    }
-                }
-                Err(_) => {
-                    continue;
-                }
-            }
-
-            utxos_to_add.push((utxo.txid.clone(), utxo.vout, utxo.value, utxo.scriptpubkey_hex));
+            return Err(anyhow::anyhow!("No valid UTXOs found on-chain. Send Bitcoin to the funding address first."));
         }
 
         if utxos_to_add.is_empty() {
@@ -253,8 +262,16 @@ async fn cmd_create(
         account,
         index,
         utxos: bitcoin_utxos.clone().unwrap_or_default().into_iter().map(|(txid, vout, value, scriptpubkey_hex): (String, u32, u64, Option<String>)| {
+            // Convert display format txid to internal byte order for Bitcoin adapter
+            // mempool.space returns display format (reversed bytes), but adapter expects internal order
+            let txid_bytes = hex::decode(&txid).unwrap_or_default();
+            let mut internal_txid = [0u8; 32];
+            if txid_bytes.len() == 32 {
+                internal_txid.copy_from_slice(&txid_bytes);
+                internal_txid.reverse(); // Convert display to internal byte order
+            }
             csv_sdk::config::UtxoConfig {
-                txid: txid.clone(),
+                txid: hex::encode(internal_txid),
                 vout,
                 value,
                 account,
@@ -341,42 +358,88 @@ async fn cmd_create(
     let runtime = client.chain_runtime();
 
     // For Bitcoin, use existing UTXOs instead of creating new seals
-    let (seal, selected_utxo_ref) = if chain.as_str() == "bitcoin" {
+    // We need to track both the seal and the anchor since we publish during UTXO selection
+    let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" {
         output::info("BITCOIN: Selecting UTXO for seal creation");
         
-        // Select the largest UTXO from the loaded state to avoid dust/tiny amounts
-        let selected_utxo = bitcoin_utxos.as_ref()
-            .and_then(|utxos: &Vec<(String, u32, u64, Option<String>)>| {
-                // Sort by value descending and pick the largest
-                let mut sorted: Vec<_> = utxos.iter().collect();
-                sorted.sort_by_key(|u| std::cmp::Reverse(u.2)); // Sort by value (index 2) descending
-                sorted.first().copied()
-            })
-            .ok_or_else(|| anyhow::anyhow!("No UTXOs available. Run 'csv wallet scan --chain bitcoin' first."))?;
+        // Sort UTXOs by value descending to try largest first
+        let mut sorted_utxos: Vec<_> = bitcoin_utxos.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No UTXOs available. Run 'csv wallet scan --chain bitcoin' first."))?
+            .iter()
+            .collect();
+        sorted_utxos.sort_by_key(|u| std::cmp::Reverse(u.2)); // Sort by value (index 2) descending
 
-        output::info(&format!("Using UTXO {}:{} ({} sats) for seal", &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
+        let mut last_error = None;
+        let mut successful_seal = None;
+        let mut successful_utxo_ref = None;
+        let mut successful_anchor = None;
 
-        // Convert txid to bytes
-        let txid_bytes = hex::decode(&selected_utxo.0)
-            .map_err(|e| anyhow::anyhow!("Invalid txid: {}", e))?;
-        if txid_bytes.len() != 32 {
-            return Err(anyhow::anyhow!("Invalid txid length"));
+        // Try UTXOs in order until one succeeds
+        for (attempt, selected_utxo) in sorted_utxos.iter().enumerate() {
+            output::info(&format!("Attempt {}/{}: Using UTXO {}:{} ({} sats) for seal",
+                attempt + 1, sorted_utxos.len(), &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
+
+            // Convert txid from display format to internal byte order
+            // mempool.space returns display format (reversed bytes), but seal protocol expects internal order
+            let txid_bytes = hex::decode(&selected_utxo.0)
+                .map_err(|e| anyhow::anyhow!("Invalid txid: {}", e))?;
+            if txid_bytes.len() != 32 {
+                return Err(anyhow::anyhow!("Invalid txid length"));
+            }
+            let mut txid_array = [0u8; 32];
+            txid_array.copy_from_slice(&txid_bytes);
+            txid_array.reverse(); // Convert display to internal byte order
+
+            // Create a seal from the UTXO
+            let mut id_bytes = Vec::with_capacity(36);
+            id_bytes.extend_from_slice(&txid_array);
+            id_bytes.extend_from_slice(&selected_utxo.1.to_le_bytes());
+
+            let seal = csv_hash::seal::SealPoint {
+                id: id_bytes,
+                nonce: Some(selected_utxo.2),
+                version: None,
+            };
+
+            // Try to publish with this UTXO
+            match runtime.publish_seal(core_chain.clone(), seal.clone(), commitment).await {
+                Ok(anchor) => {
+                    output::info(&format!("Successfully published using UTXO {}:{} ({} sats)", 
+                        &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
+                    successful_seal = Some(seal);
+                    successful_utxo_ref = Some((selected_utxo.0.clone(), selected_utxo.1));
+                    successful_anchor = Some(anchor);
+                    break;
+                }
+                Err(e) => {
+                    let error_str = e.to_string();
+                    output::warning(&format!("Failed to publish with UTXO {}:{}: {}", 
+                        &selected_utxo.0[..16], selected_utxo.1, error_str));
+                    
+                    // Check if this is a "missing or spent" error - if so, try next UTXO
+                    if error_str.contains("bad-txns-inputs-missingorspent") || 
+                       error_str.contains("already spent") ||
+                       error_str.contains("missing") {
+                        output::info("UTXO appears to be spent or missing, trying next UTXO...");
+                        last_error = Some(anyhow::anyhow!("{}", e));
+                        continue;
+                    } else {
+                        // For other errors, don't retry - fail immediately
+                        return Err(anyhow::anyhow!("Failed to publish seal: {}", e));
+                    }
+                }
+            }
         }
-        let mut txid_array = [0u8; 32];
-        txid_array.copy_from_slice(&txid_bytes);
 
-        // Create a seal from the UTXO
-        let mut id_bytes = Vec::with_capacity(36);
-        id_bytes.extend_from_slice(&txid_array);
-        id_bytes.extend_from_slice(&selected_utxo.1.to_le_bytes());
+        let seal = successful_seal
+            .ok_or_else(|| {
+                last_error.unwrap_or_else(|| anyhow::anyhow!("All UTXOs failed - no valid UTXOs available"))
+            })?;
+        
+        let anchor = successful_anchor
+            .ok_or_else(|| anyhow::anyhow!("No anchor from successful publish"))?;
 
-        let seal = csv_hash::seal::SealPoint {
-            id: id_bytes,
-            nonce: Some(selected_utxo.2),
-            version: None,
-        };
-
-        (seal, Some((selected_utxo.0.clone(), selected_utxo.1)))
+        (seal, successful_utxo_ref, Some(anchor))
     } else {
         // For other chains, use the normal create_seal flow
         log::info!("{}: Creating seal via chain adapter", chain.as_str().to_uppercase());
@@ -385,19 +448,29 @@ async fn cmd_create(
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create seal: {}", e))?;
         log::info!("{}: Seal created successfully", chain.as_str().to_uppercase());
-        (seal, None)
+        (seal, None, None)
     };
 
-    // Step 2: Publish the commitment under the seal
-    log::info!("{}: Publishing commitment under seal", chain.as_str().to_uppercase());
-    output::info(&format!("Publishing commitment to {}...", chain.as_str()));
-    let anchor = runtime
-        .publish_seal(core_chain.clone(), seal.clone(), commitment)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to publish seal: {}", e))?;
-    log::info!("{}: Commitment published successfully (anchor_id: 0x{})", 
-        chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
-    output::info(&format!("Commitment published to {}", chain.as_str()));
+    // Step 2: Publish the commitment under the seal (skip for Bitcoin since we already did it during UTXO selection)
+    let anchor = if anchor.is_some() {
+        // Bitcoin: already published during UTXO selection
+        log::info!("{}: Commitment already published during UTXO selection (anchor_id: 0x{})", 
+            chain.as_str().to_uppercase(), hex::encode(&anchor.as_ref().unwrap().anchor_id[..8]));
+        output::info(&format!("Commitment published to {}", chain.as_str()));
+        anchor.unwrap()
+    } else {
+        // Other chains: publish now
+        log::info!("{}: Publishing commitment under seal", chain.as_str().to_uppercase());
+        output::info(&format!("Publishing commitment to {}...", chain.as_str()));
+        let anchor = runtime
+            .publish_seal(core_chain.clone(), seal.clone(), commitment)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to publish seal: {}", e))?;
+        log::info!("{}: Commitment published successfully (anchor_id: 0x{})", 
+            chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
+        output::info(&format!("Commitment published to {}", chain.as_str()));
+        anchor
+    };
 
     // For Bitcoin, mark the used UTXO as spent in wallet state to prevent reuse
     if chain.as_str() == "bitcoin" {

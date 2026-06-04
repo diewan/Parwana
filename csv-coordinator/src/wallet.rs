@@ -200,7 +200,8 @@ pub mod bitcoin {
         vout: u32,
         rpc_url: &str,
     ) -> anyhow::Result<(bool, bool, bool, Option<serde_json::Value>)> {
-        // Check transaction exists and is confirmed
+        // The txid from scan is in display format (reversed bytes from internal Bitcoin representation)
+        // mempool.space API expects display format, so use it directly
         let tx_url = format!("{}/tx/{}", rpc_url, txid);
         let tx_response = reqwest::get(&tx_url).await;
         

@@ -98,7 +98,7 @@ impl CommitmentTxBuilder {
         wallet: &SealWallet,
         seal_utxo: &WalletUtxo,
         commitment_hash: [u8; 32],
-        _change_path: Option<&Bip86Path>,
+        change_path: Option<&Bip86Path>,
     ) -> Result<CommitmentTxResult, TxBuilderError> {
         // Validate minimum UTXO size
         if seal_utxo.amount_sat < MINIMUM_UTXO_SAT {
@@ -111,9 +111,24 @@ impl CommitmentTxBuilder {
         let secp = wallet.secp();
         let seal_key = wallet.derive_key(&seal_utxo.path)?;
 
-        // Calculate fee (1 input, 1 output)
-        let fee = self.calculate_fee(1, 1);
-        let commitment_value_sat = seal_utxo.amount_sat.saturating_sub(fee);
+        // Use a minimal commitment value (dust threshold + small buffer)
+        // The commitment hash is what matters, not the monetary value
+        let commitment_value_sat = self.dust_threshold_sat + 1000; // 1330 sats minimum
+
+        // Calculate fee (1 input, 1-2 outputs depending on change)
+        let output_count = if change_path.is_some() { 2 } else { 1 };
+        let fee = self.calculate_fee(1, output_count);
+
+        // Calculate change amount
+        let change_amount = seal_utxo.amount_sat.saturating_sub(fee).saturating_sub(commitment_value_sat);
+
+        // Validate we have enough for the commitment output
+        if seal_utxo.amount_sat < fee + commitment_value_sat {
+            return Err(TxBuilderError::InsufficientFunds {
+                available: seal_utxo.amount_sat,
+                required: fee + commitment_value_sat,
+            });
+        }
 
         if !self.is_above_dust(commitment_value_sat) {
             return Err(TxBuilderError::OutputBelowDust {
@@ -154,10 +169,31 @@ impl CommitmentTxBuilder {
             witness: bitcoin::Witness::new(),
         };
 
-        let outputs = vec![TxOut {
+        // Build outputs: commitment output + optional change output
+        let mut outputs = vec![TxOut {
             value: Amount::from_sat(commitment_value_sat),
             script_pubkey: address.script_pubkey(),
         }];
+
+        let change_output = if let Some(path) = change_path {
+            if self.is_above_dust(change_amount) {
+                let change_key = wallet.derive_key(path)?;
+                let change_address = change_key.address;
+                outputs.push(TxOut {
+                    value: Amount::from_sat(change_amount),
+                    script_pubkey: change_address.script_pubkey(),
+                });
+                Some(ChangeOutput {
+                    address: change_address,
+                    value: Amount::from_sat(change_amount),
+                    derivation_path: path.clone(),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let unsigned_tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version(2),
@@ -204,6 +240,10 @@ impl CommitmentTxBuilder {
         let txid = signed_tx.compute_txid();
 
         let script_pubkey = address.script_pubkey();
+
+        // Determine commitment output index (always 0, change is at 1 if present)
+        let commitment_output_index = 0;
+
         Ok(CommitmentTxResult {
             tx: signed_tx,
             txid,
@@ -216,10 +256,10 @@ impl CommitmentTxBuilder {
                 leaf_script,
                 amount_sat: commitment_value_sat,
             },
-            change_output: None,
+            change_output,
             fee_sat: fee,
             input_value_sat: seal_utxo.amount_sat,
-            commitment_output_index: 0,
+            commitment_output_index,
         })
     }
 

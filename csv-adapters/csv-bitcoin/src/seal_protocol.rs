@@ -542,29 +542,51 @@ impl SealProtocol for BitcoinSealProtocol {
             })?;
 
             // Final UTXO validation immediately before broadcast to catch race conditions
-            let is_unspent = rpc.is_utxo_unspent(seal.txid, seal.vout).await
-                .map_err(|e| ProtocolError::PublishFailed(format!("Failed to check UTXO status before broadcast: {}", e)))?;
-            
-            if !is_unspent {
-                return Err(Box::new(ProtocolError::PublishFailed(format!(
-                    "UTXO {}:{} is already spent or missing on-chain. Please refresh UTXOs with 'csv wallet scan' or fund the address.",
-                    hex::encode(outpoint.txid), outpoint.vout
-                ))));
-            }
+            // If the check fails (e.g., transaction not indexed yet), we proceed and let the broadcast fail if needed
+            let _is_unspent = match rpc.is_utxo_unspent(seal.txid, seal.vout).await {
+                Ok(unspent) => {
+                    if !unspent {
+                        return Err(Box::new(ProtocolError::PublishFailed(format!(
+                            "UTXO {}:{} is already spent or missing on-chain. Please refresh UTXOs with 'csv wallet scan' or fund the address.",
+                            hex::encode(outpoint.txid), outpoint.vout
+                        ))));
+                    }
+                    true
+                }
+                Err(e) => {
+                    log::warn!("Failed to check UTXO status before broadcast (transaction may not be indexed yet): {}. Proceeding with broadcast attempt.", e);
+                    true // Assume unspent and proceed
+                }
+            };
 
             // Fetch and validate the actual on-chain scriptPubKey (what the node expects)
+            // This is optional - if mempool.space hasn't indexed the transaction yet, we skip this validation
             log::info!("Fetching scriptPubKey for INPUT UTXO: txid={}, vout={}", hex::encode(seal.txid), seal.vout);
-            let _onchain_spk = rpc.get_utxo_scriptpubkey(seal.txid, seal.vout).await
-                .map_err(|e| ProtocolError::PublishFailed(format!("Failed to fetch UTXO scriptPubKey from RPC for INPUT UTXO {}:{}. This usually means the RPC endpoint is incompatible (e.g., blockstream.info instead of mempool.space) or the UTXO doesn't exist. Check your BITCOIN_RPC_URL environment variable. Error: {}", hex::encode(seal.txid), seal.vout, e)))?;
+            let _onchain_spk = match rpc.get_utxo_scriptpubkey(seal.txid, seal.vout).await {
+                Ok(Some(spk)) => {
+                    log::info!("Successfully fetched scriptPubKey for INPUT UTXO");
+                    Some(spk)
+                }
+                Ok(None) => {
+                    log::warn!("ScriptPubKey not found for vout {} - using wallet data", seal.vout);
+                    None
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch scriptPubKey from RPC (transaction may not be indexed yet): {}. Skipping validation and using wallet data.", e);
+                    None
+                }
+            };
 
             // Build and sign the Taproot commitment transaction
+            // Use the same derivation path for change as the input UTXO
+            let change_path = Some(utxo.path.clone());
             let tx_result = self
                 .tx_builder
                 .build_commitment_tx(
                     &self.wallet,
                     &utxo,
                     *commitment.as_bytes(),
-                    None, // No change path — single UTXO, single output
+                    change_path.as_ref(),
                 )
                 .map_err(|e| ProtocolError::PublishFailed(e.to_string()))?;
 
