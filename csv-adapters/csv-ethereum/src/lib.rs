@@ -32,6 +32,7 @@ pub mod verifier;
 
 #[cfg(feature = "rpc")]
 pub mod node;
+pub mod runtime_adapter;
 
 #[cfg(feature = "rpc")]
 pub use node::{

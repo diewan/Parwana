@@ -554,12 +554,21 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Persist transfer entry to durable storage for crash recovery
-        let registry_entry = transfer_to_registry_entry(&transfer)?;
-        if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
-            return Err(TransferCoordinatorError::RuntimeError(format!(
-                "Failed to persist transfer entry: {}",
-                e
-            )));
+        // Note: lock_tx_hash may be empty at this point (SDK passes empty vec),
+        // so we defer persistence until after lock operation completes
+        let registry_entry = if transfer.lock_tx_hash.is_empty() {
+            // Defer persistence - will be stored after lock completes
+            None
+        } else {
+            Some(transfer_to_registry_entry(&transfer)?)
+        };
+        if let Some(entry) = registry_entry {
+            if let Err(e) = self.replay_db.store_transfer_entry(&entry).await {
+                return Err(TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to persist transfer entry: {}",
+                    e
+                )));
+            }
         }
 
         // Step 2: Verify source chain capabilities
@@ -742,6 +751,18 @@ impl TransferCoordinator {
                 attempt: 1,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
+        // Persist transfer entry with lock_tx_hash now available
+        let mut updated_transfer = transfer.clone();
+        updated_transfer.lock_tx_hash = hex::decode(&lock_result.tx_hash)
+            .map_err(|e| TransferCoordinatorError::InvalidTxHash(format!("Failed to decode lock tx hash: {}", e)))?;
+        let registry_entry = transfer_to_registry_entry(&updated_transfer)?;
+        if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
+            return Err(TransferCoordinatorError::RuntimeError(format!(
+                "Failed to persist transfer entry: {}",
+                e
+            )));
+        }
 
         // Create checkpoint after lock confirmed
         self.checkpoint_manager

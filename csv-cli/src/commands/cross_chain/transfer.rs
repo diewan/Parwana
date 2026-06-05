@@ -65,9 +65,55 @@ pub async fn cmd_transfer(
     };
 
     // Create client builder with source and destination chains
+    // Build SDK config from CLI config
+    let mut sdk_config = csv_sdk::config::Config::default();
+    
+    // Add source chain config
+    if let Some(from_chain_config) = config.chain(&from).ok() {
+        let chain_config = csv_sdk::config::ChainConfig {
+            rpc: csv_sdk::config::RpcConfig {
+                url: from_chain_config.rpc_url.clone(),
+                api_key: None,
+                timeout_ms: 30000,
+                max_retries: 3,
+            },
+            finality_depth: from_chain_config.finality_depth as u32,
+            enabled: true,
+            xpub: None,
+            contract_address: from_chain_config.contract_address.clone(),
+            program_id: from_chain_config.program_id.clone(),
+            account: 0,
+            index: 0,
+            utxos: Vec::new(),
+        };
+        sdk_config.chains.insert(from.to_string(), chain_config);
+    }
+    
+    // Add destination chain config
+    if let Some(to_chain_config) = config.chain(&to).ok() {
+        let chain_config = csv_sdk::config::ChainConfig {
+            rpc: csv_sdk::config::RpcConfig {
+                url: to_chain_config.rpc_url.clone(),
+                api_key: None,
+                timeout_ms: 30000,
+                max_retries: 3,
+            },
+            finality_depth: to_chain_config.finality_depth as u32,
+            enabled: true,
+            xpub: None,
+            contract_address: to_chain_config.contract_address.clone(),
+            program_id: to_chain_config.program_id.clone(),
+            account: 0,
+            index: 0,
+            utxos: Vec::new(),
+        };
+        sdk_config.chains.insert(to.to_string(), chain_config);
+    }
+    
     let client = CsvClient::builder()
         .with_chain(from_chain.clone())
         .with_chain(to_chain.clone())
+        .with_config(sdk_config)
         .with_runtime_coordinator()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;

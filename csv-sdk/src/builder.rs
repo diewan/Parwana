@@ -34,7 +34,6 @@ use csv_runtime::adapter_registry::AdapterRegistryImpl;
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::{
     event_bus::EventBus, event_store::InMemoryEventStore, execution_journal::InMemoryJournal,
-    coordinator_lease::InMemoryLease,
 };
 #[cfg(feature = "runtime-coordinator")]
 use csv_storage::InMemoryReplayDb;
