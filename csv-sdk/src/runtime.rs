@@ -977,12 +977,31 @@ impl AdapterBuilder {
         use csv_bitcoin::ops::BitcoinBackend;
         use csv_bitcoin::seal_protocol::BitcoinSealProtocol;
 
+        // Check if we need to load sanad_seals before moving config
+        let has_sanad_seals = !config.sanad_seals.is_empty();
+        let sanad_seals_count = config.sanad_seals.len();
+
         // Bitcoin uses from_config() following the standard runtime pattern
         let seal =
             BitcoinSealProtocol::from_config(config, rpc).map_err(|e| CsvError::ProtocolError {
                 chain: ChainId::new("bitcoin"),
                 message: format!("Failed to create Bitcoin seal protocol: {}", e),
             })?;
+
+        // Load UTXOs for sanad_seals from RPC
+        // This is required because sanad_seals config only stores the mapping (sanad_id -> txid/vout)
+        // but not the actual UTXO data needed for spending
+        if has_sanad_seals {
+            log::info!("Loading {} sanad_seal UTXOs from RPC", sanad_seals_count);
+            match seal.load_sanad_seal_utxos().await {
+                Ok(count) => {
+                    log::info!("Successfully loaded {} sanad_seal UTXOs from RPC", count);
+                }
+                Err(e) => {
+                    log::warn!("Failed to load sanad_seal UTXOs from RPC: {} (continuing anyway)", e);
+                }
+            }
+        }
 
         let operations = BitcoinBackend::from_seal_protocol(Arc::new(seal)).map_err(|e| {
             CsvError::ProtocolError {

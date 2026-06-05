@@ -370,6 +370,7 @@ mod tests {
             reserved: false,
             reserved_for: None,
             script_pubkey: None,
+            sanad_id: None,
         }
     }
 

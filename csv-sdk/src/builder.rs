@@ -173,7 +173,7 @@ impl ClientBuilder {
     /// - No chains are enabled
     /// - A chain is enabled but its feature flag is not compiled
     /// - The store backend cannot be initialized
-    pub fn build(self) -> Result<crate::client::CsvClient, CsvError> {
+    pub async fn build(self) -> Result<crate::client::CsvClient, CsvError> {
         if self.state.enabled_chains.is_empty() {
             return Err(CsvError::BuilderError(
                 "At least one chain must be enabled. Use .with_chain() to enable a chain."
@@ -250,6 +250,25 @@ impl ClientBuilder {
 
         #[cfg(not(feature = "runtime-coordinator"))]
         let transfer_coordinator: Option<Arc<csv_runtime::TransferCoordinator>> = None;
+
+        // Automatically create and register adapters for all enabled chains
+        let network_type = if config.network == crate::config::Network::Testnet {
+            crate::client::NetworkType::Testnet
+        } else {
+            crate::client::NetworkType::Mainnet
+        };
+
+        for chain in &self.state.enabled_chains {
+            if let Some(backend) = crate::client::CsvClient::build_adapter_for_chain(
+                chain.clone(),
+                &config,
+                network_type,
+                None,
+            ).await? {
+                chain_runtime.register_adapter(chain.clone(), backend).await;
+                log::info!("Automatically initialized adapter for chain: {:?}", chain);
+            }
+        }
 
         Ok(crate::client::CsvClient {
             enabled_chains: self.state.enabled_chains,

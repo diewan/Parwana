@@ -42,6 +42,11 @@ impl AdapterRegistryImpl {
                 chain_id
             )))
     }
+
+    /// Get a mutable reference to an adapter by chain ID (for registration operations)
+    pub fn get(&mut self, chain_id: &str) -> Option<&mut Box<dyn ChainAdapter>> {
+        self.adapters.get_mut(chain_id)
+    }
 }
 
 impl Default for AdapterRegistryImpl {
@@ -290,6 +295,10 @@ mod tests {
 
         async fn get_balance(&self, _address: &str) -> Result<String, AdapterError> {
             Ok("1000".to_string())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 

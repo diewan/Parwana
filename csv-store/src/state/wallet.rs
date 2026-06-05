@@ -85,6 +85,20 @@ pub struct WalletConfig {
     /// UTXOs for Bitcoin wallet (persisted across commands).
     #[serde(default)]
     pub utxos: Vec<UtxoRecord>,
+    /// Sanad ID -> seal mappings for Bitcoin cross-chain lock lookups.
+    #[serde(default)]
+    pub sanad_seals: Vec<SanadSealRecord>,
+}
+
+/// Record mapping a sanad_id to its seal (anchor txid, vout) for cross-chain lookups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SanadSealRecord {
+    /// Sanad ID (hex).
+    pub sanad_id: String,
+    /// Anchor transaction ID (hex).
+    pub anchor_txid: String,
+    /// Output index of the commitment in the anchor transaction.
+    pub vout: u32,
 }
 
 /// UTXO record for Bitcoin wallet persistence.

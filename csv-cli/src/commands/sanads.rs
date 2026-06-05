@@ -247,7 +247,7 @@ async fn cmd_create(
     let chain_cfg = config.chain(&chain)?;
     eprintln!("CLI LAYER: RPC URL from config: {}", chain_cfg.rpc_url);
     eprintln!("CLI LAYER: Account: {}, Index: {}", account, index);
-    let sdk_chain_config = csv_sdk::config::ChainConfig {
+      let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_cfg.rpc_url.clone(),
             api_key: None,
@@ -279,6 +279,11 @@ async fn cmd_create(
                 script_pubkey: scriptpubkey_hex,
             }
         }).collect(),
+        sanad_seals: state.storage.wallet.sanad_seals.iter().map(|s| csv_sdk::config::SanadSealConfig {
+            sanad_id: s.sanad_id.clone(),
+            anchor_txid: s.anchor_txid.clone(),
+            vout: s.vout,
+        }).collect(),
     };
     sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
 
@@ -289,6 +294,7 @@ async fn cmd_create(
         .with_config(sdk_config)
         .with_store_backend(StoreBackend::InMemory)
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     // Initialize chain adapters for the configured network
@@ -337,9 +343,8 @@ async fn cmd_create(
     let mut private_keys = std::collections::HashMap::new();
     private_keys.insert(chain.as_str().to_string(), Some(key_hex));
 
-    eprintln!("CLI LAYER: Initializing adapters with network type: {:?}", network_type);
-    client.init_adapters(network_type, private_keys).await
-        .map_err(|e| anyhow::anyhow!("Failed to initialize chain adapters: {}", e))?;
+    // Note: SDK adapters are automatically created via bitcoin_from_config during client build
+    // Do NOT call init_adapters here as it has been removed from SDK
 
     // Generate a commitment for the sanad
     let commitment_bytes: [u8; 32] = {
@@ -507,6 +512,31 @@ async fn cmd_create(
             };
 
             state.storage.sanads.push(tracked);
+
+            // Register the sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups
+            if chain.as_str() == "bitcoin" {
+                let sanad_id_bytes = *sanad.id.as_bytes();
+                let anchor_txid_hex = hex::encode(&anchor.anchor_id);
+                let output_index = u32::from_le_bytes(
+                    anchor.metadata[..4].try_into().unwrap_or([0, 0, 0, 0])
+                );
+                if let Err(e) = client.register_sanad_seal("bitcoin", sanad_id_bytes, anchor.anchor_id.clone(), output_index) {
+                    log::warn!("Failed to register sanad seal on adapter: {}", e);
+                } else {
+                    log::info!("Registered sanad seal on adapter: sanad_id={}, txid={}, vout={}", 
+                        sanad_id_hex, anchor_txid_hex, output_index);
+                }
+
+                // Persist the mapping to state for cross-run lookups
+                state.storage.wallet.sanad_seals.push(csv_store::state::wallet::SanadSealRecord {
+                    sanad_id: sanad_id_hex.clone(),
+                    anchor_txid: anchor_txid_hex.clone(),
+                    vout: output_index,
+                });
+                state.save()?;
+                log::info!("Persisted sanad seal to state: sanad_id={}, txid={}, vout={}", 
+                    sanad_id_hex, anchor_txid_hex, output_index);
+            }
 
             output::kv("Chain", chain.as_ref());
             output::kv_hash("Sanad ID", sanad.id.as_bytes());
@@ -727,6 +757,7 @@ async fn cmd_consume(
         account: 0,
         index: 0,
         utxos: Vec::new(),
+        sanad_seals: Vec::new(),
     };
     sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
 
@@ -736,6 +767,7 @@ async fn cmd_consume(
         .with_config(sdk_config)
         .with_store_backend(StoreBackend::InMemory)
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     // Initialize chain adapters for the configured network
@@ -766,8 +798,8 @@ async fn cmd_consume(
     let mut private_keys = std::collections::HashMap::new();
     private_keys.insert(chain.as_str().to_string(), Some(key_hex));
 
-    client.init_adapters(network_type, private_keys).await
-        .map_err(|e| anyhow::anyhow!("Failed to initialize chain adapters: {}", e))?;
+    // Note: SDK adapters are automatically created during client build
+    // Do NOT call init_adapters here as it has been removed from SDK
 
     let runtime = client.chain_runtime();
 

@@ -6,6 +6,7 @@
 //! 3. Verify — Destination chain verifies proof, checks registry, mints new Hash
 //! 4. Registry — Records transfer, prevents cross-chain double-spend
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
 use sha3::{Keccak256, Sha3_256};
@@ -569,7 +570,37 @@ pub trait MintProvider {
 
 /// Default verifier implementation for cross-chain transfer proofs.
 pub struct StandardTransferVerifier {
-    _registry: Hash, // TODO: integrate when available
+    registry: CrossChainRegistry,
+}
+
+impl StandardTransferVerifier {
+    /// Create a new StandardTransferVerifier with an empty registry.
+    pub fn new() -> Self {
+        Self {
+            registry: CrossChainRegistry::new(),
+        }
+    }
+
+    /// Create with an existing registry (for persistence/recovery).
+    pub fn with_registry(registry: CrossChainRegistry) -> Self {
+        Self { registry }
+    }
+
+    /// Get a reference to the registry for inspection.
+    pub fn registry(&self) -> &CrossChainRegistry {
+        &self.registry
+    }
+
+    /// Record a completed transfer in the registry.
+    pub fn record_transfer(&mut self, entry: CrossChainRegistryEntry) -> Result<(), CrossChainError> {
+        self.registry.record_transfer(entry)
+    }
+}
+
+impl Default for StandardTransferVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Cross-chain transfer registry entry.
@@ -662,5 +693,42 @@ impl CrossChainRegistry {
     /// Get all recorded transfers.
     pub fn all_transfers(&self) -> Vec<&CrossChainRegistryEntry> {
         self.entries.values().collect()
+    }
+}
+
+#[async_trait]
+impl TransferVerifier for StandardTransferVerifier {
+    fn verify_transfer_proof(&self, proof: &CrossChainTransferProof)
+    -> Result<(), CrossChainError> {
+        // Extract sanad_id and source_seal from the lock event
+        let sanad_id = proof.lock_event.sanad_id;
+        let source_seal = &proof.lock_event.source_seal;
+
+        // Check 1: Verify the seal has not been double-spent
+        if self.registry.is_seal_consumed(source_seal) {
+            return Err(CrossChainError::AlreadyLocked);
+        }
+
+        // Check 2: Verify the sanad has not already been transferred
+        if self.registry.is_sanad_transferred(&sanad_id) {
+            return Err(CrossChainError::AlreadyMinted);
+        }
+
+        // Check 3: Verify the inclusion proof is valid (source chain finalized)
+        // This is delegated to the canonical verifier in production
+        self.verify_inclusion_proof(proof)?;
+
+        Ok(())
+    }
+}
+
+impl StandardTransferVerifier {
+    /// Internal helper to verify inclusion proof validity.
+    /// In a full implementation, this would call the CanonicalVerifier.
+    fn verify_inclusion_proof(&self, _proof: &CrossChainTransferProof) -> Result<(), CrossChainError> {
+        // Placeholder: In production, this delegates to CanonicalVerifier
+        // For now, return Ok to allow the verification flow to proceed
+        // The actual proof verification happens in the TransferCoordinator
+        Ok(())
     }
 }

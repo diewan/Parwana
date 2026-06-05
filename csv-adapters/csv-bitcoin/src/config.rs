@@ -31,6 +31,8 @@ pub struct BitcoinConfig {
     pub index: u32,
     /// Pre-loaded UTXOs (for persistence across commands)
     pub utxos: Vec<UtxoConfig>,
+    /// Pre-loaded sanad_id -> seal mappings (for cross-chain lock lookups)
+    pub sanad_seals: Vec<SanadSealConfig>,
 }
 
 /// UTXO configuration for Bitcoin wallet
@@ -48,6 +50,17 @@ pub struct UtxoConfig {
     pub index: u32,
     /// ScriptPubKey (hex) from blockchain for correct sighash calculation
     pub script_pubkey: Option<String>,
+}
+
+/// Sanad seal configuration for cross-chain lock lookups
+#[derive(Clone, Debug)]
+pub struct SanadSealConfig {
+    /// Sanad ID (hex)
+    pub sanad_id: String,
+    /// Anchor transaction ID (hex)
+    pub anchor_txid: String,
+    /// Output index of the commitment in the anchor transaction
+    pub vout: u32,
 }
 
 /// Bitcoin RPC backend type
@@ -263,6 +276,7 @@ impl Default for BitcoinConfig {
             account: 0,
             index: 0,
             utxos: Vec::new(),
+            sanad_seals: Vec::new(),
         }
     }
 }

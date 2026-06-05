@@ -22,6 +22,7 @@ pub async fn cmd_transfer(
     to: Chain,
     sanad_id: String,
     dest_owner: Option<String>,
+    finality_depth: Option<u64>,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
@@ -77,7 +78,7 @@ pub async fn cmd_transfer(
                 timeout_ms: 30000,
                 max_retries: 3,
             },
-            finality_depth: from_chain_config.finality_depth as u32,
+            finality_depth: finality_depth.unwrap_or(from_chain_config.finality_depth) as u32,
             enabled: true,
             xpub: None,
             contract_address: from_chain_config.contract_address.clone(),
@@ -85,6 +86,11 @@ pub async fn cmd_transfer(
             account: 0,
             index: 0,
             utxos: Vec::new(),
+            sanad_seals: state.storage.wallet.sanad_seals.iter().map(|s| csv_sdk::config::SanadSealConfig {
+                sanad_id: s.sanad_id.clone(),
+                anchor_txid: s.anchor_txid.clone(),
+                vout: s.vout,
+            }).collect(),
         };
         sdk_config.chains.insert(from.to_string(), chain_config);
     }
@@ -106,6 +112,7 @@ pub async fn cmd_transfer(
             account: 0,
             index: 0,
             utxos: Vec::new(),
+            sanad_seals: Vec::new(),
         };
         sdk_config.chains.insert(to.to_string(), chain_config);
     }
@@ -116,6 +123,7 @@ pub async fn cmd_transfer(
         .with_config(sdk_config)
         .with_runtime_coordinator()
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
     // Initialize chain adapters for the transfer
@@ -156,8 +164,8 @@ pub async fn cmd_transfer(
     };
     private_keys.insert(to.to_string(), Some(to_key_hex));
 
-    client.init_adapters(network_type, private_keys).await
-        .map_err(|e| anyhow::anyhow!("Failed to initialize chain adapters: {}", e))?;
+    // Note: SDK already initializes adapters via bitcoin_from_config with loaded UTXOs
+    // Do NOT call init_adapters here as it would replace the adapters with fresh wallets
 
     // Execute the real cross-chain transfer via runtime
     output::info(&format!(

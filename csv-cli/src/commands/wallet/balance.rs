@@ -167,7 +167,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
             timeout_ms: 30_000,
             max_retries: 3,
         };
-        sdk_chains.insert(
+          sdk_chains.insert(
             core_chain.to_string(),
             ChainConfig {
                 rpc,
@@ -179,6 +179,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 account: 0,
                 index: 0,
                 utxos: Vec::new(),
+                sanad_seals: Vec::new(),
             },
         );
     } else {
@@ -202,6 +203,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 account: 0,
                 index: 0,
                 utxos: Vec::new(),
+                sanad_seals: Vec::new(),
             },
         );
     }
@@ -224,6 +226,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
         .with_store_backend(StoreBackend::InMemory)
         .with_config(sdk_config)
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     // Get chain runtime and query balance through the unified runtime
@@ -238,13 +241,6 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
 
     // Execute async operations using the existing tokio runtime
     let balance_info = async {
-        client
-            .init_adapters(network, std::collections::HashMap::new())
-            .await
-            .map_err(|e| csv_sdk::CsvError::ProtocolError {
-                chain: core_chain.clone(),
-                message: format!("Failed to initialize adapters: {}", e),
-            })?;
         client
             .chain_runtime()
             .get_balance(core_chain.clone(), clean_address)

@@ -102,10 +102,13 @@ pub struct TransferManager {
     /// Transfer coordinator for production-grade execution (if enabled)
     #[cfg(feature = "runtime-coordinator")]
     coordinator: Option<Arc<TransferCoordinator>>,
+    /// SDK config for finality depth overrides
+    config: Arc<crate::config::Config>,
 }
 
 impl TransferManager {
     pub(crate) fn new(client: Arc<ClientRef>, runtime: Arc<ChainRuntime>) -> Self {
+        let config = Arc::new(client.config.clone());
         Self {
             client,
             transfers: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -113,6 +116,7 @@ impl TransferManager {
             adapter_registry: Arc::new(std::sync::Mutex::new(AdapterRegistryImpl::new())),
             #[cfg(feature = "runtime-coordinator")]
             coordinator: None,
+            config,
         }
     }
 
@@ -138,6 +142,7 @@ impl TransferManager {
             adapter_registry: self.adapter_registry.clone(),
             #[cfg(feature = "runtime-coordinator")]
             coordinator: self.coordinator.clone(),
+            config: self.config.clone(),
         }
     }
 
@@ -153,7 +158,9 @@ impl TransferManager {
     /// * `sanad_id` — The Sanad to transfer.
     /// * `to_chain` — The destination chain.
     pub fn cross_chain(&self, sanad_id: SanadId, to_chain: ChainId) -> TransferBuilder {
-        TransferBuilder::new(sanad_id, to_chain).with_manager(Arc::new(self.clone_ref()))
+        TransferBuilder::new(sanad_id, to_chain)
+            .with_manager(Arc::new(self.clone_ref()))
+            .with_config(self.config.clone())
     }
 
     /// Get the current status of a transfer.
@@ -245,6 +252,8 @@ pub struct TransferBuilder {
     lease_token: Option<csv_hash::Hash>,
     /// Reference to the TransferManager for coordinator access
     manager: Option<Arc<TransferManager>>,
+    /// SDK config for finality depth overrides
+    config: Option<Arc<crate::config::Config>>,
 }
 
 impl TransferBuilder {
@@ -258,11 +267,17 @@ impl TransferBuilder {
             metadata: HashMap::new(),
             lease_token: None,
             manager: None,
+            config: None,
         }
     }
 
     pub(crate) fn with_manager(mut self, manager: Arc<TransferManager>) -> Self {
         self.manager = Some(manager);
+        self
+    }
+
+    pub(crate) fn with_config(mut self, config: Arc<crate::config::Config>) -> Self {
+        self.config = Some(config);
         self
     }
 
@@ -365,10 +380,20 @@ impl TransferBuilder {
                         duration,
                     )
                     .map_err(|e| CsvError::RuntimeError(format!("Failed to acquire lease: {}", e)))?;
+
+                    // Create RuntimePolicy with finality depth overrides from config
+                    let mut policy = RuntimePolicy::default();
+                    if let Some(config) = &self.config {
+                        // Apply finality depth overrides from config for each chain
+                        for (chain_name, chain_config) in &config.chains {
+                            policy.set_finality_depth(chain_name.clone(), chain_config.finality_depth as u64);
+                        }
+                    }
+
                     let runtime_ctx = RuntimeExecutionContext {
                         runtime_instance: runtime_id,
                         lease,
-                        policy: RuntimePolicy::default(),
+                        policy,
                     };
 
                     // Execute transfer through coordinator

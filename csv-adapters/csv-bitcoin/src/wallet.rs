@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use bitcoin_hashes::Hash;
 
 use bitcoin::secp256k1::rand::{RngCore, rngs::OsRng};
+use hex;
 
 #[allow(unused_imports)]
 use crate::types::BitcoinSealPoint;
@@ -90,6 +91,8 @@ pub struct WalletUtxo {
     pub reserved_for: Option<String>,
     /// Actual scriptPubKey from blockchain (for correct sighash calculation)
     pub script_pubkey: Option<ScriptBuf>,
+    /// Sanad ID this UTXO is associated with (for cross-chain lock lookups)
+    pub sanad_id: Option<[u8; 32]>,
 }
 
 /// Derived Taproot key with spending info
@@ -109,6 +112,8 @@ pub struct SealWallet {
     used_seals: Mutex<HashSet<Vec<u8>>>,
     secp: Secp256k1<secp256k1::All>,
     next_index: Mutex<HashMap<u32, u32>>,
+    /// Explicit sanad_id -> seal mapping for cross-chain lock lookups
+    sanad_seals: Mutex<HashMap<[u8; 32], (Vec<u8>, u32)>>,
 }
 
 impl SealWallet {
@@ -141,6 +146,7 @@ impl SealWallet {
             used_seals: Mutex::new(HashSet::new()),
             secp,
             next_index: Mutex::new(HashMap::new()),
+            sanad_seals: Mutex::new(HashMap::new()),
         })
     }
 
@@ -196,6 +202,13 @@ impl SealWallet {
         })
     }
 
+    /// Get the owner secret key for a given path as a hex-encoded string.
+    /// This is used for signing lock transactions in cross-chain transfers.
+    pub fn get_owner_key_hex(&self, path: &Bip86Path) -> Result<String, WalletError> {
+        let secret_key = self.derive_private_key(path)?;
+        Ok(hex::encode(secret_key.secret_bytes()))
+    }
+
     /// Produce a 64-byte Schnorr signature for the given sighash using the tweaked key.
     pub fn sign_taproot_keypath(
         &self,
@@ -248,10 +261,10 @@ impl SealWallet {
     }
 
     pub fn add_utxo(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path) {
-        self.add_utxo_with_scriptpubkey(outpoint, amount_sat, path, None);
+        self.add_utxo_with_scriptpubkey(outpoint, amount_sat, path, None, None);
     }
 
-    pub fn add_utxo_with_scriptpubkey(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>) {
+    pub fn add_utxo_with_scriptpubkey(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>) {
         self.utxos.lock().unwrap_or_else(|e| e.into_inner()).insert(
             outpoint,
             WalletUtxo {
@@ -261,6 +274,7 @@ impl SealWallet {
                 reserved: false,
                 reserved_for: None,
                 script_pubkey,
+                sanad_id,
             },
         );
     }
@@ -280,6 +294,19 @@ impl SealWallet {
             .values()
             .filter(|u| !u.reserved)
             .count()
+    }
+
+    /// Register an explicit sanad_id -> seal (txid, vout) mapping for cross-chain lock lookups
+    pub fn register_sanad_seal(&self, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) {
+        self.sanad_seals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(sanad_id, (txid, vout));
+    }
+
+    /// Get the sanad_seals map for lookup by seal_protocol
+    pub fn get_sanad_seals(&self) -> std::sync::MutexGuard<'_, HashMap<[u8; 32], (Vec<u8>, u32)>> {
+        self.sanad_seals.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn select_utxos(&self, target_sat: u64) -> Result<Vec<WalletUtxo>, WalletError> {

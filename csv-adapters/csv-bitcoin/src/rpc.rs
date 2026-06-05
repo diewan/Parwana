@@ -23,6 +23,19 @@ pub struct UtxoInfo {
     pub confirmations: u64,
 }
 
+/// Full UTXO details including value and scriptPubKey
+#[derive(Debug, Clone)]
+pub struct UtxoDetails {
+    /// Transaction ID
+    pub txid: [u8; 32],
+    /// Output index
+    pub vout: u32,
+    /// Amount in satoshis
+    pub value: u64,
+    /// ScriptPubKey (hex)
+    pub script_pubkey: String,
+}
+
 /// Trait-based RPC interface for real implementations
 #[async_trait]
 pub trait BitcoinRpc: Send + Sync {
@@ -75,6 +88,16 @@ pub trait BitcoinRpc: Send + Sync {
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
         let _ = (txid, vout);
         Err("Bitcoin RPC implementation does not support scriptPubKey fetching".into())
+    }
+
+    /// Get full UTXO details (value and scriptPubKey) for a specific output
+    async fn get_utxo_details(
+        &self,
+        txid: [u8; 32],
+        vout: u32,
+    ) -> Result<Option<UtxoDetails>, Box<dyn std::error::Error + Send + Sync>> {
+        let _ = (txid, vout);
+        Err("Bitcoin RPC implementation does not support UTXO details fetching".into())
     }
 
     /// Clone the RPC client into a new boxed trait object.

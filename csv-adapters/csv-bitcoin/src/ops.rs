@@ -789,6 +789,16 @@ impl BitcoinChainSanadOps {
         }
     }
 
+    /// Get reference to the underlying seal protocol
+    pub fn seal_protocol(&self) -> &BitcoinSealProtocol {
+        &self.adapter
+    }
+
+    /// Register an explicit sanad_id -> seal mapping for cross-chain lock lookups
+    pub fn register_sanad_seal(&self, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) {
+        self.adapter.wallet.register_sanad_seal(sanad_id, txid, vout);
+    }
+
     /// Create with RPC client for broadcasting
     pub fn with_rpc(mut self, rpc: Box<dyn BitcoinRpc + Send + Sync>) -> Self {
         self.rpc = Some(rpc);

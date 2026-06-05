@@ -161,7 +161,7 @@ pub mod bitcoin {
                             if let Some(ref spk_hex) = scriptpubkey_hex {
                                 if let Ok(spk_bytes) = hex::decode(spk_hex) {
                                     let script_pubkey = bitcoin::ScriptBuf::from_bytes(spk_bytes);
-                                    wallet.add_utxo_with_scriptpubkey(outpoint, value, derivation_path.clone(), Some(script_pubkey));
+                                    wallet.add_utxo_with_scriptpubkey(outpoint, value, derivation_path.clone(), Some(script_pubkey), None);
                                 } else {
                                     wallet.add_utxo(outpoint, value, derivation_path.clone());
                                 }

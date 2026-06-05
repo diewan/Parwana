@@ -30,6 +30,9 @@ pub enum CrossChainAction {
         /// Destination owner address (hex)
         #[arg(long)]
         dest_owner: Option<String>,
+        /// Override finality depth for source chain (for testing)
+        #[arg(long)]
+        finality_depth: Option<u64>,
     },
     /// Check transfer status
     Status {
@@ -63,7 +66,8 @@ pub async fn execute(
             to,
             sanad_id,
             dest_owner,
-        } => transfer::cmd_transfer(from, to, sanad_id, dest_owner, config, state).await,
+            finality_depth,
+        } => transfer::cmd_transfer(from, to, sanad_id, dest_owner, finality_depth, config, state).await,
         CrossChainAction::Status { transfer_id } => status::cmd_status(transfer_id, state),
         CrossChainAction::List { from, to } => status::cmd_list(from, to, state),
         CrossChainAction::Retry { transfer_id } => status::cmd_retry(transfer_id, config, state),

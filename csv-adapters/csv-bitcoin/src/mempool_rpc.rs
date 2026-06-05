@@ -356,6 +356,7 @@ impl MempoolSignetRpc {
             .map(|t| {
                 let decoded = hex::decode(t)?;
                 let mut arr = [0u8; 32];
+                // Mempool.space returns txids in standard format (no reversal needed)
                 arr.copy_from_slice(&decoded);
                 Ok(arr)
             })
@@ -386,6 +387,8 @@ impl BitcoinRpc for MempoolSignetRpc {
         &self,
         height: u64,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        // mempool.space API two-step process:
+        // Step 1: GET /api/block-height/{height} returns block hash as plain text
         let url = format!("{}/block-height/{}", self.base_url, height);
         let hash_hex: String = self.get_text_with_retry(&url).await?;
         let hash_bytes = hex::decode(hash_hex.trim())?;
@@ -399,11 +402,8 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space API expects txid in display format (reversed bytes)
-        // Seal protocol passes internal byte order txids, so reverse for API
-        let mut display_txid = txid;
-        display_txid.reverse();
-        let txid_hex = hex::encode(display_txid);
+        // Mempool.space API uses standard txid format (no reversal needed)
+        let txid_hex = hex::encode(txid);
         let spend_url = format!("{}/tx/{}/outspend/{}", self.base_url, txid_hex, vout);
         let spend_status: OutSpendStatus = self.get_with_retry(&spend_url).await?;
         Ok(!spend_status.spent)
@@ -427,11 +427,8 @@ impl BitcoinRpc for MempoolSignetRpc {
         &self,
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space API expects txid in display format (reversed bytes)
-        // Seal protocol passes internal byte order txids, so reverse for API
-        let mut display_txid = txid;
-        display_txid.reverse();
-        let txid_hex = hex::encode(display_txid);
+        // Mempool.space API uses standard txid format (no reversal needed)
+        let txid_hex = hex::encode(txid);
 
         match self.get_tx_status(&txid_hex).await {
             Ok(status) => {
@@ -506,22 +503,49 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space /tx/{txid} endpoint expects display format (reversed bytes)
-        let mut display_txid = txid;
-        display_txid.reverse();
-        let txid_hex = hex::encode(display_txid);
+        // Mempool.space /tx/{txid} endpoint uses standard txid format (no byte reversal)
+        let txid_hex = hex::encode(txid);
         let url = format!("{}/tx/{}", self.base_url, txid_hex);
-        
-        log::debug!("Fetching scriptPubKey for txid: {} (internal), vout: {}, URL: {}", hex::encode(txid), vout, url);
-        
+
+        log::debug!("Fetching scriptPubKey for txid: {}, vout: {}, URL: {}", txid_hex, vout, url);
+
         let tx_detail: TxDetail = self.get_with_retry(&url).await
             .map_err(|e| {
-                log::error!("Failed to fetch tx details for txid {} (display: {}): {}", hex::encode(txid), txid_hex, e);
+                log::error!("Failed to fetch tx details for txid {}: {}", txid_hex, e);
                 e
             })?;
 
         if let Some(output) = tx_detail.vout.get(vout as usize) {
             Ok(Some(output.scriptpubkey.clone()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_utxo_details(
+        &self,
+        txid: [u8; 32],
+        vout: u32,
+    ) -> Result<Option<crate::rpc::UtxoDetails>, Box<dyn std::error::Error + Send + Sync>> {
+        // Mempool.space /tx/{txid} endpoint uses standard txid format (no byte reversal)
+        let txid_hex = hex::encode(txid);
+        let url = format!("{}/tx/{}", self.base_url, txid_hex);
+
+        log::debug!("Fetching UTXO details for txid: {}, vout: {}, URL: {}", txid_hex, vout, url);
+
+        let tx_detail: TxDetail = self.get_with_retry(&url).await
+            .map_err(|e| {
+                log::error!("Failed to fetch tx details for txid {}: {}", txid_hex, e);
+                e
+            })?;
+
+        if let Some(output) = tx_detail.vout.get(vout as usize) {
+            Ok(Some(crate::rpc::UtxoDetails {
+                txid,
+                vout,
+                value: output.value,
+                script_pubkey: output.scriptpubkey.clone(),
+            }))
         } else {
             Ok(None)
         }
@@ -640,9 +664,7 @@ pub async fn get_address_utxos(
         .into_iter()
         .map(|u| {
             let mut txid_bytes = hex::decode(&u.txid)?;
-            // mempool.space returns txid in display order (big-endian)
-            // Bitcoin internally uses little-endian (hash byte order)
-            txid_bytes.reverse();
+            // mempool.space returns txid in standard format (no reversal needed)
             let txid = Txid::from_slice(&txid_bytes).expect("valid txid");
             let outpoint = OutPoint::new(txid, u.vout);
             Ok((outpoint, u.value))

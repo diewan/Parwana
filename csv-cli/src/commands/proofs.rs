@@ -58,7 +58,7 @@ pub enum ProofAction {
     },
 }
 
-pub fn execute(
+pub async fn execute(
     action: ProofAction,
     config: &Config,
     state: &UnifiedStateManager,
@@ -72,19 +72,19 @@ pub fn execute(
             output,
         } => cmd_generate(
             chain, sanad_id, output, config, state, canonical, proof_tree,
-        ),
+        ).await,
         ProofAction::Verify { chain, proof } => {
-            cmd_verify(chain, proof, config, state, canonical, proof_tree)
+            cmd_verify(chain, proof, config, state, canonical, proof_tree).await
         }
         ProofAction::VerifyCrossChain {
             source,
             dest,
             proof,
-        } => cmd_verify_cross_chain(source, dest, proof, config, state, canonical, proof_tree),
+        } => cmd_verify_cross_chain(source, dest, proof, config, state, canonical, proof_tree).await,
     }
 }
 
-fn cmd_generate(
+async fn cmd_generate(
     chain: Chain,
     sanad_id: String,
     output: Option<String>,
@@ -123,6 +123,7 @@ fn cmd_generate(
     let client = CsvClient::builder()
         .with_chain(adapter_chain.clone())
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     output::progress(2, 4, "Querying chain state for inclusion proof...");
@@ -187,7 +188,7 @@ fn cmd_generate(
     Ok(())
 }
 
-fn cmd_verify(
+async fn cmd_verify(
     chain: Chain,
     proof_file: Option<String>,
     _config: &Config,
@@ -288,6 +289,7 @@ fn cmd_verify(
     let client = CsvClient::builder()
         .with_chain(adapter_chain.clone())
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     output::progress(2, 4, "Reconstructing proof bundle...");
@@ -381,7 +383,7 @@ fn cmd_verify(
     }
 }
 
-fn cmd_verify_cross_chain(
+async fn cmd_verify_cross_chain(
     source: Chain,
     dest: Chain,
     proof_file: String,

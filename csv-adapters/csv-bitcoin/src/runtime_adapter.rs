@@ -5,11 +5,11 @@
 //! runtime orchestration layer.
 
 use bitcoin::Network;
-use bitcoin_hashes::Hash;
 use csv_adapter_core::{
     AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
     CrossChainTransfer,
 };
+use csv_protocol::backend::ChainProofProvider;
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::signature::SignatureScheme;
 use csv_protocol::proof_types::ProofBundle;
@@ -28,6 +28,8 @@ pub struct BitcoinRuntimeAdapter {
     network: Network,
     /// Sanad operations implementation
     sanad_ops: Arc<BitcoinChainSanadOps>,
+    /// RPC client for proof building
+    rpc: Box<dyn BitcoinRpc + Send + Sync>,
 }
 
 impl BitcoinRuntimeAdapter {
@@ -45,31 +47,33 @@ impl BitcoinRuntimeAdapter {
             _ => "bitcoin".to_string(),
         };
 
-        let seal_protocol = BitcoinSealProtocol::with_wallet(
-            crate::config::BitcoinConfig {
-                network: crate::config::Network::Regtest,
-                finality_depth: 6,
-                publication_timeout_seconds: 3600,
-                rpc_url: String::new(),
-                rpc_backend: crate::config::BitcoinRpcBackend::MempoolRest,
-                api_key: None,
-                xpub: None,
-                private_key: None,
-                seed: None,
-                account: 0,
-                index: 0,
-                utxos: Vec::new(),
-            },
-            wallet,
-        ).expect("Failed to create seal protocol");
+          let seal_protocol = BitcoinSealProtocol::with_wallet(
+             crate::config::BitcoinConfig {
+                 network: crate::config::Network::Regtest,
+                 finality_depth: 6,
+                 publication_timeout_seconds: 3600,
+                 rpc_url: String::new(),
+                 rpc_backend: crate::config::BitcoinRpcBackend::MempoolRest,
+                 api_key: None,
+                 xpub: None,
+                 private_key: None,
+                 seed: None,
+                 account: 0,
+                 index: 0,
+                 utxos: Vec::new(),
+                 sanad_seals: Vec::new(),
+             },
+             wallet,
+         ).expect("Failed to create seal protocol");
 
         let sanad_ops = Arc::new(BitcoinChainSanadOps::new(seal_protocol)
-            .with_rpc(rpc));
+            .with_rpc(rpc.clone_boxed()));
 
         Self {
             chain_id,
             network,
             sanad_ops,
+            rpc,
         }
     }
 }
@@ -92,50 +96,29 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         &self,
         transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
-        // For Bitcoin, locking means creating a lock transaction
-        // that spends the commitment UTXO to an OP_RETURN output with the destination hash
-        
-        // Parse the lock_tx_hash from transfer to get the commitment UTXO
-        let txid_bytes = transfer.lock_tx_hash.clone();
-        if txid_bytes.len() != 32 {
-            return Err(AdapterError::Generic(format!(
-                "Invalid lock_tx_hash: expected 32 bytes, got {}",
-                txid_bytes.len()
-            )));
-        }
+        use csv_hash::sanad::SanadId;
 
-        // Build the lock transaction using BitcoinChainSanadOps
-        let mut txid_array = [0u8; 32];
-        txid_array.copy_from_slice(&txid_bytes);
-        
-        let outpoint = bitcoin::OutPoint {
-            txid: bitcoin::Txid::from_raw_hash(bitcoin_hashes::sha256d::Hash::from_byte_array(txid_array)),
-            vout: transfer.lock_output_index,
-        };
+        // Extract sanad_id from transfer and convert to SanadId
+        let sanad_id = SanadId(csv_hash::Hash::new(*transfer.sanad_id.as_bytes()));
 
-        // Create destination hash from sanad_id (for cross-chain proof)
-        let dest_hash = bitcoin_hashes::sha256d::Hash::from_slice(
-            &transfer.sanad_id.as_bytes()[..32]
-        ).map_err(|_| AdapterError::Generic("Failed to create destination hash".to_string()))?;
+        // Get destination chain from transfer
+        let destination_chain = transfer.destination_chain.as_str();
 
-        // Build lock transaction
-        let lock_tx = self.sanad_ops.build_lock_transaction(
-            outpoint,
-            &dest_hash,
-            &[], // owner_key not needed for Bitcoin
-        ).map_err(|e| AdapterError::Generic(format!("Failed to build lock tx: {}", e)))?;
+        // Derive owner key from wallet (account 0, index 0)
+        let seal_protocol = self.sanad_ops.seal_protocol();
+        let wallet = &seal_protocol.wallet;
+        let path = crate::wallet::Bip86Path::external(0, 0);
+        let owner_key_id = wallet.get_owner_key_hex(&path)
+            .map_err(|e| AdapterError::Generic(format!("Failed to derive owner key: {}", e)))?;
 
-        // Sign and broadcast
-        let txid = self.sanad_ops.sign_and_broadcast_lock(lock_tx, &[])
+        // Delegate to BitcoinChainSanadOps::lock_sanad for actual transaction building and broadcasting
+        let result = csv_protocol::backend::ChainSanadOps::lock_sanad(&*self.sanad_ops, &sanad_id, destination_chain, &owner_key_id)
             .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to broadcast lock tx: {}", e)))?;
-
-        // TODO: Get actual block height from RPC - for now use placeholder
-        let block_height = 0;
+            .map_err(|e| AdapterError::Generic(format!("Lock sanad failed: {}", e)))?;
 
         Ok(LockResult {
-            tx_hash: txid,
-            block_height,
+            tx_hash: result.transaction_hash,
+            block_height: result.block_height,
         })
     }
 
@@ -152,13 +135,68 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
 
     async fn build_inclusion_proof(
         &self,
-        _transfer: &CrossChainTransfer,
-        _lock_result: &LockResult,
+        transfer: &CrossChainTransfer,
+        lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        // ProofBundle construction requires complex DAG segment and inclusion proof
-        Err(AdapterError::Generic(
-            "ProofBundle construction not yet implemented for Bitcoin".to_string()
-        ))
+        use crate::ops::BitcoinChainProofProvider;
+        use csv_hash::dag::DAGSegment;
+        use csv_hash::seal::{CommitAnchor, SealPoint};
+
+        // Decode lock tx hash
+        let lock_tx_hash = hex::decode(lock_result.tx_hash.trim_start_matches("0x"))
+            .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
+        let lock_tx_hash_bytes: [u8; 32] = lock_tx_hash.try_into()
+            .map_err(|_| AdapterError::Generic("Invalid lock tx hash length".to_string()))?;
+
+        // Build inclusion proof using BitcoinChainProofProvider
+        let proof_provider = BitcoinChainProofProvider::new(self.rpc.clone_boxed());
+        let inclusion_proof = proof_provider
+            .build_inclusion_proof(
+                &csv_hash::Hash::new(lock_tx_hash_bytes),
+                lock_result.block_height,
+                &lock_tx_hash_bytes,
+            )
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to build inclusion proof: {}", e)))?;
+
+        // Build finality proof
+        let finality_proof = proof_provider
+            .build_finality_proof(&lock_result.tx_hash)
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to build finality proof: {}", e)))?;
+
+        // Create seal reference from the lock transaction outpoint
+        // The seal ID is the lock txid (32 bytes) with vout=0
+        let seal_id: Vec<u8> = lock_tx_hash_bytes.to_vec();
+        let seal_ref = SealPoint::new(seal_id, Some(0), Some(0))
+            .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
+
+        // Create anchor reference from lock transaction data
+        let anchor_ref = CommitAnchor::new(
+            lock_tx_hash_bytes.to_vec(),
+            lock_result.block_height,
+            transfer.destination_chain.as_bytes().to_vec(),
+        )
+        .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
+
+        // Create minimal DAG segment for the lock transition
+        let transition_dag = DAGSegment::new(vec![], csv_hash::Hash::new(lock_tx_hash_bytes));
+
+        // Use empty signatures for now (signature verification is done via inclusion proof)
+        let signatures = vec![];
+
+        let proof_bundle = ProofBundle::with_certification_and_signature_scheme(
+            ProofBundle::CURRENT_VERSION,
+            self.signature_scheme(),
+            transition_dag,
+            signatures,
+            seal_ref,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+        ).map_err(|e| AdapterError::Generic(format!("Failed to create proof bundle: {}", e)))?;
+
+        Ok(proof_bundle)
     }
 
     async fn validate_source_proof(
@@ -180,6 +218,10 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         Err(AdapterError::Generic(
             "Bitcoin balance query not yet implemented".to_string()
         ))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

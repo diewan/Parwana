@@ -209,11 +209,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Wallet { action } => wallet::execute(action, &config, &mut state).await,
         Commands::Sanad { action } => sanads::execute(action, &config, &mut state).await,
         Commands::Proof { action } => {
-            proofs::execute(action, &config, &state, cli.canonical, cli.proof_tree)
+            proofs::execute(action, &config, &state, cli.canonical, cli.proof_tree).await
         }
         Commands::CrossChain { action } => cross_chain::execute(action, &config, &mut state).await,
         Commands::Contract { action } => contracts::execute(action, &config, &mut state),
-        Commands::Seal { action } => seals::execute(action, &config, &mut state),
+        Commands::Seal { action } => seals::execute(action, &config, &mut state).await,
         Commands::Test { action } => tests::execute(action, &config, &state),
         Commands::Validate { action } => validate::execute(action, &config, &state),
         Commands::Inspect { action } => commands::inspect::execute(action),

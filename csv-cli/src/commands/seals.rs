@@ -49,20 +49,20 @@ pub enum SealAction {
     },
 }
 
-pub fn execute(
+pub async fn execute(
     action: SealAction,
     _config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     match action {
-        SealAction::Create { chain, value } => cmd_create(chain, value, state),
-        SealAction::Consume { chain, seal_ref } => cmd_consume(chain, seal_ref, state),
-        SealAction::Verify { chain, seal_ref } => cmd_verify(chain, seal_ref, state),
+        SealAction::Create { chain, value } => cmd_create(chain, value, state).await,
+        SealAction::Consume { chain, seal_ref } => cmd_consume(chain, seal_ref, state).await,
+        SealAction::Verify { chain, seal_ref } => cmd_verify(chain, seal_ref, state).await,
         SealAction::List { chain } => cmd_list(chain, state),
     }
 }
 
-fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateManager) -> Result<()> {
+async fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateManager) -> Result<()> {
     output::header(&format!("Creating Seal on {}", chain));
 
     let core_chain = to_protocol_chain(chain.clone());
@@ -71,6 +71,7 @@ fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateManager)
     let client = CsvClient::builder()
         .with_chain(core_chain.clone())
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
     // Create a seal by creating a basic Sanad (which creates a seal)
@@ -115,7 +116,7 @@ fn generate_commitment() -> [u8; 32] {
     bytes
 }
 
-fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) -> Result<()> {
+async fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) -> Result<()> {
     output::header(&format!("Consuming Seal on {}", chain));
 
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
@@ -133,6 +134,7 @@ fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) 
     let client = CsvClient::builder()
         .with_chain(core_chain)
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
     // Find the sanad associated with this seal and burn it (consuming the seal)
@@ -166,7 +168,7 @@ fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) 
     Ok(())
 }
 
-fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager) -> Result<()> {
+async fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager) -> Result<()> {
     output::header(&format!("Verifying Seal on {}", chain));
 
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
@@ -178,6 +180,7 @@ fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager) -> Re
     let client = CsvClient::builder()
         .with_chain(core_chain)
         .build()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
     // Query the sanad status via the sanads manager

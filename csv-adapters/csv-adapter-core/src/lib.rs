@@ -378,4 +378,7 @@ pub trait ChainAdapter: Send + Sync {
 
     /// Get the balance for an address on the chain.
     async fn get_balance(&self, address: &str) -> Result<String, AdapterError>;
+
+    /// Downcast to concrete type for feature-specific operations
+    fn as_any(&self) -> &dyn std::any::Any;
 }

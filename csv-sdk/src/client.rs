@@ -349,6 +349,27 @@ impl CsvClient {
         self.transfer_coordinator.as_ref()
     }
 
+    /// Register a sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups.
+    /// This is needed because the wallet is created fresh each time and doesn't persist UTXOs.
+    #[cfg(feature = "bitcoin")]
+    pub fn register_sanad_seal(&self, chain: &str, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) -> Result<(), CsvError> {
+        use csv_protocol::ChainSanadOps;
+
+        if let Some(adapter) = self.adapter_registry.lock().map_err(|e| CsvError::ProtocolError {
+            chain: csv_hash::ChainId::new(chain),
+            message: format!("Failed to lock adapter registry: {}", e),
+        })?.get(chain) {
+            if let Some(sanad_ops) = (&**adapter).as_any().downcast_ref::<csv_bitcoin::BitcoinChainSanadOps>() {
+                sanad_ops.register_sanad_seal(sanad_id, txid, vout);
+                return Ok(());
+            }
+        }
+        Err(CsvError::ProtocolError {
+            chain: csv_hash::ChainId::new(chain),
+            message: format!("Bitcoin adapter not found for chain: {}", chain),
+        })
+    }
+
     /// Initialize and register chain adapters for all enabled chains.
     ///
     /// This method must be called after building the client to instantiate
@@ -391,100 +412,9 @@ impl CsvClient {
     ///
     ///     Ok(())
     /// }
-    /// ```
-    pub async fn init_adapters(&self, network: NetworkType, private_keys: std::collections::HashMap<String, Option<String>>) -> Result<(), CsvError> {
-        let mut failed_chains: Vec<String> = Vec::new();
-
-        for chain in &self.enabled_chains {
-            let private_key = private_keys.get(chain.as_str()).and_then(|k| k.as_deref());
-            
-            // Build ChainBackend for chain_runtime
-            let backend_result =
-                Self::build_adapter_for_chain(chain.clone(), &self.config, network, private_key).await;
-
-            // Build ChainAdapter for adapter_registry
-            let chain_adapter_result =
-                Self::build_chain_adapter_for_chain(chain.clone(), &self.config, network, private_key).await;
-
-            match (backend_result, chain_adapter_result) {
-                (Ok(Some(backend)), Ok(Some(chain_adapter))) => {
-                    // Register ChainBackend with chain_runtime
-                    self.chain_runtime
-                        .register_adapter(chain.clone(), backend)
-                        .await;
-
-                    // Register ChainAdapter with adapter_registry
-                    self.adapter_registry
-                        .lock()
-                        .map_err(|e| CsvError::Generic(format!("Failed to lock adapter registry: {}", e)))?
-                        .register_adapter(chain_adapter)
-                        .map_err(|e| CsvError::Generic(format!("Failed to register adapter: {}", e)))?;
-
-                    log::info!(
-                        "Initialized adapters for chain: {:?} on {:?}",
-                        chain,
-                        network
-                    );
-                }
-                (Ok(Some(backend)), Ok(None)) => {
-                    // Only ChainBackend available (chain_runtime only)
-                    self.chain_runtime
-                        .register_adapter(chain.clone(), backend)
-                        .await;
-                    log::info!(
-                        "Initialized ChainBackend (no ChainAdapter) for chain: {:?} on {:?}",
-                        chain,
-                        network
-                    );
-                }
-                (Ok(None), Ok(Some(chain_adapter))) => {
-                    // Only ChainAdapter available (adapter_registry only)
-                    self.adapter_registry
-                        .lock()
-                        .map_err(|e| CsvError::Generic(format!("Failed to lock adapter registry: {}", e)))?
-                        .register_adapter(chain_adapter)
-                        .map_err(|e| CsvError::Generic(format!("Failed to register adapter: {}", e)))?;
-                    log::info!(
-                        "Initialized ChainAdapter (no ChainBackend) for chain: {:?} on {:?}",
-                        chain,
-                        network
-                    );
-                }
-                (Ok(None), Ok(None)) => {
-                    log::debug!(
-                        "Skipping adapter initialization for unsupported chain: {:?}",
-                        chain
-                    );
-                }
-                (Err(e), _) | (_, Err(e)) => {
-                    log::warn!("Failed to initialize adapter for chain {:?}: {}", chain, e);
-                    failed_chains.push(chain.to_string());
-                }
-            }
-        }
-
-        let registered = self.chain_runtime.registered_chains().await;
-        if registered.is_empty() && !failed_chains.is_empty() {
-            return Err(CsvError::ConfigError(format!(
-                "No chain adapters could be initialized. Failed chains: [{}]. \
-                     Check your configuration (e.g., Bitcoin requires an xpub for seal protocol).",
-                failed_chains.join(", ")
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Initialize and register chain adapters for all enabled chains (without signer).
-    ///
-    /// This is a convenience method for chains that don't require signing.
-    pub async fn init_adapters_simple(&self, network: NetworkType) -> Result<(), CsvError> {
-        self.init_adapters(network, std::collections::HashMap::new()).await
-    }
-
     /// Build an adapter for a specific chain.
     #[allow(unused_variables)]
-    async fn build_adapter_for_chain(
+    pub async fn build_adapter_for_chain(
         chain: ChainId,
         _config: &crate::config::Config,
         network: NetworkType,
@@ -521,6 +451,7 @@ impl CsvClient {
                 log::info!("Building Bitcoin adapter with RPC URL: {}", rpc_url);
                 let chain_config = _config.chains.get("bitcoin");
                 let mut utxos = Vec::new();
+                let mut sanad_seals = Vec::new();
                 if let Some(cc) = chain_config {
                     // Convert UTXO records from SDK config to Bitcoin adapter config
                     for utxo in &cc.utxos {
@@ -531,6 +462,14 @@ impl CsvClient {
                             account: utxo.account,
                             index: utxo.index,
                             script_pubkey: utxo.script_pubkey.clone(),
+                        });
+                    }
+                    // Convert sanad seal records from SDK config to Bitcoin adapter config
+                    for seal in &cc.sanad_seals {
+                        sanad_seals.push(csv_bitcoin::config::SanadSealConfig {
+                            sanad_id: seal.sanad_id.clone(),
+                            anchor_txid: seal.anchor_txid.clone(),
+                            vout: seal.vout,
                         });
                     }
                 }
@@ -548,6 +487,7 @@ impl CsvClient {
                     account: chain_config.map(|c| c.account).unwrap_or(0),
                     index: chain_config.map(|c| c.index).unwrap_or(0),
                     utxos,
+                    sanad_seals,
                 };
                 eprintln!("SDK LAYER: BitcoinConfig before with_env_rpc - RPC URL: {}, Account: {}, Index: {}", btc_config.rpc_url, btc_config.account, btc_config.index);
                 let btc_config = btc_config.with_env_rpc().map_err(|e| CsvError::ProtocolError {
@@ -920,199 +860,6 @@ impl CsvClient {
                 _builder.solana_from_config(sol_config, rpc).await.map(Some)
             }
             _ => Ok(None), // Skip unsupported chains
-        }
-    }
-
-    /// Build a ChainAdapter for a specific chain (for adapter_registry).
-    ///
-    /// This builds ChainAdapter instances (from csv_adapter_core) which are used
-    /// by TransferCoordinator for cross-chain transfers.
-    #[allow(unused_variables)]
-    async fn build_chain_adapter_for_chain(
-        chain: ChainId,
-        _config: &crate::config::Config,
-        network: NetworkType,
-        private_key: Option<&str>,
-    ) -> Result<Option<Box<dyn csv_adapter_core::ChainAdapter>>, CsvError> {
-        let _is_testnet = matches!(network, NetworkType::Testnet);
-
-        match chain.as_str() {
-            #[cfg(all(feature = "bitcoin", feature = "rpc"))]
-            "bitcoin" => {
-                log::info!("Building Bitcoin ChainAdapter for {:?} network", network);
-                let config_rpc_url = _config
-                    .chains
-                    .get("bitcoin")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC")
-                                .unwrap_or_else(|_| "https://bitcoin-signet.g.alchemy.com/v2/".to_string())
-                        } else {
-                            std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
-                                .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string())
-                        }
-                    });
-                let rpc_url = config_rpc_url;
-                let btc_network = if _is_testnet {
-                    csv_bitcoin::Network::Signet
-                } else {
-                    csv_bitcoin::Network::Mainnet
-                };
-                let bitcoin_network = if _is_testnet {
-                    bitcoin::Network::Signet
-                } else {
-                    bitcoin::Network::Bitcoin
-                };
-
-                // Create RPC client
-                let api_key = None;
-                let final_rpc_url = rpc_url.clone();
-                let rpc_backend = csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc;
-
-                let rpc = std::thread::spawn(move || {
-                    match rpc_backend {
-                        csv_bitcoin::BitcoinRpcBackend::MempoolRest => {
-                            Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url_and_key(
-                                final_rpc_url,
-                                api_key,
-                            )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
-                        }
-                        csv_bitcoin::BitcoinRpcBackend::BlockstreamRest => {
-                            Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url_and_key(
-                                final_rpc_url,
-                                api_key,
-                            )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
-                        }
-                        csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc => {
-                            Box::new(csv_bitcoin::BitcoinJsonRpc::new(final_rpc_url)) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
-                        }
-                    }
-                })
-                .join()
-                .map_err(|e| CsvError::ProtocolError {
-                    chain,
-                    message: format!("Thread panic: {:?}", e),
-                })?;
-
-                // Create wallet from seed (for Bitcoin, we use the seed directly)
-                let seed_bytes = if let Some(pk) = private_key {
-                    hex::decode(pk.trim_start_matches("0x"))
-                        .map_err(|e| CsvError::ConfigError(format!("Invalid private key: {}", e)))?
-                } else {
-                    // Generate random seed if no private key provided
-                    let mut seed = [0u8; 64];
-                    use rand::RngCore;
-                    rand::thread_rng().fill_bytes(&mut seed);
-                    seed.to_vec()
-                };
-
-                let mut seed_array = [0u8; 64];
-                if seed_bytes.len() >= 64 {
-                    seed_array.copy_from_slice(&seed_bytes[..64]);
-                } else {
-                    seed_array[..seed_bytes.len()].copy_from_slice(&seed_bytes);
-                }
-
-                let wallet = csv_bitcoin::wallet::SealWallet::from_seed(&seed_array, bitcoin_network)
-                    .map_err(|e| CsvError::ConfigError(format!("Failed to create wallet: {}", e)))?;
-
-                let adapter = csv_bitcoin::runtime_adapter::BitcoinRuntimeAdapter::new(
-                    bitcoin_network,
-                    wallet,
-                    rpc,
-                );
-
-                Ok(Some(Box::new(adapter)))
-            }
-            #[cfg(all(feature = "bitcoin", not(feature = "rpc")))]
-            "bitcoin" => {
-                log::warn!("Bitcoin ChainAdapter requires 'rpc' feature; skipping");
-                Ok(None)
-            }
-            #[cfg(all(feature = "ethereum", feature = "rpc"))]
-            "ethereum" => {
-                log::info!("Building Ethereum ChainAdapter for {:?} network", network);
-                let config_rpc_url = _config
-                    .chains
-                    .get("ethereum")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            std::env::var("ETHEREUM_ALCHEMY_SEPOLIA_HTTP_RPC")
-                                .unwrap_or_else(|_| "https://eth-sepolia.g.alchemy.com/v2/".to_string())
-                        } else {
-                            std::env::var("ETHEREUM_ALCHEMY_MAINNET_HTTP_RPC")
-                                .unwrap_or_else(|_| "https://eth-mainnet.g.alchemy.com/v2/".to_string())
-                        }
-                    });
-                let rpc_url = config_rpc_url;
-
-                // Get contract address from config
-                let contract_address = _config
-                    .chains
-                    .get("ethereum")
-                    .and_then(|chain| chain.contract_address.clone())
-                    .ok_or_else(|| CsvError::ConfigError(
-                        "Ethereum seal contract address must be configured".to_string(),
-                    ))?;
-
-                // Parse contract address to bytes
-                let contract_address_bytes: [u8; 20] = {
-                    let cleaned = contract_address.trim_start_matches("0x");
-                    let bytes = hex::decode(cleaned).map_err(|e| {
-                        CsvError::ConfigError(format!("Invalid contract address: {}", e))
-                    })?;
-                    if bytes.len() != 20 {
-                        return Err(CsvError::ConfigError(
-                            "Contract address must be 20 bytes".to_string(),
-                        ));
-                    }
-                    let mut addr = [0u8; 20];
-                    addr.copy_from_slice(&bytes);
-                    addr
-                };
-
-                // Create RPC client (this is async, but we're in an async function)
-                let rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, contract_address_bytes).await
-                    .map_err(|e| CsvError::ProtocolError {
-                        chain,
-                        message: format!("Failed to create Ethereum RPC: {}", e),
-                    })?;
-
-                // Create Ethereum config
-                let eth_config = csv_ethereum::config::EthereumConfig {
-                    network: if _is_testnet {
-                        csv_ethereum::config::Network::Sepolia
-                    } else {
-                        csv_ethereum::config::Network::Mainnet
-                    },
-                    contract_address: Some(contract_address_bytes),
-                    ..Default::default()
-                };
-
-                // Create EthereumBackend
-                let backend = csv_ethereum::ops::EthereumBackend::new(Box::new(rpc), eth_config);
-
-                let adapter = csv_ethereum::runtime_adapter::EthereumRuntimeAdapter::new(
-                    std::sync::Arc::new(backend),
-                );
-
-                Ok(Some(Box::new(adapter)))
-            }
-            #[cfg(all(feature = "ethereum", not(feature = "rpc")))]
-            "ethereum" => {
-                log::warn!("Ethereum ChainAdapter requires 'rpc' feature; skipping");
-                Ok(None)
-            }
-            // For other chains, ChainAdapter implementations are not yet available
-            // Return None for now - they will use ChainBackend via chain_runtime only
-            _ => {
-                log::debug!("ChainAdapter not yet implemented for chain: {}", chain);
-                Ok(None)
-            }
         }
     }
 

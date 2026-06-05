@@ -754,7 +754,7 @@ impl TransferCoordinator {
 
         // Persist transfer entry with lock_tx_hash now available
         let mut updated_transfer = transfer.clone();
-        updated_transfer.lock_tx_hash = hex::decode(&lock_result.tx_hash)
+        updated_transfer.lock_tx_hash = hex::decode(lock_result.tx_hash.trim_start_matches("0x"))
             .map_err(|e| TransferCoordinatorError::InvalidTxHash(format!("Failed to decode lock tx hash: {}", e)))?;
         let registry_entry = transfer_to_registry_entry(&updated_transfer)?;
         if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
@@ -2376,6 +2376,10 @@ mod tests {
         ) -> Result<String, csv_adapter_core::AdapterError> {
             Ok("0".to_string())
         }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     async fn recovery_fixture(
@@ -2777,6 +2781,9 @@ mod tests {
                 _address: &str,
             ) -> Result<String, csv_adapter_core::AdapterError> {
                 Ok("0".to_string())
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
             }
         }
         registry
@@ -3485,6 +3492,10 @@ mod tests {
                 _address: &str,
             ) -> Result<String, csv_adapter_core::AdapterError> {
                 Ok("0".to_string())
+            }
+
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
             }
         }
 
