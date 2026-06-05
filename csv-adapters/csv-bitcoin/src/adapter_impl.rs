@@ -5,7 +5,7 @@ use csv_adapter_core::{
     AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus,
 };
 use csv_hash::Hash;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
+use csv_protocol::proof_types::ProofBundle;
 use std::sync::Arc;
 
 use crate::BitcoinRpc;
@@ -27,12 +27,6 @@ impl ProofAdapter for BitcoinAdapter {
     async fn verify_proof_bundle(&self, _bundle: &ProofBundle) -> AdapterResult<bool> {
         // Delegate to existing proof verification logic
         // This would integrate with the existing proofs module
-        Ok(true) // Placeholder - actual implementation would use existing verification
-    }
-
-    async fn verify_finality(&self, _proof: &FinalityProof) -> AdapterResult<bool> {
-        // Delegate to existing finality verification logic
-        // This would integrate with the existing spv module
         Ok(true) // Placeholder - actual implementation would use existing verification
     }
 

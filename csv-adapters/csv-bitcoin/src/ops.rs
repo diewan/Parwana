@@ -895,7 +895,7 @@ impl BitcoinChainSanadOps {
     }
 
     /// Build a lock transaction for cross-chain transfer
-    fn build_lock_transaction(
+    pub fn build_lock_transaction(
         &self,
         seal_outpoint: bitcoin::OutPoint,
         dest_hash: &bitcoin_hashes::sha256d::Hash,
@@ -933,7 +933,7 @@ impl BitcoinChainSanadOps {
     }
 
     /// Sign and broadcast a lock transaction
-    async fn sign_and_broadcast_lock(
+    pub async fn sign_and_broadcast_lock(
         &self,
         tx: bitcoin::Transaction,
         _owner_key: &[u8],

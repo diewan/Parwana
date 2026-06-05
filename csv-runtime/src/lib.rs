@@ -49,8 +49,9 @@ pub mod transfer_coordinator;
 pub mod wallet;
 
 // Legacy re-exports (orchestration only)
-pub use adapter_registry::{
-    AdapterRegistryImpl, ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,
+pub use adapter_registry::AdapterRegistryImpl;
+pub use csv_adapter_core::{
+    ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,
     ChainProofPort, ChainReadPort, ChainSealRegistryPort,
 };
 pub use config::{

@@ -46,6 +46,9 @@ use crate::transfers::TransferManager;
 use crate::wallet::Wallet;
 use crate::wallet::WalletManager;
 
+// Import adapter registry for cross-chain transfers
+use csv_runtime::adapter_registry::AdapterRegistryImpl;
+
 /// Handle to the underlying storage backend.
 pub enum StoreHandle {
     /// In-memory seal and anchor store.
@@ -157,6 +160,8 @@ pub struct CsvClient {
     pub(crate) event_tx: (),
     /// Chain runtime for unified chain operations.
     pub(crate) chain_runtime: ChainRuntime,
+    /// Adapter registry for cross-chain transfers.
+    pub(crate) adapter_registry: Arc<std::sync::Mutex<AdapterRegistryImpl>>,
 }
 
 impl CsvClient {
@@ -260,6 +265,47 @@ impl CsvClient {
     /// Get a reference to the attached wallet, if any.
     pub fn wallet_ref(&self) -> Option<&Wallet> {
         self.wallet.as_ref()
+    }
+
+    /// Register a chain adapter for cross-chain transfers.
+    ///
+    /// This method allows manual registration of chain adapters that implement
+    /// the `ChainAdapter` trait from `csv_adapter_core`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use csv_sdk::prelude::*;
+    /// use csv_bitcoin::runtime_adapter::BitcoinRuntimeAdapter;
+    ///
+    /// let client = CsvClient::builder()
+    ///     .with_chain("bitcoin")
+    ///     .build()?;
+    ///
+    /// // Register Bitcoin adapter for cross-chain transfers
+    /// let bitcoin_adapter = Box::new(BitcoinRuntimeAdapter::new(
+    ///     bitcoin::Network::Regtest,
+    ///     wallet,
+    ///     rpc,
+    /// )) as Box<dyn csv_adapter_core::ChainAdapter>;
+    ///
+    /// client.register_adapter(bitcoin_adapter)?;
+    /// # Ok::<_, csv_sdk::CsvError>(())
+    /// ```
+    pub fn register_adapter(&self, adapter: Box<dyn csv_adapter_core::ChainAdapter>) -> Result<(), CsvError> {
+        self.adapter_registry
+            .lock()
+            .map_err(|e| CsvError::Generic(format!("Failed to lock adapter registry: {}", e)))?
+            .register_adapter(adapter)
+            .map_err(|e| CsvError::Generic(format!("Failed to register adapter: {}", e)))
+    }
+
+    /// Get the adapter registry for cross-chain transfers.
+    ///
+    /// This provides access to the `AdapterRegistry` which can be used by
+    /// the `TransferCoordinator` for cross-chain transfer operations.
+    pub fn adapter_registry(&self) -> Arc<std::sync::Mutex<AdapterRegistryImpl>> {
+        self.adapter_registry.clone()
     }
 
     /// Get a reference to the configuration.

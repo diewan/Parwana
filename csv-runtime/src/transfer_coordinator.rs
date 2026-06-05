@@ -8,7 +8,7 @@
 
 #![allow(missing_docs)]
 
-use crate::adapter_registry::{AdapterRegistry, CrossChainTransfer};
+use csv_adapter_core::{AdapterRegistry, CrossChainTransfer};
 use crate::coordinator_lease::{CoordinatorId, CoordinatorLease};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
@@ -912,7 +912,7 @@ impl TransferCoordinator {
         let proof_bundle = adapter_registry
             .build_inclusion_proof(&transfer.source_chain, &transfer, &lock_result)
             .await
-            .map_err(|e: crate::adapter_registry::AdapterError| {
+            .map_err(|e: csv_adapter_core::AdapterError| {
                 TransferCoordinatorError::ProofBuildFailed(e.to_string())
             })?;
 
@@ -938,7 +938,7 @@ impl TransferCoordinator {
             })?;
         let seal_is_consumed = matches!(
             seal_status,
-            crate::adapter_registry::SealRegistryStatus::Consumed
+            csv_adapter_core::SealRegistryStatus::Consumed
         );
         let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
 
@@ -1187,7 +1187,7 @@ impl TransferCoordinator {
             None => {
                 let error = last_error
                     .as_ref()
-                    .map(|e: &crate::adapter_registry::AdapterError| e.to_string())
+                    .map(|e: &csv_adapter_core::AdapterError| e.to_string())
                     .unwrap_or_else(|| "Unknown error".to_string());
                 let _ =
                     self.execution_journal
@@ -1682,7 +1682,7 @@ impl TransferCoordinator {
             })?;
         let seal_is_consumed = matches!(
             seal_status,
-            crate::adapter_registry::SealRegistryStatus::Consumed
+            csv_adapter_core::SealRegistryStatus::Consumed
         );
         let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
         let required_confirmations = runtime_ctx
@@ -1777,7 +1777,7 @@ impl TransferCoordinator {
             .confirm_tx(&transfer.source_chain, &lock_tx_hash)
             .await
             .map_err(|e| TransferCoordinatorError::LockFailed(e.to_string()))?;
-        let lock_result = crate::adapter_registry::LockResult {
+        let lock_result = csv_adapter_core::LockResult {
             tx_hash: confirmed_lock.tx_hash,
             block_height: confirmed_lock.block_height,
         };
@@ -2171,7 +2171,7 @@ pub trait RecoveryContextProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapter_registry::{
+    use csv_adapter_core::{
         AdapterRegistryImpl, ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer,
         LockResult, MintResult, SealRegistryStatus,
     };
@@ -2251,7 +2251,7 @@ mod tests {
         async fn lock_sanad(
             &self,
             _transfer: &CrossChainTransfer,
-        ) -> Result<LockResult, crate::adapter_registry::AdapterError> {
+        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
             Ok(LockResult {
                 tx_hash: hex::encode([0x11u8; 32]),
                 block_height: 100,
@@ -2262,7 +2262,7 @@ mod tests {
             &self,
             _transfer: &CrossChainTransfer,
             _proof_bundle: &[u8],
-        ) -> Result<MintResult, crate::adapter_registry::AdapterError> {
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
             Ok(MintResult {
                 tx_hash: hex::encode([0x22u8; 32]),
                 block_height: 200,
@@ -2273,7 +2273,7 @@ mod tests {
             &self,
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
-        ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
+        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
             use csv_hash::dag::{DAGNode, DAGSegment};
             use csv_hash::seal::{CommitAnchor, SealPoint};
             use csv_protocol::signature::SignatureScheme;
@@ -2303,16 +2303,16 @@ mod tests {
                     .unwrap(),
                 csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
             )
-            .map_err(|e| crate::adapter_registry::AdapterError::Generic(e.to_string()))?)
+            .map_err(|e| csv_adapter_core::AdapterError::Generic(e.to_string()))?)
         }
 
         async fn validate_source_proof(
             &self,
             transfer: &CrossChainTransfer,
             proof_bundle: &ProofBundle,
-        ) -> Result<(), crate::adapter_registry::AdapterError> {
+        ) -> Result<(), csv_adapter_core::AdapterError> {
             if proof_bundle.seal_ref.id != transfer.sanad_id.as_bytes() {
-                return Err(crate::adapter_registry::AdapterError::Generic(
+                return Err(csv_adapter_core::AdapterError::Generic(
                     "proof is not bound to the requested sanad".to_string(),
                 ));
             }
@@ -2323,16 +2323,16 @@ mod tests {
             &self,
             _seal_id: &[u8],
         ) -> Result<
-            crate::adapter_registry::SealRegistryStatus,
-            crate::adapter_registry::AdapterError,
+            csv_adapter_core::SealRegistryStatus,
+            csv_adapter_core::AdapterError,
         > {
-            Ok(crate::adapter_registry::SealRegistryStatus::Available)
+            Ok(csv_adapter_core::SealRegistryStatus::Available)
         }
 
         async fn confirm_tx(
             &self,
             tx_hash: &str,
-        ) -> Result<MintResult, crate::adapter_registry::AdapterError> {
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
@@ -2342,7 +2342,7 @@ mod tests {
         async fn get_balance(
             &self,
             _address: &str,
-        ) -> Result<String, crate::adapter_registry::AdapterError> {
+        ) -> Result<String, csv_adapter_core::AdapterError> {
             Ok("0".to_string())
         }
     }
@@ -2698,8 +2698,8 @@ mod tests {
             async fn lock_sanad(
                 &self,
                 _t: &RuntimeCrossChainTransfer,
-            ) -> Result<LockResult, crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Celestia is not a transfer source".to_string(),
                 ))
             }
@@ -2707,8 +2707,8 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _p: &[u8],
-            ) -> Result<MintResult, crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Celestia does not authorize destination mints".to_string(),
                 ))
             }
@@ -2716,8 +2716,8 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _l: &LockResult,
-            ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Celestia is not a transfer proof source".to_string(),
                 ))
             }
@@ -2725,8 +2725,8 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _p: &ProofBundle,
-            ) -> Result<(), crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<(), csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Celestia is not a transfer proof source".to_string(),
                 ))
             }
@@ -2734,17 +2734,17 @@ mod tests {
                 &self,
                 _s: &[u8],
             ) -> Result<
-                crate::adapter_registry::SealRegistryStatus,
-                crate::adapter_registry::AdapterError,
+                csv_adapter_core::SealRegistryStatus,
+                csv_adapter_core::AdapterError,
             > {
-                Err(crate::adapter_registry::AdapterError::Generic(
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Celestia has no transfer seal registry".to_string(),
                 ))
             }
             async fn get_balance(
                 &self,
                 _address: &str,
-            ) -> Result<String, crate::adapter_registry::AdapterError> {
+            ) -> Result<String, csv_adapter_core::AdapterError> {
                 Ok("0".to_string())
             }
         }
@@ -3405,7 +3405,7 @@ mod tests {
             async fn lock_sanad(
                 &self,
                 _transfer: &CrossChainTransfer,
-            ) -> Result<LockResult, crate::adapter_registry::AdapterError> {
+            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
                 Ok(LockResult {
                     tx_hash: hex::encode([0x11u8; 32]),
                     block_height: 100,
@@ -3416,8 +3416,8 @@ mod tests {
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &[u8],
-            ) -> Result<MintResult, crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
             }
@@ -3426,8 +3426,8 @@ mod tests {
                 &self,
                 _transfer: &CrossChainTransfer,
                 _lock_result: &LockResult,
-            ) -> Result<ProofBundle, crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
             }
@@ -3436,8 +3436,8 @@ mod tests {
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &ProofBundle,
-            ) -> Result<(), crate::adapter_registry::AdapterError> {
-                Err(crate::adapter_registry::AdapterError::Generic(
+            ) -> Result<(), csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
             }
@@ -3445,14 +3445,14 @@ mod tests {
             async fn check_seal_registry(
                 &self,
                 _seal_id: &[u8],
-            ) -> Result<SealRegistryStatus, crate::adapter_registry::AdapterError> {
+            ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
                 Ok(SealRegistryStatus::Available)
             }
 
             async fn get_balance(
                 &self,
                 _address: &str,
-            ) -> Result<String, crate::adapter_registry::AdapterError> {
+            ) -> Result<String, csv_adapter_core::AdapterError> {
                 Ok("0".to_string())
             }
         }

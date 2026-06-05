@@ -6,184 +6,14 @@
 
 #![allow(missing_docs)]
 
-use csv_hash::Hash;
+use csv_adapter_core::{
+    AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
+    CrossChainTransfer, ChainCapabilityPort, ChainLockPort, ChainMintPort,
+    ChainSealRegistryPort, ChainProofPort, ChainReadPort, AdapterRegistry as AdapterRegistryTrait,
+};
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
-
-/// Cross-chain transfer data passed to adapters.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CrossChainTransfer {
-    /// Unique transfer ID
-    pub id: String,
-    /// Source chain ID
-    pub source_chain: String,
-    /// Destination chain ID
-    pub destination_chain: String,
-    /// Lock transaction hash on source chain
-    pub lock_tx_hash: Vec<u8>,
-    /// Lock output index on source chain
-    pub lock_output_index: u32,
-    /// Sanad ID being transferred
-    pub sanad_id: Hash,
-    /// Transition ID for the transfer
-    pub transition_id: Vec<u8>,
-}
-
-/// Result of a lock operation.
-#[derive(Debug, Clone)]
-pub struct LockResult {
-    /// Transaction hash of the lock
-    pub tx_hash: String,
-    /// Block height of the lock
-    pub block_height: u64,
-}
-
-/// Result of a mint operation.
-#[derive(Debug, Clone)]
-pub struct MintResult {
-    /// Transaction hash of the mint
-    pub tx_hash: String,
-    /// Block height of the mint
-    pub block_height: u64,
-}
-
-/// Status of a seal in the registry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SealRegistryStatus {
-    /// Seal is available for use
-    Available,
-    /// Seal has been consumed
-    Consumed,
-    /// Seal is locked
-    Locked,
-}
-
-/// Capability lookup port.
-pub trait ChainCapabilityPort: Send + Sync {
-    fn capabilities(&self, chain_id: &str) -> Option<ChainCapabilities>;
-    fn signature_scheme(&self, chain_id: &str) -> Option<SignatureScheme>;
-}
-
-/// Source-chain locking port.
-#[async_trait::async_trait]
-pub trait ChainLockPort: Send + Sync {
-    async fn lock_sanad(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-    ) -> Result<LockResult, AdapterError>;
-}
-
-/// Destination-chain minting port.
-#[async_trait::async_trait]
-pub trait ChainMintPort: Send + Sync {
-    async fn mint_sanad(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-        proof_bundle: &[u8],
-    ) -> Result<MintResult, AdapterError>;
-}
-
-/// Seal/replay registry query port.
-#[async_trait::async_trait]
-pub trait ChainSealRegistryPort: Send + Sync {
-    async fn check_seal_registry(
-        &self,
-        chain_id: &str,
-        seal_id: &[u8],
-    ) -> Result<SealRegistryStatus, AdapterError>;
-}
-
-/// Source-chain proof construction port.
-#[async_trait::async_trait]
-pub trait ChainProofPort: Send + Sync {
-    async fn build_inclusion_proof(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-        lock_result: &LockResult,
-    ) -> Result<ProofBundle, AdapterError>;
-
-    /// Cryptographically validate source-chain proof material and bind it to
-    /// the transfer whose mint is being authorized.
-    async fn validate_source_proof(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-        proof_bundle: &ProofBundle,
-    ) -> Result<(), AdapterError>;
-}
-
-/// Non-mutating read port.
-#[async_trait::async_trait]
-pub trait ChainReadPort: Send + Sync {
-    async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError>;
-
-    async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError>;
-}
-
-/// Compatibility facade for runtime paths that still need the full adapter surface.
-#[async_trait::async_trait]
-pub trait AdapterRegistry: Send + Sync {
-    fn capabilities(&self, chain_id: &str) -> Option<ChainCapabilities>;
-
-    fn signature_scheme(&self, chain_id: &str) -> Option<SignatureScheme>;
-
-    async fn lock_sanad(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-    ) -> Result<LockResult, AdapterError>;
-
-    async fn mint_sanad(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-        proof_bundle: &[u8],
-    ) -> Result<MintResult, AdapterError>;
-
-    async fn check_seal_registry(
-        &self,
-        chain_id: &str,
-        seal_id: &[u8],
-    ) -> Result<SealRegistryStatus, AdapterError>;
-
-    async fn build_inclusion_proof(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-        lock_result: &LockResult,
-    ) -> Result<ProofBundle, AdapterError>;
-
-    async fn validate_source_proof(
-        &self,
-        chain_id: &str,
-        transfer: &CrossChainTransfer,
-        proof_bundle: &ProofBundle,
-    ) -> Result<(), AdapterError>;
-
-    async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError>;
-
-    async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError>;
-}
-
-/// Error type for adapter operations.
-#[derive(Debug, thiserror::Error)]
-pub enum AdapterError {
-    /// RPC or network error
-    #[error("RPC error: {0}")]
-    RpcError(String),
-
-    /// Transaction failed
-    #[error("Transaction failed: {0}")]
-    TransactionFailed(String),
-
-    /// Generic error
-    #[error("{0}")]
-    Generic(String),
-}
 
 /// Implementation of the adapter registry.
 pub struct AdapterRegistryImpl {
@@ -303,7 +133,7 @@ impl ChainReadPort for AdapterRegistryImpl {
 }
 
 #[async_trait::async_trait]
-impl AdapterRegistry for AdapterRegistryImpl {
+impl AdapterRegistryTrait for AdapterRegistryImpl {
     fn capabilities(&self, chain_id: &str) -> Option<ChainCapabilities> {
         ChainCapabilityPort::capabilities(self, chain_id)
     }
@@ -362,47 +192,6 @@ impl AdapterRegistry for AdapterRegistryImpl {
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError> {
         ChainReadPort::get_balance(self, chain_id, address).await
     }
-}
-
-/// Legacy full chain adapter facade.
-///
-/// New code should request the narrow registry ports above. Adapters can migrate
-/// to narrower internal modules while continuing to satisfy this compatibility
-/// facade at the runtime boundary.
-#[async_trait::async_trait]
-pub trait ChainAdapter: Send + Sync {
-    fn chain_id(&self) -> &str;
-    fn capabilities(&self) -> ChainCapabilities;
-    fn signature_scheme(&self) -> SignatureScheme {
-        SignatureScheme::Secp256k1
-    }
-
-    async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError>;
-    async fn mint_sanad(
-        &self,
-        transfer: &CrossChainTransfer,
-        proof_bundle: &[u8],
-    ) -> Result<MintResult, AdapterError>;
-    async fn build_inclusion_proof(
-        &self,
-        transfer: &CrossChainTransfer,
-        lock_result: &LockResult,
-    ) -> Result<ProofBundle, AdapterError>;
-    async fn validate_source_proof(
-        &self,
-        transfer: &CrossChainTransfer,
-        proof_bundle: &ProofBundle,
-    ) -> Result<(), AdapterError>;
-    async fn check_seal_registry(&self, seal_id: &[u8])
-    -> Result<SealRegistryStatus, AdapterError>;
-    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
-        Err(AdapterError::Generic(format!(
-            "confirm_tx is not implemented for transaction {}",
-            tx_hash
-        )))
-    }
-
-    async fn get_balance(&self, address: &str) -> Result<String, AdapterError>;
 }
 
 #[cfg(test)]

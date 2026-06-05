@@ -28,6 +28,7 @@ csv-hash = { path = "../csv-hash" }
 csv-proof = { path = "../csv-proof" }
 csv-verifier = { path = "../csv-verifier" }
 csv-p2p = { path = "../csv-p2p", optional = true }
+csv-adapter-core = { path = "../csv-adapters/csv-adapter-core" }
 
 # Chain adapters — optional, enabled via feature flags
 # csv-bitcoin compiles for all targets

@@ -38,6 +38,8 @@ pub mod mempool_rpc;
 
 pub mod json_rpc;
 
+pub mod runtime_adapter;
+
 pub use bip341::{Bip341Error, TaprootOutput, derive_output_key, generate_test_keypair};
 pub use config::{BitcoinConfig, BitcoinRpcBackend, Network};
 pub use rpc::BitcoinRpc;

@@ -29,6 +29,9 @@ use crate::config::Config;
 use crate::error::CsvError;
 use crate::wallet::Wallet;
 
+// Import adapter registry for cross-chain transfers
+use csv_runtime::adapter_registry::AdapterRegistryImpl;
+
 /// Storage backend for seal and anchor persistence.
 #[derive(Debug, Clone)]
 pub enum StoreBackend {
@@ -188,6 +191,9 @@ impl ClientBuilder {
         });
         let chain_runtime = crate::runtime::ChainRuntime::new(client_ref);
 
+        // Create adapter registry for cross-chain transfers
+        let adapter_registry = Arc::new(std::sync::Mutex::new(AdapterRegistryImpl::new()));
+
         Ok(crate::client::CsvClient {
             enabled_chains: self.state.enabled_chains,
             wallet: self.state.wallet,
@@ -195,6 +201,7 @@ impl ClientBuilder {
             config,
             event_tx,
             chain_runtime,
+            adapter_registry,
         })
     }
 
