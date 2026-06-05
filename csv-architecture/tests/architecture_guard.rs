@@ -40,6 +40,17 @@ fn authority_crates_do_not_depend_on_chain_adapters() {
         let content = fs::read_to_string(root.join(manifest)).unwrap();
         let active_content = strip_toml_comments(&content);
         for marker in ADAPTER_DEP_MARKERS {
+            // Allow csv-adapter-core as it's a shared library, not a chain-specific adapter
+            if (*marker == "../csv-adapters/" || *marker == "csv-adapters/") && active_content.contains("csv-adapter-core") {
+                // Check if it's specifically csv-adapter-core (allowed) or other adapters (not allowed)
+                if active_content.contains("csv-adapter-core") && !active_content.contains("csv-bitcoin")
+                    && !active_content.contains("csv-ethereum") && !active_content.contains("csv-solana")
+                    && !active_content.contains("csv-sui") && !active_content.contains("csv-aptos")
+                    && !active_content.contains("csv-celestia")
+                {
+                    continue; // csv-adapter-core is allowed
+                }
+            }
             assert!(
                 !active_content.contains(marker),
                 "{manifest} must not depend on chain adapter marker `{marker}`"

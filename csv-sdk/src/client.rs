@@ -49,6 +49,9 @@ use crate::wallet::WalletManager;
 // Import adapter registry for cross-chain transfers
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
+#[cfg(feature = "runtime-coordinator")]
+use csv_runtime::TransferCoordinator;
+
 /// Handle to the underlying storage backend.
 pub enum StoreHandle {
     /// In-memory seal and anchor store.
@@ -162,6 +165,9 @@ pub struct CsvClient {
     pub(crate) chain_runtime: ChainRuntime,
     /// Adapter registry for cross-chain transfers.
     pub(crate) adapter_registry: Arc<std::sync::Mutex<AdapterRegistryImpl>>,
+    /// Transfer coordinator for production-grade cross-chain transfer execution.
+    #[cfg(feature = "runtime-coordinator")]
+    pub(crate) transfer_coordinator: Option<Arc<TransferCoordinator>>,
 }
 
 impl CsvClient {
@@ -210,10 +216,18 @@ impl CsvClient {
 
     /// Get a [`TransferManager`] for cross-chain transfer operations.
     pub fn transfers(&self) -> TransferManager {
-        TransferManager::new(
+        let mut manager = TransferManager::new(
             Arc::new(self.clone_ref()),
             Arc::new(self.chain_runtime.clone()),
         )
+        .with_adapter_registry(self.adapter_registry.clone());
+
+        #[cfg(feature = "runtime-coordinator")]
+        if let Some(coordinator) = self.transfer_coordinator.as_ref() {
+            manager = manager.with_coordinator(coordinator.clone());
+        }
+
+        manager
     }
 
     /// Get a [`WalletManager`] for wallet operations.
@@ -320,6 +334,19 @@ impl CsvClient {
     /// a unified interface that delegates to the appropriate chain adapters.
     pub fn chain_runtime(&self) -> &ChainRuntime {
         &self.chain_runtime
+    }
+
+    /// Get a reference to the TransferCoordinator if enabled.
+    ///
+    /// The TransferCoordinator provides production-grade cross-chain transfer
+    /// execution with replay protection, durable recovery, lease enforcement,
+    /// and canonical verification.
+    ///
+    /// Returns `None` if the client was built without the runtime-coordinator feature
+    /// or if `with_runtime_coordinator()` was not called during client construction.
+    #[cfg(feature = "runtime-coordinator")]
+    pub fn coordinator(&self) -> Option<&Arc<TransferCoordinator>> {
+        self.transfer_coordinator.as_ref()
     }
 
     /// Initialize and register chain adapters for all enabled chains.

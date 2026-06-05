@@ -3149,6 +3149,7 @@ dependencies = [
  "csv-adapter-core",
  "csv-aptos",
  "csv-bitcoin",
+ "csv-codec",
  "csv-ethereum",
  "csv-hash",
  "csv-keys",
@@ -3177,6 +3178,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml",
+ "uuid",
  "wasm-bindgen-futures",
  "web-sys",
 ]

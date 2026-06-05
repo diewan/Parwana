@@ -193,9 +193,9 @@ mod tests {
         let adapter = BitcoinRuntimeAdapter::new(
             Network::Regtest,
             SealWallet::generate_random(Network::Regtest),
-            Box::new(crate::rpc::MockRpc::new()),
+            Box::new(crate::rpc::TestBitcoinRpc::new(100)),
         );
-        
+
         assert_eq!(adapter.chain_id(), "bitcoin");
         assert_eq!(adapter.signature_scheme(), SignatureScheme::Secp256k1);
     }

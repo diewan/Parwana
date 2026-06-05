@@ -39,7 +39,8 @@ csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true }
 # Persistence
 csv-store = { path = "../csv-store", optional = true }
 csv-storage = { path = "../csv-storage", optional = true }
-csv-runtime = { path = "../csv-runtime", optional = true }
+csv-runtime = { path = "../csv-runtime" }
+csv-codec = { path = "../csv-codec" }
 
 # Key management
 csv-keys = { path = "../csv-keys", optional = true }
@@ -64,6 +65,7 @@ log = "0.4"
 toml = "0.8"
 dirs = { version = "5.0", optional = true }
 rand = "0.8"
+uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 sqlx = { version = "0.8.2", features = ["sqlite", "_rt-tokio", "tls-rustls", "chrono"], optional = true }
 
@@ -112,6 +114,9 @@ in-memory = []
 
 # Cross-chain persistence (SC-02)
 cross-chain-persist = ["dep:csv-storage", "dep:sqlx", "dep:chrono"]
+
+# Runtime coordinator integration (full TransferCoordinator support)
+runtime-coordinator = ["dep:csv-storage", "tokio"]
 
 # Wallet / crypto
 wallet = ["dep:csv-keys", "dep:ed25519-dalek", "dep:bip32"]

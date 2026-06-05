@@ -1381,6 +1381,15 @@ impl TransferCoordinator {
         self.coordinator_lease = Some(lease);
     }
 
+    /// Clear the distributed coordinator lease backend.
+    ///
+    /// Used for single-instance deployments (CLI, SDK) where distributed lease
+    /// coordination is not required. The assert_single_active_coordinator check
+    /// will be skipped when coordinator_lease is None.
+    pub fn clear_coordinator_lease(&mut self) {
+        self.coordinator_lease = None;
+    }
+
     /// Acquire or renew the process authority required before executing mutations.
     pub async fn acquire_execution_authority(
         &self,
@@ -2172,9 +2181,10 @@ pub trait RecoveryContextProvider: Send + Sync {
 mod tests {
     use super::*;
     use csv_adapter_core::{
-        AdapterRegistryImpl, ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer,
+        ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer,
         LockResult, MintResult, SealRegistryStatus,
     };
+    use crate::adapter_registry::AdapterRegistryImpl;
     use csv_protocol::finality::ChainCapabilities;
     use csv_protocol::proof_types::{InclusionProof, ProofBundle};
     use csv_storage::ReplayDatabase;

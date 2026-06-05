@@ -125,6 +125,10 @@ pub enum CsvError {
     /// P2P proof transport error (Nostr relay communication failed).
     #[error("P2P transport error: {0}")]
     P2PError(String),
+
+    /// Runtime execution error (from TransferCoordinator).
+    #[error("Runtime execution error: {0}")]
+    RuntimeError(String),
 }
 
 impl CsvError {
@@ -167,6 +171,7 @@ impl HasErrorSuggestion for CsvError {
             Self::CapabilityUnavailable { .. } => "CSV_CAPABILITY_UNAVAILABLE",
             Self::Generic(_) => error_codes::CSV_GENERIC,
             Self::P2PError(_) => "CSV_P2P_ERROR",
+            Self::RuntimeError(_) => "CSV_RUNTIME_ERROR",
         }
     }
 
@@ -299,6 +304,12 @@ impl HasErrorSuggestion for CsvError {
             Self::P2PError(msg) => {
                 format!(
                     "P2P transport error: {}. Check Nostr relay connectivity and network access.",
+                    msg
+                )
+            }
+            Self::RuntimeError(msg) => {
+                format!(
+                    "Runtime execution error: {}. Check runtime configuration and retry.",
                     msg
                 )
             }

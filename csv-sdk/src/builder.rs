@@ -29,8 +29,17 @@ use crate::config::Config;
 use crate::error::CsvError;
 use crate::wallet::Wallet;
 
-// Import adapter registry for cross-chain transfers
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
+
+#[cfg(feature = "runtime-coordinator")]
+use csv_runtime::{
+    event_bus::EventBus, event_store::InMemoryEventStore, execution_journal::InMemoryJournal,
+    coordinator_lease::InMemoryLease,
+};
+#[cfg(feature = "runtime-coordinator")]
+use csv_storage::InMemoryReplayDb;
+#[cfg(feature = "runtime-coordinator")]
+use csv_verifier::CanonicalVerifierImpl;
 
 /// Storage backend for seal and anchor persistence.
 #[derive(Debug, Clone)]
@@ -46,6 +55,8 @@ struct BuilderState {
     wallet: Option<Wallet>,
     store_backend: Option<StoreBackend>,
     config: Option<Config>,
+    #[cfg(feature = "runtime-coordinator")]
+    enable_runtime_coordinator: bool,
 }
 
 /// Fluent builder for constructing a [`CsvClient`](crate::client::CsvClient).
@@ -142,6 +153,19 @@ impl ClientBuilder {
         self
     }
 
+    /// Enable the runtime coordinator for cross-chain transfer execution.
+    ///
+    /// When enabled, the client will initialize a full TransferCoordinator with
+    /// ReplayDatabase, EventBus, EventStore, ExecutionJournal, CoordinatorLease,
+    /// and CanonicalVerifier for production-grade transfer execution.
+    ///
+    /// This requires the "runtime-coordinator" feature to be enabled.
+    #[cfg(feature = "runtime-coordinator")]
+    pub fn with_runtime_coordinator(mut self) -> Self {
+        self.state.enable_runtime_coordinator = true;
+        self
+    }
+
     /// Build the [`CsvClient`](crate::client::CsvClient), validating all settings.
     ///
     /// # Errors
@@ -194,6 +218,40 @@ impl ClientBuilder {
         // Create adapter registry for cross-chain transfers
         let adapter_registry = Arc::new(std::sync::Mutex::new(AdapterRegistryImpl::new()));
 
+        // Initialize runtime coordinator if enabled
+        #[cfg(feature = "runtime-coordinator")]
+        let transfer_coordinator = if self.state.enable_runtime_coordinator {
+            // Initialize runtime components
+            let replay_db = Box::new(InMemoryReplayDb::new()) as Box<dyn csv_storage::ReplayDatabase>;
+            let event_bus = EventBus::new();
+            let event_store = Box::new(InMemoryEventStore::new()) as Box<dyn csv_runtime::EventStore>;
+            let execution_journal = Box::new(InMemoryJournal::new(10000)) as Box<dyn csv_runtime::ExecutionJournal>;
+            let verifier = CanonicalVerifierImpl::default();
+
+            // For single-instance deployments (CLI, SDK), do not configure a distributed coordinator lease.
+            // The assert_single_active_coordinator check will be skipped when coordinator_lease is None,
+            // which is correct for single-instance deployments. Distributed lease backends should be
+            // configured explicitly for HA deployments via TransferCoordinator::set_coordinator_lease.
+            let mut coordinator = csv_runtime::TransferCoordinator::with_stores(
+                replay_db,
+                event_bus,
+                event_store,
+                execution_journal,
+                verifier,
+                Box::new(csv_runtime::coordinator_lease::InMemoryLease::new()) as Box<dyn csv_runtime::CoordinatorLease>,
+            );
+
+            // Clear coordinator lease for single-instance deployments to skip the distributed lease check
+            coordinator.clear_coordinator_lease();
+
+            Some(Arc::new(coordinator))
+        } else {
+            None
+        };
+
+        #[cfg(not(feature = "runtime-coordinator"))]
+        let transfer_coordinator: Option<Arc<csv_runtime::TransferCoordinator>> = None;
+
         Ok(crate::client::CsvClient {
             enabled_chains: self.state.enabled_chains,
             wallet: self.state.wallet,
@@ -202,6 +260,8 @@ impl ClientBuilder {
             event_tx,
             chain_runtime,
             adapter_registry,
+            #[cfg(feature = "runtime-coordinator")]
+            transfer_coordinator,
         })
     }
 

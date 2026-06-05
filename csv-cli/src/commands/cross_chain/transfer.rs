@@ -8,6 +8,7 @@ use anyhow::Result;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_sdk::CsvClient;
+use csv_sdk::prelude::NetworkType;
 
 use crate::config::{Chain, Config};
 use crate::output;
@@ -21,7 +22,7 @@ pub async fn cmd_transfer(
     to: Chain,
     sanad_id: String,
     dest_owner: Option<String>,
-    _config: &Config,
+    config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     let from_chain = to_protocol_chain(from.clone());
@@ -67,8 +68,50 @@ pub async fn cmd_transfer(
     let client = CsvClient::builder()
         .with_chain(from_chain.clone())
         .with_chain(to_chain.clone())
+        .with_runtime_coordinator()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
+
+    // Initialize chain adapters for the transfer
+    // Get network type from config
+    let network_type = match config.chain(&from)?.network {
+        crate::config::Network::Test => NetworkType::Testnet,
+        crate::config::Network::Main => NetworkType::Mainnet,
+        crate::config::Network::Dev => NetworkType::Testnet, // Dev uses testnet
+    };
+
+    // Derive private keys from wallet mnemonic for chains that require signing
+    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
+    })?;
+
+    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+    let seed = mnemonic.to_seed(None);
+    let seed_array = *seed.as_bytes();
+
+    let mut private_keys = std::collections::HashMap::new();
+
+    // Derive private key for source chain
+    let from_key_hex = if from.as_str() == "bitcoin" {
+        hex::encode(seed_array)
+    } else {
+        let (secret_key, _) = signing_key_for_chain(&from, 0, &seed_array, state)?;
+        hex::encode(secret_key.as_bytes())
+    };
+    private_keys.insert(from.to_string(), Some(from_key_hex));
+
+    // Derive private key for destination chain
+    let to_key_hex = if to.as_str() == "bitcoin" {
+        hex::encode(seed_array)
+    } else {
+        let (secret_key, _) = signing_key_for_chain(&to, 0, &seed_array, state)?;
+        hex::encode(secret_key.as_bytes())
+    };
+    private_keys.insert(to.to_string(), Some(to_key_hex));
+
+    client.init_adapters(network_type, private_keys).await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize chain adapters: {}", e))?;
 
     // Execute the real cross-chain transfer via runtime
     output::info(&format!(
@@ -134,4 +177,55 @@ fn generate_transfer_id(sanad_id: &Hash, from: &Chain, to: &Chain) -> String {
     hasher.update(chrono::Utc::now().timestamp().to_le_bytes());
 
     format!("0x{}", hex::encode(hasher.finalize()))
+}
+
+fn signing_key_for_chain(
+    chain: &Chain,
+    account: u32,
+    seed_array: &[u8; 64],
+    state: &UnifiedStateManager,
+) -> Result<(csv_keys::memory::SecretKey, &'static str)> {
+    // Try keystore first for all chains (not just Aptos)
+    if let Some(secret_key) = load_keystore_key(chain, account, state)? {
+        return Ok((secret_key, "keystore"));
+    }
+
+    let mut keys = csv_keys::bip44::derive_all_chain_keys(seed_array, account);
+    let core_chain = csv_hash::ChainId::new(chain.as_str());
+    let secret_key = keys
+        .remove(&core_chain)
+        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
+
+    Ok((secret_key, "mnemonic-derived"))
+}
+
+fn load_keystore_key(
+    chain: &Chain,
+    account: u32,
+    state: &UnifiedStateManager,
+) -> Result<Option<csv_keys::memory::SecretKey>> {
+    let mut key_ids = Vec::new();
+    if let Some(wallet_account) = state.get_account(chain) {
+        if let Some(keystore_ref) = &wallet_account.keystore_ref {
+            key_ids.push(keystore_ref.clone());
+        }
+    }
+    key_ids.push(format!("{}-{}", chain.as_str(), account));
+
+    let mut keystore = csv_keys::file_keystore::FileKeystore::new(None)?;
+    let passphrase = csv_keys::memory::Passphrase::new(state.passphrase().to_string());
+
+    for key_id in key_ids {
+        match keystore.retrieve_key(&key_id, &passphrase) {
+            Ok(secret_key) => return Ok(Some(secret_key)),
+            Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
+            Err(csv_keys::file_keystore::FileKeystoreError::InvalidPassphrase) => {
+                // Key exists but wrong passphrase - fall back to mnemonic derivation
+                log::warn!("Keystore key '{}' exists but decryption failed (wrong passphrase), falling back to mnemonic derivation", key_id);
+            }
+            Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
+        }
+    }
+
+    Ok(None)
 }
