@@ -8,6 +8,14 @@
 pub use csv_hash::chain_id::ChainId;
 use serde::{Deserialize, Serialize};
 
+// Import deployment manifest reader
+use csv_protocol::deployment_manifest::{
+    get_aptos_contract_address,
+    get_ethereum_contract_address,
+    get_solana_program_id,
+    get_sui_package_id,
+};
+
 /// Network environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -97,7 +105,7 @@ impl ChainConfig {
                     Network::Main => "https://ethereum-rpc.publicnode.com".to_string(),
                 },
                 network: *network,
-                contract_address: None,
+                contract_address: get_ethereum_contract_address().ok(),
                 chain_id: match network {
                     Network::Dev => Some(1337),
                     Network::Test => Some(11155111),
@@ -114,7 +122,8 @@ impl ChainConfig {
                     Network::Main => "https://fullnode.mainnet.sui.io:443".to_string(),
                 },
                 network: *network,
-                contract_address: Some("0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string()),
+                contract_address: Some(get_sui_package_id()
+                    .unwrap_or_else(|_| "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string())),
                 chain_id: None,
                 finality_depth: 1,
                 default_fee: Some(1000),
@@ -127,7 +136,8 @@ impl ChainConfig {
                     Network::Main => "https://fullnode.mainnet.aptoslabs.com/v1".to_string(),
                 },
                 network: *network,
-                contract_address: Some("0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e".to_string()),
+                contract_address: Some(get_aptos_contract_address()
+                    .unwrap_or_else(|_| "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string())),
                 chain_id: None,
                 finality_depth: 100,
                 default_fee: Some(100),
@@ -144,7 +154,8 @@ impl ChainConfig {
                 chain_id: None,
                 finality_depth: 32,
                 default_fee: Some(5000),
-                program_id: Some("HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string()),
+                program_id: Some(get_solana_program_id()
+                    .unwrap_or_else(|_| "HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string())),
             },
             _ => Self {
                 rpc_url: String::new(),

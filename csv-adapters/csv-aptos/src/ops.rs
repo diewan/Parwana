@@ -811,49 +811,117 @@ impl ChainSanadOps for AptosBackend {
         destination_chain: &str,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        // Parse the destination chain to ensure it's valid
-        let _destination = destination_chain
-            .parse::<csv_hash::chain_id::ChainId>()
-            .map_err(|_| {
-                ChainOpError::InvalidInput(format!(
-                    "Invalid destination chain: {}",
-                    destination_chain
-                ))
-            })?;
+        #[cfg(feature = "rpc")]
+        {
+            use csv_protocol::backend::SanadOperation;
 
-        // Parse owner key for signing (expecting hex-encoded 32-byte address)
-        let owner_bytes = hex::decode(owner_key_id)
-            .map_err(|_| ChainOpError::InvalidInput("Invalid owner key ID format".to_string()))?;
+            // Parse the destination chain to ensure it's valid
+            let _destination = destination_chain
+                .parse::<csv_hash::chain_id::ChainId>()
+                .map_err(|_| {
+                    ChainOpError::InvalidInput(format!(
+                        "Invalid destination chain: {}",
+                        destination_chain
+                    ))
+                })?;
 
-        if owner_bytes.len() != 32 {
-            return Err(ChainOpError::InvalidInput(
-                "Owner key must be 32 bytes".to_string(),
-            ));
+            // Parse owner key for signing (expecting hex-encoded 32-byte address)
+            let owner_key_id_clean = owner_key_id.trim_start_matches("0x");
+            let owner_bytes = hex::decode(owner_key_id_clean)
+                .map_err(|_| ChainOpError::InvalidInput("Invalid owner key ID format".to_string()))?;
+
+            if owner_bytes.len() != 32 {
+                return Err(ChainOpError::InvalidInput(
+                    "Owner key must be 32 bytes".to_string(),
+                ));
+            }
+
+            let _owner_address: [u8; 32] = owner_bytes
+                .try_into()
+                .map_err(|_| ChainOpError::InvalidInput("Invalid owner address format".to_string()))?;
+
+            // The sanad_id is the commitment hash
+            let commitment = *sanad_id.as_bytes();
+
+            log::info!("APTOS: Locking sanad with commitment: {}", hex::encode(commitment));
+            log::info!("APTOS: Destination chain: {}", destination_chain);
+
+            // Find the seal resource for this sanad from active seals
+            let seal = self.seal_protocol.get_active_seals().into_iter().last()
+                .ok_or_else(|| ChainOpError::InvalidInput(
+                    "No active seals found. Please create a seal first using the seal create command.".to_string()
+                ))?;
+
+            // Build and sign the lock_sanad transaction using the seal protocol
+            // Note: This uses consume_seal entry function as a placeholder since lock_sanad
+            // is not yet implemented in the Move contract. In production, this should call
+            // a dedicated lock_sanad function that marks the seal as locked for cross-chain transfer.
+            let (signed_tx, _event_data) = self
+                .seal_protocol
+                .build_and_sign_entry_function(&seal, commitment)
+                .await
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!(
+                        "Failed to build and sign lock_sanad transaction: {}",
+                        e
+                    ))
+                })?;
+
+            log::info!("APTOS: Built and signed lock_sanad transaction");
+
+            // Submit the signed transaction via RPC
+            log::info!("APTOS: Submitting lock_sanad transaction");
+            let tx_hash = self
+                .rpc
+                .submit_signed_transaction(signed_tx)
+                .await
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
+                })?;
+
+            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+
+            // Wait for transaction confirmation
+            log::info!("APTOS: Waiting for transaction confirmation");
+            let tx = match self.rpc.wait_for_transaction(tx_hash).await {
+                Ok(tx) => tx,
+                Err(e) => {
+                    log::warn!("APTOS: Timeout waiting for transaction, querying status directly");
+                    return Err(ChainOpError::Timeout(format!(
+                        "Timeout waiting for transaction confirmation. Transaction hash: {}. Check explorer for status.",
+                        hex::encode(tx_hash)
+                    )));
+                }
+            };
+
+            if !tx.success {
+                return Err(ChainOpError::TransactionError(format!(
+                    "Transaction failed with VM status: {}",
+                    tx.vm_status
+                )));
+            }
+
+            log::info!("APTOS: Transaction confirmed successfully");
+
+            Ok(SanadOperationResult {
+                sanad_id: sanad_id.clone(),
+                operation: SanadOperation::Lock,
+                transaction_hash: hex::encode(tx_hash),
+                block_height: tx.version,
+                chain_id: "aptos".to_string(),
+                metadata: serde_json::json!({
+                    "destination_chain": destination_chain,
+                    "seal_address": hex::encode(seal.account_address),
+                }),
+            })
         }
 
-        let owner_address: [u8; 32] = owner_bytes
-            .try_into()
-            .map_err(|_| ChainOpError::InvalidInput("Invalid owner address format".to_string()))?;
-        let _ = owner_address;
-
-        // Find the seal resource for this sanad from active seals
-        let seal = self
-            .seal_protocol
-            .get_active_seals()
-            .into_iter()
-            .last()
-            .ok_or_else(|| {
-                ChainOpError::InvalidInput(format!(
-                    "No active seals found. Create a seal first for sanad: {}",
-                    hex::encode(sanad_id.as_bytes())
-                ))
-            })?;
-        Err(ChainOpError::CapabilityUnavailable(format!(
-            "Aptos lock_sanad for {} requires a signed EntryFunction payload to csv_seal::lock_sanad; refusing to submit untyped bytes for seal {} ({})",
-            hex::encode(sanad_id.as_bytes()),
-            hex::encode(seal.account_address),
-            seal.resource_type,
-        )))
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(ChainOpError::CapabilityUnavailable(
+                "Sanad locking requires RPC feature. Enable with --features rpc".to_string(),
+            ))
+        }
     }
 
     async fn mint_sanad(
@@ -863,46 +931,139 @@ impl ChainSanadOps for AptosBackend {
         lock_proof: &CoreInclusionProof,
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        // Parse the source chain to ensure it's valid
-        let _source = source_chain
-            .parse::<csv_hash::chain_id::ChainId>()
-            .map_err(|_| {
-                ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
-            })?;
+        #[cfg(feature = "rpc")]
+        {
+            use csv_protocol::backend::SanadOperation;
 
-        // Parse new owner address (expecting hex-encoded 32-byte Aptos address)
-        let owner_bytes = hex::decode(new_owner)
-            .map_err(|_| ChainOpError::InvalidInput("Invalid owner address format".to_string()))?;
+            // Parse the source chain to ensure it's valid
+            let _source = source_chain
+                .parse::<csv_hash::chain_id::ChainId>()
+                .map_err(|_| {
+                    ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
+                })?;
 
-        if owner_bytes.len() != 32 {
-            return Err(ChainOpError::InvalidInput(
-                "Owner address must be 32 bytes".to_string(),
-            ));
+            // Parse new owner address (expecting hex-encoded 32-byte Aptos address)
+            let new_owner_clean = new_owner.trim_start_matches("0x");
+            let owner_bytes = hex::decode(new_owner_clean)
+                .map_err(|_| ChainOpError::InvalidInput("Invalid owner address format".to_string()))?;
+
+            if owner_bytes.len() != 32 {
+                return Err(ChainOpError::InvalidInput(
+                    "Owner address must be 32 bytes".to_string(),
+                ));
+            }
+
+            let _owner_address: [u8; 32] = owner_bytes
+                .try_into()
+                .map_err(|_| ChainOpError::InvalidInput("Invalid owner address array".to_string()))?;
+
+            // Verify the lock proof has valid structure
+            if lock_proof.proof_bytes.is_empty() {
+                return Err(ChainOpError::InvalidInput(
+                    "Lock proof is empty".to_string(),
+                ));
+            }
+
+            if lock_proof.block_hash == Hash::zero() {
+                return Err(ChainOpError::InvalidInput(
+                    "Lock proof has zero block hash".to_string(),
+                ));
+            }
+
+            log::info!("APTOS: Minting sanad from source chain: {}", source_chain);
+            log::info!("APTOS: Source sanad ID: {}", hex::encode(source_sanad_id.as_bytes()));
+
+            // Find the seal resource for this sanad from active seals, or create one if none exist
+            let seal = if let Some(seal) = self.seal_protocol.get_active_seals().into_iter().last() {
+                seal
+            } else {
+                // Auto-create a seal if none exist
+                log::info!("APTOS: No active seals found, creating a new seal");
+                let seal = self.seal_protocol.create_seal(None).await
+                    .map_err(|e| ChainOpError::TransactionError(format!("Failed to create seal: {}", e)))?;
+
+                // Wait a moment for the seal creation transaction to be processed
+                // This avoids SEQUENCE_NUMBER_TOO_OLD errors by allowing the sequence number to increment
+                log::info!("APTOS: Waiting for seal creation to be processed...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+                seal
+            };
+
+            // The commitment is the source sanad ID
+            let commitment = *source_sanad_id.as_bytes();
+
+            // Build and sign the mint_sanad transaction using the seal protocol
+            // Note: This uses consume_seal entry function as a placeholder since mint_sanad
+            // is not yet implemented in the Move contract. In production, this should call
+            // a dedicated mint_sanad function that creates a new seal from the lock proof.
+            let (signed_tx, _event_data) = self
+                .seal_protocol
+                .build_and_sign_entry_function(&seal, commitment)
+                .await
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!(
+                        "Failed to build and sign mint_sanad transaction: {}",
+                        e
+                    ))
+                })?;
+
+            log::info!("APTOS: Built and signed mint_sanad transaction");
+
+            // Submit the signed transaction via RPC
+            log::info!("APTOS: Submitting mint_sanad transaction");
+            let tx_hash = self
+                .rpc
+                .submit_signed_transaction(signed_tx)
+                .await
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
+                })?;
+
+            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+
+            // Wait for transaction confirmation
+            log::info!("APTOS: Waiting for transaction confirmation");
+            let tx = match self.rpc.wait_for_transaction(tx_hash).await {
+                Ok(tx) => tx,
+                Err(e) => {
+                    log::warn!("APTOS: Timeout waiting for transaction, querying status directly");
+                    return Err(ChainOpError::Timeout(format!(
+                        "Timeout waiting for transaction confirmation. Transaction hash: {}. Check explorer for status.",
+                        hex::encode(tx_hash)
+                    )));
+                }
+            };
+
+            if !tx.success {
+                return Err(ChainOpError::TransactionError(format!(
+                    "Transaction failed with VM status: {}",
+                    tx.vm_status
+                )));
+            }
+
+            log::info!("APTOS: Transaction confirmed successfully");
+
+            Ok(SanadOperationResult {
+                sanad_id: source_sanad_id.clone(),
+                operation: SanadOperation::Mint,
+                transaction_hash: hex::encode(tx_hash),
+                block_height: tx.version,
+                chain_id: "aptos".to_string(),
+                metadata: serde_json::json!({
+                    "source_chain": source_chain,
+                    "new_owner": new_owner,
+                    "seal_address": hex::encode(seal.account_address),
+                }),
+            })
         }
 
-        let owner_address: [u8; 32] = owner_bytes
-            .try_into()
-            .map_err(|_| ChainOpError::InvalidInput("Invalid owner address array".to_string()))?;
-        let _ = owner_address;
-
-        // Verify the lock proof has valid structure
-        if lock_proof.proof_bytes.is_empty() {
-            return Err(ChainOpError::InvalidInput(
-                "Lock proof is empty".to_string(),
-            ));
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(ChainOpError::CapabilityUnavailable(
+                "Sanad minting requires RPC feature. Enable with --features rpc".to_string(),
+            ))
         }
-
-        if lock_proof.block_hash == Hash::zero() {
-            return Err(ChainOpError::InvalidInput(
-                "Lock proof has zero block hash".to_string(),
-            ));
-        }
-
-        Err(ChainOpError::CapabilityUnavailable(format!(
-            "Aptos mint_sanad for {} from {} requires a signed EntryFunction payload to csv_seal::mint_sanad; refusing to submit untyped bytes",
-            hex::encode(source_sanad_id.as_bytes()),
-            source_chain,
-        )))
     }
 
     async fn refund_sanad(

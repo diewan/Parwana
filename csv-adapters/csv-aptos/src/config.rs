@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+// Import deployment manifest reader
+use csv_protocol::deployment_manifest::get_aptos_module_address;
+
 /// Aptos network types with known chain IDs and RPC endpoints.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AptosNetwork {
@@ -130,9 +133,13 @@ pub struct SealContractConfig {
 
 impl Default for SealContractConfig {
     fn default() -> Self {
+        // Try to read from deployment manifest, fall back to default
+        let module_address = get_aptos_module_address()
+            .unwrap_or_else(|_| "0x1".to_string());
+        
         Self {
-            module_address: "0x1".to_string(),
-            module_name: "CSVSealV2".to_string(),
+            module_address,
+            module_name: "CSVSeal".to_string(),
             seal_resource: "Seal".to_string(),
         }
     }

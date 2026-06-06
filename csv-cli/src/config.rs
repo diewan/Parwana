@@ -15,6 +15,14 @@ use serde::{Deserialize, Serialize};
 // Re-export unified types from csv-store
 pub use csv_store::state::{Chain, ChainConfig, ChainId, Network, WalletAccount};
 
+// Import deployment manifest reader
+use csv_protocol::deployment_manifest::{
+    get_aptos_contract_address,
+    get_ethereum_contract_address,
+    get_solana_program_id,
+    get_sui_package_id,
+};
+
 /// CSV Wallet exported JSON format (legacy, for migration from csv-wallet < 0.4)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CsvWalletData {
@@ -161,12 +169,13 @@ impl Default for Config {
         );
 
         // Ethereum Sepolia
+        let ethereum_contract_address = get_ethereum_contract_address().ok();
         chains.insert(
             ChainId::new("ethereum"),
             ChainConfig {
                 rpc_url: "https://ethereum-sepolia-rpc.publicnode.com".to_string(),
                 network: Network::Test,
-                contract_address: None, // Not deployed yet
+                contract_address: ethereum_contract_address,
                 chain_id: Some(11155111),
                 finality_depth: 15,
                 default_fee: Some(20_000_000_000), // 20 gwei
@@ -175,12 +184,14 @@ impl Default for Config {
         );
 
         // Sui Testnet
+        let sui_package_id = get_sui_package_id()
+            .unwrap_or_else(|_| "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string());
         chains.insert(
             ChainId::new("sui"),
             ChainConfig {
                 rpc_url: "https://fullnode.testnet.sui.io:443".to_string(),
                 network: Network::Test,
-                contract_address: Some("0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string()),
+                contract_address: Some(sui_package_id),
                 chain_id: None,
                 finality_depth: 1, // Checkpoint certified
                 default_fee: Some(1000),
@@ -189,12 +200,14 @@ impl Default for Config {
         );
 
         // Aptos Testnet
+        let aptos_contract_address = get_aptos_contract_address()
+            .unwrap_or_else(|_| "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string());
         chains.insert(
             ChainId::new("aptos"),
             ChainConfig {
                 rpc_url: "https://fullnode.testnet.aptoslabs.com/v1".to_string(),
                 network: Network::Test,
-                contract_address: Some("0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e".to_string()),
+                contract_address: Some(aptos_contract_address),
                 chain_id: None,
                 finality_depth: 1, // HotStuff consensus
                 default_fee: Some(100),
@@ -203,6 +216,8 @@ impl Default for Config {
         );
 
         // Solana Devnet
+        let solana_program_id = get_solana_program_id()
+            .unwrap_or_else(|_| "HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string());
         chains.insert(
             ChainId::new("solana"),
             ChainConfig {
@@ -212,7 +227,7 @@ impl Default for Config {
                 chain_id: None,
                 finality_depth: 32,      // Solana finality
                 default_fee: Some(5000), // 5000 lamports
-                program_id: Some("HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string()),
+                program_id: Some(solana_program_id),
             },
         );
 

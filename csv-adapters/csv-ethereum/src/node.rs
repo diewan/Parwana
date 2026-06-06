@@ -8,7 +8,7 @@ mod real_rpc_impl {
     use alloy::{
         consensus::TxEnvelope,
         eips::eip2718::Encodable2718,
-        primitives::{Address, TxKind, U256, keccak256},
+        primitives::{Address, TxKind, U256},
         signers::local::PrivateKeySigner,
     };
     use async_trait::async_trait;

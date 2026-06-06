@@ -11,13 +11,13 @@
 //! - AnchorData persistence (commitment stored on-chain after consumption)
 //! - Transfer functionality (seals can be transferred between accounts)
 //! - Timestamp tracking (consumption time recorded)
-//! - Multiple seals per account via LinearCollection pattern
+//! - Multiple seals per account via SmartTable pattern (like Sui's object model)
 //! - Cross-chain proof verification with Merkle tree
 //! - Nullifier registration for double-spend prevention
 //!
 //! ## Usage Flow
 //!
-//! 1. **Seal Creation**: Mint seal objects via `create_seal`
+//! 1. **Seal Creation**: Initialize collection, then create seal objects via `create_seal`
 //! 2. **Seal Transfer**: Transfer seals between accounts via `transfer_seal`
 //! 3. **Seal Consumption**: Call `consume_seal` to mark consumed and emit event
 //! 4. **Cross-Chain**: Lock/Mint/Refund with Merkle proof verification
@@ -34,7 +34,7 @@
 //! - `EInvalidProof` (6): Invalid cross-chain proof
 //! - `ENullifierAlreadyRegistered` (7): Nullifier already registered
 
-module csv_seal::CSVSealV2 {
+module csv_seal::CSVSeal {
     use std::signer;
     use std::event;
     use std::account;

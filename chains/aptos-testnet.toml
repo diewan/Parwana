@@ -4,7 +4,7 @@ default_network = "testnet"
 rpc_endpoints = ["https://fullnode.testnet.aptoslabs.com/v1"]
 block_explorer_urls = ["https://explorer.aptoslabs.com/?network=testnet"]
 start_block = 0
-contract_address = "0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e"
+contract_address = "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50"
 
 [finality_guarantee]
 max_reorg_depth = 0
@@ -17,7 +17,7 @@ min_anchor_sources = 1
 [capabilities]
 state_model = "Resource"
 finality_model = "BftInstant"
-finality_depth = 1
+finality_depth = 0
 deterministic_finality = true
 proof_model = "AccumulatorPath"
 replay_protection = "ResourceDeleted"
@@ -33,4 +33,4 @@ chain_role = "Settlement"
 
 [custom_settings]
 # Module address where CSVSeal is deployed
-module_address = "0xd9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e"
+module_address = "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50"

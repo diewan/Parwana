@@ -144,7 +144,6 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         // Convert to ProofBundle - need to construct it properly
         // For now, return a minimal ProofBundle with the inclusion proof
         use csv_protocol::proof_types::{FinalityProof};
-        use csv_hash::dag::DAGSegment;
         use csv_hash::seal::{CommitAnchor, SealPoint};
 
         let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)

@@ -18,6 +18,7 @@ pub mod canonical_proof;
 pub mod chain_config;
 pub mod commitment;
 pub mod cross_chain;
+pub mod deployment_manifest;
 pub mod deterministic_recovery;
 pub mod envelope;
 pub mod error;

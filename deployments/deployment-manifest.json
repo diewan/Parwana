@@ -2,7 +2,7 @@
   "manifest_version": "2.0.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-05-28T18:00:00.000000Z",
+  "updated_at": "2026-06-06T07:18:00.000000Z",
   "deployments": {
     "ethereum": {
       "network": "sepolia",
@@ -37,7 +37,8 @@
     },
     "aptos": {
       "network": "testnet",
-      "module_address": "d9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e",
+      "module_address": "9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50",
+      "deployment_tx": "0xba9497bb109f0327b27f5130eaa08b3d72390cc29f908f6d48d9766e5413fd55",
       "verified": true
     }
   },

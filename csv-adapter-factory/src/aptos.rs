@@ -15,6 +15,7 @@ use csv_aptos::{
     runtime_adapter::AptosRuntimeAdapter,
     seal_protocol::AptosSealProtocol,
 };
+use csv_protocol::deployment_manifest::get_aptos_module_address;
 
 /// Aptos adapter factory.
 pub struct AptosFactory;
@@ -40,11 +41,15 @@ impl AdapterFactory for AptosFactory {
             .ok_or_else(|| FactoryError::InvalidConfig("No RPC endpoint found".to_string()))?;
 
         // Create seal protocol with signing key if provided
+        // Use deployment manifest for module address, fall back to config
+        let module_address = get_aptos_module_address()
+            .unwrap_or_else(|_| config.contract_address.clone().unwrap_or_else(|| "0x1".to_string()));
+        
         let aptos_config = AptosConfig {
             network,
             rpc_url: rest_endpoint.url.clone(),
             seal_contract: csv_aptos::config::SealContractConfig {
-                module_address: config.contract_address.clone().unwrap_or_else(|| "0x1".to_string()),
+                module_address,
                 ..Default::default()
             },
             ..Default::default()

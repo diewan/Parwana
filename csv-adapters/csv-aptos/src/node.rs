@@ -36,7 +36,10 @@ impl AptosNode {
     /// Create a new Aptos RPC client
     pub fn new(rpc_url: &str) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             rpc_url: rpc_url.trim_end_matches('/').to_string(),
             signer_address: None,
         }
@@ -45,7 +48,10 @@ impl AptosNode {
     /// Create a new Aptos RPC client with a configured signer address
     pub fn with_signer_address(rpc_url: &str, signer_address: [u8; 32]) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             rpc_url: rpc_url.trim_end_matches('/').to_string(),
             signer_address: Some(signer_address),
         }
@@ -60,8 +66,11 @@ impl AptosNode {
             &format!("{}/v1", self.rpc_url)
         };
         let url = format!("{}{}", base, path);
-        let response: Value = self.client.get(&url).send().await?.json().await?;
-        Ok(response)
+        log::debug!("AptosNode: GET request to {}", url);
+        let response = self.client.get(&url).send().await?;
+        log::debug!("AptosNode: GET response status: {}", response.status());
+        let json: Value = response.json().await?;
+        Ok(json)
     }
 
     /// Make a POST request to the Aptos REST API
@@ -161,29 +170,82 @@ impl AptosNode {
     /// Parse a transaction from API response
     fn parse_transaction(result: &Value) -> RpcResult<AptosTransaction> {
         let hash = Self::required_hex_bytes(result, "hash")?;
-        let version = Self::required_u64(result, "version")?;
-        let success = Self::required_bool(result, "success")?;
-        let vm_status = Self::required_str(result, "vm_status")?.to_string();
-        let epoch = Self::required_u64(result, "epoch")?;
-        let round = Self::required_u64(result, "round")?;
-        let gas_used = Self::required_u64(result, "gas_used")?;
-        let cumulative_gas_used = Self::required_u64(result, "cumulative_gas_used")?;
+        
+        // version is optional in some API responses (pending transactions)
+        let version = if let Some(v) = result.get("version") {
+            Self::parse_u64(v, "version")?
+        } else {
+            0
+        };
+        
+        // success is optional in some API responses (pending transactions)
+        let success = if let Some(s) = result.get("success") {
+            s.as_bool().unwrap_or(false)
+        } else {
+            false
+        };
+        
+        let vm_status = if let Some(v) = result.get("vm_status") {
+            v.as_str().unwrap_or("unknown").to_string()
+        } else {
+            "unknown".to_string()
+        };
+        
+        // epoch and round are optional in some API responses
+        let epoch = if let Some(e) = result.get("epoch") {
+            Self::parse_u64(e, "epoch").unwrap_or(0)
+        } else {
+            0
+        };
+        let round = if let Some(r) = result.get("round") {
+            Self::parse_u64(r, "round").unwrap_or(0)
+        } else {
+            0
+        };
+        
+        let gas_used = if let Some(g) = result.get("gas_used") {
+            Self::parse_u64(g, "gas_used")?
+        } else {
+            0
+        };
+        
+        // cumulative_gas_used is optional
+        let cumulative_gas_used = if let Some(c) = result.get("cumulative_gas_used") {
+            Self::parse_u64(c, "cumulative_gas_used").unwrap_or(0)
+        } else {
+            0
+        };
 
-        // Parse state hashes
-        let state_change_hash = Self::required_hex_bytes(result, "state_change_hash")?;
-        let event_root_hash = Self::required_hex_bytes(result, "event_root_hash")?;
+        // Parse state hashes - these are optional for pending transactions
+        let state_change_hash = if let Some(s) = result.get("state_change_hash") {
+            Self::required_hex_bytes(result, "state_change_hash")?
+        } else {
+            [0u8; 32]
+        };
+        let event_root_hash = if let Some(e) = result.get("event_root_hash") {
+            Self::required_hex_bytes(result, "event_root_hash")?
+        } else {
+            [0u8; 32]
+        };
         let state_checkpoint_hash = Self::optional_hex_bytes(result, "state_checkpoint_hash")?;
 
-        // Parse events
-        let events = Self::required_field(result, "events")?
-            .as_array()
-            .ok_or_else(|| Self::missing_field("events"))?
-            .iter()
-            .map(Self::parse_event)
-            .collect::<RpcResult<Vec<_>>>()?;
+        // Parse events - optional for pending transactions
+        let events = if let Some(e) = result.get("events") {
+            e.as_array()
+                .ok_or_else(|| Self::missing_field("events"))?
+                .iter()
+                .map(Self::parse_event)
+                .collect::<RpcResult<Vec<_>>>()?
+        } else {
+            vec![]
+        };
 
-        // Parse payload
-        let payload = serde_json::to_vec(Self::required_field(result, "payload")?)?;
+        // Parse payload - optional for pending transactions
+        let payload = if let Some(p) = result.get("payload") {
+            serde_json::to_vec(p)?
+        } else {
+            vec![]
+        };
 
         Ok(AptosTransaction {
             version,
@@ -418,42 +480,72 @@ impl AptosTransactionReader for AptosNode {
     ) -> BoxFuture<'_, Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
             let hash_hex = format!("0x{}", hex::encode(tx_hash));
-            let timeout = Duration::from_secs(60);
             let start = Instant::now();
-            let poll_interval = Duration::from_secs(2);
+            let poll_interval = Duration::from_millis(500); // Poll more frequently (500ms)
+            let timeout = Duration::from_secs(20); // 20 second timeout as requested by user
 
             loop {
                 if start.elapsed() > timeout {
-                    return Err("Timeout waiting for transaction confirmation".into());
+                    return Err(format!(
+                        "Timeout waiting for transaction confirmation after {} seconds. Hash: {}",
+                        timeout.as_secs(),
+                        hash_hex
+                    ).into());
                 }
 
-                if let Ok(result) = self
+                log::debug!("Querying transaction by hash: {}", hash_hex);
+                
+                // Try the transactions_by_hash endpoint first
+                let result = self
                     .get(&format!("/transactions/by_hash/{}", hash_hex))
-                    .await
-                {
-                    // Check if transaction is found
-                    if result.get("hash").is_some() {
-                        // Try to parse the transaction
-                        match Self::parse_transaction(&result) {
-                            Ok(tx) => {
-                                if tx.success {
-                                    return Ok(tx);
-                                } else {
-                                    return Err(format!("Transaction failed: {}", tx.vm_status).into());
+                    .await;
+                
+                match result {
+                    Ok(result) => {
+                        log::debug!("Transaction query response: {}", serde_json::to_string(&result).unwrap_or_else(|_| "failed".to_string()));
+                        
+                        // Check if transaction is found
+                        if result.get("hash").is_some() {
+                            // Try to parse the transaction
+                            match Self::parse_transaction(&result) {
+                                Ok(tx) => {
+                                    log::info!("Transaction parsed - success: {}, vm_status: {}", tx.success, tx.vm_status);
+                                    // Only return success if the transaction has a valid success field
+                                    // If success is false but vm_status is "unknown", it means the transaction is still pending
+                                    if tx.success || (tx.vm_status != "unknown" && tx.success) {
+                                        log::info!("Transaction confirmed successfully: {}", hash_hex);
+                                        return Ok(tx);
+                                    } else if tx.vm_status == "unknown" && !tx.success {
+                                        // Transaction is still pending, continue waiting
+                                        log::debug!("Transaction still pending (success=false, vm_status=unknown), continuing to wait");
+                                    } else {
+                                        return Err(format!("Transaction failed: {}", tx.vm_status).into());
+                                    }
+                                }
+                                Err(e) => {
+                                    // If parsing fails due to missing required fields, transaction might still be pending
+                                    let error_str = e.to_string();
+                                    log::warn!("Transaction parsing failed: {}", error_str);
+                                    if error_str.contains("missing") || error_str.contains("invalid") {
+                                        // Transaction is still pending, continue waiting
+                                        log::debug!("Transaction still pending ({}), continuing to wait", error_str);
+                                    } else {
+                                        // Other parsing error, return it
+                                        return Err(e);
+                                    }
                                 }
                             }
-                            Err(e) => {
-                                // If parsing fails due to missing required fields, transaction might still be pending
-                                let error_str = e.to_string();
-                                if error_str.contains("missing") || error_str.contains("invalid") {
-                                    // Transaction is still pending, continue waiting
-                                    log::debug!("Transaction still pending ({}), continuing to wait", error_str);
-                                } else {
-                                    // Other parsing error, return it
-                                    return Err(e);
-                                }
+                        } else {
+                            // Transaction not found yet - check if it's a 404 or other error
+                            if let Some(error_code) = result.get("error_code") {
+                                log::debug!("Transaction lookup returned error: {:?}", error_code);
+                            } else {
+                                log::debug!("Transaction not found in response");
                             }
                         }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to query transaction by hash, error: {:?}", e);
                     }
                 }
 

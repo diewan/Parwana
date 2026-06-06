@@ -67,7 +67,7 @@ pub async fn execute(
             cmd_create(chain, value, account, index, config, state).await
         }
         SanadAction::Show { sanad_id } => cmd_show(sanad_id, state),
-        SanadAction::List { chain } => cmd_list(chain, state),
+        SanadAction::List { chain } => cmd_list(chain, config, state).await,
         SanadAction::Transfer { sanad_id, to } => cmd_transfer(sanad_id, to, state),
         SanadAction::Consume { chain, sanad_id } => cmd_consume(chain, sanad_id, config, state).await,
     }
@@ -647,7 +647,7 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
     Ok(())
 }
 
-fn cmd_list(chain: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
+async fn cmd_list(chain: Option<Chain>, config: &Config, state: &UnifiedStateManager) -> Result<()> {
     output::header("Tracked Sanads");
 
     let headers = vec!["Sanad ID", "Chain", "Status"];
@@ -662,7 +662,27 @@ fn cmd_list(chain: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
 
         // Check if seal is consumed in registry even if flag not set
         let seal_consumed = state.is_seal_consumed(&sanad.id);
+        
+        // Check if sanad has a valid seal_ref (required for non-Bitcoin chains)
+        let has_valid_seal = if sanad.chain.as_str() != "bitcoin" {
+            // For non-Bitcoin chains, check if seal_ref is valid
+            base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref).is_ok()
+        } else {
+            // Bitcoin sanads might not have seal_ref in the same format
+            true
+        };
+        
+        // Check on-chain status for accurate detection
+        let on_chain_status = check_sanad_on_chain_status(sanad, config, state).await;
+        
         let status = if sanad.status == SanadStatus::Consumed || seal_consumed {
+            "Consumed".to_string()
+        } else if !has_valid_seal {
+            // Mark as Inaccessible if seal_ref is invalid (for non-Bitcoin chains)
+            "Inaccessible".to_string()
+        } else if on_chain_status == "Inaccessible" {
+            "Inaccessible".to_string()
+        } else if on_chain_status == "Consumed" {
             "Consumed".to_string()
         } else {
             "Active".to_string()
@@ -678,6 +698,251 @@ fn cmd_list(chain: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Check on-chain status of a sanad to detect if it's consumed or inaccessible
+async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state: &UnifiedStateManager) -> &'static str {
+    // For Bitcoin, check if the UTXO is still unspent
+    if sanad.chain.as_str() == "bitcoin" {
+        if let Some(anchor_tx_hash) = &sanad.anchor_tx_hash {
+            log::debug!("Bitcoin sanad {}: checking anchor_tx_hash: {}", sanad.id, anchor_tx_hash);
+            // Parse the anchor_tx_hash to get txid and vout
+            // The anchor_tx_hash format is: txid (32 bytes) + vout (4 bytes) in hex
+            if let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x")) {
+                log::debug!("Bitcoin sanad {}: decoded {} bytes from anchor_tx_hash", sanad.id, tx_hash_bytes.len());
+                
+                // Handle both formats: 32 bytes (txid only) or 36 bytes (txid + vout)
+                let (txid, vout) = if tx_hash_bytes.len() >= 36 {
+                    let txid = &tx_hash_bytes[0..32];
+                    let vout_bytes = &tx_hash_bytes[32..36];
+                    let vout = u32::from_le_bytes(vout_bytes.try_into().unwrap_or([0u8; 4]));
+                    (txid, vout)
+                } else if tx_hash_bytes.len() == 32 {
+                    // Only txid, need to look up vout from sanad_seals
+                    let txid = &tx_hash_bytes[0..32];
+                    let vout = state.storage.wallet.sanad_seals
+                        .iter()
+                        .find(|s| s.sanad_id == sanad.id)
+                        .map(|s| s.vout)
+                        .unwrap_or(0);
+                    log::debug!("Bitcoin sanad {}: looked up vout {} from sanad_seals", sanad.id, vout);
+                    (txid, vout)
+                } else {
+                    log::warn!("Bitcoin sanad {}: anchor_tx_hash has invalid length ({} bytes)", 
+                        sanad.id, tx_hash_bytes.len());
+                    return "Active";
+                };
+                
+                // Convert txid to display format (reverse byte order for Bitcoin)
+                let mut txid_display = [0u8; 32];
+                txid_display.copy_from_slice(txid);
+                txid_display.reverse();
+                let txid_hex = hex::encode(txid_display);
+                
+                log::debug!("Bitcoin sanad {}: checking UTXO {}:{} on-chain", sanad.id, &txid_hex[..16], vout);
+                
+                // Check if UTXO is still unspent on-chain
+                if let Ok(chain_cfg) = config.chain(&sanad.chain) {
+                    match csv_coordinator::wallet::bitcoin::validate_utxo_onchain(&txid_hex, vout, &chain_cfg.rpc_url).await {
+                        Ok((tx_exists, is_confirmed, is_unspent, _)) => {
+                            log::debug!("Bitcoin sanad {}: UTXO status - exists={}, confirmed={}, unspent={}", 
+                                sanad.id, tx_exists, is_confirmed, is_unspent);
+                            if !tx_exists || !is_confirmed {
+                                return "Inaccessible";
+                            }
+                            if !is_unspent {
+                                return "Consumed";
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Bitcoin sanad {}: failed to validate UTXO on-chain: {}", sanad.id, e);
+                        }
+                    }
+                }
+            } else {
+                log::warn!("Bitcoin sanad {}: failed to decode anchor_tx_hash", sanad.id);
+            }
+        } else {
+            log::warn!("Bitcoin sanad {}: no anchor_tx_hash found", sanad.id);
+        }
+    }
+    
+    // For Aptos, check if seal resource is still available
+    if sanad.chain.as_str() == "aptos" {
+        log::debug!("Aptos sanad {}: checking seal status", sanad.id);
+        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
+            // Check if the seal resource exists on-chain by querying the account
+            // Parse the seal_ref to get the account address
+            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
+                log::debug!("Aptos sanad {}: decoded {} bytes from seal_ref", sanad.id, seal_ref_bytes.len());
+                if seal_ref_bytes.len() >= 32 {
+                    let account_address = &seal_ref_bytes[0..32];
+                    
+                    // Use Aptos RPC to check if the seal resource exists
+                    use reqwest::Client;
+                    let client = Client::new();
+                    
+                    // Build the resource type for the seal
+                    let resource_type = if let Some(contract_addr) = &chain_cfg.contract_address {
+                        format!("{}::CSVSeal::Seal", contract_addr)
+                    } else {
+                        // Default contract address for testnet
+                        "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50::CSVSeal::Seal".to_string()
+                    };
+                    
+                    let addr_hex = format!("0x{}", hex::encode(account_address));
+                    let url = format!("{}/v1/accounts/{}/resources", chain_cfg.rpc_url.trim_end_matches('/'), addr_hex);
+                    
+                    log::debug!("Aptos sanad {}: checking account {} for resource {}", sanad.id, addr_hex, resource_type);
+                    
+                    if let Ok(response) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+                        if let Ok(resources) = response.json::<serde_json::Value>().await {
+                            log::debug!("Aptos sanad {}: resources response: {}", sanad.id, serde_json::to_string(&resources).unwrap_or_else(|_| "failed".to_string()));
+                            // Check if the seal resource exists in the resources array
+                            if let Some(resource_array) = resources.as_array() {
+                                let seal_exists = resource_array.iter().any(|r| {
+                                    r.get("type").and_then(|t| t.as_str()) == Some(&resource_type)
+                                });
+                                
+                                log::debug!("Aptos sanad {}: seal resource exists = {}", sanad.id, seal_exists);
+                                
+                                if !seal_exists {
+                                    return "Inaccessible";
+                                }
+                            } else {
+                                // Response might be an error object
+                                if let Some(error_code) = resources.get("error_code") {
+                                    log::warn!("Aptos sanad {}: API returned error: {:?}", sanad.id, error_code);
+                                    return "Inaccessible";
+                                }
+                                log::warn!("Aptos sanad {}: resources response is not an array", sanad.id);
+                            }
+                        } else {
+                            log::warn!("Aptos sanad {}: failed to parse resources response", sanad.id);
+                        }
+                    } else {
+                        log::warn!("Aptos sanad {}: failed to query account resources", sanad.id);
+                    }
+                } else {
+                    log::warn!("Aptos sanad {}: seal_ref is too short ({} bytes, expected >= 32)", 
+                        sanad.id, seal_ref_bytes.len());
+                }
+            } else {
+                log::warn!("Aptos sanad {}: failed to decode seal_ref", sanad.id);
+            }
+        } else {
+            log::warn!("Aptos sanad {}: failed to get chain config", sanad.id);
+        }
+    }
+    
+    // For Ethereum, check if seal/contract is still valid
+    if sanad.chain.as_str() == "ethereum" {
+        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
+            // Use Ethereum RPC to check if the seal exists
+            use reqwest::Client;
+            let client = Client::new();
+            
+            // Parse seal_ref to get contract address and seal ID
+            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
+                if seal_ref_bytes.len() >= 32 {
+                    let contract_address = &seal_ref_bytes[0..20]; // Ethereum addresses are 20 bytes
+                    
+                    let addr_hex = format!("0x{}", hex::encode(contract_address));
+                    let url = format!("{}", chain_cfg.rpc_url.trim_end_matches('/'));
+                    
+                    // Build JSON-RPC request to check if the seal exists
+                    let payload = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "eth_getCode",
+                        "params": [addr_hex, "latest"],
+                        "id": 1
+                    });
+                    
+                    if let Ok(response) = client.post(&url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+                        if let Ok(result) = response.json::<serde_json::Value>().await {
+                            // If result is "0x" or null, the contract doesn't exist
+                            if let Some(code) = result.get("result") {
+                                if code.as_str() == Some("0x") || code.is_null() {
+                                    return "Inaccessible";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // For Sui, check if seal object is still available
+    if sanad.chain.as_str() == "sui" {
+        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
+            // Use Sui RPC to check if the seal object exists
+            use reqwest::Client;
+            let client = Client::new();
+            
+            // Parse seal_ref to get object ID
+            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
+                if seal_ref_bytes.len() >= 32 {
+                    let object_id = &seal_ref_bytes[0..32];
+                    
+                    let object_id_hex = format!("0x{}", hex::encode(object_id));
+                    let url = format!("{}/sui/object/{}", chain_cfg.rpc_url.trim_end_matches('/'), object_id_hex);
+                    
+                    if let Ok(response) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+                        if let Ok(result) = response.json::<serde_json::Value>().await {
+                            // Check if object exists and is not deleted
+                            if let Some(status) = result.get("status") {
+                                if status.as_str() == Some("Deleted") || status.as_str() == Some("NotFound") {
+                                    return "Inaccessible";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // For Solana, check if seal account is still valid
+    if sanad.chain.as_str() == "solana" {
+        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
+            // Use Solana RPC to check if the account exists
+            use reqwest::Client;
+            let client = Client::new();
+            
+            // Parse seal_ref to get account address
+            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
+                if seal_ref_bytes.len() >= 32 {
+                    let account_address = &seal_ref_bytes[0..32];
+                    
+                    let account_hex = hex::encode(account_address);
+                    let url = format!("{}", chain_cfg.rpc_url.trim_end_matches('/'));
+                    
+                    // Build JSON-RPC request to check account info
+                    let payload = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "getAccountInfo",
+                        "params": [account_hex],
+                        "id": 1
+                    });
+                    
+                    if let Ok(response) = client.post(&url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+                        if let Ok(result) = response.json::<serde_json::Value>().await {
+                            // If result.value is null, the account doesn't exist
+                            if let Some(value) = result.get("result").and_then(|r| r.get("value")) {
+                                if value.is_null() {
+                                    return "Inaccessible";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Return "Active" if we can't determine status or chain is not supported for verification
+    "Active"
 }
 
 fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> Result<()> {

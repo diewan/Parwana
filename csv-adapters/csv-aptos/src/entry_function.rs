@@ -7,7 +7,7 @@ use serde_json::json;
 use std::fmt;
 
 /// CSV Seal module address (configured at runtime)
-pub const CSV_SEAL_MODULE_NAME: &str = "CSVSealV2";
+pub const CSV_SEAL_MODULE_NAME: &str = "CSVSeal";
 
 /// EntryFunction function names
 pub mod functions {
