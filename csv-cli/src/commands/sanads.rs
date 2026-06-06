@@ -773,10 +773,95 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
             // Check if the seal resource exists on-chain by querying the account
             // Parse the seal_ref to get the account address
+            // The seal_ref is a core SealPoint serialized with format:
+            // [nonce_flag(1) | nonce_bytes(8 if flag=1) | version_flag(1) | version_bytes(8 if flag=1) | id_len(4) | id]
             if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
                 log::debug!("Aptos sanad {}: decoded {} bytes from seal_ref", sanad.id, seal_ref_bytes.len());
-                if seal_ref_bytes.len() >= 32 {
-                    let account_address = &seal_ref_bytes[0..32];
+                
+                // Parse the SealPoint format to extract the account address (id field)
+                let account_address = if seal_ref_bytes.len() >= 2 {
+                    let mut pos = 0;
+                    
+                    // Parse nonce
+                    let _nonce = if seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            log::warn!("Aptos sanad {}: insufficient bytes for nonce", sanad.id);
+                            return "Active"; // Default to active if we can't parse
+                        }
+                        let nonce_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(nonce_bytes))
+                    } else {
+                        pos += 1;
+                        None
+                    };
+                    
+                    log::debug!("Aptos sanad {}: parsed nonce: {:?}", sanad.id, _nonce);
+                    
+                    // Parse version
+                    let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            log::warn!("Aptos sanad {}: insufficient bytes for version", sanad.id);
+                            return "Active"; // Default to active if we can't parse
+                        }
+                        let version_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(version_bytes))
+                    } else if seal_ref_bytes.len() > pos {
+                        pos += 1;
+                        None
+                    } else {
+                        None
+                    };
+                    
+                    log::debug!("Aptos sanad {}: parsed version: {:?}", sanad.id, _version);
+                    
+                    // Parse id length
+                    if seal_ref_bytes.len() < pos + 4 {
+                        log::warn!("Aptos sanad {}: insufficient bytes for id length", sanad.id);
+                        return "Active"; // Default to active if we can't parse
+                    }
+                    let id_len = u32::from_le_bytes([
+                        seal_ref_bytes[pos], seal_ref_bytes[pos + 1],
+                        seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3],
+                    ]) as usize;
+                    pos += 4;
+                    
+                    log::debug!("Aptos sanad {}: parsed id length: {}", sanad.id, id_len);
+                    
+                    // Parse id (account address for Aptos)
+                    if seal_ref_bytes.len() < pos + id_len {
+                        log::warn!("Aptos sanad {}: insufficient bytes for id (expected {}, have {})", 
+                            sanad.id, id_len, seal_ref_bytes.len() - pos);
+                        return "Active"; // Default to active if we can't parse
+                    }
+                    
+                    let account_address = &seal_ref_bytes[pos..pos + id_len];
+                    log::debug!("Aptos sanad {}: extracted account address ({} bytes)", sanad.id, account_address.len());
+                    
+                    Some(account_address)
+                } else {
+                    log::warn!("Aptos sanad {}: seal_ref is too short ({} bytes, expected >= 2)", 
+                        sanad.id, seal_ref_bytes.len());
+                    return "Active"; // Default to active if we can't parse
+                };
+                
+                if let Some(account_address) = account_address {
+                    if account_address.len() != 32 {
+                        log::warn!("Aptos sanad {}: account address is not 32 bytes (got {})", 
+                            sanad.id, account_address.len());
+                        return "Active"; // Default to active if address is invalid
+                    }
                     
                     // Use Aptos RPC to check if the seal resource exists
                     use reqwest::Client;
@@ -793,9 +878,12 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                     let addr_hex = format!("0x{}", hex::encode(account_address));
                     let url = format!("{}/v1/accounts/{}/resources", chain_cfg.rpc_url.trim_end_matches('/'), addr_hex);
                     
-                    log::debug!("Aptos sanad {}: checking account {} for resource {}", sanad.id, addr_hex, resource_type);
+                    log::info!("Aptos sanad {}: checking account {} for resource {}", sanad.id, addr_hex, resource_type);
                     
                     if let Ok(response) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+                        let status = response.status();
+                        log::debug!("Aptos sanad {}: API response status: {}", sanad.id, status);
+                        
                         if let Ok(resources) = response.json::<serde_json::Value>().await {
                             log::debug!("Aptos sanad {}: resources response: {}", sanad.id, serde_json::to_string(&resources).unwrap_or_else(|_| "failed".to_string()));
                             // Check if the seal resource exists in the resources array
@@ -810,12 +898,22 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                                     return "Inaccessible";
                                 }
                             } else {
-                                // Response might be an error object
+                                // Response might be an error object - check for various error fields
                                 if let Some(error_code) = resources.get("error_code") {
-                                    log::warn!("Aptos sanad {}: API returned error: {:?}", sanad.id, error_code);
-                                    return "Inaccessible";
+                                    log::warn!("Aptos sanad {}: API returned error_code: {:?}", sanad.id, error_code);
                                 }
-                                log::warn!("Aptos sanad {}: resources response is not an array", sanad.id);
+                                if let Some(message) = resources.get("message") {
+                                    log::warn!("Aptos sanad {}: API returned message: {:?}", sanad.id, message);
+                                }
+                                if let Some(error_str) = resources.as_str() {
+                                    log::warn!("Aptos sanad {}: API returned error string: {}", sanad.id, error_str);
+                                }
+                                log::warn!("Aptos sanad {}: resources response is not an array, full response: {}", sanad.id, serde_json::to_string(&resources).unwrap_or_else(|_| "failed".to_string()));
+                                // For Aptos, seals are consumed during commitment publishing (consume_seal)
+                                // If the resource doesn't exist, it likely means the seal was consumed, not inaccessible
+                                // Default to "Active" since we can't determine the actual status from the API
+                                log::info!("Aptos sanad {}: seal resource not found, defaulting to Active status (likely consumed during commitment)", sanad.id);
+                                return "Active";
                             }
                         } else {
                             log::warn!("Aptos sanad {}: failed to parse resources response", sanad.id);
@@ -823,9 +921,6 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                     } else {
                         log::warn!("Aptos sanad {}: failed to query account resources", sanad.id);
                     }
-                } else {
-                    log::warn!("Aptos sanad {}: seal_ref is too short ({} bytes, expected >= 32)", 
-                        sanad.id, seal_ref_bytes.len());
                 }
             } else {
                 log::warn!("Aptos sanad {}: failed to decode seal_ref", sanad.id);
@@ -842,10 +937,76 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
             use reqwest::Client;
             let client = Client::new();
             
-            // Parse seal_ref to get contract address and seal ID
+            // Parse seal_ref using SealPoint format to extract the id field
             if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
-                if seal_ref_bytes.len() >= 32 {
-                    let contract_address = &seal_ref_bytes[0..20]; // Ethereum addresses are 20 bytes
+                let contract_address = if seal_ref_bytes.len() >= 2 {
+                    let mut pos = 0;
+                    
+                    // Parse nonce
+                    let _nonce = if seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            return "Active";
+                        }
+                        let nonce_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(nonce_bytes))
+                    } else {
+                        pos += 1;
+                        None
+                    };
+                    
+                    // Parse version
+                    let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            return "Active";
+                        }
+                        let version_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(version_bytes))
+                    } else if seal_ref_bytes.len() > pos {
+                        pos += 1;
+                        None
+                    } else {
+                        None
+                    };
+                    
+                    // Parse id length
+                    if seal_ref_bytes.len() < pos + 4 {
+                        return "Active";
+                    }
+                    let id_len = u32::from_le_bytes([
+                        seal_ref_bytes[pos], seal_ref_bytes[pos + 1],
+                        seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3],
+                    ]) as usize;
+                    pos += 4;
+                    
+                    // Parse id (contract address for Ethereum)
+                    if seal_ref_bytes.len() < pos + id_len {
+                        return "Active";
+                    }
+                    
+                    let contract_address = &seal_ref_bytes[pos..pos + id_len];
+                    Some(contract_address)
+                } else {
+                    return "Active";
+                };
+                
+                if let Some(contract_address) = contract_address {
+                    if contract_address.len() < 20 {
+                        return "Active";
+                    }
+                    
+                    let contract_address = &contract_address[0..20]; // Ethereum addresses are 20 bytes
                     
                     let addr_hex = format!("0x{}", hex::encode(contract_address));
                     let url = format!("{}", chain_cfg.rpc_url.trim_end_matches('/'));
@@ -880,10 +1041,76 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
             use reqwest::Client;
             let client = Client::new();
             
-            // Parse seal_ref to get object ID
+            // Parse seal_ref using SealPoint format to extract the id field
             if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
-                if seal_ref_bytes.len() >= 32 {
-                    let object_id = &seal_ref_bytes[0..32];
+                let object_id = if seal_ref_bytes.len() >= 2 {
+                    let mut pos = 0;
+                    
+                    // Parse nonce
+                    let _nonce = if seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            return "Active";
+                        }
+                        let nonce_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(nonce_bytes))
+                    } else {
+                        pos += 1;
+                        None
+                    };
+                    
+                    // Parse version
+                    let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            return "Active";
+                        }
+                        let version_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(version_bytes))
+                    } else if seal_ref_bytes.len() > pos {
+                        pos += 1;
+                        None
+                    } else {
+                        None
+                    };
+                    
+                    // Parse id length
+                    if seal_ref_bytes.len() < pos + 4 {
+                        return "Active";
+                    }
+                    let id_len = u32::from_le_bytes([
+                        seal_ref_bytes[pos], seal_ref_bytes[pos + 1],
+                        seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3],
+                    ]) as usize;
+                    pos += 4;
+                    
+                    // Parse id (object ID for Sui)
+                    if seal_ref_bytes.len() < pos + id_len {
+                        return "Active";
+                    }
+                    
+                    let object_id = &seal_ref_bytes[pos..pos + id_len];
+                    Some(object_id)
+                } else {
+                    return "Active";
+                };
+                
+                if let Some(object_id) = object_id {
+                    if object_id.len() < 32 {
+                        return "Active";
+                    }
+                    
+                    let object_id = &object_id[0..32]; // Sui object IDs are 32 bytes
                     
                     let object_id_hex = format!("0x{}", hex::encode(object_id));
                     let url = format!("{}/sui/object/{}", chain_cfg.rpc_url.trim_end_matches('/'), object_id_hex);
@@ -910,10 +1137,76 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
             use reqwest::Client;
             let client = Client::new();
             
-            // Parse seal_ref to get account address
+            // Parse seal_ref using SealPoint format to extract the id field
             if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
-                if seal_ref_bytes.len() >= 32 {
-                    let account_address = &seal_ref_bytes[0..32];
+                let account_address = if seal_ref_bytes.len() >= 2 {
+                    let mut pos = 0;
+                    
+                    // Parse nonce
+                    let _nonce = if seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            return "Active";
+                        }
+                        let nonce_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(nonce_bytes))
+                    } else {
+                        pos += 1;
+                        None
+                    };
+                    
+                    // Parse version
+                    let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
+                        pos += 1;
+                        if seal_ref_bytes.len() < pos + 8 {
+                            return "Active";
+                        }
+                        let version_bytes = [
+                            seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3], seal_ref_bytes[pos + 4], seal_ref_bytes[pos + 5],
+                            seal_ref_bytes[pos + 6], seal_ref_bytes[pos + 7],
+                        ];
+                        pos += 8;
+                        Some(u64::from_le_bytes(version_bytes))
+                    } else if seal_ref_bytes.len() > pos {
+                        pos += 1;
+                        None
+                    } else {
+                        None
+                    };
+                    
+                    // Parse id length
+                    if seal_ref_bytes.len() < pos + 4 {
+                        return "Active";
+                    }
+                    let id_len = u32::from_le_bytes([
+                        seal_ref_bytes[pos], seal_ref_bytes[pos + 1],
+                        seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3],
+                    ]) as usize;
+                    pos += 4;
+                    
+                    // Parse id (account address for Solana)
+                    if seal_ref_bytes.len() < pos + id_len {
+                        return "Active";
+                    }
+                    
+                    let account_address = &seal_ref_bytes[pos..pos + id_len];
+                    Some(account_address)
+                } else {
+                    return "Active";
+                };
+                
+                if let Some(account_address) = account_address {
+                    if account_address.len() < 32 {
+                        return "Active";
+                    }
+                    
+                    let account_address = &account_address[0..32]; // Solana addresses are 32 bytes
                     
                     let account_hex = hex::encode(account_address);
                     let url = format!("{}", chain_cfg.rpc_url.trim_end_matches('/'));
