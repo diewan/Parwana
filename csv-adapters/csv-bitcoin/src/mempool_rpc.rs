@@ -663,7 +663,7 @@ pub async fn get_address_utxos(
     let result: Vec<(OutPoint, u64)> = utxos
         .into_iter()
         .map(|u| {
-            let mut txid_bytes = hex::decode(&u.txid)?;
+            let txid_bytes = hex::decode(&u.txid)?;
             // mempool.space returns txid in standard format (no reversal needed)
             let txid = Txid::from_slice(&txid_bytes).expect("valid txid");
             let outpoint = OutPoint::new(txid, u.vout);

@@ -4,6 +4,7 @@ default_network = "testnet"
 rpc_endpoints = ["https://fullnode.testnet.sui.io:443"]
 block_explorer_urls = ["https://suiscan.xyz/testnet"]
 start_block = 0
+contract_address = "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21"
 
 [finality_guarantee]
 max_reorg_depth = 0

@@ -3,7 +3,7 @@ UPDATING GIT DEPENDENCY https://github.com/aptos-labs/aptos-core.git
 INCLUDING DEPENDENCY AptosFramework
 INCLUDING DEPENDENCY AptosStdlib
 INCLUDING DEPENDENCY MoveStdlib
-BUILDING csv-seal-v2
+BUILDING csv-seal
 [0m[1m[38;5;11mwarning[0m[1m: unused alias[0m
    [0m[34m┌─[0m contracts/sources/csv_seal.move:34:14
    [0m[34m│[0m

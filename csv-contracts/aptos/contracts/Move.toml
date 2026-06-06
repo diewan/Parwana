@@ -1,6 +1,6 @@
 [package]
-name = "csv-seal-v2"
-version = "1.0.0"
+name = "csv-seal"
+version = "1.0.1"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "testnet" }

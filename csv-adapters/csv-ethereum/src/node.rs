@@ -668,11 +668,11 @@ mod real_rpc_impl {
         println!("[Ethereum]   Calldata length: {} bytes", calldata.len());
         println!("[Ethereum]   Function selector: 0x{}", hex::encode(&calldata[..4]));
 
-        // Step 2: Get current nonce
+        // Step 2: Get current nonce using "pending" to account for transactions in mempool
         let signer_addr = format!("0x{}", hex::encode(signer.address()));
         println!("[Ethereum]   Signer address: {}", signer_addr);
         let nonce_str = rpc
-            .rpc_call("eth_getTransactionCount", json!([signer_addr, "latest"]))
+            .rpc_call("eth_getTransactionCount", json!([signer_addr, "pending"]))
             .await?;
         let nonce_str = nonce_str.as_str().ok_or("Invalid nonce response")?;
         let nonce = u64::from_str_radix(nonce_str.trim_start_matches("0x"), 16)
@@ -689,61 +689,76 @@ mod real_rpc_impl {
         println!("[Ethereum]   Base gas price: {} wei", base_fee);
         println!("[Ethereum]   Max fee per gas: {} wei", max_fee_per_gas);
 
-        // Step 4: Build the typed EIP-1559 transaction (pre-signing RLP without signature)
-        let _tx_hash = keccak256(&calldata);
-
-        // Build and sign EIP-1559 tx using alloy
-        let tx = alloy::consensus::TxEip1559 {
-            chain_id,
-            nonce,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            gas_limit: 300_000, // Increased for lockSanad which updates multiple storage slots
-            to: TxKind::Call(rpc.csv_seal_address),
-            value: U256::ZERO,
-            input: alloy::primitives::Bytes::from(calldata.clone()),
-            access_list: Default::default(),
-        };
-
+        // Step 4: Broadcast with retry logic for "replacement transaction underpriced" error
         println!("[Ethereum]   Contract address: 0x{}", hex::encode(rpc.csv_seal_address));
         println!("[Ethereum]   Gas limit: 300,000");
-
-        // Sign the transaction using SignableTransaction trait + SignerSync
-        use alloy::consensus::SignableTransaction;
-        use alloy::signers::SignerSync;
-
-        // Calculate the signature hash
-        let sig_hash = tx.signature_hash();
-
-        // Sign using the sync signer
-        let signature = signer
-            .sign_hash_sync(&sig_hash)
-            .map_err(|e| format!("Failed to sign transaction: {}", e))?;
-
-        println!("[Ethereum] Transaction signed successfully");
-
-        // Convert to signed transaction
-        let signed_tx = tx.into_signed(signature);
-
-        // Build the signed transaction envelope and encode using EIP-2718
-        let tx_envelope = TxEnvelope::Eip1559(signed_tx);
-        let tx_bytes = tx_envelope.encoded_2718();
-
-        println!("[Ethereum]   Encoded tx length: {} bytes", tx_bytes.len());
-
-        // Step 5: Broadcast
         println!("[Ethereum] Broadcasting transaction...");
-        let tx_hex = format!("0x{}", hex::encode(&tx_bytes));
-        let hash_str = rpc.send_raw_tx_raw(&tx_hex).await?;
-        println!("[Ethereum] Transaction hash: 0x{}", hash_str.trim_start_matches("0x"));
-        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
-            .map_err(|e| format!("Invalid hex response: {}", e))?;
-        if bytes.len() != 32 {
-            return Err(format!("Expected 32-byte hash, got {} bytes", bytes.len()).into());
+        
+        let mut current_max_fee = max_fee_per_gas;
+        let mut retry_count = 0;
+        let max_retries = 3;
+
+        loop {
+            // Build and sign transaction with current gas price
+            let tx = alloy::consensus::TxEip1559 {
+                chain_id,
+                nonce,
+                max_fee_per_gas: current_max_fee,
+                max_priority_fee_per_gas,
+                gas_limit: 300_000,
+                to: TxKind::Call(rpc.csv_seal_address),
+                value: U256::ZERO,
+                input: alloy::primitives::Bytes::from(calldata.clone()),
+                access_list: Default::default(),
+            };
+
+            use alloy::consensus::SignableTransaction;
+            use alloy::signers::SignerSync;
+
+            let sig_hash = tx.signature_hash();
+            let signature = signer
+                .sign_hash_sync(&sig_hash)
+                .map_err(|e| format!("Failed to sign transaction: {}", e))?;
+            let signed_tx = tx.into_signed(signature);
+            let tx_envelope = TxEnvelope::Eip1559(signed_tx);
+            let tx_bytes = tx_envelope.encoded_2718();
+
+            let tx_hex = format!("0x{}", hex::encode(&tx_bytes));
+            match rpc.send_raw_tx_raw(&tx_hex).await {
+                Ok(hash_str) => {
+                    println!("[Ethereum] Transaction hash: 0x{}", hash_str.trim_start_matches("0x"));
+                    let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+                        .map_err(|e| format!("Invalid hex response: {}", e))?;
+                    if bytes.len() != 32 {
+                        return Err(format!("Expected 32-byte hash, got {} bytes", bytes.len()).into());
+                    }
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes);
+                    return Ok(arr);
+                }
+                Err(e) => {
+                    let error_str = e.to_string();
+                    if error_str.contains("replacement transaction underpriced") 
+                        || error_str.contains("underpriced") {
+                        retry_count += 1;
+                        if retry_count >= max_retries {
+                            return Err(format!(
+                                "Failed to send transaction after {} retries: {}",
+                                max_retries, e
+                            ).into());
+                        }
+                        
+                        // Bump gas price by 20% and retry
+                        current_max_fee = current_max_fee.saturating_mul(12) / 10;
+                        println!("[Ethereum]   Retry {}/{}: Bumping gas price to {} wei", 
+                            retry_count, max_retries, current_max_fee);
+                        continue;
+                    } else {
+                        return Err(format!("Failed to send transaction: {}", e).into());
+                    }
+                }
+            }
         }
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&bytes);
-        Ok(arr)
     }
 
     /// Legacy: Build and send a raw transaction that calls `lockSanad` on the CSVSeal contract.

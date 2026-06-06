@@ -118,8 +118,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
     async fn build_inclusion_proof(
         &self,
-        transfer: &CrossChainTransfer,
-        lock_result: &LockResult,
+        _transfer: &CrossChainTransfer,
+        _lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
         // Build inclusion proof for a sanad on Solana
         // This is a simplified stub implementation

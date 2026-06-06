@@ -8,7 +8,6 @@ use anyhow::Result;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_sdk::CsvClient;
-use csv_sdk::prelude::NetworkType;
 
 use crate::config::{Chain, Config};
 use crate::output;
@@ -71,6 +70,20 @@ pub async fn cmd_transfer(
     
     // Add source chain config
     if let Some(from_chain_config) = config.chain(&from).ok() {
+        // Include UTXOs from wallet state for Bitcoin
+        let utxos = if from.as_str() == "bitcoin" {
+            state.storage.wallet.utxos.iter().map(|u| csv_sdk::config::UtxoConfig {
+                txid: u.txid.clone(),
+                vout: u.vout,
+                value: u.value,
+                account: u.account,
+                index: u.index,
+                script_pubkey: u.script_pubkey.clone(),
+            }).collect()
+        } else {
+            Vec::new()
+        };
+
         let chain_config = csv_sdk::config::ChainConfig {
             rpc: csv_sdk::config::RpcConfig {
                 url: from_chain_config.rpc_url.clone(),
@@ -85,7 +98,7 @@ pub async fn cmd_transfer(
             program_id: from_chain_config.program_id.clone(),
             account: 0,
             index: 0,
-            utxos: Vec::new(),
+            utxos,
             sanad_seals: state.storage.wallet.sanad_seals.iter().map(|s| csv_sdk::config::SanadSealConfig {
                 sanad_id: s.sanad_id.clone(),
                 anchor_txid: s.anchor_txid.clone(),
@@ -152,6 +165,7 @@ pub async fn cmd_transfer(
         .with_chain(to_chain.clone())
         .with_config(sdk_config)
         .with_private_keys(private_keys)
+        .with_runtime_coordinator()
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
@@ -208,6 +222,11 @@ pub async fn cmd_transfer(
         "Transfer {} recorded in local state.",
         transfer_id
     ));
+
+    // Update local Sanad store: mark source Sanad as consumed
+    if let Err(e) = state.consume_sanad(&sanad_id_hash.to_hex()) {
+        log::warn!("Failed to mark source Sanad as consumed in local store: {}", e);
+    }
 
     Ok(())
 }

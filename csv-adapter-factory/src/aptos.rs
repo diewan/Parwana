@@ -11,8 +11,9 @@ use csv_aptos::{
     ops::AptosBackend,
     rpc::AptosRpc,
     node::AptosNode,
-    config::AptosNetwork,
+    config::{AptosNetwork, AptosConfig},
     runtime_adapter::AptosRuntimeAdapter,
+    seal_protocol::AptosSealProtocol,
 };
 
 /// Aptos adapter factory.
@@ -38,12 +39,40 @@ impl AdapterFactory for AptosFactory {
             })
             .ok_or_else(|| FactoryError::InvalidConfig("No RPC endpoint found".to_string()))?;
 
-        // Create RPC client
-        let rpc: Box<dyn AptosRpc + Send + Sync> = Box::new(AptosNode::new(&rest_endpoint.url));
+        // Create seal protocol with signing key if provided
+        let aptos_config = AptosConfig {
+            network,
+            rpc_url: rest_endpoint.url.clone(),
+            seal_contract: csv_aptos::config::SealContractConfig {
+                module_address: config.contract_address.clone().unwrap_or_else(|| "0x1".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        // Create ChainBackend
+        let seal_protocol = if let Some(ref private_key_hex) = config.private_key {
+            log::info!("Factory: Creating Aptos seal protocol with signing key");
+            AptosSealProtocol::with_rpc_and_signing_key(
+                aptos_config,
+                &rest_endpoint.url,
+                private_key_hex,
+            )
+            .map_err(|e| FactoryError::CreationFailed(format!("Failed to create seal protocol with signing key: {}", e)))?
+        } else {
+            log::warn!("Factory: No private key provided, creating Aptos seal protocol without signing key (read-only mode)");
+            AptosSealProtocol::from_config(
+                aptos_config,
+                Box::new(AptosNode::new(&rest_endpoint.url)) as Box<dyn AptosRpc + Send + Sync>
+            )
+            .map_err(|e| FactoryError::CreationFailed(format!("Failed to create seal protocol: {}", e)))?
+        };
+
+        let seal_protocol = Arc::new(seal_protocol);
+
+        // Create ChainBackend from seal protocol
         let aptos_backend = Arc::new(
-            AptosBackend::new(rpc, network)
+            AptosBackend::from_seal_protocol(seal_protocol)
+                .map_err(|e| FactoryError::CreationFailed(format!("Failed to create backend: {}", e)))?
         );
         
         let chain_backend: Arc<dyn ChainBackend> = aptos_backend.clone();

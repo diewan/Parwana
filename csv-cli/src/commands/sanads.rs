@@ -510,7 +510,7 @@ async fn cmd_create(
 
             // Register the sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups
             if chain.as_str() == "bitcoin" {
-                let sanad_id_bytes = *sanad.id.as_bytes();
+                let _sanad_id_bytes = *sanad.id.as_bytes();
                 let anchor_txid_hex = hex::encode(&anchor.anchor_id);
                 let output_index = u32::from_le_bytes(
                     anchor.metadata[..4].try_into().unwrap_or([0, 0, 0, 0])
@@ -762,7 +762,7 @@ async fn cmd_consume(
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     // Initialize chain adapters for the configured network
-    let network_type = match config.chain(&chain)?.network {
+    let _network_type = match config.chain(&chain)?.network {
         Network::Test => csv_sdk::client::NetworkType::Testnet,
         Network::Main => csv_sdk::client::NetworkType::Mainnet,
         Network::Dev => csv_sdk::client::NetworkType::Testnet, // Dev uses testnet

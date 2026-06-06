@@ -350,7 +350,9 @@ impl TransferBuilder {
         {
             // Use TransferCoordinator if available
             if let Some(manager) = self.manager {
+                log::info!("TransferBuilder: TransferManager found, checking for TransferCoordinator");
                 if let Some(coordinator) = manager.coordinator.as_ref() {
+                    log::info!("TransferBuilder: TransferCoordinator available, executing real transfer");
                     // Get adapter registry from the manager
                     let adapter_registry = manager.adapter_registry();
                     let adapter_registry = adapter_registry.lock().map_err(|e| {
@@ -402,10 +404,21 @@ impl TransferBuilder {
                         .await
                         .map_err(|e| CsvError::RuntimeError(format!("Transfer execution failed: {}", e)))?;
 
+                    log::info!("TransferBuilder: Transfer executed successfully, transfer_id={}", receipt.transfer_id);
                     return Ok(receipt.transfer_id);
+                } else {
+                    log::warn!("TransferBuilder: TransferCoordinator not available in TransferManager");
                 }
+            } else {
+                log::warn!("TransferBuilder: TransferManager not available");
             }
         }
+
+        #[cfg(feature = "runtime-coordinator")]
+        log::error!("TransferBuilder: Falling back to placeholder transfer ID - runtime-coordinator feature enabled but coordinator not available");
+
+        #[cfg(not(feature = "runtime-coordinator"))]
+        log::error!("TransferBuilder: Falling back to placeholder transfer ID - runtime-coordinator feature not enabled");
 
         // Fallback: return a placeholder transfer ID
         // This path is taken when runtime-coordinator is not enabled or not available

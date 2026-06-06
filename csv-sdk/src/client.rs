@@ -54,6 +54,7 @@ use csv_adapter_factory::{AdapterFactory, AdapterConfig, NetworkType as FactoryN
 
 #[cfg(feature = "runtime-coordinator")]
 // Type alias for factory result
+/// Result type returned by the adapter factory
 pub type AdapterResult = FactoryAdapterResult;
 
 #[cfg(not(feature = "runtime-coordinator"))]
@@ -366,7 +367,6 @@ impl CsvClient {
     /// This is needed because the wallet is created fresh each time and doesn't persist UTXOs.
     #[cfg(feature = "bitcoin")]
     pub fn register_sanad_seal(&self, chain: &str, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) -> Result<(), CsvError> {
-        use csv_protocol::ChainSanadOps;
 
         if let Some(adapter) = self.adapter_registry.lock().map_err(|e| CsvError::ProtocolError {
             chain: csv_hash::ChainId::new(chain),

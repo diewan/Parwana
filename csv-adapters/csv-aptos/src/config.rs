@@ -110,7 +110,7 @@ impl Default for TransactionConfig {
     fn default() -> Self {
         Self {
             max_gas: 100_000,
-            confirmation_timeout_ms: 30_000,
+            confirmation_timeout_ms: 300_000, // Increased to 5 minutes for testnet
             max_retries: 3,
             retry_delay_ms: 1_000,
         }

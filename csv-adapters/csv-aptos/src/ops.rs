@@ -48,26 +48,25 @@ pub struct AptosBackend {
 impl AptosBackend {
     /// Create new Aptos chain operations from RPC client
     pub fn new(rpc: Box<dyn AptosRpc>, network: AptosNetwork) -> Self {
-        // Create a minimal seal protocol to derive domain separator
-        let mock_rpc = Box::new(crate::rpc::MockAptosRpc::new(0));
-        let seal = AptosSealProtocol::from_config(
-            crate::config::AptosConfig {
-                network: network.clone(),
-                ..Default::default()
-            },
-            mock_rpc,
-        )
-        .unwrap_or_else(|_| {
-            // Ultimate fallback
-            AptosSealProtocol::from_config(
-                crate::config::AptosConfig {
-                    network: AptosNetwork::Testnet,
-                    ..Default::default()
-                },
-                Box::new(crate::rpc::MockAptosRpc::new(0)),
-            )
-            .expect("default AptosSealProtocol config must succeed")
-        });
+        // Create seal protocol using the real RPC (not a mock)
+        // This is required for publish() to work with transaction signing
+        let config = crate::config::AptosConfig {
+            network: network.clone(),
+            ..Default::default()
+        };
+        let seal = AptosSealProtocol::from_config(config, rpc.clone_boxed())
+            .unwrap_or_else(|e| {
+                // Fallback to mock if real RPC creation fails
+                eprintln!("Warning: Failed to create seal protocol with real RPC: {}, using mock", e);
+                AptosSealProtocol::from_config(
+                    crate::config::AptosConfig {
+                        network: AptosNetwork::Testnet,
+                        ..Default::default()
+                    },
+                    Box::new(crate::rpc::MockAptosRpc::new(0)),
+                )
+                .expect("default AptosSealProtocol config must succeed")
+            });
 
         // MED-DUP-03: Derive domain separator from SealProtocol instead of recomputing
         let domain_separator = seal.domain();

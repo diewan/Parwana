@@ -95,23 +95,21 @@ impl EthereumBackend {
             prefer_checkpoint_finality: config.use_checkpoint_finality,
         });
 
-        // Create a minimal seal protocol for backward compatibility
-        let mock_rpc = Box::new(crate::rpc::MockEthereumRpc::new(1000));
-        let seal_config = EthereumConfig {
-            network: crate::config::Network::Sepolia,
-            finality_depth: 12,
-            ..Default::default()
-        };
-        let seal = EthereumSealProtocol::from_config(seal_config, mock_rpc, [0u8; 20])
-            .unwrap_or_else(|_| {
-                // Ultimate fallback - shouldn't happen
-                let fallback_rpc = Box::new(crate::rpc::MockEthereumRpc::new(0));
-                EthereumSealProtocol::from_config(
-                    EthereumConfig::default(),
-                    fallback_rpc,
-                    [0u8; 20],
-                )
-                .expect("failed to create EthereumSealProtocol from fallback config")
+        // Create seal protocol using the real RPC (not a mock)
+        // This is required for publish() to work, which downcasts to EthereumNode
+        let csv_seal_address = config.contract_address.unwrap_or([0u8; 20]);
+        let seal = EthereumSealProtocol::from_config(config.clone(), rpc.clone_boxed(), csv_seal_address)
+            .unwrap_or_else(|e| {
+                // Fallback to mock if real RPC creation fails
+                eprintln!("Warning: Failed to create seal protocol with real RPC: {}, using mock", e);
+                let mock_rpc = Box::new(crate::rpc::MockEthereumRpc::new(1000));
+                let seal_config = EthereumConfig {
+                    network: crate::config::Network::Sepolia,
+                    finality_depth: 12,
+                    ..Default::default()
+                };
+                EthereumSealProtocol::from_config(seal_config, mock_rpc, [0u8; 20])
+                    .expect("failed to create EthereumSealProtocol from fallback config")
             });
 
         Self {

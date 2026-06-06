@@ -233,7 +233,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
     let clean_address = address.strip_prefix("0x").unwrap_or(address);
 
     // Initialize adapters with the correct network (testnet by default for CLI)
-    let network = if config.network().is_testnet() {
+    let _network = if config.network().is_testnet() {
         NetworkType::Testnet
     } else {
         NetworkType::Mainnet

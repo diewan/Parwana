@@ -297,7 +297,7 @@ impl ClientBuilder {
                 
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if let Some(chain_adapter) = result.chain_adapter {
-                    adapter_registry.lock().unwrap_or_else(|e| e.into_inner()).register_adapter(chain_adapter);
+                    let _ = adapter_registry.lock().unwrap_or_else(|e| e.into_inner()).register_adapter(chain_adapter);
                     log::info!("Automatically registered ChainAdapter for chain: {:?}", chain);
                 }
             }

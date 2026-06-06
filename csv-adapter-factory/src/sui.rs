@@ -38,12 +38,18 @@ impl AdapterFactory for SuiFactory {
             })
             .ok_or_else(|| FactoryError::InvalidConfig("No RPC endpoint found".to_string()))?;
 
+        // Parse package ID if provided
+        let package_id = config.contract_address.as_deref();
+
         let sui_config = SuiConfig {
             network,
             rpc_url: grpc_endpoint.url.clone(),
             checkpoint: csv_sui::config::CheckpointConfig::default(),
             transaction: csv_sui::config::TransactionConfig::default(),
-            seal_contract: csv_sui::config::SealContractConfig::default(),
+            seal_contract: csv_sui::config::SealContractConfig {
+                package_id: package_id.map(|s| s.to_string()),
+                ..Default::default()
+            },
             signer_address: None,
             signer_private_key: config.private_key.and_then(|k| hex::decode(k).ok()),
         };

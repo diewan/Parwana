@@ -131,19 +131,6 @@ module csv_seal::CSVSealV2 {
     }
 
     // =========================================================================
-    // Transfer State
-    // =========================================================================
-
-    /// Represents a seal that is pending transfer to a specific recipient.
-    /// This is the safe transfer pattern - recipient must accept the transfer.
-    struct PendingTransfer has key, drop {
-        /// The seal being transferred
-        seal: Seal,
-        /// The intended recipient address
-        recipient: address,
-    }
-
-    // =========================================================================
     // Error Codes
     // =========================================================================
 
@@ -181,7 +168,7 @@ module csv_seal::CSVSealV2 {
 
     /// Seal resource that can be consumed exactly once.
     /// Contains a consumed flag and nonce for replay resistance.
-    struct Seal has key, store, drop {
+    struct Seal has store, drop {
         /// Nonce for replay resistance.
         nonce: u64,
         /// Whether this seal has been consumed.
@@ -200,9 +187,21 @@ module csv_seal::CSVSealV2 {
         nullifier: vector<u8>,
     }
 
+    /// Collection of seals for an account (allows multiple seals per account like Sui).
+    struct SealCollection has key {
+        seals: SmartTable<u64, Seal>,
+        next_nonce: u64,
+    }
+
     /// Persistent storage of commitment after seal consumption.
     /// Created when a seal is consumed and persists the commitment data.
-    struct AnchorData has key, store, copy, drop {
+    struct AnchorDataCollection has key {
+        anchor_data: SmartTable<u64, AnchorData>,
+    }
+
+    /// Persistent storage of commitment after seal consumption.
+    /// Created when a seal is consumed and persists the commitment data.
+    struct AnchorData has store, copy, drop {
         /// The commitment hash that was anchored.
         commitment: vector<u8>,
         /// Timestamp when the seal was consumed (Unix epoch seconds).
@@ -215,11 +214,26 @@ module csv_seal::CSVSealV2 {
     // Seal Creation
     // =========================================================================
 
-    /// Create a new seal resource at the signer's address with the given nonce.
-    public entry fun create_seal(account: &signer, nonce: u64) {
+    /// Initialize the seal collection for an account (called once).
+    public entry fun init_seal_collection(account: &signer) {
         let addr = signer::address_of(account);
-        assert!(!exists<Seal>(addr), EAnchorDataExists);
-        move_to(account, Seal {
+        assert!(!exists<SealCollection>(addr), EAnchorDataExists);
+        move_to(account, SealCollection {
+            seals: smart_table::new(),
+            next_nonce: 0,
+        });
+    }
+
+    /// Create a new seal resource at the signer's address with the given nonce.
+    /// If nonce is not provided, uses the next available nonce from the collection.
+    public entry fun create_seal(account: &signer, nonce: u64) acquires SealCollection {
+        let addr = signer::address_of(account);
+        assert!(exists<SealCollection>(addr), ESealNotFound);
+        
+        let collection = borrow_global_mut<SealCollection>(addr);
+        assert!(!smart_table::contains(&collection.seals, nonce), EAnchorDataExists);
+        
+        smart_table::add(&mut collection.seals, nonce, Seal {
             nonce,
             consumed: false,
             asset_class: ASSET_CLASS_UNSPECIFIED,
@@ -229,24 +243,55 @@ module csv_seal::CSVSealV2 {
             proof_root: vector::empty<u8>(),
             nullifier: vector::empty<u8>(),
         });
+        
+        // Update next_nonce if this is the highest nonce
+        if (nonce >= collection.next_nonce) {
+            collection.next_nonce = nonce + 1;
+        };
+    }
+
+    /// Create a new seal with auto-generated nonce (like Sui).
+    public entry fun create_seal_auto(account: &signer) acquires SealCollection {
+        let addr = signer::address_of(account);
+        assert!(exists<SealCollection>(addr), ESealNotFound);
+        
+        let collection = borrow_global_mut<SealCollection>(addr);
+        let nonce = collection.next_nonce;
+        
+        smart_table::add(&mut collection.seals, nonce, Seal {
+            nonce,
+            consumed: false,
+            asset_class: ASSET_CLASS_UNSPECIFIED,
+            asset_id: vector::empty<u8>(),
+            metadata_hash: vector::empty<u8>(),
+            proof_system: PROOF_SYSTEM_UNSPECIFIED,
+            proof_root: vector::empty<u8>(),
+            nullifier: vector::empty<u8>(),
+        });
+        
+        collection.next_nonce = nonce + 1;
     }
 
     /// Attach token/NFT/proof metadata to an unconsumed seal.
     public entry fun record_sanad_metadata(
         account: &signer,
+        nonce: u64,
         asset_class: u8,
         asset_id: vector<u8>,
         metadata_hash: vector<u8>,
         proof_system: u8,
         proof_root: vector<u8>,
-    ) acquires Seal {
+    ) acquires SealCollection {
         let addr = signer::address_of(account);
-        assert!(exists<Seal>(addr), ESealNotFound);
+        assert!(exists<SealCollection>(addr), ESealNotFound);
         assert!(asset_class <= ASSET_CLASS_PROOF_SANAD, EInvalidMetadata);
         assert!(asset_class == ASSET_CLASS_UNSPECIFIED || vector::length(&asset_id) > 0, EInvalidMetadata);
         assert!(proof_system == PROOF_SYSTEM_UNSPECIFIED || vector::length(&proof_root) > 0, EInvalidMetadata);
 
-        let seal = borrow_global_mut<Seal>(addr);
+        let collection = borrow_global_mut<SealCollection>(addr);
+        assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
+        
+        let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
         assert!(!seal.consumed, ESealAlreadyConsumed);
 
         seal.asset_class = asset_class;
@@ -269,24 +314,42 @@ module csv_seal::CSVSealV2 {
     // Seal Consumption
     // =========================================================================
 
+    /// Initialize the anchor data collection for an account (called once).
+    public entry fun init_anchor_collection(account: &signer) {
+        let addr = signer::address_of(account);
+        assert!(!exists<AnchorDataCollection>(addr), EAnchorDataExists);
+        move_to(account, AnchorDataCollection {
+            anchor_data: smart_table::new(),
+        });
+    }
+
     /// Consume a seal and emit an AnchorEvent with the commitment.
-    public entry fun consume_seal(account: &signer, commitment: vector<u8>) {
+    public entry fun consume_seal(account: &signer, nonce: u64, commitment: vector<u8>) acquires SealCollection, AnchorDataCollection {
         let seal_addr = signer::address_of(account);
-        assert!(exists<Seal>(seal_addr), ESealNotFound);
+        assert!(exists<SealCollection>(seal_addr), ESealNotFound);
 
-        let seal = borrow_global_mut<Seal>(seal_addr);
+        let collection = borrow_global_mut<SealCollection>(seal_addr);
+        assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
+        
+        let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
         assert!(!seal.consumed, ESealAlreadyConsumed);
-
-        let nonce = seal.nonce;
         seal.consumed = true;
 
         // Get current timestamp
         let timestamp = aptos_framework::timestamp::now_seconds();
 
-        // Create AnchorData storage
-        assert!(!exists<AnchorData>(seal_addr), EAnchorDataExists);
-        move_to(account, AnchorData {
-            commitment,
+        // Initialize anchor collection if needed
+        if (!exists<AnchorDataCollection>(seal_addr)) {
+            move_to(account, AnchorDataCollection {
+                anchor_data: smart_table::new(),
+            });
+        };
+
+        // Add to AnchorData collection
+        let anchor_collection = borrow_global_mut<AnchorDataCollection>(seal_addr);
+        assert!(!smart_table::contains(&anchor_collection.anchor_data, nonce), EAnchorDataExists);
+        smart_table::add(&mut anchor_collection.anchor_data, nonce, AnchorData {
+            commitment: copy commitment,
             consumed_at: timestamp,
             nonce,
         });
@@ -303,111 +366,85 @@ module csv_seal::CSVSealV2 {
     // =========================================================================
     // Seal Transfer (Safe Two-Phase Pattern)
     // =========================================================================
-
-    /// Initiate a seal transfer to a specific recipient.
-    /// The seal is moved to a pending state where only the specified
-    /// recipient can claim it. This is the safe transfer pattern.
-    public entry fun initiate_transfer(from: &signer, recipient: address) {
-        let from_addr = signer::address_of(from);
-        assert!(exists<Seal>(from_addr), ESealNotFound);
-
-        let seal = borrow_global<Seal>(from_addr);
-        assert!(!seal.consumed, ESealAlreadyConsumed);
-        assert!(!exists<PendingTransfer>(from_addr), EAnchorDataExists);
-
-        // Move seal to pending transfer state at sender's address
-        let seal_res = move_from<Seal>(from_addr);
-        move_to(from, PendingTransfer {
-            seal: seal_res,
-            recipient,
-        });
-    }
-
-    /// Accept a pending seal transfer.
-    /// The intended recipient calls this to claim the seal.
-    public entry fun accept_transfer(recipient_signer: &signer, sender_addr: address) {
-        let recipient_addr = signer::address_of(recipient_signer);
-
-        // Verify transfer exists and recipient is authorized
-        assert!(exists<PendingTransfer>(sender_addr), ESealNotFound);
-        let pending = borrow_global<PendingTransfer>(sender_addr);
-        assert!(pending.recipient == recipient_addr, ESealNotFound);
-
-        // Verify recipient doesn't already have a seal
-        assert!(!exists<Seal>(recipient_addr), EAnchorDataExists);
-
-        // Move seal from pending to recipient's account
-        let PendingTransfer { seal, recipient: _ } = move_from<PendingTransfer>(sender_addr);
-        move_to(recipient_signer, seal);
-    }
-
-    /// Cancel a pending transfer (only the sender can cancel).
-    public entry fun cancel_transfer(sender: &signer) {
-        let sender_addr = signer::address_of(sender);
-        assert!(exists<PendingTransfer>(sender_addr), ESealNotFound);
-
-        // Return seal to sender's account
-        assert!(!exists<Seal>(sender_addr), EAnchorDataExists);
-        let PendingTransfer { seal, recipient: _ } = move_from<PendingTransfer>(sender_addr);
-        move_to(sender, seal);
-    }
-
-    /// Check if there's a pending transfer for a specific sender.
-    public fun has_pending_transfer(sender_addr: address): bool {
-        exists<PendingTransfer>(sender_addr)
-    }
-
-    /// Get the intended recipient for a pending transfer.
-    public fun get_pending_recipient(sender_addr: address): address {
-        assert!(exists<PendingTransfer>(sender_addr), ESealNotFound);
-        borrow_global<PendingTransfer>(sender_addr).recipient
-    }
+    // NOTE: Transfer functionality disabled for collection-based seals.
+    // Use cross-chain mint/lock instead for seal movement between accounts.
+    // Transfers within the same chain can be implemented by consuming
+    // and re-minting with different nonces if needed.
 
     // =========================================================================
     // Queries
     // =========================================================================
 
     /// Check if a seal exists and has not been consumed.
-    public fun is_seal_available(addr: address): bool {
-        exists<Seal>(addr) && !borrow_global<Seal>(addr).consumed
+    public fun is_seal_available(addr: address, nonce: u64): bool {
+        if (!exists<SealCollection>(addr)) {
+            return false
+        };
+        let collection = borrow_global<SealCollection>(addr);
+        if (!smart_table::contains(&collection.seals, nonce)) {
+            return false
+        };
+        !smart_table::borrow(&collection.seals, nonce).consumed
     }
 
     /// Check if a seal has been consumed.
     /// Returns false if no seal exists at the address.
-    public fun is_consumed(addr: address): bool {
-        if (!exists<Seal>(addr)) {
+    public fun is_consumed(addr: address, nonce: u64): bool {
+        if (!exists<SealCollection>(addr)) {
             return false
         };
-        borrow_global<Seal>(addr).consumed
+        let collection = borrow_global<SealCollection>(addr);
+        if (!smart_table::contains(&collection.seals, nonce)) {
+            return false
+        };
+        smart_table::borrow(&collection.seals, nonce).consumed
     }
 
     /// Get the nonce of a seal at the given address.
-    public fun get_seal_nonce(addr: address): u64 {
-        assert!(exists<Seal>(addr), ESealNotFound);
-        borrow_global<Seal>(addr).nonce
+    public fun get_seal_nonce(addr: address, nonce: u64): u64 {
+        assert!(exists<SealCollection>(addr), ESealNotFound);
+        let collection = borrow_global<SealCollection>(addr);
+        assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
+        smart_table::borrow(&collection.seals, nonce).nonce
     }
 
     /// Get the AnchorData for a consumed seal.
-    public fun get_anchor_data(addr: address): AnchorData {
-        assert!(exists<AnchorData>(addr), ESealNotFound);
-        *borrow_global<AnchorData>(addr)
+    public fun get_anchor_data(addr: address, nonce: u64): AnchorData acquires AnchorDataCollection {
+        assert!(exists<AnchorDataCollection>(addr), ESealNotFound);
+        let collection = borrow_global<AnchorDataCollection>(addr);
+        assert!(smart_table::contains(&collection.anchor_data, nonce), ESealNotFound);
+        *smart_table::borrow(&collection.anchor_data, nonce)
     }
 
     /// Check if AnchorData exists for a seal (i.e., seal was consumed).
-    public fun has_anchor_data(addr: address): bool {
-        exists<AnchorData>(addr)
+    public fun has_anchor_data(addr: address, nonce: u64): bool {
+        if (!exists<AnchorDataCollection>(addr)) {
+            return false
+        };
+        let collection = borrow_global<AnchorDataCollection>(addr);
+        smart_table::contains(&collection.anchor_data, nonce)
     }
 
     /// Get the commitment from AnchorData.
-    public fun get_commitment(addr: address): vector<u8> {
-        assert!(exists<AnchorData>(addr), ESealNotFound);
-        borrow_global<AnchorData>(addr).commitment
+    public fun get_commitment(addr: address, nonce: u64): vector<u8> acquires AnchorDataCollection {
+        assert!(exists<AnchorDataCollection>(addr), ESealNotFound);
+        let collection = borrow_global<AnchorDataCollection>(addr);
+        assert!(smart_table::contains(&collection.anchor_data, nonce), ESealNotFound);
+        smart_table::borrow(&collection.anchor_data, nonce).commitment
     }
 
     /// Get the consumption timestamp from AnchorData.
-    public fun get_consumed_at(addr: address): u64 {
-        assert!(exists<AnchorData>(addr), ESealNotFound);
-        borrow_global<AnchorData>(addr).consumed_at
+    public fun get_consumed_at(addr: address, nonce: u64): u64 acquires AnchorDataCollection {
+        assert!(exists<AnchorDataCollection>(addr), ESealNotFound);
+        let collection = borrow_global<AnchorDataCollection>(addr);
+        assert!(smart_table::contains(&collection.anchor_data, nonce), ESealNotFound);
+        smart_table::borrow(&collection.anchor_data, nonce).consumed_at
+    }
+
+    /// Get the next available nonce for an account.
+    public fun get_next_nonce(addr: address): u64 acquires SealCollection {
+        assert!(exists<SealCollection>(addr), ESealNotFound);
+        borrow_global<SealCollection>(addr).next_nonce
     }
 
     // =========================================================================
@@ -699,17 +736,20 @@ module csv_seal::CSVSealV2 {
     /// This consumes the seal and records the lock in the registry.
     public entry fun lock_sanad(
         account: &signer,
+        nonce: u64,
         sanad_id: vector<u8>,
         destination_chain: u8,
         destination_owner: vector<u8>,
-    ) acquires Seal, LockRegistry {
+    ) acquires SealCollection, LockRegistry, AnchorDataCollection {
         let owner_addr = signer::address_of(account);
-        assert!(exists<Seal>(owner_addr), ESealNotFound);
+        assert!(exists<SealCollection>(owner_addr), ESealNotFound);
 
-        let seal = borrow_global<Seal>(owner_addr);
+        let collection = borrow_global_mut<SealCollection>(owner_addr);
+        assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
+        
+        let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
         assert!(!seal.consumed, ESealAlreadyConsumed);
 
-        let nonce = seal.nonce;
         let commitment = get_commitment_bytes(sanad_id, nonce);
 
         // Record lock in registry
@@ -759,13 +799,23 @@ module csv_seal::CSVSealV2 {
         });
 
         // Consume the seal (mark as consumed and store AnchorData)
-        let seal_res = move_from<Seal>(owner_addr);
-        move_to(account, AnchorData {
+        seal.consumed = true;
+
+        // Initialize anchor collection if needed
+        if (!exists<AnchorDataCollection>(owner_addr)) {
+            move_to(account, AnchorDataCollection {
+                anchor_data: smart_table::new(),
+            });
+        };
+
+        // Add to AnchorData collection
+        let anchor_collection = borrow_global_mut<AnchorDataCollection>(owner_addr);
+        assert!(!smart_table::contains(&anchor_collection.anchor_data, nonce), EAnchorDataExists);
+        smart_table::add(&mut anchor_collection.anchor_data, nonce, AnchorData {
             commitment,
             consumed_at: locked_at,
-            nonce: seal_res.nonce,
+            nonce,
         });
-        // seal_res dropped automatically (has drop ability)
     }
 
     /// Mint a new Sanad from a cross-chain transfer proof.
@@ -791,7 +841,7 @@ module csv_seal::CSVSealV2 {
         proof: vector<u8>,
         proof_root: vector<u8>,
         leaf_position: u64,
-    ) acquires LockRegistry {
+    ) acquires LockRegistry, SealCollection {
         // Input validation: 32-byte checks for hashes
         assert!(vector::length(&sanad_id) == 32, EInvalidProof);
         assert!(vector::length(&commitment) == 32, EInvalidProof);
@@ -815,10 +865,20 @@ module csv_seal::CSVSealV2 {
         smart_table::add(&mut registry.minted_sanads, sanad_id, true);
 
         let owner_addr = signer::address_of(account);
-        assert!(!exists<Seal>(owner_addr), EAnchorDataExists);
+        
+        // Initialize seal collection if needed
+        if (!exists<SealCollection>(owner_addr)) {
+            move_to(account, SealCollection {
+                seals: smart_table::new(),
+                next_nonce: 0,
+            });
+        };
+
+        let collection = borrow_global_mut<SealCollection>(owner_addr);
+        assert!(!smart_table::contains(&collection.seals, nonce), EAnchorDataExists);
 
         // Create new seal
-        move_to(account, Seal {
+        smart_table::add(&mut collection.seals, nonce, Seal {
             nonce,
             consumed: false,
             asset_class: ASSET_CLASS_UNSPECIFIED,
@@ -828,6 +888,11 @@ module csv_seal::CSVSealV2 {
             proof_root,
             nullifier: vector::empty<u8>(),
         });
+
+        // Update next_nonce if needed
+        if (nonce >= collection.next_nonce) {
+            collection.next_nonce = nonce + 1;
+        };
 
         // Emit CrossChainMint event
         event::emit(CrossChainMint {
@@ -860,12 +925,15 @@ module csv_seal::CSVSealV2 {
     /// Reverts if the nullifier has already been registered for this Sanad.
     public entry fun register_nullifier(
         account: &signer,
+        nonce: u64,
         nullifier: vector<u8>,
         sanad_id: vector<u8>,
-    ) acquires Seal {
+    ) acquires SealCollection {
         let addr = signer::address_of(account);
-        assert!(exists<Seal>(addr), ESealNotFound);
-        let seal = borrow_global_mut<Seal>(addr);
+        assert!(exists<SealCollection>(addr), ESealNotFound);
+        let collection = borrow_global_mut<SealCollection>(addr);
+        assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
+        let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
         assert!(seal.nullifier == vector::empty<u8>(), ENullifierAlreadyRegistered);
 
         // Store the nullifier in the seal for on-chain verification

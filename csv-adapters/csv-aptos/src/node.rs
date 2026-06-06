@@ -576,10 +576,15 @@ impl AptosTransactionSubmitter for AptosNode {
         signed_tx_json: serde_json::Value,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
+            log::info!("AptosNode: Submitting transaction to /transactions endpoint");
+            log::debug!("AptosNode: Transaction payload: {}", serde_json::to_string_pretty(&signed_tx_json).unwrap_or_else(|_| "failed to serialize".to_string()));
             let result = self.post("/transactions", &signed_tx_json).await?;
+            log::info!("AptosNode: Received response: {}", serde_json::to_string_pretty(&result).unwrap_or_else(|_| "failed to serialize".to_string()));
             if let Some(hash_hex) = result.get("hash").and_then(|h| h.as_str()) {
+                log::info!("AptosNode: Transaction submitted successfully, hash: {}", hash_hex);
                 Ok(Self::parse_hex_bytes("hash", hash_hex)?)
             } else if let Some(error) = result.get("error_code") {
+                log::error!("AptosNode: Transaction submission failed: {} - {:?}", error, result.get("message"));
                 Err(format!(
                     "Aptos transaction submission failed: {} - {:?}",
                     error,
@@ -587,6 +592,7 @@ impl AptosTransactionSubmitter for AptosNode {
                 )
                 .into())
             } else {
+                log::error!("AptosNode: Unexpected response: {:?}", result);
                 Err(format!("Unexpected Aptos response: {:?}", result).into())
             }
         })

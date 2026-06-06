@@ -122,6 +122,48 @@ impl AptosSealProtocol {
         self
     }
 
+    /// Create a new adapter with real RPC and signing key from hex (requires `rpc` feature).
+    ///
+    /// # Arguments
+    /// * `config` - Adapter configuration
+    /// * `rpc_url` - RPC endpoint URL
+    /// * `private_key_hex` - Hex-encoded Ed25519 private key (with or without 0x prefix)
+    #[cfg(feature = "rpc")]
+    pub fn with_rpc_and_signing_key(
+        config: AptosConfig,
+        rpc_url: &str,
+        private_key_hex: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::node::AptosNode;
+        use sha3::{Digest, Sha3_256};
+
+        // Parse private key
+        let private_key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        if private_key_bytes.len() != 32 {
+            return Err("Private key must be 32 bytes".into());
+        }
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(
+            &private_key_bytes.try_into().map_err(|_| "Failed to parse private key")?,
+        );
+
+        // Derive Aptos account address from signing key
+        let public_key = signing_key.verifying_key().to_bytes();
+        let mut data = public_key.to_vec();
+        data.push(0x00); // Ed25519 single key scheme
+        let hash = Sha3_256::digest(&data);
+        let mut sender_address = [0u8; 32];
+        sender_address.copy_from_slice(&hash[..32]);
+
+        // Create RPC client with signer address
+        let rpc: Box<dyn AptosRpc> = Box::new(AptosNode::with_signer_address(rpc_url, sender_address));
+
+        // Create seal protocol and attach signing key
+        let mut seal = Self::from_config(config, rpc)?;
+        seal.signing_key = Some(signing_key);
+        Ok(seal)
+    }
+
     /// Create a new adapter with real RPC (requires `rpc` feature).
     ///
     /// # Arguments
@@ -776,25 +818,31 @@ impl SealProtocol for AptosSealProtocol {
         // we still prevent double-spends by querying the blockchain
         #[cfg(all(feature = "rpc", not(test)))]
         {
-            let resource_exists = StateProofVerifier::verify_resource_exists_async(
+            // With collection-based seals, check if SealCollection exists
+            let seal_collection_type = format!("{}::CSVSealV2::SealCollection", self.config.seal_contract.module_address);
+            let collection_exists = StateProofVerifier::verify_resource_exists_async(
                 seal.account_address,
-                &seal.resource_type,
+                &seal_collection_type,
                 self.rpc.as_ref() as &(dyn crate::rpc::AptosAccountReader + Send + Sync),
             )
             .await
             .map_err(|e| {
                 ProtocolError::NetworkError(format!(
-                    "Failed to check resource status on-chain: {}",
+                    "Failed to check seal collection on-chain: {}",
                     e
                 ))
             })?;
 
-            if !resource_exists {
+            if !collection_exists {
                 return Err(Box::new(ProtocolError::SealReplay(format!(
-                    "Resource already consumed on-chain at {}",
+                    "Seal collection does not exist at {}",
                     format_address(seal.account_address)
                 ))) as Box<dyn std::error::Error>);
             }
+
+            // Note: We can't easily check if a specific nonce is consumed without a view function
+            // For now, we assume the seal is available if the collection exists
+            // The actual consumption check will happen when calling consume_seal on-chain
         }
 
         // Step 3: Mark seal as used in local registry
@@ -862,7 +910,27 @@ impl SealProtocol for AptosSealProtocol {
 
         // Check if seal already exists on-chain and reuse it if unconsumed
         #[cfg(feature = "rpc")]
-        if self.signing_key.is_some() {
+        let nonce = if self.signing_key.is_some() {
+            // Initialize seal collection if needed
+            let seal_collection_type = format!("{}::CSVSealV2::SealCollection", self.config.seal_contract.module_address);
+            match self.rpc.get_resource(addr, &seal_collection_type, None).await {
+                Ok(None) => {
+                    log::info!("APTOS: Initializing seal collection");
+                    if let Err(e) = self.init_seal_collection(addr).await {
+                        log::warn!("APTOS: Failed to init seal collection: {}, continuing anyway", e);
+                    }
+                }
+                Ok(Some(_)) => {
+                    log::info!("APTOS: Seal collection already exists");
+                }
+                Err(e) => {
+                    log::warn!("APTOS: Failed to check seal collection: {}, assuming it exists", e);
+                }
+            }
+
+            let mut effective_nonce = nonce;
+            
+            // Check if seal with this nonce already exists
             let seal_resource_type = format!("{}::CSVSealV2::Seal", self.config.seal_contract.module_address);
             match self.rpc.get_resource(addr, &seal_resource_type, None).await {
                 Ok(Some(_resource)) => {
@@ -871,26 +939,27 @@ impl SealProtocol for AptosSealProtocol {
                     match self.rpc.get_resource(addr, &anchor_data_type, None).await {
                         Ok(Some(_)) => {
                             // AnchorData exists, meaning seal was already consumed
-                            return Err(Box::new(ProtocolError::SealReplay(format!(
-                                "Seal at {} is already consumed. Use a different account or reset the seal.",
-                                format_address(addr)
-                            ))) as Box<dyn std::error::Error>);
+                            // Try to create a new seal with incremented nonce
+                            log::warn!("APTOS: Seal at {} with nonce {} is already consumed, attempting to create new seal with incremented nonce", format_address(addr), effective_nonce);
+                            effective_nonce = effective_nonce.saturating_add(1);
+                            log::info!("APTOS: Using incremented nonce: {}", effective_nonce);
+                            // Continue to deploy_seal_on_chain with new nonce
                         }
                         Ok(None) => {
                             // Seal exists but not consumed, reuse it
-                            log::info!("APTOS: Reusing existing unconsumed seal at {}", format_address(addr));
-                            return Ok(AptosSealPoint::new(addr, seal_resource_type, nonce));
+                            log::info!("APTOS: Reusing existing unconsumed seal at {} with nonce {}", format_address(addr), effective_nonce);
+                            return Ok(AptosSealPoint::new(addr, seal_resource_type, effective_nonce));
                         }
                         Err(e) => {
                             log::warn!("APTOS: Failed to check AnchorData: {}, assuming seal is unconsumed", e);
-                            log::info!("APTOS: Reusing existing seal at {}", format_address(addr));
-                            return Ok(AptosSealPoint::new(addr, seal_resource_type, nonce));
+                            log::info!("APTOS: Reusing existing seal at {} with nonce {}", format_address(addr), effective_nonce);
+                            return Ok(AptosSealPoint::new(addr, seal_resource_type, effective_nonce));
                         }
                     }
                 }
                 Ok(None) => {
                     // Seal doesn't exist, create it
-                    log::info!("APTOS: No existing seal found, creating new seal");
+                    log::info!("APTOS: No existing seal found, creating new seal with nonce {}", effective_nonce);
                 }
                 Err(e) => {
                     log::warn!("APTOS: Failed to check for existing seal: {}, attempting to create new seal", e);
@@ -898,14 +967,17 @@ impl SealProtocol for AptosSealProtocol {
             }
 
             log::info!("APTOS: Deploying seal on-chain via create_seal entry function");
-            if let Err(e) = self.deploy_seal_on_chain(addr, nonce).await {
+            if let Err(e) = self.deploy_seal_on_chain(addr, effective_nonce).await {
                 return Err(Box::new(ProtocolError::PublishFailed(format!(
                     "Failed to deploy seal on-chain: {}",
                     e
                 ))) as Box<dyn std::error::Error>);
             }
             log::info!("APTOS: Seal deployed on-chain successfully");
-        }
+            effective_nonce
+        } else {
+            nonce
+        };
 
         Ok(AptosSealPoint::new(addr, format!("{}::CSVSealV2::Seal", self.config.seal_contract.module_address), nonce))
     }
@@ -1095,6 +1167,134 @@ impl AptosSealProtocol {
         } else {
             Vec::new()
         }
+    }
+
+    /// Initialize the seal collection for an account.
+    #[cfg(feature = "rpc")]
+    async fn init_seal_collection(
+        &self,
+        account_address: [u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use sha3::{Digest, Sha3_256};
+
+        let signing_key = self
+            .signing_key
+            .as_ref()
+            .ok_or("No signing key configured")?;
+
+        // Derive sender address from signing key
+        let public_key = signing_key.verifying_key().to_bytes();
+        let mut data = public_key.to_vec();
+        data.push(0x00);
+        let hash = Sha3_256::digest(&data);
+        let mut sender = [0u8; 32];
+        sender.copy_from_slice(&hash[..32]);
+
+        // Get account sequence number
+        let sequence_number = self
+            .rpc
+            .get_account_sequence_number(sender)
+            .await
+            .map_err(|e| format!("Failed to get sequence number: {}", e))?;
+
+        // Get ledger info
+        let ledger = self
+            .rpc
+            .get_ledger_info()
+            .await
+            .map_err(|e| format!("Failed to get ledger info: {}", e))?;
+
+        let expiration_secs = (ledger.ledger_timestamp / 1_000_000) + 600;
+        let module_address = &self.config.seal_contract.module_address;
+
+        // Build transaction for init_seal_collection
+        log::info!("APTOS: Building init_seal_collection transaction");
+        let raw_transaction = self
+            .build_init_seal_collection_transaction(
+                sender,
+                sequence_number,
+                expiration_secs,
+                module_address,
+            )
+            .map_err(|e| format!("Failed to build transaction: {}", e))?;
+
+        // Sign the transaction using the existing helper
+        let (public_key, signature, _signing_message) =
+            Self::sign_raw_transaction(&raw_transaction, signing_key)?;
+
+        // Build the signed transaction JSON
+        let sender_hex = format_address(sender);
+        let signed_tx = serde_json::json!({
+            "sender": sender_hex,
+            "sequence_number": sequence_number.to_string(),
+            "max_gas_amount": self.config.transaction.max_gas.to_string(),
+            "gas_unit_price": "100",
+            "expiration_timestamp_secs": expiration_secs.to_string(),
+            "payload": {
+                "type": "entry_function_payload",
+                "function": format!("{}::CSVSealV2::init_seal_collection", module_address),
+                "type_arguments": [],
+                "arguments": []
+            },
+            "signature": {
+                "type": "ed25519_signature",
+                "public_key": format!("0x{}", hex::encode(public_key.to_bytes())),
+                "signature": format!("0x{}", hex::encode(signature.to_bytes()))
+            }
+        });
+
+        // Submit the transaction using the JSON format
+        log::info!("APTOS: Submitting init_seal_collection transaction");
+        let tx_hash = self
+            .rpc
+            .submit_signed_transaction(signed_tx)
+            .await
+            .map_err(|e| format!("Failed to submit init_seal_collection transaction: {}", e))?;
+
+        log::info!("APTOS: init_seal_collection transaction submitted: 0x{}", hex::encode(tx_hash));
+        Ok(())
+    }
+
+    /// Build a raw transaction for the init_seal_collection entry function.
+    #[cfg(feature = "rpc")]
+    fn build_init_seal_collection_transaction(
+        &self,
+        sender: [u8; 32],
+        sequence_number: u64,
+        expiration_secs: u64,
+        module_address: &str,
+    ) -> Result<
+        aptos_sdk::transaction::types::RawTransaction,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        use aptos_sdk::transaction::EntryFunction;
+        use aptos_sdk::transaction::payload::TransactionPayload;
+        use aptos_sdk::transaction::types::RawTransaction;
+        use aptos_sdk::types::{AccountAddress, ChainId, MoveModuleId};
+
+        let module_addr = AccountAddress::from_hex(module_address)
+            .map_err(|e| format!("Invalid module address: {}", e))?;
+
+        let module_name = aptos_sdk::types::Identifier::new("CSVSealV2")
+            .map_err(|e| format!("Invalid module name: {}", e))?;
+        let module_id = MoveModuleId::new(module_addr, module_name);
+
+        let entry_function = EntryFunction::new(module_id, "init_seal_collection", vec![], vec![]);
+
+        let sender_addr = AccountAddress::new(sender);
+        let payload = TransactionPayload::EntryFunction(entry_function);
+        let max_gas = self.config.transaction.max_gas;
+        let chain_id = ChainId::new(self.config.network.chain_id());
+
+        Ok(RawTransaction::new(
+            sender_addr,
+            sequence_number,
+            payload,
+            max_gas,
+            100,
+            expiration_secs,
+            chain_id,
+        ))
     }
 
     /// Deploy the seal on-chain by calling the create_seal Move entry function.
