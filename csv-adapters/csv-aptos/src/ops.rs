@@ -846,19 +846,54 @@ impl ChainSanadOps for AptosBackend {
             log::info!("APTOS: Locking sanad with commitment: {}", hex::encode(commitment));
             log::info!("APTOS: Destination chain: {}", destination_chain);
 
-            // Find the seal resource for this sanad from active seals
-            let seal = self.seal_protocol.get_active_seals().into_iter().last()
-                .ok_or_else(|| ChainOpError::InvalidInput(
-                    "No active seals found. Please create a seal first using the seal create command.".to_string()
-                ))?;
+            // Query the seal resource from on-chain instead of using in-memory registry
+            // The seal was created via CLI and may not be in the in-memory registry
+            let account_address = self.seal_protocol.signing_key.as_ref()
+                .map(|key| {
+                    use sha3::{Digest, Sha3_256};
+                    let public_key = key.verifying_key().to_bytes();
+                    let mut data = public_key.to_vec();
+                    data.push(0x00); // Ed25519 single key scheme
+                    let hash = Sha3_256::digest(&data);
+                    let mut addr = [0u8; 32];
+                    addr.copy_from_slice(&hash[..32]);
+                    addr
+                })
+                .ok_or_else(|| ChainOpError::InvalidInput("No signing key configured".to_string()))?;
 
-            // Build and sign the lock_sanad transaction using the seal protocol
-            // Note: This uses consume_seal entry function as a placeholder since lock_sanad
-            // is not yet implemented in the Move contract. In production, this should call
-            // a dedicated lock_sanad function that marks the seal as locked for cross-chain transfer.
-            let (signed_tx, _event_data) = self
-                .seal_protocol
-                .build_and_sign_entry_function(&seal, commitment)
+            // Query the seal resource from on-chain
+            let seal = self.seal_protocol.get_seal_from_chain(account_address)
+                .await
+                .map_err(|e| ChainOpError::InvalidInput(format!("Failed to query seal from chain: {}", e)))?;
+
+            // Get the nonce from the seal
+            let nonce = seal.nonce;
+
+            // Convert destination chain to u8
+            let dest_chain_u8 = match destination_chain {
+                "sui" => 1u8,
+                "aptos" => 2u8,
+                "ethereum" => 3u8,
+                "solana" => 4u8,
+                "bitcoin" => 5u8,
+                _ => return Err(ChainOpError::InvalidInput(
+                    format!("Invalid destination chain: {}", destination_chain)
+                )),
+            };
+
+            // Build the lock_sanad entry function payload
+            let entry_function_builder = crate::entry_function::EntryFunctionBuilder::new(
+                self.seal_protocol.config().seal_contract.module_address.clone()
+            );
+            let payload = entry_function_builder.lock_sanad(
+                nonce,
+                commitment,
+                dest_chain_u8,
+                _owner_address,
+            );
+
+            // Sign the transaction
+            let signed_tx = self.seal_protocol.sign_entry_function_payload(payload)
                 .await
                 .map_err(|e| {
                     ChainOpError::TransactionError(format!(

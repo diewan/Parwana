@@ -28,6 +28,9 @@ pub enum SanadAction {
         /// Address index for HD wallet derivation (default: 0)
         #[arg(long, default_value = "0")]
         index: u32,
+        /// Skip publishing the commitment (for testing lock functionality)
+        #[arg(long)]
+        skip_publish: bool,
     },
     /// Show Sanad details
     Show {
@@ -63,8 +66,8 @@ pub async fn execute(
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     match action {
-        SanadAction::Create { chain, value, account, index } => {
-            cmd_create(chain, value, account, index, config, state).await
+        SanadAction::Create { chain, value, account, index, skip_publish } => {
+            cmd_create(chain, value, account, index, skip_publish, config, state).await
         }
         SanadAction::Show { sanad_id } => cmd_show(sanad_id, state),
         SanadAction::List { chain } => cmd_list(chain, config, state).await,
@@ -78,6 +81,7 @@ async fn cmd_create(
     value: Option<u64>,
     account: u32,
     index: u32,
+    skip_publish: bool,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
@@ -452,12 +456,17 @@ async fn cmd_create(
     };
 
     // Step 2: Publish the commitment under the seal (skip for Bitcoin since we already did it during UTXO selection)
-    let anchor = if anchor.is_some() {
+    let anchor: Option<csv_protocol::CommitAnchor> = if skip_publish {
+        // Skip publishing - return None for anchor
+        log::info!("{}: Skipping commitment publishing (--skip-publish flag set)", chain.as_str().to_uppercase());
+        output::info(&format!("Skipping commitment publishing (--skip-publish flag set)"));
+        None
+    } else if anchor.is_some() {
         // Bitcoin: already published during UTXO selection
         log::info!("{}: Commitment already published during UTXO selection (anchor_id: 0x{})", 
             chain.as_str().to_uppercase(), hex::encode(&anchor.as_ref().unwrap().anchor_id[..8]));
         output::info(&format!("Commitment published to {}", chain.as_str()));
-        anchor.unwrap()
+        anchor
     } else {
         // Other chains: publish now
         log::info!("{}: Publishing commitment under seal", chain.as_str().to_uppercase());
@@ -469,7 +478,7 @@ async fn cmd_create(
         log::info!("{}: Commitment published successfully (anchor_id: 0x{})", 
             chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
         output::info(&format!("Commitment published to {}", chain.as_str()));
-        anchor
+        Some(anchor)
     };
 
     // For Bitcoin, mark the used UTXO as spent in wallet state to prevent reuse
@@ -503,30 +512,32 @@ async fn cmd_create(
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                anchor_tx_hash: Some(hex::encode(&anchor.anchor_id)),
+                anchor_tx_hash: anchor.as_ref().map(|a| hex::encode(&a.anchor_id)),
             };
 
             state.storage.sanads.push(tracked);
 
             // Register the sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups
             if chain.as_str() == "bitcoin" {
-                let _sanad_id_bytes = *sanad.id.as_bytes();
-                let anchor_txid_hex = hex::encode(&anchor.anchor_id);
-                let output_index = u32::from_le_bytes(
-                    anchor.metadata[..4].try_into().unwrap_or([0, 0, 0, 0])
-                );
-                // Note: SDK runtime automatically registers sanad seals during publish_seal
-                // Manual registration is no longer needed and causes "adapter not found" warnings
+                if let Some(ref anchor) = anchor {
+                    let _sanad_id_bytes = *sanad.id.as_bytes();
+                    let anchor_txid_hex = hex::encode(&anchor.anchor_id);
+                    let output_index = u32::from_le_bytes(
+                        anchor.metadata[..4.min(anchor.metadata.len())].try_into().unwrap_or([0, 0, 0, 0])
+                    );
+                    // Note: SDK runtime automatically registers sanad seals during publish_seal
+                    // Manual registration is no longer needed and causes "adapter not found" warnings
 
-                // Persist the mapping to state for cross-run lookups
-                state.storage.wallet.sanad_seals.push(csv_store::state::wallet::SanadSealRecord {
-                    sanad_id: sanad_id_hex.clone(),
-                    anchor_txid: anchor_txid_hex.clone(),
-                    vout: output_index,
-                });
-                state.save()?;
-                log::info!("Persisted sanad seal to state: sanad_id={}, txid={}, vout={}", 
-                    sanad_id_hex, anchor_txid_hex, output_index);
+                    // Persist the mapping to state for cross-run lookups
+                    state.storage.wallet.sanad_seals.push(csv_store::state::wallet::SanadSealRecord {
+                        sanad_id: sanad_id_hex.clone(),
+                        anchor_txid: anchor_txid_hex.clone(),
+                        vout: output_index,
+                    });
+                    state.save()?;
+                    log::info!("Persisted sanad seal to state: sanad_id={}, txid={}, vout={}", 
+                        sanad_id_hex, anchor_txid_hex, output_index);
+                }
             }
 
             output::kv("Chain", chain.as_ref());
@@ -538,15 +549,27 @@ async fn cmd_create(
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "default".to_string()),
             );
-            output::kv("Anchor TX Hash", &hex::encode(&anchor.anchor_id));
-            output::kv("Block Height", &anchor.block_height.to_string());
-            output::kv("Status", "Created and published via runtime");
+            if let Some(ref anchor) = anchor {
+                output::kv("Anchor TX Hash", &hex::encode(&anchor.anchor_id));
+                output::kv("Block Height", &anchor.block_height.to_string());
+            }
+            output::kv("Status", if anchor.is_some() {
+                "Created and published via runtime"
+            } else {
+                "Created (not published)"
+            });
 
             // UnifiedStateManager is automatically saved after command execution
             println!();
-            output::info(
-                "Sanad created and published successfully. Use 'csv sanad show <sanad_id>' to view details",
-            );
+            if anchor.is_some() {
+                output::info(
+                    "Sanad created and published successfully. Use 'csv sanad show <sanad_id>' to view details",
+                );
+            } else {
+                output::info(
+                    "Sanad created successfully (not published). Use 'csv sanad show <sanad_id>' to view details",
+                );
+            }
         }
         Err(e) => {
             output::error(&format!("Failed to create sanad via runtime: {}", e));

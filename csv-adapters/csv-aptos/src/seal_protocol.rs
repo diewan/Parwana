@@ -335,6 +335,92 @@ impl AptosSealProtocol {
         )
     }
 
+    /// Build a raw transaction from an EntryFunctionPayload.
+    #[cfg(feature = "rpc")]
+    fn build_raw_transaction_from_entry_function(
+        &self,
+        sender: [u8; 32],
+        sequence_number: u64,
+        expiration_secs: u64,
+        payload: &crate::entry_function::EntryFunctionPayload,
+    ) -> Result<
+        aptos_sdk::transaction::types::RawTransaction,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        use aptos_sdk::transaction::EntryFunction;
+        use aptos_sdk::transaction::payload::TransactionPayload;
+        use aptos_sdk::transaction::types::RawTransaction;
+        use aptos_sdk::types::{AccountAddress, ChainId, MoveModuleId};
+
+        // Parse the function name to extract module address and function name
+        // Format: "0x1234...::CSVSeal::lock_sanad"
+        let parts: Vec<&str> = payload.function.split("::").collect();
+        if parts.len() != 3 {
+            return Err(format!("Invalid function format: {}", payload.function).into());
+        }
+
+        let module_address = parts[0];
+        let module_name_str = parts[1];
+        let function_name = parts[2];
+
+        // Parse module address
+        let module_addr = AccountAddress::from_hex(module_address)
+            .map_err(|e| format!("Invalid module address: {}", e))?;
+
+        // Build the EntryFunction
+        let module_name = aptos_sdk::types::Identifier::new(module_name_str)
+            .map_err(|e| format!("Invalid module name: {}", e))?;
+        let module_id = MoveModuleId::new(module_addr, module_name);
+
+        // Parse arguments from string format to BCS-encoded bytes
+        // Arguments are strings like "123", "0x1234...", etc.
+        let mut args_bcs = Vec::new();
+        for arg_str in &payload.arguments {
+            // Try to parse as u64 first
+            if let Ok(n) = arg_str.parse::<u64>() {
+                args_bcs.push(aptos_bcs::to_bytes(&n)
+                    .map_err(|e| format!("Failed to serialize u64 argument: {}", e))?);
+            } else if arg_str.starts_with("0x") {
+                // Parse as hex bytes (vector<u8>)
+                let hex_str = arg_str.trim_start_matches("0x");
+                let bytes = hex::decode(hex_str)
+                    .map_err(|e| format!("Failed to decode hex argument: {}", e))?;
+                let vec_arg: Vec<u8> = bytes;
+                args_bcs.push(aptos_bcs::to_bytes(&vec_arg)
+                    .map_err(|e| format!("Failed to serialize vector argument: {}", e))?);
+            } else {
+                // Try as string
+                let string_arg = arg_str.as_bytes().to_vec();
+                args_bcs.push(aptos_bcs::to_bytes(&string_arg)
+                    .map_err(|e| format!("Failed to serialize string argument: {}", e))?);
+            }
+        }
+
+        let entry_function = EntryFunction::new(
+            module_id,
+            function_name,
+            vec![], // type arguments
+            args_bcs,
+        );
+
+        // Build raw transaction
+        let sender_addr = AccountAddress::new(sender);
+        let payload = TransactionPayload::EntryFunction(entry_function);
+        let max_gas = self.config.transaction.max_gas;
+
+        let chain_id = ChainId::new(self.config.network.chain_id());
+
+        Ok(RawTransaction::new(
+            sender_addr,
+            sequence_number,
+            payload,
+            max_gas,
+            100, // gas_unit_price
+            expiration_secs,
+            chain_id,
+        ))
+    }
+
     #[cfg(feature = "rpc")]
     fn sign_raw_transaction(
         raw_transaction: &aptos_sdk::transaction::types::RawTransaction,
@@ -550,6 +636,153 @@ impl AptosSealProtocol {
         );
 
         Ok((signed_tx, event_data))
+    }
+
+    /// Sign an EntryFunctionPayload and return the signed transaction JSON.
+    #[cfg(feature = "rpc")]
+    pub async fn sign_entry_function_payload(
+        &self,
+        payload: crate::entry_function::EntryFunctionPayload,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        use sha3::{Digest, Sha3_256};
+
+        let signing_key = self
+            .signing_key
+            .as_ref()
+            .ok_or("No signing key configured")?;
+
+        // Derive sender address from signing key (Aptos address derivation)
+        // Aptos authentication key = SHA3-256(public_key || 0x00)
+        let public_key = signing_key.verifying_key().to_bytes();
+        let mut data = public_key.to_vec();
+        data.push(0x00); // Ed25519 single key scheme
+        let hash = Sha3_256::digest(&data);
+        let mut sender = [0u8; 32];
+        sender.copy_from_slice(&hash[..32]);
+        let sender_hex = format_address(sender);
+        log::info!(
+            "APTOS: Derived sender address from signing key: {}",
+            sender_hex
+        );
+
+        // Get account sequence number from RPC
+        let (sequence_number, ledger) = {
+            let max_retries = 3;
+            let mut retry_count = 0;
+            let mut sequence_number = 0;
+            
+            loop {
+                log::info!("APTOS: Fetching account sequence number (attempt {}/{})", retry_count + 1, max_retries);
+                match self.rpc.get_account_sequence_number(sender).await {
+                    Ok(seq) => {
+                        sequence_number = seq;
+                        log::info!("APTOS: Account sequence number: {}", sequence_number);
+                        break;
+                    }
+                    Err(e) => {
+                        retry_count += 1;
+                        if retry_count >= max_retries {
+                            return Err(format!("Failed to get sequence number after {} attempts: {}", max_retries, e).into());
+                        }
+                        log::warn!("APTOS: Failed to get sequence number, retrying in 1 second...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+            
+            log::info!("APTOS: Fetching ledger info");
+            let ledger = self
+                .rpc
+                .get_ledger_info()
+                .await
+                .map_err(|e| format!("Failed to get ledger info: {}", e))?;
+            log::info!(
+                "APTOS: Ledger info - chain_id={}, epoch={}, ledger_version={}, ledger_timestamp={}",
+                ledger.chain_id,
+                ledger.epoch,
+                ledger.ledger_version,
+                ledger.ledger_timestamp
+            );
+
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((sequence_number, ledger))
+        }?;
+
+        // Calculate expiration (current timestamp + 600 seconds)
+        let expiration_secs = (ledger.ledger_timestamp / 1_000_000) + 600;
+        log::info!(
+            "APTOS: Transaction expiration timestamp: {} seconds",
+            expiration_secs
+        );
+
+        // Build the raw transaction from the entry function payload
+        log::info!("APTOS: Building raw transaction from entry function payload");
+        let raw_transaction = self
+            .build_raw_transaction_from_entry_function(
+                sender,
+                sequence_number,
+                expiration_secs,
+                &payload,
+            )
+            .map_err(|e| format!("Failed to build raw transaction: {}", e))?;
+        log::info!("APTOS: Raw transaction built successfully");
+
+        // Sign using aptos-sdk's Ed25519PrivateKey and create SignedTransaction
+        log::info!("APTOS: Signing transaction");
+        let (public_key, signature, signing_message) =
+            Self::sign_raw_transaction(&raw_transaction, signing_key)?;
+        log::info!(
+            "APTOS: Aptos signing message built (length: {} bytes)",
+            signing_message.len()
+        );
+        log::info!(
+            "APTOS: Transaction signed successfully (public_key: 0x{})",
+            hex::encode(&public_key.to_bytes()[..8])
+        );
+        log::info!(
+            "APTOS: Signature (first 8 bytes): 0x{}",
+            hex::encode(&signature.to_bytes()[..8])
+        );
+
+        // Serialize the SignedTransaction to JSON using the SDK's format
+        // Convert arguments to proper JSON types (numbers instead of strings)
+        let json_arguments: Vec<serde_json::Value> = payload.arguments.iter().map(|arg| {
+            // Try to parse as u64 first
+            if let Ok(num) = arg.parse::<u64>() {
+                serde_json::Value::Number(serde_json::Number::from(num))
+            } else if let Ok(num) = arg.parse::<i64>() {
+                serde_json::Value::Number(serde_json::Number::from(num))
+            } else {
+                // Keep as string (for hex-encoded bytes)
+                serde_json::Value::String(arg.clone())
+            }
+        }).collect();
+
+        let signed_tx = serde_json::json!({
+            "sender": sender_hex,
+            "sequence_number": sequence_number.to_string(),
+            "max_gas_amount": self.config.transaction.max_gas.to_string(),
+            "gas_unit_price": "100",
+            "expiration_timestamp_secs": expiration_secs.to_string(),
+            "payload": {
+                "type": "entry_function_payload",
+                "function": payload.function,
+                "type_arguments": payload.type_arguments,
+                "arguments": json_arguments
+            },
+            "signature": {
+                "type": "ed25519_signature",
+                "public_key": format!("0x{}", hex::encode(public_key.to_bytes())),
+                "signature": format!("0x{}", hex::encode(signature.to_bytes()))
+            }
+        });
+        log::info!("APTOS: Signed transaction JSON built successfully");
+        log::info!(
+            "APTOS: Full transaction payload: {}",
+            serde_json::to_string_pretty(&signed_tx)
+                .unwrap_or_else(|_| "Failed to serialize".to_string())
+        );
+
+        Ok(signed_tx)
     }
 
     /// Verify the event in a published anchor matches the expected commitment.
@@ -1196,6 +1429,77 @@ impl AptosSealProtocol {
         } else {
             Vec::new()
         }
+    }
+
+    /// Query the seal resource from on-chain for a given account address.
+    #[cfg(feature = "rpc")]
+    pub async fn get_seal_from_chain(&self, account_address: [u8; 32]) -> Result<AptosSealPoint, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::types::AptosSealPoint;
+
+        let module_address = &self.config.seal_contract.module_address;
+        let resource_type = format!("{}::CSVSeal::SealCollection", module_address);
+        let addr_hex = format_address(account_address);
+        let base_url = self.config.rpc_url.trim_end_matches('/');
+        let url = if base_url.ends_with("/v1") {
+            format!("{}/accounts/{}/resources", base_url, addr_hex)
+        } else {
+            format!("{}/v1/accounts/{}/resources", base_url, addr_hex)
+        };
+
+        log::info!("APTOS: Querying seal resource from chain at {}", url);
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|e| format!("Failed to query seal resource: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Failed to query seal resource: HTTP {}", response.status()).into());
+        }
+
+        let resources: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        let resource_array = resources
+            .as_array()
+            .ok_or_else(|| format!("Expected array of resources"))?;
+
+        // Find the SealCollection resource
+        for resource in resource_array {
+            if let Some(res_type) = resource.get("type").and_then(|t| t.as_str()) {
+                log::info!("APTOS: Checking resource type: {}", res_type);
+                // Match both with and without hex prefix
+                if res_type.contains("CSVSeal::SealCollection") {
+                    log::info!("APTOS: Found matching resource type");
+                    if let Some(data) = resource.get("data") {
+                        // next_nonce might be a string or a number
+                        let next_nonce = data.get("next_nonce")
+                            .and_then(|n| n.as_str())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .or_else(|| data.get("next_nonce").and_then(|n| n.as_u64()));
+                        
+                        if let Some(next_nonce) = next_nonce {
+                            log::info!("APTOS: Found SealCollection with next_nonce {}", next_nonce);
+                            // The seal is stored in a SmartTable, but for now we can use the next_nonce - 1
+                            // as the most recent seal nonce
+                            let nonce = if next_nonce > 0 { next_nonce - 1 } else { 0 };
+                            return Ok(AptosSealPoint {
+                                account_address,
+                                resource_type,
+                                nonce,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Err("Seal resource not found on-chain".into())
     }
 
     /// Initialize the seal collection for an account.

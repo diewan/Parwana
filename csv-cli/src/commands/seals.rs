@@ -22,7 +22,7 @@ pub enum SealAction {
         #[arg(value_enum)]
         chain: Chain,
         /// Value (chain-specific)
-        #[arg(short, long)]
+        #[arg(long)]
         value: Option<u64>,
     },
     /// Consume a seal

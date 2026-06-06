@@ -54,18 +54,21 @@ impl EntryFunctionBuilder {
     /// Build lock_sanad EntryFunction payload
     ///
     /// # Arguments
-    /// * `seal_address` - The seal account address (32 bytes)
+    /// * `nonce` - The seal nonce
+    /// * `sanad_id` - Unique Sanad identifier (32 bytes)
     /// * `destination_chain` - Destination chain ID (u8)
     /// * `destination_owner` - Destination owner address (32 bytes)
     pub fn lock_sanad(
         &self,
-        seal_address: [u8; 32],
+        nonce: u64,
+        sanad_id: [u8; 32],
         destination_chain: u8,
         destination_owner: [u8; 32],
     ) -> EntryFunctionPayload {
         let function = self.function_name(functions::LOCK_SANAD);
         let arguments = vec![
-            format!("0x{}", hex::encode(seal_address)),
+            nonce.to_string(),
+            format!("0x{}", hex::encode(sanad_id)),
             destination_chain.to_string(),
             format!("0x{}", hex::encode(destination_owner)),
         ];
@@ -157,11 +160,24 @@ pub struct EntryFunctionPayload {
 impl EntryFunctionPayload {
     /// Convert to Aptos REST API payload format
     pub fn to_api_payload(&self) -> serde_json::Value {
+        // Convert string arguments to proper JSON types
+        let json_arguments: Vec<serde_json::Value> = self.arguments.iter().map(|arg| {
+            // Try to parse as u64 first
+            if let Ok(num) = arg.parse::<u64>() {
+                serde_json::Value::Number(serde_json::Number::from(num))
+            } else if let Ok(num) = arg.parse::<i64>() {
+                serde_json::Value::Number(serde_json::Number::from(num))
+            } else {
+                // Keep as string (for hex-encoded bytes)
+                serde_json::Value::String(arg.clone())
+            }
+        }).collect();
+
         json!({
             "type": "entry_function_payload",
             "function": self.function,
             "type_arguments": self.type_arguments,
-            "arguments": self.arguments
+            "arguments": json_arguments
         })
     }
 
