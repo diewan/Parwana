@@ -2698,6 +2698,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv-adapter-factory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "csv-adapter-core",
+ "csv-aptos",
+ "csv-bitcoin",
+ "csv-ethereum",
+ "csv-hash",
+ "csv-protocol",
+ "csv-solana",
+ "csv-sui",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "csv-admission"
 version = "0.1.0"
 dependencies = [
@@ -3147,6 +3169,7 @@ dependencies = [
  "bs58",
  "chrono",
  "csv-adapter-core",
+ "csv-adapter-factory",
  "csv-aptos",
  "csv-bitcoin",
  "csv-codec",

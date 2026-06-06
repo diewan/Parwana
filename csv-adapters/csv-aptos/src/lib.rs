@@ -47,6 +47,7 @@ pub mod mint;
 pub mod ops;
 pub mod proofs;
 pub mod rpc;
+pub mod runtime_adapter;
 pub mod seal;
 pub mod seal_protocol;
 pub mod signatures;
@@ -79,3 +80,4 @@ pub use types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, Apto
 
 // Ops exports
 pub use ops::AptosBackend;
+pub use runtime_adapter::AptosRuntimeAdapter;

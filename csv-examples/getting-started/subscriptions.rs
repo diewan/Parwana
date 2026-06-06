@@ -7,17 +7,15 @@
 
 use csv_sdk::prelude::*;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     println!("=== CSV Adapter: Cross-Chain Subscriptions Demo ===\n");
 
     // Initialize client with all chains
-    let rt = tokio::runtime::Runtime::new()?;
-    let client = rt.block_on(async {
-        CsvClient::builder()
-            .with_all_chains()
-            .with_store_backend(StoreBackend::InMemory)
-            .build()
-    })?;
+    let client = CsvClient::builder()
+        .with_all_chains()
+        .with_store_backend(StoreBackend::InMemory)
+        .build().await?;
 
     println!("✓ Client initialized with all chains\n");
 
@@ -25,14 +23,13 @@ fn main() -> Result<()> {
     println!("Creating subscription sanad on Bitcoin...");
     let commitment = Hash::from([1u8; 32]);
 
-    let sanad =
-        rt.block_on(async { client.sanads().create(commitment, ChainId::new("bitcoin")) })?;
+    let sanad = client.sanads().create(commitment, ChainId::new("bitcoin"))?;
 
     println!("✓ Created sanad: {:?}\n", sanad.id);
 
     // Query the sanad
     println!("Querying sanad status...");
-    let found_sanad = rt.block_on(async { client.sanads().get(&sanad.id) })?;
+    let found_sanad = client.sanads().get(&sanad.id)?;
     if let Some(found_sanad) = found_sanad {
         println!("✓ Found sanad: {:?}\n", found_sanad.id);
     }
@@ -44,19 +41,17 @@ fn main() -> Result<()> {
     println!("  3. Verifying on Ethereum...");
     println!("  4. Minting destination sanad...");
 
-    let transfer_id = rt.block_on(async {
-        client
-            .transfers()
-            .cross_chain(sanad.id.clone(), ChainId::new("ethereum"))
-            .to_address("0x1234567890abcdef".to_string())
-            .execute()
-            .await
-    })?;
+    let transfer_id = client
+        .transfers()
+        .cross_chain(sanad.id.clone(), ChainId::new("ethereum"))
+        .to_address("0x1234567890abcdef".to_string())
+        .execute()
+        .await?;
 
     println!("\n✓ Transfer initiated: {}\n", transfer_id);
 
     // Check status
-    let status = rt.block_on(async { client.transfers().status(&transfer_id) })?;
+    let status = client.transfers().status(&transfer_id)?;
     println!("Transfer status: {:?}", status);
 
     println!("\n=== Demo Complete ===");

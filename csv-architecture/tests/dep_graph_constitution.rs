@@ -142,6 +142,7 @@ fn intentional_workspace_crates_are_allowlisted() {
         .expect("cargo metadata must succeed");
     let allowed = [
         "csv-adapter-core",
+        "csv-adapter-factory",
         "csv-admission",
         "csv-algebra",
         "csv-aptos",

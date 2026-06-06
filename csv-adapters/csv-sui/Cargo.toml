@@ -57,6 +57,9 @@ default = []
 # Enables real RPC client (gRPC via sui-rust-sdk)
 rpc = ["sui-rpc", "sui-sdk-types", "sui-transaction-builder"]
 
+# Test configuration - enables rpc for tests
+test = ["rpc"]
+
 [dev-dependencies]
 rand = "0.8"
 tempfile = "3"

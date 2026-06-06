@@ -1434,9 +1434,18 @@ impl From<SuiError> for ChainOpError {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_address_validation() {
-        let config = SuiConfig::default();
+    #[tokio::test]
+    async fn test_address_validation() {
+        let config = SuiConfig {
+            seal_contract: crate::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
         let ops = SuiBackend::new(config, node);
 
@@ -1452,9 +1461,18 @@ mod tests {
         assert!(!ops.validate_address("0xZZZZ"));
     }
 
-    #[test]
-    fn test_signature_verification() {
-        let config = SuiConfig::default();
+    #[tokio::test]
+    async fn test_signature_verification() {
+        let config = SuiConfig {
+            seal_contract: crate::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
         let ops = SuiBackend::new(config, node);
 

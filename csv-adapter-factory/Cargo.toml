@@ -1,0 +1,32 @@
+[package]
+name = "csv-adapter-factory"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+csv-protocol = { path = "../csv-protocol" }
+csv-adapter-core = { path = "../csv-adapters/csv-adapter-core" }
+csv-hash = { path = "../csv-hash" }
+csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true, features = ["signet-rest"] }
+csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }
+csv-sui = { path = "../csv-adapters/csv-sui", optional = true, features = ["rpc"] }
+csv-aptos = { path = "../csv-adapters/csv-aptos", optional = true, features = ["rpc"] }
+csv-solana = { path = "../csv-adapters/csv-solana", optional = true }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+thiserror = "1.0"
+hex = "0.4"
+
+[features]
+bitcoin = ["csv-bitcoin"]
+ethereum = ["csv-ethereum"]
+solana = ["csv-solana"]
+sui = ["csv-sui"]
+aptos = ["csv-aptos"]
+default = []
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

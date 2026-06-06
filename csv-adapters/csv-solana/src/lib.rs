@@ -17,6 +17,7 @@ pub mod ops;
 pub mod program;
 pub mod proofs;
 pub mod rpc;
+pub mod runtime_adapter;
 pub mod seal;
 pub mod seal_protocol;
 pub mod sync_coordinator;
@@ -34,6 +35,7 @@ pub use wallet::{ProgramWallet, WalletError};
 
 // Ops exports
 pub use ops::SolanaBackend;
+pub use runtime_adapter::SolanaRuntimeAdapter;
 
 #[cfg(feature = "rpc")]
 pub mod node;

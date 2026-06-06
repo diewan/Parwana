@@ -75,6 +75,7 @@ async fn main() {
         account: 0,
         index: 0,
         utxos: Vec::new(),
+        sanad_seals: Vec::new(),
     };
 
     let required_depth = config.finality_depth;

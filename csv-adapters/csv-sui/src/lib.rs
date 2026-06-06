@@ -45,6 +45,7 @@ pub mod gas_utils;
 pub mod mint;
 pub mod ops;
 pub mod proofs;
+pub mod runtime_adapter;
 pub mod seal;
 pub mod seal_protocol;
 pub mod signatures;
@@ -72,3 +73,4 @@ pub use types::{SuiCommitAnchor, SuiFinalityProof, SuiInclusionProof, SuiSealPoi
 
 // Ops exports
 pub use ops::SuiBackend;
+pub use runtime_adapter::SuiRuntimeAdapter;

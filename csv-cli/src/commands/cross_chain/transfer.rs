@@ -116,23 +116,6 @@ pub async fn cmd_transfer(
         };
         sdk_config.chains.insert(to.to_string(), chain_config);
     }
-    
-    let client = CsvClient::builder()
-        .with_chain(from_chain.clone())
-        .with_chain(to_chain.clone())
-        .with_config(sdk_config)
-        .with_runtime_coordinator()
-        .build()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
-
-    // Initialize chain adapters for the transfer
-    // Get network type from config
-    let network_type = match config.chain(&from)?.network {
-        crate::config::Network::Test => NetworkType::Testnet,
-        crate::config::Network::Main => NetworkType::Mainnet,
-        crate::config::Network::Dev => NetworkType::Testnet, // Dev uses testnet
-    };
 
     // Derive private keys from wallet mnemonic for chains that require signing
     let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
@@ -163,6 +146,15 @@ pub async fn cmd_transfer(
         hex::encode(secret_key.as_bytes())
     };
     private_keys.insert(to.to_string(), Some(to_key_hex));
+
+    let client = CsvClient::builder()
+        .with_chain(from_chain.clone())
+        .with_chain(to_chain.clone())
+        .with_config(sdk_config)
+        .with_private_keys(private_keys)
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
     // Note: SDK already initializes adapters via bitcoin_from_config with loaded UTXOs
     // Do NOT call init_adapters here as it would replace the adapters with fresh wallets

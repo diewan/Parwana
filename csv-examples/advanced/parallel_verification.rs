@@ -10,13 +10,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     println!("=== CSV Adapter: Parallel Operations Demo ===\n");
 
     let client = CsvClient::builder()
         .with_all_chains()
         .with_store_backend(StoreBackend::InMemory)
-        .build()?;
+        .build().await?;
 
     // Sequential creation benchmark
     println!("Sequential Sanad Creation:");

@@ -44,6 +44,8 @@ members = [
     "csv-adapters/csv-sui",
     "csv-adapters/csv-aptos",
     "csv-adapters/csv-celestia",
+    # Adapter factory crate
+    "csv-adapter-factory",
 ]
 
 [workspace.package]

@@ -50,6 +50,17 @@ use crate::wallet::WalletManager;
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 #[cfg(feature = "runtime-coordinator")]
+use csv_adapter_factory::{AdapterFactory, AdapterConfig, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol, BitcoinFactory, EthereumFactory, SuiFactory, AptosFactory, SolanaFactory, AdapterResult as FactoryAdapterResult};
+
+#[cfg(feature = "runtime-coordinator")]
+// Type alias for factory result
+pub type AdapterResult = FactoryAdapterResult;
+
+#[cfg(not(feature = "runtime-coordinator"))]
+// Type alias for legacy result (no factory support)
+pub type AdapterResult = std::sync::Arc<dyn csv_protocol::backend::ChainBackend>;
+
+#[cfg(feature = "runtime-coordinator")]
 use csv_runtime::TransferCoordinator;
 
 /// Handle to the underlying storage backend.
@@ -168,6 +179,8 @@ pub struct CsvClient {
     /// Transfer coordinator for production-grade cross-chain transfer execution.
     #[cfg(feature = "runtime-coordinator")]
     pub(crate) transfer_coordinator: Option<Arc<TransferCoordinator>>,
+    /// Private keys for chain adapters (chain name -> hex-encoded key/seed)
+    pub(crate) private_keys: Option<std::collections::HashMap<String, Option<String>>>,
 }
 
 impl CsvClient {
@@ -418,8 +431,8 @@ impl CsvClient {
         chain: ChainId,
         _config: &crate::config::Config,
         network: NetworkType,
-        private_key: Option<&str>,
-    ) -> Result<Option<std::sync::Arc<dyn csv_protocol::backend::ChainBackend>>, CsvError> {
+        private_keys: Option<std::collections::HashMap<String, Option<String>>>,
+    ) -> Result<Option<AdapterResult>, CsvError> {
         let _builder = crate::runtime::AdapterBuilder::new();
         let _is_testnet = matches!(network, NetworkType::Testnet);
 
@@ -443,19 +456,15 @@ impl CsvClient {
                     });
                 eprintln!("SDK LAYER: RPC URL from SDK config: {}", config_rpc_url);
                 let rpc_url = config_rpc_url;
-                let btc_network = if _is_testnet {
-                    csv_bitcoin::Network::Signet
-                } else {
-                    csv_bitcoin::Network::Mainnet
-                };
-                log::info!("Building Bitcoin adapter with RPC URL: {}", rpc_url);
                 let chain_config = _config.chains.get("bitcoin");
                 let mut utxos = Vec::new();
                 let mut sanad_seals = Vec::new();
                 if let Some(cc) = chain_config {
+                    log::info!("SDK: Chain config has {} UTXOs", cc.utxos.len());
                     // Convert UTXO records from SDK config to Bitcoin adapter config
                     for utxo in &cc.utxos {
-                        utxos.push(csv_bitcoin::config::UtxoConfig {
+                        log::info!("SDK: Converting UTXO: txid={}, vout={}, value={}", utxo.txid, utxo.vout, utxo.value);
+                        utxos.push(csv_adapter_factory::UtxoConfig {
                             txid: utxo.txid.clone(),
                             vout: utxo.vout,
                             value: utxo.value,
@@ -464,9 +473,10 @@ impl CsvClient {
                             script_pubkey: utxo.script_pubkey.clone(),
                         });
                     }
+                    log::info!("SDK: Converted {} UTXOs to Bitcoin adapter config", utxos.len());
                     // Convert sanad seal records from SDK config to Bitcoin adapter config
                     for seal in &cc.sanad_seals {
-                        sanad_seals.push(csv_bitcoin::config::SanadSealConfig {
+                        sanad_seals.push(csv_adapter_factory::SanadSealConfig {
                             sanad_id: seal.sanad_id.clone(),
                             anchor_txid: seal.anchor_txid.clone(),
                             vout: seal.vout,
@@ -474,78 +484,135 @@ impl CsvClient {
                     }
                 }
 
-                let btc_config = csv_bitcoin::config::BitcoinConfig {
-                    network: btc_network,
-                    finality_depth: 6,
-                    publication_timeout_seconds: 3600,
-                    rpc_url: rpc_url.clone(),
-                    rpc_backend: csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc, // Default to JSON-RPC, will be auto-detected by with_env_rpc
-                    api_key: None, // Will be loaded by with_env_rpc if using Tatum
-                    xpub: chain_config.and_then(|c| c.xpub.clone()),
-                    private_key: None, // Not used when seed is provided
-                    seed: private_key.map(|k| k.to_string()), // Pass seed for Bitcoin
+                // Extract Bitcoin seed from private_keys if available
+                let bitcoin_seed = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("bitcoin"))
+                    .and_then(|k| k.clone());
+
+                // Create RPC endpoint configuration
+                let rpc_endpoint = RpcEndpoint {
+                    url: rpc_url.clone(),
+                    protocol: RpcProtocol::Rest,
+                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    priority: 0,
+                };
+
+                // Create adapter config for factory
+                let factory_network = if _is_testnet {
+                    FactoryNetworkType::Testnet
+                } else {
+                    FactoryNetworkType::Mainnet
+                };
+
+                let adapter_config = AdapterConfig {
+                    chain_id: chain.clone(),
+                    network: factory_network,
+                    rpc_endpoints: vec![rpc_endpoint],
+                    private_key: bitcoin_seed,
                     account: chain_config.map(|c| c.account).unwrap_or(0),
                     index: chain_config.map(|c| c.index).unwrap_or(0),
+                    contract_address: None,
+                    program_id: None,
                     utxos,
                     sanad_seals,
                 };
-                eprintln!("SDK LAYER: BitcoinConfig before with_env_rpc - RPC URL: {}, Account: {}, Index: {}", btc_config.rpc_url, btc_config.account, btc_config.index);
-                let btc_config = btc_config.with_env_rpc().map_err(|e| CsvError::ProtocolError {
-                    chain: chain.clone(),
-                    message: format!("Failed to apply env RPC override: {}", e),
-                })?; // Override RPC URL from environment variable if set
-                
-                // Auto-detect backend type from URL if not already set correctly
-                let btc_config = btc_config.auto_detect_backend();
-                eprintln!("SDK LAYER: BitcoinConfig after with_env_rpc - RPC URL: {}, backend: {:?}", btc_config.rpc_url, btc_config.rpc_backend);
-                // Mark private_key as intentionally unused for Bitcoin (we use seed instead)
-                let _ = private_key;
-                // Create RPC client - this uses reqwest::blocking which needs its own runtime
-                // We must create it outside any async context to avoid runtime conflicts
-                let api_key = btc_config.api_key.clone();
-                let final_rpc_url = btc_config.rpc_url.clone();
-                let rpc_backend = btc_config.rpc_backend;
-                eprintln!("SDK LAYER: Creating RPC client with URL: {}, backend: {:?}", final_rpc_url, rpc_backend);
-                
-                // Create RPC client based on explicit backend type (not URL heuristics)
-                let rpc = std::thread::spawn(move || {
-                    match rpc_backend {
-                        csv_bitcoin::BitcoinRpcBackend::MempoolRest => {
-                            eprintln!("SDK LAYER: Using MempoolSignetRpc (REST API)");
-                            Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url_and_key(
-                                final_rpc_url,
-                                api_key,
-                            )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
-                        }
-                        csv_bitcoin::BitcoinRpcBackend::BlockstreamRest => {
-                            eprintln!("SDK LAYER: Using MempoolSignetRpc (Blockstream REST API)");
-                            Box::new(csv_bitcoin::mempool_rpc::MempoolSignetRpc::with_url_and_key(
-                                final_rpc_url,
-                                api_key,
-                            )) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
-                        }
-                        csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc => {
-                            eprintln!("SDK LAYER: Using BitcoinJsonRpc (JSON-RPC API)");
-                            Box::new(csv_bitcoin::BitcoinJsonRpc::new(final_rpc_url)) as Box<dyn csv_bitcoin::rpc::BitcoinRpc + Send + Sync>
-                        }
-                    }
-                })
-                .join()
-                .map_err(|e| CsvError::ProtocolError {
-                    chain,
-                    message: format!("Thread panic: {:?}", e),
-                })?;
-                _builder
-                    .bitcoin_from_config(btc_config, rpc)
-                    .await
-                    .map(Some)
+
+                // Use factory to create adapter
+                let factory = BitcoinFactory;
+                let result = factory.create_adapter(adapter_config).await
+                    .map_err(|e| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Factory failed to create Bitcoin adapter: {}", e),
+                    })?;
+
+                // Register ChainAdapter in adapter_registry for TransferCoordinator
+                if result.chain_adapter.is_some() {
+                    log::info!("SDK: Created Bitcoin ChainAdapter for TransferCoordinator");
+                }
+
+                Ok(Some(result))
             }
             #[cfg(all(feature = "bitcoin", not(feature = "rpc")))]
             "bitcoin" => {
                 log::warn!("Bitcoin adapter requires 'rpc' feature for RPC client; skipping");
                 Ok(None)
             }
-            #[cfg(feature = "ethereum")]
+            #[cfg(all(feature = "ethereum", feature = "runtime-coordinator"))]
+            "ethereum" => {
+                log::info!("Building Ethereum adapter for {:?} network", network);
+                let rpc_url = _config
+                    .chains
+                    .get("ethereum")
+                    .map(|c| c.rpc.url.clone())
+                    .filter(|url| !url.is_empty())
+                    .unwrap_or_else(|| {
+                        if _is_testnet {
+                            "https://ethereum-sepolia-rpc.publicnode.com".to_string()
+                        } else {
+                            "https://ethereum-rpc.publicnode.com".to_string()
+                        }
+                    });
+                let chain_config = _config.chains.get("ethereum");
+                
+                let address = chain_config
+                    .and_then(|chain| chain.contract_address.as_deref())
+                    .ok_or_else(|| {
+                        CsvError::ConfigError(
+                            "Ethereum seal contract address must be configured".to_string(),
+                        )
+                    })?;
+                
+                // Extract Ethereum private key from private_keys if available
+                let eth_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("ethereum"))
+                    .and_then(|k| k.clone());
+
+                // Create RPC endpoint configuration
+                let rpc_endpoint = RpcEndpoint {
+                    url: rpc_url.clone(),
+                    protocol: RpcProtocol::JsonRpc,
+                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    priority: 0,
+                };
+
+                // Create adapter config for factory
+                let factory_network = if _is_testnet {
+                    FactoryNetworkType::Testnet
+                } else {
+                    FactoryNetworkType::Mainnet
+                };
+
+                let adapter_config = AdapterConfig {
+                    chain_id: chain.clone(),
+                    network: factory_network,
+                    rpc_endpoints: vec![rpc_endpoint],
+                    private_key: eth_private_key,
+                    account: 0,
+                    index: 0,
+                    contract_address: Some(address.to_string()),
+                    program_id: None,
+                    utxos: vec![],
+                    sanad_seals: vec![],
+                };
+
+                // Use factory to create adapter
+                let factory = EthereumFactory;
+                let result = factory.create_adapter(adapter_config).await
+                    .map_err(|e| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Factory failed to create Ethereum adapter: {}", e),
+                    })?;
+
+                // Register ChainAdapter in adapter_registry for TransferCoordinator
+                if result.chain_adapter.is_some() {
+                    log::info!("SDK: Created Ethereum ChainAdapter for TransferCoordinator");
+                }
+
+                Ok(Some(result))
+            }
+            #[cfg(all(feature = "ethereum", not(feature = "runtime-coordinator")))]
             "ethereum" => {
                 let rpc_url = _config
                     .chains
@@ -597,7 +664,11 @@ impl CsvClient {
                     })?;
 
                 // Configure signer if private key is provided
-                if let Some(private_key) = private_key {
+                let eth_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("ethereum"))
+                    .and_then(|k| k.as_deref());
+                if let Some(private_key) = eth_private_key {
                     rpc = rpc.with_signer(private_key).map_err(|e| CsvError::ProtocolError {
                         chain: ChainId::new("ethereum"),
                         message: format!("Failed to configure Ethereum signer: {}", e),
@@ -610,9 +681,83 @@ impl CsvClient {
                         csv_seal_address,
                     )
                     .await
-                    .map(Some)
+                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
             }
-            #[cfg(feature = "sui")]
+            #[cfg(all(feature = "sui", feature = "runtime-coordinator"))]
+            "sui" => {
+                log::info!("Building Sui adapter for {:?} network", network);
+                let rpc_url = _config
+                    .chains
+                    .get("sui")
+                    .map(|c| c.rpc.url.clone())
+                    .filter(|url| !url.is_empty())
+                    .unwrap_or_else(|| {
+                        if _is_testnet {
+                            "https://fullnode.testnet.sui.io:443".to_string()
+                        } else {
+                            "https://fullnode.mainnet.sui.io:443".to_string()
+                        }
+                    });
+                let chain_config = _config.chains.get("sui");
+                
+                let contract_address = chain_config
+                    .and_then(|chain| chain.contract_address.as_deref())
+                    .ok_or_else(|| {
+                        CsvError::ConfigError(
+                            "Sui seal package ID must be configured".to_string(),
+                        )
+                    })?;
+                
+                // Extract Sui private key from private_keys if available
+                let sui_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("sui"))
+                    .and_then(|k| k.clone());
+
+                // Create RPC endpoint configuration
+                let rpc_endpoint = RpcEndpoint {
+                    url: rpc_url.clone(),
+                    protocol: RpcProtocol::Grpc,
+                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    priority: 0,
+                };
+
+                // Create adapter config for factory
+                let factory_network = if _is_testnet {
+                    FactoryNetworkType::Testnet
+                } else {
+                    FactoryNetworkType::Mainnet
+                };
+
+                let adapter_config = AdapterConfig {
+                    chain_id: chain.clone(),
+                    network: factory_network,
+                    rpc_endpoints: vec![rpc_endpoint],
+                    private_key: sui_private_key,
+                    account: 0,
+                    index: 0,
+                    contract_address: Some(contract_address.to_string()),
+                    program_id: None,
+                    utxos: vec![],
+                    sanad_seals: vec![],
+                };
+
+                // Use factory to create adapter
+                let factory = SuiFactory;
+                let result = factory.create_adapter(adapter_config).await
+                    .map_err(|e| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Factory failed to create Sui adapter: {}", e),
+                    })?;
+
+                // Register ChainAdapter in adapter_registry for TransferCoordinator
+                if result.chain_adapter.is_some() {
+                    log::info!("SDK: Created Sui ChainAdapter for TransferCoordinator");
+                }
+
+                Ok(Some(result))
+            }
+            #[cfg(all(feature = "sui", not(feature = "runtime-coordinator")))]
             "sui" => {
                 let rpc_url = _config
                     .chains
@@ -645,7 +790,11 @@ impl CsvClient {
                         })?,
                 );
                 // Convert hex string to Vec<u8> for Sui and derive signer address
-                let signer_address = if let Some(pk) = private_key {
+                let sui_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("sui"))
+                    .and_then(|k| k.as_deref());
+                let signer_address = if let Some(pk) = sui_private_key {
                     let cleaned = pk.trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
                         sui_config.signer_private_key = Some(key_bytes.clone());
@@ -694,9 +843,75 @@ impl CsvClient {
                 _builder
                     .sui_from_config(sui_config, std::sync::Arc::new(node))
                     .await
-                    .map(Some)
+                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
             }
-            #[cfg(feature = "aptos")]
+            #[cfg(all(feature = "aptos", feature = "runtime-coordinator"))]
+            "aptos" => {
+                log::info!("Building Aptos adapter for {:?} network", network);
+                let rpc_url = _config
+                    .chains
+                    .get("aptos")
+                    .map(|c| c.rpc.url.clone())
+                    .filter(|url| !url.is_empty())
+                    .unwrap_or_else(|| {
+                        if _is_testnet {
+                            "https://api.testnet.aptoslabs.com/v1".to_string()
+                        } else {
+                            "https://api.mainnet.aptoslabs.com/v1".to_string()
+                        }
+                    });
+                let chain_config = _config.chains.get("aptos");
+                
+                // Extract Aptos private key from private_keys if available
+                let aptos_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("aptos"))
+                    .and_then(|k| k.clone());
+
+                // Create RPC endpoint configuration
+                let rpc_endpoint = RpcEndpoint {
+                    url: rpc_url.clone(),
+                    protocol: RpcProtocol::Rest,
+                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    priority: 0,
+                };
+
+                // Create adapter config for factory
+                let factory_network = if _is_testnet {
+                    FactoryNetworkType::Testnet
+                } else {
+                    FactoryNetworkType::Mainnet
+                };
+
+                let adapter_config = AdapterConfig {
+                    chain_id: chain.clone(),
+                    network: factory_network,
+                    rpc_endpoints: vec![rpc_endpoint],
+                    private_key: aptos_private_key,
+                    account: 0,
+                    index: 0,
+                    contract_address: chain_config.and_then(|c| c.contract_address.clone()),
+                    program_id: None,
+                    utxos: vec![],
+                    sanad_seals: vec![],
+                };
+
+                // Use factory to create adapter
+                let factory = AptosFactory;
+                let result = factory.create_adapter(adapter_config).await
+                    .map_err(|e| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Factory failed to create Aptos adapter: {}", e),
+                    })?;
+
+                // Register ChainAdapter in adapter_registry for TransferCoordinator
+                if result.chain_adapter.is_some() {
+                    log::info!("SDK: Created Aptos ChainAdapter for TransferCoordinator");
+                }
+
+                Ok(Some(result))
+            }
+            #[cfg(all(feature = "aptos", not(feature = "runtime-coordinator")))]
             "aptos" => {
                 let rpc_url = _config
                     .chains
@@ -713,7 +928,11 @@ impl CsvClient {
                 
                 // Derive signer address from private key if available
                 // In Aptos, address = last 32 bytes of sha3-256(public_key + 0x00)
-                let signer_address = if let Some(pk) = private_key {
+                let aptos_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("aptos"))
+                    .and_then(|k| k.as_deref());
+                let signer_address = if let Some(pk) = aptos_private_key {
                     let cleaned = pk.trim().trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
                         if key_bytes.len() == 32 {
@@ -758,7 +977,7 @@ impl CsvClient {
                         csv_aptos::config::AptosNetwork::Mainnet
                     },
                     rpc_url: rpc_url.clone(),
-                    private_key: private_key.map(|k| k.to_string()),
+                    private_key: aptos_private_key.map(|k| k.to_string()),
                     ..Default::default()
                 };
                 // Set module_address from config if available
@@ -783,9 +1002,83 @@ impl CsvClient {
                         Box::new(rpc) as Box<dyn csv_aptos::rpc::AptosRpc>,
                     )
                     .await
-                    .map(Some)
+                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
             }
-            #[cfg(feature = "solana")]
+            #[cfg(all(feature = "solana", feature = "runtime-coordinator"))]
+            "solana" => {
+                log::info!("Building Solana adapter for {:?} network", network);
+                let rpc_url = _config
+                    .chains
+                    .get("solana")
+                    .map(|c| c.rpc.url.clone())
+                    .filter(|url| !url.is_empty())
+                    .unwrap_or_else(|| {
+                        if _is_testnet {
+                            "https://api.devnet.solana.com".to_string()
+                        } else {
+                            "https://api.mainnet-beta.solana.com".to_string()
+                        }
+                    });
+                let chain_config = _config.chains.get("solana");
+                
+                let program_id = chain_config
+                    .and_then(|chain| chain.contract_address.as_deref())
+                    .ok_or_else(|| {
+                        CsvError::ConfigError(
+                            "Solana CSV program ID must be configured".to_string(),
+                        )
+                    })?;
+                
+                // Extract Solana private key from private_keys if available
+                let solana_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("solana"))
+                    .and_then(|k| k.clone());
+
+                // Create RPC endpoint configuration
+                let rpc_endpoint = RpcEndpoint {
+                    url: rpc_url.clone(),
+                    protocol: RpcProtocol::JsonRpc,
+                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    priority: 0,
+                };
+
+                // Create adapter config for factory
+                let factory_network = if _is_testnet {
+                    FactoryNetworkType::Testnet
+                } else {
+                    FactoryNetworkType::Mainnet
+                };
+
+                let adapter_config = AdapterConfig {
+                    chain_id: chain.clone(),
+                    network: factory_network,
+                    rpc_endpoints: vec![rpc_endpoint],
+                    private_key: solana_private_key,
+                    account: 0,
+                    index: 0,
+                    contract_address: None,
+                    program_id: Some(program_id.to_string()),
+                    utxos: vec![],
+                    sanad_seals: vec![],
+                };
+
+                // Use factory to create adapter
+                let factory = SolanaFactory;
+                let result = factory.create_adapter(adapter_config).await
+                    .map_err(|e| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Factory failed to create Solana adapter: {}", e),
+                    })?;
+
+                // Register ChainAdapter in adapter_registry for TransferCoordinator
+                if result.chain_adapter.is_some() {
+                    log::info!("SDK: Created Solana ChainAdapter for TransferCoordinator");
+                }
+
+                Ok(Some(result))
+            }
+            #[cfg(all(feature = "solana", not(feature = "runtime-coordinator")))]
             "solana" => {
                 let rpc_url = _config
                     .chains
@@ -806,7 +1099,11 @@ impl CsvClient {
                 };
                 
                 // Convert hex private key to base58 keypair for Solana
-                let keypair_base58 = if let Some(pk) = private_key {
+                let solana_private_key = private_keys
+                    .as_ref()
+                    .and_then(|keys| keys.get("solana"))
+                    .and_then(|k| k.as_deref());
+                let keypair_base58 = if let Some(pk) = solana_private_key {
                     let cleaned = pk.trim().trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
                         if key_bytes.len() == 32 {
@@ -857,7 +1154,7 @@ impl CsvClient {
                     timeout_seconds: 30,
                 };
                 let rpc = Box::new(csv_solana::node::SolanaNode::new(&rpc_url));
-                _builder.solana_from_config(sol_config, rpc).await.map(Some)
+                _builder.solana_from_config(sol_config, rpc).await.map(|backend| Some(AdapterBuildResult::Legacy(backend)))
             }
             _ => Ok(None), // Skip unsupported chains
         }
@@ -887,6 +1184,7 @@ impl CsvClient {
             config: self.config.clone(),
             event_tx: self.event_tx.clone(),
             chain_runtime: Some(self.chain_runtime.clone()),
+            private_keys: self.private_keys.clone(),
         }
     }
 }
@@ -911,6 +1209,9 @@ pub(crate) struct ClientRef {
     /// Chain runtime for unified chain operations.
     #[allow(dead_code)]
     pub(crate) chain_runtime: Option<crate::runtime::ChainRuntime>,
+    /// Private keys for chain adapters (chain name -> hex-encoded key/seed)
+    #[allow(dead_code)]
+    pub(crate) private_keys: Option<std::collections::HashMap<String, Option<String>>>,
 }
 
 impl ClientRef {
@@ -933,6 +1234,7 @@ impl ClientRef {
             config: Config::default(),
             event_tx,
             chain_runtime: None,
+            private_keys: None,
         }
     }
 

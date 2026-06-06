@@ -97,27 +97,36 @@ impl BitcoinSealProtocol {
                 .map_err(|e| BitcoinError::RpcError(format!("Wallet creation from seed failed: {}", e)))?;
 
             // Load UTXOs from config if available
+            log::info!("Bitcoin: Loading {} UTXOs from config", config.utxos.len());
             for utxo_config in &config.utxos {
                 if let Ok(txid_bytes) = hex::decode(&utxo_config.txid) {
                     if txid_bytes.len() == 32 {
+                        log::info!("Bitcoin: Loading UTXO from config: txid={}, vout={}", utxo_config.txid, utxo_config.vout);
+                        // Use txid as-is from config (display format)
+                        // Txid::from_raw_hash expects internal byte order, so we need to reverse
                         let mut txid_array = [0u8; 32];
                         txid_array.copy_from_slice(&txid_bytes);
+                        txid_array.reverse(); // Convert display to internal byte order for Txid
+                        log::info!("Bitcoin: Reversed txid for wallet: {}", hex::encode(&txid_array));
                         let hash = bitcoin::hashes::Hash::from_byte_array(txid_array);
                         let outpoint = bitcoin::OutPoint {
                             txid: bitcoin::Txid::from_raw_hash(hash),
                             vout: utxo_config.vout,
                         };
+                        log::info!("Bitcoin: Created OutPoint: txid={}, vout={}", hex::encode(outpoint.txid.as_byte_array()), outpoint.vout);
                         let path = crate::wallet::Bip86Path::external(utxo_config.account, utxo_config.index);
-                        
+
                         // Decode scriptPubKey if available
                         let script_pubkey = utxo_config.script_pubkey.as_ref()
                             .and_then(|spk_hex| hex::decode(spk_hex).ok())
                             .map(|bytes| bitcoin::ScriptBuf::from(bytes));
-                        
+
                         wallet.add_utxo_with_scriptpubkey(outpoint, utxo_config.value, path, script_pubkey, None);
+                        log::info!("Bitcoin: Added UTXO to wallet: txid={}, vout={}, value={}", hex::encode(outpoint.txid.as_byte_array()), outpoint.vout, utxo_config.value);
                     }
                 }
             }
+            log::info!("Bitcoin: Wallet now has {} UTXOs", wallet.utxo_count());
 
             // Load sanad_id -> seal mappings from config
             log::info!("Bitcoin: Loading {} sanad_seals from config", config.sanad_seals.len());
@@ -658,8 +667,11 @@ impl SealProtocol for BitcoinSealProtocol {
 
             // Fetch and validate the actual on-chain scriptPubKey (what the node expects)
             // This is optional - if mempool.space hasn't indexed the transaction yet, we skip this validation
-            log::info!("Fetching scriptPubKey for INPUT UTXO: txid={}, vout={}", hex::encode(seal.txid), seal.vout);
-            let _onchain_spk = match rpc.get_utxo_scriptpubkey(seal.txid, seal.vout).await {
+            // mempool.space expects display format txid (reversed bytes), but seal.txid is internal byte order
+            let mut display_txid = seal.txid;
+            display_txid.reverse(); // Convert internal to display byte order for RPC
+            log::info!("Fetching scriptPubKey for INPUT UTXO: txid={}, vout={}", hex::encode(display_txid), seal.vout);
+            let _onchain_spk = match rpc.get_utxo_scriptpubkey(display_txid, seal.vout).await {
                 Ok(Some(spk)) => {
                     log::info!("Successfully fetched scriptPubKey for INPUT UTXO");
                     Some(spk)

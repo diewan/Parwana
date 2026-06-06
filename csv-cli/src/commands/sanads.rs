@@ -262,16 +262,10 @@ async fn cmd_create(
         account,
         index,
         utxos: bitcoin_utxos.clone().unwrap_or_default().into_iter().map(|(txid, vout, value, scriptpubkey_hex): (String, u32, u64, Option<String>)| {
-            // Convert display format txid to internal byte order for Bitcoin adapter
-            // mempool.space returns display format (reversed bytes), but adapter expects internal order
-            let txid_bytes = hex::decode(&txid).unwrap_or_default();
-            let mut internal_txid = [0u8; 32];
-            if txid_bytes.len() == 32 {
-                internal_txid.copy_from_slice(&txid_bytes);
-                internal_txid.reverse(); // Convert display to internal byte order
-            }
+            // Pass txid as-is from blockchain scan (display format)
+            // Bitcoin adapter's from_config loads UTXOs in display format
             csv_sdk::config::UtxoConfig {
-                txid: hex::encode(internal_txid),
+                txid: txid.clone(),
                 vout,
                 value,
                 account,
@@ -287,22 +281,10 @@ async fn cmd_create(
     };
     sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
 
-    // Build CSV client with the requested chain enabled
-    eprintln!("CLI LAYER: Building client with SDK config RPC URL: {}", sdk_config.chains.get(chain.as_str()).map(|c| &c.rpc.url).unwrap_or(&"N/A".to_string()));
-    let client = CsvClient::builder()
-        .with_chain(core_chain.clone())
-        .with_config(sdk_config)
-        .with_store_backend(StoreBackend::InMemory)
-        .build()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
-
-    // Initialize chain adapters for the configured network
-    let network_type = match config.chain(&chain)?.network {
-        Network::Test => csv_sdk::client::NetworkType::Testnet,
-        Network::Main => csv_sdk::client::NetworkType::Mainnet,
-        Network::Dev => csv_sdk::client::NetworkType::Testnet, // Dev uses testnet
-    };
+    // Extract UTXOs from SDK config before building client (config is moved)
+    let sdk_utxos = sdk_config.chains.get(chain.as_str())
+        .and_then(|c| Some(c.utxos.clone()))
+        .unwrap_or_default();
 
     // Derive private key from wallet mnemonic for chains that require signing
     let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
@@ -343,6 +325,17 @@ async fn cmd_create(
     let mut private_keys = std::collections::HashMap::new();
     private_keys.insert(chain.as_str().to_string(), Some(key_hex));
 
+    // Build CSV client with the requested chain enabled
+    eprintln!("CLI LAYER: Building client with SDK config RPC URL: {}", sdk_config.chains.get(chain.as_str()).map(|c| &c.rpc.url).unwrap_or(&"N/A".to_string()));
+    let client = CsvClient::builder()
+        .with_chain(core_chain.clone())
+        .with_config(sdk_config)
+        .with_private_keys(private_keys)
+        .with_store_backend(StoreBackend::InMemory)
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
+
     // Note: SDK adapters are automatically created via bitcoin_from_config during client build
     // Do NOT call init_adapters here as it has been removed from SDK
 
@@ -366,13 +359,13 @@ async fn cmd_create(
     // We need to track both the seal and the anchor since we publish during UTXO selection
     let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" {
         output::info("BITCOIN: Selecting UTXO for seal creation");
-        
+
+        // Use pre-extracted SDK config utxos (display format from blockchain scan)
+        // Bitcoin adapter's from_config loads these into wallet in display format
+
         // Sort UTXOs by value descending to try largest first
-        let mut sorted_utxos: Vec<_> = bitcoin_utxos.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No UTXOs available. Run 'csv wallet scan --chain bitcoin' first."))?
-            .iter()
-            .collect();
-        sorted_utxos.sort_by_key(|u| std::cmp::Reverse(u.2)); // Sort by value (index 2) descending
+        let mut sorted_utxos: Vec<_> = sdk_utxos.iter().collect();
+        sorted_utxos.sort_by_key(|u| std::cmp::Reverse(u.value));
 
         let mut last_error = None;
         let mut successful_seal = None;
@@ -382,47 +375,49 @@ async fn cmd_create(
         // Try UTXOs in order until one succeeds
         for (attempt, selected_utxo) in sorted_utxos.iter().enumerate() {
             output::info(&format!("Attempt {}/{}: Using UTXO {}:{} ({} sats) for seal",
-                attempt + 1, sorted_utxos.len(), &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
+                attempt + 1, sorted_utxos.len(), &selected_utxo.txid[..16], selected_utxo.vout, selected_utxo.value));
 
-            // Convert txid from display format to internal byte order
-            // mempool.space returns display format (reversed bytes), but seal protocol expects internal order
-            let txid_bytes = hex::decode(&selected_utxo.0)
+            // Convert display format txid to internal byte order for seal
+            // SDK config has display format, but Bitcoin adapter reverses when loading into wallet
+            let txid_bytes = hex::decode(&selected_utxo.txid)
                 .map_err(|e| anyhow::anyhow!("Invalid txid: {}", e))?;
             if txid_bytes.len() != 32 {
                 return Err(anyhow::anyhow!("Invalid txid length"));
             }
+            eprintln!("DEBUG: SDK config txid (display): {}", hex::encode(&txid_bytes));
             let mut txid_array = [0u8; 32];
             txid_array.copy_from_slice(&txid_bytes);
             txid_array.reverse(); // Convert display to internal byte order
+            eprintln!("DEBUG: Seal txid (internal): {}", hex::encode(&txid_array));
 
             // Create a seal from the UTXO
             let mut id_bytes = Vec::with_capacity(36);
             id_bytes.extend_from_slice(&txid_array);
-            id_bytes.extend_from_slice(&selected_utxo.1.to_le_bytes());
+            id_bytes.extend_from_slice(&selected_utxo.vout.to_le_bytes());
 
             let seal = csv_hash::seal::SealPoint {
                 id: id_bytes,
-                nonce: Some(selected_utxo.2),
+                nonce: Some(selected_utxo.value),
                 version: None,
             };
 
             // Try to publish with this UTXO
             match runtime.publish_seal(core_chain.clone(), seal.clone(), commitment).await {
                 Ok(anchor) => {
-                    output::info(&format!("Successfully published using UTXO {}:{} ({} sats)", 
-                        &selected_utxo.0[..16], selected_utxo.1, selected_utxo.2));
+                    output::info(&format!("Successfully published using UTXO {}:{} ({} sats)",
+                        &selected_utxo.txid[..16], selected_utxo.vout, selected_utxo.value));
                     successful_seal = Some(seal);
-                    successful_utxo_ref = Some((selected_utxo.0.clone(), selected_utxo.1));
+                    successful_utxo_ref = Some((selected_utxo.txid.clone(), selected_utxo.vout));
                     successful_anchor = Some(anchor);
                     break;
                 }
                 Err(e) => {
                     let error_str = e.to_string();
-                    output::warning(&format!("Failed to publish with UTXO {}:{}: {}", 
-                        &selected_utxo.0[..16], selected_utxo.1, error_str));
-                    
+                    output::warning(&format!("Failed to publish with UTXO {}:{}: {}",
+                        &selected_utxo.txid[..16], selected_utxo.vout, error_str));
+
                     // Check if this is a "missing or spent" error - if so, try next UTXO
-                    if error_str.contains("bad-txns-inputs-missingorspent") || 
+                    if error_str.contains("bad-txns-inputs-missingorspent") ||
                        error_str.contains("already spent") ||
                        error_str.contains("missing") {
                         output::info("UTXO appears to be spent or missing, trying next UTXO...");
@@ -520,12 +515,8 @@ async fn cmd_create(
                 let output_index = u32::from_le_bytes(
                     anchor.metadata[..4].try_into().unwrap_or([0, 0, 0, 0])
                 );
-                if let Err(e) = client.register_sanad_seal("bitcoin", sanad_id_bytes, anchor.anchor_id.clone(), output_index) {
-                    log::warn!("Failed to register sanad seal on adapter: {}", e);
-                } else {
-                    log::info!("Registered sanad seal on adapter: sanad_id={}, txid={}, vout={}", 
-                        sanad_id_hex, anchor_txid_hex, output_index);
-                }
+                // Note: SDK runtime automatically registers sanad seals during publish_seal
+                // Manual registration is no longer needed and causes "adapter not found" warnings
 
                 // Persist the mapping to state for cross-run lookups
                 state.storage.wallet.sanad_seals.push(csv_store::state::wallet::SanadSealRecord {

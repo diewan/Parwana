@@ -54,6 +54,7 @@ struct BuilderState {
     wallet: Option<Wallet>,
     store_backend: Option<StoreBackend>,
     config: Option<Config>,
+    private_keys: Option<std::collections::HashMap<String, Option<String>>>,
     #[cfg(feature = "runtime-coordinator")]
     enable_runtime_coordinator: bool,
 }
@@ -152,6 +153,31 @@ impl ClientBuilder {
         self
     }
 
+    /// Set private keys for chain adapters.
+    ///
+    /// This is required for chains that need to sign transactions (e.g., Bitcoin).
+    /// The keys are passed as a HashMap mapping chain names to optional hex-encoded private keys/seeds.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use csv_sdk::prelude::*;
+    /// use std::collections::HashMap;
+    ///
+    /// let mut keys = HashMap::new();
+    /// keys.insert("bitcoin".to_string(), Some("64-byte-hex-seed".to_string()));
+    ///
+    /// let client = CsvClient::builder()
+    ///     .with_chain("bitcoin")
+    ///     .with_private_keys(keys)
+    ///     .build()?;
+    /// # Ok::<_, csv_sdk::CsvError>(())
+    /// ```
+    pub fn with_private_keys(mut self, keys: std::collections::HashMap<String, Option<String>>) -> Self {
+        self.state.private_keys = Some(keys);
+        self
+    }
+
     /// Enable the runtime coordinator for cross-chain transfer execution.
     ///
     /// When enabled, the client will initialize a full TransferCoordinator with
@@ -211,8 +237,9 @@ impl ClientBuilder {
             config: config.clone(),
             event_tx: event_tx.clone(),
             chain_runtime: None,
+            private_keys: self.state.private_keys.clone(),
         });
-        let chain_runtime = crate::runtime::ChainRuntime::new(client_ref);
+        let chain_runtime = crate::runtime::ChainRuntime::new(client_ref.clone());
 
         // Create adapter registry for cross-chain transfers
         let adapter_registry = Arc::new(std::sync::Mutex::new(AdapterRegistryImpl::new()));
@@ -259,14 +286,20 @@ impl ClientBuilder {
         };
 
         for chain in &self.state.enabled_chains {
-            if let Some(backend) = crate::client::CsvClient::build_adapter_for_chain(
+            if let Some(result) = crate::client::CsvClient::build_adapter_for_chain(
                 chain.clone(),
                 &config,
                 network_type,
-                None,
+                self.state.private_keys.clone(),
             ).await? {
-                chain_runtime.register_adapter(chain.clone(), backend).await;
-                log::info!("Automatically initialized adapter for chain: {:?}", chain);
+                chain_runtime.register_adapter(chain.clone(), result.chain_backend.clone()).await;
+                log::info!("Automatically initialized ChainBackend for chain: {:?}", chain);
+                
+                // Register ChainAdapter in adapter_registry for TransferCoordinator
+                if let Some(chain_adapter) = result.chain_adapter {
+                    adapter_registry.lock().unwrap_or_else(|e| e.into_inner()).register_adapter(chain_adapter);
+                    log::info!("Automatically registered ChainAdapter for chain: {:?}", chain);
+                }
             }
         }
 
@@ -278,6 +311,7 @@ impl ClientBuilder {
             event_tx,
             chain_runtime,
             adapter_registry,
+            private_keys: self.state.private_keys,
             #[cfg(feature = "runtime-coordinator")]
             transfer_coordinator,
         })
