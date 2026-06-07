@@ -1022,7 +1022,8 @@ impl CsvClient {
                 let chain_config = _config.chains.get("solana");
                 
                 let program_id = chain_config
-                    .and_then(|chain| chain.contract_address.as_deref())
+                    .and_then(|chain| chain.program_id.as_deref())
+                    .or_else(|| chain_config.and_then(|chain| chain.contract_address.as_deref()))
                     .ok_or_else(|| {
                         CsvError::ConfigError(
                             "Solana CSV program ID must be configured".to_string(),

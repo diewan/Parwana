@@ -58,6 +58,11 @@ pub trait AptosTransactionReader: Send + Sync + 'static {
         &self,
         version: u64,
     ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>;
+
+    fn get_transaction_by_hash<'a>(
+        &'a self,
+        hash: &'a str,
+    ) -> BoxFuture<'a, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>;
 }
 
 /// Aptos event read capability.
@@ -440,6 +445,14 @@ impl AptosTransactionReader for MockAptosRpc {
             .get(&version)
             .cloned();
         Box::pin(async move { Ok(result) })
+    }
+
+    fn get_transaction_by_hash(
+        &self,
+        _hash: &str,
+    ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
+    {
+        Box::pin(async move { Ok(None) })
     }
 }
 

@@ -2703,6 +2703,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bs58",
  "csv-adapter-core",
  "csv-aptos",
  "csv-bitcoin",
@@ -2711,6 +2712,7 @@ dependencies = [
  "csv-protocol",
  "csv-solana",
  "csv-sui",
+ "ed25519-dalek",
  "hex",
  "log",
  "serde",

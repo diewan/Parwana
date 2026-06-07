@@ -189,13 +189,23 @@ impl ChainQuery for AptosBackend {
     }
 
     async fn get_transaction(&self, hash: &str) -> ChainOpResult<TransactionInfo> {
-        let version = self.parse_version(hash)?;
+        // Try parsing as version first (numeric), then fall back to hash lookup
+        if let Ok(version) = self.parse_version(hash) {
+            let tx = self
+                .rpc()
+                .get_transaction(version)
+                .await
+                .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?
+                .ok_or_else(|| ChainOpError::RpcError("Transaction not found".to_string()))?;
+            return Ok(self.tx_to_info(&tx));
+        }
 
+        // Fall back to hash-based lookup
         let tx = self
             .rpc()
-            .get_transaction(version)
+            .get_transaction_by_hash(hash)
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction by hash: {}", e)))?
             .ok_or_else(|| ChainOpError::RpcError("Transaction not found".to_string()))?;
 
         Ok(self.tx_to_info(&tx))
@@ -668,7 +678,7 @@ impl ChainSanadOps for AptosBackend {
             .await
             .map_err(|e| ChainOpError::TransactionError(format!("Failed to create seal: {}", e)))?;
 
-        log::info!("APTOS: Creating sanad with seal at {}", format_address(seal.account_address));
+        log::debug!("APTOS: Creating sanad with seal at {}", format_address(seal.account_address));
 
         #[cfg(feature = "rpc")]
         {
@@ -677,14 +687,14 @@ impl ChainSanadOps for AptosBackend {
                 .await
                 .map_err(|e| ChainOpError::TransactionError(format!("Failed to build transaction: {}", e)))?;
 
-            log::info!("APTOS: Built and signed create_sanad transaction");
+            log::debug!("APTOS: Built and signed create_sanad transaction");
 
             let tx_hash = self.rpc
                 .submit_signed_transaction(_signed_tx)
                 .await
                 .map_err(|e| ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e)))?;
 
-            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
         }
 
         #[cfg(not(feature = "rpc"))]
@@ -727,7 +737,7 @@ impl ChainSanadOps for AptosBackend {
             // The sanad_id is the commitment hash
             let commitment = *sanad_id.as_bytes();
 
-            log::info!("APTOS: Consuming sanad with commitment: {}", hex::encode(commitment));
+            log::debug!("APTOS: Consuming sanad with commitment: {}", hex::encode(commitment));
 
             // Create a seal point - for consume, the seal is at the signer's address
             // The actual address will be derived from the signing key in build_and_sign_entry_function
@@ -749,10 +759,10 @@ impl ChainSanadOps for AptosBackend {
                     ))
                 })?;
 
-            log::info!("APTOS: Built and signed consume_seal transaction");
+            log::debug!("APTOS: Built and signed consume_seal transaction");
 
             // Submit the signed transaction via RPC
-            log::info!("APTOS: Submitting consume_seal transaction");
+            log::debug!("APTOS: Submitting consume_seal transaction");
             let tx_hash = self
                 .rpc
                 .submit_signed_transaction(signed_tx)
@@ -761,10 +771,10 @@ impl ChainSanadOps for AptosBackend {
                     ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
                 })?;
 
-            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
 
             // Wait for transaction confirmation
-            log::info!("APTOS: Waiting for transaction confirmation");
+            log::debug!("APTOS: Waiting for transaction confirmation");
             let tx = match self.rpc.wait_for_transaction(tx_hash).await {
                 Ok(tx) => tx,
                 Err(e) => {
@@ -785,7 +795,7 @@ impl ChainSanadOps for AptosBackend {
                 )));
             }
 
-            log::info!("APTOS: Transaction confirmed successfully");
+            log::debug!("APTOS: Transaction confirmed successfully");
 
             Ok(SanadOperationResult {
                 sanad_id: sanad_id.clone(),
@@ -843,8 +853,8 @@ impl ChainSanadOps for AptosBackend {
             // The sanad_id is the commitment hash
             let commitment = *sanad_id.as_bytes();
 
-            log::info!("APTOS: Locking sanad with commitment: {}", hex::encode(commitment));
-            log::info!("APTOS: Destination chain: {}", destination_chain);
+            log::debug!("APTOS: Locking sanad with commitment: {}", hex::encode(commitment));
+            log::debug!("APTOS: Destination chain: {}", destination_chain);
 
             // Query the seal resource from on-chain instead of using in-memory registry
             // The seal was created via CLI and may not be in the in-memory registry
@@ -902,10 +912,10 @@ impl ChainSanadOps for AptosBackend {
                     ))
                 })?;
 
-            log::info!("APTOS: Built and signed lock_sanad transaction");
+            log::debug!("APTOS: Built and signed lock_sanad transaction");
 
             // Submit the signed transaction via RPC
-            log::info!("APTOS: Submitting lock_sanad transaction");
+            log::debug!("APTOS: Submitting lock_sanad transaction");
             let tx_hash = self
                 .rpc
                 .submit_signed_transaction(signed_tx)
@@ -914,10 +924,10 @@ impl ChainSanadOps for AptosBackend {
                     ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
                 })?;
 
-            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
 
             // Wait for transaction confirmation
-            log::info!("APTOS: Waiting for transaction confirmation");
+            log::debug!("APTOS: Waiting for transaction confirmation");
             let tx = match self.rpc.wait_for_transaction(tx_hash).await {
                 Ok(tx) => tx,
                 Err(e) => {
@@ -936,7 +946,7 @@ impl ChainSanadOps for AptosBackend {
                 )));
             }
 
-            log::info!("APTOS: Transaction confirmed successfully");
+            log::debug!("APTOS: Transaction confirmed successfully");
 
             Ok(SanadOperationResult {
                 sanad_id: sanad_id.clone(),
@@ -1005,21 +1015,21 @@ impl ChainSanadOps for AptosBackend {
                 ));
             }
 
-            log::info!("APTOS: Minting sanad from source chain: {}", source_chain);
-            log::info!("APTOS: Source sanad ID: {}", hex::encode(source_sanad_id.as_bytes()));
+            log::debug!("APTOS: Minting sanad from source chain: {}", source_chain);
+            log::debug!("APTOS: Source sanad ID: {}", hex::encode(source_sanad_id.as_bytes()));
 
             // Find the seal resource for this sanad from active seals, or create one if none exist
             let seal = if let Some(seal) = self.seal_protocol.get_active_seals().into_iter().last() {
                 seal
             } else {
                 // Auto-create a seal if none exist
-                log::info!("APTOS: No active seals found, creating a new seal");
+                log::debug!("APTOS: No active seals found, creating a new seal");
                 let seal = self.seal_protocol.create_seal(None).await
                     .map_err(|e| ChainOpError::TransactionError(format!("Failed to create seal: {}", e)))?;
 
                 // Wait a moment for the seal creation transaction to be processed
                 // This avoids SEQUENCE_NUMBER_TOO_OLD errors by allowing the sequence number to increment
-                log::info!("APTOS: Waiting for seal creation to be processed...");
+                log::debug!("APTOS: Waiting for seal creation to be processed...");
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                 seal
@@ -1043,10 +1053,10 @@ impl ChainSanadOps for AptosBackend {
                     ))
                 })?;
 
-            log::info!("APTOS: Built and signed mint_sanad transaction");
+            log::debug!("APTOS: Built and signed mint_sanad transaction");
 
             // Submit the signed transaction via RPC
-            log::info!("APTOS: Submitting mint_sanad transaction");
+            log::debug!("APTOS: Submitting mint_sanad transaction");
             let tx_hash = self
                 .rpc
                 .submit_signed_transaction(signed_tx)
@@ -1055,10 +1065,10 @@ impl ChainSanadOps for AptosBackend {
                     ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
                 })?;
 
-            log::info!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
 
             // Wait for transaction confirmation
-            log::info!("APTOS: Waiting for transaction confirmation");
+            log::debug!("APTOS: Waiting for transaction confirmation");
             let tx = match self.rpc.wait_for_transaction(tx_hash).await {
                 Ok(tx) => tx,
                 Err(e) => {
@@ -1077,7 +1087,7 @@ impl ChainSanadOps for AptosBackend {
                 )));
             }
 
-            log::info!("APTOS: Transaction confirmed successfully");
+            log::debug!("APTOS: Transaction confirmed successfully");
 
             Ok(SanadOperationResult {
                 sanad_id: source_sanad_id.clone(),

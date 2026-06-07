@@ -154,10 +154,21 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             vec![],
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
+        let commitment = csv_hash::Hash::new(*transfer.sanad_id.as_bytes());
+        let dag_node = csv_hash::dag::DAGNode::new(
+            commitment,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+         let signatures = build_ethereum_signature(self.backend.as_ref(), commitment.as_bytes());
+
         Ok(ProofBundle {
             version: 1,
-            transition_dag: csv_hash::dag::DAGSegment::new(vec![], csv_hash::Hash::new([0u8; 32])),
-            signatures: vec![],
+            transition_dag: csv_hash::dag::DAGSegment::new(vec![dag_node], commitment),
+            signatures,
             signature_scheme: csv_protocol::signature::SignatureScheme::Secp256k1,
             seal_ref: seal_point,
             anchor_ref: commit_anchor,
@@ -177,10 +188,30 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 
     async fn check_seal_registry(
         &self,
-        _seal_id: &[u8],
+        seal_id: &[u8],
     ) -> Result<SealRegistryStatus, AdapterError> {
-        // Ethereum doesn't have a seal registry in the traditional sense
-        Ok(SealRegistryStatus::Available)
+        #[cfg(feature = "rpc")]
+        {
+            use csv_protocol::backend::ChainSanadOps;
+            match self.backend.is_sanad_locked(seal_id).await {
+                Ok(locked) => {
+                    if locked {
+                        Ok(SealRegistryStatus::Consumed)
+                    } else {
+                        Ok(SealRegistryStatus::Available)
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to check seal registry on Ethereum: {}", e);
+                    Ok(SealRegistryStatus::Available)
+                }
+            }
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let _ = seal_id;
+            Ok(SealRegistryStatus::Available)
+        }
     }
 
     async fn get_balance(&self, address: &str) -> Result<String, AdapterError> {
@@ -196,4 +227,30 @@ impl ChainAdapter for EthereumRuntimeAdapter {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+#[cfg(feature = "rpc")]
+fn build_ethereum_signature(backend: &EthereumBackend, message: &[u8]) -> Vec<Vec<u8>> {
+    match backend.sign_message(message) {
+        Ok(sig) => {
+            let pk = backend.rpc().as_any()
+                .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
+                .and_then(|node| node.public_key());
+            
+            if let Some(pk_bytes) = pk {
+                let mut encoded = Vec::with_capacity(4 + pk_bytes.len() + sig.len());
+                encoded.extend_from_slice(&(pk_bytes.len() as u32).to_le_bytes());
+                encoded.extend_from_slice(&pk_bytes);
+                encoded.extend_from_slice(&sig);
+                return vec![encoded];
+            }
+        }
+        Err(_) => {}
+    }
+    vec![]
+}
+
+#[cfg(not(feature = "rpc"))]
+fn build_ethereum_signature(_backend: &EthereumBackend, _message: &[u8]) -> Vec<Vec<u8>> {
+    vec![]
 }

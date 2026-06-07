@@ -5,3 +5,6 @@
 
 #[cfg(feature = "rpc")]
 pub mod csv_seal;
+
+#[cfg(feature = "rpc")]
+pub mod csv_lock;

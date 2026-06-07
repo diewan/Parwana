@@ -271,13 +271,23 @@ impl AptosNode {
             Self::required_field(guid, "creation_number")?,
             "guid.creation_number",
         )?;
-        let key = Self::required_field(guid, "id")?
-            .get("creation_num")
+        // guid.id.creation_num is optional in some API responses
+        let key = guid
+            .get("id")
+            .and_then(|v| v.get("creation_num"))
             .and_then(Value::as_str)
-            .ok_or_else(|| Self::missing_field("guid.id.creation_num"))?
+            .unwrap_or(&event_sequence_number.to_string())
             .to_string();
-        let data = serde_json::to_vec(Self::required_field(value, "data")?)?;
-        let transaction_version = Self::required_u64(value, "version")?;
+        let data = if let Some(d) = value.get("data") {
+            serde_json::to_vec(d)?
+        } else {
+            vec![]
+        };
+        let transaction_version = if let Some(v) = value.get("version") {
+            Self::parse_u64(v, "version").unwrap_or(0)
+        } else {
+            0
+        };
 
         Ok(AptosEvent {
             event_sequence_number,
@@ -509,15 +519,15 @@ impl AptosTransactionReader for AptosNode {
                             // Try to parse the transaction
                             match Self::parse_transaction(&result) {
                                 Ok(tx) => {
-                                    log::info!("Transaction parsed - success: {}, vm_status: {}", tx.success, tx.vm_status);
-                                    // Only return success if the transaction has a valid success field
-                                    // If success is false but vm_status is "unknown", it means the transaction is still pending
-                                    if tx.success || (tx.vm_status != "unknown" && tx.success) {
-                                        log::info!("Transaction confirmed successfully: {}", hash_hex);
+                                    log::debug!("Transaction parsed - success: {}, vm_status: {}", tx.success, tx.vm_status);
+                                    // Transaction confirmed
+                                    if tx.success {
+                                        log::debug!("Transaction confirmed successfully: {}", hash_hex);
                                         return Ok(tx);
-                                    } else if tx.vm_status == "unknown" && !tx.success {
-                                        // Transaction is still pending, continue waiting
-                                        log::debug!("Transaction still pending (success=false, vm_status=unknown), continuing to wait");
+                                    }
+                                    // Pending states: "unknown" (pre-execution) or "pending" (being processed)
+                                    if tx.vm_status == "unknown" || tx.vm_status == "pending" {
+                                        log::debug!("Transaction still pending (vm_status={}), continuing to wait", tx.vm_status);
                                     } else {
                                         return Err(format!("Transaction failed: {}", tx.vm_status).into());
                                     }
@@ -584,6 +594,27 @@ impl AptosTransactionReader for AptosNode {
     ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
     {
         Box::pin(async move { self.get_transaction(version).await })
+    }
+
+     fn get_transaction_by_hash<'a>(
+        &'a self,
+        hash: &'a str,
+    ) -> BoxFuture<'a, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
+    {
+        Box::pin(async move {
+            let hash_hex = if hash.starts_with("0x") {
+                hash.to_string()
+            } else {
+                format!("0x{}", hash)
+            };
+            let result = self
+                .get(&format!("/transactions/by_hash/{}", hash_hex))
+                .await?;
+            if result.get("hash").is_none() {
+                return Ok(None);
+            }
+            Ok(Some(Self::parse_transaction(&result)?))
+        })
     }
 }
 
@@ -668,12 +699,12 @@ impl AptosTransactionSubmitter for AptosNode {
         signed_tx_json: serde_json::Value,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
-            log::info!("AptosNode: Submitting transaction to /transactions endpoint");
+            log::debug!("AptosNode: Submitting transaction to /transactions endpoint");
             log::debug!("AptosNode: Transaction payload: {}", serde_json::to_string_pretty(&signed_tx_json).unwrap_or_else(|_| "failed to serialize".to_string()));
             let result = self.post("/transactions", &signed_tx_json).await?;
-            log::info!("AptosNode: Received response: {}", serde_json::to_string_pretty(&result).unwrap_or_else(|_| "failed to serialize".to_string()));
+            log::debug!("AptosNode: Received response: {}", serde_json::to_string_pretty(&result).unwrap_or_else(|_| "failed to serialize".to_string()));
             if let Some(hash_hex) = result.get("hash").and_then(|h| h.as_str()) {
-                log::info!("AptosNode: Transaction submitted successfully, hash: {}", hash_hex);
+                log::debug!("AptosNode: Transaction submitted successfully, hash: {}", hash_hex);
                 Ok(Self::parse_hex_bytes("hash", hash_hex)?)
             } else if let Some(error) = result.get("error_code") {
                 log::error!("AptosNode: Transaction submission failed: {} - {:?}", error, result.get("message"));
@@ -763,12 +794,13 @@ mod tests {
             "gas_used": "1",
             "cumulative_gas_used": "1",
             "event_root_hash": hex32(3),
+            "state_change_hash": "0x1234", // too short (should be 32 bytes)
             "events": [],
             "payload": {}
         });
 
         let err = AptosNode::parse_transaction(&tx).unwrap_err();
-        assert!(err.to_string().contains("state_change_hash"));
+        assert!(err.to_string().contains("must be 32 bytes"));
     }
 
     #[test]

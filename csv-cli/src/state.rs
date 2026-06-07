@@ -151,6 +151,16 @@ impl UnifiedStateManager {
         }
     }
 
+    /// Update a Sanad's status
+    pub fn update_sanad_status(&mut self, id: &str, status: SanadStatus) -> anyhow::Result<()> {
+        if let Some(sanad) = self.storage.sanads.iter_mut().find(|r| r.id == id) {
+            sanad.status = status;
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Sanad {} not found", id))
+        }
+    }
+
     // --- Transfer Management ---
 
     /// Add a transfer to tracking

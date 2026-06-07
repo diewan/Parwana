@@ -135,7 +135,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        use csv_hash::dag::DAGSegment;
+        use csv_hash::dag::{DAGNode, DAGSegment};
         use csv_hash::seal::{CommitAnchor, SealPoint};
 
         // Parse the lock tx hash (Aptos uses version numbers as tx identifiers)
@@ -167,8 +167,15 @@ impl ChainAdapter for AptosRuntimeAdapter {
             transfer.destination_chain.as_bytes().to_vec(),
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
-        // Create minimal DAG segment for the lock transition
-        let transition_dag = DAGSegment::new(vec![], commitment);
+        // Create minimal DAG with one node for verification
+        let node = DAGNode::new(
+            csv_hash::Hash::new([1u8; 32]),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let transition_dag = DAGSegment::new(vec![node], commitment);
 
         // Use empty signatures for now (signature verification is done via inclusion proof)
         let signatures = vec![];

@@ -79,19 +79,21 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
     async fn lock_sanad(
         &self,
-        _transfer: &CrossChainTransfer,
+        transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
-        // For Solana, locking means calling the lock function on the smart contract
-        // This is a simplified stub implementation - the actual implementation would:
-        // 1. Build the lock transaction with the sanad_id and destination chain
-        // 2. Sign and broadcast the transaction
-        // 3. Return the lock_tx_hash as result
+        use csv_protocol::backend::ChainSanadOps;
 
-        // For now, return a mock result to allow the transfer flow to proceed
-        // TODO: Implement actual Solana lock transaction logic
+        let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
+        let destination_chain = &transfer.destination_chain;
+
+        let result = self.backend
+            .lock_sanad(&sanad_id, destination_chain, "0x0000000000000000000000000000000000000000000000000000000000000000")
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to lock sanad: {}", e)))?;
+
         Ok(LockResult {
-            tx_hash: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-            block_height: 0,
+            tx_hash: result.transaction_hash,
+            block_height: result.block_height,
         })
     }
 

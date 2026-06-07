@@ -20,12 +20,14 @@ tracing = "0.1"
 thiserror = "1.0"
 hex = "0.4"
 log = "0.4"
+ed25519-dalek = { version = "2.0", features = ["rand_core"], optional = true }
+bs58 = { version = "0.5", optional = true }
 
 [features]
 bitcoin = ["csv-bitcoin"]
 ethereum = ["csv-ethereum"]
-solana = ["csv-solana"]
-sui = ["csv-sui"]
+solana = ["csv-solana", "ed25519-dalek", "bs58"]
+sui = ["csv-sui", "ed25519-dalek"]
 aptos = ["csv-aptos"]
 default = []
 

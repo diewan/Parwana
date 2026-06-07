@@ -65,10 +65,26 @@ pub trait EthereumRpc: Send + Sync {
         address: [u8; 20],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Get transaction count (nonce) for an address at "pending" block tag
+    async fn get_transaction_count_pending(
+        &self,
+        address: [u8; 20],
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        // Default implementation falls back to latest block
+        self.get_transaction_count(address).await
+    }
+
     /// Get code at an address
     async fn get_code(
         &self,
         address: [u8; 20],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Execute a read-only call against the EVM (eth_call)
+    async fn eth_call(
+        &self,
+        call: serde_json::Value,
+        block: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Downcast to `Any` for feature-gated real implementations.
@@ -401,6 +417,15 @@ impl EthereumRpc for MockEthereumRpc {
         _address: [u8; 20],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(vec![]) // Mock empty code (EOA)
+    }
+
+    async fn eth_call(
+        &self,
+        _call: serde_json::Value,
+        _block: &str,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        // Return empty response (sanad not locked) for mock
+        Ok(vec![0u8; 64])
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {

@@ -100,6 +100,27 @@ mod real_rpc_impl {
             self.signer.as_ref()
         }
 
+        /// Get the compressed public key (33 bytes) for the configured signer
+        pub fn public_key(&self) -> Option<[u8; 33]> {
+            use secp256k1::{Secp256k1, SecretKey, PublicKey};
+            
+            self.signer.as_ref().map(|s| {
+                // Get the secret key bytes from the signer
+                let secret_key_bytes = s.credential().to_bytes();
+                let secret_key = SecretKey::from_slice(&secret_key_bytes)
+                    .expect("valid 32-byte secret key");
+                
+                let secp = Secp256k1::new();
+                let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+                
+                // serialize() returns 33 bytes (compressed format)
+                let pk_bytes = public_key.serialize();
+                let mut compressed = [0u8; 33];
+                compressed.copy_from_slice(&pk_bytes);
+                compressed
+            })
+        }
+
         /// Set the signer private key for transaction signing
         pub fn with_signer(mut self, private_key_hex: &str) -> Result<Self, AlloyRpcError> {
             let bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
@@ -585,6 +606,21 @@ mod real_rpc_impl {
             Ok(count)
         }
 
+        async fn get_transaction_count_pending(
+            &self,
+            address: [u8; 20],
+        ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            let addr_hex = format!("0x{}", hex::encode(address));
+            let result = self
+                .rpc_call("eth_getTransactionCount", json!([addr_hex, "pending"]))
+                .await?;
+            let hex_str = result
+                .as_str()
+                .ok_or("Invalid transaction count response")?;
+            let count = parse_hex_u64(hex_str)?;
+            Ok(count)
+        }
+
         async fn get_code(
             &self,
             address: [u8; 20],
@@ -594,6 +630,18 @@ mod real_rpc_impl {
                 .rpc_call("eth_getCode", json!([addr_hex, "latest"]))
                 .await?;
             let hex_str = result.as_str().ok_or("Invalid code response")?;
+            Ok(parse_hex_bytes(hex_str))
+        }
+
+        async fn eth_call(
+            &self,
+            call: serde_json::Value,
+            block: &str,
+        ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+            let result = self
+                .rpc_call("eth_call", json!([call, block]))
+                .await?;
+            let hex_str = result.as_str().ok_or("Invalid eth_call response")?;
             Ok(parse_hex_bytes(hex_str))
         }
 

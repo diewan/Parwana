@@ -745,10 +745,23 @@ impl ChainSanadOps for SolanaBackend {
         &self,
         sanad_id: &SanadId,
         destination_chain: &str,
-        owner_key_id: &str,
+        _owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        // Parse the destination chain to ensure it's valid
-        let _destination = destination_chain
+        use csv_protocol::backend::SanadOperation;
+        use sha2::Digest;
+        use solana_sdk::instruction::AccountMeta;
+        use solana_sdk::instruction::Instruction;
+        use solana_sdk::message::Message;
+        use solana_sdk::signature::Signer;
+        use solana_sdk::transaction::Transaction;
+
+        let wallet = self.seal_protocol
+            .wallet()
+            .ok_or_else(|| ChainOpError::SigningError("No wallet configured for Solana".to_string()))?;
+
+        let owner_pubkey = wallet.pubkey();
+
+        let destination = destination_chain
             .parse::<csv_hash::chain_id::ChainId>()
             .map_err(|_| {
                 ChainOpError::InvalidInput(format!(
@@ -757,35 +770,83 @@ impl ChainSanadOps for SolanaBackend {
                 ))
             })?;
 
-        // Parse owner key for signing (expecting hex-encoded 32-byte keypair)
-        let key_bytes = hex::decode(owner_key_id)
-            .map_err(|_| ChainOpError::InvalidInput("Invalid owner key ID format".to_string()))?;
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|_| ChainOpError::InvalidInput("Invalid CSV program ID".to_string()))?;
 
-        if key_bytes.len() != 32 {
-            return Err(ChainOpError::InvalidInput(
-                "Owner key must be 32 bytes".to_string(),
-            ));
-        }
-        let _ = key_bytes;
-
-        // Get the most recent seal from active seals
-        let seal = self
-            .seal_protocol
-            .get_active_seals()
-            .into_iter()
-            .last()
+        let active_seals = self.seal_protocol.get_active_seals();
+        let seal = active_seals
+            .iter()
+            .find(|s| {
+                if let Some(seed) = &s.seed {
+                    seed.as_slice() == sanad_id.as_bytes()
+                } else {
+                    false
+                }
+            })
             .ok_or_else(|| {
                 ChainOpError::InvalidInput(format!(
-                    "No active seals found. Create a seal first for sanad: {}",
+                    "No active seal found for sanad_id {}. Create a sanad first.",
                     hex::encode(sanad_id.as_bytes())
                 ))
             })?;
-        Err(ChainOpError::CapabilityUnavailable(format!(
-            "Solana lock_sanad for {} to {} requires the typed Anchor csv-seal lock_sanad instruction; refusing to use a system-program placeholder for seal {}",
-            hex::encode(sanad_id.as_bytes()),
-            destination_chain,
-            seal.account,
-        )))
+
+        let lock_discriminator: [u8; 8] = {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(b"global:lock_sanad");
+            let hash = hasher.finalize();
+            hash.as_slice()[..8].try_into().unwrap()
+        };
+
+        let dest_chain_bytes = destination.as_bytes();
+        let mut instruction_data = Vec::with_capacity(8 + 32 + dest_chain_bytes.len());
+        instruction_data.extend_from_slice(&lock_discriminator);
+        instruction_data.extend_from_slice(sanad_id.as_bytes());
+        instruction_data.extend_from_slice(dest_chain_bytes);
+
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(seal.account, false),
+                AccountMeta::new_readonly(owner_pubkey, true),
+            ],
+            data: instruction_data,
+        };
+
+        let rpc = self.seal_protocol
+            .get_rpc()
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get RPC: {}", e)))?;
+
+        let recent_blockhash = rpc
+            .get_recent_blockhash()
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get recent blockhash: {}", e)))?;
+
+        let mut transaction = solana_sdk::transaction::Transaction::new_with_payer(
+            &[instruction],
+            Some(&owner_pubkey),
+        );
+        transaction.message.recent_blockhash = recent_blockhash;
+        transaction.sign(&[&wallet.keypair], recent_blockhash);
+
+        let sig = rpc
+            .send_transaction(&transaction)
+            .map_err(|e| ChainOpError::TransactionError(format!("Failed to send lock transaction: {}", e)))?;
+
+        let slot = rpc
+            .get_latest_slot()
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get slot: {}", e)))?;
+
+        Ok(SanadOperationResult {
+            sanad_id: sanad_id.clone(),
+            operation: SanadOperation::Lock,
+            transaction_hash: sig.to_string(),
+            block_height: slot,
+            chain_id: "solana".to_string(),
+            metadata: serde_json::json!({
+                "operation": "lock",
+                "destination_chain": destination_chain,
+                "seal_account": seal.account.to_string(),
+            }),
+        })
     }
 
     async fn mint_sanad(

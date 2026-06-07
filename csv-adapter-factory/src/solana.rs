@@ -10,7 +10,8 @@ use std::sync::Arc;
 use csv_solana::{
     ops::SolanaBackend,
     node::SolanaNode,
-    config::Network as SolanaNetwork,
+    config::{Network as SolanaNetwork, SolanaConfig},
+    seal_protocol::SolanaSealProtocol,
     runtime_adapter::SolanaRuntimeAdapter,
 };
 
@@ -40,11 +41,50 @@ impl AdapterFactory for SolanaFactory {
         // Create RPC client
         let rpc = Box::new(SolanaNode::new(&jsonrpc_endpoint.url));
 
-        // Create ChainBackend
-        let solana_backend = Arc::new(
-            SolanaBackend::new(rpc, network)
-        );
-        
+        // Build SolanaConfig with optional keypair from private_key
+        let sol_config = {
+            let mut cfg = SolanaConfig::for_network(network);
+            cfg.rpc_url = jsonrpc_endpoint.url.clone();
+            if let Some(program_id) = config.program_id {
+                cfg = cfg.with_csv_program_id(program_id);
+            }
+            if let Some(pk) = config.private_key {
+                let cleaned = pk.trim().trim_start_matches("0x");
+                if let Ok(key_bytes) = hex::decode(cleaned) {
+                    if key_bytes.len() == 32 {
+                        use ed25519_dalek::SigningKey;
+                        let key_array: [u8; 32] = key_bytes
+                            .try_into()
+                            .map_err(|_| {
+                                FactoryError::InvalidConfig(
+                                    "Invalid Solana private key length".to_string(),
+                                )
+                            })?;
+                        let signing_key = SigningKey::from_bytes(&key_array);
+                        let public_key = signing_key.verifying_key();
+                        let mut keypair_bytes = [0u8; 64];
+                        keypair_bytes[..32].copy_from_slice(&key_array);
+                        keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
+                        cfg = cfg.with_keypair(bs58::encode(keypair_bytes).into_string());
+                    }
+                }
+            }
+            cfg
+        };
+
+        // Create SolanaSealProtocol with wallet if keypair provided
+        let seal_protocol =
+            SolanaSealProtocol::from_config(sol_config, rpc).map_err(|e| {
+                FactoryError::InvalidConfig(format!("Solana config error: {}", e))
+            })?;
+
+        // Create ChainBackend from seal protocol
+        let solana_backend =
+            SolanaBackend::from_seal_protocol(Arc::new(seal_protocol)).map_err(|e| {
+                FactoryError::InvalidConfig(format!("Solana backend error: {}", e))
+            })?;
+        let solana_backend = Arc::new(solana_backend);
+
         let chain_backend: Arc<dyn ChainBackend> = solana_backend.clone();
 
         // Create ChainAdapter for TransferCoordinator using SolanaRuntimeAdapter

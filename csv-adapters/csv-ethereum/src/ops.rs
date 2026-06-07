@@ -224,7 +224,7 @@ impl EthereumBackend {
     }
 
     /// Get RPC client reference
-    fn rpc(&self) -> &dyn EthereumRpc {
+    pub fn rpc(&self) -> &dyn EthereumRpc {
         self.rpc.as_ref()
     }
 
@@ -232,6 +232,35 @@ impl EthereumBackend {
     fn keccak256(&self, input: &[u8]) -> [u8; 32] {
         use sha3::{Digest, Keccak256};
         Keccak256::digest(input).into()
+    }
+
+   /// Check if a sanad is locked on-chain by querying getLockInfo
+    #[cfg(feature = "rpc")]
+    pub async fn is_sanad_locked(&self, sanad_id: &[u8]) -> ChainOpResult<bool> {
+        let contract_addr = self.contract().map_err(|e| {
+            ChainOpError::RpcError(format!("Failed to get contract address: {}", e))
+        })?;
+
+        let sanad_id_bytes = alloy_primitives::FixedBytes::<32>::from_slice(sanad_id);
+        let calldata = crate::bindings::csv_lock::CsvLockClient::new(contract_addr.into())
+            .get_lock_info_call(sanad_id_bytes);
+
+        let encoded = hex::encode(calldata.abi_encode());
+
+        let result = self.rpc().eth_call(
+            serde_json::json!({
+                "to": format!("0x{}", hex::encode(contract_addr)),
+                "data": format!("0x{}", encoded)
+            }),
+            "latest",
+        ).await.map_err(|e| {
+            ChainOpError::RpcError(format!("Failed to call getLockInfo: {}", e))
+        })?;
+
+        // Decode the response: (bytes32 commitment, uint256 timestamp, uint8 destinationChain, bool refunded)
+        // If commitment is all zeros, the sanad is not locked
+        let commitment = &result[..64]; // First 32 bytes of commitment, but we need to check if it's all zeros
+        Ok(!commitment.iter().all(|&b| b == 0))
     }
 
     /// Build, sign, and send a transaction to a contract
@@ -263,12 +292,17 @@ impl EthereumBackend {
         let sender: Address = signer.address();
         let sender_bytes: [u8; 20] = sender.into();
 
-        // Get nonce
-        let nonce = self
-            .rpc()
-            .get_transaction_count(sender_bytes)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get nonce: {}", e)))?;
+        // Get nonce using "pending" to account for transactions in mempool
+        let nonce = match self.rpc().get_transaction_count_pending(sender_bytes).await {
+            Ok(nonce) => nonce,
+            Err(_) => {
+                // Fallback if pending method not available
+                self.rpc()
+                    .get_transaction_count(sender_bytes)
+                    .await
+                    .map_err(|e| ChainOpError::RpcError(format!("Failed to get nonce: {}", e)))?
+            }
+        };
 
         // Get gas price
         let gas_price = self
@@ -277,42 +311,60 @@ impl EthereumBackend {
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get gas price: {}", e)))?;
 
-        // Build EIP-1559 transaction
-        let tx = TxEip1559 {
-            chain_id: self.config.network.chain_id(),
-            nonce,
-            max_fee_per_gas: gas_price as u128,
-            max_priority_fee_per_gas: 1_000_000_000u128, // 1 Gwei priority fee
-            gas_limit: 500_000u64,
-            to: TxKind::Call(to.into()),
-            value: U256::ZERO,
-            input: Bytes::from(calldata.to_vec()),
-            access_list: Default::default(),
-        };
+        // Build EIP-1559 transaction with gas bumping retry logic
+        let max_retries = 3;
+        let mut current_max_fee = gas_price as u128;
+        let max_priority_fee = 1_000_000_000u128; // 1 Gwei priority fee
 
-        // Sign the transaction using SignableTransaction + SignerSync
-        let sig_hash = tx.signature_hash();
-        let signature = signer.sign_hash_sync(&sig_hash).map_err(|e| {
-            ChainOpError::SigningError(format!("Failed to sign transaction: {}", e))
-        })?;
+        for retry_count in 0..max_retries {
+            let tx = TxEip1559 {
+                chain_id: self.config.network.chain_id(),
+                nonce,
+                max_fee_per_gas: current_max_fee,
+                max_priority_fee_per_gas: max_priority_fee,
+                gas_limit: 500_000u64,
+                to: TxKind::Call(to.into()),
+                value: U256::ZERO,
+                input: Bytes::from(calldata.to_vec()),
+                access_list: Default::default(),
+            };
 
-        // Convert to signed transaction
-        let signed_tx = tx.into_signed(signature);
-
-        // Build the signed transaction envelope and encode using EIP-2718
-        let tx_envelope = TxEnvelope::Eip1559(signed_tx);
-        let tx_bytes = tx_envelope.encoded_2718();
-
-        // Send the raw transaction
-        let tx_hash = self
-            .rpc()
-            .send_raw_transaction(tx_bytes.to_vec())
-            .await
-            .map_err(|e| {
-                ChainOpError::TransactionError(format!("Failed to send transaction: {}", e))
+            // Sign the transaction
+            let sig_hash = tx.signature_hash();
+            let signature = signer.sign_hash_sync(&sig_hash).map_err(|e| {
+                ChainOpError::SigningError(format!("Failed to sign transaction: {}", e))
             })?;
 
-        Ok(tx_hash)
+            // Convert to signed transaction and encode
+            let signed_tx = tx.into_signed(signature);
+            let tx_envelope = TxEnvelope::Eip1559(signed_tx);
+            let tx_bytes = tx_envelope.encoded_2718();
+
+            // Send the raw transaction
+            match self.rpc().send_raw_transaction(tx_bytes.to_vec()).await {
+                Ok(tx_hash) => return Ok(tx_hash),
+                Err(e) => {
+                    let error_str = e.to_string();
+                    if error_str.contains("replacement transaction underpriced")
+                        || error_str.contains("underpriced")
+                        && retry_count < max_retries - 1
+                    {
+                        // Bump gas price by 10% and retry
+                        current_max_fee = (current_max_fee as u128).saturating_mul(110) / 100;
+                        continue;
+                    } else {
+                        return Err(ChainOpError::TransactionError(format!(
+                            "Failed to send transaction: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+
+        Err(ChainOpError::TransactionError(
+            "Failed to send transaction after retries".to_string(),
+        ))
     }
 
     /// Wait for a transaction receipt
@@ -1355,6 +1407,31 @@ fn parse_chain_id(chain_name: &str) -> ChainOpResult<u8> {
                     format!("Unknown chain: {}. Supported: bitcoin, ethereum, sui, aptos, solana, or numeric ID", chain_name)
                 ))
         }
+    }
+}
+
+#[cfg(feature = "rpc")]
+impl EthereumBackend {
+    pub fn sign_message(&self, message: &[u8]) -> ChainOpResult<Vec<u8>> {
+        use alloy::signers::SignerSync;
+
+        let signer = self
+            .rpc()
+            .as_any()
+            .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
+            .and_then(|node| node.signer())
+            .ok_or_else(|| {
+                ChainOpError::SigningError(
+                    "No signer configured - call with_signer() on the RPC client first".to_string(),
+                )
+            })?;
+
+        let hash = alloy_primitives::FixedBytes::<32>::from_slice(message);
+        let signature = signer.sign_hash_sync(&hash).map_err(|e| {
+            ChainOpError::SigningError(format!("Failed to sign message: {}", e))
+        })?;
+
+        Ok(signature.as_bytes().to_vec())
     }
 }
 

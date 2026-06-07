@@ -53,6 +53,9 @@ pub struct SanadRecord {
     /// Chain-anchored transaction hash (the on-chain txid where this Sanad was published).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor_tx_hash: Option<String>,
+    /// Nonce used for this sanad on-chain (Aptos-specific, optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<u64>,
 }
 
 /// Status of a cross-chain transfer.
