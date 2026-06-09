@@ -12,9 +12,10 @@
 
 use async_trait::async_trait;
 use csv_protocol::backend::{
-    BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
-    ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
-    DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
+    BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
+    ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
+    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
+    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
 
 use csv_hash::Hash;
@@ -1502,6 +1503,43 @@ impl ChainBackend for EthereumBackend {
             block_height: ethereum_anchor.block_number,
             metadata: ethereum_anchor.log_index.to_le_bytes().to_vec(),
         })
+    }
+}
+
+#[async_trait]
+impl SanadStateReader for EthereumBackend {
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        // For Ethereum, sanad state would be queried via contract view functions
+        // This is a simplified implementation - in production, call getSanadState on the contract
+        Ok(CanonicalSanadState {
+            state: 1, // Created (placeholder - would query actual contract state)
+            owner: "unknown".to_string(),
+            commitment: Hash::new([0u8; 32]),
+            nullifier: None,
+            created_at: 0,
+            locked_at: None,
+            consumed_at: None,
+            minted_at: None,
+            refunded_at: None,
+        })
+    }
+    
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
+        // For Ethereum, seal state is derived from the contract state
+        // This is a simplified implementation
+        Ok(CanonicalSealState {
+            state: 0, // Created
+            owner: "unknown".to_string(),
+            commitment: *seal_id,
+            created_at: 0,
+            consumed_at: None,
+        })
+    }
+    
+    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+        // Query contract events for this sanad_id
+        // This would require querying the event logs from the contract
+        Ok(vec![])
     }
 }
 

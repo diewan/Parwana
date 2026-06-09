@@ -1,149 +1,169 @@
 #!/bin/bash
-# Deployment Script for CSV Contracts on Sepolia
+# Deployment Script for CSVSeal Contract
 #
-# This script deploys the CSVSeal contract (merged lock + mint) to Sepolia testnet
-# and updates the deployment manifest and chain configuration.
+# Deploys CSVSeal to Ethereum and updates:
+# - ~/.csv/config.toml (contract_address)
+# - ~/.csv/deployment-ethereum.json (deployment manifest)
 #
 # Prerequisites:
-# - Foundry installed (https://getfoundry.sh/)
-# - Sepolia RPC URL set in SEPOLIA_RPC_URL environment variable
-# - Deployer private key set in DEPLOYER_KEY environment variable
-# - Etherscan API key set in ETHERSCAN_API_KEY (for contract verification)
-# - Sufficient Sepolia ETH for gas fees
+# - Foundry installed
+# - SEPOLIA_RPC_URL and DEPLOYER_KEY environment variables
 #
 # Usage:
-#   ./deploy.sh
+#   ./deploy.sh [network]
 #
-# Environment variables:
-#   SEPOLIA_RPC_URL - Sepolia RPC endpoint URL
-#   DEPLOYER_KEY - Private key of deployer account (with 0x prefix)
-#   ETHERSCAN_API_KEY - Etherscan API key for contract verification (optional)
+# Networks: sepolia (default), mainnet
 
 set -e
 
-# Colors for output
+NETWORK="${1:-sepolia}"
+CHAIN_ID="11155111"
+RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+
+if [ "$NETWORK" = "mainnet" ]; then
+    CHAIN_ID="1"
+    RPC_URL="https://eth.llamarpc.com"
+fi
+
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${GREEN}=== CSV Protocol Contract Deployment Script ===${NC}"
-echo ""
-
-# Load .env file if it exists
-if [ -f "../.env" ]; then
-    echo "Loading environment variables from .env..."
-    export $(cat ../.env | grep -v '^#' | xargs)
-fi
+echo -e "${GREEN}=== CSVSeal Deployment to $NETWORK ===${NC}"
 
 # Check prerequisites
 if ! command -v forge &> /dev/null; then
-    echo -e "${RED}Error: Foundry not found. Please install Foundry from https://getfoundry.sh/${NC}"
+    echo -e "${RED}Error: Foundry not found${NC}"
     exit 1
 fi
 
-if [ -z "$SEPOLIA_RPC_URL" ]; then
-    echo -e "${RED}Error: SEPOLIA_RPC_URL environment variable not set${NC}"
-    echo "Example: export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_PROJECT_ID"
-    exit 1
+if [ -z "$SEPOLIA_RPC_URL" ] && [ "$NETWORK" = "sepolia" ]; then
+    export SEPOLIA_RPC_URL="$RPC_URL"
 fi
 
 if [ -z "$DEPLOYER_KEY" ]; then
-    echo -e "${RED}Error: DEPLOYER_KEY environment variable not set${NC}"
-    echo "Example: export DEPLOYER_KEY=0xyour_private_key_with_0x_prefix"
+    echo -e "${RED}Error: DEPLOYER_KEY not set${NC}"
     exit 1
 fi
 
-# Get deployer address
 DEPLOYER_ADDRESS=$(cast wallet address --private-key $DEPLOYER_KEY)
-echo -e "${YELLOW}Deployer address: ${DEPLOYER_ADDRESS}${NC}"
+echo -e "${YELLOW}Deployer: $DEPLOYER_ADDRESS${NC}"
 
-# Check balance
-BALANCE=$(cast balance $DEPLOYER_ADDRESS --rpc-url $SEPOLIA_RPC_URL)
-echo -e "${YELLOW}Deployer balance: ${BALANCE} ETH${NC}"
+# Build contracts
+echo -e "${GREEN}Building contracts...${NC}"
+cd "$(dirname "$0")/../contracts"
 
-if [ "$BALANCE" = "0" ]; then
-    echo -e "${RED}Error: Insufficient balance. Please fund your account with Sepolia ETH${NC}"
-    echo "Get Sepolia ETH from: https://sepoliafaucet.com/"
-    exit 1
-fi
+# Clean previous builds to ensure fresh compilation
+echo -e "${YELLOW}Cleaning previous builds...${NC}"
+forge clean
+rm -rf out/ broadcast/ cache/
 
-echo ""
-echo -e "${GREEN}=== Building contracts ===${NC}"
-cd ../contracts
-forge install foundry-rs/forge-std
-forge build --sizes
+# Build from scratch
+forge build --sizes 2>&1 | tail -5
 
-echo ""
-echo -e "${GREEN}=== Deploying contracts to Sepolia ===${NC}"
-
-# Deploy contracts
+# Deploy (NO --verify flag — verification is done separately)
+echo -e "${GREEN}Deploying CSVSeal...${NC}"
 forge script script/Deploy.s.sol \
-    --rpc-url $SEPOLIA_RPC_URL \
-    --private-key $DEPLOYER_KEY \
+    --rpc-url "$SEPOLIA_RPC_URL" \
+    --private-key "$DEPLOYER_KEY" \
     --broadcast \
-    --verify \
+    --slow \
     -vvv
 
-echo ""
-echo -e "${GREEN}=== Extracting deployment information ===${NC}"
-
-# Parse deployment addresses from broadcast output (we're inside contracts/ dir)
-BROADCAST_DIR="broadcast/Deploy.s.sol/11155111"
+# Extract deployment info
+BROADCAST_DIR="broadcast/Deploy.s.sol/$CHAIN_ID"
 RUN_FILE="$BROADCAST_DIR/run-latest.json"
 
 if [ ! -f "$RUN_FILE" ]; then
-    echo -e "${RED}Error: Deployment run file not found at $RUN_FILE${NC}"
+    # Try to find any run file
+    RUN_FILE=$(ls -t "$BROADCAST_DIR"/run-*.json 2>/dev/null | head -1)
+fi
+
+if [ -z "$RUN_FILE" ] || [ ! -f "$RUN_FILE" ]; then
+    echo -e "${RED}Error: No deployment run file found${NC}"
     exit 1
 fi
 
-# Extract contract address and deployment info
-SEAL_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVSeal") | .contractAddress] | first' $RUN_FILE)
-DEPLOYMENT_TX=$(jq -r '[.transactions[] | select(.transactionType == "CREATE") | .hash] | first' $RUN_FILE)
-BLOCK_NUMBER_HEX=$(jq -r '[.receipts[] | .blockNumber] | first' $RUN_FILE)
-BLOCK_NUMBER=$(printf "%d" $BLOCK_NUMBER_HEX)
+SEAL_ADDRESS=$(jq -r '[.transactions[] | select(.contractName == "CSVSeal") | .contractAddress] | first' "$RUN_FILE")
+DEPLOYMENT_TX=$(jq -r '[.transactions[] | select(.transactionType == "CREATE") | .hash] | first' "$RUN_FILE")
+BLOCK_NUMBER=$(jq -r '[.receipts[] | .blockNumber] | first' "$RUN_FILE")
+BLOCK_NUMBER_DEC=$(printf "%d" "$BLOCK_NUMBER" 2>/dev/null || echo "$BLOCK_NUMBER")
 
-echo -e "${YELLOW}CSVSeal address: ${SEAL_ADDRESS}${NC}"
-echo -e "${YELLOW}Deployment TX: ${DEPLOYMENT_TX}${NC}"
-echo -e "${YELLOW}Block number: ${BLOCK_NUMBER}${NC}"
+echo -e "${GREEN}CSVSeal deployed:${NC}"
+echo -e "  Address: $SEAL_ADDRESS"
+echo -e "  TX: $DEPLOYMENT_TX"
+echo -e "  Block: $BLOCK_NUMBER_DEC"
 
-cd ..
-
-echo ""
-echo -e "${GREEN}=== Updating deployment manifest ===${NC}"
-
-# Update deployment-manifest.json (relative to csv-contracts/ethereum/)
-MANIFEST="../../../deployments/deployment-manifest.json"
-jq --arg seal "$SEAL_ADDRESS" \
-   --arg tx "$DEPLOYMENT_TX" \
-   --arg block "$BLOCK_NUMBER" \
-   --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-   '
-   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .address) = $seal |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .deployment_tx) = $tx |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .block_number) = $block |
-   (.deployments.ethereum.contracts[] | select(.name == "CSVSeal") | .constructor_args.verifier) = "" |
-   .deployments.ethereum.deployment_block = $block |
-   .deployments.ethereum.deployment_timestamp = $timestamp |
-   .deployments.ethereum.verified = true
-   ' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
-echo "Deployment manifest updated successfully!"
-
-# Update chains/ethereum.toml (relative to csv-contracts/ethereum/)
-CHAINS_CONFIG="../../../chains/ethereum.toml"
-if [ -f "$CHAINS_CONFIG" ]; then
-    sed -i "s/contract_address = \".*\"/contract_address = \"$SEAL_ADDRESS\"/" "$CHAINS_CONFIG"
-    echo "chains/ethereum.toml updated successfully!"
+# Compute bytecode hash
+BYTECODE_PATH="out/CSVSeal.sol/CSVSeal.json"
+BYTECODE_HASH="unknown"
+if [ -f "$BYTECODE_PATH" ]; then
+    BYTECODE=$(jq -r '.bytecode.object' "$BYTECODE_PATH")
+    if [ -n "$BYTECODE" ] && [ "$BYTECODE" != "null" ]; then
+        BYTECODE_HASH=$(echo -n "$BYTECODE" | sha3sum | awk '{print "0x"$1}')
+    fi
 fi
 
-echo -e "${YELLOW}CSVSeal address: ${SEAL_ADDRESS}${NC}"
-echo -e "${YELLOW}Deployment TX: ${DEPLOYMENT_TX}${NC}"
-echo -e "${YELLOW}Block number: ${BLOCK_NUMBER}${NC}"
+# Update ~/.csv/config.toml
+CONFIG_FILE="$HOME/.csv/config.toml"
+if [ -f "$CONFIG_FILE" ]; then
+    echo -e "${GREEN}Updating $CONFIG_FILE...${NC}"
+    # Use sed to update contract_address for ethereum chain
+    if command -v sed &> /dev/null; then
+        # Create backup
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.backup.$(date +%s)"
+        # Update contract_address
+        sed -i.bak "s|contract_address = \".*\"|contract_address = \"$SEAL_ADDRESS\"|" "$CONFIG_FILE"
+        rm -f "${CONFIG_FILE}.bak"
+        echo -e "${GREEN}  contract_address updated${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: $CONFIG_FILE not found, skipping config update${NC}"
+fi
 
+# Update ~/.csv/deployment-ethereum.json
+DEPLOYMENT_FILE="$HOME/.csv/deployment-ethereum.json"
+DEPLOYMENT_DIR=$(dirname "$DEPLOYMENT_FILE")
+mkdir -p "$DEPLOYMENT_DIR"
+
+cat > "$DEPLOYMENT_FILE" << EOF
+{
+  "version": "1.0.0",
+  "network": "$NETWORK",
+  "chain_id": $CHAIN_ID,
+  "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "contracts": {
+    "CSVSeal": {
+      "address": "$SEAL_ADDRESS",
+      "deployment_tx": "$DEPLOYMENT_TX",
+      "block_number": $BLOCK_NUMBER_DEC,
+      "bytecode_hash": "$BYTECODE_HASH",
+      "verified": false,
+      "constructor_args": {
+        "verifier": "$DEPLOYER_ADDRESS"
+      }
+    }
+  },
+  "abi_hash": "pending",
+  "protocol_version": "1.0.0"
+}
+EOF
+
+echo -e "${GREEN}Deployment manifest written to $DEPLOYMENT_FILE${NC}"
+
+# Copy to repo deployments folder if it exists
+REPO_DEPLOYMENTS="$(dirname "$0")/../../deployments"
+if [ -d "$REPO_DEPLOYMENTS" ]; then
+    mkdir -p "$REPO_DEPLOYMENTS/ethereum"
+    cp "$DEPLOYMENT_FILE" "$REPO_DEPLOYMENTS/ethereum/deployment.json"
+    echo -e "${GREEN}Copied to $REPO_DEPLOYMENTS/ethereum/deployment.json${NC}"
+fi
+
+echo -e "${GREEN}=== Deployment complete ===${NC}"
 echo ""
-echo -e "${GREEN}=== Deployment completed successfully! ===${NC}"
-echo ""
-echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Verify contract on Etherscan: https://sepolia.etherscan.io/address/$SEAL_ADDRESS"
-echo "2. Set verifier address in CSVSeal constructor args if needed"
-echo "3. Mark contract as verified in deployment-manifest.json"
+echo "Next steps:"
+echo "  1. Verify contract: forge verify-contract --chain-id $CHAIN_ID $SEAL_ADDRESS script/Deploy.s.sol:CSVSeal --constructor-args $(cast abi-encode 'constructor(address)' $DEPLOYER_ADDRESS) --rpc-url $SEPOLIA_RPC_URL --etherscan-api-key \"\${ETHERSCAN_API_KEY}\""
+echo "  2. Update ABI hash in deployment manifest after verification"
+echo "  3. Update ~/.csv/config.toml contract_address if not done automatically"

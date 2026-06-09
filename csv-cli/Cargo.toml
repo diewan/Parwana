@@ -70,6 +70,9 @@ base64 = "0.21"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 thiserror = "1.0"
 
+# Solana SDK for PDA derivation in on-chain status checks
+solana-sdk = "3.0"
+
 [dev-dependencies]
 tempfile = "3.0"
 

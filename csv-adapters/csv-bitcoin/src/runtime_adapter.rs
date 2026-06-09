@@ -76,6 +76,35 @@ impl BitcoinRuntimeAdapter {
             rpc,
         }
     }
+
+    /// Create a BitcoinRuntimeAdapter from an already-configured BitcoinSealProtocol.
+    /// Use this in the factory so that the ChainAdapter shares the same seal wallet
+    /// (and its registered sanad_seals) as the ChainBackend.
+    pub fn from_seal_protocol(
+        network: Network,
+        seal: Arc<BitcoinSealProtocol>,
+        rpc: Box<dyn BitcoinRpc + Send + Sync>,
+    ) -> Self {
+        let chain_id = match network {
+            Network::Bitcoin => "bitcoin".to_string(),
+            Network::Testnet => "bitcoin".to_string(),
+            Network::Signet => "bitcoin".to_string(),
+            Network::Regtest => "bitcoin".to_string(),
+            _ => "bitcoin".to_string(),
+        }
+        .to_string();
+
+        // Wrap the shared seal protocol in a ChainSanadOps instance.
+        // BitcoinChainSanadOps::from_arc reuses the Arc without cloning the wallet data.
+        let sanad_ops = Arc::new(BitcoinChainSanadOps::from_arc(Arc::clone(&seal)));
+
+        Self {
+            chain_id,
+            network,
+            sanad_ops,
+            rpc,
+        }
+    }
 }
 
 #[async_trait::async_trait]

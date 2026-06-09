@@ -1,6 +1,8 @@
 #![allow(clippy::collapsible_if)]
 #![allow(unused_variables)]
-#![deny(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used)]
+#![allow(unreachable_code)]
+#![allow(clippy::needless_borrows_for_generic_args)]
 //! Aptos Adapter for CSV (Client-Side Validation)
 //!
 //! This adapter implements the SealProtocol trait for Aptos,

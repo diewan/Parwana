@@ -10,9 +10,10 @@ use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::backend::{
-    BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
-    ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
-    DeploymentStatus, FinalityStatus, SanadOperation, SanadOperationResult, TransactionStatus,
+    BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
+    ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
+    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
+    FinalityStatus, SanadOperation, SanadOperationResult, SanadStateReader, TransactionStatus,
 };
 use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::signature::SignatureScheme;
@@ -776,7 +777,7 @@ impl ChainDeployer for BitcoinChainDeployer {
 
 /// Bitcoin implementation of ChainSanadOps trait
 pub struct BitcoinChainSanadOps {
-    adapter: BitcoinSealProtocol,
+    adapter: Arc<BitcoinSealProtocol>,
     rpc: Option<Box<dyn BitcoinRpc + Send + Sync>>,
 }
 
@@ -784,7 +785,15 @@ impl BitcoinChainSanadOps {
     /// Create a new Bitcoin chain sanad ops instance
     pub fn new(adapter: BitcoinSealProtocol) -> Self {
         Self {
-            adapter,
+            adapter: Arc::new(adapter),
+            rpc: None,
+        }
+    }
+
+    /// Build from an already-initialised (Arc-shared) seal protocol.
+    pub fn from_arc(seal: Arc<BitcoinSealProtocol>) -> Self {
+        Self {
+            adapter: seal,
             rpc: None,
         }
     }
@@ -1018,8 +1027,11 @@ impl BitcoinChainSanadOps {
         _metadata: &[u8],
         _owner_key: &[u8],
     ) -> Result<bitcoin::Transaction, String> {
+        // seal.txid is in internal byte order; reverse to display for Txid parser
+        let mut display_txid = seal.txid;
+        display_txid.reverse();
         let seal_outpoint = bitcoin::OutPoint {
-            txid: hex::encode(seal.txid)
+            txid: hex::encode(display_txid)
                 .parse::<bitcoin::Txid>()
                 .expect("valid txid"),
             vout: seal.vout,
@@ -1144,8 +1156,11 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         let dest_hash = sha256d::Hash::hash(destination_chain.as_bytes());
 
         // Create the lock UTXO outpoint reference
+        // seal.txid is in internal byte order (after Bug 2B fix); reverse to display for Txid parser
+        let mut display_txid = seal.txid;
+        display_txid.reverse();
         let lock_outpoint = bitcoin::OutPoint {
-            txid: hex::encode(seal.txid)
+            txid: hex::encode(display_txid)
                 .parse::<bitcoin::Txid>()
                 .expect("valid txid"),
             vout: seal.vout,
@@ -1334,8 +1349,11 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         };
 
         // Check if the seal UTXO is still unspent via RPC
+        // seal.txid is in internal byte order; reverse to display for Txid parser
+        let mut display_txid = seal.txid;
+        display_txid.reverse();
         let seal_outpoint = bitcoin::OutPoint {
-            txid: hex::encode(seal.txid)
+            txid: hex::encode(display_txid)
                 .parse::<bitcoin::Txid>()
                 .expect("valid txid"),
             vout: seal.vout,
@@ -2463,5 +2481,42 @@ impl ChainBackend for BitcoinBackend {
             block_height: bitcoin_anchor.block_height,
             metadata: bitcoin_anchor.output_index.to_le_bytes().to_vec(),
         })
+    }
+}
+
+#[async_trait]
+impl SanadStateReader for BitcoinBackend {
+    async fn get_sanad_state(&self, _sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        // For Bitcoin, sanad state is tracked via UTXO and transaction history
+        // This is a simplified implementation
+        Ok(CanonicalSanadState {
+            state: 1, // Created (placeholder - would query actual UTXO state)
+            owner: "unknown".to_string(),
+            commitment: Hash::new([0u8; 32]),
+            nullifier: None,
+            created_at: 0,
+            locked_at: None,
+            consumed_at: None,
+            minted_at: None,
+            refunded_at: None,
+        })
+    }
+    
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
+        // For Bitcoin, seal state is derived from the UTXO
+        // This is a simplified implementation
+        Ok(CanonicalSealState {
+            state: 0, // Created
+            owner: "unknown".to_string(),
+            commitment: *seal_id,
+            created_at: 0,
+            consumed_at: None,
+        })
+    }
+    
+    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+        // Query transaction history for this sanad_id
+        // This would require querying the Bitcoin blockchain
+        Ok(vec![])
     }
 }

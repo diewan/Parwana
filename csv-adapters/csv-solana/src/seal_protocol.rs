@@ -207,6 +207,9 @@ impl SealProtocol for SolanaSealProtocol {
     type FinalityProof = SolanaFinalityProof;
 
     /// Create a new seal account (PDA) for a sanad
+    ///
+    /// Returns a local placeholder — the real on-chain account is created in publish()
+    /// once we know the commitment hash to use as sanad_id.
     async fn create_seal(
         &self,
         amount: Option<u64>,
@@ -217,144 +220,129 @@ impl SealProtocol for SolanaSealProtocol {
             .ok_or_else(|| SolanaError::Wallet("No wallet configured".to_string()))?;
 
         let owner = wallet.pubkey();
-        let sanad_id = Hash::new(Self::generate_sanad_id());
-        let seal_pda = self.derive_seal_pda(&sanad_id, &owner)?;
-
         let lamports = amount.unwrap_or(1_000_000); // Default 0.001 SOL rent exemption
 
-        let seal_ref = SolanaSealPoint {
+        // Use a deterministic but temporary seed based on owner + lamports + timestamp.
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"csv-solana-pending-seal");
+        hasher.update(owner.as_ref());
+        hasher.update(lamports.to_le_bytes());
+        hasher.update(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+                .to_le_bytes(),
+        );
+        let pending_id_bytes: [u8; 32] = hasher.finalize().into();
+        let pending_id = Hash::new(pending_id_bytes);
+
+        Ok(SolanaSealPoint {
+            account: Pubkey::default(), // filled in by publish()
+            owner,
+            lamports,
+            seed: Some(pending_id.as_bytes().to_vec()),
+        })
+    }
+
+    /// Publish a commitment to the seal account
+    ///
+    /// For Solana, this performs the real on-chain create_seal transaction using
+    /// the commitment hash as the sanad_id so CLI and on-chain IDs match.
+    async fn publish(
+        &self,
+        commitment: Hash,
+        seal_point: Self::SealPoint,
+    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
+        let wallet = self
+            .wallet
+            .as_ref()
+            .ok_or_else(|| SolanaError::Wallet("No wallet configured".to_string()))?;
+        let owner = wallet.pubkey();
+
+        // Use the commitment hash as the sanad_id so CLI and on-chain IDs match.
+        let sanad_id = commitment; // commitment IS the sanad_id from the CLI perspective
+        let lamports = seal_point.lamports;
+
+        // Derive the PDA using the commitment-as-sanad_id
+        let seal_pda = self.derive_seal_pda(&sanad_id, &owner)?;
+
+        log::info!(
+            "SOLANA: Publishing commitment to seal account\n\
+             SOLANA: Seal account: {}\n\
+             SOLANA: Commitment hash: 0x{}\n\
+             SOLANA: Wallet owner: {}",
+            seal_pda,
+            hex::encode(commitment.as_bytes()),
+            owner,
+        );
+
+        let rpc = self.check_rpc()?;
+        let recent_blockhash = rpc.get_recent_blockhash()
+            .map_err(|e| SolanaError::Rpc(format!("Failed to get recent blockhash: {}", e)))?;
+
+        // Build create_seal instruction with commitment as both sanad_id and commitment fields
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"global:create_seal");
+        let discriminator_hash = hasher.finalize();
+        let anchor_discriminator: [u8; 8] = discriminator_hash[0..8].try_into().expect("slice length matches array size");
+
+        let mut instruction_data = Vec::with_capacity(8 + 32 + 32 + 32);
+        instruction_data.extend_from_slice(&anchor_discriminator);
+        instruction_data.extend_from_slice(sanad_id.as_bytes()); // sanad_id = commitment
+        instruction_data.extend_from_slice(commitment.as_bytes()); // commitment field
+        instruction_data.extend_from_slice(&[0u8; 32]); // state_root
+
+        let program_id = self.csv_program_id()?;
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(seal_pda, false),
+                solana_sdk::instruction::AccountMeta::new(owner, true),
+                solana_sdk::instruction::AccountMeta::new_readonly(
+                    solana_system_interface::program::ID,
+                    false,
+                ),
+            ],
+            data: instruction_data,
+        };
+
+        let message = solana_sdk::message::Message::new(&[instruction], Some(&owner));
+        let mut transaction = solana_sdk::transaction::Transaction::new_unsigned(message);
+        transaction.sign(&[&wallet.keypair], recent_blockhash);
+
+        let signature = rpc.send_transaction(&transaction)
+            .map_err(|e| SolanaError::Rpc(format!("Failed to send create_seal transaction: {}", e)))?;
+        rpc.wait_for_confirmation(&signature)
+            .map_err(|e| SolanaError::Rpc(format!("Transaction confirmation failed: {}", e)))?;
+
+        let slot = rpc.get_latest_slot()
+            .map_err(|e| SolanaError::Rpc(format!("Failed to get slot: {}", e)))?;
+
+        // Store seal in active_seals with seed = commitment bytes
+        let real_seal = SolanaSealPoint {
             account: seal_pda,
             owner,
             lamports,
             seed: Some(sanad_id.as_bytes().to_vec()),
         };
+        self.store_seal(real_seal.clone());
 
-        // Create the seal account via RPC using the CSV program's create_seal instruction
-        let rpc = self.check_rpc()?;
-        let program_id = self.csv_program_id()?;
-        log::info!("SOLANA ADAPTER: Using program_id for instruction: {}", program_id);
+        log::info!("SOLANA: Seal created successfully");
 
-        // Get recent blockhash
-        let recent_blockhash = rpc
-            .get_recent_blockhash()
-            .map_err(|e| SolanaError::Rpc(format!("Failed to get recent blockhash: {}", e)))?;
-
-        // Build instruction data for create_seal
-        // Anchor discriminator: 8-byte SHA256 hash of "global:create_seal"
-        // Instruction format: discriminator (8 bytes) + sanad_id (32 bytes) + commitment (32 bytes) + state_root (32 bytes)
-        let discriminator_hash = Sha256::digest(b"global:create_seal");
-        let anchor_discriminator: [u8; 8] = discriminator_hash[0..8].try_into().unwrap();
-        log::info!("SOLANA ADAPTER: Anchor discriminator: 0x{}", hex::encode(&anchor_discriminator));
-        let mut instruction_data = Vec::with_capacity(104);
-        instruction_data.extend_from_slice(&anchor_discriminator);
-        instruction_data.extend_from_slice(sanad_id.as_bytes());
-        // Use zero commitment and state_root for initial seal creation
-        instruction_data.extend_from_slice(&[0u8; 32]); // commitment
-        instruction_data.extend_from_slice(&[0u8; 32]); // state_root
-        log::info!("SOLANA ADAPTER: Instruction data length: {} bytes", instruction_data.len());
-
-        // Create the create_seal instruction
-        log::info!("SOLANA ADAPTER: Creating instruction with accounts:");
-        log::info!("  - sanad_account (PDA): {}", seal_pda);
-        log::info!("  - owner (signer): {}", owner);
-        let create_seal_ix = Instruction {
-            program_id,
-            accounts: vec![
-                solana_sdk::instruction::AccountMeta::new(seal_pda, false), // sanad_account (PDA, writable for init)
-                solana_sdk::instruction::AccountMeta::new(owner, true),     // owner (payer and signer, writable)
-                solana_sdk::instruction::AccountMeta::new_readonly(
-                    Pubkey::from_str("11111111111111111111111111111111").unwrap(),
-                    false,
-                ), // system_program
-            ],
-            data: instruction_data,
-        };
-
-        // Build transaction
-        let mut transaction = solana_sdk::transaction::Transaction::new_with_payer(
-            &[create_seal_ix],
-            Some(&owner),
-        );
-        transaction.message.recent_blockhash = recent_blockhash;
-
-        // Sign transaction
-        transaction.sign(&[&wallet.keypair], recent_blockhash);
-
-        // Send transaction via RPC
-        let signature = rpc
-            .send_transaction(&transaction)
-            .map_err(|e| SolanaError::Rpc(format!("Failed to send transaction: {}", e)))?;
-
-        // Wait for confirmation
-        let _status = rpc
-            .wait_for_confirmation(&signature)
-            .map_err(|e| SolanaError::Rpc(format!("Transaction confirmation failed: {}", e)))?;
-
-        // Get slot information
-        let _slot = rpc
-            .get_latest_slot()
-            .map_err(|e| SolanaError::Rpc(format!("Failed to get slot: {}", e)))?;
-
-        // Store seal reference locally for tracking
-        self.store_seal(seal_ref.clone());
-
-        Ok(seal_ref)
-    }
-
-    /// Publish a commitment to the seal account
-    /// For Solana, the commitment is already set during create_seal, so this is a no-op
-    /// that returns the seal's current state as the commit anchor
-    async fn publish(
-        &self,
-        hash: Hash,
-        seal_point: Self::SealPoint,
-    ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
-        log::info!("SOLANA: Publishing commitment to seal account");
-        log::info!("SOLANA: Seal account: {}", seal_point.account);
-        log::info!("SOLANA: Commitment hash: 0x{}", hex::encode(hash.as_bytes()));
-        
-        let rpc = self.check_rpc()?;
-        let wallet = self
-            .wallet
-            .as_ref()
-            .ok_or_else(|| SolanaError::Wallet("No wallet configured".to_string()))?;
-
-        let owner = wallet.pubkey();
-        log::info!("SOLANA: Wallet owner: {}", owner);
-        
-        // For Solana, commitment is already set during create_seal
-        // This publish is a no-op that returns the seal's current state
-        log::info!("SOLANA: Commitment already set during create_seal, returning current seal state");
-
-        // Get slot information for the anchor
-        let slot = rpc
-            .get_latest_slot()
-            .map_err(|e| SolanaError::Rpc(format!("Failed to get slot: {}", e)))?;
-        log::info!("SOLANA: Latest slot: {}", slot);
-
-        // Create a dummy signature for the anchor (in production, this would be from create_seal)
-        let signature = solana_sdk::signature::Signature::default();
-
-        let anchor_ref = SolanaCommitAnchor {
+        Ok(SolanaCommitAnchor {
             signature,
             slot,
             block_height: slot,
-            account_changes: vec![
-                AccountChange {
-                    pubkey: seal_point.account,
-                    prev_lamports: seal_point.lamports,
-                    new_lamports: seal_point.lamports, // Seal unchanged (commitment already set)
-                    prev_data: seal_point.seed.clone(),
-                    new_data: Some(hash.as_bytes().to_vec()), // Commitment updated
-                    closed: false,
-                },
-            ],
-        };
-
-        // Keep seal in active tracking since it's not consumed yet
-        // (commitment is already set during create_seal)
-
-        Ok(anchor_ref)
+            account_changes: vec![AccountChange {
+                pubkey: seal_pda,
+                prev_lamports: 0,
+                new_lamports: lamports,
+                prev_data: None,
+                new_data: Some(commitment.as_bytes().to_vec()),
+                closed: false,
+            }],
+        })
     }
 
     /// Verify inclusion by checking the transaction is in a block

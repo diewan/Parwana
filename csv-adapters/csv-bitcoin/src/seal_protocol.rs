@@ -119,7 +119,7 @@ impl BitcoinSealProtocol {
                         // Decode scriptPubKey if available
                         let script_pubkey = utxo_config.script_pubkey.as_ref()
                             .and_then(|spk_hex| hex::decode(spk_hex).ok())
-                            .map(|bytes| bitcoin::ScriptBuf::from(bytes));
+                            .map(bitcoin::ScriptBuf::from);
 
                         wallet.add_utxo_with_scriptpubkey(outpoint, utxo_config.value, path, script_pubkey, None);
                         log::info!("Bitcoin: Added UTXO to wallet: txid={}, vout={}, value={}", hex::encode(outpoint.txid.as_byte_array()), outpoint.vout, utxo_config.value);
@@ -133,16 +133,21 @@ impl BitcoinSealProtocol {
             for seal_config in &config.sanad_seals {
                 log::info!("Bitcoin: Loading sanad_seal: sanad_id={}, anchor_txid={}, vout={}",
                     seal_config.sanad_id, seal_config.anchor_txid, seal_config.vout);
-                if let Ok(sanad_bytes) = hex::decode(&seal_config.sanad_id) {
-                    if sanad_bytes.len() == 32 {
-                        let mut sanad_id = [0u8; 32];
-                        sanad_id.copy_from_slice(&sanad_bytes);
-                        if let Ok(txid_bytes) = hex::decode(&seal_config.anchor_txid) {
-                            wallet.register_sanad_seal(sanad_id, txid_bytes, seal_config.vout);
-                            log::info!("Bitcoin: Registered sanad_seal for sanad_id={}", hex::encode(sanad_id));
+                   if let Ok(sanad_bytes) = hex::decode(&seal_config.sanad_id) {
+                        if sanad_bytes.len() == 32 {
+                            let mut sanad_id = [0u8; 32];
+                            sanad_id.copy_from_slice(&sanad_bytes);
+                            if let Ok(txid_bytes) = hex::decode(&seal_config.anchor_txid) {
+                                // anchor_txid in config (and in SanadSealRecord) is stored as display-format hex.
+                                // The sanad_seals HashMap must hold internal-byte-order bytes so that
+                                // Txid::from_byte_array() and UTXO lookups work correctly.
+                                let mut txid_internal = txid_bytes.clone();
+                                txid_internal.reverse();
+                                wallet.register_sanad_seal(sanad_id, txid_internal, seal_config.vout);
+                                log::info!("Bitcoin: Registered sanad_seal for sanad_id={}", hex::encode(sanad_id));
+                            }
                         }
                     }
-                }
             }
 
             wallet
@@ -245,10 +250,13 @@ impl BitcoinSealProtocol {
             BitcoinError::RpcError("No RPC client configured".to_string())
         })?;
 
-        let seals = self.wallet.get_sanad_seals();
+        let seals: Vec<_> = {
+            let guard = self.wallet.get_sanad_seals();
+            guard.iter().map(|(k, v)| (*k, v.clone())).collect()
+        };
         let mut loaded_count = 0;
 
-        for (sanad_id, (txid_bytes, vout)) in seals.iter() {
+        for (sanad_id, (txid_bytes, vout)) in &seals {
             let txid_array: [u8; 32] = txid_bytes.clone().try_into().unwrap_or([0u8; 32]);
             let outpoint = bitcoin::OutPoint {
                 txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_byte_array(txid_array)),
@@ -261,13 +269,18 @@ impl BitcoinSealProtocol {
                 continue;
             }
 
+            // RPC expects display-format txid, but our HashMap stores internal byte order.
+            // Reverse back to display format for the HTTP query.
+            let mut display_txid = txid_array;
+            display_txid.reverse();
+
             // Fetch UTXO details from RPC
-            match rpc.get_utxo_details(txid_array, *vout).await {
+            match rpc.get_utxo_details(display_txid, *vout).await {
                 Ok(Some(utxo_details)) => {
                     // Parse scriptPubKey
                     let script_pubkey = hex::decode(&utxo_details.script_pubkey)
                         .ok()
-                        .map(|bytes| bitcoin::ScriptBuf::from(bytes));
+                        .map(bitcoin::ScriptBuf::from);
 
                     // Add UTXO to wallet with fetched details
                     let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index);

@@ -8,16 +8,16 @@
       "network": "sepolia",
       "chain_id": 11155111,
       "deployment_block": "0",
-      "deployment_timestamp": "2026-05-28T18:00:00Z",
+      "deployment_timestamp": "2026-06-08T18:00:00Z",
       "verified": false,
       "contracts": [
         {
           "name": "CSVSeal",
-          "address": "0x189BE35e28331E20481C100cA93fc9a96601E48f",
-          "deployment_tx": "0x214b63a95dbeb72b051dfb20effbf9312c8cafa61c80a3283b791bfee37ee883",
-          "block_number": "10941734",
+          "address": "0xaa724b64984cc1776eb37f1c4d4d7130a2660ac1",
+          "deployment_tx": "0x75ba9d7ff8593158cb7a7e43600c15505fb570f5ca21af771b58bdcdfd14b142",
+          "block_number": "11018494",
           "bytecode_hash": "",
-          "verified": false,
+          "verified": true,
           "constructor_args": {
             "verifier": ""
           },

@@ -161,6 +161,17 @@ impl UnifiedStateManager {
         }
     }
 
+    /// Remove a Sanad from local tracking
+    pub fn remove_sanad(&mut self, id: &str) -> anyhow::Result<()> {
+        let len_before = self.storage.sanads.len();
+        self.storage.sanads.retain(|r| r.id != id);
+        if self.storage.sanads.len() < len_before {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Sanad {} not found", id))
+        }
+    }
+
     // --- Transfer Management ---
 
     /// Add a transfer to tracking

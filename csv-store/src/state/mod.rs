@@ -45,9 +45,10 @@ pub use backend::{StorageBackend, StorageError};
 pub use core::{ChainConfig, Network};
 pub use csv_hash::chain_id::ChainId;
 pub use domain::{
-    ContractRecord, ProofRecord, SanadRecord, SanadStatus, SealRecord, SealStatus, TestResult,
-    TestStatus, TransactionRecord, TransactionStatus, TransactionType, TransferRecord,
-    TransferStatus,
+    CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ContractRecord,
+    LifecycleEventType, ProofRecord, SanadLifecycleState, SanadRecord, SanadStatus,
+    SealLifecycleState, SealRecord, SealStatus, TestResult, TestStatus, TransactionRecord,
+    TransactionStatus, TransactionType, TransferRecord, TransferStatus,
 };
 pub use storage::StateStorage;
 /// Backward compatibility alias

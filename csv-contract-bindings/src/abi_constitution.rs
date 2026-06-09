@@ -1,35 +1,24 @@
 //! ABI Constitution for CSV Protocol Contracts
 //!
 //! This module defines the ABI constitution that all chain contracts MUST follow.
-//! The constitution ensures contract equivalence across chains and enables
-//! unified verification and indexing.
+//! Uses canonical snake_case naming across all chains (Ethereum, Solana, Sui, Aptos).
 //!
 //! # ABI Constitution Requirements
 //!
 //! All CSV protocol contracts MUST:
 //! 1. Emit canonical events with indexed parameters
 //! 2. Use deterministic error codes
-//! 3. Implement required functions with exact signatures
+//! 3. Implement required functions with exact signatures (snake_case)
 //! 4. Follow state machine invariants
 //! 5. Support replay nullifier registration
 //! 6. Anchor commitments with proof roots
-//!
-//! # Required Functions
-//!
-//! Every chain contract MUST implement these functions:
-//! - createSeal(bytes32 commitment) -> bytes32 sealId
-//! - consumeSeal(bytes32 sealId) -> bool
-//! - lockSeal(bytes32 sealId, uint8 destinationChain, bytes destinationOwner) -> bool
-//! - mintSeal(bytes32 sealId, bytes32 commitment, uint8 sourceChain, bytes sourceSealRef, bytes proof, bytes32 proofRoot, uint256 leafPosition) -> bool
-//! - refundSeal(bytes32 sealId) -> bool
-//! - registerNullifier(bytes32 nullifier) -> bool
-//! - updateProofRoot(bytes32 proofRoot) -> bool
+//! 7. Use canonical SanadState enum (0-9 values)
 
 use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 
 /// ABI constitution version.
-pub const ABI_CONSTITUTION_VERSION: u32 = 1;
+pub const ABI_CONSTITUTION_VERSION: u32 = 2; // Updated to canonical snake_case naming
 
 /// Maximum function name length (bytes).
 pub const MAX_FUNCTION_NAME_LENGTH: usize = 32;
@@ -37,44 +26,62 @@ pub const MAX_FUNCTION_NAME_LENGTH: usize = 32;
 /// Maximum parameter count per function.
 pub const MAX_PARAMETERS: usize = 10;
 
-/// Required function signatures that all contracts MUST implement.
+/// Required function signatures that all contracts MUST implement (canonical snake_case).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequiredFunction {
-    /// createSeal(bytes32 commitment) -> bytes32 sealId
+    /// create_seal(sanad_id, commitment, state_root) -> bool
     CreateSeal,
 
-    /// consumeSeal(bytes32 sealId) -> bool
+    /// consume_seal(seal_id, nullifier) -> bool
     ConsumeSeal,
 
-    /// lockSeal(bytes32 sealId, uint8 destinationChain, bytes destinationOwner) -> bool
-    LockSeal,
+    /// lock_sanad(sanad_id, commitment, destination_chain, destination_owner) -> bool
+    LockSanad,
 
-    /// mintSeal(bytes32 sealId, bytes32 commitment, uint8 sourceChain, bytes sourceSealRef, bytes proof, bytes32 proofRoot, uint256 leafPosition) -> bool
-    MintSeal,
+    /// mint_sanad(sanad_id, commitment, state_root, source_chain, source_seal_ref, proof, proof_root, leaf_position) -> bool
+    MintSanad,
 
-    /// refundSeal(bytes32 sealId) -> bool
-    RefundSeal,
+    /// refund_sanad(sanad_id, destination_owner_hash) -> bool
+    RefundSanad,
 
-    /// registerNullifier(bytes32 nullifier) -> bool
+    /// transfer_sanad(sanad_id, new_owner) -> bool
+    TransferSanad,
+
+    /// register_nullifier(nullifier, sanad_id, source_chain) -> bool
     RegisterNullifier,
 
-    /// updateProofRoot(bytes32 proofRoot) -> bool
+    /// anchor_commitment(commitment, seal_id) -> bool
+    AnchorCommitment,
+
+    /// record_sanad_metadata(sanad_id, asset_class, asset_id, metadata_hash, proof_system, proof_root) -> bool
+    RecordSanadMetadata,
+
+    /// update_proof_root(proof_root) -> bool
     UpdateProofRoot,
+
+    /// get_sanad_state(sanad_id) -> SanadStateView
+    GetSanadState,
 }
 
 impl RequiredFunction {
     /// Get the function signature as a string.
     pub fn signature(&self) -> &'static str {
         match self {
-            RequiredFunction::CreateSeal => "createSeal(bytes32)",
-            RequiredFunction::ConsumeSeal => "consumeSeal(bytes32)",
-            RequiredFunction::LockSeal => "lockSeal(bytes32,uint8,bytes)",
-            RequiredFunction::MintSeal => {
-                "mintSeal(bytes32,bytes32,uint8,bytes,bytes,bytes32,uint256)"
+            RequiredFunction::CreateSeal => "create_seal(bytes32,bytes32,bytes32)",
+            RequiredFunction::ConsumeSeal => "consume_seal(bytes32,bytes32)",
+            RequiredFunction::LockSanad => "lock_sanad(bytes32,bytes32,uint8,bytes)",
+            RequiredFunction::MintSanad => {
+                "mint_sanad(bytes32,bytes32,bytes32,uint8,bytes,bytes,bytes32,uint256)"
             }
-            RequiredFunction::RefundSeal => "refundSeal(bytes32)",
-            RequiredFunction::RegisterNullifier => "registerNullifier(bytes32)",
-            RequiredFunction::UpdateProofRoot => "updateProofRoot(bytes32)",
+            RequiredFunction::RefundSanad => "refund_sanad(bytes32,bytes32)",
+            RequiredFunction::TransferSanad => "transfer_sanad(bytes32,address)",
+            RequiredFunction::RegisterNullifier => "register_nullifier(bytes32,bytes32,uint8)",
+            RequiredFunction::AnchorCommitment => "anchor_commitment(bytes32,bytes32)",
+            RequiredFunction::RecordSanadMetadata => {
+                "record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)"
+            }
+            RequiredFunction::UpdateProofRoot => "update_proof_root(bytes32)",
+            RequiredFunction::GetSanadState => "get_sanad_state(bytes32)",
         }
     }
 
@@ -91,13 +98,60 @@ impl RequiredFunction {
     /// Get the parameter count.
     pub fn param_count(&self) -> usize {
         match self {
-            RequiredFunction::CreateSeal => 1,
-            RequiredFunction::ConsumeSeal => 1,
-            RequiredFunction::LockSeal => 3,
-            RequiredFunction::MintSeal => 7,
-            RequiredFunction::RefundSeal => 1,
-            RequiredFunction::RegisterNullifier => 1,
+            RequiredFunction::CreateSeal => 3,
+            RequiredFunction::ConsumeSeal => 2,
+            RequiredFunction::LockSanad => 4,
+            RequiredFunction::MintSanad => 8,
+            RequiredFunction::RefundSanad => 2,
+            RequiredFunction::TransferSanad => 2,
+            RequiredFunction::RegisterNullifier => 3,
+            RequiredFunction::AnchorCommitment => 2,
+            RequiredFunction::RecordSanadMetadata => 6,
             RequiredFunction::UpdateProofRoot => 1,
+            RequiredFunction::GetSanadState => 1,
+        }
+    }
+}
+
+/// Canonical event names that all contracts MUST emit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RequiredEvent {
+    /// Emitted when a seal is created
+    SanadCreated,
+    /// Emitted when a seal is consumed
+    SanadConsumed,
+    /// Emitted when a Sanad is locked for cross-chain transfer
+    SanadLocked,
+    /// Emitted when a Sanad is minted on destination chain
+    SanadMinted,
+    /// Emitted when a locked Sanad is refunded
+    SanadRefunded,
+    /// Emitted when Sanad ownership is transferred
+    SanadTransferred,
+    /// Emitted when a nullifier is registered
+    NullifierRegistered,
+    /// Emitted when a commitment is anchored
+    CommitmentAnchored,
+    /// Emitted when proof root is updated
+    ProofRootUpdated,
+    /// Emitted when replay is detected
+    ReplayDetected,
+}
+
+impl RequiredEvent {
+    /// Get the event name as a string.
+    pub fn name(&self) -> &'static str {
+        match self {
+            RequiredEvent::SanadCreated => "SanadCreated",
+            RequiredEvent::SanadConsumed => "SanadConsumed",
+            RequiredEvent::SanadLocked => "SanadLocked",
+            RequiredEvent::SanadMinted => "SanadMinted",
+            RequiredEvent::SanadRefunded => "SanadRefunded",
+            RequiredEvent::SanadTransferred => "SanadTransferred",
+            RequiredEvent::NullifierRegistered => "NullifierRegistered",
+            RequiredEvent::CommitmentAnchored => "CommitmentAnchored",
+            RequiredEvent::ProofRootUpdated => "ProofRootUpdated",
+            RequiredEvent::ReplayDetected => "ReplayDetected",
         }
     }
 }
@@ -120,21 +174,27 @@ impl Default for AbiConstitution {
             required_functions: vec![
                 RequiredFunction::CreateSeal,
                 RequiredFunction::ConsumeSeal,
-                RequiredFunction::LockSeal,
-                RequiredFunction::MintSeal,
-                RequiredFunction::RefundSeal,
+                RequiredFunction::LockSanad,
+                RequiredFunction::MintSanad,
+                RequiredFunction::RefundSanad,
+                RequiredFunction::TransferSanad,
                 RequiredFunction::RegisterNullifier,
+                RequiredFunction::AnchorCommitment,
+                RequiredFunction::RecordSanadMetadata,
                 RequiredFunction::UpdateProofRoot,
+                RequiredFunction::GetSanadState,
             ],
             required_events: vec![
-                "SealCreated".to_string(),
-                "SealConsumed".to_string(),
-                "SealLocked".to_string(),
-                "SealMinted".to_string(),
-                "SealRefunded".to_string(),
+                "SanadCreated".to_string(),
+                "SanadConsumed".to_string(),
+                "SanadLocked".to_string(),
+                "SanadMinted".to_string(),
+                "SanadRefunded".to_string(),
+                "SanadTransferred".to_string(),
+                "NullifierRegistered".to_string(),
                 "CommitmentAnchored".to_string(),
-                "ReplayNullifierRegistered".to_string(),
                 "ProofRootUpdated".to_string(),
+                "ReplayDetected".to_string(),
             ],
         }
     }
@@ -278,12 +338,12 @@ pub struct ComplianceResult {
 /// Deterministic error codes that all contracts MUST use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorCode {
-    /// Seal not found (0x01)
-    SealNotFound = 0x01,
-    /// Seal already consumed (0x02)
-    SealAlreadyConsumed = 0x02,
-    /// Seal already locked (0x03)
-    SealAlreadyLocked = 0x03,
+    /// Sanad not found (0x01)
+    SanadNotFound = 0x01,
+    /// Sanad already consumed (0x02)
+    SanadAlreadyConsumed = 0x02,
+    /// Sanad already locked (0x03)
+    SanadAlreadyLocked = 0x03,
     /// Invalid commitment (0x04)
     InvalidCommitment = 0x04,
     /// Invalid proof (0x05)
@@ -298,6 +358,10 @@ pub enum ErrorCode {
     InvalidChainId = 0x09,
     /// Refund not available (0x0A)
     RefundNotAvailable = 0x0A,
+    /// Timeout not expired (0x0B)
+    TimeoutNotExpired = 0x0B,
+    /// Refund already claimed (0x0C)
+    RefundAlreadyClaimed = 0x0C,
 }
 
 impl ErrorCode {
@@ -309,9 +373,9 @@ impl ErrorCode {
     /// Get the error name.
     pub fn name(&self) -> &'static str {
         match self {
-            ErrorCode::SealNotFound => "SealNotFound",
-            ErrorCode::SealAlreadyConsumed => "SealAlreadyConsumed",
-            ErrorCode::SealAlreadyLocked => "SealAlreadyLocked",
+            ErrorCode::SanadNotFound => "SanadNotFound",
+            ErrorCode::SanadAlreadyConsumed => "SanadAlreadyConsumed",
+            ErrorCode::SanadAlreadyLocked => "SanadAlreadyLocked",
             ErrorCode::InvalidCommitment => "InvalidCommitment",
             ErrorCode::InvalidProof => "InvalidProof",
             ErrorCode::NullifierAlreadyRegistered => "NullifierAlreadyRegistered",
@@ -319,8 +383,74 @@ impl ErrorCode {
             ErrorCode::Unauthorized => "Unauthorized",
             ErrorCode::InvalidChainId => "InvalidChainId",
             ErrorCode::RefundNotAvailable => "RefundNotAvailable",
+            ErrorCode::TimeoutNotExpired => "TimeoutNotExpired",
+            ErrorCode::RefundAlreadyClaimed => "RefundAlreadyClaimed",
         }
     }
+}
+
+/// Canonical Sanad lifecycle state — matches all chain contracts.
+/// 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred, 7=Refunded, 8=Burned, 9=Invalid
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SanadState {
+    /// Sanad has not been created yet
+    Uncreated = 0,
+    /// Sanad has been created but not yet used
+    Created = 1,
+    /// Sanad is active and available for operations
+    Active = 2,
+    /// Sanad is locked for cross-chain transfer
+    Locked = 3,
+    /// Sanad has been consumed (single-use enforcement)
+    Consumed = 4,
+    /// Sanad has been minted on destination chain
+    Minted = 5,
+    /// Sanad ownership has been transferred
+    Transferred = 6,
+    /// Locked Sanad has been refunded
+    Refunded = 7,
+    /// Sanad has been burned (irreversible)
+    Burned = 8,
+    /// Invalid or unknown state
+    Invalid = 9,
+}
+
+impl SanadState {
+    /// Get the state name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            SanadState::Uncreated => "Uncreated",
+            SanadState::Created => "Created",
+            SanadState::Active => "Active",
+            SanadState::Locked => "Locked",
+            SanadState::Consumed => "Consumed",
+            SanadState::Minted => "Minted",
+            SanadState::Transferred => "Transferred",
+            SanadState::Refunded => "Refunded",
+            SanadState::Burned => "Burned",
+            SanadState::Invalid => "Invalid",
+        }
+    }
+
+    /// Get the state value.
+    pub fn value(&self) -> u8 {
+        *self as u8
+    }
+}
+
+/// Seal state in the state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SealState {
+    /// Seal has been created but not yet used
+    Created,
+    /// Seal has been consumed (locked or burned)
+    Consumed,
+    /// Seal is locked for cross-chain transfer
+    Locked,
+    /// Seal has been minted from cross-chain transfer
+    Minted,
+    /// Seal has been refunded
+    Refunded,
 }
 
 /// State machine invariants that contracts MUST enforce.
@@ -357,30 +487,15 @@ impl StateMachineInvariants {
     }
 
     /// Check if a state transition is valid.
-    pub fn check_transition(&self, from_state: SealState, to_state: SealState) -> bool {
+    pub fn check_transition(&self, from_state: SanadState, to_state: SanadState) -> bool {
         matches!(
             (from_state, to_state),
-            (SealState::Created, SealState::Consumed)
-                | (SealState::Created, SealState::Locked)
-                | (SealState::Locked, SealState::Minted)
-                | (SealState::Locked, SealState::Refunded)
+            (SanadState::Created, SanadState::Consumed)
+                | (SanadState::Created, SanadState::Locked)
+                | (SanadState::Locked, SanadState::Minted)
+                | (SanadState::Locked, SanadState::Refunded)
         )
     }
-}
-
-/// Seal state in the state machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SealState {
-    /// Seal has been created but not yet used
-    Created,
-    /// Seal has been consumed (locked or burned)
-    Consumed,
-    /// Seal is locked for cross-chain transfer
-    Locked,
-    /// Seal has been minted from cross-chain transfer
-    Minted,
-    /// Seal has been refunded
-    Refunded,
 }
 
 #[cfg(test)]
@@ -411,7 +526,21 @@ mod tests {
     #[test]
     fn test_state_machine_invariants() {
         let invariants = StateMachineInvariants::new();
-        assert!(invariants.check_transition(SealState::Created, SealState::Consumed));
-        assert!(!invariants.check_transition(SealState::Consumed, SealState::Created));
+        assert!(invariants.check_transition(SanadState::Created, SanadState::Consumed));
+        assert!(!invariants.check_transition(SanadState::Consumed, SanadState::Created));
+    }
+
+    #[test]
+    fn test_canonical_state_values() {
+        assert_eq!(SanadState::Uncreated.value(), 0);
+        assert_eq!(SanadState::Created.value(), 1);
+        assert_eq!(SanadState::Active.value(), 2);
+        assert_eq!(SanadState::Locked.value(), 3);
+        assert_eq!(SanadState::Consumed.value(), 4);
+        assert_eq!(SanadState::Minted.value(), 5);
+        assert_eq!(SanadState::Transferred.value(), 6);
+        assert_eq!(SanadState::Refunded.value(), 7);
+        assert_eq!(SanadState::Burned.value(), 8);
+        assert_eq!(SanadState::Invalid.value(), 9);
     }
 }

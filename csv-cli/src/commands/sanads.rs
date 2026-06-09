@@ -4,6 +4,7 @@ use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::Subcommand;
 use sha2::Digest;
+use std::str::FromStr;
 
 use csv_hash::ChainId;
 use csv_hash::Hash;
@@ -11,6 +12,10 @@ use csv_hash::Hash;
 use crate::config::{Chain, Config, Network};
 use crate::output;
 use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager};
+
+use csv_store::state::{
+    CanonicalLifecycleEvent, CanonicalSanadState, LifecycleEventType, SanadLifecycleState,
+};
 
 #[derive(Subcommand)]
 pub enum SanadAction {
@@ -61,6 +66,31 @@ pub enum SanadAction {
         /// Sanad ID (hex)
         sanad_id: String,
     },
+    /// Remove a Sanad from local tracking
+    Remove {
+        /// Sanad ID (hex) to remove
+        #[arg(required = false)]
+        sanad_id: Option<String>,
+        /// Remove all tracked Sanads
+        #[arg(long)]
+        all: bool,
+    },
+    /// Show canonical on-chain state of a Sanad
+    State {
+        /// Chain name
+        #[arg(short, long, value_enum)]
+        chain: Chain,
+        /// Sanad ID (hex)
+        sanad_id: String,
+    },
+    /// Show full lifecycle trace of a Sanad
+    Trace {
+        /// Chain name
+        #[arg(short, long, value_enum)]
+        chain: Chain,
+        /// Sanad ID (hex)
+        sanad_id: String,
+    },
 }
 
 pub async fn execute(
@@ -76,6 +106,9 @@ pub async fn execute(
         SanadAction::List { chain, update } => cmd_list(chain, update, config, state).await,
         SanadAction::Transfer { sanad_id, to } => cmd_transfer(sanad_id, to, state),
         SanadAction::Consume { chain, sanad_id } => cmd_consume(chain, sanad_id, config, state).await,
+        SanadAction::Remove { sanad_id, all } => cmd_remove(sanad_id, all, state),
+        SanadAction::State { chain, sanad_id } => cmd_state(chain, sanad_id, config, state).await,
+        SanadAction::Trace { chain, sanad_id } => cmd_trace(chain, sanad_id, config, state).await,
     }
 }
 
@@ -356,6 +389,10 @@ async fn cmd_create(
         if let Some(nanos) = chrono::Utc::now().timestamp_nanos_opt() {
             hasher.update(nanos.to_le_bytes());
         }
+        // Add random nonce to guarantee uniqueness even for rapid successive calls
+        let mut nonce = [0u8; 8];
+        rand::Rng::fill(&mut rand::thread_rng(), &mut nonce);
+        hasher.update(nonce);
         hasher.finalize().into()
     };
     let commitment = Hash::new(commitment_bytes);
@@ -699,7 +736,7 @@ async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &m
         output::info("Querying on-chain status for all sanads...");
     }
 
-    let headers = vec!["Sanad ID", "Chain", "Status"];
+    let headers = vec!["Sanad ID", "Chain", "State"];
     let mut rows = Vec::new();
     let mut updates_to_apply: Vec<(String, SanadStatus)> = Vec::new();
 
@@ -716,34 +753,33 @@ async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &m
         } else {
             true
         };
-        
-        let on_chain_status = check_sanad_on_chain_status(sanad, config, state).await;
-        
-        let status = if let Some(ref cs) = on_chain_status {
-            if *cs == "Inaccessible" {
-                "Inaccessible".to_string()
-            } else if *cs == "Consumed" {
-                "Consumed".to_string()
-            } else {
-                "Active".to_string()
-            }
+
+        // Query on-chain state using the new canonical state query (replaces check_sanad_on_chain_status)
+        let on_chain_state = query_sanad_on_chain_state(
+            &sanad.chain,
+            &sanad.id,
+            Some(sanad),
+            config,
+            state,
+        ).await;
+
+        let state_enum = if let Some(ref cs) = on_chain_state {
+            cs.state
         } else if !has_valid_seal {
-            "Inaccessible".to_string()
+            SanadLifecycleState::Invalid
         } else {
-            match sanad.status {
-                SanadStatus::Consumed => "Consumed".to_string(),
-                _ => "Active".to_string(),
-            }
+            SanadLifecycleState::from_local_status(sanad.status)
         };
+
+        let status = state_enum.label().to_string();
 
         // Collect updates to apply after the loop
         if update {
-            let new_status = match on_chain_status.as_deref() {
-                Some("Consumed") => SanadStatus::Consumed,
-                Some("Inaccessible") => SanadStatus::Consumed,
+            let new_status = match state_enum {
+                SanadLifecycleState::Consumed | SanadLifecycleState::Invalid => SanadStatus::Consumed,
                 _ => SanadStatus::Active,
             };
-            
+
             if sanad.status != new_status {
                 updates_to_apply.push((sanad.id.clone(), new_status));
             }
@@ -805,7 +841,8 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                 
                 let mut txid_display = [0u8; 32];
                 txid_display.copy_from_slice(txid);
-                txid_display.reverse();
+                // anchor_tx_hash is already in display format (mempool.space returns display-order
+                // txids from /tx broadcast; no reversal is needed here).
                 let txid_hex = hex::encode(txid_display);
                 
                 log::debug!("Bitcoin sanad {}: checking UTXO {}:{} on-chain", sanad.id, &txid_hex[..16], vout);
@@ -956,7 +993,7 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
         return None;
     }
     
-    // For Ethereum, check if sanad is locked on-chain via CSVLock.getLockInfo
+    // For Ethereum, check if sanad is locked on-chain via CSVLock.getSanadState
     if sanad.chain.as_str() == "ethereum" {
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
             use reqwest::Client;
@@ -971,7 +1008,7 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
             };
             
             let mut hasher = Keccak256::new();
-            hasher.update(b"getLockInfo(bytes32)");
+            hasher.update(b"getSanadState(bytes32)");
             let selector = &hasher.finalize()[..4];
             
             let sanad_id_hex = sanad.id.trim_start_matches("0x");
@@ -1007,7 +1044,7 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                     "id": 1
                 });
                 
-                log::debug!("Ethereum sanad {}: calling getLockInfo on {} via {}", sanad.id, contract_addr, url);
+                log::debug!("Ethereum sanad {}: calling getSanadState on {} via {}", sanad.id, contract_addr, url);
                 
                 if let Ok(response) = client.post(url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
                     if let Ok(result) = response.json::<serde_json::Value>().await {
@@ -1018,16 +1055,33 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                                 Err(_) => continue,
                             };
                             
-                            if response_bytes.len() >= 32 {
-                                let commitment = &response_bytes[..32];
-                                let is_locked = !commitment.iter().all(|&b| b == 0);
-                                if is_locked {
-                                    eprintln!("DEBUG: Ethereum sanad {} is LOCKED on-chain (commitment={:?})", sanad.id, commitment);
-                                    return Some("Consumed".to_string());
-                                } else {
-                                    eprintln!("DEBUG: Ethereum sanad {} is NOT locked on-chain", sanad.id);
-                                    return Some("Active".to_string());
-                                }
+                            // getSanadState returns 4 x 32 bytes:
+                            // [state (uint8, padded), isUsed (bool, padded), lockTimestamp (uint256), refunded (bool, padded)]
+                            if response_bytes.len() >= 128 {
+                                let state = response_bytes[31]; // state is uint8, last byte of first 32-byte word
+                                let is_used = response_bytes[63] != 0; // isUsed is bool, last byte of second 32-byte word
+                                let refunded = response_bytes[127] != 0; // refunded is bool, last byte of fourth 32-byte word
+                                
+                                let status = match state {
+                                    0 => "Uncreated",
+                                    1 => "Active",
+                                    2 => "Locked",
+                                    3 => "Consumed",
+                                    4 => "Refunded",
+                                    _ => "Unknown",
+                                };
+                                
+                                eprintln!(
+                                    "DEBUG: Ethereum sanad {} state={} isUsed={} refunded={}",
+                                    sanad.id, status, is_used, refunded
+                                );
+                                
+                                // Map contract state to display status
+                                return match state {
+                                    3 => Some("Consumed".to_string()), // Consumed
+                                    4 => Some("Consumed".to_string()), // Refunded (also consumed)
+                                    _ => Some("Active".to_string()),   // Active, Locked, Uncreated
+                                };
                             }
                         } else if let Some(err) = result.get("error") {
                             eprintln!("DEBUG: Ethereum sanad {} RPC error from {}: {}", sanad.id, url, err);
@@ -1151,119 +1205,64 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
     if sanad.chain.as_str() == "solana" {
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
             use reqwest::Client;
+            use solana_sdk::pubkey::Pubkey;
+            use std::str::FromStr;
+            
             let client = Client::new();
             
-            // Parse seal_ref to extract owner address and sanad_id
-            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
-                let (owner_address, sanad_id_bytes) = if seal_ref_bytes.len() >= 2 {
-                    let mut pos = 0;
-                    
-                    let _nonce = if seal_ref_bytes[pos] == 1 {
-                        pos += 1;
-                        if seal_ref_bytes.len() < pos + 8 {
-                            return None;
+            // Decode the program ID as base58 (Solana's native address encoding)
+            let program_id = Pubkey::from_str("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj")
+                .ok()?;
+            
+            // Parse the owner pubkey from the sanad record
+            let owner_pubkey = Pubkey::from_str(&sanad.owner).ok()?;
+            
+            // Derive the PDA using the correct Solana algorithm
+            let sanad_id_bytes: [u8; 32] = hex::decode(
+                    sanad.id.trim_start_matches("0x")
+                ).ok()?.try_into().ok()?;
+            let sanad_id_hash = csv_hash::Hash::new(sanad_id_bytes);
+            
+            let (seal_pda, _bump) = Pubkey::find_program_address(
+                &[b"sanad", owner_pubkey.as_ref(), sanad_id_hash.as_bytes()],
+                &program_id,
+            );
+            
+            let url = chain_cfg.rpc_url.trim_end_matches('/').to_string();
+            
+            let payload = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "getAccountInfo",
+                "params": [[seal_pda.to_string()], {"encoding": "base64"}],
+                "id": 1
+            });
+            
+            log::debug!("Solana sanad {}: fetching PDA {} via getAccountInfo", sanad.id, seal_pda);
+            
+            if let Ok(response) = client.post(&url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+                if let Ok(result) = response.json::<serde_json::Value>().await {
+                    if let Some(value) = result.get("result").and_then(|r| r.get("value")) {
+                        if value.is_null() {
+                            log::debug!("Solana sanad {}: PDA account not found", sanad.id);
+                            return Some("Inaccessible".to_string());
                         }
-                        pos += 8;
-                        Some(u64::from_le_bytes([
-                            seal_ref_bytes[pos-8], seal_ref_bytes[pos-7], seal_ref_bytes[pos-6],
-                            seal_ref_bytes[pos-5], seal_ref_bytes[pos-4], seal_ref_bytes[pos-3],
-                            seal_ref_bytes[pos-2], seal_ref_bytes[pos-1],
-                        ]))
-                    } else {
-                        pos += 1;
-                        None
-                    };
-                    
-                    let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
-                        pos += 1;
-                        if seal_ref_bytes.len() < pos + 8 {
-                            return None;
-                        }
-                        pos += 8;
-                        Some(0u64)
-                    } else if seal_ref_bytes.len() > pos {
-                        pos += 1;
-                        None
-                    } else {
-                        None
-                    };
-                    
-                    if seal_ref_bytes.len() < pos + 4 {
-                        return None;
-                    }
-                    let id_len = u32::from_le_bytes([
-                        seal_ref_bytes[pos], seal_ref_bytes[pos + 1],
-                        seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3],
-                    ]) as usize;
-                    pos += 4;
-                    
-                    if seal_ref_bytes.len() < pos + id_len {
-                        return None;
-                    }
-                    
-                    let account_address = &seal_ref_bytes[pos..pos + id_len];
-                    (account_address, &sanad.id)
-                } else {
-                    return None;
-                };
-                
-                if owner_address.len() < 32 || sanad_id_bytes.len() < 32 {
-                    return None;
-                }
-                
-                let owner_address = &owner_address[0..32];
-                
-                // Decode sanad_id from hex
-                let sanad_id_hex = sanad_id_bytes.trim_start_matches("0x");
-                let sanad_id_bytes = hex::decode(sanad_id_hex).ok()?;
-                if sanad_id_bytes.len() != 32 {
-                    return None;
-                }
-                
-                // Derive SanadAccount PDA: seeds = [b"sanad", owner, sanad_id]
-                // The program ID for csv-seal is: CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj
-                let program_id = hex::decode("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj").ok()?;
-                
-                // Derive PDA using the same method as the Anchor program
-                let pda = derive_sanad_pda(&program_id, owner_address, &sanad_id_bytes);
-                
-                let account_hex = hex::encode(pda);
-                let url = chain_cfg.rpc_url.trim_end_matches('/').to_string();
-                
-                let payload = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": "getAccountInfo",
-                    "params": [[account_hex], {"encoding": "base64"}],
-                    "id": 1
-                });
-                
-                log::debug!("Solana sanad {}: fetching PDA {} via getAccountInfo", sanad.id, account_hex);
-                
-                if let Ok(response) = client.post(&url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
-                    if let Ok(result) = response.json::<serde_json::Value>().await {
-                        if let Some(value) = result.get("result").and_then(|r| r.get("value")) {
-                            if value.is_null() {
-                                log::debug!("Solana sanad {}: PDA account not found", sanad.id);
-                                return Some("Inaccessible".to_string());
-                            }
-                            
-                            // Parse the base64 encoded account data to check consumed flag
-                            if let Some(data) = value.get("data").and_then(|d| d.get("data")) {
-                                if let Some(data_str) = data.as_str() {
-                                    if let Ok(account_data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
-                                        // Parse SanadAccount: 8 (discriminator) + 32 (owner) + 32 (sanad_id) + 
-                                        // 32 (commitment) + 32 (state_root) + 32 (nullifier) + 1 (asset_class) + 
-                                        // 32 (asset_id) + 32 (metadata_hash) + 1 (proof_system) + 32 (proof_root) + 
-                                        // 1 (consumed) + 1 (locked) + 8 (created_at) + 1 (bump)
-                                        if account_data.len() >= 44 {
-                                            let consumed = account_data[43] != 0;
-                                            if consumed {
-                                                log::debug!("Solana sanad {}: SanadAccount consumed flag is true", sanad.id);
-                                                return Some("Consumed".to_string());
-                                            } else {
-                                                log::debug!("Solana sanad {}: SanadAccount consumed flag is false", sanad.id);
-                                                return Some("Active".to_string());
-                                            }
+                        
+                        // Parse the base64 encoded account data to check consumed flag
+                        if let Some(data) = value.get("data").and_then(|d| d.get("data")) {
+                            if let Some(data_str) = data.as_str() {
+                                if let Ok(account_data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
+                                    // Parse SanadAccount: 8 (discriminator) + 32 (owner) + 32 (sanad_id) + 
+                                    // 32 (commitment) + 32 (state_root) + 32 (nullifier) + 1 (asset_class) + 
+                                    // 32 (asset_id) + 32 (metadata_hash) + 1 (proof_system) + 32 (proof_root) + 
+                                    // 1 (consumed) + 1 (locked) + 8 (created_at) + 1 (bump)
+                                    if account_data.len() >= 44 {
+                                        let consumed = account_data[43] != 0;
+                                        if consumed {
+                                            log::debug!("Solana sanad {}: SanadAccount consumed flag is true", sanad.id);
+                                            return Some("Consumed".to_string());
+                                        } else {
+                                            log::debug!("Solana sanad {}: SanadAccount consumed flag is false", sanad.id);
+                                            return Some("Active".to_string());
                                         }
                                     }
                                 }
@@ -1280,32 +1279,6 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
     None
 }
 
-/// Derive the SanadAccount PDA for Solana
-/// Seeds: [b"sanad", owner, sanad_id]
-/// Uses the same PDA derivation as the Anchor csv-seal program
-fn derive_sanad_pda(program_id: &[u8], owner: &[u8], sanad_id: &[u8]) -> [u8; 32] {
-    for bump in 0..=255u8 {
-        let mut seeds = Vec::with_capacity(4 + owner.len() + sanad_id.len() + 1);
-        seeds.extend_from_slice(b"sanad");
-        seeds.extend_from_slice(owner);
-        seeds.extend_from_slice(sanad_id);
-        seeds.push(bump);
-        
-        let mut combined = Vec::with_capacity(program_id.len() + seeds.len());
-        combined.extend_from_slice(program_id);
-        combined.extend_from_slice(&seeds);
-        
-        let hash = sha3::Keccak256::digest(&combined);
-        
-        if hash.len() >= 32 {
-            let mut result = [0u8; 32];
-            result.copy_from_slice(&hash[..32]);
-            return result;
-        }
-    }
-    
-    [0u8; 32]
-}
 
 fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> Result<()> {
     output::header(&format!("Transferring Sanad to {}", to));
@@ -1440,4 +1413,711 @@ async fn cmd_consume(
     }
 
     Ok(())
+}
+
+fn cmd_remove(sanad_id: Option<String>, all: bool, state: &mut UnifiedStateManager) -> Result<()> {
+    if all {
+        output::header("Removing All Sanads");
+        let count = state.storage.sanads.len();
+        if count == 0 {
+            output::info("No Sanads to remove");
+            return Ok(());
+        }
+        state.storage.sanads.clear();
+        state.save()?;
+        output::info(&format!("Removed {} Sanad(s) from local tracking", count));
+        return Ok(());
+    }
+
+    let sanad_id = sanad_id.ok_or_else(|| anyhow::anyhow!("Must provide --all or a Sanad ID"))?;
+    output::header(&format!("Removing Sanad {}", &sanad_id[..8.min(sanad_id.len())]));
+
+    // Normalize sanad_id (remove 0x prefix if present)
+    let normalized_id = sanad_id.trim_start_matches("0x").to_string();
+
+    // Check if sanad exists
+    if state.get_sanad(&normalized_id).is_none() {
+        output::error(&format!("Sanad {} not found in local tracking", sanad_id));
+        return Err(anyhow::anyhow!("Sanad not found in local state"));
+    }
+
+    // Remove the sanad
+    state.remove_sanad(&normalized_id)?;
+    state.save()?;
+
+    output::info(&format!("Sanad {} removed from local tracking", sanad_id));
+    Ok(())
+}
+
+/// Show canonical on-chain state of a Sanad (Contracts-Audit.md § "CLI fixes")
+async fn cmd_state(
+    chain: Chain,
+    sanad_id: String,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<()> {
+    let bytes = hex::decode(sanad_id.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    if bytes.len() != 32 {
+        return Err(anyhow::anyhow!(
+            "Sanad ID must be 32 bytes ({} bytes provided)",
+            bytes.len()
+        ));
+    }
+    let mut hash_bytes = [0u8; 32];
+    hash_bytes.copy_from_slice(&bytes);
+    let sanad_id_hash = csv_hash::Hash::new(hash_bytes);
+    let sanad_id_hex = sanad_id_hash.to_hex();
+
+    output::header(&format!("Sanad State: {}", sanad_id_hex));
+    output::kv("Chain", chain.as_ref());
+
+    // Try to find the sanad in local state for fallback data
+    let local_sanad = state.get_sanad(&sanad_id_hex);
+
+    // Query on-chain state
+    let on_chain_state = query_sanad_on_chain_state(&chain, &sanad_id_hex, local_sanad, config, state).await;
+
+    match on_chain_state {
+        Some(cs) => {
+            output::kv("State", cs.state.label());
+            if let Some(seal_id) = &cs.seal_id {
+                output::kv("Seal ID", seal_id);
+            }
+            if let Some(owner) = &cs.owner {
+                output::kv("Owner", owner);
+            }
+            if let Some(commitment) = &cs.commitment {
+                output::kv_hash("Commitment", commitment.as_bytes());
+            }
+            if let Some(nullifier) = &cs.nullifier {
+                output::kv_hash("Nullifier", nullifier.as_bytes());
+            }
+            if let Some(src) = &cs.source_chain {
+                output::kv("Source Chain", src.as_ref());
+            }
+            if let Some(dst) = &cs.destination_chain {
+                output::kv("Destination Chain", dst.as_ref());
+            }
+            if let Some(tx) = &cs.tx_hash {
+                output::kv("Last TX", tx);
+            }
+            if let Some(height) = &cs.block_height {
+                output::kv("Block Height", &height.to_string());
+            }
+            if let Some(updated) = &cs.updated_at {
+                output::kv("Updated", &chrono::DateTime::from_timestamp(*updated as i64, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|| updated.to_string()));
+            }
+        }
+        None => {
+            // Fall back to local state
+            if let Some(tracked) = local_sanad {
+                output::warning("On-chain query returned no data; showing local state");
+                let state_enum = SanadLifecycleState::from_local_status(tracked.status);
+                output::kv("State", state_enum.label());
+                output::kv("Owner", &tracked.owner);
+                output::kv_hash("Commitment", tracked.commitment.as_bytes());
+                if let Some(nullifier) = &tracked.nullifier {
+                    output::kv_hash("Nullifier", nullifier.as_bytes());
+                }
+                if let Some(anchor) = &tracked.anchor_tx_hash {
+                    output::kv("Anchor TX", anchor);
+                }
+            } else {
+                output::error("Sanad not found locally and on-chain query returned no data");
+                output::info("This Sanad may not exist on-chain or the chain adapter may not support state queries yet");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Show full lifecycle trace of a Sanad (Contracts-Audit.md § "CLI fixes")
+async fn cmd_trace(
+    chain: Chain,
+    sanad_id: String,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<()> {
+    let bytes = hex::decode(sanad_id.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    if bytes.len() != 32 {
+        return Err(anyhow::anyhow!(
+            "Sanad ID must be 32 bytes ({} bytes provided)",
+            bytes.len()
+        ));
+    }
+    let mut hash_bytes = [0u8; 32];
+    hash_bytes.copy_from_slice(&bytes);
+    let sanad_id_hash = csv_hash::Hash::new(hash_bytes);
+    let sanad_id_hex = sanad_id_hash.to_hex();
+
+    output::header(&format!("Sanad Lifecycle Trace: {}", sanad_id_hex));
+    output::kv("Chain", chain.as_ref());
+
+    let events = query_sanad_lifecycle_events(&chain, &sanad_id_hex, config, state).await;
+
+    if events.is_empty() {
+        output::info("No lifecycle events found. This Sanad may not exist on-chain yet.");
+        return Ok(());
+    }
+
+    output::info(&format!("Found {} lifecycle event(s)", events.len()));
+    println!();
+
+    for event in &events {
+        let time = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .unwrap_or_else(|| event.timestamp.to_string());
+
+        output::kv("Time", &time);
+        output::kv("Event", &event.event.to_string());
+        output::kv("Chain", event.chain.as_ref());
+        output::kv("State After", event.state_after.label());
+        if let Some(actor) = &event.actor {
+            output::kv("Actor", actor);
+        }
+        if let Some(tx) = &event.tx_hash {
+            output::kv("TX", tx);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Query on-chain state and return a CanonicalSanadState.
+/// This replaces the old check_sanad_on_chain_status which only returned "Active"/"Consumed".
+async fn query_sanad_on_chain_state(
+    chain: &Chain,
+    sanad_id_hex: &str,
+    local_sanad: Option<&SanadRecord>,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Option<CanonicalSanadState> {
+    // Ethereum: call getSanadState and return full state
+    if chain.as_str() == "ethereum" {
+        return query_ethereum_sanad_state(sanad_id_hex, config).await;
+    }
+
+    // Bitcoin: check UTXO state
+    if chain.as_str() == "bitcoin" {
+        return query_bitcoin_sanad_state(sanad_id_hex, config, state).await;
+    }
+
+    // Sui: parse seal object state
+    if chain.as_str() == "sui" {
+        return query_sui_sanad_state(sanad_id_hex, local_sanad, config, state).await;
+    }
+
+    // Solana: parse PDA state
+    if chain.as_str() == "solana" {
+        return query_solana_sanad_state(sanad_id_hex, local_sanad, config, state).await;
+    }
+
+    // Aptos: check AnchorDataCollection state
+    if chain.as_str() == "aptos" {
+        return query_aptos_sanad_state(sanad_id_hex, local_sanad, config, state).await;
+    }
+
+    None
+}
+
+/// Ethereum: call getSanadState and return full CanonicalSanadState
+async fn query_ethereum_sanad_state(sanad_id_hex: &str, config: &Config) -> Option<CanonicalSanadState> {
+    use reqwest::Client;
+    use sha3::{Digest, Keccak256};
+
+    let client = Client::new();
+
+    // Find the chain config — try ethereum first, then look for any chain with a contract
+    let chain_cfg = config.chain(&Chain::from_str("ethereum").ok()?).ok()?;
+
+    let contract_addr = chain_cfg.contract_address.as_ref()?;
+
+    let mut hasher = Keccak256::new();
+    hasher.update(b"getSanadState(bytes32)");
+    let selector = &hasher.finalize()[..4];
+
+    let sanad_id_bytes = hex::decode(sanad_id_hex.trim_start_matches("0x")).ok()?;
+
+    let mut calldata = Vec::with_capacity(36);
+    calldata.extend_from_slice(selector);
+    calldata.extend_from_slice(&sanad_id_bytes);
+
+    let calldata_hex = format!("0x{}", hex::encode(&calldata));
+    let contract_addr_normalized = contract_addr.trim_start_matches("0x");
+
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": format!("0x{}", contract_addr_normalized),
+            "data": calldata_hex
+        }, "latest"],
+        "id": 1
+    });
+
+    if let Ok(response) = client.post(&chain_cfg.rpc_url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+        if let Ok(result) = response.json::<serde_json::Value>().await {
+            if let Some(hex_str) = result.get("result").and_then(|r| r.as_str()) {
+                let response_bytes = hex::decode(hex_str.trim_start_matches("0x")).ok()?;
+
+                if response_bytes.len() >= 128 {
+                    let state = response_bytes[31];
+                    let locked_at = u64::from_be_bytes(response_bytes[64..72].try_into().unwrap_or([0; 8]));
+                    let consumed_at = u64::from_be_bytes(response_bytes[96..104].try_into().unwrap_or([0; 8]));
+
+                    return Some(CanonicalSanadState {
+                        sanad_id: sanad_id_hex.to_string(),
+                        seal_id: None,
+                        chain: csv_hash::ChainId::new("ethereum"),
+                        state: SanadLifecycleState::from_u8(state),
+                        owner: None,
+                        commitment: None,
+                        nullifier: None,
+                        source_chain: None,
+                        destination_chain: None,
+                        tx_hash: None,
+                        block_height: None,
+                        updated_at: Some(if consumed_at > 0 { consumed_at } else { locked_at }),
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Bitcoin: check UTXO state
+async fn query_bitcoin_sanad_state(
+    sanad_id_hex: &str,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Option<CanonicalSanadState> {
+    let tracked = state.get_sanad(sanad_id_hex)?;
+
+    if let Some(anchor_tx_hash) = &tracked.anchor_tx_hash {
+        if let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x")) {
+            if tx_hash_bytes.len() >= 32 {
+                let txid = &tx_hash_bytes[0..32];
+                let vout = if tx_hash_bytes.len() >= 36 {
+                    u32::from_le_bytes(tx_hash_bytes[32..36].try_into().unwrap_or([0; 4]))
+                } else {
+                    state.storage.wallet.sanad_seals
+                        .iter()
+                        .find(|s| s.sanad_id == sanad_id_hex)
+                        .map(|s| s.vout)
+                        .unwrap_or(0)
+                };
+
+                let txid_display = hex::encode(txid);
+
+                if let Ok(chain_cfg) = config.chain(&csv_store::state::ChainId::new("bitcoin")) {
+                    match csv_coordinator::wallet::bitcoin::validate_utxo_onchain(&txid_display, vout, &chain_cfg.rpc_url).await {
+                        Ok((tx_exists, is_confirmed, is_unspent, _)) => {
+                            if !tx_exists || !is_confirmed {
+                                return Some(CanonicalSanadState {
+                                    sanad_id: sanad_id_hex.to_string(),
+                                    seal_id: None,
+                                    chain: csv_hash::ChainId::new("bitcoin"),
+                                    state: SanadLifecycleState::Invalid,
+                                    owner: None,
+                                    commitment: None,
+                                    nullifier: None,
+                                    source_chain: None,
+                                    destination_chain: None,
+                                    tx_hash: Some(txid_display),
+                                    block_height: None,
+                                    updated_at: None,
+                                });
+                            }
+                            if !is_unspent {
+                                return Some(CanonicalSanadState {
+                                    sanad_id: sanad_id_hex.to_string(),
+                                    seal_id: None,
+                                    chain: csv_hash::ChainId::new("bitcoin"),
+                                    state: SanadLifecycleState::Consumed,
+                                    owner: None,
+                                    commitment: None,
+                                    nullifier: None,
+                                    source_chain: None,
+                                    destination_chain: None,
+                                    tx_hash: Some(txid_display),
+                                    block_height: None,
+                                    updated_at: None,
+                                });
+                            }
+                            // UTXO is unspent — Active
+                            return Some(CanonicalSanadState {
+                                sanad_id: sanad_id_hex.to_string(),
+                                seal_id: None,
+                                chain: csv_hash::ChainId::new("bitcoin"),
+                                state: SanadLifecycleState::Active,
+                                owner: None,
+                                commitment: Some(tracked.commitment.clone()),
+                                nullifier: tracked.nullifier.clone(),
+                                source_chain: None,
+                                destination_chain: None,
+                                tx_hash: Some(txid_display),
+                                block_height: None,
+                                updated_at: Some(tracked.created_at),
+                            });
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Sui: parse seal object state
+async fn query_sui_sanad_state(
+    sanad_id_hex: &str,
+    local_sanad: Option<&SanadRecord>,
+    config: &Config,
+    _state: &UnifiedStateManager,
+) -> Option<CanonicalSanadState> {
+    let tracked = local_sanad?;
+
+    if let Ok(chain_cfg) = config.chain(&csv_store::state::ChainId::new("sui")) {
+        if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&tracked.seal_ref) {
+            if seal_ref_bytes.len() >= 2 {
+                let mut pos = 0;
+                if seal_ref_bytes[pos] == 1 { pos += 1; }
+                if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 { pos += 1; }
+                else { pos += 1; }
+
+                if seal_ref_bytes.len() >= pos + 4 {
+                    let id_len = u32::from_le_bytes([seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3]]) as usize;
+                    pos += 4;
+                    if seal_ref_bytes.len() >= pos + id_len && id_len >= 32 {
+                        let object_id_hex = format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + 32]));
+                        let base_url = chain_cfg.rpc_url.trim_end_matches('/');
+                        let url = format!("{}/v1(objects/{})", base_url, object_id_hex);
+
+                        if let Ok(response) = reqwest::Client::new().get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+                            if let Ok(result) = response.json::<serde_json::Value>().await {
+                                if let Some(status) = result.get("status") {
+                                    if status.as_str() == Some("Deleted") || status.as_str() == Some("NotFound") {
+                                        return Some(CanonicalSanadState {
+                                            sanad_id: sanad_id_hex.to_string(),
+                                            seal_id: Some(object_id_hex),
+                                            chain: csv_hash::ChainId::new("sui"),
+                                            state: SanadLifecycleState::Invalid,
+                                            owner: None,
+                                            commitment: None,
+                                            nullifier: None,
+                                            source_chain: None,
+                                            destination_chain: None,
+                                            tx_hash: None,
+                                            block_height: None,
+                                            updated_at: None,
+                                        });
+                                    }
+                                }
+                                if let Some(contents) = result.get("data").and_then(|d| d.get("contents")) {
+                                    if let Some(display_data) = contents.get("display").and_then(|d| d.get("data")) {
+                                        if let Some(consumed) = display_data.get("consumed").and_then(|c| c.as_bool()) {
+                                            let state = if consumed {
+                                                // Check locked flag too
+                                                if let Some(locked) = display_data.get("locked").and_then(|l| l.as_bool()) {
+                                                    if locked {
+                                                        SanadLifecycleState::Locked
+                                                    } else {
+                                                        SanadLifecycleState::Consumed
+                                                    }
+                                                } else {
+                                                    SanadLifecycleState::Consumed
+                                                }
+                                            } else {
+                                                SanadLifecycleState::Active
+                                            };
+                                            return Some(CanonicalSanadState {
+                                                sanad_id: sanad_id_hex.to_string(),
+                                                seal_id: Some(object_id_hex),
+                                                chain: csv_hash::ChainId::new("sui"),
+                                                state,
+                                                owner: None,
+                                                commitment: Some(tracked.commitment.clone()),
+                                                nullifier: tracked.nullifier.clone(),
+                                                source_chain: None,
+                                                destination_chain: None,
+                                                tx_hash: None,
+                                                block_height: None,
+                                                updated_at: Some(tracked.created_at),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Solana: parse PDA state
+async fn query_solana_sanad_state(
+    sanad_id_hex: &str,
+    local_sanad: Option<&SanadRecord>,
+    config: &Config,
+    _state: &UnifiedStateManager,
+) -> Option<CanonicalSanadState> {
+    let tracked = local_sanad?;
+
+    if let Ok(chain_cfg) = config.chain(&csv_store::state::ChainId::new("solana")) {
+        use solana_sdk::pubkey::Pubkey;
+        use std::str::FromStr;
+
+        let program_id = Pubkey::from_str("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj").ok()?;
+        let owner_pubkey = Pubkey::from_str(&tracked.owner).ok()?;
+
+        let sanad_id_bytes: [u8; 32] = hex::decode(sanad_id_hex.trim_start_matches("0x")).ok()?.try_into().ok()?;
+        let sanad_id_hash = csv_hash::Hash::new(sanad_id_bytes);
+
+        let (seal_pda, _bump) = Pubkey::find_program_address(
+            &[b"sanad", owner_pubkey.as_ref(), sanad_id_hash.as_bytes()],
+            &program_id,
+        );
+
+        let url = chain_cfg.rpc_url.trim_end_matches('/');
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "getAccountInfo",
+            "params": [[seal_pda.to_string()], {"encoding": "base64"}],
+            "id": 1
+        });
+
+        if let Ok(response) = reqwest::Client::new().post(url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+            if let Ok(result) = response.json::<serde_json::Value>().await {
+                if let Some(value) = result.get("result").and_then(|r| r.get("value")) {
+                    if value.is_null() {
+                        return Some(CanonicalSanadState {
+                            sanad_id: sanad_id_hex.to_string(),
+                            seal_id: Some(seal_pda.to_string()),
+                            chain: csv_hash::ChainId::new("solana"),
+                            state: SanadLifecycleState::Invalid,
+                            owner: None,
+                            commitment: None,
+                            nullifier: None,
+                            source_chain: None,
+                            destination_chain: None,
+                            tx_hash: None,
+                            block_height: None,
+                            updated_at: None,
+                        });
+                    }
+
+                    if let Some(data) = value.get("data").and_then(|d| d.get("data")) {
+                        if let Some(data_str) = data.as_str() {
+                            if let Ok(account_data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
+                                if account_data.len() >= 44 {
+                                    let consumed = account_data[43] != 0;
+                                    let locked = account_data[44] != 0;
+                                    let state = if consumed && locked {
+                                        SanadLifecycleState::Locked
+                                    } else if consumed {
+                                        SanadLifecycleState::Consumed
+                                    } else {
+                                        SanadLifecycleState::Active
+                                    };
+                                    return Some(CanonicalSanadState {
+                                        sanad_id: sanad_id_hex.to_string(),
+                                        seal_id: Some(seal_pda.to_string()),
+                                        chain: csv_hash::ChainId::new("solana"),
+                                        state,
+                                        owner: None,
+                                        commitment: Some(tracked.commitment.clone()),
+                                        nullifier: tracked.nullifier.clone(),
+                                        source_chain: None,
+                                        destination_chain: None,
+                                        tx_hash: None,
+                                        block_height: None,
+                                        updated_at: Some(tracked.created_at),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Aptos: check AnchorDataCollection state
+async fn query_aptos_sanad_state(
+    sanad_id_hex: &str,
+    local_sanad: Option<&SanadRecord>,
+    config: &Config,
+    _state: &UnifiedStateManager,
+) -> Option<CanonicalSanadState> {
+    let tracked = local_sanad?;
+
+    if let Ok(chain_cfg) = config.chain(&csv_store::state::ChainId::new("aptos")) {
+        if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&tracked.seal_ref) {
+            if seal_ref_bytes.len() >= 2 {
+                let mut pos = 0;
+                let sanad_nonce = if seal_ref_bytes[pos] == 1 {
+                    pos += 1;
+                    if seal_ref_bytes.len() >= pos + 8 {
+                        if let Ok(nonce_bytes) = seal_ref_bytes[pos..pos + 8].try_into() {
+                            pos += 8;
+                            Some(u64::from_le_bytes(nonce_bytes))
+                        } else { None }
+                    } else { None }
+                } else {
+                    pos += 1;
+                    None
+                };
+
+                if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 { pos += 1; }
+                else if seal_ref_bytes.len() > pos { pos += 1; }
+
+                if seal_ref_bytes.len() >= pos + 4 {
+                    let id_len = u32::from_le_bytes([seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3]]) as usize;
+                    pos += 4;
+                    if seal_ref_bytes.len() >= pos + id_len && id_len == 32 {
+                        let addr_hex = format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + id_len]));
+                        let contract_addr = chain_cfg.contract_address.as_deref().unwrap_or("0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50");
+                        let anchor_collection_type = format!("{}::CSVSeal::AnchorDataCollection", contract_addr);
+                        let collection_url = format!(
+                            "{}/accounts/{}/resource/{}",
+                            chain_cfg.rpc_url.trim_end_matches('/'),
+                            addr_hex,
+                            anchor_collection_type
+                        );
+
+                        if let Ok(response) = reqwest::Client::new().get(&collection_url).timeout(std::time::Duration::from_secs(5)).send().await {
+                            if response.status().is_success() {
+                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                    if let Some(table_handle) = data.get("data").and_then(|d| d.get("data")).and_then(|d| d.get("handle")).and_then(|h| h.as_str()) {
+                                        let table_url = format!(
+                                            "{}/accounts/{}/table_item",
+                                            chain_cfg.rpc_url.trim_end_matches('/'),
+                                            addr_hex
+                                        );
+                                        let key_type = "u64";
+                                        let value_type = format!("{}::CSVSeal::AnchorData", contract_addr);
+                                        let sanad_nonce_val = sanad_nonce.unwrap_or(0);
+
+                                        let table_payload = serde_json::json!({
+                                            "key_type": key_type,
+                                            "value_type": value_type,
+                                            "key": format!("0x{:016x}", sanad_nonce_val),
+                                            "handle": table_handle
+                                        });
+
+                                        if let Ok(table_response) = reqwest::Client::new()
+                                            .post(&table_url)
+                                            .json(&table_payload)
+                                            .timeout(std::time::Duration::from_secs(5))
+                                            .send()
+                                            .await
+                                        {
+                                            if table_response.status().is_success() {
+                                                return Some(CanonicalSanadState {
+                                                    sanad_id: sanad_id_hex.to_string(),
+                                                    seal_id: None,
+                                                    chain: csv_hash::ChainId::new("aptos"),
+                                                    state: SanadLifecycleState::Consumed,
+                                                    owner: None,
+                                                    commitment: Some(tracked.commitment.clone()),
+                                                    nullifier: tracked.nullifier.clone(),
+                                                    source_chain: None,
+                                                    destination_chain: None,
+                                                    tx_hash: None,
+                                                    block_height: None,
+                                                    updated_at: Some(tracked.created_at),
+                                                });
+                                            } else if table_response.status().as_u16() == 404 {
+                                                return Some(CanonicalSanadState {
+                                                    sanad_id: sanad_id_hex.to_string(),
+                                                    seal_id: None,
+                                                    chain: csv_hash::ChainId::new("aptos"),
+                                                    state: SanadLifecycleState::Active,
+                                                    owner: None,
+                                                    commitment: Some(tracked.commitment.clone()),
+                                                    nullifier: tracked.nullifier.clone(),
+                                                    source_chain: None,
+                                                    destination_chain: None,
+                                                    tx_hash: None,
+                                                    block_height: None,
+                                                    updated_at: Some(tracked.created_at),
+                                                });
+                                            }
+                                        }
+                                    } else if let Some(next_nonce_str) = data.get("data").and_then(|d| d.get("next_nonce")).and_then(|n| n.as_str()) {
+                                        if let Ok(next_nonce) = next_nonce_str.parse::<u64>() {
+                                            if let Some(sanad_nonce) = sanad_nonce {
+                                                if sanad_nonce < next_nonce.saturating_sub(1) {
+                                                    return Some(CanonicalSanadState {
+                                                        sanad_id: sanad_id_hex.to_string(),
+                                                        seal_id: None,
+                                                        chain: csv_hash::ChainId::new("aptos"),
+                                                        state: SanadLifecycleState::Consumed,
+                                                        owner: None,
+                                                        commitment: Some(tracked.commitment.clone()),
+                                                        nullifier: tracked.nullifier.clone(),
+                                                        source_chain: None,
+                                                        destination_chain: None,
+                                                        tx_hash: None,
+                                                        block_height: None,
+                                                        updated_at: Some(tracked.created_at),
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Query lifecycle events for a Sanad (placeholder — full implementation requires chain adapter event indexing)
+async fn query_sanad_lifecycle_events(
+    _chain: &Chain,
+    sanad_id_hex: &str,
+    _config: &Config,
+    state: &UnifiedStateManager,
+) -> Vec<CanonicalLifecycleEvent> {
+    let mut events = Vec::new();
+
+    // Get local sanad for creation event
+    if let Some(tracked) = state.get_sanad(sanad_id_hex) {
+        events.push(CanonicalLifecycleEvent {
+            timestamp: tracked.created_at,
+            chain: tracked.chain.clone(),
+            event: LifecycleEventType::Created,
+            actor: None,
+            tx_hash: tracked.anchor_tx_hash.clone(),
+            state_after: SanadLifecycleState::from_local_status(tracked.status),
+        });
+    }
+
+    // Chain-specific event queries would go here (Phase 5: SanadStateReader trait)
+    // For now, return the creation event from local state
+
+    events
 }

@@ -2,6 +2,66 @@
 
 use anchor_lang::prelude::*;
 
+/// Canonical Sanad lifecycle state — matches Ethereum/Sui/Aptos
+/// 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred, 7=Refunded, 8=Burned, 9=Invalid
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SanadState {
+    Uncreated = 0,
+    Created = 1,
+    Active = 2,
+    Locked = 3,
+    Consumed = 4,
+    Minted = 5,
+    Transferred = 6,
+    Refunded = 7,
+    Burned = 8,
+    Invalid = 9,
+}
+
+impl SanadState {
+    pub fn from_u8(val: u8) -> Self {
+        match val {
+            0 => SanadState::Uncreated,
+            1 => SanadState::Created,
+            2 => SanadState::Active,
+            3 => SanadState::Locked,
+            4 => SanadState::Consumed,
+            5 => SanadState::Minted,
+            6 => SanadState::Transferred,
+            7 => SanadState::Refunded,
+            8 => SanadState::Burned,
+            9 => SanadState::Invalid,
+            _ => SanadState::Invalid,
+        }
+    }
+}
+
+/// Canonical Seal lifecycle state
+/// 0=Created, 1=Consumed, 2=Locked, 3=Minted, 4=Refunded
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SealState {
+    Created = 0,
+    Consumed = 1,
+    Locked = 2,
+    Minted = 3,
+    Refunded = 4,
+}
+
+impl SealState {
+    pub fn from_u8(val: u8) -> Self {
+        match val {
+            0 => SealState::Created,
+            1 => SealState::Consumed,
+            2 => SealState::Locked,
+            3 => SealState::Minted,
+            4 => SealState::Refunded,
+            _ => SealState::Created,
+        }
+    }
+}
+
 /// SanadAccount stores the state of a Sanad on Solana
 /// This is a PDA (Program Derived Address) account
 #[account]
@@ -26,12 +86,18 @@ pub struct SanadAccount {
     pub proof_system: u8,
     /// Root/verification key commitment for advanced proof systems
     pub proof_root: [u8; 32],
-    /// Whether this sanad has been consumed
-    pub consumed: bool,
-    /// Whether this sanad is locked for cross-chain transfer
-    pub locked: bool,
+    /// Canonical lifecycle state (replaces consumed/locked booleans)
+    pub state: u8,
     /// Creation timestamp (Unix epoch seconds)
     pub created_at: i64,
+    /// Lock timestamp (Unix epoch seconds)
+    pub locked_at: i64,
+    /// Consumption timestamp (Unix epoch seconds)
+    pub consumed_at: i64,
+    /// Mint timestamp (Unix epoch seconds)
+    pub minted_at: i64,
+    /// Refund timestamp (Unix epoch seconds)
+    pub refunded_at: i64,
     /// PDA bump seed
     pub bump: u8,
 }
@@ -39,8 +105,8 @@ pub struct SanadAccount {
 impl SanadAccount {
     /// Account size for space calculation
     /// 8 (discriminator) + 32 (owner) + 32 (sanad_id) + 32 (commitment) + 
-    /// 32 (state_root) + 32 (nullifier) + metadata/proof fields + flags + timestamp + bump
-    pub const SIZE: usize = 8 + 32 + 32 + 32 + 32 + 32 + 1 + 32 + 32 + 1 + 32 + 1 + 1 + 8 + 1;
+    /// 32 (state_root) + 32 (nullifier) + metadata/proof fields + state + timestamps + bump
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 32 + 32 + 1 + 32 + 32 + 1 + 32 + 1 + 8 + 8 + 8 + 8 + 1;
 }
 
 /// LockRecord stores information about a locked sanad for refund purposes

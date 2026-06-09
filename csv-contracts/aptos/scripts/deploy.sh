@@ -106,6 +106,12 @@ sed -i "s/^CSV = \"0x[0-9a-f]*\"/CSV = \"_\"/" "${MOVE_TOML}"
 
 # Build the package with the correct address
 echo "Building Move package..."
+
+# Clean previous builds to ensure fresh compilation
+echo "Cleaning previous builds..."
+rm -rf build/
+
+# Build from scratch
 "$APTOS" move compile \
     --package-dir contracts \
     --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" 2>&1 | tail -5

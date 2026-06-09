@@ -2872,6 +2872,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sha3 0.10.9",
+ "solana-sdk",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

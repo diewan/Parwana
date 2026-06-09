@@ -47,7 +47,24 @@ pub struct SanadConsumed {
     pub account: Pubkey,
 }
 
-/// Emitted when a Sanad is locked for cross-chain transfer
+/// Canonical: Emitted when a Sanad is locked for cross-chain transfer
+#[event]
+pub struct SanadLocked {
+    /// Unique Sanad identifier
+    pub sanad_id: [u8; 32],
+    /// Commitment hash
+    pub commitment: [u8; 32],
+    /// Owner of the sanad
+    pub owner: Pubkey,
+    /// Destination chain ID
+    pub destination_chain: u8,
+    /// Destination owner (hashed)
+    pub destination_owner: [u8; 32],
+    /// Lock timestamp (Unix epoch seconds)
+    pub locked_at: i64,
+}
+
+/// Legacy: Emitted when a Sanad is locked for cross-chain transfer (backward compatibility)
 #[event]
 pub struct CrossChainLock {
     /// Unique Sanad identifier
@@ -76,7 +93,24 @@ pub struct CrossChainLock {
     pub proof_root: [u8; 32],
 }
 
-/// Emitted when a Sanad is minted from a cross-chain transfer
+/// Canonical: Emitted when a Sanad is minted on destination chain
+#[event]
+pub struct SanadMinted {
+    /// Unique Sanad identifier (from source chain)
+    pub sanad_id: [u8; 32],
+    /// Commitment hash
+    pub commitment: [u8; 32],
+    /// Owner of the new sanad
+    pub owner: Pubkey,
+    /// Source chain ID
+    pub source_chain: u8,
+    /// Source chain seal reference
+    pub source_seal_ref: [u8; 32],
+    /// Account address of the new sanad
+    pub account: Pubkey,
+}
+
+/// Legacy: Emitted when a Sanad is minted from a cross-chain transfer (backward compatibility)
 #[event]
 pub struct CrossChainMint {
     /// Unique Sanad identifier (from source chain)
@@ -103,7 +137,22 @@ pub struct CrossChainMint {
     pub proof_root: [u8; 32],
 }
 
-/// Emitted when a locked Sanad is refunded
+/// Canonical: Emitted when a locked Sanad is refunded
+#[event]
+pub struct SanadRefunded {
+    /// Unique Sanad identifier
+    pub sanad_id: [u8; 32],
+    /// Commitment hash
+    pub commitment: [u8; 32],
+    /// Address that claimed the refund
+    pub claimant: Pubkey,
+    /// Reason for refund
+    pub reason: String,
+    /// Refund timestamp (Unix epoch seconds)
+    pub refunded_at: i64,
+}
+
+/// Legacy: Emitted when a locked Sanad is refunded (backward compatibility)
 #[event]
 pub struct CrossChainRefund {
     /// Unique Sanad identifier

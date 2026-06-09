@@ -157,6 +157,45 @@ pub enum SealStatus {
     Pending,
 }
 
+/// Solana SanadAccount state (matches contract state.rs)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SolanaSanadAccount {
+    /// Owner of the sanad
+    pub owner: Pubkey,
+    /// Unique Sanad identifier
+    pub sanad_id: [u8; 32],
+    /// Commitment hash
+    pub commitment: [u8; 32],
+    /// State root
+    pub state_root: [u8; 32],
+    /// Nullifier
+    pub nullifier: [u8; 32],
+    /// Asset class
+    pub asset_class: u8,
+    /// Chain-native asset id
+    pub asset_id: [u8; 32],
+    /// Canonical metadata hash
+    pub metadata_hash: [u8; 32],
+    /// Proof system identifier
+    pub proof_system: u8,
+    /// Proof root or verification-key commitment
+    pub proof_root: [u8; 32],
+    /// Canonical lifecycle state (0-9)
+    pub state: u8,
+    /// Creation timestamp (Unix epoch seconds)
+    pub created_at: i64,
+    /// Lock timestamp (Unix epoch seconds)
+    pub locked_at: i64,
+    /// Consumption timestamp (Unix epoch seconds)
+    pub consumed_at: i64,
+    /// Mint timestamp (Unix epoch seconds)
+    pub minted_at: i64,
+    /// Refund timestamp (Unix epoch seconds)
+    pub refunded_at: i64,
+    /// PDA bump seed
+    pub bump: u8,
+}
+
 /// Solana transaction status
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SolanaTransactionStatus {

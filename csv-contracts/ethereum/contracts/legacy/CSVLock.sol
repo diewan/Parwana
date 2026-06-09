@@ -179,12 +179,8 @@ contract CSVLock {
         SanadMetadata memory metadata
     ) internal {
         // Gas optimization: combine checks to reduce SLOADs
-        bool isConsumed = usedSeals[sanadId];
         (uint256 lockTimestamp, bool lockRefunded) = (locks[sanadId].timestamp, locks[sanadId].refunded);
-        
-        if (isConsumed) {
-            revert SanadAlreadyConsumed();
-        }
+
         if (lockTimestamp != 0 && !lockRefunded) {
             revert SanadAlreadyLocked();
         }
@@ -193,7 +189,6 @@ contract CSVLock {
         bytes32 destinationOwnerRoot = keccak256(destinationOwner);
 
         // Batch storage writes
-        usedSeals[sanadId] = true;
         locks[sanadId] = LockRecord({
             commitment: commitment,
             owner: msg.sender,
@@ -226,7 +221,6 @@ contract CSVLock {
             metadata.proofSystem,
             metadata.proofRoot
         );
-        emit SealUsed(sanadId, commitment);
     }
 
     function _validateMetadata(SanadMetadata memory metadata) internal pure {
@@ -363,5 +357,38 @@ contract CSVLock {
         if (block.timestamp < lock.timestamp + REFUND_TIMEOUT) return false;
 
         return true;
+    }
+
+    /// @notice Sanad state enum for clear on-chain status reporting
+    enum SanadState { Uncreated, Active, Locked, Consumed, Refunded }
+
+    /// @notice Get the full on-chain state of a Sanad
+    /// @param sanadId The Sanad identifier
+    /// @return state The current state (Uncreated=0, Active=1, Locked=2, Consumed=3, Refunded=4)
+    /// @return isUsed Whether the seal has been consumed (usedSeals mapping)
+    /// @return lockTimestamp When the lock was created (0 if never locked)
+    /// @return refunded Whether a refund was claimed
+    function getSanadState(bytes32 sanadId) external view returns (
+        SanadState state,
+        bool isUsed,
+        uint256 lockTimestamp,
+        bool refunded
+    ) {
+        isUsed = usedSeals[sanadId];
+        LockRecord storage lock = locks[sanadId];
+        lockTimestamp = lock.timestamp;
+        refunded = lock.refunded;
+
+        if (!isUsed && lockTimestamp == 0) {
+            state = SanadState.Uncreated;
+        } else if (isUsed && lockTimestamp == 0) {
+            state = SanadState.Consumed;
+        } else if (refunded) {
+            state = SanadState.Refunded;
+        } else if (lockTimestamp > 0) {
+            state = SanadState.Locked;
+        } else {
+            state = SanadState.Active;
+        }
     }
 }

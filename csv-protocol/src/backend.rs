@@ -504,13 +504,80 @@ pub trait ChainSanadOps: Send + Sync {
     ) -> ChainOpResult<bool>;
 }
 
+/// Canonical Sanad state for cross-chain consistency
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanonicalSanadState {
+    /// The canonical state value (0-9)
+    pub state: u8,
+    /// Owner address
+    pub owner: String,
+    /// Commitment hash
+    pub commitment: Hash,
+    /// Nullifier (if registered)
+    pub nullifier: Option<Hash>,
+    /// Creation timestamp
+    pub created_at: i64,
+    /// Lock timestamp (if locked)
+    pub locked_at: Option<i64>,
+    /// Consumption timestamp (if consumed)
+    pub consumed_at: Option<i64>,
+    /// Mint timestamp (if minted)
+    pub minted_at: Option<i64>,
+    /// Refund timestamp (if refunded)
+    pub refunded_at: Option<i64>,
+}
+
+/// Canonical lifecycle event for traceability
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanonicalLifecycleEvent {
+    /// Event type
+    pub event_type: String,
+    /// Timestamp
+    pub timestamp: i64,
+    /// Transaction hash or identifier
+    pub tx_hash: String,
+    /// Additional data
+    pub data: HashMap<String, String>,
+}
+
+/// Trait for reading sanad state from chain adapters
+///
+/// Provides unified state querying across all chains.
+/// Replaces ad-hoc per-chain state checking in CLI.
+#[async_trait]
+pub trait SanadStateReader: Send + Sync {
+    /// Get the canonical state of a Sanad
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState>;
+    
+    /// Get the canonical state of a Seal
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState>;
+    
+    /// Trace the full lifecycle of a Sanad
+    async fn trace_sanad(&self, sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>>;
+}
+
+/// Canonical Seal state for cross-chain consistency
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanonicalSealState {
+    /// The canonical state value
+    pub state: u8,
+    /// Owner address
+    pub owner: String,
+    /// Commitment hash
+    pub commitment: Hash,
+    /// Creation timestamp
+    pub created_at: i64,
+    /// Consumption timestamp
+    pub consumed_at: Option<i64>,
+}
+
 /// Combined trait for full chain backend capabilities
 ///
 /// Implementors must provide real implementations for all operations.
 /// Use `CapabilityUnavailable` error for operations not supported on a chain.
 #[async_trait]
 pub trait ChainBackend:
-    ChainQuery + ChainSigner + ChainBroadcaster + ChainDeployer + ChainProofProvider + ChainSanadOps
+    ChainQuery + ChainSigner + ChainBroadcaster + ChainDeployer + ChainProofProvider + ChainSanadOps + SanadStateReader
 {
     /// Get the chain identifier
     fn chain_id(&self) -> &'static str;

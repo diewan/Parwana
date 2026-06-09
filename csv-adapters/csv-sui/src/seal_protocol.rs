@@ -109,7 +109,7 @@ impl SuiSealProtocol {
 
         // Extract signing key from config if available
         #[cfg(feature = "rpc")]
-        let signing_key = if let Some(private_key_bytes) = &config.signer_private_key {
+     let signing_key = if let Some(private_key_bytes) = &config.signer_private_key {
             if private_key_bytes.len() == 32 {
                 let mut key_bytes = [0u8; 32];
                 key_bytes.copy_from_slice(private_key_bytes);
@@ -347,7 +347,7 @@ impl SuiSealProtocol {
         hasher.update([0x00]); // Sui address prefix
         hasher.update(pubkey_bytes);
         let hash: [u8; 32] = hasher.finalize().into();
-        let sender_address = Address::from_bytes(&hash)
+        let sender_address = Address::from_bytes(hash)
             .map_err(|e| format!("Failed to derive address: {}", e))?;
 
         // Get the package ID from config
@@ -355,7 +355,7 @@ impl SuiSealProtocol {
             .ok_or("Package ID not configured")?;
         let package_id_bytes = parse_object_id(package_id_str)
             .map_err(|e| format!("Invalid package ID: {}", e))?;
-        let package_id = Address::from_bytes(&package_id_bytes)
+        let package_id = Address::from_bytes(package_id_bytes)
             .map_err(|e| format!("Invalid package ID: {}", e))?;
         let module_name = self.config.seal_contract.module_name.clone();
         let function_name = "consume_seal".to_string();
@@ -377,7 +377,7 @@ impl SuiSealProtocol {
         let seal_object_arg = tx_builder.object(sui_transaction_builder::ObjectInput::owned(
             seal_object_id,
             seal.version,
-            sui_sdk_types::Digest::from_base58(&seal.digest).unwrap_or_else(|_| sui_sdk_types::Digest::ZERO),
+            sui_sdk_types::Digest::from_base58(&seal.digest).unwrap_or(sui_sdk_types::Digest::ZERO),
         ));
         let commitment_arg = tx_builder.pure(&commitment.to_vec());
         tx_builder.move_call(function, vec![seal_object_arg, commitment_arg]);
@@ -435,16 +435,13 @@ impl SuiSealProtocol {
             ProtocolError::InclusionProofFailed("Transaction has no events".to_string())
         })?;
         
-        let event_found = tx_events.events.iter().any(|event| {
-            let type_match = event.event_type.as_ref().map_or(false, |t| t == &self.event_builder.event_type);
-            let json_match = event.json.as_ref().map_or(false, |j| {
+    let event_found = tx_events.events.iter().any(|event| {
+            let type_match = event.event_type.as_ref().is_some_and(|t| t == &self.event_builder.event_type);
+            let json_match = event.json.as_ref().is_some_and(|j| {
                 // prost_types::Value doesn't implement serde::Serialize directly
                 // Compare the struct type and kind for basic matching
                 // A proper implementation would convert prost_types::Value to a comparable format
-                match &j.kind {
-                    Some(_) => true, // If there's any value, consider it a match for now
-                    None => false,
-                }
+                j.kind.is_some()
             });
             type_match && json_match
         });
@@ -511,7 +508,7 @@ impl SealProtocol for SuiSealProtocol {
             hasher.update([0x00]); // Sui address prefix
             hasher.update(pubkey_bytes);
             let hash: [u8; 32] = hasher.finalize().into();
-            let sender_address = Address::from_bytes(&hash)
+            let sender_address = Address::from_bytes(hash)
                 .map_err(|e| format!("Failed to derive address: {}", e))?;
 
             // Get the package ID from config
@@ -519,7 +516,7 @@ impl SealProtocol for SuiSealProtocol {
                 .ok_or("Package ID not configured")?;
             let package_id_bytes = parse_object_id(package_id_str)
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
-            let package_id = Address::from_bytes(&package_id_bytes)
+            let package_id = Address::from_bytes(package_id_bytes)
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
             let module_name = self.config.seal_contract.module_name.clone();
 
@@ -705,13 +702,11 @@ impl SealProtocol for SuiSealProtocol {
         
         let tx_response = (*client_guard)
             .ledger_client()
-            .get_transaction(request)
+    .get_transaction(request)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to get transaction: {}", e),
-                )) as Box<dyn std::error::Error>
+                Box::new(std::io::Error::other(format!("Failed to get transaction: {}", e)))
+                    as Box<dyn std::error::Error>
             })?;
         
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
@@ -838,7 +833,7 @@ impl SealProtocol for SuiSealProtocol {
             hasher.update([0x00]); // Sui address prefix
             hasher.update(pubkey_bytes);
             let hash: [u8; 32] = hasher.finalize().into();
-            let sender_address = Address::from_bytes(&hash)
+            let sender_address = Address::from_bytes(hash)
                 .map_err(|e| format!("Failed to derive address: {}", e))?;
 
             // Get the package ID from config
@@ -846,7 +841,7 @@ impl SealProtocol for SuiSealProtocol {
                 .ok_or("Package ID not configured")?;
             let package_id_bytes = parse_object_id(package_id_str)
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
-            let package_id = Address::from_bytes(&package_id_bytes)
+            let package_id = Address::from_bytes(package_id_bytes)
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
             let module_name = self.config.seal_contract.module_name.clone();
 
@@ -938,7 +933,7 @@ impl SealProtocol for SuiSealProtocol {
                 .map_err(|e| format!("Failed to execute transaction: {}", e))?;
 
             let executed_tx = execution_response.into_inner().transaction
-                .ok_or_else(|| "No transaction in response")?;
+                .ok_or("No transaction in response")?;
 
             log::info!("SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}", executed_tx.digest, executed_tx.checkpoint);
             log::info!("SUI: Transaction effects present: {}", executed_tx.effects.is_some());
@@ -1092,7 +1087,7 @@ impl SealProtocol for SuiSealProtocol {
         let client = self.node.client();
         let mut client_guard = client.lock().await;
 
-        let tx_digest = sui_sdk_types::Digest::from_bytes(&anchor.tx_digest)
+        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest)
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("Invalid tx digest: {}", e))) as Box<dyn std::error::Error + 'static>)?;
 
         let request = sui_rpc::proto::sui::rpc::v2::GetTransactionRequest::new(&tx_digest);
@@ -1101,7 +1096,7 @@ impl SealProtocol for SuiSealProtocol {
             .ledger_client()
             .get_transaction(request)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to get transaction: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+            .map_err(|e| Box::new(std::io::Error::other(format!("Failed to get transaction: {}", e))) as Box<dyn std::error::Error + 'static>)?;
 
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
             Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "Transaction not found".to_string())) as Box<dyn std::error::Error + 'static>
@@ -1125,7 +1120,7 @@ impl SealProtocol for SuiSealProtocol {
             checkpoint_hash,
             anchor.checkpoint,
             0, // Transaction index within checkpoint (not applicable for Sui)
-        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build finality proof by checking if checkpoint is certified
         let is_certified = self.checkpoint_verifier.is_checkpoint_certified(anchor.checkpoint).await
@@ -1135,21 +1130,21 @@ impl SealProtocol for SuiSealProtocol {
             vec![], // Sui uses checkpoint certification signatures
             anchor.checkpoint,
             is_certified.is_finalized(),
-        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build DAG segment (empty for Sui as it doesn't use DAG-based consensus)
         let dag_segment = DAGSegment::new(vec![], Hash::zero());
 
         // Build seal point from SuiCommitAnchor
         let seal_point = SealPoint::new(anchor.object_id.to_vec(), Some(anchor.checkpoint), None)
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+            .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build commit anchor from SuiCommitAnchor
         let commit_anchor = CommitAnchor::new(
             anchor.tx_digest.to_vec(),
             anchor.checkpoint,
             vec![], // Additional data (empty for now)
-        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)?;
+        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build the proof bundle
         ProofBundle::new(
@@ -1159,7 +1154,7 @@ impl SealProtocol for SuiSealProtocol {
             commit_anchor,
             inclusion_proof,
             finality_proof,
-        ).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + 'static>)
+        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)
     }
 
     #[cfg(not(feature = "rpc"))]

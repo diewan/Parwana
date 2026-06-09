@@ -437,3 +437,257 @@ impl std::fmt::Display for TestStatus {
         }
     }
 }
+
+// ── Canonical lifecycle state types (Contracts-Audit.md § "Recommended canonical model") ──
+
+/// Canonical Sanad lifecycle state — matches on-chain SanadState enum on all chains.
+///
+/// Values are canonical across Ethereum, Solana, Sui, and Aptos:
+///   0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted,
+///   6=Transferred, 7=Refunded, 8=Burned, 9=Invalid
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum SanadLifecycleState {
+    Uncreated = 0,
+    Created = 1,
+    Active = 2,
+    Locked = 3,
+    Consumed = 4,
+    Minted = 5,
+    Transferred = 6,
+    Refunded = 7,
+    Burned = 8,
+    Invalid = 9,
+    Unknown = 255,
+}
+
+impl SanadLifecycleState {
+    /// Parse from a raw u8 value returned by on-chain queries.
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => SanadLifecycleState::Uncreated,
+            1 => SanadLifecycleState::Created,
+            2 => SanadLifecycleState::Active,
+            3 => SanadLifecycleState::Locked,
+            4 => SanadLifecycleState::Consumed,
+            5 => SanadLifecycleState::Minted,
+            6 => SanadLifecycleState::Transferred,
+            7 => SanadLifecycleState::Refunded,
+            8 => SanadLifecycleState::Burned,
+            9 => SanadLifecycleState::Invalid,
+            _ => SanadLifecycleState::Unknown,
+        }
+    }
+
+    /// Convert to raw u8 for on-chain queries.
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            SanadLifecycleState::Uncreated => 0,
+            SanadLifecycleState::Created => 1,
+            SanadLifecycleState::Active => 2,
+            SanadLifecycleState::Locked => 3,
+            SanadLifecycleState::Consumed => 4,
+            SanadLifecycleState::Minted => 5,
+            SanadLifecycleState::Transferred => 6,
+            SanadLifecycleState::Refunded => 7,
+            SanadLifecycleState::Burned => 8,
+            SanadLifecycleState::Invalid => 9,
+            SanadLifecycleState::Unknown => 255,
+        }
+    }
+
+    /// Human-readable label for display.
+    pub fn label(&self) -> &'static str {
+        match self {
+            SanadLifecycleState::Uncreated => "Uncreated",
+            SanadLifecycleState::Created => "Created",
+            SanadLifecycleState::Active => "Active",
+            SanadLifecycleState::Locked => "Locked",
+            SanadLifecycleState::Consumed => "Consumed",
+            SanadLifecycleState::Minted => "Minted",
+            SanadLifecycleState::Transferred => "Transferred",
+            SanadLifecycleState::Refunded => "Refunded",
+            SanadLifecycleState::Burned => "Burned",
+            SanadLifecycleState::Invalid => "Invalid",
+            SanadLifecycleState::Unknown => "Unknown",
+        }
+    }
+
+    /// Convert from the local SanadStatus (used by cmd_show fallback).
+    pub fn from_local_status(status: SanadStatus) -> Self {
+        match status {
+            SanadStatus::Active => SanadLifecycleState::Active,
+            SanadStatus::Transferred => SanadLifecycleState::Transferred,
+            SanadStatus::Consumed => SanadLifecycleState::Consumed,
+        }
+    }
+}
+
+impl std::fmt::Display for SanadLifecycleState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+/// Canonical Seal lifecycle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum SealLifecycleState {
+    Created = 0,
+    Consumed = 1,
+    Locked = 2,
+    Minted = 3,
+    Refunded = 4,
+    Unknown = 255,
+}
+
+impl SealLifecycleState {
+    /// Parse from a raw u8 value.
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => SealLifecycleState::Created,
+            1 => SealLifecycleState::Consumed,
+            2 => SealLifecycleState::Locked,
+            3 => SealLifecycleState::Minted,
+            4 => SealLifecycleState::Refunded,
+            _ => SealLifecycleState::Unknown,
+        }
+    }
+
+    /// Convert to raw u8.
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            SealLifecycleState::Created => 0,
+            SealLifecycleState::Consumed => 1,
+            SealLifecycleState::Locked => 2,
+            SealLifecycleState::Minted => 3,
+            SealLifecycleState::Refunded => 4,
+            SealLifecycleState::Unknown => 255,
+        }
+    }
+
+    /// Human-readable label.
+    pub fn label(&self) -> &'static str {
+        match self {
+            SealLifecycleState::Created => "Created",
+            SealLifecycleState::Consumed => "Consumed",
+            SealLifecycleState::Locked => "Locked",
+            SealLifecycleState::Minted => "Minted",
+            SealLifecycleState::Refunded => "Refunded",
+            SealLifecycleState::Unknown => "Unknown",
+        }
+    }
+
+    /// Convert from local SealStatus.
+    pub fn from_local_status(status: SealStatus) -> Self {
+        match status {
+            SealStatus::Active => SealLifecycleState::Created,
+            SealStatus::Locked => SealLifecycleState::Locked,
+            SealStatus::Consumed => SealLifecycleState::Consumed,
+            SealStatus::Transferred => SealLifecycleState::Minted,
+        }
+    }
+}
+
+impl std::fmt::Display for SealLifecycleState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+/// Canonical Sanad state returned by `csv sanad state` command.
+///
+/// This is the normalized view that all chain adapters must produce.
+#[derive(Debug, Clone)]
+pub struct CanonicalSanadState {
+    /// Sanad ID (hex string).
+    pub sanad_id: String,
+    /// Associated seal reference (optional).
+    pub seal_id: Option<String>,
+    /// Chain where the Sanad currently resides.
+    pub chain: ChainId,
+    /// Current lifecycle state.
+    pub state: SanadLifecycleState,
+    /// Current owner address (optional).
+    pub owner: Option<String>,
+    /// Commitment hash (optional).
+    pub commitment: Option<String>,
+    /// Nullifier if consumed (optional).
+    pub nullifier: Option<String>,
+    /// Source chain of the original transfer (optional).
+    pub source_chain: Option<ChainId>,
+    /// Destination chain of the transfer (optional).
+    pub destination_chain: Option<ChainId>,
+    /// Last transaction hash (optional).
+    pub tx_hash: Option<String>,
+    /// Block height of last state change (optional).
+    pub block_height: Option<u64>,
+    /// Unix timestamp of last state change (optional).
+    pub updated_at: Option<u64>,
+}
+
+/// Canonical Seal state returned by `csv seal state` command.
+#[derive(Debug, Clone)]
+pub struct CanonicalSealState {
+    /// Seal reference (hex string).
+    pub seal_id: String,
+    /// Chain where the Seal is anchored.
+    pub chain: ChainId,
+    /// Current lifecycle state.
+    pub state: SealLifecycleState,
+    /// Associated Sanad ID (optional).
+    pub sanad_id: Option<String>,
+    /// Commitment hash (optional).
+    pub commitment: Option<String>,
+    /// Transaction hash (optional).
+    pub tx_hash: Option<String>,
+    /// Block height (optional).
+    pub block_height: Option<u64>,
+    /// Unix timestamp (optional).
+    pub updated_at: Option<u64>,
+}
+
+/// A single event in a Sanad's lifecycle, returned by `csv sanad trace`.
+#[derive(Debug, Clone)]
+pub struct CanonicalLifecycleEvent {
+    /// Unix timestamp of the event.
+    pub timestamp: u64,
+    /// Chain where the event occurred.
+    pub chain: ChainId,
+    /// Event type.
+    pub event: LifecycleEventType,
+    /// Address that triggered the event (optional).
+    pub actor: Option<String>,
+    /// Transaction hash (optional).
+    pub tx_hash: Option<String>,
+    /// State after this event.
+    pub state_after: SanadLifecycleState,
+}
+
+/// Type of lifecycle event.
+#[derive(Debug, Clone)]
+pub enum LifecycleEventType {
+    Created,
+    Consumed,
+    Locked,
+    Minted,
+    Transferred,
+    Refunded,
+    Burned,
+    Invalidated,
+}
+
+impl std::fmt::Display for LifecycleEventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LifecycleEventType::Created => write!(f, "Created"),
+            LifecycleEventType::Consumed => write!(f, "Consumed"),
+            LifecycleEventType::Locked => write!(f, "Locked"),
+            LifecycleEventType::Minted => write!(f, "Minted"),
+            LifecycleEventType::Transferred => write!(f, "Transferred"),
+            LifecycleEventType::Refunded => write!(f, "Refunded"),
+            LifecycleEventType::Burned => write!(f, "Burned"),
+            LifecycleEventType::Invalidated => write!(f, "Invalidated"),
+        }
+    }
+}

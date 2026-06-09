@@ -79,7 +79,9 @@ impl CrossChainHashAlgorithm {
                 let mut hasher = Blake2b512::new();
                 Blake2Digest::update(&mut hasher, bytes);
                 let result = Blake2Digest::finalize(hasher);
-                Hash::new(result.as_slice()[0..32].try_into().unwrap())
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes.copy_from_slice(&result.as_slice()[..32]);
+                Hash::new(hash_bytes)
             }
         }
     }
@@ -126,7 +128,9 @@ impl CrossChainHashAlgorithm {
                 let mut hasher = Blake2b512::new();
                 Blake2Digest::update(&mut hasher, bytes);
                 let result = Blake2Digest::finalize(hasher);
-                result.as_slice()[0..32].try_into().unwrap()
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes.copy_from_slice(&result.as_slice()[..32]);
+                hash_bytes
             }
         }
     }

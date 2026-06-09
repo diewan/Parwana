@@ -32,4 +32,4 @@ chain_role = "Settlement"
 
 [custom_settings]
 # Contract address where CSVSeal is deployed
-contract_address = "0x189BE35e28331E20481C100cA93fc9a96601E48f"
+contract_address = "0xaa724b64984cc1776eb37f1c4d4d7130a2660ac1"

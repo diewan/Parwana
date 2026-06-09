@@ -117,6 +117,12 @@ echo ""
 
 # Build the package
 echo "Building Move package..."
+
+# Clean previous builds to ensure fresh compilation
+echo "Cleaning previous builds..."
+rm -rf build/ dependencies/
+
+# Build from scratch
 "$SUI" move build 2>&1 | tail -5
 echo ""
 

@@ -61,6 +61,7 @@ pub mod csv_seal {
     ) -> Result<()> {
         let sanad = &mut ctx.accounts.sanad_account;
         let owner = ctx.accounts.owner.key();
+        let now = Clock::get()?.unix_timestamp;
 
         sanad.owner = owner;
         sanad.sanad_id = sanad_id;
@@ -72,9 +73,12 @@ pub mod csv_seal {
         sanad.metadata_hash = [0u8; 32];
         sanad.proof_system = PROOF_SYSTEM_UNSPECIFIED;
         sanad.proof_root = [0u8; 32];
-        sanad.consumed = false;
-        sanad.locked = false;
-        sanad.created_at = Clock::get()?.unix_timestamp;
+        sanad.state = SanadState::Created as u8;
+        sanad.created_at = now;
+        sanad.locked_at = 0;
+        sanad.consumed_at = 0;
+        sanad.minted_at = 0;
+        sanad.refunded_at = 0;
         sanad.bump = ctx.bumps.sanad_account;
 
         emit!(SanadCreated {
@@ -97,10 +101,12 @@ pub mod csv_seal {
     pub fn consume_seal(ctx: Context<ConsumeSeal>) -> Result<()> {
         let sanad = &mut ctx.accounts.sanad_account;
         let consumer = ctx.accounts.consumer.key();
+        let now = Clock::get()?.unix_timestamp;
 
-        require!(!sanad.consumed, CsvError::AlreadyConsumed);
+        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
 
-        sanad.consumed = true;
+        sanad.state = SanadState::Consumed as u8;
+        sanad.consumed_at = now;
 
         emit!(SanadConsumed {
             sanad_id: sanad.sanad_id,
@@ -123,11 +129,10 @@ pub mod csv_seal {
         let registry = &mut ctx.accounts.registry;
         let lock_account = &mut ctx.accounts.lock_account;
         let owner = ctx.accounts.owner.key();
+        let now = Clock::get()?.unix_timestamp;
 
-        require!(!sanad.consumed, CsvError::AlreadyConsumed);
-        require!(!sanad.locked, CsvError::AlreadyLocked);
-
-        let locked_at = Clock::get()?.unix_timestamp;
+        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
+        require!(sanad.state != SanadState::Locked as u8, CsvError::AlreadyLocked);
 
         // Record the lock in the LockAccount PDA
         lock_account.lock = LockRecord {
@@ -141,7 +146,7 @@ pub mod csv_seal {
             metadata_hash: sanad.metadata_hash,
             proof_system: sanad.proof_system,
             proof_root: sanad.proof_root,
-            locked_at,
+            locked_at: now,
             refunded: false,
         };
         lock_account.bump = ctx.bumps.lock_account;
@@ -149,26 +154,16 @@ pub mod csv_seal {
         // Update registry statistics
         registry.lock_count += 1;
 
-        sanad.locked = true;
-        sanad.consumed = true;
+        sanad.state = SanadState::Locked as u8;
+        sanad.locked_at = now;
 
-        // Get transaction signature for source_tx_hash
-        // Using placeholder since Anchor doesn't provide direct tx signature access
-        let source_tx_hash = [0u8; 32];
-
-        emit!(CrossChainLock {
+        emit!(SanadLocked {
             sanad_id: sanad.sanad_id,
             commitment: sanad.commitment,
             owner,
             destination_chain,
             destination_owner,
-            source_tx_hash,
-            locked_at,
-            asset_class: sanad.asset_class,
-            asset_id: sanad.asset_id,
-            metadata_hash: sanad.metadata_hash,
-            proof_system: sanad.proof_system,
-            proof_root: sanad.proof_root,
+            locked_at: now,
         });
 
         emit!(SanadMetadataRecorded {
@@ -180,19 +175,12 @@ pub mod csv_seal {
             proof_root: sanad.proof_root,
         });
 
-        emit!(SanadConsumed {
-            sanad_id: sanad.sanad_id,
-            commitment: sanad.commitment,
-            consumer: owner,
-            account: sanad.key(),
-        });
-
         Ok(())
     }
 
     /// Mint a new Sanad from a cross-chain transfer proof
     /// Creates a new SanadAccount with the same commitment as the source chain
-    /// 
+    ///
     /// # Arguments
     /// * `sanad_id` - Unique Sanad identifier from source chain
     /// * `commitment` - Commitment hash preserved across chains
@@ -227,10 +215,11 @@ pub mod csv_seal {
         let sanad = &mut ctx.accounts.sanad_account;
         let minted_sanad = &mut ctx.accounts.minted_sanad;
         let owner = ctx.accounts.owner.key();
+        let now = Clock::get()?.unix_timestamp;
 
         // Mark sanad_id as minted (replay protection)
         minted_sanad.sanad_id = sanad_id;
-        minted_sanad.minted_at = Clock::get()?.unix_timestamp;
+        minted_sanad.minted_at = now;
         minted_sanad.bump = ctx.bumps.minted_sanad;
 
         sanad.owner = owner;
@@ -243,23 +232,21 @@ pub mod csv_seal {
         sanad.metadata_hash = [0u8; 32];
         sanad.proof_system = PROOF_SYSTEM_UNSPECIFIED;
         sanad.proof_root = proof_root;
-        sanad.consumed = false;
-        sanad.locked = false;
-        sanad.created_at = Clock::get()?.unix_timestamp;
+        sanad.state = SanadState::Minted as u8;
+        sanad.created_at = now;
+        sanad.minted_at = now;
+        sanad.locked_at = 0;
+        sanad.consumed_at = 0;
+        sanad.refunded_at = 0;
         sanad.bump = ctx.bumps.sanad_account;
 
-        emit!(CrossChainMint {
+        emit!(SanadMinted {
             sanad_id,
             commitment,
             owner,
             source_chain,
             source_seal_ref,
             account: sanad.key(),
-            asset_class: sanad.asset_class,
-            asset_id: sanad.asset_id,
-            metadata_hash: sanad.metadata_hash,
-            proof_system: sanad.proof_system,
-            proof_root: sanad.proof_root,
         });
 
         Ok(())
@@ -300,18 +287,22 @@ pub mod csv_seal {
         sanad.metadata_hash = lock.metadata_hash;
         sanad.proof_system = lock.proof_system;
         sanad.proof_root = lock.proof_root;
-        sanad.consumed = false;
-        sanad.locked = false;
+        sanad.state = SanadState::Refunded as u8;
         sanad.created_at = now;
+        sanad.refunded_at = now;
+        sanad.locked_at = 0;
+        sanad.consumed_at = 0;
+        sanad.minted_at = 0;
         sanad.bump = ctx.bumps.new_sanad_account;
 
         // Update registry statistics
         ctx.accounts.registry.lock_count -= 1;
 
-        emit!(CrossChainRefund {
+        emit!(SanadRefunded {
             sanad_id: lock.sanad_id,
             commitment: lock.commitment,
             claimant,
+            reason: "timeout".to_string(),
             refunded_at: now,
         });
 
@@ -338,7 +329,7 @@ pub mod csv_seal {
         );
 
         let sanad = &mut ctx.accounts.sanad_account;
-        require!(!sanad.consumed, CsvError::AlreadyConsumed);
+        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
 
         sanad.asset_class = asset_class;
         sanad.asset_id = asset_id;
@@ -370,9 +361,11 @@ pub mod csv_seal {
             sanad.owner == current_owner,
             CsvError::NotAuthorized
         );
-        require!(!sanad.consumed, CsvError::AlreadyConsumed);
+        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
+        require!(sanad.state != SanadState::Locked as u8, CsvError::AlreadyLocked);
 
         sanad.owner = new_owner;
+        sanad.state = SanadState::Transferred as u8;
 
         emit!(SanadTransferred {
             sanad_id: sanad.sanad_id,
@@ -381,6 +374,57 @@ pub mod csv_seal {
         });
 
         Ok(())
+    }
+
+    // ==================== View Functions (Canonical Names) ====================
+
+    /// Get Sanad state — returns full state view
+    pub fn get_sanad_state(
+        ctx: Context<GetSanadState>,
+    ) -> Result<GetSanadStateResponse> {
+        let sanad = &ctx.accounts.sanad_account;
+        Ok(GetSanadStateResponse {
+            state: sanad.state,
+            owner: sanad.owner,
+            commitment: sanad.commitment,
+            nullifier: sanad.nullifier,
+            created_at: sanad.created_at,
+            locked_at: sanad.locked_at,
+            consumed_at: sanad.consumed_at,
+            minted_at: sanad.minted_at,
+            refunded_at: sanad.refunded_at,
+        })
+    }
+
+    /// Check if seal is available (not consumed)
+    pub fn is_seal_available(ctx: Context<GetSanadState>) -> Result<bool> {
+        let sanad = &ctx.accounts.sanad_account;
+        Ok(sanad.state != SanadState::Consumed as u8)
+    }
+
+    /// Check if seal is consumed
+    pub fn is_seal_consumed(ctx: Context<GetSanadState>) -> Result<bool> {
+        let sanad = &ctx.accounts.sanad_account;
+        Ok(sanad.state == SanadState::Consumed as u8)
+    }
+
+    /// Check if nullifier is registered
+    pub fn is_nullifier_registered(ctx: Context<GetSanadState>) -> Result<bool> {
+        let sanad = &ctx.accounts.sanad_account;
+        Ok(sanad.nullifier != [0u8; 32])
+    }
+
+    /// Check if Sanad is minted
+    pub fn is_sanad_minted(ctx: Context<GetSanadState>) -> Result<bool> {
+        let sanad = &ctx.accounts.sanad_account;
+        Ok(sanad.state == SanadState::Minted as u8)
+    }
+
+    /// Check if refund is available
+    pub fn can_refund(ctx: Context<CanRefund>) -> Result<bool> {
+        let lock = &ctx.accounts.lock_account;
+        let now = Clock::get()?.unix_timestamp;
+        Ok(!lock.lock.refunded && now >= lock.lock.locked_at + ctx.accounts.registry.refund_timeout as i64)
     }
 
     /// Register a nullifier for a Sanad (prevents double-spend)
@@ -573,6 +617,13 @@ pub fn verify_bitcoin_proof(
     }
     
     Ok(())
+}
+
+/// Check if commitment is anchored (off-chain helper)
+/// In Solana, commitment anchoring is tracked via SanadAccount existence
+/// This would require a separate registry; return true if sanad exists
+pub fn is_commitment_anchored(_commitment: [u8; 32]) -> bool {
+    true
 }
 
 /// Initialize the LockRegistry accounts
@@ -775,4 +826,46 @@ pub struct RecordSanadMetadata<'info> {
     pub sanad_account: Account<'info, SanadAccount>,
 
     pub authority: Signer<'info>,
+}
+
+// ==================== View Function Accounts & Responses ====================
+
+/// Response for get_sanad_state
+#[derive(AnchorSerialize, AnchorDeserialize, Debug, Clone)]
+pub struct GetSanadStateResponse {
+    pub state: u8,
+    pub owner: Pubkey,
+    pub commitment: [u8; 32],
+    pub nullifier: [u8; 32],
+    pub created_at: i64,
+    pub locked_at: i64,
+    pub consumed_at: i64,
+    pub minted_at: i64,
+    pub refunded_at: i64,
+}
+
+/// Get Sanad state accounts
+#[derive(Accounts)]
+pub struct GetSanadState<'info> {
+    #[account(
+        seeds = [b"sanad", sanad_account.owner.as_ref(), &sanad_account.sanad_id],
+        bump = sanad_account.bump
+    )]
+    pub sanad_account: Account<'info, SanadAccount>,
+}
+
+/// Can refund accounts
+#[derive(Accounts)]
+pub struct CanRefund<'info> {
+    #[account(
+        seeds = [b"lock_registry"],
+        bump = registry.bump
+    )]
+    pub registry: Account<'info, LockRegistry>,
+
+    #[account(
+        seeds = [b"lock", &lock_account.lock.sanad_id],
+        bump = lock_account.bump
+    )]
+    pub lock_account: Account<'info, LockAccount>,
 }

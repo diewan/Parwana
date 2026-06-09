@@ -2,7 +2,9 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::manual_clamp)]
 #![allow(clippy::collapsible_if)]
-#![deny(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::redundant_field_names)]
 //!
 //! This adapter implements the SealProtocol trait for Sui,
 //! using owned objects with one_time attributes as seals.

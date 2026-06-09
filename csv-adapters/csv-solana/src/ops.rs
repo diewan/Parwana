@@ -11,9 +11,10 @@
 use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_protocol::backend::{
-    BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
-    ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
-    DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
+    BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
+    ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
+    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
+    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
@@ -681,28 +682,17 @@ impl ChainSanadOps for SolanaBackend {
         let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
             .map_err(|_| ChainOpError::InvalidInput("Invalid CSV program ID".to_string()))?;
 
-        let active_seals = self.seal_protocol.get_active_seals();
-        let seal = active_seals
-            .iter()
-            .find(|s| {
-                if let Some(seed) = &s.seed {
-                    seed.as_slice() == sanad_id.as_bytes()
-                } else {
-                    false
-                }
-            })
-            .ok_or_else(|| {
-                ChainOpError::InvalidInput(format!(
-                    "No active seal found for sanad_id {}. Create a sanad first.",
-                    hex::encode(sanad_id.as_bytes())
-                ))
-            })?;
+        // Derive the SanadAccount PDA directly — no active_seals lookup needed.
+        let (sanad_account, _bump) = Pubkey::find_program_address(
+            &[b"sanad", consumer_pubkey.as_ref(), sanad_id.as_bytes()],
+            &program_id,
+        );
 
         let consume_discriminator: [u8; 8] = {
             let mut hasher = sha2::Sha256::new();
             hasher.update(b"global:consume_seal");
             let hash = hasher.finalize();
-            hash.as_slice()[..8].try_into().unwrap()
+            hash.as_slice()[..8].try_into().expect("slice length matches array size")
         };
 
         let mut instruction_data = Vec::with_capacity(8);
@@ -711,7 +701,7 @@ impl ChainSanadOps for SolanaBackend {
         let instruction = Instruction {
             program_id,
             accounts: vec![
-                AccountMeta::new(seal.account, false),
+                AccountMeta::new(sanad_account, false),
                 AccountMeta::new_readonly(consumer_pubkey, true),
             ],
             data: instruction_data,
@@ -736,7 +726,7 @@ impl ChainSanadOps for SolanaBackend {
             chain_id: "solana".to_string(),
             metadata: serde_json::json!({
                 "operation": "consume",
-                "seal_account": seal.account.to_string(),
+                "seal_account": sanad_account.to_string(),
             }),
         })
     }
@@ -746,58 +736,37 @@ impl ChainSanadOps for SolanaBackend {
         sanad_id: &SanadId,
         destination_chain: &str,
         _owner_key_id: &str,
-    ) -> ChainOpResult<SanadOperationResult> {
+   ) -> ChainOpResult<SanadOperationResult> {
         use csv_protocol::backend::SanadOperation;
         use sha2::Digest;
         use solana_sdk::instruction::AccountMeta;
         use solana_sdk::instruction::Instruction;
         use solana_sdk::message::Message;
-        use solana_sdk::signature::Signer;
         use solana_sdk::transaction::Transaction;
 
         let wallet = self.seal_protocol
             .wallet()
             .ok_or_else(|| ChainOpError::SigningError("No wallet configured for Solana".to_string()))?;
-
         let owner_pubkey = wallet.pubkey();
-
-        let destination = destination_chain
-            .parse::<csv_hash::chain_id::ChainId>()
-            .map_err(|_| {
-                ChainOpError::InvalidInput(format!(
-                    "Invalid destination chain: {}",
-                    destination_chain
-                ))
-            })?;
 
         let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
             .map_err(|_| ChainOpError::InvalidInput("Invalid CSV program ID".to_string()))?;
 
-        let active_seals = self.seal_protocol.get_active_seals();
-        let seal = active_seals
-            .iter()
-            .find(|s| {
-                if let Some(seed) = &s.seed {
-                    seed.as_slice() == sanad_id.as_bytes()
-                } else {
-                    false
-                }
-            })
-            .ok_or_else(|| {
-                ChainOpError::InvalidInput(format!(
-                    "No active seal found for sanad_id {}. Create a sanad first.",
-                    hex::encode(sanad_id.as_bytes())
-                ))
-            })?;
+        // Derive the SanadAccount PDA directly — no active_seals lookup needed.
+        // After Bug 3B fix, the on-chain PDA uses commitment (= sanad_id) as its seed,
+        // so this derivation matches what publish() used when creating the account.
+        let (sanad_account, _bump) = Pubkey::find_program_address(
+            &[b"sanad", owner_pubkey.as_ref(), sanad_id.as_bytes()],
+            &program_id,
+        );
 
-        let lock_discriminator: [u8; 8] = {
-            let mut hasher = sha2::Sha256::new();
-            hasher.update(b"global:lock_sanad");
-            let hash = hasher.finalize();
-            hash.as_slice()[..8].try_into().unwrap()
-        };
+        // Build the lock_sanad discriminator
+        let mut disc_hasher = sha2::Sha256::new();
+        disc_hasher.update(b"global:lock_sanad");
+        let hash = disc_hasher.finalize();
+        let lock_discriminator: [u8; 8] = hash.as_slice()[..8].try_into().expect("slice length matches array size");
 
-        let dest_chain_bytes = destination.as_bytes();
+        let dest_chain_bytes = destination_chain.as_bytes();
         let mut instruction_data = Vec::with_capacity(8 + 32 + dest_chain_bytes.len());
         instruction_data.extend_from_slice(&lock_discriminator);
         instruction_data.extend_from_slice(sanad_id.as_bytes());
@@ -806,8 +775,8 @@ impl ChainSanadOps for SolanaBackend {
         let instruction = Instruction {
             program_id,
             accounts: vec![
-                AccountMeta::new(seal.account, false),
-                AccountMeta::new_readonly(owner_pubkey, true),
+                AccountMeta::new(sanad_account, false),
+                AccountMeta::new(owner_pubkey, true),
             ],
             data: instruction_data,
         };
@@ -820,11 +789,8 @@ impl ChainSanadOps for SolanaBackend {
             .get_recent_blockhash()
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get recent blockhash: {}", e)))?;
 
-        let mut transaction = solana_sdk::transaction::Transaction::new_with_payer(
-            &[instruction],
-            Some(&owner_pubkey),
-        );
-        transaction.message.recent_blockhash = recent_blockhash;
+        let message = Message::new(&[instruction], Some(&owner_pubkey));
+        let mut transaction = Transaction::new_unsigned(message);
         transaction.sign(&[&wallet.keypair], recent_blockhash);
 
         let sig = rpc
@@ -844,7 +810,7 @@ impl ChainSanadOps for SolanaBackend {
             metadata: serde_json::json!({
                 "operation": "lock",
                 "destination_chain": destination_chain,
-                "seal_account": seal.account.to_string(),
+                "seal_account": sanad_account.to_string(),
             }),
         })
     }
@@ -1022,6 +988,106 @@ impl ChainBackend for SolanaBackend {
             metadata: solana_anchor.slot.to_le_bytes().to_vec(),
         })
     }
+}
+
+#[async_trait]
+impl SanadStateReader for SolanaBackend {
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        // Derive the SanadAccount PDA
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid program ID: {}", e)))?;
+        
+        // We need the owner to derive the PDA - for now, use a placeholder
+        // In production, this would require the owner address as input
+        let owner = Pubkey::default();
+        let sanad_id_bytes = sanad_id.as_bytes();
+        let (sanad_pda, _) = Pubkey::find_program_address(&[b"sanad", owner.as_ref(), sanad_id_bytes], &program_id);
+        
+        // Query the SanadAccount PDA on Solana (get_account is synchronous)
+        let account = self.rpc()
+            .get_account(&sanad_pda)
+            .map_err(|e| match e {
+                crate::error::SolanaError::AccountNotFound(_) => {
+                    ChainOpError::RpcError("Sanad account not found".to_string())
+                }
+                _ => ChainOpError::RpcError(format!("Failed to get sanad account: {}", e)),
+            })?;
+        
+        // Decode the SanadAccount from account data
+        let sanad_account = decode_sanad_account(&account.data)
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to decode sanad account: {}", e)))?;
+        
+        Ok(CanonicalSanadState {
+            state: sanad_account.state,
+            owner: sanad_account.owner.to_string(),
+            commitment: Hash::from(sanad_account.commitment),
+            nullifier: if sanad_account.nullifier != [0u8; 32] {
+                Some(Hash::from(sanad_account.nullifier))
+            } else {
+                None
+            },
+            created_at: sanad_account.created_at,
+            locked_at: if sanad_account.locked_at != 0 { Some(sanad_account.locked_at) } else { None },
+            consumed_at: if sanad_account.consumed_at != 0 { Some(sanad_account.consumed_at) } else { None },
+            minted_at: if sanad_account.minted_at != 0 { Some(sanad_account.minted_at) } else { None },
+            refunded_at: if sanad_account.refunded_at != 0 { Some(sanad_account.refunded_at) } else { None },
+        })
+    }
+    
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
+        // For Solana, seal state is derived from the SanadAccount state
+        // This is a simplified implementation
+        Ok(CanonicalSealState {
+            state: 0, // Created
+            owner: "unknown".to_string(),
+            commitment: *seal_id,
+            created_at: 0,
+            consumed_at: None,
+        })
+    }
+    
+    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+        // Query events from Solana transactions
+        // This would require querying the transaction history for events related to this sanad_id
+        Ok(vec![])
+    }
+}
+
+/// Decode SanadAccount from account data
+fn decode_sanad_account(data: &[u8]) -> ChainOpResult<crate::types::SolanaSanadAccount> {
+    // Skip the 8-byte discriminator
+    if data.len() < 8 {
+        return Err(ChainOpError::RpcError("Account data too short".to_string()));
+    }
+    
+    let account_data = &data[8..];
+    
+    // Decode fields according to SanadAccount layout
+    if account_data.len() < 32 {
+        return Err(ChainOpError::RpcError("Account data too short for owner".to_string()));
+    }
+    
+    let owner = Pubkey::new_from_array(account_data[..32].try_into().expect("slice length matches array size"));
+    
+    Ok(crate::types::SolanaSanadAccount {
+        owner,
+        sanad_id: account_data[32..64].try_into().expect("slice length matches array size"),
+        commitment: account_data[64..96].try_into().expect("slice length matches array size"),
+        state_root: account_data[96..128].try_into().expect("slice length matches array size"),
+        nullifier: account_data[128..160].try_into().expect("slice length matches array size"),
+        asset_class: account_data[160],
+        asset_id: account_data[161..193].try_into().expect("slice length matches array size"),
+        metadata_hash: account_data[193..225].try_into().expect("slice length matches array size"),
+        proof_system: account_data[225],
+        proof_root: account_data[226..258].try_into().expect("slice length matches array size"),
+        state: account_data[258],
+        created_at: i64::from_le_bytes(account_data[259..267].try_into().expect("slice length matches array size")),
+        locked_at: i64::from_le_bytes(account_data[267..275].try_into().expect("slice length matches array size")),
+        consumed_at: i64::from_le_bytes(account_data[275..283].try_into().expect("slice length matches array size")),
+        minted_at: i64::from_le_bytes(account_data[283..291].try_into().expect("slice length matches array size")),
+        refunded_at: i64::from_le_bytes(account_data[291..299].try_into().expect("slice length matches array size")),
+        bump: account_data[299],
+    })
 }
 
 #[cfg(test)]

@@ -170,9 +170,9 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             transition_dag: csv_hash::dag::DAGSegment::new(vec![dag_node], commitment),
             signatures,
             signature_scheme: csv_protocol::signature::SignatureScheme::Secp256k1,
-            seal_ref: seal_point,
+        seal_ref: seal_point,
             anchor_ref: commit_anchor,
-            inclusion_proof: inclusion_proof,
+            inclusion_proof,
             finality_proof: FinalityProof::default(),
         })
     }

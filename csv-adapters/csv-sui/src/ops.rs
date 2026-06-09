@@ -14,9 +14,10 @@ use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::backend::{
-    BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
-    ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
-    DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
+    BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
+    ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
+    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
+    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
@@ -26,6 +27,7 @@ use std::sync::Arc;
 
 use crate::config::SuiConfig;
 use crate::error::SuiError;
+#[cfg(feature = "rpc")]
 use crate::node::SuiNode;
 use crate::proofs::CommitmentEventBuilder;
 use crate::seal_protocol::SuiSealProtocol;
@@ -1388,6 +1390,80 @@ impl ChainSanadOps for SuiBackend {
         _sanad_id: &SanadId,
         _expected_state: &str,
     ) -> ChainOpResult<bool> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "RPC feature not enabled".to_string(),
+        ))
+    }
+}
+
+#[cfg(feature = "rpc")]
+#[async_trait]
+impl SanadStateReader for SuiBackend {
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        // Query the Sui object for this sanad_id
+        let object_id = sui_sdk_types::Address::from_bytes(sanad_id.as_bytes())
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid sanad ID: {}", e)))?;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+        
+        let request = sui_rpc::proto::sui::rpc::v2::GetObjectRequest::new(&object_id);
+        
+        let object_response = (*client_guard)
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get object: {}", e)))?;
+        
+        let object = object_response.into_inner().object;
+        
+        match object {
+            Some(_) => Ok(CanonicalSanadState {
+                state: 1, // Created (placeholder)
+                owner: "unknown".to_string(),
+                commitment: Hash::new([0u8; 32]),
+                nullifier: None,
+                created_at: 0,
+                locked_at: None,
+                consumed_at: None,
+                minted_at: None,
+                refunded_at: None,
+            }),
+            None => Err(ChainOpError::RpcError("Sanad object not found".to_string())),
+        }
+    }
+    
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
+        Ok(CanonicalSealState {
+            state: 0,
+            owner: "unknown".to_string(),
+            commitment: *seal_id,
+            created_at: 0,
+            consumed_at: None,
+        })
+    }
+    
+    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+        Ok(vec![])
+    }
+}
+
+#[cfg(not(feature = "rpc"))]
+#[async_trait]
+impl SanadStateReader for SuiBackend {
+    async fn get_sanad_state(&self, _sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "RPC feature not enabled".to_string(),
+        ))
+    }
+    
+    async fn get_seal_state(&self, _seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
+        Err(ChainOpError::CapabilityUnavailable(
+            "RPC feature not enabled".to_string(),
+        ))
+    }
+    
+    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
         Err(ChainOpError::CapabilityUnavailable(
             "RPC feature not enabled".to_string(),
         ))

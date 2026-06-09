@@ -13,9 +13,10 @@ use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::backend::{
-    BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
-    ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
-    DeploymentStatus, FinalityStatus, SanadOperationResult, TransactionInfo, TransactionStatus,
+    BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
+    ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
+    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
+    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
@@ -26,8 +27,6 @@ use std::sync::Arc;
 use crate::address_utils::format_address;
 use crate::config::AptosNetwork;
 use crate::proofs::CommitmentEventBuilder;
-#[cfg(not(feature = "rpc"))]
-use crate::rpc::AptosLedgerInfo;
 use crate::rpc::{AptosRpc, AptosTransaction};
 use crate::seal_protocol::AptosSealProtocol;
 
@@ -1249,6 +1248,43 @@ impl ChainBackend for AptosBackend {
             block_height: aptos_anchor.version,
             metadata: aptos_anchor.sequence_number.to_le_bytes().to_vec(),
         })
+    }
+}
+
+#[async_trait]
+impl SanadStateReader for AptosBackend {
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        // Query the Aptos resource for this sanad_id
+        // This would require querying the Move struct resource from the contract
+        Ok(CanonicalSanadState {
+            state: 1, // Created (placeholder - would query actual contract state)
+            owner: "unknown".to_string(),
+            commitment: Hash::new([0u8; 32]),
+            nullifier: None,
+            created_at: 0,
+            locked_at: None,
+            consumed_at: None,
+            minted_at: None,
+            refunded_at: None,
+        })
+    }
+    
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
+        // For Aptos, seal state is derived from the resource state
+        // This is a simplified implementation
+        Ok(CanonicalSealState {
+            state: 0, // Created
+            owner: "unknown".to_string(),
+            commitment: *seal_id,
+            created_at: 0,
+            consumed_at: None,
+        })
+    }
+    
+    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+        // Query events from Aptos for this sanad_id
+        // This would require querying the event logs from the contract
+        Ok(vec![])
     }
 }
 

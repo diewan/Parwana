@@ -14,7 +14,6 @@ use csv_bitcoin::{
     seal_protocol::BitcoinSealProtocol,
     mempool_rpc::MempoolSignetRpc,
     runtime_adapter::BitcoinRuntimeAdapter,
-    wallet::SealWallet,
     Network as BtcNetwork,
 };
 
@@ -40,6 +39,7 @@ impl AdapterFactory for BitcoinFactory {
             .min_by_key(|e| e.priority)
             .ok_or_else(|| FactoryError::InvalidConfig("No REST RPC endpoint found".to_string()))?;
 
+        let has_sanad_seals = !config.sanad_seals.is_empty();
         let btc_config = BitcoinConfig {
             network: network,
             finality_depth: 6,
@@ -67,40 +67,7 @@ impl AdapterFactory for BitcoinFactory {
             }).collect(),
         };
 
-        // Create wallet from seed for both adapters
-        let seed_bytes = if let Some(ref seed_hex) = config.private_key {
-            hex::decode(seed_hex)
-                .map_err(|e| FactoryError::InvalidConfig(format!("Invalid seed hex: {}", e)))?
-        } else {
-            return Err(FactoryError::InvalidConfig("Seed is required for Bitcoin adapter".to_string()));
-        };
-
-        if seed_bytes.len() != 64 {
-            return Err(FactoryError::InvalidConfig("Seed must be 64 bytes".to_string()));
-        }
-
-        let mut seed_array = [0u8; 64];
-        seed_array.copy_from_slice(&seed_bytes);
-
-        let wallet = SealWallet::from_seed(&seed_array, network.to_bitcoin_network())
-            .map_err(|e| FactoryError::CreationFailed(format!("Failed to create wallet: {}", e)))?;
-
-        // Create RPC client for ChainAdapter
-        let rpc_adapter: Box<dyn BitcoinRpc + Send + Sync> = Box::new(
-            MempoolSignetRpc::with_url_and_key(
-                rest_endpoint.url.clone(),
-                rest_endpoint.api_key.clone(),
-            )
-        );
-
-        // Create ChainAdapter for TransferCoordinator using BitcoinRuntimeAdapter
-        let btc_network_for_runtime = network.to_bitcoin_network();
-
-        let chain_adapter: Box<dyn ChainAdapter> = Box::new(
-            BitcoinRuntimeAdapter::new(btc_network_for_runtime, wallet, rpc_adapter)
-        );
-
-        // Create ChainBackend adapter from config
+        // Create ChainBackend from config first — this registers all sanad_seals
         let rpc_backend: Box<dyn BitcoinRpc + Send + Sync> = Box::new(
             MempoolSignetRpc::with_url_and_key(
                 rest_endpoint.url.clone(),
@@ -108,12 +75,39 @@ impl AdapterFactory for BitcoinFactory {
             )
         );
 
-        let seal_protocol_backend = BitcoinSealProtocol::from_config(btc_config, rpc_backend)
-            .map_err(|e| FactoryError::CreationFailed(format!("Failed to create BitcoinSealProtocol for ChainBackend: {}", e)))?;
+        let seal = BitcoinSealProtocol::from_config(btc_config, rpc_backend)
+            .map_err(|e| FactoryError::CreationFailed(
+                format!("Failed to create BitcoinSealProtocol for ChainBackend: {}", e)
+            ))?;
+        let seal_arc = Arc::new(seal);
+
+        // Load UTXO data for every registered sanad_seal from RPC (needed for spending)
+        if has_sanad_seals {
+            if let Err(e) = seal_arc.load_sanad_seal_utxos().await {
+                log::warn!("Failed to load sanad seal UTXOs: {}", e);
+            }
+        }
 
         let chain_backend: Arc<dyn ChainBackend> = Arc::new(
-            BitcoinBackend::from_seal_protocol(Arc::new(seal_protocol_backend))
+            BitcoinBackend::from_seal_protocol(Arc::clone(&seal_arc))
                 .map_err(|e| FactoryError::CreationFailed(format!("Failed to create BitcoinBackend: {}", e)))?
+        );
+
+        // Create ChainAdapter from the SAME seal_arc — shares the wallet + sanad_seals
+        let btc_network_for_runtime = network.to_bitcoin_network();
+        let rpc_adapter: Box<dyn BitcoinRpc + Send + Sync> = Box::new(
+            MempoolSignetRpc::with_url_and_key(
+                rest_endpoint.url.clone(),
+                rest_endpoint.api_key.clone(),
+            )
+        );
+
+        let chain_adapter: Box<dyn ChainAdapter> = Box::new(
+            BitcoinRuntimeAdapter::from_seal_protocol(
+                btc_network_for_runtime,
+                Arc::clone(&seal_arc),
+                rpc_adapter,
+            )
         );
 
         Ok(AdapterResult {

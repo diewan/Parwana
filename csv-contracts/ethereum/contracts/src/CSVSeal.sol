@@ -2,11 +2,11 @@
 pragma solidity ^0.8.20;
 
 /// @title CSVSeal — Cross-Chain Sanad Transfer on Ethereum
-/// @notice Unified contract for lock, mint, and refund operations on Ethereum
-/// @dev Merges CSVLock and CSVMint functionality into a single contract
+/// @notice Unified contract for lock, mint, and refund operations
+/// @dev Canonical naming: all functions use snake_case, matching Solana/Sui/Aptos
 contract CSVSeal {
-    /// @notice Protocol version — incremented on every breaking change
-    uint256 public constant VERSION = 3; // Merged version
+    /// @notice Protocol version
+    uint256 public constant VERSION = 4; // Canonical naming version
 
     uint8 public constant ASSET_CLASS_UNSPECIFIED = 0;
     uint8 public constant ASSET_CLASS_FUNGIBLE_TOKEN = 1;
@@ -14,38 +14,84 @@ contract CSVSeal {
     uint8 public constant ASSET_CLASS_PROOF_SANAD = 3;
     uint8 public constant PROOF_SYSTEM_UNSPECIFIED = 0;
 
-    /// @notice Chain IDs for cross-chain transfers
+    /// @notice Chain IDs — canonical across all chains
     uint8 public constant CHAIN_BITCOIN = 0;
     uint8 public constant CHAIN_SUI = 1;
     uint8 public constant CHAIN_APTOS = 2;
     uint8 public constant CHAIN_ETHEREUM = 3;
     uint8 public constant CHAIN_SOLANA = 4;
 
-    /// @notice Contract owner - can call owner-only functions
+    // ==================== Canonical State Enum ====================
+
+    /// @notice Sanad lifecycle state — canonical values across all chains
+    /// @dev 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred, 7=Refunded, 8=Burned, 9=Invalid
+    enum SanadState {
+        Uncreated,
+        Created,
+        Active,
+        Locked,
+        Consumed,
+        Minted,
+        Transferred,
+        Refunded,
+        Burned,
+        Invalid
+    }
+
+    /// @notice Seal lifecycle state — canonical values across all chains
+    /// @dev 0=Created, 1=Consumed, 2=Locked, 3=Minted, 4=Refunded
+    enum SealState {
+        Created,
+        Consumed,
+        Locked,
+        Minted,
+        Refunded
+    }
+
+    // ==================== Canonical View Structures ====================
+
+    /// @notice Full state view for a Sanad — returned by get_sanad_state()
+    struct SanadStateView {
+        bytes32 sanadId;
+        bytes32 sealId;
+        bytes32 commitment;
+        address owner;
+        uint8 sourceChain;
+        uint8 currentChain;
+        uint8 destinationChain;
+        SanadState state;
+        bytes32 nullifier;
+        uint256 createdAt;
+        uint256 updatedAt;
+        uint256 lockedAt;
+        uint256 consumedAt;
+        uint256 mintedAt;
+        uint256 refundedAt;
+        bytes32 lastTx;
+    }
+
+    /// @notice Full state view for a Seal — returned by get_seal_state()
+    struct SealStateView {
+        bytes32 sealId;
+        bytes32 sanadId;
+        bytes32 commitment;
+        SealState state;
+        uint256 consumedAt;
+        uint256 lockedAt;
+    }
+
+    // ==================== Storage ====================
+
     address public owner;
-
-    /// @notice Trusted verifier address that validates proofs before minting
     address public immutable verifier;
-
-    /// @notice Trusted proof root (Merkle root for cross-chain proofs)
     bytes32 public trustedProofRoot;
-
-    /// @notice Block height of last proof root update
     uint256 public proofRootBlockHeight;
 
-    /// @notice Tracks consumed nullifiers (seal single-use)
     mapping(bytes32 => bool) public usedSeals;
-
-    /// @notice Tracks minted Sanads (prevents double-mint)
     mapping(bytes32 => bool) public mintedSanads;
-
-    /// @notice Tracks registered nullifiers (prevents double-spend on Ethereum)
     mapping(bytes32 => bool) public nullifiers;
-
-    /// @notice Anchored commitments (commitment -> block height)
     mapping(bytes32 => uint256) public commitmentAnchorHeight;
 
-    /// @notice Cross-chain metadata shared by all CSV contracts.
     struct SanadMetadata {
         uint8 assetClass;
         bytes32 assetId;
@@ -53,10 +99,8 @@ contract CSVSeal {
         uint8 proofSystem;
         bytes32 proofRoot;
     }
-
     mapping(bytes32 => SanadMetadata) public sanadMetadata;
 
-    /// @notice Lock record for refund support
     struct LockRecord {
         bytes32 commitment;
         address owner;
@@ -66,89 +110,79 @@ contract CSVSeal {
         SanadMetadata metadata;
         bool refunded;
     }
-
-    /// @notice Tracks lock events for refund verification
     mapping(bytes32 => LockRecord) public locks;
 
-    /// @notice Refund timeout — 24 hours after lock
+    /// @notice Canonical Sanad state tracking
+    mapping(bytes32 => SanadState) public sanadStates;
+    mapping(bytes32 => bytes32) public sanadSealId; // sanad_id -> seal_id
+    mapping(bytes32 => uint256) public sanadCreatedAt;
+    mapping(bytes32 => uint256) public sanadLockedAt;
+    mapping(bytes32 => uint256) public sanadConsumedAt;
+    mapping(bytes32 => uint256) public sanadMintedAt;
+    mapping(bytes32 => uint256) public sanadRefundedAt;
+    mapping(bytes32 => bytes32) public sanadLastTx;
+
     uint256 public constant REFUND_TIMEOUT = 24 hours;
 
-    /// @notice Emitted when ownership is transferred
+    // ==================== Canonical Events ====================
+
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
-    /// @notice Emitted when a Sanad is locked for cross-chain transfer
-    event CrossChainLock(
+    /// @notice Emitted when a seal is created
+    event SanadCreated(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint256 timestamp);
+
+    /// @notice Emitted when a seal is consumed (canonical name, replaces SealUsed)
+    event SanadConsumed(bytes32 indexed sanadId, bytes32 indexed nullifier, address indexed consumer, uint256 timestamp);
+
+    /// @notice Emitted when a Sanad is locked for cross-chain transfer (canonical name, replaces CrossChainLock)
+    event SanadLocked(
         bytes32 indexed sanadId,
         bytes32 indexed commitment,
         address indexed owner,
         uint8 destinationChain,
         bytes destinationOwner,
-        bytes32 sourceTxHash,
-        uint8 assetClass,
-        bytes32 assetId,
-        bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 proofRoot
+        uint256 timestamp
     );
 
-    /// @notice Emitted when a Sanad is consumed (nullifier registered)
-    event SealUsed(bytes32 indexed sealId, bytes32 commitment);
-
-    /// @notice Emitted when a locked Sanad is refunded
-    event SanadRefunded(
-        bytes32 indexed sanadId,
-        bytes32 indexed commitment,
-        address indexed claimant,
-        uint256 refundTimestamp
-    );
-
-    /// @notice Emitted when a Sanad is minted from cross-chain transfer
+    /// @notice Emitted when a Sanad is minted on destination (canonical name, replaces SanadMinted)
     event SanadMinted(
         bytes32 indexed sanadId,
         bytes32 indexed commitment,
         address indexed owner,
         uint8 sourceChain,
         bytes sourceSealRef,
-        uint8 assetClass,
-        bytes32 assetId,
-        bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 proofRoot,
-        uint256 blockNumber
+        uint256 timestamp
     );
+
+    /// @notice Emitted when a locked Sanad is refunded (canonical name)
+    event SanadRefunded(
+        bytes32 indexed sanadId,
+        bytes32 indexed commitment,
+        address indexed claimant,
+        string reason,
+        uint256 timestamp
+    );
+
+    /// @notice Emitted when Sanad ownership is transferred
+    event SanadTransferred(bytes32 indexed sanadId, address indexed from, address indexed to, uint256 timestamp);
 
     /// @notice Emitted when a nullifier is registered
-    event NullifierRegistered(
-        bytes32 indexed nullifier,
-        bytes32 indexed sanadId,
-        uint8 sourceChain,
-        bytes sourceSealRef,
-        uint256 blockNumber
-    );
+    event NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanadId, uint8 sourceChain, uint256 timestamp);
 
     /// @notice Emitted when a commitment is anchored
-    event CommitmentAnchored(
-        bytes32 indexed commitment,
-        bytes32 indexed sealId,
-        address indexed owner,
-        uint256 blockNumber
-    );
+    event CommitmentAnchored(bytes32 indexed commitment, bytes32 indexed sealId, address indexed owner, uint256 timestamp);
 
     /// @notice Emitted when proof root is updated
-    event ProofRootUpdated(
-        bytes32 indexed proofRoot,
-        uint256 blockNumber,
-        address indexed updater
-    );
+    event ProofRootUpdated(bytes32 indexed proofRoot, uint256 blockNumber, address indexed updater);
 
-    event SanadMetadataRecorded(
-        bytes32 indexed sanadId,
-        uint8 assetClass,
-        bytes32 indexed assetId,
-        bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 indexed proofRoot
-    );
+    /// @notice Emitted when replay is detected
+    event ReplayDetected(bytes32 indexed replayId, bytes32 indexed sanadId, uint256 timestamp);
+
+    // Legacy events (backward compatibility — emit alongside canonical events during transition)
+    event SealUsed(bytes32 indexed sealId, bytes32 commitment);
+    event CrossChainLock(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint8 destinationChain, bytes destinationOwner, uint256 timestamp);
+
+    // ==================== Errors ====================
 
     error SanadAlreadyConsumed();
     error SanadAlreadyLocked();
@@ -164,8 +198,15 @@ contract CSVSeal {
     error Unauthorized();
     error InvalidProofRoot();
     error CommitmentNotAnchored();
+    error SanadNotFound();
 
-    /// @notice Constructor to set verifier and initialize owner
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+
+    // ==================== Constructor ====================
+
     constructor(address _verifier) {
         require(_verifier != address(0), "Invalid verifier address");
         verifier = _verifier;
@@ -175,50 +216,81 @@ contract CSVSeal {
         emit OwnershipTransferred(address(0), msg.sender);
     }
 
-    /// @notice Transfer ownership of the contract to a new address
-    function transferOwnership(address newOwner) external onlyOwner {
+    // ==================== Governance ====================
+
+    function transfer_ownership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "New owner cannot be zero address");
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
     }
 
-    /// @notice Update the trusted proof root (verifier only)
-    function updateProofRoot(bytes32 _proofRoot) external {
+    function update_proof_root(bytes32 _proofRoot) external {
         if (msg.sender != verifier) revert Unauthorized();
         if (_proofRoot == bytes32(0)) revert InvalidProofRoot();
-        
+
         trustedProofRoot = _proofRoot;
         proofRootBlockHeight = block.number;
-        
+
         emit ProofRootUpdated(_proofRoot, block.number, msg.sender);
     }
 
-    // ==================== Lock Operations ====================
+    // ==================== Lifecycle Mutations (Canonical Names) ====================
 
-    /// @notice Lock a Sanad for cross-chain transfer
-    function lockSanad(
+    /// @notice Create a seal (anchor commitment on-chain)
+    function create_seal(bytes32 commitment, bytes32 sealId) external returns (bool) {
+        if (commitmentAnchorHeight[commitment] != 0) revert CommitmentNotAnchored();
+
+        commitmentAnchorHeight[commitment] = block.number;
+        sanadStates[sealId] = SanadState.Created;
+        sanadSealId[sealId] = sealId;
+        sanadCreatedAt[sealId] = block.timestamp;
+        sanadLastTx[sealId] = bytes32(0);
+
+        emit SanadCreated(sealId, commitment, msg.sender, block.timestamp);
+        emit CommitmentAnchored(commitment, sealId, msg.sender, block.timestamp);
+        emit SealUsed(sealId, commitment); // Legacy
+
+        return true;
+    }
+
+    /// @notice Consume a seal (mark as used, register nullifier)
+    function consume_seal(bytes32 sealId, bytes32 nullifier) external {
+        if (usedSeals[sealId]) revert SanadAlreadyConsumed();
+
+        usedSeals[sealId] = true;
+        if (nullifier != bytes32(0)) {
+            nullifiers[nullifier] = true;
+        }
+        sanadStates[sealId] = SanadState.Consumed;
+        sanadConsumedAt[sealId] = block.timestamp;
+        sanadLastTx[sealId] = nullifier;
+
+        emit SanadConsumed(sealId, nullifier, msg.sender, block.timestamp);
+        emit SealUsed(sealId, bytes32(0)); // Legacy
+
+        if (nullifier != bytes32(0)) {
+            emit NullifierRegistered(nullifier, sealId, CHAIN_ETHEREUM, block.timestamp);
+        }
+    }
+
+    /// @notice Lock a Sanad for cross-chain transfer (canonical name, replaces lockSanad)
+    function lock_sanad(
         bytes32 sanadId,
         bytes32 commitment,
         uint8 destinationChain,
         bytes calldata destinationOwner
     ) external {
-        _lockSanad(
-            sanadId,
-            commitment,
-            destinationChain,
-            destinationOwner,
-            SanadMetadata({
-                assetClass: ASSET_CLASS_UNSPECIFIED,
-                assetId: bytes32(0),
-                metadataHash: bytes32(0),
-                proofSystem: PROOF_SYSTEM_UNSPECIFIED,
-                proofRoot: bytes32(0)
-            })
-        );
+        _lock_sanad_internal(sanadId, commitment, destinationChain, destinationOwner, SanadMetadata({
+            assetClass: ASSET_CLASS_UNSPECIFIED,
+            assetId: bytes32(0),
+            metadataHash: bytes32(0),
+            proofSystem: PROOF_SYSTEM_UNSPECIFIED,
+            proofRoot: bytes32(0)
+        }));
     }
 
-    /// @notice Lock a Sanad with asset/proof metadata
-    function lockSanadWithMetadata(
+    /// @notice Lock a Sanad with metadata
+    function lock_sanad_with_metadata(
         bytes32 sanadId,
         bytes32 commitment,
         uint8 destinationChain,
@@ -229,33 +301,26 @@ contract CSVSeal {
         uint8 proofSystem,
         bytes32 proofRoot
     ) external {
-        SanadMetadata memory metadata = SanadMetadata({
+        _lock_sanad_internal(sanadId, commitment, destinationChain, destinationOwner, SanadMetadata({
             assetClass: assetClass,
             assetId: assetId,
             metadataHash: metadataHash,
             proofSystem: proofSystem,
             proofRoot: proofRoot
-        });
-        _validateMetadata(metadata);
-        _lockSanad(sanadId, commitment, destinationChain, destinationOwner, metadata);
+        }));
     }
 
-    function _lockSanad(
+    function _lock_sanad_internal(
         bytes32 sanadId,
         bytes32 commitment,
         uint8 destinationChain,
         bytes calldata destinationOwner,
         SanadMetadata memory metadata
     ) internal {
-        bool isConsumed = usedSeals[sanadId];
+        if (usedSeals[sanadId]) revert SanadAlreadyConsumed();
+
         (uint256 lockTimestamp, bool lockRefunded) = (locks[sanadId].timestamp, locks[sanadId].refunded);
-        
-        if (isConsumed) {
-            revert SanadAlreadyConsumed();
-        }
-        if (lockTimestamp != 0 && !lockRefunded) {
-            revert SanadAlreadyLocked();
-        }
+        if (lockTimestamp != 0 && !lockRefunded) revert SanadAlreadyLocked();
 
         bytes32 destinationOwnerRoot = keccak256(destinationOwner);
 
@@ -270,111 +335,16 @@ contract CSVSeal {
             refunded: false
         });
 
-        emit CrossChainLock(
-            sanadId,
-            commitment,
-            msg.sender,
-            destinationChain,
-            destinationOwner,
-            bytes32(0),
-            metadata.assetClass,
-            metadata.assetId,
-            metadata.metadataHash,
-            metadata.proofSystem,
-            metadata.proofRoot
-        );
+        sanadStates[sanadId] = SanadState.Locked;
+        sanadLockedAt[sanadId] = block.timestamp;
+        sanadLastTx[sanadId] = bytes32(0);
 
-        emit SanadMetadataRecorded(
-            sanadId,
-            metadata.assetClass,
-            metadata.assetId,
-            metadata.metadataHash,
-            metadata.proofSystem,
-            metadata.proofRoot
-        );
-        emit SealUsed(sanadId, commitment);
+        emit SanadLocked(sanadId, commitment, msg.sender, destinationChain, destinationOwner, block.timestamp);
+        emit CrossChainLock(sanadId, commitment, msg.sender, destinationChain, destinationOwner, block.timestamp); // Legacy
     }
 
-    function _validateMetadata(SanadMetadata memory metadata) internal pure {
-        if (metadata.assetClass > ASSET_CLASS_PROOF_SANAD) revert InvalidSanadMetadata();
-        if (metadata.assetClass != ASSET_CLASS_UNSPECIFIED && metadata.assetId == bytes32(0)) {
-            revert InvalidSanadMetadata();
-        }
-        if (metadata.proofSystem != PROOF_SYSTEM_UNSPECIFIED && metadata.proofRoot == bytes32(0)) {
-            revert InvalidSanadMetadata();
-        }
-    }
-
-    /// @notice Register a nullifier (consume seal without cross-chain transfer)
-    function markSealUsed(bytes32 sealId, bytes32 commitment) external onlyOwner {
-        if (usedSeals[sealId]) {
-            revert SanadAlreadyConsumed();
-        }
-        usedSeals[sealId] = true;
-        emit SealUsed(sealId, commitment);
-    }
-
-    /// @notice Claim a refund for a locked Sanad that was never minted
-    function refundSanad(bytes32 sanadId, bytes32 destinationOwnerHash) external {
-        LockRecord storage lock = locks[sanadId];
-
-        if (lock.timestamp == 0) {
-            revert SanadAlreadyConsumed();
-        }
-
-        if (block.timestamp < lock.timestamp + REFUND_TIMEOUT) {
-            revert TimeoutNotExpired();
-        }
-
-        if (lock.destinationOwnerRoot != destinationOwnerHash) {
-            revert InvalidProof();
-        }
-        if (lock.owner != msg.sender) {
-            revert NotOwner();
-        }
-
-        if (lock.refunded) {
-            revert RefundAlreadyClaimed();
-        }
-
-        // Check if sanad was minted locally (no cross-contract call needed)
-        if (mintedSanads[sanadId]) {
-            revert SanadAlreadyMinted();
-        }
-
-        lock.refunded = true;
-        usedSeals[sanadId] = false;
-
-        emit SanadRefunded(sanadId, lock.commitment, msg.sender, block.timestamp);
-    }
-
-    // ==================== Mint Operations ====================
-
-    /// @notice Register a nullifier for a Sanad (prevents double-spend)
-    function registerNullifier(
-        bytes32 nullifier,
-        bytes32 sanadId,
-        uint8 sourceChain,
-        bytes calldata sourceSealRef
-    ) external {
-        if (nullifiers[nullifier]) revert NullifierAlreadyRegistered();
-        
-        nullifiers[nullifier] = true;
-        
-        emit NullifierRegistered(nullifier, sanadId, sourceChain, sourceSealRef, block.number);
-    }
-
-    /// @notice Anchor a commitment on-chain
-    function anchorCommitment(bytes32 commitment, bytes32 sealId) external {
-        if (commitmentAnchorHeight[commitment] != 0) revert CommitmentNotAnchored();
-        
-        commitmentAnchorHeight[commitment] = block.number;
-        
-        emit CommitmentAnchored(commitment, sealId, msg.sender, block.number);
-    }
-
-    /// @notice Mint a new Sanad from a verified cross-chain transfer
-    function mintSanad(
+    /// @notice Mint a Sanad on destination chain (canonical name, replaces mintSanad)
+    function mint_sanad(
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
@@ -384,27 +354,17 @@ contract CSVSeal {
         bytes32 proofRoot,
         uint256 leafPosition
     ) external returns (bool) {
-        return _mintSanad(
-            sanadId,
-            commitment,
-            stateRoot,
-            sourceChain,
-            sourceSealPoint,
-            proof,
-            proofRoot,
-            leafPosition,
-            SanadMetadata({
-                assetClass: ASSET_CLASS_UNSPECIFIED,
-                assetId: bytes32(0),
-                metadataHash: bytes32(0),
-                proofSystem: PROOF_SYSTEM_UNSPECIFIED,
-                proofRoot: proofRoot
-            })
-        );
+        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
+            assetClass: ASSET_CLASS_UNSPECIFIED,
+            assetId: bytes32(0),
+            metadataHash: bytes32(0),
+            proofSystem: PROOF_SYSTEM_UNSPECIFIED,
+            proofRoot: proofRoot
+        }));
     }
 
-    /// @notice Mint a Sanad with token/NFT/proof metadata
-    function mintSanadWithMetadata(
+    /// @notice Mint a Sanad with metadata
+    function mint_sanad_with_metadata(
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
@@ -418,18 +378,16 @@ contract CSVSeal {
         uint8 proofSystem,
         uint256 leafPosition
     ) external returns (bool) {
-        SanadMetadata memory metadata = SanadMetadata({
+        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
             assetClass: assetClass,
             assetId: assetId,
             metadataHash: metadataHash,
             proofSystem: proofSystem,
             proofRoot: proofRoot
-        });
-        _validateMetadata(metadata);
-        return _mintSanad(sanadId, commitment, stateRoot, sourceChain, sourceSealPoint, proof, proofRoot, leafPosition, metadata);
+        }));
     }
 
-    function _mintSanad(
+    function _mint_sanad_internal(
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
@@ -441,47 +399,217 @@ contract CSVSeal {
         SanadMetadata memory metadata
     ) internal returns (bool) {
         if (proofRoot != trustedProofRoot) revert InvalidProofRoot();
-        
         if (mintedSanads[sanadId]) revert SanadAlreadyMinted();
         if (stateRoot == bytes32(0)) revert InvalidProof();
 
-        if (sourceChain == 0) { // CHAIN_BITCOIN
-            _verifyBitcoinProof(sanadId, commitment, proof, proofRoot, leafPosition);
+        if (sourceChain == CHAIN_BITCOIN) {
+            _verify_bitcoin_proof(sanadId, commitment, proof, proofRoot, leafPosition);
         } else {
-            _verifyCrossChainProof(sanadId, commitment, sourceChain, proof, proofRoot, leafPosition);
+            _verify_cross_chain_proof(sanadId, commitment, sourceChain, proof, proofRoot, leafPosition);
         }
 
         mintedSanads[sanadId] = true;
         sanadMetadata[sanadId] = metadata;
+        sanadStates[sanadId] = SanadState.Minted;
+        sanadMintedAt[sanadId] = block.timestamp;
+        sanadLastTx[sanadId] = bytes32(0);
 
-        emit SanadMinted(
-            sanadId,
-            commitment,
-            msg.sender,
-            sourceChain,
-            sourceSealPoint,
-            metadata.assetClass,
-            metadata.assetId,
-            metadata.metadataHash,
-            metadata.proofSystem,
-            metadata.proofRoot,
-            block.number
-        );
-        emit SanadMetadataRecorded(
-            sanadId,
-            metadata.assetClass,
-            metadata.assetId,
-            metadata.metadataHash,
-            metadata.proofSystem,
-            metadata.proofRoot
-        );
+        emit SanadMinted(sanadId, commitment, msg.sender, sourceChain, sourceSealPoint, block.timestamp);
+    }
 
+    /// @notice Refund a locked Sanad after timeout (canonical name)
+    function refund_sanad(bytes32 sanadId, bytes32 destinationOwnerHash) external {
+        LockRecord storage lock = locks[sanadId];
+
+        if (lock.timestamp == 0) revert SanadNotFound();
+        if (block.timestamp < lock.timestamp + REFUND_TIMEOUT) revert TimeoutNotExpired();
+        if (lock.destinationOwnerRoot != destinationOwnerHash) revert InvalidProof();
+        if (lock.owner != msg.sender) revert NotOwner();
+        if (lock.refunded) revert RefundAlreadyClaimed();
+        if (mintedSanads[sanadId]) revert SanadAlreadyMinted();
+
+        lock.refunded = true;
+        usedSeals[sanadId] = false;
+
+        sanadStates[sanadId] = SanadState.Refunded;
+        sanadRefundedAt[sanadId] = block.timestamp;
+        sanadLastTx[sanadId] = bytes32(0);
+
+        emit SanadRefunded(sanadId, lock.commitment, msg.sender, "timeout", block.timestamp);
+    }
+
+    /// @notice Transfer Sanad ownership (same chain)
+    function transfer_sanad(bytes32 sanadId, address newOwner) external {
+        if (sanadStates[sanadId] != SanadState.Active && sanadStates[sanadId] != SanadState.Created) revert SanadNotFound();
+        if (locks[sanadId].timestamp != 0 && !locks[sanadId].refunded) revert SanadAlreadyLocked();
+
+        address currentOwner = locks[sanadId].owner;
+        if (msg.sender != currentOwner && msg.sender != owner) revert NotOwner();
+
+        locks[sanadId].owner = newOwner;
+        sanadStates[sanadId] = SanadState.Transferred;
+        sanadLastTx[sanadId] = bytes32(0);
+
+        emit SanadTransferred(sanadId, currentOwner, newOwner, block.timestamp);
+    }
+
+    /// @notice Register nullifier for replay protection
+    function register_nullifier(bytes32 nullifier, bytes32 sanadId, uint8 sourceChain) external {
+        if (nullifiers[nullifier]) revert NullifierAlreadyRegistered();
+
+        nullifiers[nullifier] = true;
+
+        emit NullifierRegistered(nullifier, sanadId, sourceChain, block.timestamp);
+    }
+
+    /// @notice Anchor commitment on-chain
+    function anchor_commitment(bytes32 commitment, bytes32 sealId) external {
+        if (commitmentAnchorHeight[commitment] != 0) revert CommitmentNotAnchored();
+
+        commitmentAnchorHeight[commitment] = block.number;
+
+        emit CommitmentAnchored(commitment, sealId, msg.sender, block.timestamp);
+    }
+
+    /// @notice Record metadata for a Sanad
+    function record_sanad_metadata(
+        bytes32 sanadId,
+        uint8 assetClass,
+        bytes32 assetId,
+        bytes32 metadataHash,
+        uint8 proofSystem,
+        bytes32 proofRoot
+    ) external {
+        if (sanadStates[sanadId] == SanadState.Uncreated || sanadStates[sanadId] == SanadState.Invalid) revert SanadNotFound();
+
+        sanadMetadata[sanadId] = SanadMetadata({
+            assetClass: assetClass,
+            assetId: assetId,
+            metadataHash: metadataHash,
+            proofSystem: proofSystem,
+            proofRoot: proofRoot
+        });
+    }
+
+    // ==================== View Functions (Canonical Names) ====================
+
+    /// @notice Get full Sanad state view
+    function get_sanad_state(bytes32 sanadId) external view returns (SanadStateView memory) {
+        SanadState state = sanadStates[sanadId];
+        if (state == SanadState.Uncreated) {
+            // Check if it exists in locks
+            if (locks[sanadId].timestamp != 0) {
+                state = SanadState.Locked;
+            } else if (mintedSanads[sanadId]) {
+                state = SanadState.Minted;
+            } else if (usedSeals[sanadId]) {
+                state = SanadState.Consumed;
+            }
+        }
+
+        LockRecord storage lock = locks[sanadId];
+
+        return SanadStateView({
+            sanadId: sanadId,
+            sealId: sanadSealId[sanadId],
+            commitment: lock.commitment,
+            owner: lock.owner,
+            sourceChain: 0,
+            currentChain: CHAIN_ETHEREUM,
+            destinationChain: lock.destinationChain,
+            state: state,
+            nullifier: bytes32(0),
+            createdAt: sanadCreatedAt[sanadId],
+            updatedAt: block.timestamp,
+            lockedAt: sanadLockedAt[sanadId],
+            consumedAt: sanadConsumedAt[sanadId],
+            mintedAt: sanadMintedAt[sanadId],
+            refundedAt: sanadRefundedAt[sanadId],
+            lastTx: sanadLastTx[sanadId]
+        });
+    }
+
+    /// @notice Get full Seal state view
+    function get_seal_state(bytes32 sealId) external view returns (SealStateView memory) {
+        SealState state;
+        if (usedSeals[sealId]) {
+            state = SealState.Consumed;
+        } else if (locks[sealId].timestamp != 0 && !locks[sealId].refunded) {
+            state = SealState.Locked;
+        } else {
+            state = SealState.Created;
+        }
+
+        return SealStateView({
+            sealId: sealId,
+            sanadId: sealId,
+            commitment: locks[sealId].commitment,
+            state: state,
+            consumedAt: sanadConsumedAt[sealId],
+            lockedAt: sanadLockedAt[sealId]
+        });
+    }
+
+    /// @notice Check if seal is available (not consumed)
+    function is_seal_available(bytes32 sealId) external view returns (bool) {
+        return !usedSeals[sealId];
+    }
+
+    /// @notice Check if seal is consumed (canonical name, replaces isSealUsed)
+    function is_seal_consumed(bytes32 sealId) external view returns (bool) {
+        return usedSeals[sealId];
+    }
+
+    /// @notice Check if nullifier is registered
+    function is_nullifier_registered(bytes32 nullifier) external view returns (bool) {
+        return nullifiers[nullifier];
+    }
+
+    /// @notice Check if commitment is anchored
+    function is_commitment_anchored(bytes32 commitment) external view returns (bool) {
+        return commitmentAnchorHeight[commitment] != 0;
+    }
+
+    /// @notice Check if Sanad is minted
+    function is_sanad_minted(bytes32 sanadId) external view returns (bool) {
+        return mintedSanads[sanadId];
+    }
+
+    /// @notice Check if refund is available
+    function can_refund(bytes32 sanadId) external view returns (bool) {
+        LockRecord storage lock = locks[sanadId];
+        if (lock.timestamp == 0) return false;
+        if (lock.refunded) return false;
+        if (block.timestamp < lock.timestamp + REFUND_TIMEOUT) return false;
         return true;
     }
 
-    // ==================== Proof Verification ====================
+    /// @notice Get lock details (legacy compatibility)
+    function get_lock_info(bytes32 sanadId) external view returns (
+        bytes32 commitment,
+        uint256 timestamp,
+        uint8 destinationChain,
+        bool refunded
+    ) {
+        LockRecord storage lock = locks[sanadId];
+        return (lock.commitment, lock.timestamp, lock.destinationChain, lock.refunded);
+    }
 
-    function _verifyCrossChainProof(
+    /// @notice Get Sanad metadata
+    function get_sanad_metadata(bytes32 sanadId) external view returns (
+        uint8 assetClass,
+        bytes32 assetId,
+        bytes32 metadataHash,
+        uint8 proofSystem,
+        bytes32 proofRoot
+    ) {
+        SanadMetadata storage metadata = sanadMetadata[sanadId];
+        return (metadata.assetClass, metadata.assetId, metadata.metadataHash, metadata.proofSystem, metadata.proofRoot);
+    }
+
+    // ==================== Proof Verification (Internal) ====================
+
+    function _verify_cross_chain_proof(
         bytes32 sanadId,
         bytes32 commitment,
         uint8 sourceChain,
@@ -495,22 +623,22 @@ contract CSVSeal {
         if (commitment == bytes32(0)) revert InvalidProof();
 
         bytes32 leaf;
-        
-        if (sourceChain == 3 || sourceChain == 4) { // Ethereum (3) or Solana (4)
+
+        if (sourceChain == CHAIN_ETHEREUM || sourceChain == CHAIN_SOLANA) {
             leaf = keccak256(abi.encodePacked(sanadId, commitment, sourceChain));
-            if (!_verifyMerkleProofKeccak256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
-        } else if (sourceChain == 1) { // Sui (1)
+            if (!_verify_merkle_proof_keccak256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        } else if (sourceChain == CHAIN_SUI) {
             leaf = blake2b256(abi.encodePacked(sanadId, commitment, sourceChain));
-            if (!_verifyMerkleProofBlake2b256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
-        } else if (sourceChain == 2) { // Aptos (2)
+            if (!_verify_merkle_proof_blake2b256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        } else if (sourceChain == CHAIN_APTOS) {
             leaf = sha3_256(abi.encodePacked(sanadId, commitment, sourceChain));
-            if (!_verifyMerkleProofSha3_256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+            if (!_verify_merkle_proof_sha3_256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
         } else {
             revert InvalidProof();
         }
     }
 
-    function _verifyBitcoinProof(
+    function _verify_bitcoin_proof(
         bytes32 sanadId,
         bytes32 commitment,
         bytes calldata proof,
@@ -522,140 +650,91 @@ contract CSVSeal {
         if (sanadId == bytes32(0)) revert InvalidProof();
         if (commitment == bytes32(0)) revert InvalidProof();
 
-        bytes32 leaf = doubleSha256(abi.encodePacked(sanadId, commitment));
-
-        if (!_verifyMerkleProofDoubleSha256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
+        bytes32 leaf = double_sha256(abi.encodePacked(sanadId, commitment));
+        if (!_verify_merkle_proof_double_sha256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
     }
 
-    function _verifyMerkleProofKeccak256(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 leaf,
-        uint256 leafPosition
-    ) internal pure returns (bool) {
-        if (proof.length == 0) return false;
-        if (proof.length % 32 != 0) return false;
-
+    function _verify_merkle_proof_keccak256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal pure returns (bool) {
+        if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
-
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
-            assembly {
-                sibling := calldataload(add(proof.offset, mul(i, 32)))
-            }
-
+            assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
             if ((leafPosition >> i) & 1 == 0) {
-                current = _hashPairKeccak256(current, sibling);
+                current = _hash_pair_keccak256(current, sibling);
             } else {
-                current = _hashPairKeccak256(sibling, current);
+                current = _hash_pair_keccak256(sibling, current);
             }
         }
-
         return current == root;
     }
 
-    function _verifyMerkleProofDoubleSha256(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 leaf,
-        uint256 leafPosition
-    ) internal pure returns (bool) {
-        if (proof.length == 0) return false;
-        if (proof.length % 32 != 0) return false;
-
+    function _verify_merkle_proof_double_sha256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal pure returns (bool) {
+        if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
-
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
-            assembly {
-                sibling := calldataload(add(proof.offset, mul(i, 32)))
-            }
-
+            assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
             if ((leafPosition >> i) & 1 == 0) {
-                current = _hashPairDoubleSha256(current, sibling);
+                current = _hash_pair_double_sha256(current, sibling);
             } else {
-                current = _hashPairDoubleSha256(sibling, current);
+                current = _hash_pair_double_sha256(sibling, current);
             }
         }
-
         return current == root;
     }
 
-    function _verifyMerkleProofBlake2b256(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 leaf,
-        uint256 leafPosition
-    ) internal view returns (bool) {
-        if (proof.length == 0) return false;
-        if (proof.length % 32 != 0) return false;
-
+    function _verify_merkle_proof_blake2b256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal view returns (bool) {
+        if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
-
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
-            assembly {
-                sibling := calldataload(add(proof.offset, mul(i, 32)))
-            }
-
+            assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
             if ((leafPosition >> i) & 1 == 0) {
-                current = _hashPairBlake2b256(current, sibling);
+                current = _hash_pair_blake2b256(current, sibling);
             } else {
-                current = _hashPairBlake2b256(sibling, current);
+                current = _hash_pair_blake2b256(sibling, current);
             }
         }
-
         return current == root;
     }
 
-    function _verifyMerkleProofSha3_256(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 leaf,
-        uint256 leafPosition
-    ) internal view returns (bool) {
-        if (proof.length == 0) return false;
-        if (proof.length % 32 != 0) return false;
-
+    function _verify_merkle_proof_sha3_256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal view returns (bool) {
+        if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
-
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
-            assembly {
-                sibling := calldataload(add(proof.offset, mul(i, 32)))
-            }
-
+            assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
             if ((leafPosition >> i) & 1 == 0) {
-                current = _hashPairSha3_256(current, sibling);
+                current = _hash_pair_sha3_256(current, sibling);
             } else {
-                current = _hashPairSha3_256(sibling, current);
+                current = _hash_pair_sha3_256(sibling, current);
             }
         }
-
         return current == root;
     }
 
-    function _hashPairKeccak256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+    function _hash_pair_keccak256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(a, b));
     }
 
-    function _hashPairDoubleSha256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
-        return doubleSha256(abi.encodePacked(a, b));
+    function _hash_pair_double_sha256(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return double_sha256(abi.encodePacked(a, b));
     }
 
-    function _hashPairBlake2b256(bytes32 a, bytes32 b) internal view returns (bytes32) {
+    function _hash_pair_blake2b256(bytes32 a, bytes32 b) internal view returns (bytes32) {
         return blake2b256(abi.encodePacked(a, b));
     }
 
-    function _hashPairSha3_256(bytes32 a, bytes32 b) internal view returns (bytes32) {
+    function _hash_pair_sha3_256(bytes32 a, bytes32 b) internal view returns (bytes32) {
         return sha3_256(abi.encodePacked(a, b));
     }
 
-    function doubleSha256(bytes memory data) internal pure returns (bytes32) {
+    function double_sha256(bytes memory data) internal pure returns (bytes32) {
         return sha256(abi.encodePacked(sha256(data)));
     }
 
@@ -671,72 +750,9 @@ contract CSVSeal {
         return bytes32(result);
     }
 
-    // ==================== View Functions ====================
-
-    /// @notice Check if a seal/Sanad has been consumed
-    function isSealUsed(bytes32 sealId) external view returns (bool) {
-        return usedSeals[sealId];
-    }
-
-    /// @notice Check if a Sanad has been minted on this chain
-    function isSanadMinted(bytes32 sanadId) external view returns (bool) {
-        return mintedSanads[sanadId];
-    }
-
-    /// @notice Check if a nullifier has been registered
-    function isNullifierRegistered(bytes32 nullifier) external view returns (bool) {
-        return nullifiers[nullifier];
-    }
-
-    /// @notice Check if a commitment is anchored
-    function isCommitmentAnchored(bytes32 commitment) external view returns (bool) {
-        return commitmentAnchorHeight[commitment] != 0;
-    }
-
-    /// @notice Get lock details for a Sanad
-    function getLockInfo(bytes32 sanadId) external view returns (
-        bytes32 commitment,
-        uint256 timestamp,
-        uint8 destinationChain,
-        bool refunded
-    ) {
-        LockRecord storage lock = locks[sanadId];
-        return (lock.commitment, lock.timestamp, lock.destinationChain, lock.refunded);
-    }
-
-    /// @notice Get metadata attached to a locked Sanad
-    function getSanadMetadata(bytes32 sanadId) external view returns (
-        uint8 assetClass,
-        bytes32 assetId,
-        bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 proofRoot
-    ) {
-        SanadMetadata storage metadata = sanadMetadata[sanadId];
-        return (
-            metadata.assetClass,
-            metadata.assetId,
-            metadata.metadataHash,
-            metadata.proofSystem,
-            metadata.proofRoot
-        );
-    }
-
-    /// @notice Check if a refund can be claimed for a Sanad
-    function canRefund(bytes32 sanadId) external view returns (bool) {
-        LockRecord storage lock = locks[sanadId];
-
-        if (lock.timestamp == 0) return false;
-        if (lock.refunded) return false;
-        if (block.timestamp < lock.timestamp + REFUND_TIMEOUT) return false;
-
-        return true;
-    }
-
     // ==================== Batch Operations ====================
 
-    /// @notice Batch mint multiple Sanads (for efficiency)
-    function batchMintSanads(
+    function batch_mint_sanads(
         bytes32[] calldata sanadIds,
         bytes32[] calldata commitments,
         bytes32[] calldata stateRoots,
@@ -747,32 +763,10 @@ contract CSVSeal {
         uint256[] calldata leafPositions
     ) external {
         if (msg.sender != verifier) revert Unauthorized();
-
-        if (
-            sanadIds.length != commitments.length ||
-            sanadIds.length != stateRoots.length ||
-            sanadIds.length != proofs.length ||
-            sanadIds.length != leafPositions.length
-        ) revert ArraysMismatch();
+        if (sanadIds.length != commitments.length || sanadIds.length != stateRoots.length || sanadIds.length != proofs.length || sanadIds.length != leafPositions.length) revert ArraysMismatch();
 
         for (uint256 i = 0; i < sanadIds.length; i++) {
-            this.mintSanad(
-                sanadIds[i],
-                commitments[i],
-                stateRoots[i],
-                sourceChain,
-                sourceSealPoint,
-                proofs[i],
-                proofRoot,
-                leafPositions[i]
-            );
+            mint_sanad(sanadIds[i], commitments[i], stateRoots[i], sourceChain, sourceSealPoint, proofs[i], proofRoot, leafPositions[i]);
         }
-    }
-
-    // ==================== Modifiers ====================
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can call this function");
-        _;
     }
 }
