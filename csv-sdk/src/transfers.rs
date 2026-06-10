@@ -30,7 +30,7 @@ use csv_runtime::TransferCoordinator;
 #[cfg(feature = "runtime-coordinator")]
 use csv_adapter_core::CrossChainTransfer;
 #[cfg(feature = "runtime-coordinator")]
-use csv_runtime::lease::{RuntimeExecutionContext, TransferLease};
+use csv_runtime::user_runtime_lease::{RuntimeExecutionContext, TransferLease};
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::policy::RuntimePolicy;
 

@@ -7,7 +7,7 @@
 //! Protocol traits, not concrete adapter types.
 
 use async_trait::async_trait;
-use csv_protocol::backend::ChainBackend;
+use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::secret::{SecretHandle, SharedSecretHandle};
 use csv_adapter_core::ChainAdapter;
 use csv_hash::chain_id::ChainId;

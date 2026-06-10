@@ -35,7 +35,7 @@
 //! - [ ] No adapter exposes raw keys or secrets through trait methods
 //! - [ ] No adapter accepts mock/simulated proofs in production builds
 
-use crate::proof::ProofBundle;
+use crate::proof_taxonomy::ProofBundle;
 use crate::signature::SignatureScheme;
 use async_trait::async_trait;
 use csv_hash::Hash;

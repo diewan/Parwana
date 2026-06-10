@@ -2,6 +2,9 @@
 //!
 //! This module defines the core invariants that the CSV protocol must maintain.
 //! These invariants are enforced through the type system and verification logic.
+//!
+//! **Layer Classification:**
+//! - L4 (Runtime type): TimeoutConfig MAY use serde for operational serialization.
 
 use std::fmt;
 

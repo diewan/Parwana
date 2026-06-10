@@ -32,7 +32,7 @@ pub mod provenance;
 // proof_types and proof modules removed - types now live in csv-protocol
 
 // Re-exports from csv-protocol (canonical location)
-pub use csv_protocol::proof_types::{
+pub use csv_protocol::proof_taxonomy::{
     CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof,
     MAX_FINALITY_DATA, MAX_PROOF_BYTES, MAX_SIGNATURES_TOTAL_SIZE, OwnershipProof, Proof,
     ProofBundle, ProofCategory, ProofPhase, ReplayId, ReplayProof, TransitionProof, ZKProof,

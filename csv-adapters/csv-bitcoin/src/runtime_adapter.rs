@@ -9,10 +9,10 @@ use csv_adapter_core::{
     AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
     CrossChainTransfer,
 };
-use csv_protocol::backend::ChainProofProvider;
+use csv_protocol::chain_adapter_traits::ChainProofProvider;
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use std::sync::Arc;
 
 use crate::ops::BitcoinChainSanadOps;

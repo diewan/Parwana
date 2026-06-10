@@ -23,7 +23,7 @@
 
 use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 

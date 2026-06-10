@@ -12,7 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::Proof;
 
+// L0/L1 types (proof data) use canonical_cbor for serialization
+// L2 types (metadata) MAY use serde for configuration/indexing
+
 /// A unique identifier for a proof node.
+/// L0 type: hash wrapper - uses canonical_cbor for serialization
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProofId(pub Hash);
 
@@ -34,6 +38,7 @@ impl ProofId {
 }
 
 /// A node in a proof DAG.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofNode {
     /// Unique identifier for this node.
@@ -100,6 +105,7 @@ impl ProofNode {
 }
 
 /// A directed acyclic graph of proof nodes.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProofDag {
     /// All nodes in the DAG.

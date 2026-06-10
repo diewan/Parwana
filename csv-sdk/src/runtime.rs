@@ -50,11 +50,11 @@ use sha3::Digest;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
-use csv_protocol::backend::{
+use csv_protocol::chain_adapter_traits::{
     BalanceInfo, ChainBackend, DeploymentStatus, SanadOperationResult, TransactionInfo,
     TransactionStatus,
 };
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;

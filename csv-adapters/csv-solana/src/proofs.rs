@@ -11,7 +11,7 @@
 //! 3. Finality verification via slot depth and cluster consensus
 
 use csv_hash::Hash;
-use csv_protocol::proof_types::{FinalityProof, InclusionProof};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;

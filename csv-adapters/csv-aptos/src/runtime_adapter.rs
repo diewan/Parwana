@@ -13,8 +13,8 @@ use csv_protocol::finality::capabilities::{
     ReplayProtectionModel, ReorgRisk, ChainRole
 };
 use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_types::ProofBundle;
-use csv_protocol::backend::{ChainBackend, ChainProofProvider, ChainQuery};
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::chain_adapter_traits::{ChainBackend, ChainProofProvider, ChainQuery};
 use std::sync::Arc;
 
 use crate::ops::AptosBackend;
@@ -81,7 +81,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
         &self,
         transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
@@ -105,7 +105,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
         transfer: &CrossChainTransfer,
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let source_chain = &transfer.source_chain;
@@ -168,7 +168,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
         // Create a canonical ProofLeafV1 for this transfer
-        use csv_protocol::proof_types::ProofLeafV1;
+        use csv_protocol::proof_taxonomy::ProofLeafV1;
         let proof_leaf = ProofLeafV1::new(
             transfer.source_chain.clone(),
             transfer.destination_chain.clone(),

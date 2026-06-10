@@ -14,6 +14,11 @@ use csv_content::resource_accounting::VerificationLimit;
 use crate::config::Config;
 use crate::output;
 
+use aead::{Aead, AeadCore, KeyInit};
+use aes_gcm::Aes256Gcm;
+use aes_gcm::aes::cipher::generic_array::GenericArray;
+use rand::Rng;
+
 #[derive(Subcommand)]
 pub enum ContentAction {
     /// Create a content tree from data
@@ -48,12 +53,20 @@ pub enum ContentAction {
     Encrypt {
         /// Content tree file
         tree: String,
-        /// Key ID for encryption
+        /// Key ID for encryption (hex-encoded 32-byte key)
         #[arg(short, long)]
         key_id: String,
         /// Encryption algorithm (aes-256-gcm, chacha20-poly1305)
         #[arg(short, long, default_value = "aes-256-gcm")]
         algorithm: String,
+    },
+    /// Decrypt an encrypted content tree
+    Decrypt {
+        /// Encrypted envelope file
+        envelope: String,
+        /// Key ID for decryption (hex-encoded 32-byte key)
+        #[arg(short, long)]
+        key_id: String,
     },
     /// Create a selective disclosure proof
     Disclose {
@@ -153,6 +166,10 @@ pub fn execute(action: ContentAction, _config: &Config) -> Result<()> {
             key_id,
             algorithm,
         } => cmd_encrypt(&tree, &key_id, &algorithm),
+        ContentAction::Decrypt {
+            envelope,
+            key_id,
+        } => cmd_decrypt(&envelope, &key_id),
         ContentAction::Disclose { tree, include } => cmd_disclose(&tree, &include),
         ContentAction::Attach { action } => cmd_attach(action),
         ContentAction::Participants { action } => cmd_participants(action),
@@ -318,7 +335,7 @@ fn cmd_encrypt(tree_file: &str, key_id: &str, algorithm: &str) -> Result<()> {
     let tree: ContentTree = serde_json::from_str(&content)
         .map_err(|e| anyhow::anyhow!("Failed to parse content tree: {}", e))?;
 
-    output::progress(1, 3, "Loading content tree...");
+    output::progress(1, 4, "Loading content tree...");
     output::kv("Tree Root", &hex::encode(tree.root_hash));
 
     // Validate algorithm
@@ -332,20 +349,52 @@ fn cmd_encrypt(tree_file: &str, key_id: &str, algorithm: &str) -> Result<()> {
         return Ok(());
     }
 
-    output::progress(2, 3, "Creating encryption descriptor...");
+    output::progress(2, 4, "Deriving encryption key...");
+    // Derive key from key_id (treat as hex-encoded 32-byte key)
+    let key = hex::decode(key_id.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid key_id (must be hex-encoded 32 bytes): {}", e))?;
+    if key.len() != 32 {
+        return Err(anyhow::anyhow!(
+            "Invalid key length: expected 32 bytes, got {}",
+            key.len()
+        ));
+    }
+
+    output::progress(3, 4, "Encrypting content tree...");
+    // Serialize tree to bytes for encryption
+    let tree_bytes = serde_json::to_vec(&tree)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize tree: {}", e))?;
+
+    // Generate random nonce
+    let nonce = generate_nonce();
+
+    // Encrypt using AES-256-GCM
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("Invalid key for AES-256-GCM: {}", e))?;
+    let ciphertext_with_tag = cipher
+        .encrypt((&nonce).into(), tree_bytes.as_ref())
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+
+    // Split ciphertext and tag (AES-GCM appends 16-byte tag)
+    let tag_len = 16;
+    if ciphertext_with_tag.len() < tag_len {
+        return Err(anyhow::anyhow!("Ciphertext too short"));
+    }
+    let split_point = ciphertext_with_tag.len() - tag_len;
+    let ciphertext = ciphertext_with_tag[..split_point].to_vec();
+    let tag = ciphertext_with_tag[split_point..].to_vec();
+
+    output::progress(4, 4, "Creating encryption envelope...");
     let descriptor = EncryptionDescriptor {
         algorithm: algorithm.to_string(),
         key_id: key_id.to_string(),
-        nonce: [0u8; 12].to_vec(), // In production, this would be a random nonce
+        nonce: nonce.to_vec(),
         aad: None,
     };
 
-    output::progress(3, 3, "Encrypting subtree...");
-
-    // Create an encryption envelope (in production, this would encrypt actual data)
     let envelope = EncryptionEnvelope {
-        ciphertext: vec![],
-        tag: vec![],
+        ciphertext,
+        tag,
         descriptor,
     };
 
@@ -354,9 +403,78 @@ fn cmd_encrypt(tree_file: &str, key_id: &str, algorithm: &str) -> Result<()> {
 
     println!("\n{}", envelope_json);
 
-    output::success("Encryption descriptor created");
+    output::success("Content tree encrypted");
     output::kv("Algorithm", algorithm);
     output::kv("Key ID", key_id);
+    output::kv("Ciphertext Size", &envelope.ciphertext.len().to_string());
+    output::kv("Tag Size", &envelope.tag.len().to_string());
+
+    Ok(())
+}
+
+/// Generate a random 12-byte nonce for AES-GCM.
+fn generate_nonce() -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    rand::thread_rng().fill(&mut nonce);
+    nonce
+}
+
+fn cmd_decrypt(envelope_file: &str, key_id: &str) -> Result<()> {
+    output::header("Decrypt Content Tree");
+
+    let content = std::fs::read_to_string(envelope_file)
+        .map_err(|e| anyhow::anyhow!("Failed to read envelope file: {}", e))?;
+
+    let envelope: EncryptionEnvelope = serde_json::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse encryption envelope: {}", e))?;
+
+    output::progress(1, 4, "Loading encryption envelope...");
+    output::kv("Algorithm", &envelope.descriptor.algorithm);
+    output::kv("Key ID", &envelope.descriptor.key_id);
+
+    output::progress(2, 4, "Deriving decryption key...");
+    // Derive key from key_id (treat as hex-encoded 32-byte key)
+    let key = hex::decode(key_id.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid key_id (must be hex-encoded 32 bytes): {}", e))?;
+    if key.len() != 32 {
+        return Err(anyhow::anyhow!(
+            "Invalid key length: expected 32 bytes, got {}",
+            key.len()
+        ));
+    }
+
+    output::progress(3, 4, "Decrypting content tree...");
+    // Reconstruct nonce
+    let nonce_bytes = &envelope.descriptor.nonce;
+    if nonce_bytes.len() != 12 {
+        return Err(anyhow::anyhow!("Invalid nonce length: expected 12, got {}", nonce_bytes.len()));
+    }
+    let nonce: GenericArray<u8, <Aes256Gcm as AeadCore>::NonceSize> =
+        *GenericArray::from_slice(nonce_bytes);
+
+    // Reconstruct ciphertext with tag
+    let mut ciphertext_with_tag = envelope.ciphertext;
+    ciphertext_with_tag.extend_from_slice(&envelope.tag);
+
+    // Decrypt using AES-256-GCM
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("Invalid key for AES-256-GCM: {}", e))?;
+    let tree_bytes = cipher
+        .decrypt(&nonce, ciphertext_with_tag.as_ref())
+        .map_err(|_| anyhow::anyhow!("Decryption failed - wrong key or corrupted data"))?;
+
+    output::progress(4, 4, "Deserializing content tree...");
+    let tree: ContentTree = serde_json::from_slice(&tree_bytes)
+        .map_err(|e| anyhow::anyhow!("Failed to deserialize tree: {}", e))?;
+
+    let tree_json = serde_json::to_string_pretty(&tree)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize tree: {}", e))?;
+
+    println!("\n{}", tree_json);
+
+    output::success("Content tree decrypted");
+    output::kv("Tree Root", &hex::encode(tree.root_hash));
+    output::kv("Leaf Count", &tree.leaf_count.to_string());
 
     Ok(())
 }

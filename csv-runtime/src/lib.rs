@@ -29,19 +29,20 @@ pub use backpressure::{
 
 // Legacy re-exports (to be migrated to focused crates)
 pub mod adapter_registry;
+pub mod chain_discovery;
 pub mod config;
-pub mod coordinator_lease;
+pub mod distributed_coordinator_lease;
 pub mod error;
 pub mod event_bus;
 pub mod event_envelope;
-pub mod event_store;
+pub mod event_persistence;
 pub mod execution_journal;
 pub mod failure_domain;
-pub mod lease;
+pub mod user_runtime_lease;
 pub mod policy;
 pub mod queue;
 pub mod recovery;
-pub mod replay_db;
+pub mod replay_database;
 pub mod runtime_mode;
 pub mod transfer_coordinator;
 
@@ -50,6 +51,7 @@ pub mod wallet;
 
 // Legacy re-exports (orchestration only)
 pub use adapter_registry::AdapterRegistryImpl;
+pub use chain_discovery::{ChainConfig, ChainDiscovery};
 pub use csv_adapter_core::{
     ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,
     ChainProofPort, ChainReadPort, ChainSealRegistryPort,
@@ -60,14 +62,14 @@ pub use config::{
 };
 pub use error::{RuntimeError, TransferCoordinatorError};
 pub use event_bus::{EventBus, TransferEvent};
-pub use event_store::{EventStore, EventStoreError, InMemoryEventStore};
+pub use event_persistence::{EventStore, EventStoreError, InMemoryEventStore};
 #[cfg(feature = "persistent")]
 pub use execution_journal::RocksDbExecutionJournal;
 pub use execution_journal::{
     ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry,
 };
 pub use failure_domain::{ClassifiedError, FailureDomain};
-pub use lease::{
+pub use user_runtime_lease::{
     DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,
     RuntimeExecutionContext, RuntimeId, TransferLease,
 };
@@ -84,7 +86,7 @@ pub use runtime_mode::{
 pub use transfer_coordinator::{RecoveryContextProvider, TransferCoordinator};
 
 // Coordinator lease re-exports
-pub use coordinator_lease::{
+pub use distributed_coordinator_lease::{
     CoordinatorId, CoordinatorLease, InMemoryLease, LeaseError, LeaseGuard, MintCoordinator,
     MintProvider, MintReceipt,
 };

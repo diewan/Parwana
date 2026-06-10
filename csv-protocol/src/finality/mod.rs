@@ -2,6 +2,12 @@
 //!
 //! This module provides a structured approach to defining and monitoring
 //! different levels of transaction finality across chains.
+//!
+//! **Layer Classification:**
+//! - L1 (Proof types): FinalityType, FinalityProof, FinalityAnchor, AncestorContinuityProof,
+//!   FinalityGuaranteeSpec, ProofSystem, FinalityGuarantee use canonical_cbor for serialization.
+//!   Serde derives are required by canonical_cbor but non-canonical formats (serde_json) are forbidden.
+//! - L4 (Runtime types): FinalityConfig MAY use serde for operational serialization.
 
 #![allow(missing_docs)]
 

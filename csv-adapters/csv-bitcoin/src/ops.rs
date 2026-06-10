@@ -9,13 +9,13 @@ use bitcoin_hashes::Hash as BitcoinHash;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_protocol::backend::{
+use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
     FinalityStatus, SanadOperation, SanadOperationResult, SanadStateReader, TransactionStatus,
 };
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 

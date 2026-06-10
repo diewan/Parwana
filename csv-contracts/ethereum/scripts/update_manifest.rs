@@ -25,17 +25,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compute bytecode hash from compiled artifact
     let bytecode_hash = compute_bytecode_hash()?;
 
+    // Compute ABI hash from compiled artifact
+    let abi_hash = compute_abi_hash()?;
+
     // Update ~/.csv/config.toml
     update_config_toml(seal_address)?;
 
     // Update ~/.csv/deployment-ethereum.json
-    update_deployment_manifest(seal_address, deployment_tx, block_number, &bytecode_hash)?;
+    update_deployment_manifest(seal_address, deployment_tx, block_number, &bytecode_hash, &abi_hash)?;
 
     println!("Deployment manifest updated successfully!");
     println!("  CSVSeal address: {}", seal_address);
     println!("  Deployment TX: {}", deployment_tx);
     println!("  Block number: {}", block_number);
     println!("  Bytecode hash: {}", bytecode_hash);
+    println!("  ABI hash: {}", abi_hash);
 
     Ok(())
 }
@@ -62,6 +66,30 @@ fn compute_bytecode_hash() -> Result<String, Box<dyn std::error::Error>> {
 
     // If no bytecode found, return placeholder
     eprintln!("Warning: Could not find bytecode file, using placeholder hash");
+    Ok("0x0000000000000000000000000000000000000000000000000000000000000000".to_string())
+}
+
+fn compute_abi_hash() -> Result<String, Box<dyn std::error::Error>> {
+    // Try multiple possible paths for the compiled ABI
+    let possible_paths = [
+        "csv-contracts/ethereum/contracts/out/CSVSeal.sol/CSVSeal.json",
+        "csv-contracts/ethereum/out/CSVSeal.sol/CSVSeal.json",
+        "contracts/out/CSVSeal.sol/CSVSeal.json",
+        "out/CSVSeal.sol/CSVSeal.json",
+    ];
+
+    for path_str in &possible_paths {
+        let path = Path::new(path_str);
+        if path.exists() {
+            let content = fs::read_to_string(path)?;
+            // Hash the entire ABI JSON
+            let hash = Keccak256::digest(content.as_bytes());
+            return Ok(format!("0x{}", hex::encode(hash)));
+        }
+    }
+
+    // If no ABI found, return placeholder
+    eprintln!("Warning: Could not find ABI file, using placeholder hash");
     Ok("0x0000000000000000000000000000000000000000000000000000000000000000".to_string())
 }
 
@@ -107,6 +135,7 @@ fn update_deployment_manifest(
     deployment_tx: &str,
     block_number: &str,
     bytecode_hash: &str,
+    abi_hash: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let deployment_path = Path::new(&format!("{}/.csv/deployment-ethereum.json", home));
@@ -123,13 +152,13 @@ fn update_deployment_manifest(
       "deployment_tx": "{}",
       "block_number": {},
       "bytecode_hash": "{}",
+      "abi_hash": "{}",
       "verified": false,
       "constructor_args": {{
         "verifier": ""
       }}
     }}
   }},
-  "abi_hash": "pending",
   "protocol_version": "1.0.0"
 }}"#,
         chrono::Utc::now().to_rfc3339(),
@@ -137,6 +166,7 @@ fn update_deployment_manifest(
         deployment_tx,
         block_number,
         bytecode_hash,
+        abi_hash,
     );
 
     // Create directory if it doesn't exist

@@ -35,7 +35,15 @@ impl TestProofBundle {
         )
         .expect("Valid finality proof data");
 
-        let transition_dag = DAGSegment::new(vec![], Hash::new([4u8; 32]));
+        // Create a valid DAG with at least one node
+        let dag_node = DAGNode::new(
+            Hash::new([8u8; 32]),
+            vec![],
+            vec![],
+            vec![vec![]],
+            vec![],
+        );
+        let transition_dag = DAGSegment::new(vec![dag_node], Hash::new([4u8; 32]));
         let seal_ref = SealPoint::new(vec![5u8; 32], Some(42), None).unwrap();
         let anchor_ref = CommitAnchor::new(vec![6u8; 32], 100, vec![]).unwrap();
 

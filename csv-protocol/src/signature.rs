@@ -472,7 +472,7 @@ pub fn parse_signatures_from_bundle(
 /// # Returns
 /// `Ok(())` if all signatures are valid, or an error otherwise.
 pub fn verify_bundle_signatures(
-    bundle: &crate::proof::ProofBundle,
+    bundle: &crate::proof_taxonomy::ProofBundle,
     scheme: SignatureScheme,
 ) -> Result<()> {
     let signatures = parse_signatures_from_bundle(

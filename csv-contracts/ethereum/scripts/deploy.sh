@@ -99,11 +99,14 @@ echo -e "  Block: $BLOCK_NUMBER_DEC"
 # Compute bytecode hash
 BYTECODE_PATH="out/CSVSeal.sol/CSVSeal.json"
 BYTECODE_HASH="unknown"
+ABI_HASH="unknown"
 if [ -f "$BYTECODE_PATH" ]; then
     BYTECODE=$(jq -r '.bytecode.object' "$BYTECODE_PATH")
     if [ -n "$BYTECODE" ] && [ "$BYTECODE" != "null" ]; then
         BYTECODE_HASH=$(echo -n "$BYTECODE" | sha3sum | awk '{print "0x"$1}')
     fi
+    # Compute ABI hash (hash of entire ABI JSON)
+    ABI_HASH=$(cat "$BYTECODE_PATH" | sha3sum | awk '{print "0x"$1}')
 fi
 
 # Update ~/.csv/config.toml
@@ -140,13 +143,13 @@ cat > "$DEPLOYMENT_FILE" << EOF
       "deployment_tx": "$DEPLOYMENT_TX",
       "block_number": $BLOCK_NUMBER_DEC,
       "bytecode_hash": "$BYTECODE_HASH",
+      "abi_hash": "$ABI_HASH",
       "verified": false,
       "constructor_args": {
         "verifier": "$DEPLOYER_ADDRESS"
       }
     }
   },
-  "abi_hash": "pending",
   "protocol_version": "1.0.0"
 }
 EOF

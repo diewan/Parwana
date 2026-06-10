@@ -78,29 +78,27 @@ message = "csv-content must not use serde_json. Use csv-wire for transport encod
 [[graph.forbidden-edges]]
 # L0-L4 internal crates must not use serde directly for wire encoding.
 # csv-wire owns all serde and transport encoding.
-# Exception: serde derives are allowed for canonical serialization via csv-codec.
+# Exception: serde derives are allowed for canonical serialization via csv-codec::canonical.
+# L0/L1 types MUST use canonical_cbor for serialization (not serde_json).
+# L2+ types MAY use serde for configuration/indexing/persistence.
 from = "csv-hash"
-to   = "serde"
-path = "serde::Serialize"
-message = "csv-hash must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+to   = "serde_json"
+message = "csv-hash (L0) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding."
 
 [[graph.forbidden-edges]]
 from = "csv-protocol"
-to   = "serde"
-path = "serde::Serialize"
-message = "csv-protocol must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+to   = "serde_json"
+message = "csv-protocol (L0/L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding. L2+ types MAY use serde for non-critical paths."
 
 [[graph.forbidden-edges]]
 from = "csv-proof"
-to   = "serde"
-path = "serde::Serialize"
-message = "csv-proof must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+to   = "serde_json"
+message = "csv-proof (L0/L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding. L2+ types MAY use serde for non-critical paths."
 
 [[graph.forbidden-edges]]
 from = "csv-verifier"
-to   = "serde"
-path = "serde::Serialize"
-message = "csv-verifier must not use serde::Serialize directly. Use csv-wire wire types for transport encoding."
+to   = "serde_json"
+message = "csv-verifier (L0/L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding."
 
 [[graph.forbidden-edges]]
 # csv-runtime must not depend on csv-core (legacy crate)

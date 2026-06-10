@@ -11,7 +11,7 @@
 //! - ChainSanadOps: Sanad management via CSV seal contract
 
 use async_trait::async_trait;
-use csv_protocol::backend::{
+use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
@@ -20,8 +20,8 @@ use csv_protocol::backend::{
 
 use csv_hash::Hash;
 #[cfg(feature = "rpc")]
-use csv_protocol::backend::SanadOperation;
-use csv_protocol::proof::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::chain_adapter_traits::SanadOperation;
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};
 use csv_protocol::seal_protocol::SealProtocol;

@@ -245,6 +245,72 @@ module csv_seal::CSVSeal {
     const ENullifierAlreadyRegistered: u64 = 7;
 
     // =========================================================================
+    // Canonical ProofLeafV1 Schema
+    // =========================================================================
+
+    /// Canonical ProofLeafV1 schema for cross-chain proof verification
+    /// This struct matches the canonical schema defined in csv-protocol
+    struct ProofLeafV1 has copy, drop {
+        /// Version of the proof leaf schema
+        version: u32,
+        /// Source chain identifier
+        source_chain: u8,
+        /// Destination chain identifier
+        destination_chain: u8,
+        /// Sanad identifier
+        sanad_id: vector<u8>,
+        /// Commitment hash
+        commitment: vector<u8>,
+        /// Content descriptor hash (optional, default empty)
+        content_descriptor_hash: vector<u8>,
+        /// Source seal reference hash (optional, default empty)
+        source_seal_ref_hash: vector<u8>,
+        /// Destination owner hash (optional, default empty)
+        destination_owner_hash: vector<u8>,
+        /// Nullifier hash (optional, default empty)
+        nullifier: vector<u8>,
+        /// Lock event ID hash (optional, default empty)
+        lock_event_id: vector<u8>,
+        /// Metadata hash (optional, default empty)
+        metadata_hash: vector<u8>,
+        /// Proof policy hash (optional, default empty)
+        proof_policy_hash: vector<u8>,
+    }
+
+    /// Compute the canonical hash of a ProofLeafV1 using sha3_256 (Aptos's native hash)
+    /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    public fun hash_proof_leaf_v1(leaf: &ProofLeafV1): vector<u8> {
+        let mut data = vector::empty();
+        // Domain separator for tagged hashing
+        let domain = b"csv.proof.leaf.v1";
+        vector::append(&mut data, domain);
+        
+        // Serialize all fields in canonical order
+        let version_bytes = bcs::to_bytes(&leaf.version);
+        vector::append(&mut data, version_bytes);
+        vector::push_back(&mut data, leaf.source_chain);
+        vector::push_back(&mut data, leaf.destination_chain);
+        vector::append(&mut data, leaf.sanad_id);
+        vector::append(&mut data, leaf.commitment);
+        vector::append(&mut data, leaf.content_descriptor_hash);
+        vector::append(&mut data, leaf.source_seal_ref_hash);
+        vector::append(&mut data, leaf.destination_owner_hash);
+        vector::append(&mut data, leaf.nullifier);
+        vector::append(&mut data, leaf.lock_event_id);
+        vector::append(&mut data, leaf.metadata_hash);
+        vector::append(&mut data, leaf.proof_policy_hash);
+        
+        // Use sha3_256 (Aptos's native hash)
+        hash::sha3_256(data)
+    }
+
+    /// Compute ProofLeafV1 hash using chain-specific hash function
+    /// For Aptos, this uses sha3_256 (native hash function)
+    public fun hash_proof_leaf_v1_with_chain_function(leaf: &ProofLeafV1, _chain: u8): vector<u8> {
+        hash_proof_leaf_v1(leaf)
+    }
+
+    // =========================================================================
     // Structs
     // =========================================================================
 
@@ -262,12 +328,12 @@ module csv_seal::CSVSeal {
     }
 
     /// Seal resource that can be consumed exactly once.
-    /// Contains a consumed flag and nonce for replay resistance.
+    /// Contains canonical lifecycle state and nonce for replay resistance.
     struct Seal has store, drop {
         /// Nonce for replay resistance.
         nonce: u64,
-        /// Whether this seal has been consumed.
-        consumed: bool,
+        /// Canonical lifecycle state (replaces consumed boolean)
+        state: u8,
         /// Asset class: 0 unspecified, 1 fungible token, 2 NFT, 3 proof sanad.
         asset_class: u8,
         /// Chain-native token/NFT/proof family id.
@@ -305,6 +371,21 @@ module csv_seal::CSVSeal {
         nonce: u64,
     }
 
+    /// SanadStateRecord tracks state transitions for a sanad_id
+    /// Used for canonical state queries and replay protection
+    struct SanadStateRecord has key {
+        /// Sanad identifier
+        sanad_id: vector<u8>,
+        /// Current canonical state
+        state: u8,
+        /// Owner address
+        owner: address,
+        /// Commitment hash
+        commitment: vector<u8>,
+        /// Last state transition timestamp
+        updated_at: u64,
+    }
+
     // =========================================================================
     // Seal Creation
     // =========================================================================
@@ -330,7 +411,7 @@ module csv_seal::CSVSeal {
         
         smart_table::add(&mut collection.seals, nonce, Seal {
             nonce,
-            consumed: false,
+            state: SANAD_STATE_CREATED,
             asset_class: ASSET_CLASS_UNSPECIFIED,
             asset_id: vector::empty<u8>(),
             metadata_hash: vector::empty<u8>(),
@@ -355,7 +436,7 @@ module csv_seal::CSVSeal {
         
         smart_table::add(&mut collection.seals, nonce, Seal {
             nonce,
-            consumed: false,
+            state: SANAD_STATE_CREATED,
             asset_class: ASSET_CLASS_UNSPECIFIED,
             asset_id: vector::empty<u8>(),
             metadata_hash: vector::empty<u8>(),
@@ -387,7 +468,7 @@ module csv_seal::CSVSeal {
         assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
         
         let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
-        assert!(!seal.consumed, ESealAlreadyConsumed);
+        assert!(seal.state != SANAD_STATE_CONSUMED, ESealAlreadyConsumed);
 
         seal.asset_class = asset_class;
         seal.asset_id = asset_id;
@@ -427,8 +508,8 @@ module csv_seal::CSVSeal {
         assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
         
         let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
-        assert!(!seal.consumed, ESealAlreadyConsumed);
-        seal.consumed = true;
+        assert!(seal.state != SANAD_STATE_CONSUMED, ESealAlreadyConsumed);
+        seal.state = SANAD_STATE_CONSUMED;
 
         // Get current timestamp
         let timestamp = aptos_framework::timestamp::now_seconds();
@@ -843,7 +924,7 @@ module csv_seal::CSVSeal {
         assert!(smart_table::contains(&collection.seals, nonce), ESealNotFound);
         
         let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
-        assert!(!seal.consumed, ESealAlreadyConsumed);
+        assert!(seal.state != SANAD_STATE_CONSUMED, ESealAlreadyConsumed);
 
         let commitment = get_commitment_bytes(sanad_id, nonce);
 
@@ -894,7 +975,7 @@ module csv_seal::CSVSeal {
         });
 
         // Consume the seal (mark as consumed and store AnchorData)
-        seal.consumed = true;
+        seal.state = SANAD_STATE_CONSUMED;
 
         // Initialize anchor collection if needed
         if (!exists<AnchorDataCollection>(owner_addr)) {
@@ -975,7 +1056,7 @@ module csv_seal::CSVSeal {
         // Create new seal
         smart_table::add(&mut collection.seals, nonce, Seal {
             nonce,
-            consumed: false,
+            state: SANAD_STATE_CREATED,
             asset_class: ASSET_CLASS_UNSPECIFIED,
             asset_id: vector::empty<u8>(),
             metadata_hash: vector::empty<u8>(),
@@ -1147,7 +1228,7 @@ module csv_seal::CSVSeal {
             return SANAD_STATE_UNCREATED
         };
         let seal = smart_table::borrow(&collection.seals, nonce);
-        if (seal.consumed) {
+        if (seal.state == SANAD_STATE_CONSUMED) {
             SANAD_STATE_CONSUMED
         } else {
             SANAD_STATE_ACTIVE

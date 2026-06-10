@@ -48,6 +48,9 @@ use commands::*;
 use config::Config;
 use state::UnifiedStateManager;
 
+// Import chain management commands
+use commands::chain_management::ChainCommands;
+
 /// CLI version from Cargo.toml - single source of truth
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -86,6 +89,11 @@ enum Commands {
     Chain {
         #[command(subcommand)]
         action: ChainAction,
+    },
+    /// Chain discovery and configuration management
+    ChainManagement {
+        #[command(subcommand)]
+        action: ChainCommands,
     },
 
     // ─── Wallet Operations ───
@@ -206,6 +214,7 @@ async fn main() -> anyhow::Result<()> {
     // Dispatch commands
     let result = match cli.command {
         Commands::Chain { action } => chain::execute(action, &config).await,
+        Commands::ChainManagement { action } => chain_management::ChainCommands::execute(&action).await.map_err(|e| anyhow::anyhow!("{:?}", e)),
         Commands::Wallet { action } => wallet::execute(action, &config, &mut state).await,
         Commands::Sanad { action } => sanads::execute(action, &config, &mut state).await,
         Commands::Proof { action } => {

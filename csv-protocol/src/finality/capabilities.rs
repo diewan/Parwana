@@ -3,7 +3,7 @@
 //! Defines the capabilities that chains must expose.
 //! This prevents semantic flattening and allows chains to declare what they can do.
 
-use crate::verified::{FinalityStrength, InclusionStrength};
+use crate::verification_results::{FinalityStrength, InclusionStrength};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

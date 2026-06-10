@@ -86,7 +86,7 @@ pub use csv_hash::sanad::SanadId;
 pub use csv_hash::seal::{CommitAnchor, SealPoint};
 pub use csv_protocol::error::ProtocolError;
 pub use csv_protocol::genesis::Genesis;
-pub use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
+pub use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 pub use csv_protocol::seal_protocol::SealProtocol;
 pub use csv_protocol::state::{OwnedState, StateRef};
 pub use csv_protocol::transition::Transition;

@@ -27,7 +27,7 @@ use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, ProofBundle};
 
 use crate::address_utils::{format_address, parse_aptos_address};
 use crate::checkpoint::CheckpointVerifier;

@@ -12,6 +12,7 @@
 
 pub mod abi_constitution;
 pub mod common;
+pub mod csv_seal;
 pub mod deployment;
 pub mod mint_contract;
 pub mod sanad_contract;

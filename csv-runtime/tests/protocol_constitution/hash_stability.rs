@@ -12,7 +12,7 @@ use csv_hash::{
     seal::{CommitAnchor, SealPoint},
     tagged_hash::{csv_tagged_hash, tagged_hash},
 };
-use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Test that canonical serialization produces stable, deterministic hashes
 /// for protocol types across multiple serializations.

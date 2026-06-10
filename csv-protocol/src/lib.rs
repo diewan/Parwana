@@ -13,8 +13,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::let_unit_value)]
 
-pub mod backend;
-pub mod canonical_proof;
+pub mod chain_adapter_traits;
 pub mod chain_config;
 pub mod chain_registry;
 pub mod commitment;
@@ -26,16 +25,16 @@ pub mod error;
 pub mod events;
 pub mod failure_domains;
 pub mod lease;
-pub mod proof;
-pub mod proof_types;
+pub mod proof_taxonomy;
+pub mod proof_validation;
 pub mod proof_verification;
 pub mod sanad;
 pub mod secret;
 pub mod seal;
 pub mod seal_protocol;
 pub mod signature;
-pub mod verification;
-pub mod verified;
+pub mod verification_levels;
+pub mod verification_results;
 
 // State machine modules
 pub mod state_machine;
@@ -97,7 +96,7 @@ pub use signature::{
 };
 
 // Re-export backend types
-pub use backend::{
+pub use chain_adapter_traits::{
     BalanceInfo, ChainBackend, ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError,
     ChainOpResult, ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus,
     DeploymentStatus, FinalityStatus, SanadOperation, SanadOperationResult, TransactionInfo,
@@ -105,7 +104,7 @@ pub use backend::{
 };
 
 // Re-export verification types
-pub use verification::VerificationLevel;
+pub use verification_levels::VerificationLevel;
 
 // Re-export cross-chain types
 pub use cross_chain::HashEntry;
@@ -123,8 +122,7 @@ pub use commitment::Commitment;
 pub use envelope::{CanonicalSanadEnvelope, TypeId, decode_envelope};
 
 // Re-export proof types (excluding FinalityProof to avoid conflict with finality module)
-pub use proof::{InclusionProof, ProofBundle};
-pub use proof_types::{HashFunction, ProofLeafV1};
+pub use proof_taxonomy::{InclusionProof, ProofBundle, HashFunction, ProofLeafV1};
 
 // Re-export transfer state types
 pub use transfer_state::TransferStage;
@@ -133,13 +131,13 @@ pub use transfer_state::TransferStage;
 pub use lease::{Lease, LeaseError, LeaseId, LeaseManager, now_secs};
 
 // Re-export verification types
-pub use verified::{
+pub use verification_results::{
     FinalityStrength, InclusionStrength, VerificationAssurance, VerificationFailure,
     VerificationResult, VerifiedComponents,
 };
 
 // Re-export canonical proof types
-pub use canonical_proof::{CanonicalProof, ProofValidationError};
+pub use proof_validation::{CanonicalProof, ProofValidationError};
 
 // Re-export secret handling types
 pub use secret::{SecretHandle, SharedSecretHandle};

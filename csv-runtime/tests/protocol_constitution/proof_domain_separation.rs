@@ -14,7 +14,7 @@ use csv_hash::{
     seal::{CommitAnchor, SealPoint},
     tagged_hash::{csv_tagged_hash, tagged_hash},
 };
-use csv_protocol::proof_types::{
+use csv_protocol::proof_taxonomy::{
     CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
     Proof, ProofBundle, ProofCategory, ReplayProof, TransitionProof, ZKProof,
 };

@@ -25,16 +25,16 @@ The current smart contracts have inconsistent event schemas across chains:
 All chains MUST emit events matching the canonical schema:
 
 ```rust
-// Canonical event names (matching csv-core/src/events.rs)
+// Canonical event names (matching csv-contract-bindings/src/abi_constitution.rs)
 pub const EVENT_SANAD_CREATED: &str = "SanadCreated";
 pub const EVENT_SANAD_CONSUMED: &str = "SanadConsumed";
-pub const EVENT_CROSS_CHAIN_LOCK: &str = "CrossChainLock";
-pub const EVENT_CROSS_CHAIN_MINT: &str = "CrossChainMint";
-pub const EVENT_CROSS_CHAIN_REFUND: &str = "CrossChainRefund";
+pub const EVENT_SANAD_LOCKED: &str = "SanadLocked";
+pub const EVENT_SANAD_MINTED: &str = "SanadMinted";
+pub const EVENT_SANAD_REFUNDED: &str = "SanadRefunded";
 pub const EVENT_SANAD_TRANSFERRED: &str = "SanadTransferred";
 pub const EVENT_NULLIFIER_REGISTERED: &str = "NullifierRegistered";
-pub const EVENT_PROOF_ACCEPTED: &str = "ProofAccepted";
-pub const EVENT_PROOF_REJECTED: &str = "ProofRejected";
+pub const EVENT_COMMITMENT_ANCHORED: &str = "CommitmentAnchored";
+pub const EVENT_PROOF_ROOT_UPDATED: &str = "ProofRootUpdated";
 pub const EVENT_REPLAY_DETECTED: &str = "ReplayDetected";
 ```
 

@@ -12,7 +12,7 @@ use csv_adapter_core::{
     ChainSealRegistryPort, ChainProofPort, ChainReadPort, AdapterRegistry as AdapterRegistryTrait,
 };
 use csv_protocol::finality::ChainCapabilities;
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 
 /// Implementation of the adapter registry.
@@ -253,7 +253,7 @@ mod tests {
         ) -> Result<ProofBundle, AdapterError> {
             use csv_hash::dag::{DAGNode, DAGSegment};
             use csv_hash::seal::{CommitAnchor, SealPoint};
-            use csv_protocol::proof_types::InclusionProof;
+            use csv_protocol::proof_taxonomy::InclusionProof;
 
             let node = DAGNode::new(
                 csv_hash::Hash::new([1u8; 32]),

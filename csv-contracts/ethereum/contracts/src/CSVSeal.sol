@@ -136,6 +136,39 @@ contract CSVSeal {
         uint256 lockedAt;
     }
 
+    // ==================== Governance Epoch ====================
+
+    /// @notice Root governance epoch structure
+    /// @dev Each epoch has a monotonic epoch number, root hash, validity period, and link to previous epoch
+    struct GovernanceEpoch {
+        uint256 epoch;                  // Monotonic epoch number
+        bytes32 root;                   // Root hash for this epoch
+        uint256 validFrom;              // Unix timestamp when epoch becomes valid
+        uint256 validUntil;             // Unix timestamp when epoch expires
+        bytes32 previousRoot;           // Root hash of previous epoch (for chain verification)
+    }
+
+    /// @notice Current governance epoch
+    GovernanceEpoch public currentEpoch;
+
+    /// @notice Governance timelock period (7 days default)
+    uint256 public constant TIMELOCK_PERIOD = 7 days;
+
+    /// @notice Pending governance changes (for timelock)
+    struct PendingGovernanceChange {
+        address newOwner;
+        bytes32 newProofRoot;
+        uint256 validAfter;             // Unix timestamp when change becomes valid
+    }
+
+    PendingGovernanceChange public pendingChange;
+
+    /// @notice Multisig governance (optional - can be enabled)
+    bool public multisigEnabled;
+    uint256 public multisigThreshold;
+    mapping(address => bool) public multisigSigners;
+    mapping(bytes32 => uint256) public multisigApprovals; // change_hash -> approval count
+
     // ==================== Storage ====================
 
     address public owner;
@@ -147,6 +180,7 @@ contract CSVSeal {
     mapping(bytes32 => bool) public mintedSanads;
     mapping(bytes32 => bool) public nullifiers;
     mapping(bytes32 => uint256) public commitmentAnchorHeight;
+    mapping(bytes32 => address) public sealOwners; // Track seal ownership
 
     struct SanadMetadata {
         uint8 assetClass;
@@ -231,6 +265,18 @@ contract CSVSeal {
     /// @notice Emitted when proof root is updated
     event ProofRootUpdated(bytes32 indexed proofRoot, uint256 blockNumber, address indexed updater);
 
+    /// @notice Emitted when governance epoch is advanced
+    event EpochAdvanced(uint256 indexed newEpoch, bytes32 indexed newRoot, uint256 validFrom, uint256 validUntil);
+
+    /// @notice Emitted when governance change is scheduled (timelock)
+    event GovernanceChangeScheduled(bytes32 indexed changeHash, uint256 validAfter);
+
+    /// @notice Emitted when governance change is executed
+    event GovernanceChangeExecuted(bytes32 indexed changeHash);
+
+    /// @notice Emitted when multisig signer is added/removed
+    event MultisigSignerUpdated(address indexed signer, bool added);
+
     /// @notice Emitted when replay is detected
     event ReplayDetected(bytes32 indexed replayId, bytes32 indexed sanadId, uint256 timestamp);
 
@@ -255,9 +301,19 @@ contract CSVSeal {
     error InvalidProofRoot();
     error CommitmentNotAnchored();
     error SanadNotFound();
+    error TimelockNotExpired();
+    error InvalidEpoch();
+    error MonotonicEpochViolation();
+    error MultisigThresholdNotMet();
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+
+    modifier onlyMultisig() {
+        require(multisigEnabled, "Multisig not enabled");
+        require(multisigSigners[msg.sender], "Not a multisig signer");
         _;
     }
 
@@ -269,25 +325,144 @@ contract CSVSeal {
         owner = msg.sender;
         trustedProofRoot = bytes32(0);
         proofRootBlockHeight = block.number;
+
+        // Initialize governance epoch (epoch 0)
+        currentEpoch = GovernanceEpoch({
+            epoch: 0,
+            root: bytes32(0),
+            validFrom: block.timestamp,
+            validUntil: block.timestamp + 365 days,
+            previousRoot: bytes32(0)
+        });
+
         emit OwnershipTransferred(address(0), msg.sender);
+        emit EpochAdvanced(0, bytes32(0), block.timestamp, block.timestamp + 365 days);
     }
 
     // ==================== Governance ====================
 
-    function transfer_ownership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "New owner cannot be zero address");
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
+    /// @notice Schedule ownership transfer with timelock
+    /// @dev New owner must wait TIMELOCK_PERIOD before accepting transfer
+    function schedule_ownership_transfer(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert("New owner cannot be zero address");
+        
+        bytes32 changeHash = keccak256(abi.encodePacked("ownership", newOwner, block.timestamp + TIMELOCK_PERIOD));
+        pendingChange = PendingGovernanceChange({
+            newOwner: newOwner,
+            newProofRoot: bytes32(0),
+            validAfter: block.timestamp + TIMELOCK_PERIOD
+        });
+        
+        emit GovernanceChangeScheduled(changeHash, block.timestamp + TIMELOCK_PERIOD);
     }
 
-    function update_proof_root(bytes32 _proofRoot) external {
-        if (msg.sender != verifier) revert Unauthorized();
+    /// @notice Execute scheduled ownership transfer (after timelock expires)
+    function execute_ownership_transfer() external {
+        if (block.timestamp < pendingChange.validAfter) revert TimelockNotExpired();
+        if (pendingChange.newOwner == address(0)) revert("No pending ownership transfer");
+        
+        address newOwner = pendingChange.newOwner;
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
+        
+        // Clear pending change
+        pendingChange.newOwner = address(0);
+        pendingChange.validAfter = 0;
+        
+        bytes32 changeHash = keccak256(abi.encodePacked("ownership", newOwner, pendingChange.validAfter));
+        emit GovernanceChangeExecuted(changeHash);
+    }
+
+    /// @notice Schedule proof root update with timelock
+    function schedule_proof_root_update(bytes32 _proofRoot) external {
+        if (msg.sender != owner && msg.sender != verifier) revert Unauthorized();
         if (_proofRoot == bytes32(0)) revert InvalidProofRoot();
+        
+        bytes32 changeHash = keccak256(abi.encodePacked("proofRoot", _proofRoot, block.timestamp + TIMELOCK_PERIOD));
+        pendingChange = PendingGovernanceChange({
+            newOwner: address(0),
+            newProofRoot: _proofRoot,
+            validAfter: block.timestamp + TIMELOCK_PERIOD
+        });
+        
+        emit GovernanceChangeScheduled(changeHash, block.timestamp + TIMELOCK_PERIOD);
+    }
 
-        trustedProofRoot = _proofRoot;
+    /// @notice Execute scheduled proof root update (after timelock expires)
+    function execute_proof_root_update() external {
+        if (block.timestamp < pendingChange.validAfter) revert TimelockNotExpired();
+        if (pendingChange.newProofRoot == bytes32(0)) revert("No pending proof root update");
+        
+        bytes32 newRoot = pendingChange.newProofRoot;
+        trustedProofRoot = newRoot;
         proofRootBlockHeight = block.number;
+        
+        emit ProofRootUpdated(newRoot, block.number, msg.sender);
+        
+        // Clear pending change
+        pendingChange.newProofRoot = bytes32(0);
+        pendingChange.validAfter = 0;
+        
+        bytes32 changeHash = keccak256(abi.encodePacked("proofRoot", newRoot, pendingChange.validAfter));
+        emit GovernanceChangeExecuted(changeHash);
+    }
 
-        emit ProofRootUpdated(_proofRoot, block.number, msg.sender);
+    /// @notice Advance governance epoch (monotonic)
+    /// @dev Only callable by owner or multisig, enforces monotonic epoch numbers
+    function advance_epoch(bytes32 newRoot, uint256 validDuration) external onlyOwner {
+        if (newRoot == bytes32(0)) revert("New root cannot be zero");
+        if (validDuration == 0) revert("Valid duration must be positive");
+        if (block.timestamp < currentEpoch.validFrom) revert("Current epoch not yet valid");
+        
+        uint256 newEpoch = currentEpoch.epoch + 1;
+        bytes32 previousRoot = currentEpoch.root;
+        
+        currentEpoch = GovernanceEpoch({
+            epoch: newEpoch,
+            root: newRoot,
+            validFrom: block.timestamp,
+            validUntil: block.timestamp + validDuration,
+            previousRoot: previousRoot
+        });
+        
+        emit EpochAdvanced(newEpoch, newRoot, block.timestamp, block.timestamp + validDuration);
+    }
+
+    /// @notice Enable multisig governance
+    function enable_multisig(uint256 _threshold) external onlyOwner {
+        if (_threshold == 0) revert("Threshold must be positive");
+        multisigEnabled = true;
+        multisigThreshold = _threshold;
+    }
+
+    /// @notice Disable multisig governance
+    function disable_multisig() external onlyOwner {
+        multisigEnabled = false;
+    }
+
+    /// @notice Add multisig signer
+    function add_multisig_signer(address signer) external onlyOwner {
+        if (signer == address(0)) revert("Signer cannot be zero address");
+        multisigSigners[signer] = true;
+        emit MultisigSignerUpdated(signer, true);
+    }
+
+    /// @notice Remove multisig signer
+    function remove_multisig_signer(address signer) external onlyOwner {
+        multisigSigners[signer] = false;
+        emit MultisigSignerUpdated(signer, false);
+    }
+
+    /// @notice Approve governance change (multisig)
+    function approve_governance_change(bytes32 changeHash) external onlyMultisig {
+        multisigApprovals[changeHash]++;
+    }
+
+    /// @notice Execute governance change with multisig approval
+    function execute_multisig_change(bytes32 changeHash) external onlyMultisig {
+        if (multisigApprovals[changeHash] < multisigThreshold) revert MultisigThresholdNotMet();
+        multisigApprovals[changeHash] = 0; // Reset approvals
+        emit GovernanceChangeExecuted(changeHash);
     }
 
     // ==================== Lifecycle Mutations (Canonical Names) ====================
@@ -301,6 +476,7 @@ contract CSVSeal {
         sanadSealId[sealId] = sealId;
         sanadCreatedAt[sealId] = block.timestamp;
         sanadLastTx[sealId] = bytes32(0);
+        sealOwners[sealId] = msg.sender; // Set seal owner
 
         emit SanadCreated(sealId, commitment, msg.sender, block.timestamp);
         emit CommitmentAnchored(commitment, sealId, msg.sender, block.timestamp);
@@ -310,8 +486,10 @@ contract CSVSeal {
     }
 
     /// @notice Consume a seal (mark as used, register nullifier)
+    /// @dev Requires seal owner signature to prevent arbitrary consumption
     function consume_seal(bytes32 sealId, bytes32 nullifier) external {
         if (usedSeals[sealId]) revert SanadAlreadyConsumed();
+        if (sealOwners[sealId] != msg.sender) revert NotOwner();
 
         usedSeals[sealId] = true;
         if (nullifier != bytes32(0)) {

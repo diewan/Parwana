@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::proof::{FinalityProof, InclusionProof};
+use crate::proof_taxonomy::{FinalityProof, InclusionProof};
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};

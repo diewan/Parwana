@@ -3,6 +3,11 @@
 //! This module defines the canonical proof types used across the CSV protocol.
 //! All proofs must be one of these variants, ensuring consistent semantics
 //! and enabling unified verification.
+//!
+//! **Layer Classification:**
+//! - L1 (Proof types): All types in this module use canonical_cbor for serialization
+//!   to ensure deterministic encoding across all chains. Serde derives are required
+//!   by canonical_cbor but non-canonical formats (serde_json) are forbidden.
 
 use csv_hash::Hash;
 use csv_hash::HashDomain;

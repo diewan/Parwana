@@ -5,8 +5,8 @@
 //! so protocol semantics stay in csv-verifier, not adapter `ops.rs`.
 
 use csv_hash::Hash;
-use csv_protocol::backend::{ChainOpError, ChainProofProvider};
-use csv_protocol::proof::{FinalityProof, InclusionProof};
+use csv_protocol::chain_adapter_traits::{ChainOpError, ChainProofProvider};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 use thiserror::Error;
 
 /// Policy applied after native chain checks (confirmations window, etc.).

@@ -2,6 +2,11 @@
 //!
 //! Defines the canonical finality types that all chains must implement.
 //! Different chains have different finality models, but they all map to these canonical types.
+//!
+//! **Layer Classification:**
+//! - L1 (Proof types): FinalityType, FinalityRequirement, FinalityProof use canonical_cbor
+//!   for serialization. Serde derives are required by canonical_cbor but non-canonical
+//!   formats (serde_json) are forbidden.
 
 use serde::{Deserialize, Serialize};
 

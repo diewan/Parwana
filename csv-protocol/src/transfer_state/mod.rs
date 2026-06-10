@@ -20,6 +20,9 @@
 //! - **Completed**: Transfer successfully completed
 //! - **RolledBack**: Transfer rolled back due to reorg
 //! - **Compromised**: Transfer compromised (security incident)
+//!
+//! **Layer Classification:**
+//! - L3 (Storage type): TransferStage MAY use serde for persistence layer serialization.
 
 pub mod awaiting_finality;
 pub mod completed;

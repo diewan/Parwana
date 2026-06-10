@@ -80,12 +80,12 @@ pub trait ChainBackendForReconciliation: Send + Sync {
         &self,
         commitment: &Hash,
         block_height: u64,
-    ) -> Result<crate::proof::InclusionProof, String>;
+    ) -> Result<crate::proof_taxonomy::InclusionProof, String>;
 
     /// Verify a proof bundle against the canonical chain.
     async fn verify_proof_bundle(
         &self,
-        inclusion_proof: &crate::proof::InclusionProof,
+        inclusion_proof: &crate::proof_taxonomy::InclusionProof,
         commitment: &Hash,
     ) -> Result<bool, String>;
 }
@@ -454,14 +454,14 @@ impl ChainBackendForReconciliation for MockChainBackend {
         &self,
         _commitment: &Hash,
         _block_height: u64,
-    ) -> Result<crate::proof::InclusionProof, String> {
+    ) -> Result<crate::proof_taxonomy::InclusionProof, String> {
         // In production, this would rebuild the proof from chain state
         Err("Not implemented in mock backend".to_string())
     }
 
     async fn verify_proof_bundle(
         &self,
-        _inclusion_proof: &crate::proof::InclusionProof,
+        _inclusion_proof: &crate::proof_taxonomy::InclusionProof,
         _commitment: &Hash,
     ) -> Result<bool, String> {
         Ok(true)

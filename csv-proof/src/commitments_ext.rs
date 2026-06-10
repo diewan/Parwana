@@ -12,6 +12,9 @@ use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+// L0/L1 types (proof data) must NOT use serde - use canonical_cbor instead
+// L2 types (metadata) MAY use serde for configuration/indexing
+
 // ---------------------------------------------------------------------------
 // Commitment Scheme Types
 // ---------------------------------------------------------------------------
@@ -242,6 +245,7 @@ pub struct ProofMetadata {
 // ---------------------------------------------------------------------------
 
 /// Enhanced commitment with scheme and metadata tracking.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnhancedCommitment {
     // Basic fields (same as core Commitment)

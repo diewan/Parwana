@@ -2,12 +2,15 @@
 //!
 //! This module tests that the execution journal correctly records phase transitions
 //! and that transfers can be resumed from any phase after a crash.
+//!
+//! Tests use deterministic proof fixtures from csv-testkit, not fake bytes.
 
 use csv_hash::{Hash, ReplayIdHash};
 use csv_runtime::execution_journal::{
     ExecutionJournal, InMemoryJournal, PhaseOutcome, TransferPhaseEntry,
 };
 use csv_runtime::recovery::TransferStage;
+use csv_testkit::fixtures::TestProofBundle;
 
 fn replay_id(byte: u8) -> ReplayIdHash {
     ReplayIdHash(Hash::new([byte; 32]))
@@ -289,4 +292,49 @@ async fn test_journal_capacity_enforcement() {
         result,
         Err(csv_runtime::execution_journal::JournalError::CapacityExceeded)
     );
+}
+
+#[tokio::test]
+async fn test_recovery_with_deterministic_proof_fixture() {
+    let journal = InMemoryJournal::new(1000);
+    let transfer_id = "test-transfer-with-proof".to_string();
+    let replay_id = replay_id(5);
+
+    // Use deterministic proof fixture from csv-testkit
+    let proof_bundle = TestProofBundle::minimal();
+    let proof_payload = csv_codec::to_canonical_cbor(&proof_bundle).unwrap();
+    // Compute proof hash using tagged hash (same as transfer_coordinator does)
+    let proof_hash = csv_hash::csv_tagged_hash("csv.execution-journal.proof-payload.v1", &proof_payload);
+
+    // Record phase: ProofBuilding with persisted proof payload
+    journal
+        .record(TransferPhaseEntry {
+            transfer_id: transfer_id.clone(),
+            replay_id: replay_id.clone(),
+            proof_hash,
+            proof_payload: Some(proof_payload.clone()),
+            phase: TransferStage::ProofBuilding,
+            ts: std::time::SystemTime::now(),
+            outcome: PhaseOutcome::Completed,
+            transfer_context: None,
+            attempt: 1,
+        })
+        .unwrap();
+
+    // Verify proof payload is persisted
+    let latest = journal.latest_phase(&transfer_id).unwrap();
+    assert_eq!(latest, Some(TransferStage::ProofBuilding));
+
+    // Verify the transfer is incomplete (ProofBuilding is not terminal)
+    let incomplete = journal.incomplete_transfers().unwrap();
+    assert_eq!(incomplete.len(), 1);
+    assert_eq!(incomplete[0].transfer_id, transfer_id);
+    assert_eq!(incomplete[0].phase, TransferStage::ProofBuilding);
+    
+    // Verify the proof payload can be deserialized
+    let recovered_bundle: csv_protocol::proof_types::ProofBundle = 
+        csv_codec::from_canonical_cbor(&proof_payload).unwrap();
+    
+    // Verify the recovered bundle has valid structure (access field directly)
+    assert_eq!(recovered_bundle.inclusion_proof.block_number, proof_bundle.inclusion_proof.block_number);
 }

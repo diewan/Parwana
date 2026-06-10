@@ -64,7 +64,7 @@ Protocol orchestration layer for CSV Protocol - state machines, protocol constan
 ## Usage Example
 
 ```rust
-use csv_protocol::backend::{ChainBackend, ChainQuery};
+use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery};
 use csv_protocol::cross_chain::HashEntry;
 use csv_protocol::finality::CapabilityRequirements;
 

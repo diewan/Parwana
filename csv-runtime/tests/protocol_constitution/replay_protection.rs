@@ -9,7 +9,7 @@ use csv_hash::{
     sanad::SanadId,
     seal::SealPoint,
 };
-use csv_protocol::proof_types::ReplayId;
+use csv_protocol::proof_taxonomy::ReplayId;
 
 /// Test that duplicate proofs are rejected by the seal nullifier registry.
 #[test]

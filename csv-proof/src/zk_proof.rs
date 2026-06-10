@@ -8,6 +8,9 @@ use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
 use serde::{Deserialize, Serialize};
 
+// L0/L1 types (proof data) must NOT use serde - use canonical_cbor instead
+// L2 types (metadata) MAY use serde for configuration/indexing
+
 /// Maximum encoded ZK proof size accepted by the protocol.
 pub const MAX_ZK_PROOF_SIZE: usize = 1024 * 1024;
 
@@ -34,6 +37,7 @@ impl core::fmt::Display for ProofSystem {
 }
 
 /// Verification key identifying the proof backend and source chain.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifierKey {
     pub chain: csv_hash::chain_id::ChainId,
@@ -61,6 +65,7 @@ impl VerifierKey {
 }
 
 /// Public outputs bound by a zero-knowledge seal proof.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ZkPublicInputs {
     pub seal_ref: SealPoint,
@@ -72,6 +77,7 @@ pub struct ZkPublicInputs {
 }
 
 /// Complete proof envelope submitted by an adapter.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ZkSealProof {
     pub proof_bytes: Vec<u8>,
@@ -100,6 +106,7 @@ impl ZkSealProof {
 }
 
 /// Chain witness supplied to a zero-knowledge prover.
+/// L1 type: proof data - uses canonical_cbor for serialization
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChainWitness {
     pub chain: csv_hash::chain_id::ChainId,

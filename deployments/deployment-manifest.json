@@ -16,7 +16,8 @@
           "address": "0xaa724b64984cc1776eb37f1c4d4d7130a2660ac1",
           "deployment_tx": "0x75ba9d7ff8593158cb7a7e43600c15505fb570f5ca21af771b58bdcdfd14b142",
           "block_number": "11018494",
-          "bytecode_hash": "",
+          "bytecode_hash": "7227e552d193c02a3ca5f1c57bbd4e7fc5fb77fdddd3e054efd9c1ad54efa0ab",
+          "abi_hash": "74bac11175cda72653bd80bce55b616c2d81c9fc8e9da52668235235d3f80f41",
           "verified": true,
           "constructor_args": {
             "verifier": ""

@@ -3,6 +3,9 @@
 //! Genesis represents the first instantiation of a contract. It defines
 //! the global state and assigns initial owned states to their seals.
 //! Every consignment chain starts from exactly one genesis.
+//!
+//! **Layer Classification:**
+//! - L3 (Storage type): Genesis MAY use serde for persistence layer serialization.
 
 use crate::state::{GlobalState, Metadata, OwnedState};
 use csv_hash::Hash;

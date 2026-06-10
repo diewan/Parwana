@@ -8,6 +8,9 @@
 //! - SDKs to parse and display event data
 //!
 //! All events follow a consistent schema for maximum interoperability.
+//!
+//! **Layer Classification:**
+//! - L2/L3 (Event types): Event types MAY use serde for serialization and indexing.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

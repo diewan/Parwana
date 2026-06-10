@@ -11,7 +11,7 @@ use csv_hash::{
     dag::DAGSegment,
     seal::{CommitAnchor, SealPoint},
 };
-use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 use serde::{Deserialize, Serialize};
 
 /// Test that canonical serialization is deterministic and field-order independent.

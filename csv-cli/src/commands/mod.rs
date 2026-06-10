@@ -4,6 +4,7 @@
 #![allow(deprecated)]
 
 pub mod chain;
+pub mod chain_management;
 pub mod content;
 pub mod contracts;
 pub mod cross_chain;

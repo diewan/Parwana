@@ -3,6 +3,11 @@
 //! These types ensure that chain-specific semantics are never collapsed into
 //! scalar values or binary booleans, which would lose information critical for
 //! correct verification decision-making.
+//!
+//! **Layer Classification:**
+//! - L1 (Proof types): SolanaCommitmentGrade, EthereumFinalityStage use canonical_cbor
+//!   for serialization. Serde derives are required by canonical_cbor but non-canonical
+//!   formats (serde_json) are forbidden.
 
 use serde::{Deserialize, Serialize};
 

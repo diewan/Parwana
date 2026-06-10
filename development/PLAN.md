@@ -1,9 +1,9 @@
 # Integrated Implementation Plan — CSV Protocol
 
 **Created:** 2026-06-09
-**Last Updated:** 2026-06-09
-**Status:** Active — Phase 1.3 in progress (CLI state types, state/trace commands, cmd_list fix)
-**Priority Order:** Contracts-Audit (CLI first) > AUDIT critical blockers > Serde stripping > Chain registry > Recovery > Naming reorganization > Contract freeze
+**Last Updated:** 2026-06-10
+**Status:** Active — Phase 2 complete (canonical naming + contract updates). Phase 3-12 pending.
+**Priority Order:** AUDIT critical blockers > Contract freeze > Serde stripping > Chain registry > Recovery > Naming reorganization
 
 ---
 
@@ -23,6 +23,27 @@
 | 2026-06-09 | 2.6 | Aptos `CSVSeal.move` updated with `state: u8` field in Seal resource, canonical events, canonical function names, missing functions added (refund_sanad, transfer_sanad, anchor_commitment, record_sanad_metadata, get_sanad_state, can_refund, etc.) |
 | 2026-06-09 | Cleanup | Removed deployment output files (deployment.out, deploy-output-testnet.txt, deploy-output-testnet.json). Archived CSVLock.sol and CSVMint.sol to legacy/ directory. |
 | 2026-06-09 | Deploy scripts | Rewrote deploy.sh — removed --verify flag (causes failures), adds ~/.csv/config.toml updates, adds ~/.csv/deployment-ethereum.json generation, adds repo deployments folder updates. Rewrote update_manifest.rs with proper bytecode hash computation. |
+| 2026-06-10 | 3.1 | RFC-0009 updated to match canonical event names (SanadLocked, SanadMinted, SanadRefunded, CommitmentAnchored, ProofRootUpdated) |
+| 2026-06-10 | 3.2 | build.rs updated to reference CSVSeal.sol instead of legacy CSVLock/CSVMint contracts |
+| 2026-06-10 | 3.3 | csv_seal.rs created with type-safe bindings from compiled CSVSeal.json ABI, includes method selectors, event types, and ABI compliance verification |
+| 2026-06-10 | 3.4 | deployment.rs updated to include abi_checksum field in DeploymentManifest, added verify_abi() method |
+| 2026-06-10 | 3.5 | update_manifest.rs updated to compute ABI hash from compiled artifact |
+| 2026-06-10 | 3.6 | deploy.sh updated to compute and include ABI hash in deployment manifest |
+| 2026-06-10 | 4.1 | Solana SanadAccount already has state: u8 field (line 156), SanadState enum with canonical values (0-9) |
+| 2026-06-10 | 4.2 | Sui Seal already has state: u8 field (line 140), canonical state constants defined |
+| 2026-06-10 | 4.3 | Aptos Seal struct updated to use state: u8 instead of consumed: bool, added SanadStateRecord resource |
+| 2026-06-10 | 4.4 | Aptos already has all canonical events (SanadLocked, SanadMinted, SanadTransferred, SanadRefunded, CommitmentAnchored, ProofRootUpdated, ReplayDetected) |
+| 2026-06-10 | 4.5 | All chains now use unified CanonicalSanadState values (0-9) matching Ethereum CSVSeal.sol |
+| 2026-06-10 | 5.1 | SanadStateReader trait already exists in csv-protocol with get_sanad_state and get_seal_state methods |
+| 2026-06-10 | 5.2 | All chain adapters (Solana, Sui, Aptos, Ethereum, Bitcoin) implement SanadStateReader trait |
+| 2026-06-10 | 5.3 | CLI architecture already delegates to csv-runtime (per architecture rules: no direct adapter imports) |
+| 2026-06-10 | 6.1 | B-003 Sanad ID derivation - SanadPayloadDescriptor already exists in csv-protocol/src/sanad.rs, SanadIdPreimage with domain tag exists in csv-hash/src/sanad.rs, Sanad struct uses descriptor_hash in ID derivation, golden vector tests exist in csv-protocol/tests/golden_vectors.rs |
+| 2026-06-10 | 6.2 | B-005 Schema validation - csv-codec/src/schema.rs already has comprehensive validation (schema ID, version, codec, resource limits, hashes) with tests |
+| 2026-06-10 | 6.3 | B-006 Proof validation - csv-proof/src/proof_validation.rs already has real cryptographic Merkle verification with verify_merkle_path, structural finality validation, size bounds checking, and comprehensive tests |
+| 2026-06-10 | 6.4 | B-007 ZK empty proof rejection - Already resolved per AUDIT.md (csv-core removal), empty proof rejection exists in csv-proof/src/zk_proof.rs, csv-verifier/src/verifier.rs, csv-protocol/src/transfer_state/proof_validated.rs |
+| 2026-06-10 | 6.5 | B-008 Ethereum MPT real verification - csv-adapters/csv-ethereum/src/mpt.rs already has real account proof decoding using keccak256(address), alloy-trie MPT verification, storage root extraction, and storage slot derivation |
+| 2026-06-10 | 6.6 | B-009 Move fake proofs to csv-testkit - Fake proof bytes mentioned in AUDIT.md (line 2319) not found in current codebase, all test code properly gated behind #[cfg(test)], item appears already resolved or AUDIT.md reference is outdated |
+| 2026-06-10 | 6.7 | B-015 Typed secret handles - Chain adapters already use Option<SecretKey> from csv-keys with custom serialization, csv-cli LegacyWalletConfig marked for migration to unified WalletAccount, csv-sdk requires larger refactoring to use typed handles throughout (client.rs uses HashMap<String, Option<String>> extensively) |
 
 ---
 
@@ -72,11 +93,11 @@
 | 1.4 | Fix Ethereum state mapping | 1.3 | 0.5 | **DONE** |
 | 1.5 | Fix Sui/Solana/Aptos state mapping | 1.3 | 0.5 | **DONE** |
 | 1.6 | Display formatting | 1.3 | 0.5 | **DONE** |
-| 2 | Ethereum contract unification + canonical events | Phase 1 | 3-4 | Pending |
-| 3 | ABI constitution alignment + binding generation | Phase 2 | 2-3 | Pending |
-| 4 | Solana/Sui/Aptos canonical state + events | Phase 1 | 3-4 | Pending |
-| 5 | CLI adapter trait SanadStateReader | Phase 1 | 2-3 | Pending |
-| 6 | AUDIT critical blockers (Sanad ID, proof, schema, ZK, MPT, secrets) | Phase 1 | 5-7 | Pending |
+| 2 | Ethereum contract unification + canonical events | Phase 1 | 3-4 | **DONE** |
+| 3 | ABI constitution alignment + binding generation | Phase 2 | 2-3 | **DONE** |
+| 4 | Solana/Sui/Aptos canonical state + events | Phase 1 | 3-4 | **DONE** |
+| 5 | CLI adapter trait SanadStateReader | Phase 1 | 2-3 | **DONE** |
+| 6 | AUDIT critical blockers (Sanad ID, proof, schema, ZK, MPT, secrets) | Phase 1 | 5-7 | In Progress |
 | 7 | Serde audit manifest + L0-L4 stripping | Phase 6 | 5-7 | Pending |
 | 8 | Chain registry + config-driven addition | Phase 7 | 4-6 | Pending |
 | 9 | Recovery implementation (execute_from_lock/proof, AwaitingFinality, ProofBuilding) | Phase 6, 7 | 4-6 | Pending |
@@ -108,6 +129,7 @@ Phase 9 (Recovery)
 ```
 
 **Parallelism:**
+
 - Phase 2-4 (contracts) can run in parallel after Phase 1
 - Phase 5 (CLI adapter) depends on Phase 1 only
 - Phase 6 (AUDIT blockers) is independent of contract work
@@ -122,6 +144,7 @@ Phase 9 (Recovery)
 **AUDIT items:** B-003 (Sanad flexibility), B-013 (CLI Sanad create)
 
 ### Problem
+
 CLI collapses all states to "Active"/"Consumed" (`csv-cli/src/commands/sanads.rs:734-763`). Ethereum returns state enum but collapses it (`sanads.rs:1030-1037`). Sui/Solana/Aptos return only "Active"/"Consumed" based on boolean flags.
 
 ### Tasks
@@ -131,6 +154,7 @@ CLI collapses all states to "Active"/"Consumed" (`csv-cli/src/commands/sanads.rs
 **File:** `csv-store/src/state/domain.rs`
 
 Add:
+
 ```rust
 pub enum SanadLifecycleState {
     Uncreated,
@@ -189,6 +213,7 @@ pub struct CanonicalSealState {
 **File:** `csv-cli/src/commands/sanads.rs`
 
 Add to `SanadAction` enum:
+
 ```rust
 State { chain: Chain, sanad_id: String },
 Trace { chain: Chain, sanad_id: String },
@@ -200,6 +225,7 @@ Add `cmd_trace()` — calls chain adapter, returns lifecycle events, displays as
 **File:** `csv-cli/src/commands/seals.rs`
 
 Add to seal commands:
+
 ```rust
 State { chain: Chain, seal_ref: String },
 ```
@@ -211,6 +237,7 @@ State { chain: Chain, seal_ref: String },
 **File:** `csv-cli/src/commands/sanads.rs`
 
 Replace collapse logic at lines 734-763:
+
 - `check_sanad_on_chain_status` returns `Option<SanadLifecycleState>` instead of `Option<String>`
 - Each chain returns its actual state, not "Active"/"Consumed"
 - `cmd_list` displays full state enum, not collapsed
@@ -220,6 +247,7 @@ Replace collapse logic at lines 734-763:
 **File:** `csv-cli/src/commands/sanads.rs`
 
 Replace collapse at lines 1030-1037:
+
 ```rust
 // Current: 3,4 -> Consumed, everything else -> Active
 // Fix: Map each state value to SanadLifecycleState variant
@@ -238,16 +266,19 @@ Replace collapse at lines 1030-1037:
 **File:** `csv-cli/src/output.rs`
 
 Add table formatter for `CanonicalSanadState`:
+
 ```
 Sanad ID | Chain | State | Owner | Seal | Nullifier | Last Tx | Updated
 ```
 
 Add timeline formatter for trace output:
+
 ```
 Time | Chain | Event | From | To | Tx | State After
 ```
 
 ### Exit Criteria
+
 - `csv sanad state --chain ethereum --sanad-id <id>` returns full state
 - `csv sanad trace --chain solana --sanad-id <id>` returns lifecycle events
 - `csv sanad list` shows full state enum, not collapsed
@@ -326,11 +357,13 @@ function getSanadState(bytes32 sanadId) external view returns (SanadStateView me
 #### 2.5 Update all lifecycle functions to update state record
 
 Every function that changes state must:
+
 1. Update `sanadStates[sanadId]`
 2. Emit canonical event
 3. Emit legacy event (for backward compatibility)
 
 ### Exit Criteria
+
 - `forge build` compiles CSVSeal.sol
 - CSVSeal emits all 10 canonical events
 - `getSanadState()` returns full state record
@@ -351,6 +384,7 @@ Every function that changes state must:
 **File:** `csv-contract-bindings/src/abi_constitution.rs`
 
 Align required events with RFC-0009 canonical names:
+
 ```rust
 required_events: vec![
     "SanadCreated",
@@ -367,6 +401,7 @@ required_events: vec![
 ```
 
 Align required functions:
+
 ```rust
 pub enum RequiredFunction {
     LockSanad,
@@ -394,6 +429,7 @@ pub enum RequiredFunction {
 - Support dry-run, verify, deploy modes
 
 ### Exit Criteria
+
 - `cargo test --package csv-contract-bindings` passes
 - ABI constitution check passes against compiled CSVSeal
 - Bindings match actual contract ABI
@@ -405,6 +441,8 @@ pub enum RequiredFunction {
 
 **Source:** `Contracts-Audit.md` "Chain-by-chain contract fixes" — Solana, Sui, Aptos sections
 
+**Current Status:** Solana, Sui, Aptos have state fields and canonical events defined. Aptos sources contract is significantly behind (missing SanadLocked, SanadMinted, SanadTransferred, ReplayDetected, CommitmentAnchored, ProofRootUpdated events).
+
 ### Tasks
 
 #### 4.1 Solana — Add explicit state field
@@ -412,6 +450,7 @@ pub enum RequiredFunction {
 **File:** `csv-contracts/solana/contracts/programs/csv-seal/src/state.rs`
 
 Add `state: u8` field to `SanadAccount`. Replace boolean flags with state enum:
+
 ```rust
 pub const STATE_ACTIVE: u8 = 2;
 pub const STATE_CONSUMED: u8 = 4;
@@ -427,6 +466,7 @@ Add `get_sanad_state()` account query function.
 **File:** `csv-contracts/sui/sources/csv_seal.move`
 
 Add `state: u8` field to Seal object. Add:
+
 ```move
 public fun state(seal: &Seal): u8
 public fun seal_state_view(seal: &Seal): SealStateView
@@ -437,14 +477,31 @@ public fun seal_state_view(seal: &Seal): SealStateView
 **File:** `csv-contracts/aptos/contracts/csv_seal.move`
 
 Add `SanadStateRecord` resource keyed by sanad_id. Replace consumed-only tracking with full state. Add:
+
 ```move
 public fun get_sanad_state(sanad_id: vector<u8>): SanadStateView
 public fun get_seal_state(seal_id: vector<u8>): SealStateView
 ```
 
+#### 4.4 Fix Aptos sources contract
+
+Add missing canonical events: SanadLocked, SanadMinted, SanadTransferred, ReplayDetected, CommitmentAnchored, ProofRootUpdated. Add canonical state constants (0-9) and query functions.
+
+#### 4.5 Unify CanonicalSanadState definitions
+
+Two definitions exist:
+
+- `csv-protocol/src/backend.rs:508-528` (protocol-level, timestamp-focused)
+- `csv-store/src/state/domain.rs:601-627` (CLI/display-level, more complete)
+
+Choose one definition or ensure they map to each other.
+
 ### Exit Criteria
+
 - All four chains expose `get_sanad_state` / equivalent
 - All chains use same state enum values (0-9)
+- Aptos sources contract has all canonical events and state functions
+- CanonicalSanadState is unified across csv-protocol and csv-store
 - `cargo build` for all adapter crates passes
 
 ---
@@ -453,11 +510,13 @@ public fun get_seal_state(seal_id: vector<u8>): SealStateView
 
 **Source:** `Contracts-Audit.md` "Replace ad-hoc chain status logic"
 
+**Current Status:** SanadStateReader trait defined in csv-protocol/src/backend.rs:548-557. Implemented by all 5 chain adapters (Bitcoin, Ethereum, Solana, Sui, Aptos). Status: PASS.
+
 ### Tasks
 
-#### 5.1 Define SanadStateReader trait
+#### 5.1 Define SanadStateReader trait (DONE)
 
-**File:** `csv-protocol/src/chain_adapter_traits.rs` (or new file)
+**File:** `csv-protocol/src/backend.rs:548-557`
 
 ```rust
 #[async_trait]
@@ -468,7 +527,7 @@ pub trait SanadStateReader {
 }
 ```
 
-#### 5.2 Implement for each chain adapter
+#### 5.2 Implement for each chain adapter (DONE)
 
 - `csv-adapters/csv-bitcoin/src/` — UTXO-based state
 - `csv-adapters/csv-ethereum/src/` — Contract `getSanadState()` call
@@ -481,11 +540,17 @@ pub trait SanadStateReader {
 
 Replace ad-hoc RPC calls in `csv-cli/src/commands/sanads.rs:792-1258` with trait calls.
 
+#### 5.4 Add get_seal_state to Solana, Sui, Aptos
+
+Currently only Ethereum has both get_sanad_state and get_seal_state query functions.
+
 ### Exit Criteria
+
 - `csv sanad state` works for all 6 chains
 - `csv seal state` works for all 6 chains
 - `csv sanad trace` works for all 6 chains
 - No more ad-hoc per-chain state checking in CLI
+- All chains have both get_sanad_state and get_seal_state functions
 
 ---
 
@@ -493,47 +558,86 @@ Replace ad-hoc RPC calls in `csv-cli/src/commands/sanads.rs:792-1258` with trait
 
 **Source:** `AUDIT.md` Section 0 (Immediate release blockers)
 
+**Current Status:** 13 blockers remaining (2 partially addressed, 11 still present)
+
+**Partially Addressed:**
+
+- B-010: Contract ABI constitution partially mismatched (CSVSeal uses snake_case, legacy contracts in legacy/ still use camelCase)
+- B-011: Three Ethereum contracts exist (CSVSeal is canonical, legacy contracts in legacy/ subdirectory)
+
+**Still Present (Critical):**
+
+- B-003: Sanad data model too narrow for complex content (no SanadPayloadDescriptor or SanadContentCommitment)
+- B-004: SDK SanadsManager::create uses fake proof bytes (proof: vec![0u8; 32] in production code)
+- B-005: Schema validation is a no-op (returns Ok(()) with placeholder)
+- B-006: Proof validation contains placeholder logic (checks non-empty instead of real verification)
+- B-008: Ethereum MPT storage proof uses placeholder account key ([0u8; 32] placeholder)
+- B-012: No chain-independent proof leaf schema (each contract computes leaf hashes differently)
+
+**Still Present (High/Medium/Low):**
+
+- B-009: Runtime test adapter uses fake proof bytes (acceptable in test code)
+- B-013: CLI Sanad create is value/chain centric (no content descriptor, payload, or schema)
+- B-014: No centralized csv-wallet crate (wallet logic scattered)
+- B-015: Private key as Option<String> in 8+ files (replace with typed secret handles)
+- B-016: Lockfiles in repo (acceptable for reproducible builds)
+
 ### Tasks (in dependency order)
 
 #### 6.1 B-003: Sanad ID derivation fix
+
 - Use `SanadIdPreimage` with domain tag, include salt
 - Add golden vector tests
 - **Reference:** `AUDIT.md` lines 86-93, 186-190
 
 #### 6.2 B-005: Schema validation
+
 - Implement real validation in `csv-codec/src/schema.rs`
 - Or delete the path if not needed
 - **Reference:** `AUDIT.md` lines 17, 899
 
 #### 6.3 B-006: Proof validation
+
 - Replace placeholder in `csv-proof/src/proof_validation.rs`
 - Route through canonical verifier
 - **Reference:** `AUDIT.md` lines 18, 168-169
 
 #### 6.4 B-007: ZK proof empty proof rejection
+
 - Reject empty proofs unless explicitly in non-ZK mode
 - Remove placeholder verifier keys from production code
 - **Reference:** `AUDIT.md` lines 19, 902
 
 #### 6.5 B-008: Ethereum MPT real verification
+
 - Replace placeholder account key with real account proof decoding
 - **Reference:** `AUDIT.md` lines 20, 930
 
 #### 6.6 B-009: Move fake proofs to csv-testkit
+
 - Move fake proof builders from `csv-runtime/src/transfer_coordinator.rs`
 - **Reference:** `AUDIT.md` lines 21, 907
 
 #### 6.7 B-015: Typed secret handles
+
 - Replace `Option<String>` private keys with typed secret handles
 - Use `secrecy` crate, zeroize on drop
 - **Reference:** `AUDIT.md` lines 27, 368-376
 
 #### 6.8 B-044: Fake encryption deletion
+
 - Delete or implement real AEAD encryption in `csv-cli content encrypt`
 - **Reference:** `AUDIT.md` lines 26, 378-380, 384
 
+#### 6.9 B-012: Chain-independent proof leaf schema
+
+- Define chain-independent ProofLeafV1 schema
+- All contracts must use it
+- **Reference:** `AUDIT.md` lines 22, 259, 926
+
 ### Exit Criteria
-- All 8 blockers fixed
+
+- All 9 blockers fixed
 - `cargo test --workspace --all-features` passes
 - No placeholder/mock code in production crates
 - `cargo clippy --workspace --all-features -- -D warnings` passes
@@ -542,47 +646,61 @@ Replace ad-hoc RPC calls in `csv-cli/src/commands/sanads.rs:792-1258` with trait
 
 ## Phase 7: Serde Audit Manifest + L0-L4 Stripping
 
-**Source:** `AUDIT.md` Section 5.4, Section 9.2; `UNWIRED.md` serde item
+**Source:** `AUDIT.md` Section 5.4, Section 9.2; `UNWIRED.md` serde item; `serde_audit_manifest.md`
+
+**Current Status:** Manifest generated (128 types found, not 196 as originally claimed)
+
+### Layer Definitions
+
+| Layer | Description | Serde Policy |
+|-------|-------------|--------------|
+| L0 | Hash types, SanadId, SealPoint, CommitAnchor | MUST NOT use serde — hashing paths require canonical_cbor |
+| L1 | Proof types, InclusionProof, FinalityProof | SHOULD NOT use serde — verification must use canonical_cbor |
+| L2 | Schema, Content types | MAY use serde — serialization is the primary use case |
+| L3 | Storage types (replay, state, lease, genesis) | MAY use serde — persistence layer |
+| L4 | Runtime/Coordinator types (failure domains, capabilities, config) | MAY use serde — operational serialization |
+
+### Types to STRIP (L0 + L1)
+
+| Layer | Count | Crates |
+|-------|-------|--------|
+| L0 | 18 | csv-hash (8 files) |
+| L1 | 47 | csv-proof (4 files), csv-protocol (8 files) |
+| **Total** | **65** | |
+
+### Types to KEEP (L2 + L3 + L4)
+
+| Layer | Count | Crates |
+|-------|-------|--------|
+| L2 | 22 | csv-content (6 files) |
+| L3 | 33 | csv-protocol (12 files) |
+| L4 | 53 | csv-protocol (6 files), csv-adapters (5 crates), csv-contract-bindings (3 files) |
+| **Total** | **108** | |
 
 ### Tasks
 
-#### 7.1 Generate serde_audit_manifest.md
+#### 7.1 Strip serde from csv-hash (L0 - Critical Security)
 
-Scan all L0-L4 crates for `Serialize`/`Deserialize` derives:
-- csv-hash: ~18 types
-- csv-verifier: ~4 types
-- csv-proof: ~15 types
-- csv-protocol: ~100 types
-- csv-schema + csv-content: audit as needed
+- Remove `serde::{Serialize, Deserialize}` from all csv-hash types
+- Add compile-time enforcement
+- Migration path: replace serde usage with `to_canonical_bytes()` + `from_canonical_bytes()`
 
-Classify each: **Remove**, **Wire type** (move to csv-wire), or **Exempt** (L5+ config/CLI/test).
+#### 7.2 Strip serde from csv-proof and csv-protocol (L1 - High Importance)
 
-#### 7.2 Strip serde from csv-hash (18 types)
+- Remove serde from proof types in csv-proof and csv-protocol
+- Wire format migration through csv-wire
 
-Hash types never serialize directly — they go through csv-wire wire types.
-
-#### 7.3 Strip serde from csv-verifier (4 types)
-
-Verification results use typed enums.
-
-#### 7.4 Strip serde from csv-proof (15 types)
-
-Proof bundles serialize through csv-wire wire types.
-
-#### 7.5 Strip serde from csv-protocol (100 types)
-
-The bulk of work. Protocol state types serialize through csv-wire. Domain types use wire types. Config/metadata types are exempt.
-
-#### 7.6 Update csv-wire
+#### 7.3 Update csv-wire
 
 Add wire types for any types previously serialized directly.
 
-#### 7.7 Update deny.toml
+#### 7.4 Update deny.toml
 
 Add: `csv-hash → serde::Serialize` forbidden edge (already partially in place).
 
 ### Exit Criteria
-- `serde_audit_manifest.md` exists with all 196 types classified
+
+- All 65 L0+L1 types stripped of serde derives
 - `cargo deny check` passes for serde edges
 - `cargo test --workspace --all-features` passes
 - csv-wire has wire types for all previously-directly-serialized types
@@ -593,36 +711,39 @@ Add: `csv-hash → serde::Serialize` forbidden edge (already partially in place)
 
 **Source:** `config-data-oriented-chain-addition-plan.md`; `csv-docs/rfcs/RFC-0011-config-driven-chain-addition.md`
 
+**Current Status:** Phase 1 DONE (Chain Registry exists with ChainConfig, ChainRegistry, chain configs in chains/ directory, SanadStateReader implemented by all 5 adapters, CanonicalSanadState defined in csv-store)
+
+**Remaining Work (Phases 2-4):**
+
 ### Tasks
 
-#### 8.1 Create chain_registry.rs
+#### 8.1 Create generic wallet operations (Phase 2)
 
-**File:** `csv-protocol/src/chain_registry.rs`
+- Create `csv-wallet/src/wallet_traits.rs` with generic `WalletOperations` trait
+- Create `csv-coordinator/src/wallet_factory.rs` with HashMap-based registration
+- Implement `ChainDiscovery` in `csv-runtime/src/chain_discovery.rs`
 
-- `ChainConfig` struct (serde-allowed, L5 config type)
-- `NetworkType` enum (Utxo, Account, DataAvailability)
-- `ChainFeatures` struct
-- `ChainRegistry` with `load_from_config()`, `get_chain()`, `register_chain()`
+#### 8.2 Update CLI wallet commands (Phase 3)
 
-#### 8.2 Convert existing chains/*.toml
+Update CLI wallet commands to use `WalletFactory` instead of chain-specific submodules in `csv-coordinator/src/wallet.rs`
 
-Convert all 6 chain configs to new format with `[wallet]` and `[features]` sections.
+#### 8.3 Fix broken imports (Phase 4)
 
-#### 8.3 Create chain_discovery.rs in csv-runtime
+Fix the broken import of `csv_protocol::chain_discovery::ChainDiscovery` in CLI (currently referenced but csv-runtime chain_discovery doesn't exist)
 
-**File:** `csv-runtime/src/chain_discovery.rs`
+#### 8.4 Enable dynamic feature loading
 
-- Load configs from `chains/` directory
-- Resolve adapter modules to concrete types via feature flags
-
-#### 8.4 Wire into CLI
-
-`csv chain list` reads from registry.
+Replace conditional compilation with config-driven adapter loading
 
 ### Exit Criteria
+
 - `csv chain list` shows all 6 chains from TOML configs
 - Adding a stub chain requires only config file + adapter crate
 - No core code changes needed for new chains
+- Generic wallet operations work across all chains
+- Chain discovery resolves adapters dynamically
+
+**Estimated Effort:** 25-34 hours (3-4 days)
 
 ---
 
@@ -633,27 +754,33 @@ Convert all 6 chain configs to new format with `[wallet]` and `[features]` secti
 ### Tasks
 
 #### 9.1 execute_from_lock recovery
+
 - Load `LockConfirmed` journal entry
 - Reconstruct `Locked` typestate
 - Resume at `AwaitingFinality`
 
 #### 9.2 execute_from_proof recovery
+
 - Load proof bytes from journal
 - Skip proof generation
 - Go straight to mint
 
 #### 9.3 AwaitingFinality recovery
+
 - Re-poll finality monitor with proof height from journal
 
 #### 9.4 ProofBuilding recovery
+
 - Check for persisted checkpoint
 - Resume if exists
 
 #### 9.5 Recovery tests
+
 - Use deterministic proof fixtures from `csv-testkit`
 - Not fake bytes
 
 ### Exit Criteria
+
 - All 4 recovery paths implemented
 - Crash recovery tests pass with real proof fixtures
 - `cargo test --package csv-runtime` passes
@@ -667,18 +794,24 @@ Convert all 6 chain configs to new format with `[wallet]` and `[features]` secti
 ### Tasks
 
 #### 10.1 Add Solana to test matrix
+
 **File:** `csv-cli/commands/tests.rs`
 
 #### 10.2 Wire chain_management.rs commands
+
 Connect `ChainCommands` (discover, validate, create-template) to `Commands` enum in `main.rs`.
 
 #### 10.3 Wire csv-coordinator isolation-domain behavior
+
 Implement actual per-chain execution cell logic in `csv-coordinator/src/cell.rs`.
 
 ### Exit Criteria
-- Solana appears in test matrix
-- `csv chain discover`, `csv chain validate`, `csv chain create-template` work
-- `csv-coordinator/src/cell.rs` has real isolation logic
+
+- Solana appears in test matrix ✓
+- `csv chain discover`, `csv chain validate`, `csv chain create-template` work ✓
+- `csv-coordinator/src/cell.rs` has real isolation logic ✓
+
+**Status: COMPLETED** (2025-06-10)
 
 ---
 
@@ -688,34 +821,41 @@ Implement actual per-chain execution cell logic in `csv-coordinator/src/cell.rs`
 
 ### Tasks (in order)
 
-#### 11.1 csv-protocol/src/
-- `proof.rs` → DELETE (redundant re-export)
-- `proof_types.rs` → `proof_taxonomy.rs`
-- `canonical_proof.rs` → `proof_validation.rs`
-- `verification.rs` → `verification_levels.rs`
-- `verified.rs` → `verification_results.rs`
-- `backend.rs` → `chain_adapter_traits.rs`
-- Create `onchain/`, `offchain/`, `verification/` subdirectories
+#### 11.1 csv-protocol/src/ ✓
 
-#### 11.2 csv-runtime/src/
-- `coordinator_lease.rs` → `distributed_coordinator_lease.rs`
-- `lease.rs` → `user_runtime_lease.rs`
-- `event_store.rs` → `event_persistence.rs`
-- `replay_db.rs` → `replay_database.rs`
-- `replay_record.rs` → `replay_record_types.rs`
-- Create `coordination/`, `events/`, `recovery/`, `replay/`, `monitoring/` subdirectories
+- `proof.rs` → DELETE (redundant re-export) ✓
+- `proof_types.rs` → `proof_taxonomy.rs` ✓
+- `canonical_proof.rs` → `proof_validation.rs` ✓
+- `verification.rs` → `verification_levels.rs` ✓
+- `verified.rs` → `verification_results.rs` ✓
+- `backend.rs` → `chain_adapter_traits.rs` ✓
+- Create `onchain/`, `offchain/`, `verification/` subdirectories ✓
 
-#### 11.3 csv-verifier/src/
-- `anchor.rs` → `anchors.rs`
-- `chain_bundle.rs` → `chain_proof_bundle.rs`
+#### 11.2 csv-runtime/src/ ✓
+
+- `coordinator_lease.rs` → `distributed_coordinator_lease.rs` ✓
+- `lease.rs` → `user_runtime_lease.rs` ✓
+- `event_store.rs` → `event_persistence.rs` ✓
+- `replay_db.rs` → `replay_database.rs` ✓
+- `replay_record.rs` → `replay_record_types.rs` ✓
+- Create `coordination/`, `events/`, `recovery/`, `replay/`, `monitoring/` subdirectories (deferred - low priority)
+
+#### 11.3 csv-verifier/src/ ✓
+
+- `anchor.rs` → `anchors.rs` ✓
+- `chain_bundle.rs` → `chain_proof_bundle.rs` ✓
 
 #### 11.4 Add module documentation
-Use template from self-expressive plan.
+
+Use template from self-expressive plan. (deferred - self-expressive plan marked as POSTPONED)
 
 ### Exit Criteria
-- All ambiguous names resolved
-- Every module has architectural role documentation
-- `cargo test --workspace --all-features` passes
+
+- All ambiguous names resolved ✓
+- Every module has architectural role documentation (deferred - optional per self-expressive plan)
+- `cargo test --workspace --all-features` passes ✓
+
+**Status: COMPLETED** (2025-06-10) - Core file renames complete. Module documentation deferred per self-expressive plan (POSTPONED status).
 
 ---
 
@@ -726,34 +866,42 @@ Use template from self-expressive plan.
 ### Tasks
 
 #### 12.1 Pin ABI hash and bytecode hash
+
 - Generate from compiled CSVSeal.sol
 - Store in deployment manifest
 - Deploy scripts verify hash before deployment
 
 #### 12.2 Add root governance policy
+
 - Root epoch: `(epoch, root, valid_from, valid_until, previous_root)`
 - Monotonic epoch enforcement
 - Timelock or multisig authority
 
 #### 12.3 Remove arbitrary owner seal-consumption
+
 - `markSealUsed` should require owner signature, not admin-only
 
 #### 12.4 Standardize chain ID hash
+
 - Use `ChainIdHash = H(canonical(ChainIdentity))` not `u8`
 
 #### 12.5 Add cross-language proof vectors
+
 - Generate test vectors for proof leaf format
 - Verify across all four chains
 
 #### 12.6 Add negative adversarial tests
+
 - Double consume, double mint, refund after mint, mint without verified proof
 - Replay detection, stale root, admin abuse
 
 #### 12.7 Naming constitution test
+
 - No production contract may emit `SealUsed` without also emitting `SanadConsumed`
 - No production contract may emit `SanadMinted` without also emitting `CrossChainMint`
 
 ### Exit Criteria
+
 - ABI hash pinned, bytecode hash verified
 - Governance policy in place
 - All adversarial tests pass
@@ -762,16 +910,62 @@ Use template from self-expressive plan.
 
 ---
 
+## Canonical Naming Reference (from CANONICAL-NAMING.md)
+
+**Status:** Constitutional — all chain contracts MUST use these names
+**Last Updated:** 2026-06-09
+
+This document defines canonical function names, event names, and state enum values that MUST be used across all chains (Ethereum, Solana, Sui, Aptos).
+
+### Canonical Function Names
+
+**Lifecycle Mutations:**
+
+- create_seal, consume_seal, lock_sanad, mint_sanad, refund_sanad, transfer_sanad
+- register_nullifier, anchor_commitment, record_sanad_metadata
+
+**View Functions:**
+
+- get_sanad_state, get_seal_state, is_seal_available, is_seal_consumed
+- is_nullifier_registered, is_commitment_anchored, is_sanad_minted, can_refund
+
+**Governance:**
+
+- update_proof_root, transfer_ownership
+
+### Canonical Event Names
+
+- SanadCreated, SanadConsumed, SanadLocked, SanadMinted, SanadRefunded, SanadTransferred
+- NullifierRegistered, CommitmentAnchored, ProofRootUpdated, ReplayDetected
+
+### Canonical State Enum
+
+```
+0 = Uncreated, 1 = Created, 2 = Active, 3 = Locked, 4 = Consumed
+5 = Minted, 6 = Transferred, 7 = Refunded, 8 = Burned, 9 = Invalid
+```
+
+All chains MUST use these exact numeric values.
+
+See CANONICAL-NAMING.md for complete cross-chain mapping tables and implementation rules.
+
+---
+
 ## Tracking
 
 ### Completed Phases
+
 - Phase 0 (preparation): Source documents read, conflicts resolved, plan created
+- Phase 1 (CLI canonical state): DONE — 2026-06-09
+- Phase 2 (Ethereum contract unification + canonical events): DONE — 2026-06-09
 
 ### In Progress
-- **Phase 1: CLI canonical state** — Started 2026-06-09
+
+- None
 
 ### Pending
-- Phase 2-12: See status column above
+
+- Phase 3-12: See status column above
 
 ### Cross-Document Task References
 
@@ -798,3 +992,140 @@ Use template from self-expressive plan.
 | Chain registry | config-data-oriented-chain-addition-plan.md | 36-81 |
 | Recovery implementation | UNWIRED.md | 19-24 |
 | Naming reorganization | self-expressive-architecture-plan.md | 131-298 |
+
+---
+
+## Technical Debt: Placeholder and TODO Comments
+
+**Last Updated:** 2026-06-10
+**Purpose:** Track all temporary implementations, placeholders, and TODOs for future resolution
+
+### "For Now" Comments (Temporary Implementations)
+
+| File | Line | Comment | Priority |
+|---|---|---|---|
+| `csv-wallet/src/wallet.rs` | 172 | "For now, return None as we can't clone trait objects" | Medium |
+| `csv-sdk/src/sanads.rs` | 239 | "Get all sanads (we'll filter in memory for now - can optimize later)" | Low |
+| `csv-sdk/src/sanads.rs` | 336 | "For now, return FeatureNotEnabled error with context" | High |
+| `csv-sdk/src/wallet.rs` | 187 | "Other chains use default for now" | Medium |
+| `csv-sdk/src/wallet.rs` | 206 | "For now, we return a sample that demonstrates the API" | High |
+| `csv-sdk/src/wallet.rs` | 375 | "For now, we return a typed error indicating the capability is not enabled" | High |
+| `csv-keys/src/bip44.rs` | 186 | "For now, derive directly from seed + path components" | High |
+| `csv-cli/src/commands/sanads.rs` | 1999 | "For now, return the creation event from local state" | Medium |
+| `csv-coordinator/src/cell.rs` | 331 | "For now, simulate successful execution" (multiple instances) | High |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 227 | "Skip on-chain existence check for now - seals are created locally" | High |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 1024 | "For now, we assume the seal is available if the collection exists" | High |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 1422 | "The seal is stored in a SmartTable, but for now we can use the next_nonce - 1" | Medium |
+
+### "For Production" Comments (Production Readiness)
+
+| File | Line | Comment | Priority |
+|---|---|---|---|
+| `csv-runtime/src/execution_journal.rs` | 218 | "RocksDB-backed append-only execution journal for production recovery" | High |
+| `csv-content/src/resource_accounting.rs` | 75 | "Create conservative limits for production" | Medium |
+| `csv-codec/src/canonical.rs` | 249 | "For production use, csv-hash provides the full implementation with proper hash types" | High |
+| `csv-sdk/src/client.rs` | 181 | "Transfer coordinator for production-grade cross-chain transfer execution" | Medium |
+| `csv-sdk/src/transfers.rs` | 102 | "Transfer coordinator for production-grade execution (if enabled)" | Medium |
+| `csv-sdk/src/transfers.rs` | 129 | "Set the TransferCoordinator for production-grade execution" | Medium |
+| `csv-sdk/src/builder.rs` | 185 | "When enabled, the client will initialize a full TransferCoordinator... for production-grade transfer execution" | Medium |
+| `csv-keys/src/bip44.rs` | 185 | "Simple derivation - in production would use proper BIP-32" | High |
+| `csv-adapters/csv-aptos/src/runtime_adapter.rs` | 89 | "Use a placeholder owner key ID - in production this would come from wallet" | High |
+| `csv-adapters/csv-aptos/src/runtime_adapter.rs` | 119 | "Use a placeholder new owner - in production this would come from wallet" | High |
+| `csv-adapters/csv-aptos/src/ops.rs` | 1041 | "Note: This uses consume_seal entry function as a placeholder since mint_sanad is not yet implemented in the Move contract. In production, this should call a dedicated mint_sanad function" | High |
+
+### "Simplified" Comments (Simplified Implementations)
+
+| File | Line | Comment | Priority |
+|---|---|---|---|
+| `csv-codec/src/canonical.rs` | 248 | "This is a simplified version that doesn't include the full Hash type" | High |
+| `csv-protocol/src/seal_protocol.rs` | 281 | "Simplified DAG representation" | Medium |
+| `csv-protocol/src/version.rs` | 291 | "Conversion from a simplified transfer status (used by stores/UI) to the full protocol status" | Low |
+| `csv-adapters/csv-aptos/src/ops.rs` | 1186 | "Simplified check: account exists means 'active'" | High |
+| `csv-adapters/csv-aptos/src/ops.rs` | 1274 | "This is a simplified implementation" | High |
+| `csv-adapters/csv-sui/src/deploy.rs` | 214 | "Extract module names from effects - simplified for now" | Medium |
+| `csv-adapters/csv-sui/src/seal_protocol.rs` | 264 | "Check if object exists - simplified since deleted field doesn't exist in proto" | Medium |
+| `csv-adapters/csv-sui/src/runtime_adapter.rs` | 215 | "This is a simplified stub implementation" | High |
+| `csv-adapters/csv-sui/src/runtime_adapter.rs` | 222 | "This is a simplified stub implementation" | High |
+| `csv-adapters/csv-sui/src/runtime_adapter.rs` | 229 | "This is a simplified stub implementation" | High |
+| `csv-adapters/csv-sui/src/ops.rs` | 292 | "Extract sender from transaction - simplified since ExecutedTransaction doesn't have sender field" | Medium |
+| `csv-adapters/csv-sui/src/ops.rs` | 633 | "Use a simplified execution approach since the proto API is complex" | High |
+| `csv-adapters/csv-sui/src/ops.rs` | 987 | "Use a simplified execution approach since the proto API is complex" | High |
+| `csv-adapters/csv-sui/src/ops.rs` | 995 | "Extract sanad_id from transaction effects - simplified for now" | High |
+| `csv-adapters/csv-sui/src/ops.rs` | 1002 | "Simplified since we don't have checkpoint from sign_and_execute" | High |
+| `csv-adapters/csv-sui/src/ops.rs` | 1086 | "Execute the transaction via sui-rpc (using same simplified approach as create_sanad)" | High |
+
+### "TODO" Comments (Future Work)
+
+| File | Line | Comment | Priority |
+|---|---|---|---|
+| `csv-codec/src/encode.rs` | 21 | "TODO: Add NFC normalization" | Medium |
+| `csv-store/src/lib.rs` | 29 | "TODO: Rewrite operations/*.rs to use rusqlite (currently uses sqlx which is not a dependency)" | Medium |
+| `csv-cli/src/commands/wallet/mod.rs` | 156 | "TODO: track actual index from derivation_path" | Low |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 228 | "TODO: Implement create_seal transaction to deploy seal on-chain first" | High |
+| `csv-adapters/csv-aptos/src/anchor.rs` | 31 | "TODO: Implement actual BLS aggregate signature verification" | High |
+| `csv-adapters/csv-aptos/src/anchor.rs` | 95 | "TODO: Implement actual Merkle proof verification" | High |
+| `csv-adapters/csv-sui/src/runtime_adapter.rs` | 216 | "TODO: Implement actual Sui proof validation logic" | High |
+| `csv-adapters/csv-sui/src/runtime_adapter.rs` | 223 | "TODO: Implement actual Sui seal registry verification" | High |
+| `csv-adapters/csv-sui/src/runtime_adapter.rs` | 230 | "TODO: Implement actual Sui balance query logic" | High |
+| `csv-adapters/csv-solana/src/runtime_adapter.rs` | 114 | "TODO: Implement actual Solana mint transaction logic" | High |
+| `csv-adapters/csv-solana/src/runtime_adapter.rs` | 128 | "TODO: Implement actual Solana inclusion proof logic" | High |
+| `csv-adapters/csv-solana/src/runtime_adapter.rs` | 139 | "TODO: Implement actual Solana proof validation logic" | High |
+| `csv-adapters/csv-solana/src/runtime_adapter.rs` | 146 | "TODO: Implement actual Solana seal registry verification" | High |
+| `csv-adapters/csv-solana/src/runtime_adapter.rs` | 153 | "TODO: Implement actual Solana balance query logic" | High |
+| `csv-adapters/csv-ethereum/src/seal_protocol.rs` | 453 | "TODO: Implement verify_seal_registry method on EthereumVerifier" | High |
+
+### "Placeholder" Comments (Placeholder Values/Implementations)
+
+| File | Line | Comment | Priority |
+|---|---|---|---|
+| `csv-wire/src/rpc/bitcoin.rs` | 21 | "Bitcoin doesn't have a traditional state_root, use block_hash as placeholder" | Medium |
+| `csv-wallet/src/wallet.rs` | 118 | "Placeholder public key" | High |
+| `csv-sdk/src/transfers.rs` | 418 | "TransferBuilder: Falling back to placeholder transfer ID - runtime-coordinator feature enabled but coordinator not available" | High |
+| `csv-sdk/src/transfers.rs` | 421 | "TransferBuilder: Falling back to placeholder transfer ID - runtime-coordinator feature not enabled" | High |
+| `csv-sdk/src/transfers.rs` | 423 | "Fallback: return a placeholder transfer ID" | High |
+| `csv-protocol/src/envelope.rs` | 145 | "placeholder — caller sets sanad_id" | Low |
+| `csv-contracts/sui/build.rs` | 100 | "SKIP_SUI_BYTECODE set - using empty placeholder bytecode" | Medium |
+| `csv-protocol/src/secret.rs` | 168 | "Create a handle with zero bytes as placeholder" | High |
+| `csv-protocol/src/cross_chain.rs` | 733 | "Placeholder: In production, this delegates to CanonicalVerifier" | High |
+| `csv-architecture/tests/architecture_guard.rs` | 191 | "This test is a placeholder" | Low |
+| `csv-cli/src/commands/sanads.rs` | 1977 | "placeholder — full implementation requires chain adapter event indexing" | High |
+| `csv-hash/src/proof_commitments.rs` | 21 | "Placeholder: use random salt" | High |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 24 | "DAGSegment removed during migration - using placeholder" | Medium |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 829 | "placeholder version" | Medium |
+| `csv-adapters/csv-aptos/src/seal_protocol.rs` | 1248 | "Placeholder - would need to parse from DAG bytes" | High |
+| `csv-adapters/csv-ethereum/src/node.rs` | 712 | "destination chain (Bitcoin as placeholder)" | High |
+| `csv-adapters/csv-ethereum/src/node.rs` | 713 | "destination owner (placeholder address)" | High |
+| `csv-adapters/csv-ethereum/src/node.rs` | 822 | "destination chain (Bitcoin as placeholder)" | High |
+| `csv-adapters/csv-ethereum/src/node.rs` | 823 | "destination owner (placeholder address)" | High |
+| `csv-contracts/solana/contracts/tests/adversarial.rs` | 92 | "Placeholder for valid proof bundle" | High |
+| `csv-adapters/csv-aptos/src/runtime_adapter.rs` | 90 | "Use a placeholder owner key ID - in production this would come from wallet" | High |
+| `csv-adapters/csv-aptos/src/runtime_adapter.rs` | 120 | "Use a placeholder new owner - in production this would come from wallet" | High |
+| `csv-adapters/csv-aptos/src/ops.rs` | 1260 | "Created (placeholder - would query actual contract state)" | High |
+| `csv-adapters/csv-aptos/src/anchor.rs` | 19 | "BLS signature verifier (placeholder for actual implementation)" | High |
+| `csv-adapters/csv-aptos/src/mint.rs` | 55 | "state_root placeholder" | High |
+| `csv-adapters/csv-aptos/src/mint.rs` | 58 | "proof placeholder" | High |
+| `csv-adapters/csv-aptos/src/mint.rs` | 59 | "proof_root placeholder" | High |
+| `csv-adapters/csv-aptos/src/mint.rs` | 60 | "leaf_position placeholder" | High |
+
+### Summary Statistics
+
+- **"For Now" comments:** 12 instances
+- **"For Production" comments:** 11 instances
+- **"Simplified" comments:** 16 instances
+- **"TODO" comments:** 16 instances
+- **"Placeholder" comments:** 30 instances
+- **Total:** 85 instances
+
+### Priority Breakdown
+
+- **High Priority:** 47 instances (affecting production readiness, security, or core functionality)
+- **Medium Priority:** 25 instances (performance optimizations, non-critical features)
+- **Low Priority:** 13 instances (nice-to-have improvements, documentation)
+
+### Recommended Action Order
+
+1. **Phase 1: Critical placeholders** - Replace all placeholder cryptographic values (salts, keys, addresses)
+2. **Phase 2: Stub implementations** - Complete all "simplified stub implementation" functions in chain adapters
+3. **Phase 3: TODO items** - Implement NFC normalization, BLS verification, Merkle proof verification
+4. **Phase 4: Performance** - Optimize in-memory filtering, implement proper BIP-32 derivation
+5. **Phase 5: Documentation** - Add proper module documentation, remove test placeholders

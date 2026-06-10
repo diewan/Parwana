@@ -41,6 +41,8 @@ pub struct DeploymentManifest {
     pub chain_id: String,
     /// Deployment bytecode checksum (SHA-256)
     pub bytecode_checksum: Hash,
+    /// ABI checksum (SHA-256 of canonical ABI JSON)
+    pub abi_checksum: Hash,
     /// Constructor parameters (canonical CBOR encoded)
     pub constructor_params: Vec<u8>,
     /// Deployment timestamp (Unix epoch seconds)
@@ -64,10 +66,12 @@ impl DeploymentManifest {
         contract_version: String,
         chain_id: String,
         bytecode: &[u8],
+        abi_json: &str,
         constructor_params: Vec<u8>,
         deployer_address: Vec<u8>,
     ) -> Self {
         let bytecode_checksum = Hash::sha256(bytecode);
+        let abi_checksum = Hash::sha256(abi_json.as_bytes());
         let deployment_timestamp = chrono::Utc::now().timestamp() as u64;
 
         Self {
@@ -76,6 +80,7 @@ impl DeploymentManifest {
             contract_version,
             chain_id,
             bytecode_checksum,
+            abi_checksum,
             constructor_params,
             deployment_timestamp,
             deployer_address,
@@ -119,6 +124,11 @@ impl DeploymentManifest {
     /// Verify the bytecode checksum matches the manifest.
     pub fn verify_bytecode(&self, bytecode: &[u8]) -> bool {
         self.bytecode_checksum == Hash::sha256(bytecode)
+    }
+
+    /// Verify the ABI checksum matches the manifest.
+    pub fn verify_abi(&self, abi_json: &str) -> bool {
+        self.abi_checksum == Hash::sha256(abi_json.as_bytes())
     }
 }
 
@@ -335,6 +345,7 @@ mod tests {
             "1.0.0".to_string(),
             "ethereum".to_string(),
             &[1, 2, 3],
+            "{}",
             vec![],
             vec![4, 5, 6],
         );
@@ -350,6 +361,7 @@ mod tests {
             "1.0.0".to_string(),
             "ethereum".to_string(),
             &[1, 2, 3],
+            "{}",
             vec![],
             vec![4, 5, 6],
         );

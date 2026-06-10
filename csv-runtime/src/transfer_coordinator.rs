@@ -2368,10 +2368,48 @@ mod tests {
     };
     use crate::adapter_registry::AdapterRegistryImpl;
     use csv_protocol::finality::ChainCapabilities;
-    use csv_protocol::proof_types::{InclusionProof, ProofBundle};
+    use csv_protocol::proof_taxonomy::{InclusionProof, ProofBundle};
     use csv_storage::ReplayDatabase;
     use std::sync::Arc;
-    use csv_testkit::fixtures::TestAdapter;
+
+    // Local test adapter to avoid orphan rule
+    struct LocalTestAdapter {
+        caps: ChainCapabilities,
+    }
+
+    impl LocalTestAdapter {
+        fn new(caps: ChainCapabilities) -> Self {
+            Self { caps }
+        }
+
+        fn new_bitcoin() -> Self {
+            Self::new(ChainCapabilities::bitcoin())
+        }
+
+        fn build_fake_lock_result() -> LockResult {
+            LockResult {
+                tx_hash: hex::encode([0u8; 32]),
+                block_height: 100,
+            }
+        }
+
+        fn build_fake_mint_result() -> MintResult {
+            MintResult {
+                tx_hash: "0x123".to_string(),
+                block_height: 100,
+            }
+        }
+
+        fn build_fake_inclusion_proof(
+            sanad_id: &csv_hash::Hash,
+        ) -> Result<ProofBundle, String> {
+            // Use deterministic proof fixture from csv-testkit
+            let mut bundle = csv_testkit::fixtures::TestProofBundle::minimal();
+            // Update the seal_ref to match the sanad_id
+            bundle.seal_ref.id = sanad_id.as_bytes().to_vec();
+            Ok(bundle)
+        }
+    }
 
     #[test]
     fn test_registry_entry_roundtrip_preserves_lock_tx_and_output_index() {
@@ -2416,7 +2454,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl ChainAdapter for TestAdapter {
+    impl ChainAdapter for LocalTestAdapter {
         fn chain_id(&self) -> &str {
             "test-chain"
         }
@@ -2426,14 +2464,14 @@ mod tests {
         }
 
         fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
-            csv_protocol::signature::SignatureScheme::Ed25519
+            csv_protocol::signature::SignatureScheme::Secp256k1
         }
 
         async fn lock_sanad(
             &self,
             _transfer: &CrossChainTransfer,
         ) -> Result<LockResult, csv_adapter_core::AdapterError> {
-            Ok(TestAdapter::build_fake_lock_result())
+            Ok(LocalTestAdapter::build_fake_lock_result())
         }
 
         async fn mint_sanad(
@@ -2441,7 +2479,7 @@ mod tests {
             _transfer: &CrossChainTransfer,
             _proof_bundle: &[u8],
         ) -> Result<MintResult, csv_adapter_core::AdapterError> {
-            Ok(TestAdapter::build_fake_mint_result())
+            Ok(LocalTestAdapter::build_fake_mint_result())
         }
 
         async fn build_inclusion_proof(
@@ -2449,7 +2487,7 @@ mod tests {
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
         ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
-            TestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+            LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
                 .map_err(|e| csv_adapter_core::AdapterError::Generic(e))
         }
 
@@ -2545,7 +2583,7 @@ mod tests {
             .unwrap();
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
         let owner = uuid::Uuid::new_v4();
         let runtime_ctx = crate::lease::RuntimeExecutionContext {
@@ -2631,7 +2669,7 @@ mod tests {
             sanad_id: csv_hash::Hash::new([44u8; 32]),
             transition_id: vec![3u8; 32],
         };
-        let proof_bundle = TestAdapter::new_bitcoin()
+        let proof_bundle = LocalTestAdapter::new_bitcoin()
             .build_inclusion_proof(
                 &expected_transfer,
                 &LockResult {
@@ -2699,7 +2737,7 @@ mod tests {
             sanad_id: csv_hash::Hash::new([44u8; 32]),
             transition_id: vec![3u8; 32],
         };
-        let bundle = TestAdapter::new_bitcoin()
+        let bundle = LocalTestAdapter::new_bitcoin()
             .build_inclusion_proof(
                 &expected_transfer,
                 &LockResult {
@@ -2745,7 +2783,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -2949,7 +2987,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3009,7 +3047,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3053,7 +3091,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         // Open the circuit breaker by recording failures
@@ -3148,7 +3186,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3218,7 +3256,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3288,7 +3326,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3398,7 +3436,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3464,7 +3502,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3537,11 +3575,11 @@ mod tests {
         let coordinator = TransferCoordinator::new(replay_db, event_bus);
 
         // Create a test adapter that rejects invalid proof bundles
-        struct MaliciousTestAdapter {
+        struct MaliciousLocalTestAdapter {
             caps: ChainCapabilities,
         }
 
-        impl MaliciousTestAdapter {
+        impl MaliciousLocalTestAdapter {
             fn new() -> Self {
                 Self {
                     caps: ChainCapabilities::bitcoin(),
@@ -3550,7 +3588,7 @@ mod tests {
         }
 
         #[async_trait::async_trait]
-        impl ChainAdapter for MaliciousTestAdapter {
+        impl ChainAdapter for MaliciousLocalTestAdapter {
             fn chain_id(&self) -> &str {
                 "malicious-chain"
             }
@@ -3619,7 +3657,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(MaliciousTestAdapter::new()))
+            .register_adapter(Box::new(MaliciousLocalTestAdapter::new()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3663,7 +3701,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3746,7 +3784,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3832,7 +3870,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {

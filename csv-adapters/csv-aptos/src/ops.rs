@@ -12,13 +12,13 @@ use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_protocol::backend::{
+use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
     FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use sha3::{Digest, Sha3_256};
@@ -651,7 +651,7 @@ impl ChainSanadOps for AptosBackend {
         asset_id: &str,
         metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
-        use csv_protocol::backend::SanadOperation;
+        use csv_protocol::chain_adapter_traits::SanadOperation;
         use sha2::{Digest, Sha256};
 
         let commitment_bytes: [u8; 32] = {
@@ -730,7 +730,7 @@ impl ChainSanadOps for AptosBackend {
 
         #[cfg(feature = "rpc")]
         {
-            use csv_protocol::backend::SanadOperation;
+            use csv_protocol::chain_adapter_traits::SanadOperation;
             use crate::types::AptosSealPoint;
 
             // The sanad_id is the commitment hash
@@ -822,7 +822,7 @@ impl ChainSanadOps for AptosBackend {
     ) -> ChainOpResult<SanadOperationResult> {
         #[cfg(feature = "rpc")]
         {
-            use csv_protocol::backend::SanadOperation;
+            use csv_protocol::chain_adapter_traits::SanadOperation;
 
             // Parse the destination chain to ensure it's valid
             let _destination = destination_chain
@@ -977,7 +977,7 @@ impl ChainSanadOps for AptosBackend {
     ) -> ChainOpResult<SanadOperationResult> {
         #[cfg(feature = "rpc")]
         {
-            use csv_protocol::backend::SanadOperation;
+            use csv_protocol::chain_adapter_traits::SanadOperation;
 
             // Parse the source chain to ensure it's valid
             let _source = source_chain

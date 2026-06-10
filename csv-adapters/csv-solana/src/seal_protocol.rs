@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;

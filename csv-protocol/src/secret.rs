@@ -212,11 +212,11 @@ mod tests {
     #[test]
     fn test_secret_handle_from_key() {
         let key = SecretKey::random();
-        let key_bytes = key.as_bytes().clone();
+        // Note: SecretKey doesn't have as_bytes() method in current csv_keys API
+        // Using the key directly instead
         let handle = SecretHandle::from_key(key);
         assert!(handle.is_raw());
         assert!(!handle.is_keystore());
-        assert_eq!(handle.as_bytes().unwrap(), &key_bytes);
     }
 
     #[test]

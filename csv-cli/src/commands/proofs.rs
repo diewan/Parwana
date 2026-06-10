@@ -197,7 +197,7 @@ async fn cmd_verify(
     proof_tree: bool,
 ) -> Result<()> {
     use csv_hash::sanad::SanadId;
-    use csv_protocol::proof_types::ProofBundle;
+    use csv_protocol::proof_taxonomy::ProofBundle;
     use csv_sdk::prelude::CsvClient;
 
     output::header(&format!("Verifying Proof on {}", chain));
@@ -305,7 +305,7 @@ async fn cmd_verify(
             dag::{DAGNode, DAGSegment},
             seal::{CommitAnchor, SealPoint},
         };
-        use csv_protocol::proof_types::{FinalityProof, InclusionProof};
+        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 
         let dag_root = hex::decode(&proof_output.dag_root)
             .ok()

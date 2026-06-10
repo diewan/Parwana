@@ -13,13 +13,13 @@ use blake2::Digest as Blake2Digest;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::{CommitAnchor, SealPoint};
-use csv_protocol::backend::{
+use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
     FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
 use ed25519_dalek::{Verifier, VerifyingKey};

@@ -13,8 +13,8 @@ use csv_protocol::finality::capabilities::{
     ReplayProtectionModel, ReorgRisk, ChainRole
 };
 use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_types::ProofBundle;
-use csv_protocol::backend::ChainBackend;
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::chain_adapter_traits::ChainBackend;
 use std::sync::Arc;
 
 use crate::ops::SuiBackend;
@@ -82,7 +82,7 @@ impl ChainAdapter for SuiRuntimeAdapter {
         transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
         // Use the backend's lock_sanad method which properly constructs and signs the transaction
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
@@ -108,13 +108,13 @@ impl ChainAdapter for SuiRuntimeAdapter {
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
         // Use the backend's mint_sanad method which properly constructs and signs the transaction
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let source_chain = &transfer.source_chain;
 
         // Parse proof bundle to extract needed fields
-        let proof_bundle: csv_protocol::proof_types::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
+        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
             .map_err(|e| AdapterError::Generic(format!("Failed to decode proof bundle: {}", e)))?;
 
         // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])
@@ -153,7 +153,7 @@ impl ChainAdapter for SuiRuntimeAdapter {
             .map_err(|_| AdapterError::Generic("Invalid lock tx hash length".to_string()))?;
 
         // Build inclusion proof using the backend
-        use csv_protocol::backend::ChainProofProvider;
+        use csv_protocol::chain_adapter_traits::ChainProofProvider;
 
         let inclusion_proof = self.backend
             .build_inclusion_proof(&transfer.sanad_id, lock_result.block_height, lock_tx_hash.as_bytes())
@@ -162,7 +162,7 @@ impl ChainAdapter for SuiRuntimeAdapter {
 
         // Convert to ProofBundle - need to construct it properly
         // For now, return a minimal ProofBundle with the inclusion proof
-        use csv_protocol::proof_types::{FinalityProof};
+        use csv_protocol::proof_taxonomy::{FinalityProof};
         use csv_hash::seal::{CommitAnchor, SealPoint};
 
         let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)
@@ -174,7 +174,7 @@ impl ChainAdapter for SuiRuntimeAdapter {
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
         // Create a canonical ProofLeafV1 for this transfer
-        use csv_protocol::proof_types::ProofLeafV1;
+        use csv_protocol::proof_taxonomy::ProofLeafV1;
         let proof_leaf = ProofLeafV1::new(
             transfer.source_chain.clone(),
             transfer.destination_chain.clone(),
