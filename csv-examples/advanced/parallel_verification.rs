@@ -1,9 +1,10 @@
-//! Parallel Operations Example
-//!
-//! This example demonstrates concurrent Sanad creation and queries,
-//! useful for high-throughput scenarios like batch processing or gaming.
-//!
-//! Run with: `cargo run --example parallel_verification --features "all-chains,tokio" --release`
+use csv_hash::Hash;
+// Parallel Operations Example
+// 
+// This example demonstrates concurrent Sanad creation and queries,
+// useful for high-throughput scenarios like batch processing or gaming.
+// 
+// Run with: `cargo run --example parallel_verification --features "all-chains,tokio" --release`
 
 use csv_sdk::prelude::*;
 use std::sync::Arc;
@@ -28,7 +29,7 @@ async fn main() -> Result<()> {
 
     for i in 0..num_sanads {
         let commitment = Hash::from([i as u8; 32]);
-        let _ = client.sanads().create(commitment, ChainId::new("bitcoin"));
+        let _ = client.sanads().create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"));
     }
 
     let seq_duration = start.elapsed();
@@ -56,7 +57,7 @@ async fn main() -> Result<()> {
                     let commitment = Hash::from([(thread_id * sanads_per_thread + i) as u8; 32]);
                     let _ = client_ref
                         .sanads()
-                        .create(commitment, ChainId::new("ethereum"));
+                        .create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("ethereum"));
                 }
                 sanads_per_thread
             })
@@ -82,7 +83,7 @@ async fn main() -> Result<()> {
     // First create a sanad to query repeatedly
     let test_sanad = client_arc
         .sanads()
-        .create(Hash::from([255u8; 32]), ChainId::new("bitcoin"))?;
+        .create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, Hash::from([255u8; 32]), None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), Hash::from([255u8; 32]), csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"))?;
 
     let num_queries = 1000;
     let start = Instant::now();

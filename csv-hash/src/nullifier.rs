@@ -57,7 +57,8 @@ use crate::seal::SealPoint;
 use crate::{DomainSeparatedHash, ReplayRegistryDomain};
 
 /// A seal consumption event recording when and where a seal was used.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SealConsumption {
     /// Which chain enforced this consumption
     pub chain: ChainId,

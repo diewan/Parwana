@@ -18,6 +18,7 @@
 //! - Checksum for integrity verification
 
 use csv_hash::Hash;
+use crate::transfer_state::TransferStage;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -481,6 +482,153 @@ mod tests {
             .unwrap();
         let recovered = manager.recover().unwrap();
 
-        assert_eq!(recovered.checkpoint.sequence, 1);
+    assert_eq!(recovered.checkpoint.sequence, 1);
+     }
+
+     #[test]
+     fn test_execute_from_lock_recovery() {
+         let ctx = execute_from_lock_recovery(
+             "test-transfer-1",
+             Some(vec![1, 2, 3]),
+             Hash::new([1u8; 32]),
+         );
+
+         assert_eq!(ctx.transfer_id, "test-transfer-1");
+         assert_eq!(ctx.resume_stage, TransferStage::AwaitingFinality);
+         assert_eq!(ctx.proof_payload, Some(vec![1, 2, 3]));
+         assert!(ctx.lock_tx_hash.is_some());
+         assert!(ctx.mint_tx_hash.is_none());
+     }
+
+     #[test]
+     fn test_execute_from_proof_recovery() {
+         let ctx = execute_from_proof_recovery(
+             "test-transfer-2",
+             vec![4, 5, 6],
+             Hash::new([2u8; 32]),
+         );
+
+         assert_eq!(ctx.transfer_id, "test-transfer-2");
+         assert_eq!(ctx.resume_stage, TransferStage::MintSubmitted);
+         assert_eq!(ctx.proof_payload, Some(vec![4, 5, 6]));
+         assert!(ctx.lock_tx_hash.is_some());
+     }
+
+     #[test]
+     fn test_execute_awaiting_finality_recovery() {
+         let ctx = execute_awaiting_finality_recovery(
+             "test-transfer-3",
+             12345,
+             Hash::new([3u8; 32]),
+         );
+
+         assert_eq!(ctx.transfer_id, "test-transfer-3");
+         assert_eq!(ctx.resume_stage, TransferStage::AwaitingFinality);
+         assert_eq!(ctx.proof_height, Some(12345));
+     }
+
+     #[test]
+     fn test_execute_proof_building_recovery() {
+         let ctx = execute_proof_building_recovery(
+             "test-transfer-4",
+             None,
+             Hash::new([4u8; 32]),
+         );
+
+         assert_eq!(ctx.transfer_id, "test-transfer-4");
+         assert_eq!(ctx.resume_stage, TransferStage::ProofBuilding);
+     }
+}
+
+// ==================== Recovery Path Implementations ====================
+
+/// Recovery context for resuming a transfer after crash.
+#[derive(Debug, Clone)]
+pub struct RecoveryContext {
+    /// Transfer ID
+    pub transfer_id: String,
+    /// Current stage to resume from
+    pub resume_stage: TransferStage,
+    /// Proof payload bytes (if available from journal)
+    pub proof_payload: Option<Vec<u8>>,
+    /// Lock transaction hash (if available)
+    pub lock_tx_hash: Option<Hash>,
+    /// Mint transaction hash (if available)
+    pub mint_tx_hash: Option<Hash>,
+    /// Proof height for finality polling
+    pub proof_height: Option<u64>,
+}
+
+/// Execute recovery from LockConfirmed state.
+///
+/// Loads the LockConfirmed journal entry, reconstructs the Locked typestate,
+/// and resumes execution at AwaitingFinality.
+pub fn execute_from_lock_recovery(
+    transfer_id: &str,
+    proof_payload: Option<Vec<u8>>,
+    lock_tx_hash: Hash,
+) -> RecoveryContext {
+    RecoveryContext {
+        transfer_id: transfer_id.to_string(),
+        resume_stage: TransferStage::AwaitingFinality,
+        proof_payload,
+        lock_tx_hash: Some(lock_tx_hash),
+        mint_tx_hash: None,
+        proof_height: None,
+    }
+}
+
+/// Execute recovery from ProofValidated state.
+///
+/// Loads proof bytes from journal, skips proof generation,
+/// and goes straight to minting.
+pub fn execute_from_proof_recovery(
+    transfer_id: &str,
+    proof_payload: Vec<u8>,
+    lock_tx_hash: Hash,
+) -> RecoveryContext {
+    RecoveryContext {
+        transfer_id: transfer_id.to_string(),
+        resume_stage: TransferStage::MintSubmitted,
+        proof_payload: Some(proof_payload),
+        lock_tx_hash: Some(lock_tx_hash),
+        mint_tx_hash: None,
+        proof_height: None,
+    }
+}
+
+/// Execute recovery for AwaitingFinality state.
+///
+/// Re-polls the finality monitor with the proof height from the journal.
+pub fn execute_awaiting_finality_recovery(
+    transfer_id: &str,
+    proof_height: u64,
+    lock_tx_hash: Hash,
+) -> RecoveryContext {
+    RecoveryContext {
+        transfer_id: transfer_id.to_string(),
+        resume_stage: TransferStage::AwaitingFinality,
+        proof_payload: None,
+        lock_tx_hash: Some(lock_tx_hash),
+        mint_tx_hash: None,
+        proof_height: Some(proof_height),
+    }
+}
+
+/// Execute recovery for ProofBuilding state.
+///
+/// Checks for a persisted checkpoint and resumes if it exists.
+pub fn execute_proof_building_recovery(
+    transfer_id: &str,
+    checkpoint: Option<RuntimeCheckpoint>,
+    lock_tx_hash: Hash,
+) -> RecoveryContext {
+    RecoveryContext {
+        transfer_id: transfer_id.to_string(),
+        resume_stage: TransferStage::ProofBuilding,
+        proof_payload: None,
+        lock_tx_hash: Some(lock_tx_hash),
+        mint_tx_hash: None,
+        proof_height: None,
     }
 }

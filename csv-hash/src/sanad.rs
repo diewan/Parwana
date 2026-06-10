@@ -1,12 +1,28 @@
 //! Sanad identifier types
+//!
+//! SanadId derivation uses domain-separated tagged hashing:
+//! ```text
+//! SanadId = tagged_hash("urn:lnp-bp:csv:csv.sanad.id.v1", descriptor_hash || commitment || salt)
+//! ```
+//!
+//! This ensures:
+//! - Salt affects the ID (prevents collision when same commitment used with different salts)
+//! - Descriptor hash binds content metadata to the ID
+//! - Domain separation prevents cross-protocol replay
 
-use crate::Hash;
+use crate::{Hash, csv_tagged_hash, tagged_hash_str};
 
 /// A unique Sanad identifier.
 ///
-/// Computed as `H(commitment || salt)` to ensure uniqueness
-/// even when the same state is committed to multiple times.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+/// Derived via domain-separated tagged hashing:
+/// ```text
+/// SanadId = tagged_hash("csv.sanad.id.v1", descriptor_hash || commitment_bytes || salt)
+/// ```
+///
+/// The domain tag `csv.sanad.id.v1` ensures Sanad IDs are cryptographically
+/// separated from all other protocol hashes (commitments, nullifiers, proof leaves).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SanadId(pub Hash);
 
 impl SanadId {
@@ -28,6 +44,54 @@ impl SanadId {
         let mut array = [0u8; 32];
         array.copy_from_slice(bytes);
         Self::new(array)
+    }
+
+    /// Derives a SanadId from a descriptor hash, commitment, and salt.
+    ///
+    /// Uses domain-separated tagged hashing:
+    /// ```text
+    /// SanadId = tagged_hash("urn:lnp-bp:csv:csv.sanad.id.v1", descriptor_hash || commitment || salt)
+    /// ```
+    ///
+    /// ## Arguments
+    ///
+    /// * `descriptor_hash` — 32-byte hash of the SanadPayloadDescriptor (canonical CBOR)
+    /// * `commitment` — 32-byte commitment hash
+    /// * `salt` — Salt bytes that affect the ID derivation
+    ///
+    /// ## Security
+    ///
+    /// The domain tag `csv.sanad.id.v1` ensures this hash is cryptographically
+    /// separated from all other protocol hashes. The descriptor_hash binds content
+    /// metadata to the Sanad identity. The salt ensures uniqueness even when the
+    /// same commitment is used multiple times.
+    #[inline]
+    pub fn from_descriptor_commitment_salt(
+        descriptor_hash: &[u8; 32],
+        commitment: &[u8; 32],
+        salt: &[u8],
+    ) -> Self {
+        let mut combined = Vec::with_capacity(64 + salt.len());
+        combined.extend_from_slice(descriptor_hash);
+        combined.extend_from_slice(commitment);
+        combined.extend_from_slice(salt);
+        let hash_bytes = tagged_hash_str("urn:lnp-bp:csv:csv.sanad.id.v1", &combined);
+        Self(Hash::new(hash_bytes))
+    }
+
+    /// Derives a SanadId from a descriptor hash, commitment, and salt.
+    ///
+    /// Convenience wrapper that accepts descriptor_hash as `Hash`.
+    pub fn from_descriptor_commitment(
+        descriptor_hash: Hash,
+        commitment: Hash,
+        salt: &[u8],
+    ) -> Self {
+        Self::from_descriptor_commitment_salt(
+            descriptor_hash.as_bytes(),
+            commitment.as_bytes(),
+            salt,
+        )
     }
 
     /// Returns the underlying hash bytes.

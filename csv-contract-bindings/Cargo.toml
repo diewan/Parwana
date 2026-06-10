@@ -5,7 +5,7 @@ edition = "2024"
 description = "CSV Contract Bindings - Type-safe smart contract ABI bindings for all supported chains"
 
 [dependencies]
-csv-hash = { path = "../csv-hash" }
+csv-hash = { path = "../csv-hash", features = ["serde"] }
 csv-codec = { path = "../csv-codec" }
 chrono = { workspace = true }
 serde = { workspace = true }

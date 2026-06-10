@@ -10,7 +10,7 @@ pub mod negotiation;
 pub mod router;
 pub mod wallet;
 
-pub use cell::InboundTransfer;
+pub use cell::TransferTask;
 pub use cell::{CellConfig, CellError, CellTask, ChainCell};
 pub use circuit::{CellCircuitBreaker, CircuitState};
 pub use memory::MemoryCeiling;

@@ -1,9 +1,10 @@
-//! Cross-Chain Subscriptions Example
-//!
-//! This example demonstrates how to create and manage subscription sanads
-//! that can be transferred across chains.
-//!
-//! Run with: `cargo run --example subscriptions --features "all-chains,tokio"`
+use csv_hash::Hash;
+// Cross-Chain Subscriptions Example
+// 
+// This example demonstrates how to create and manage subscription sanads
+// that can be transferred across chains.
+// 
+// Run with: `cargo run --example subscriptions --features "all-chains,tokio"`
 
 use csv_sdk::prelude::*;
 
@@ -23,7 +24,7 @@ async fn main() -> Result<()> {
     println!("Creating subscription sanad on Bitcoin...");
     let commitment = Hash::from([1u8; 32]);
 
-    let sanad = client.sanads().create(commitment, ChainId::new("bitcoin"))?;
+    let sanad = client.sanads().create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"))?;
 
     println!("✓ Created sanad: {:?}\n", sanad.id);
 

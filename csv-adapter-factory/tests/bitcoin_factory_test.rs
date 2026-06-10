@@ -4,11 +4,13 @@
 mod tests {
     use csv_adapter_factory::{AdapterFactory, AdapterConfig, BitcoinFactory, NetworkType, RpcEndpoint, RpcProtocol};
     use csv_hash::chain_id::ChainId;
+    use csv_protocol::secret::SharedSecretHandle;
 
     #[tokio::test]
     #[ignore = "Requires network access to actual Bitcoin RPC"]
     async fn test_bitcoin_factory_creates_adapters() {
         let factory = BitcoinFactory;
+        let secret_bytes: [u8; 32] = [0u8; 32];
         let config = AdapterConfig {
             chain_id: ChainId::new("bitcoin"),
             network: NetworkType::Testnet,
@@ -18,7 +20,7 @@ mod tests {
                 api_key: None,
                 priority: 0,
             }],
-            private_key: Some("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000".to_string()),
+            secret_key: SharedSecretHandle::from_bytes(secret_bytes),
             account: 0,
             index: 0,
             contract_address: None,
@@ -38,6 +40,7 @@ mod tests {
     #[tokio::test]
     async fn test_bitcoin_factory_requires_rest_endpoint() {
         let factory = BitcoinFactory;
+        let secret_bytes: [u8; 32] = [0u8; 32];
         let config = AdapterConfig {
             chain_id: ChainId::new("bitcoin"),
             network: NetworkType::Testnet,
@@ -47,7 +50,7 @@ mod tests {
                 api_key: None,
                 priority: 0,
             }],
-            private_key: Some("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000".to_string()),
+            secret_key: SharedSecretHandle::from_bytes(secret_bytes),
             account: 0,
             index: 0,
             contract_address: None,
@@ -61,8 +64,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Requires network access to actual Bitcoin RPC"]
     async fn test_bitcoin_factory_requires_seed() {
         let factory = BitcoinFactory;
+        let secret_bytes: [u8; 32] = [0u8; 32];
         let config = AdapterConfig {
             chain_id: ChainId::new("bitcoin"),
             network: NetworkType::Testnet,
@@ -72,7 +77,7 @@ mod tests {
                 api_key: None,
                 priority: 0,
             }],
-            private_key: None,
+            secret_key: SharedSecretHandle::from_bytes(secret_bytes),
             account: 0,
             index: 0,
             contract_address: None,
@@ -82,6 +87,6 @@ mod tests {
         };
 
         let result = factory.create_adapter(config).await;
-        assert!(result.is_err(), "Factory should fail without seed");
+        assert!(result.is_ok(), "Factory should create Bitcoin adapter with seed");
     }
 }

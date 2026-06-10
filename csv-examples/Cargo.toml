@@ -6,6 +6,8 @@ publish = false
 
 [dependencies]
 csv-sdk = { path = "../csv-sdk", features = ["all-chains", "tokio"] }
+csv-protocol = { path = "../csv-protocol" }
+csv-hash = { path = "../csv-hash" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
 # Getting started examples

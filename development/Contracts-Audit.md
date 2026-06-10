@@ -1,378 +1,158 @@
-I inspected the uploaded Repomix bundle. Your diagnosis is correct: the project has **two conflicting truths** right now: contracts emit/store some state, while the CLI mostly relies on **local display records and ad-hoc chain-specific queries**. That makes Sanad/Seal lifecycle untraceable across chains. The repo itself says the CLI “holds NO protocol authority state” and only stores display records, while protocol state should live in runtime/on-chain systems, but the current contracts do not expose a uniform state API everywhere. 
+# Contracts Audit — Canonical Lifecycle State Machine
 
-## Main audit findings
+**Last validated:** 2025-06-09
+**Status:** Active — tracks canonical event naming, state enum, and query interface across all chains.
 
-### 1. Canonical docs exist, but contracts do not consistently implement them
+## Current State
 
-The docs define canonical events that all chains must follow:
+### 1. Canonical Events Across Chains
 
-`SanadCreated`, `SanadConsumed`, `CrossChainLock`, `CrossChainMint`, `CrossChainRefund`, `NullifierRegistered`, `ProofAccepted`, `ProofRejected`, and `ReplayDetected`. 
+All four chains define the canonical event names. Ethereum, Solana, and Sui emit them correctly. Aptos has two versions with different conformance levels.
 
-But Ethereum uses mixed names:
+| Event | Ethereum (CSVSeal.sol) | Solana | Sui | Aptos (legacy) | Aptos (sources) |
+|-------|----------------------|--------|-----|-----------------|-----------------|
+| SanadCreated | Emitted | Emitted | Emitted | Emitted | Emitted |
+| SanadConsumed | Emitted | Emitted | Emitted | Emitted | Emitted |
+| SanadLocked | Emitted | Defined | Emitted | Emitted | **MISSING** |
+| CrossChainLock | Emitted (alongside SanadLocked) | Defined | Emitted | Emitted | Emitted |
+| SanadMinted | Emitted | Emitted | Emitted | Emitted | **MISSING** |
+| CrossChainMint | Emitted (alongside SanadMinted) | Defined | Emitted | Emitted | Emitted |
+| SanadRefunded | Emitted | Emitted | Emitted | Emitted | Emitted |
+| CrossChainRefund | Emitted (alongside SanadRefunded) | Defined | Emitted | Emitted | Emitted |
+| SanadTransferred | Emitted | Emitted | Emitted | Emitted | **MISSING** |
+| NullifierRegistered | Emitted | Emitted | Emitted | Emitted | Emitted |
+| ReplayDetected | Emitted | Emitted | Emitted | **MISSING** | **MISSING** |
+| CommitmentAnchored | Emitted | **MISSING** | Emitted | **MISSING** | **MISSING** |
+| ProofRootUpdated | **MISSING** | **MISSING** | Emitted | **MISSING** | **MISSING** |
 
-* `CSVLock` has `CrossChainLock`, `SealUsed`, `SanadRefunded`.
-* `CSVMint` has `SanadMinted`, `NullifierRegistered`, `CommitmentAnchored`, `ProofRootUpdated`.
-* `CSVSeal` merges lock and mint logic but still uses mixed names like `SealUsed`, `SanadMinted`, `SanadRefunded`.
+**Verdict: PARTIAL** — Ethereum, Solana, Sui, and Aptos-legacy are mostly compliant. Aptos-sources version is significantly behind: missing `SanadLocked`, `SanadMinted`, `SanadTransferred`, `ReplayDetected`, `CommitmentAnchored`, `ProofRootUpdated`.
 
-That is the naming inconsistency you saw: `CSVLock`, `CreateSanad`, `SealUsed`, `SanadMinted`, `CrossChainMint`, and `SanadConsumed` are not being treated as one canonical lifecycle vocabulary.
+### 2. Canonical State Enum
 
-### 2. Ethereum has partial state tracing, but it is incomplete and inconsistent
+All chains define the 10-state enum (0-9):
 
-`CSVLock` exposes `getSanadState(bytes32)` returning a state enum like `Uncreated=0, Active=1, Locked=2, Consumed=3, Refunded=4`, plus used/refund metadata. 
+| Chain | State Enum | Values | Query Interface |
+|-------|-----------|--------|-----------------|
+| Ethereum (CSVSeal.sol) | `enum SanadState` | Uncreated=0 through Invalid=9 | `get_sanad_state(bytes32)` returns full view, `get_seal_state(bytes32)` |
+| Solana | `enum SanadState` (repr u8) | Uncreated=0 through Invalid=9 | `get_sanad_state` exists; `get_seal_state` missing |
+| Sui | Constants `SANAD_STATE_*` | 0-9 | `public fun state(seal: &Seal): u8` — returns raw u8, not full view |
+| Aptos (legacy) | Constants `SANAD_STATE_*` | 0-9 | `public fun get_sanad_state(addr: address): u8` — returns raw u8 |
+| Aptos (sources) | **MISSING** | — | **No query functions** |
 
-But `CSVSeal`, the merged Ethereum contract, appears not to expose the same `getSanadState` interface in the Repomix summary. The CLI specifically calls Ethereum `getSanadState(bytes32)`, so if the deployed contract is `CSVSeal` or `CSVMint` rather than `CSVLock`, status can silently become wrong or incomplete.
+**Verdict: PARTIAL** — Ethereum has the most complete query interface (full state view). Solana has `get_sanad_state` only. Sui and Aptos-legacy return raw u8. Aptos-sources has no state enum or query functions.
 
-### 3. CLI collapses important states into “Active” or “Consumed”
+### 3. SanadStateReader Trait (Rust side)
 
-The CLI `sanad list --update` logic maps several on-chain states poorly. For Ethereum, the code comments say `getSanadState` returns state values, but the CLI maps `3` to `Consumed`, `4` to `Consumed`, and everything else to `Active`. That destroys distinctions between:
-
-* `Uncreated`
-* `Created`
-* `Active`
-* `Locked`
-* `Minted`
-* `Transferred`
-* `Refunded`
-* `Burned/Consumed`
-
-So the CLI cannot show a true lifecycle even when the contract gives it more detail. 
-
-### 4. Solana is closest to canonical events, but still needs explicit queryable state
-
-Solana has event structs for `SanadCreated`, `SanadConsumed`, `CrossChainLock`, `CrossChainMint`, `CrossChainRefund`, `SanadTransferred`, `NullifierRegistered`, and metadata. That is better than Ethereum’s naming. However, the CLI still needs a uniform `get_sanad_state` / account decoding path rather than custom partial parsing.
-
-### 5. Aptos and Sui have Seal objects with flags, not a canonical state machine
-
-Aptos and Sui represent seals with fields like `consumed`, `locked`, owner, commitment, metadata, and proof fields. That is useful, but it is still not a canonical Sanad lifecycle enum. A pair of booleans cannot safely express all valid states. For example:
-
-* `consumed=false, locked=false` could mean created, active, refunded, or transferred depending on history.
-* `consumed=true, locked=true` could mean locked, minted, or consumed depending on destination proof status.
-
-The RFC already recognizes state-machine complexity and proposes formal transition rules and forbidden-transition tests. 
-
----
-
-# Recommended canonical model
-
-Use one vocabulary everywhere.
-
-## Canonical object names
-
-Use these terms consistently:
-
-| Concept   | Canonical name     | Meaning                                             |
-| --------- | ------------------ | --------------------------------------------------- |
-| Sanad     | `Sanad`            | The transferable proof-bearing asset/state object   |
-| Seal      | `Seal`             | Single-use constraint/nullifier backing a Sanad     |
-| Nullifier | `Nullifier`        | Replay-prevention value proving one-time use        |
-| Lock      | `CrossChainLock`   | Source-chain transition for cross-chain transfer    |
-| Mint      | `CrossChainMint`   | Destination-chain creation after proof verification |
-| Refund    | `CrossChainRefund` | Recovery after failed/expired transfer              |
-
-Avoid these as primary names:
-
-* `CSVLock` as the main contract name.
-* `CreateSanad` in one chain and `create_seal` in another for the same lifecycle operation.
-* `SealUsed` when the canonical meaning is `SanadConsumed`.
-* `SanadMinted` when the canonical event is `CrossChainMint`.
-
-## Canonical state enum
-
-Every chain should expose the same logical state enum:
-
-```text
-0 = Uncreated
-1 = Created
-2 = Active
-3 = Locked
-4 = Consumed
-5 = Minted
-6 = Transferred
-7 = Refunded
-8 = Burned
-9 = Invalid
-```
-
-Minimum query interface on every chain:
-
-```text
-get_sanad_state(sanad_id) -> SanadStateView
-get_seal_state(seal_id) -> SealStateView
-is_sanad_created(sanad_id) -> bool
-is_sanad_active(sanad_id) -> bool
-is_sanad_locked(sanad_id) -> bool
-is_sanad_consumed(sanad_id) -> bool
-is_sanad_minted(sanad_id) -> bool
-is_sanad_refunded(sanad_id) -> bool
-is_nullifier_used(nullifier) -> bool
-```
-
-Canonical view structure:
-
-```text
-SanadStateView {
-  sanad_id
-  seal_id
-  commitment
-  owner
-  source_chain
-  current_chain
-  destination_chain
-  state
-  created_at
-  updated_at
-  locked_at
-  consumed_at
-  minted_at
-  transferred_at
-  refunded_at
-  nullifier
-  last_tx
-  version
-}
-```
-
-This is the missing piece that makes the CLI reliable.
-
----
-
-# Chain-by-chain contract fixes
-
-## Ethereum
-
-Unify around one deployed contract: preferably `CSVSeal`, not separate `CSVLock` + `CSVMint`, unless there is a strong architectural reason.
-
-Add or rename events to match canonical schema:
-
-```solidity
-event SanadCreated(bytes32 indexed sanad_id, bytes32 commitment, address indexed owner, uint256 timestamp);
-event SanadConsumed(bytes32 indexed sanad_id, bytes32 indexed nullifier, uint256 timestamp);
-event CrossChainLock(bytes32 indexed sanad_id, string source_chain, string destination_chain, bytes32 commitment, uint256 timestamp);
-event CrossChainMint(bytes32 indexed sanad_id, bytes32 commitment, address indexed owner, string source_chain, uint256 timestamp);
-event CrossChainRefund(bytes32 indexed sanad_id, bytes32 commitment, string reason, uint256 timestamp);
-event SanadTransferred(bytes32 indexed sanad_id, address indexed from, address indexed to, uint256 timestamp);
-event NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanad_id, uint256 timestamp);
-event ProofAccepted(bytes32 indexed proof_root, string protocol_version, uint256 timestamp);
-event ProofRejected(bytes32 indexed proof_root, string reason, uint256 timestamp);
-event ReplayDetected(bytes32 indexed replay_id, bytes32 indexed sanad_id, uint256 timestamp);
-```
-
-Add a real state mapping:
-
-```solidity
-enum SanadState {
-    Uncreated,
-    Created,
-    Active,
-    Locked,
-    Consumed,
-    Minted,
-    Transferred,
-    Refunded,
-    Burned,
-    Invalid
-}
-
-struct SanadStateRecord {
-    SanadState state;
-    bytes32 sanadId;
-    bytes32 sealId;
-    bytes32 commitment;
-    address owner;
-    uint8 sourceChain;
-    uint8 currentChain;
-    uint8 destinationChain;
-    bytes32 nullifier;
-    uint256 createdAt;
-    uint256 updatedAt;
-    uint256 lockedAt;
-    uint256 consumedAt;
-    uint256 mintedAt;
-    uint256 refundedAt;
-}
-```
-
-Every lifecycle function must update this record and emit the canonical event.
-
-Important: keep legacy events like `SealUsed` and `SanadMinted` only temporarily as compatibility aliases. The indexer and CLI should use canonical events.
-
-## Aptos
-
-Add a `SanadStateRecord` resource/table keyed by `sanad_id`.
-
-Do not rely only on `Seal { consumed, locked }`.
-
-Expose:
-
-```move
-public fun get_sanad_state(sanad_id: vector<u8>): SanadStateView
-public fun get_seal_state(seal_id: vector<u8>): SealStateView
-public fun is_nullifier_used(nullifier: vector<u8>): bool
-```
-
-Emit canonical events with the same semantic fields as Ethereum and Solana. Aptos already has several of these structs, but the important fix is to wire them to every state transition and expose one normalized state view.
-
-## Sui
-
-Sui’s object model is good for ownership, but the current `Seal` object’s booleans are not enough. Add an explicit `state: u8` or `SanadState` field to the `Seal`/Sanad object.
-
-Expose:
-
-```move
-public fun state(seal: &Seal): u8
-public fun sanad_id(seal: &Seal): vector<u8>
-public fun seal_state_view(seal: &Seal): SealStateView
-```
-
-For events, use canonical names:
-
-* `SanadCreated`
-* `SanadConsumed`
-* `CrossChainLock`
-* `CrossChainMint`
-* `CrossChainRefund`
-* `SanadTransferred`
-* `NullifierRegistered`
-* `ReplayDetected`
-
-## Solana
-
-Solana events are already closer to the canonical schema. The missing part is a stable account query model.
-
-Add or confirm `SanadAccount` contains:
+Defined in `csv-protocol/src/backend.rs:548-557`:
 
 ```rust
-pub state: u8,
-pub sanad_id: [u8; 32],
-pub seal_id: [u8; 32],
-pub commitment: [u8; 32],
-pub owner: Pubkey,
-pub source_chain: u8,
-pub current_chain: u8,
-pub destination_chain: u8,
-pub nullifier: [u8; 32],
-pub created_at: i64,
-pub updated_at: i64,
-pub locked_at: i64,
-pub consumed_at: i64,
-pub minted_at: i64,
-pub refunded_at: i64,
+pub trait SanadStateReader: Send + Sync {
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState>;
+    async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState>;
+    async fn trace_sanad(&self, sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>>;
+}
 ```
 
-Then the CLI should fetch and decode `SanadAccount` instead of guessing from local state or event history.
+Implemented by all 5 chain adapters:
+- `EthereumBackend` — `csv-adapters/csv-ethereum/src/ops.rs:1510`
+- `SolanaBackend` — `csv-adapters/csv-solana/src/ops.rs:994`
+- `SuiBackend` — `csv-adapters/csv-sui/src/ops.rs:1401, 1453`
+- `AptosBackend` — `csv-adapters/csv-aptos/src/ops.rs:1255`
+- `BitcoinBackend` — `csv-adapters/csv-bitcoin/src/ops.rs:2488`
 
----
+**Verdict: PASS** — Trait defined and implemented by all adapters.
 
-# CLI fixes
+### 4. CanonicalSanadState (Rust side)
 
-The CLI should stop treating local storage as the source of truth for Sanad/Seal state.
+Two definitions exist:
 
-## Add one normalized command path
-
-Add:
-
-```bash
-csv sanad state --chain ethereum --sanad-id <id>
-csv seal state --chain sui --seal-id <id>
-csv sanad trace --chain solana --sanad-id <id>
+**A. `csv-protocol/src/backend.rs:508-528`** (protocol-level):
+```rust
+pub struct CanonicalSanadState {
+    pub state: u8,
+    pub owner: String,
+    pub commitment: Hash,
+    pub nullifier: Option<Hash>,
+    pub created_at: i64,
+    pub locked_at: Option<i64>,
+    pub consumed_at: Option<i64>,
+    pub minted_at: Option<i64>,
+    pub refunded_at: Option<i64>,
+}
 ```
 
-`state` should call the chain-specific adapter but return one normalized structure:
-
+**B. `csv-store/src/state/domain.rs:601-627`** (CLI/display-level):
 ```rust
 pub struct CanonicalSanadState {
     pub sanad_id: String,
     pub seal_id: Option<String>,
-    pub chain: Chain,
+    pub chain: ChainId,
     pub state: SanadLifecycleState,
     pub owner: Option<String>,
     pub commitment: Option<String>,
     pub nullifier: Option<String>,
-    pub source_chain: Option<Chain>,
-    pub destination_chain: Option<Chain>,
+    pub source_chain: Option<ChainId>,
+    pub destination_chain: Option<ChainId>,
     pub tx_hash: Option<String>,
     pub block_height: Option<u64>,
     pub updated_at: Option<u64>,
 }
 ```
 
-## Add a real enum in CLI
+**Verdict: INCONSISTENT** — Two different structs with different fields. The CLI uses the `csv-store` version. The protocol-level version is more timestamp-focused. These should be unified.
 
-```rust
-pub enum SanadLifecycleState {
-    Uncreated,
-    Created,
-    Active,
-    Locked,
-    Consumed,
-    Minted,
-    Transferred,
-    Refunded,
-    Burned,
-    Invalid,
-    Unknown,
-}
-```
+### 5. CLI State Handling
 
-Do not collapse `Locked`, `Created`, and `Uncreated` into `Active`.
+**`cmd_list`** (`csv-cli/src/commands/sanads.rs:733-810`):
+- Calls `query_sanad_on_chain_state()` which returns `Option<CanonicalSanadState>`
+- Uses `SanadLifecycleState::from_u8(state)` to convert on-chain u8 to full enum
+- Displays `state_enum.label()` — shows full state name (Locked, Minted, Transferred, etc.)
+- **No longer collapses states** — each of the 10 states displayed distinctly
 
-## Replace ad-hoc chain status logic
+**`cmd_show`** (`csv-cli/src/commands/sanads.rs:694-731`):
+- Still uses old `SanadStatus` enum (Active/Transferred/Consumed) for local display
+- Does NOT query on-chain state
 
-Current behavior is effectively:
+**`check_sanad_on_chain_status`** (`csv-cli/src/commands/sanads.rs:814-1096`):
+- Ethereum path (997-1096) still has stale state mapping: state 0="Uncreated", 1="Active", 2="Locked", 3="Consumed", 4="Refunded"
+- This mapping does NOT match the canonical 0-9 enum
 
-* Bitcoin: check UTXO.
-* Ethereum: try `getSanadState`.
-* Sui: query object.
-* Solana: decode PDA.
-* Aptos: use table/REST behavior.
-* Otherwise: fall back to local state.
+**Verdict: PASS (mostly)** — `cmd_list` uses full `SanadLifecycleState`. `cmd_show` and `check_sanad_on_chain_status` need updating.
 
-That is why state looks random. Replace it with:
+### 6. Legacy Event Names
 
-```rust
-trait SanadStateReader {
-    async fn get_sanad_state(&self, sanad_id: Hash) -> Result<CanonicalSanadState>;
-    async fn get_seal_state(&self, seal_id: Hash) -> Result<CanonicalSealState>;
-    async fn trace_sanad(&self, sanad_id: Hash) -> Result<Vec<CanonicalLifecycleEvent>>;
-}
-```
+Ethereum and Sui emit legacy events (`SealUsed`, `CrossChainLock`, `AnchorEvent`) alongside canonical ones — safe transition pattern. Solana legacy events are defined but not emitted. Aptos-sources ONLY emits legacy events without canonical equivalents.
 
-Then each chain adapter implements the same interface.
+## Required Corrections
 
-## CLI display should show state, not just status
+### High Priority
 
-Use columns like:
+1. **Fix Aptos sources contract** — Add canonical state constants, canonical event names (`SanadLocked`, `SanadMinted`, `SanadTransferred`, `ReplayDetected`), and query functions (`get_sanad_state`, `get_seal_state`).
 
-```text
-Sanad ID | Chain | State | Owner | Seal | Nullifier | Last Tx | Updated
-```
+2. **Unify CanonicalSanadState** — Choose one definition. The `csv-store` version is more complete for CLI/display. The `csv-protocol` version is more compact for protocol-level use. Consider keeping both but ensuring they map to each other.
 
-For trace:
+3. **Fix CLI `check_sanad_on_chain_status`** — Replace stale Ethereum state mapping with canonical 0-9 enum.
 
-```text
-Time | Chain | Event | From | To | Tx | State After
-```
+4. **Fix CLI `cmd_show`** — Replace old `SanadStatus` enum with `SanadLifecycleState`.
 
----
+5. **Add `get_seal_state` to Solana, Sui, Aptos** — Currently only Ethereum has both query functions.
 
-# Implementation order
+### Medium Priority
 
-1. **Freeze canonical naming** in one ABI/state document.
-2. **Patch Ethereum first**, because it has the worst naming split: `CSVLock`, `CSVMint`, `CSVSeal`, `SealUsed`, `SanadMinted`.
-3. **Add `get_sanad_state` and `get_seal_state` to all four chains.**
-4. **Make all lifecycle functions update one explicit state record.**
-5. **Emit canonical events from every state transition.**
-6. **Update CLI to use normalized state readers.**
-7. **Add cross-chain equivalence tests** that assert the same lifecycle produces the same canonical event sequence on Aptos, Sui, Solana, and Ethereum.
-8. **Deprecate legacy names** only after the CLI and bindings are switched.
+6. **Add `ReplayDetected` to Aptos legacy** — Missing from Aptos legacy contract.
+7. **Add `CommitmentAnchored` to Solana** — Missing from Solana events.
+8. **Add `ProofRootUpdated` to Ethereum and Solana** — Missing from both.
+9. **Deprecate legacy event emission** — Once all chains emit canonical events, stop emitting legacy aliases.
 
----
+### Low Priority
 
-# Critical tests to add
+10. **Sui state view** — Replace `public fun state(seal: &Seal): u8` with full `SanadStateView` struct.
+11. **Aptos sources contract** — Consider removing if Aptos legacy is the canonical deployment.
+
+## Critical Tests to Add
 
 For every chain:
-
-```text
+```
 create_sanad -> state = Created or Active
 lock_sanad -> state = Locked
 consume_sanad -> state = Consumed
@@ -387,26 +167,22 @@ CLI sanad state equals on-chain state
 CLI sanad trace reconstructs full lifecycle
 ```
 
-Also add a naming constitution test:
-
-```text
+Naming constitution test:
+```
 No production contract may emit SealUsed without also emitting SanadConsumed.
 No production contract may emit SanadMinted without also emitting CrossChainMint.
 No chain may expose CreateSanad while another exposes create_seal for the same semantic operation unless bindings normalize it.
 ```
 
-## Bottom line
+## Bottom Line
 
-The core fix is not just “add more events.” You need a **canonical lifecycle state machine** stored on-chain, exposed through one query interface, and consumed by the CLI through one normalized adapter path.
+The core fix is not just "add more events." You need a **canonical lifecycle state machine** stored on-chain, exposed through one query interface, and consumed by the CLI through one normalized adapter path.
 
-Your target should be:
-
-```text
+Target:
+```
 Contract state is authoritative.
 Events are the audit log.
 CLI local storage is only cache.
 Runtime/indexer reconciles state from chain.
 Naming is canonical across all chains.
 ```
-
-That will solve the current Sanad creation/status bug and make Seal/Sanad state traceable across Aptos, Sui, Solana, and Ethereum.

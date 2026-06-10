@@ -7,7 +7,8 @@ use crate::Hash;
 use crate::csv_tagged_hash;
 
 /// A single node in the state transition DAG
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DAGNode {
     /// Unique identifier for this node
     pub node_id: Hash,
@@ -39,23 +40,35 @@ impl DAGNode {
         }
     }
 
-    /// Compute the node hash using canonical serialization and tagged hashing
+  /// Compute the node hash using canonical serialization and tagged hashing
+    ///
+    /// Format: `[node_id][bytecode_len:u32 LE][bytecode][signatures_len:u32 LE][sig_len:u32 LE][sig_bytes]...[witnesses_len:u32 LE][wit_len:u32 LE][wit_bytes]...[parents_len:u32 LE][parent_id]...`
     pub fn hash(&self) -> Hash {
-        use csv_codec::canonical::to_canonical_cbor;
-        let data = to_canonical_cbor(&(
-            self.node_id,
-            &self.bytecode,
-            &self.signatures,
-            &self.witnesses,
-            &self.parents,
-        ))
-        .unwrap_or_else(|err| format!("dag-node-canonical-serialization-error:{err}").into_bytes());
+        let mut data = Vec::new();
+        data.extend_from_slice(self.node_id.as_bytes());
+        data.extend_from_slice(&(self.bytecode.len() as u32).to_le_bytes());
+        data.extend_from_slice(&self.bytecode);
+        data.extend_from_slice(&(self.signatures.len() as u32).to_le_bytes());
+        for sig in &self.signatures {
+            data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+            data.extend_from_slice(sig);
+        }
+        data.extend_from_slice(&(self.witnesses.len() as u32).to_le_bytes());
+        for wit in &self.witnesses {
+            data.extend_from_slice(&(wit.len() as u32).to_le_bytes());
+            data.extend_from_slice(wit);
+        }
+        data.extend_from_slice(&(self.parents.len() as u32).to_le_bytes());
+        for parent in &self.parents {
+            data.extend_from_slice(parent.as_bytes());
+        }
         Hash::new(csv_tagged_hash("dag-node", &data))
     }
 }
 
 /// A segment of the state transition DAG
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DAGSegment {
     /// Nodes in this segment
     pub nodes: Vec<DAGNode>,

@@ -10,23 +10,49 @@
 //!   execution (Completed or Failed).
 //! - The journal is append-only: entries are never modified or deleted.
 //! - Crash recovery uses the journal to determine where to resume execution.
+//! - Transfer context (sanad_id, chains, lock_tx_hash) is stored in the journal
+//!   entry to enable recovery even when the transfer store is unavailable.
 //!
 //! # Crash Recovery
 //!
 //! When a coordinator restarts after a crash, it queries the journal to find
 //! the last phase reached for each incomplete transfer and resumes from there.
+//! Recovery uses the transfer context stored in the journal entry to reconstruct
+//! the transfer state without relying on external storage.
 //!
 //! # Invariants
 //!
 //! - Entries are written in order: Entered -> Completed/Failed
 //! - No entry is ever modified after writing
 //! - The journal survives coordinator restarts
+//! - Transfer context is persisted alongside phase entries for recovery
 
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use csv_hash::{Hash, sanad::SanadId};
 use csv_protocol::transfer_state::TransferStage;
 use serde::{Deserialize, Serialize};
+
+/// Transfer context stored in journal entries for crash recovery.
+///
+/// This contains the minimal data needed to reconstruct a transfer
+/// without relying on external storage. It is persisted alongside
+/// each phase entry to enable recovery even when the transfer store
+/// is unavailable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferContext {
+    /// Sanad ID being transferred
+    pub sanad_id: SanadId,
+    /// Source chain ID
+    pub source_chain: String,
+    /// Destination chain ID
+    pub destination_chain: String,
+    /// Lock transaction hash (hex-encoded)
+    pub lock_tx_hash: Hash,
+    /// Destination owner address (hex-encoded)
+    pub destination_owner: String,
+}
 
 /// Outcome of a transfer phase execution
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,7 +65,10 @@ pub enum PhaseOutcome {
     Failed(String),
 }
 
-/// A single entry in the execution journal
+/// A single entry in the execution journal.
+///
+/// Each entry records a phase transition with its outcome. The entry
+/// includes transfer context to enable recovery without external storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransferPhaseEntry {
     /// Unique transfer identifier
@@ -58,6 +87,8 @@ pub struct TransferPhaseEntry {
     pub outcome: PhaseOutcome,
     /// Attempt number (increments on retry)
     pub attempt: u32,
+    /// Transfer context for crash recovery (persisted with each entry)
+    pub transfer_context: Option<TransferContext>,
 }
 
 /// Error type for journal operations
@@ -296,6 +327,7 @@ mod tests {
                 phase: TransferStage::Initialized,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Entered,
+                transfer_context: None,
                 attempt: 1,
             })
             .unwrap();
@@ -309,6 +341,7 @@ mod tests {
                 phase: TransferStage::Initialized,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Completed,
+                transfer_context: None,
                 attempt: 1,
             })
             .unwrap();
@@ -333,6 +366,7 @@ mod tests {
                 phase: TransferStage::Completed,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Completed,
+                transfer_context: None,
                 attempt: 1,
             })
             .unwrap();
@@ -347,6 +381,7 @@ mod tests {
                 phase: TransferStage::LockConfirmed,
                 ts: SystemTime::now(),
                 outcome: PhaseOutcome::Entered,
+                transfer_context: None,
                 attempt: 1,
             })
             .unwrap();
@@ -372,6 +407,7 @@ mod tests {
                     phase: TransferStage::Initialized,
                     ts: SystemTime::now(),
                     outcome: PhaseOutcome::Entered,
+                transfer_context: None,
                     attempt: 1,
                 })
                 .unwrap();
@@ -385,6 +421,7 @@ mod tests {
             phase: TransferStage::Initialized,
             ts: SystemTime::now(),
             outcome: PhaseOutcome::Entered,
+                transfer_context: None,
             attempt: 1,
         });
         assert_eq!(result, Err(JournalError::CapacityExceeded));
@@ -410,6 +447,7 @@ mod tests {
                     phase: TransferStage::ProofValidated,
                     ts: SystemTime::now(),
                     outcome: PhaseOutcome::Completed,
+                transfer_context: None,
                     attempt: 1,
                 })
                 .unwrap();

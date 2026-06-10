@@ -29,8 +29,11 @@ impl AdapterFactory for BitcoinFactory {
             NetworkType::Mainnet => BtcNetwork::Mainnet,
         };
 
-        // Clone private_key for wallet creation
-        let private_key_clone = config.private_key.clone();
+        // Extract secret key bytes for wallet creation
+        let seed = config.secret_key
+            .as_bytes()
+            .map(|bytes| hex::encode(bytes))
+            .ok_or_else(|| FactoryError::InvalidConfig("Secret key not available".to_string()))?;
 
         // Select the highest priority REST endpoint
         let rest_endpoint = config.rpc_endpoints
@@ -49,7 +52,7 @@ impl AdapterFactory for BitcoinFactory {
             api_key: rest_endpoint.api_key.clone(),
             xpub: None,
             private_key: None,
-            seed: private_key_clone,
+            seed: Some(seed),
             account: config.account,
             index: config.index,
             utxos: config.utxos.into_iter().map(|u| csv_bitcoin::config::UtxoConfig {

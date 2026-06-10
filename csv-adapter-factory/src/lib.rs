@@ -8,6 +8,7 @@
 
 use async_trait::async_trait;
 use csv_protocol::backend::ChainBackend;
+use csv_protocol::secret::{SecretHandle, SharedSecretHandle};
 use csv_adapter_core::ChainAdapter;
 use csv_hash::chain_id::ChainId;
 use std::sync::Arc;
@@ -33,6 +34,20 @@ pub use aptos::AptosFactory;
 pub use solana::SolanaFactory;
 
 /// Configuration for creating a chain adapter.
+///
+/// # Security
+///
+/// Private key material is passed via [`SharedSecretHandle`] which prevents:
+/// - Raw hex strings flowing through config structs
+/// - Accidental cloning of secret material (Arc-based sharing)
+/// - Serialization of secret material to disk/network
+/// - Printing of secret material in logs/errors
+///
+/// # Clone Behavior
+///
+/// `AdapterConfig` implements `Clone` by cloning the `Arc<SecretHandle>`
+/// reference. This shares the same underlying secret across clones without
+/// duplicating the key material in memory.
 #[derive(Debug, Clone)]
 pub struct AdapterConfig {
     /// Chain identifier
@@ -41,8 +56,8 @@ pub struct AdapterConfig {
     pub network: NetworkType,
     /// RPC endpoints with protocol and optional API key
     pub rpc_endpoints: Vec<RpcEndpoint>,
-    /// Private key or seed (hex-encoded, optional)
-    pub private_key: Option<String>,
+    /// Secret key handle for signing operations (shared via Arc)
+    pub secret_key: SharedSecretHandle,
     /// Account index for HD derivation
     pub account: u32,
     /// Index for HD derivation

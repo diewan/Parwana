@@ -1,9 +1,10 @@
-//! Gaming Assets Cross-Chain Example
-//!
-//! This example demonstrates how gaming assets can be represented as sanads
-//! and transferred between chains for different game ecosystems.
-//!
-//! Run with: `cargo run --example gaming --features "all-chains,tokio"`
+use csv_hash::Hash;
+// Gaming Assets Cross-Chain Example
+// 
+// This example demonstrates how gaming assets can be represented as sanads
+// and transferred between chains for different game ecosystems.
+// 
+// Run with: `cargo run --example gaming --features "all-chains,tokio"`
 
 use csv_sdk::prelude::*;
 
@@ -24,7 +25,7 @@ async fn main() -> Result<()> {
 
     let sword = client
         .sanads()
-        .create(sword_commitment, ChainId::new("bitcoin"))?;
+        .create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, sword_commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), sword_commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"))?;
 
     println!("✓ Created sword asset: {:?}", sword.id);
     println!("  Owner: {:?}", sword.owner);
@@ -36,7 +37,7 @@ async fn main() -> Result<()> {
 
     let shield = client
         .sanads()
-        .create(shield_commitment, ChainId::new("sui"))?;
+        .create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, shield_commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), shield_commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("sui"))?;
 
     println!("✓ Created shield asset: {:?}", shield.id);
     println!("  Chain: Sui (Sui Defenders game)\n");

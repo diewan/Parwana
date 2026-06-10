@@ -39,6 +39,10 @@ pub enum CsvError {
     #[error("Invalid Sanad ID: {0}")]
     InvalidSanadId(String),
 
+    /// Invalid input provided to an operation.
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     /// The specified Sanad was not found.
     #[error("Sanad not found: {0}")]
     SanadNotFound(String),
@@ -172,6 +176,7 @@ impl HasErrorSuggestion for CsvError {
             Self::Generic(_) => error_codes::CSV_GENERIC,
             Self::P2PError(_) => "CSV_P2P_ERROR",
             Self::RuntimeError(_) => "CSV_RUNTIME_ERROR",
+            Self::InvalidInput(_) => "CSV_INVALID_INPUT",
         }
     }
 
@@ -310,6 +315,12 @@ impl HasErrorSuggestion for CsvError {
             Self::RuntimeError(msg) => {
                 format!(
                     "Runtime execution error: {}. Check runtime configuration and retry.",
+                    msg
+                )
+            }
+            Self::InvalidInput(msg) => {
+                format!(
+                    "Invalid input: {}. Verify the input format and constraints.",
                     msg
                 )
             }

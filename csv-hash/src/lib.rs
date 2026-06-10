@@ -41,7 +41,7 @@ pub use domain_hash::{Domain, DomainSeparatedHash};
 pub use domain_separation::{DomainSeparator, derive_domain_separator};
 pub use domains::{
     AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain, ProofBundleDomain,
-    ReplayRegistryDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
+    ReplayRegistryDomain, SanadIdDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
 };
 pub use hash_registry::{
     CommitmentHash, DomainCategory, Hash, HashDomain, HashParseError, MerkleHash, NullifierHash,

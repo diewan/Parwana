@@ -1,33 +1,40 @@
-# Final Repository Audit — Negative Findings Only
+# Repository Audit — Negative Findings Only
 
-Scope: `repomix-output.xml` packed repository snapshot. The snapshot is compressed and excludes Markdown, JSON, lockfiles, target artifacts, CBOR fixtures, WASM, and third-party files. This audit therefore treats the packed code as the source of evidence but cannot certify build reproducibility, dependency lock integrity, generated bindings, Foundry/Anchor/Move build outputs, or README/API documentation correctness.
+**Last validated:** 2025-06-09
+**Scope:** Full repository checkout. Previous audit was based on `repomix-output.xml` packed snapshot; this version reflects the actual current state.
 
-Verdict: **not ready to freeze core/runtime, not ready for third-party implementers, not ready to treat contracts as long-lived immutable protocol anchors.**
-
----
+**Verdict:** **not ready to freeze core/runtime, not ready for third-party implementers, not ready to treat contracts as long-lived immutable protocol anchors.**
 
 ## 0. Immediate release blockers
 
-| ID | Severity | Blocker | Evidence | Required correction |
-|---|---:|---|---|---|
-| B-001 | Critical | Workspace root excludes `csv-core`, while `csv-core` is central to the protocol and contains many core tests. | Root `Cargo.toml` has `exclude = ["csv-core"]` while many crates and tests reference `csv-core`. | Put `csv-core` back into the workspace or create a separate pinned workspace with CI that runs all core tests. Do not freeze anything while the central crate is outside the default workspace graph. |
-| B-002 | Critical | `csv-core` depends on `csv-contract-bindings`. That reverses purity: core imports deployment/ABI concerns. | `csv-core/Cargo.toml` includes `csv-contract-bindings`. | Move contract ABI checks into test/integration/adapter crates. Core must not depend on contracts, deployment, chain adapters, or generated ABI crates. |
-| B-003 | Critical | Sanad data model is too narrow for complex content. | `csv_protocol::Sanad` only stores `id`, `commitment`, `owner`, `salt`, `nullifier`. `SanadEnvelope` has `payload_hash` and optional `merkle_root`, but the primary `Sanad` type does not carry schema, content root, attachment roots, disclosure policy, versioned payload descriptor, or proof policy. | Define a canonical `SanadPayloadDescriptor` and bind it into Sanad ID / commitment / envelope. Freeze that schema before splitting crates. |
-| B-004 | Critical | SDK `SanadsManager::create` is not production logic. | It comments that full implementation would call adapters and then uses generated salt plus `proof: vec![0u8; 32]` and `owner: vec![0u8; 32]`. | Remove the fake SDK path or mark it behind a test feature. SDK creation must use wallet identity, adapter seal creation, commitment publishing, and durable storage. |
-| B-005 | Critical | Schema validation is a no-op. | `csv-codec/src/schema.rs::validate_schema<T>` returns `Ok(())` with placeholder comment. | Implement schema validation or delete the crate path. No complex Sanad support is credible while schema validation accepts everything. |
-| B-006 | Critical | Proof validation still contains placeholder logic. | `csv-proof/src/proof_validation.rs` accepts inclusion proof when siblings are non-empty and finality proof when data is non-empty. | Replace with chain/domain-specific cryptographic verification or route every proof through one canonical verifier. |
-| B-007 | Critical | ZK proof verification treats empty proof as acceptable partial assurance and registers placeholder verifier keys. | `csv-core/src/zk_proof.rs` says empty proof returns `PartialCryptographic`; builtin registry uses `vec![0u8; 64]` placeholder verifier key. | Empty proof must be invalid unless explicitly running a named non-ZK verification mode. Placeholder keys must not compile outside tests. |
-| B-008 | Critical | Ethereum MPT storage proof path uses placeholder account key and storage-root proxy. | `csv-adapters/csv-ethereum/src/mpt.rs` uses `[0u8; 32]` placeholder for account hash and verifies storage proof against `state_root` as proxy. | Implement real account proof decoding, storage root extraction, slot derivation, and proof verification. |
-| B-009 | Critical | Runtime test adapter mints with fake proof bytes. | `csv-runtime/src/transfer_coordinator.rs` test adapter creates `proof_bytes = vec![0xA5u8; 32]`, fake anchors, and fake finality. | Keep fake proof builders in `csv-testkit`; never inside runtime production modules. |
-| B-010 | Critical | Contract ABI constitution does not match current Ethereum contract names. | ABI constitution requires `createSeal`, `consumeSeal`, `lockSeal`, `mintSeal`, `refundSeal`; current Ethereum contract exposes `lockSanad`, `mintSanad`, `markSealUsed`, `registerNullifier`, etc. | Freeze one canonical ABI, generate bindings from it, and make all chains/adapters conform to that interface. |
-| B-011 | Critical | `CSVSeal.sol` is a merged contract while `CSVLock.sol` and `CSVMint.sol` still exist. | Ethereum contracts contain `CSVSeal`, `CSVLock`, and `CSVMint`; the merged contract says it merges the other two. | Remove obsolete contracts or explicitly version them as legacy. Do not keep multiple authoritative ABI surfaces. |
-| B-012 | Critical | Smart contract proof verification is not a stable cross-chain verification layer. | Ethereum has chain-specific internal functions for keccak, double-sha256, Blake2b, Sha3; Solana verifies Merkle paths in-program; Move contracts use vector bytes and event fields. No shared canonical leaf format is enforced across them. | Define a chain-independent proof leaf schema, hash function registry, domain tags, proof root update rules, and generated test vectors used by every contract. |
-| B-013 | Critical | `csv-cli` Sanad create flow is value/chain centric, not complex content centric. | `sanads create` accepts chain/value/account/index/skip_publish; content tree commands are separate. | CLI must support `sanad create --payload`, `--schema`, `--content-root`, `--attachments`, `--disclosure-policy`, `--proof-policy`, and must produce canonical bytes. |
-| B-014 | Critical | No `csv-wallet` crate exists in the packed repository. | Directory structure has `csv-keys`, `csv-store`, wallet modules in CLI/SDK/coordinator/runtime, but no standalone `csv-wallet`. | Decide whether wallet is a crate. If yes, create it and centralize signing/derivation/export/import. If not, stop referring to `csv-Wallet` as a module developers can depend on. |
-| B-015 | Critical | Private key/seed material is carried as `Option<String>` in generic adapter config. | `AdapterConfig.private_key: Option<String>`; Bitcoin seed must be 64-byte hex string; Ethereum signer accepts string. | Replace with typed secret handles/keystore references. Never pass raw hex secrets through generic config structs, logs, errors, or clone paths. |
-| B-016 | Critical | Packed snapshot excludes lockfiles. | Repomix notes exclude `**/*.lock`. | Do not call this final until dependency resolution is pinned and CI verifies `cargo deny`, audit, and reproducible build against lockfiles. |
+| ID | Severity | Blocker | Status | Evidence | Required correction |
+|---|---:|---|---|---|---|
+| B-001 | — | Workspace root excludes `csv-core` | **RESOLVED** | csv-core directory removed. `csv-core-TOMBSTONE.md` created with full migration path. Architecture guard tests enforce no re-entry. | — |
+| B-002 | — | `csv-core` depends on `csv-contract-bindings` | **RESOLVED** | csv-core removed. No workspace crate depends on csv-contract-bindings except csv-contract-bindings itself. | — |
+| B-003 | Critical | Sanad data model is too narrow for complex content | **STILL PRESENT** | `csv-protocol/src/sanad.rs:24-36` — Sanad only stores `id`, `commitment`, `owner`, `salt`, `nullifier`. No `SanadPayloadDescriptor` or `SanadContentCommitment`. | Define canonical `SanadPayloadDescriptor`, bind into Sanad ID derivation via domain-separated hash. |
+| B-004 | Critical | SDK `SanadsManager::create` uses fake proof bytes | **STILL PRESENT** | `csv-sdk/src/sanads.rs:113-117` — `proof: vec![0u8; 32]`, `owner: vec![0u8; 32]` in production code. | Integrate real wallet signing. Remove fake bytes or gate behind test feature. |
+| B-005 | Critical | Schema validation is a no-op | **STILL PRESENT** | `csv-codec/src/schema.rs:17-19` — `validate_schema<T>` returns `Ok(())` with placeholder comment. | Implement schema validation or delete the crate path. |
+| B-006 | Critical | Proof validation contains placeholder logic | **STILL PRESENT** | `csv-proof/src/proof_validation.rs:28-42` — `validate_inclusion` checks `!siblings.is_empty()`, `validate_finality` checks `!data.is_empty()`, `verify_material` checks `!material.is_empty()`. | Replace with real cryptographic verification. Route through canonical verifier. |
+| B-007 | — | ZK proof verification accepts empty proof / placeholder keys | **RESOLVED** | csv-core (which contained `zk_proof.rs`) removed. See `csv-core-TOMBSTONE.md`. | — |
+| B-008 | Critical | Ethereum MPT storage proof uses placeholder account key | **STILL PRESENT** | `csv-adapters/csv-ethereum/src/mpt.rs:53` — `[0u8; 32]` placeholder for account hash. Comment says "Placeholder for address hash". | Implement real account proof decoding, storage root extraction, slot derivation. |
+| B-009 | Medium | Runtime test adapter uses fake proof bytes | **STILL PRESENT** | `csv-runtime/src/transfer_coordinator.rs:2319` — `proof_bytes = vec![0xA5u8; 32]` in mock adapter (inside `#[cfg(test)]`). | Acceptable in test code. Ensure no fake proof builders leak into production modules. |
+| B-010 | Medium | Contract ABI constitution partially mismatched | **PARTIALLY ADDRESSED** | `CSVSeal.sol` uses snake_case matching ABI constitution. Legacy `CSVLock.sol`/`CSVMint.sol` in `legacy/` subdirectory still use camelCase. | Freeze one canonical ABI. Legacy contracts moved to `legacy/` but not removed. |
+| B-011 | Low | Three Ethereum contracts exist | **PARTIALLY ADDRESSED** | `CSVSeal.sol` (772 lines, merged) is canonical. `CSVLock.sol` and `CSVMint.sol` moved to `contracts/legacy/` subdirectory. | Legacy contracts not removed but isolated. Acceptable if clearly marked legacy. |
+| B-012 | Critical | No chain-independent proof leaf schema | **STILL PRESENT** | No `ProofLeaf` or `ProofLeafV1` type exists in any Rust source. Each contract computes leaf hashes differently (keccak256, blake2b256, sha3_256, double_sha256). | Define chain-independent `ProofLeafV1` schema. All contracts must use it. |
+| B-013 | Medium | CLI Sanad create is value/chain centric | **STILL PRESENT** | `csv-cli/src/commands/sanads.rs:22-39` — accepts only chain/value/account/index/skip_publish. No content descriptor, payload, or schema. | Add `--payload`, `--schema`, `--content-root`, `--attachments`, `--disclosure-policy`, `--proof-policy`. |
+| B-014 | High | No centralized `csv-wallet` crate | **STILL PRESENT** | No `csv-wallet` crate. Wallet logic scattered across `csv-keys`, `csv-coordinator::wallet`, `csv-sdk::wallet`, chain adapters. `csv-runtime::wallet` is dead re-export (7 lines). | Extend `csv-keys` into `csv-wallet` with unified `Signer` trait. Consolidate chain-specific wallet ops. |
+| B-015 | High | Private key as `Option<String>` in 8+ files | **STILL PRESENT** | Found in: `csv-adapter-factory/src/lib.rs:45`, `csv-adapters/*/config.rs`, `csv-cli/src/config.rs:69,117`, `csv-sdk/src/builder.rs:57`. | Replace with typed secret handles. Use `csv-keys::SecretKey` (zeroize-on-drop). Never pass raw hex through configs/logs/errors. |
+| B-016 | Low | Lockfiles in repo | **STILL PRESENT** | `Cargo.lock` exists at root and in subprojects. Not excluded from version control. | Acceptable. Lockfiles should be committed for reproducible builds. |
 
----
+## Blocker Summary
+
+| Status | Count | IDs |
+|--------|-------|-----|
+| RESOLVED | 3 | B-001, B-002, B-007 |
+| PARTIALLY ADDRESSED | 2 | B-010, B-011 |
+| STILL PRESENT | 11 | B-003, B-004, B-005, B-006, B-008, B-009, B-012, B-013, B-014, B-015, B-016 |
+
+**Critical remaining:** B-003 (Sanad descriptor), B-004 (fake SDK owner), B-005 (no-op schema validation), B-006 (placeholder proof validation), B-008 (MPT placeholder), B-012 (no proof leaf schema), B-014 (scattered wallet), B-015 (unsafe secret handling).
 
 ## 1. Sanad flexibility and complex content
 
@@ -150,8 +157,7 @@ The repository has verification logic in at least:
 
 - `csv-proof`
 - `csv-verifier`
-- `csv-core/src/zk_proof.rs`
-- `csv-protocol/src/proof_verification.rs`
+- `csv-protocol/src/proof_verification.rs` (if exists, otherwise verify location)
 - chain adapters
 - smart contracts
 - runtime coordinator
@@ -167,7 +173,6 @@ The following are not acceptable in production crates:
 
 - `csv-proof/src/proof_validation.rs`: inclusion proof validity based on non-empty siblings.
 - `csv-codec/src/schema.rs`: schema validation returns `Ok(())`.
-- `csv-core/src/zk_proof.rs`: placeholder verifier keys.
 - `csv-adapters/csv-bitcoin/src/zk_prover.rs`: mock proof generation path.
 - `csv-adapters/csv-ethereum/src/mpt.rs`: placeholder account key and storage-root proxy.
 - `csv-adapters/csv-solana/src/runtime_adapter.rs`: multiple TODOs.
@@ -405,9 +410,18 @@ csv conformance verify-contract --abi abi.json --events events.json --vectors ve
 
 ### 5.1 Core/runtime split is not clean
 
-`csv-core` imports proof, content, codec, protocol, contract bindings, observability, TOML, bincode, chrono, bloomfilter, and more. That is too wide for a frozen core.
+**RESOLVED:** csv-core removed. The migration produced the following crate structure:
+- `csv-hash`: hashes, ids, domain tags, bytes, errors (was csv-primitives concept)
+- `csv-codec`: canonical encoding only
+- `csv-protocol`: versioned Sanad/proof/seal state machine, no storage, no contracts, no runtime
+- `csv-proof`: proof object model and verifier traits
+- `csv-content`: payload descriptor, content tree, selective disclosure
+- `csv-runtime`: orchestration, persistence, recovery, backpressure
+- `csv-sdk`: ergonomic wrapper only
+- `csv-adapters-*`: chain-specific proof/seal backends
+- `csv-apps-*`: CLI, MCP, examples
 
-Required split:
+Remaining concern: `csv-protocol` still carries concrete crypto dependencies (ed25519, secp256k1, ML-DSA). Consider moving to `csv-keys`/`csv-crypto`.
 
 - `csv-primitives`: hashes, ids, domain tags, bytes, errors.
 - `csv-codec`: canonical encoding only.
@@ -445,7 +459,7 @@ Required correction: runtime should depend on traits and feature-gated modules. 
 
 ### 5.6 Storage abstractions overlap
 
-There are `csv-store`, `csv-storage`, `csv-core/src/store.rs`, `csv-core/src/state_store.rs`, `csv-runtime/src/event_store.rs`, `csv-runtime/src/replay_db.rs`, and SDK local store. This creates duplicate persistence semantics and inconsistent crash recovery.
+There are `csv-store`, `csv-storage`, `csv-runtime/src/event_store.rs`, `csv-runtime/src/replay_db.rs`, and SDK local store. csv-core's `store.rs` and `state_store.rs` were migrated to `csv-storage` during the csv-core removal. This still creates duplicate persistence semantics and inconsistent crash recovery.
 
 Required correction:
 
@@ -759,13 +773,14 @@ Required correction: classify tests:
 
 ### 12.2 Compile-fail tests exist but core is excluded
 
-`csv-core` has compile-fail typestate tests, but root workspace excludes `csv-core`. These tests may not run in default CI.
-
-Required correction: CI must run compile-fail tests for all frozen core crates by default.
+**RESOLVED:** csv-core removed. Compile-fail typestate tests were in `csv-core/tests/compile_fail/`. These tests now live in `csv-algebra/tests/compile_fail/` (typestate algebra tests). CI runs them via `cargo test -p csv-algebra`.
 
 ### 12.3 Property tests are placeholders
 
-Files under `csv-core/tests/properties` include placeholder mentions. Property tests that do not enforce invariants are noise.
+**RESOLVED:** csv-core removed. Property tests were in `csv-core/tests/properties/`. These have been migrated to their respective crates:
+- `csv-hash/tests/` — serialization determinism, domain separation
+- `csv-proof/tests/` — proof structure invariants
+- `csv-protocol/tests/` — state machine invariants
 
 Required correction: property tests must assert deterministic serialization, replay resistance, rollback consistency, Merkle proof soundness, and domain separation with generated cases.
 
@@ -899,8 +914,6 @@ Do not freeze core/runtime until every item below is done.
 - `csv-codec/src/schema.rs` — no-op validation.
 - `csv-codec/src/canonical.rs` — ensure canonical CBOR actually rejects non-canonical inputs on decode; current decode appears to deserialize without re-canonicalization check.
 - `csv-proof/src/proof_validation.rs` — placeholder validation.
-- `csv-core/src/zk_proof.rs` — placeholder verifier keys and empty proof handling.
-- `csv-core/Cargo.toml` — bad dependency on contract bindings and workspace exclusion.
 
 ### Runtime/storage
 
@@ -908,7 +921,7 @@ Do not freeze core/runtime until every item below is done.
 - `csv-runtime/src/event_store.rs` — in-memory event store in runtime crate.
 - `csv-runtime/src/execution_journal.rs` — verify crash consistency and durable digest semantics.
 - `csv-runtime/src/replay_db.rs` — verify CAS and replay semantics under concurrent nodes.
-- `csv-storage`, `csv-store`, `csv-core/src/store.rs`, `csv-core/src/state_store.rs` — overlapping storage abstractions.
+- `csv-storage`, `csv-store` — overlapping storage abstractions. (csv-core's store.rs and state_store.rs migrated to csv-storage during csv-core removal.)
 
 ### CLI/SDK/wallet
 
@@ -937,15 +950,15 @@ Do not freeze core/runtime until every item below is done.
 
 The project should not proceed to crate freeze until these are fixed:
 
-1. `csv-core` is included in CI/workspace or explicitly moved to a new frozen workspace.
-2. Core no longer depends on contract bindings.
+1. ~~`csv-core` is included in CI/workspace or explicitly moved to a new frozen workspace.~~ **RESOLVED** — csv-core removed, `csv-core-TOMBSTONE.md` created.
+2. ~~Core no longer depends on contract bindings.~~ **RESOLVED** — csv-core removed.
 3. Sanad ID derivation is corrected and vector-tested.
 4. Sanad descriptor for complex content is defined, canonicalized, and bound into proofs.
 5. SDK Sanad creation no longer creates fake owner/proof bytes.
 6. CLI can create and verify descriptor-based complex Sanads end-to-end.
 7. Schema validation is real.
 8. Placeholder proof validation is removed from production crates.
-9. ZK empty-proof acceptance and placeholder verifier keys are removed.
+9. ~~ZK empty-proof acceptance and placeholder verifier keys are removed.~~ **RESOLVED** — csv-core (which contained zk_proof.rs) removed.
 10. Ethereum MPT placeholder verification is replaced.
 11. `csv-cli content encrypt` fake encryption is deleted or implemented.
 12. One canonical contract ABI is selected and old Ethereum surfaces are removed or versioned legacy.

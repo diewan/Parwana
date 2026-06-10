@@ -131,6 +131,101 @@ module csv_seal::CSVSeal {
     }
 
     // =========================================================================
+    // Canonical State Constants (matching Ethereum/Solana/Sui)
+    // =========================================================================
+    
+    /// Sanad state: Uncreated
+    const SANAD_STATE_UNCREATED: u8 = 0;
+    /// Sanad state: Created
+    const SANAD_STATE_CREATED: u8 = 1;
+    /// Sanad state: Active
+    const SANAD_STATE_ACTIVE: u8 = 2;
+    /// Sanad state: Locked
+    const SANAD_STATE_LOCKED: u8 = 3;
+    /// Sanad state: Consumed
+    const SANAD_STATE_CONSUMED: u8 = 4;
+    /// Sanad state: Minted
+    const SANAD_STATE_MINTED: u8 = 5;
+    /// Sanad state: Transferred
+    const SANAD_STATE_TRANSFERRED: u8 = 6;
+    /// Sanad state: Refunded
+    const SANAD_STATE_REFUNDED: u8 = 7;
+    /// Sanad state: Burned
+    const SANAD_STATE_BURNED: u8 = 8;
+    /// Sanad state: Invalid
+    const SANAD_STATE_INVALID: u8 = 9;
+
+    // =========================================================================
+    // Canonical Events (completing the set from Ethereum/Solana/Sui)
+    // =========================================================================
+
+    // Emitted when a Sanad is locked for cross-chain transfer (canonical name).
+    // Emits alongside CrossChainLock for backward compatibility.
+    #[event]
+    struct SanadLocked has drop, store {
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        owner: address,
+        destination_chain: u8,
+        destination_owner: vector<u8>,
+        locked_at: u64,
+    }
+
+    // Emitted when a Sanad is minted from cross-chain proof (canonical name).
+    // Emits alongside CrossChainMint for backward compatibility.
+    #[event]
+    struct SanadMinted has drop, store {
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        owner: address,
+        source_chain: u8,
+        minted_at: u64,
+    }
+
+    // Emitted when a Sanad is transferred to a new owner.
+    #[event]
+    struct SanadTransferred has drop, store {
+        sanad_id: vector<u8>,
+        from: address,
+        to: address,
+        transferred_at: u64,
+    }
+
+    // Emitted when a Sanad is refunded after timeout.
+    // Emits alongside CrossChainRefund for backward compatibility.
+    #[event]
+    struct SanadRefunded has drop, store {
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        claimant: address,
+        refunded_at: u64,
+    }
+
+    // Emitted when a replay attempt is detected.
+    #[event]
+    struct ReplayDetected has drop, store {
+        replay_id: vector<u8>,
+        sanad_id: vector<u8>,
+        detected_at: u64,
+    }
+
+    // Emitted when a commitment is anchored on-chain.
+    #[event]
+    struct CommitmentAnchored has drop, store {
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        anchored_at: u64,
+    }
+
+    // Emitted when the proof root is updated.
+    #[event]
+    struct ProofRootUpdated has drop, store {
+        old_root: vector<u8>,
+        new_root: vector<u8>,
+        updated_at: u64,
+    }
+
+    // =========================================================================
     // Error Codes
     // =========================================================================
 
@@ -1028,6 +1123,123 @@ module csv_seal::CSVSeal {
             j = j + 1;
         };
         hash::sha3_256(data)
+    }
+
+    // =========================================================================
+    // Query Functions (Canonical State Machine Interface)
+    // =========================================================================
+
+    /// Get the state of a seal by nonce.
+    ///
+    /// Returns the canonical SanadState value:
+    /// - 0 (Uncreated) if seal doesn't exist
+    /// - 1 (Created) if seal exists and is not consumed
+    /// - 4 (Consumed) if seal is consumed
+    public fun get_seal_state(
+        account_addr: address,
+        nonce: u64,
+    ): u8 acquires SealCollection {
+        if (!exists<SealCollection>(account_addr)) {
+            return SANAD_STATE_UNCREATED
+        };
+        let collection = borrow_global<SealCollection>(account_addr);
+        if (!smart_table::contains(&collection.seals, nonce)) {
+            return SANAD_STATE_UNCREATED
+        };
+        let seal = smart_table::borrow(&collection.seals, nonce);
+        if (seal.consumed) {
+            SANAD_STATE_CONSUMED
+        } else {
+            SANAD_STATE_ACTIVE
+        }
+    }
+
+    /// Get the state of a Sanad by sanad_id from the lock registry.
+    ///
+    /// Returns the canonical SanadState value based on lock status:
+    /// - 0 (Uncreated) if no lock record exists
+    /// - 3 (Locked) if lock exists and not refunded
+    /// - 7 (Refunded) if lock exists and refunded
+    public fun get_sanad_state(
+        registry_addr: address,
+        sanad_id: vector<u8>,
+    ): u8 acquires LockRegistry {
+        if (!exists<LockRegistry>(registry_addr)) {
+            return SANAD_STATE_UNCREATED
+        };
+        let registry = borrow_global<LockRegistry>(registry_addr);
+        if (!smart_table::contains(&registry.locks, copy sanad_id)) {
+            return SANAD_STATE_UNCREATED
+        };
+        let lock = smart_table::borrow(&registry.locks, sanad_id);
+        if (lock.refunded) {
+            SANAD_STATE_REFUNDED
+        } else {
+            SANAD_STATE_LOCKED
+        }
+    }
+
+    /// Check if a nullifier has been registered.
+    ///
+    /// Returns true if the nullifier is registered for the given sanad_id.
+    public fun is_nullifier_used(
+        account_addr: address,
+        nonce: u64,
+        nullifier: vector<u8>,
+    ): bool acquires SealCollection {
+        if (!exists<SealCollection>(account_addr)) {
+            return false
+        };
+        let collection = borrow_global<SealCollection>(account_addr);
+        if (!smart_table::contains(&collection.seals, nonce)) {
+            return false
+        };
+        let seal = smart_table::borrow(&collection.seals, nonce);
+        seal.nullifier == nullifier
+    }
+
+    /// Check if a Sanad is created (has a lock record).
+    public fun is_sanad_created(
+        registry_addr: address,
+        sanad_id: vector<u8>,
+    ): bool acquires LockRegistry {
+        if (!exists<LockRegistry>(registry_addr)) {
+            return false
+        };
+        let registry = borrow_global<LockRegistry>(registry_addr);
+        smart_table::contains(&registry.locks, copy sanad_id)
+    }
+
+    /// Check if a Sanad is locked (not refunded).
+    public fun is_sanad_locked(
+        registry_addr: address,
+        sanad_id: vector<u8>,
+    ): bool acquires LockRegistry {
+        if (!exists<LockRegistry>(registry_addr)) {
+            return false
+        };
+        let registry = borrow_global<LockRegistry>(registry_addr);
+        if (!smart_table::contains(&registry.locks, copy sanad_id)) {
+            return false
+        };
+        let lock = smart_table::borrow(&registry.locks, sanad_id);
+        !lock.refunded
+    }
+
+    /// Check if a Sanad is refunded.
+    public fun is_sanad_refunded(
+        registry_addr: address,
+        sanad_id: vector<u8>,
+    ): bool acquires LockRegistry {
+        if (!exists<LockRegistry>(registry_addr)) {
+            return false
+        };
+        let registry = borrow_global<LockRegistry>(registry_addr);
+        if (!smart_table::contains(&registry.locks, copy sanad_id)) {
+            return false
+        };
+        let lock = smart_table::borrow(&registry.locks, sanad_id);
+        lock.refunded
     }
 
     // =========================================================================

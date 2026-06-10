@@ -29,6 +29,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::Initialized,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -43,6 +44,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::Initialized,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Completed,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -57,6 +59,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::LockConfirmed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -71,6 +74,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::LockConfirmed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Completed,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -102,6 +106,7 @@ async fn test_journal_identifies_incomplete_transfers() {
             phase: TransferStage::Initialized,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -121,7 +126,7 @@ async fn test_journal_records_failed_phase() {
     let replay_id = replay_id(3);
 
     // Record phase: LockConfirmed (Failed)
-    journal
+         journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
             replay_id: replay_id.clone(),
@@ -131,6 +136,7 @@ async fn test_journal_records_failed_phase() {
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Failed("RPC timeout".to_string()),
             attempt: 1,
+            transfer_context: None,
         })
         .unwrap();
 
@@ -165,6 +171,7 @@ async fn test_journal_latest_phase_for_completed_transfer() {
                 phase,
                 ts: std::time::SystemTime::now(),
                 outcome: PhaseOutcome::Completed,
+                transfer_context: None,
                 attempt: 1,
             })
             .unwrap();
@@ -195,6 +202,7 @@ async fn test_journal_multiple_transfers() {
             phase: TransferStage::Completed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Completed,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -211,6 +219,7 @@ async fn test_journal_multiple_transfers() {
             phase: TransferStage::LockConfirmed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -227,6 +236,7 @@ async fn test_journal_multiple_transfers() {
             phase: TransferStage::ProofBuilding,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
+                transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -256,6 +266,7 @@ async fn test_journal_capacity_enforcement() {
                 phase: TransferStage::Initialized,
                 ts: std::time::SystemTime::now(),
                 outcome: PhaseOutcome::Completed,
+                transfer_context: None,
                 attempt: 1,
             })
             .unwrap();
@@ -270,6 +281,7 @@ async fn test_journal_capacity_enforcement() {
         phase: TransferStage::Initialized,
         ts: std::time::SystemTime::now(),
         outcome: PhaseOutcome::Completed,
+                transfer_context: None,
         attempt: 1,
     });
 

@@ -4,7 +4,7 @@
 //! Anchors represent on-chain references containing commitments.
 
 use anyhow::Result;
-use csv_codec::canonical::{from_canonical_cbor, to_canonical_cbor};
+// Serde removed - using manual canonical serialization
 use std::vec::Vec;
 
 /// Maximum allowed size for seal identifiers (1KB)
@@ -26,7 +26,8 @@ pub const MAX_ANCHOR_METADATA_SIZE: usize = 4096;
 /// - Ethereum: Contract address + storage slot
 /// - Sui: Object ID
 /// - Aptos: Resource address + key
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SealPoint {
     /// Chain-specific seal identifier
     pub id: Vec<u8>,
@@ -184,23 +185,81 @@ impl SealPoint {
         Ok(Self { id, nonce, version })
     }
 
-    /// Serialize to canonical CBOR bytes for hashing.
+  /// Serialize to canonical bytes for hashing.
+    ///
+    /// Format: `[id_len:u32 LE][id_bytes][nonce_present:u8][nonce:u64 LE if present][version_present:u8][version:u64 LE if present]`
     ///
     /// This is the ONLY approved method for serializing SealPoint in hashing paths.
-    /// Manual `to_vec()` is forbidden in protocol-critical hashing.
     ///
     /// # Errors
     /// Returns `anyhow::Error::SerializationError` if encoding fails.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, anyhow::Error> {
-        to_canonical_cbor(self).map_err(|e| anyhow::Error::msg(e.to_string()))
+        let mut out = Vec::with_capacity(4 + self.id.len() + 1 + 8 + 1 + 8);
+        out.extend_from_slice(&(self.id.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.id);
+        match self.nonce {
+            Some(n) => {
+                out.push(1);
+                out.extend_from_slice(&n.to_le_bytes());
+            }
+            None => out.push(0),
+        }
+        match self.version {
+            Some(v) => {
+                out.push(1);
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+            None => out.push(0),
+        }
+        Ok(out)
     }
 
-    /// Deserialize from canonical CBOR bytes.
+    /// Deserialize from canonical bytes.
     ///
     /// # Errors
     /// Returns `anyhow::Error::DeserializationError` if decoding fails.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, anyhow::Error> {
-        from_canonical_cbor(bytes).map_err(|e| anyhow::Error::msg(e.to_string()))
+        if bytes.len() < 4 {
+            return Err(anyhow::anyhow!("insufficient bytes for id_len"));
+        }
+        let id_len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        let mut pos = 4;
+        if bytes.len() < pos + id_len {
+            return Err(anyhow::anyhow!("insufficient bytes for id"));
+        }
+        let id = bytes[pos..pos + id_len].to_vec();
+        pos += id_len;
+        if bytes.len() < pos + 1 {
+            return Err(anyhow::anyhow!("insufficient bytes for nonce_present"));
+        }
+        let nonce = if bytes[pos] == 1 {
+            pos += 1;
+            if bytes.len() < pos + 8 {
+                return Err(anyhow::anyhow!("insufficient bytes for nonce"));
+            }
+            let nonce_val = u64::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3], bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]]);
+            pos += 8;
+            Some(nonce_val)
+        } else {
+            pos += 1;
+            None
+        };
+        if bytes.len() < pos + 1 {
+            return Err(anyhow::anyhow!("insufficient bytes for version_present"));
+        }
+        let version = if bytes[pos] == 1 {
+            pos += 1;
+            if bytes.len() < pos + 8 {
+                return Err(anyhow::anyhow!("insufficient bytes for version"));
+            }
+            let version_val = u64::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3], bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]]);
+            pos += 8;
+            Some(version_val)
+        } else {
+            pos += 1;
+            None
+        };
+        Ok(Self { id, nonce, version })
     }
 }
 
@@ -212,7 +271,8 @@ impl SealPoint {
 /// - Bitcoin: Transaction ID + output index
 /// - Ethereum: Transaction hash + log index
 /// - Sui: Object ID + version
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommitAnchor {
     /// Chain-specific anchor identifier
     pub anchor_id: Vec<u8>,
@@ -339,23 +399,56 @@ impl CommitAnchor {
         })
     }
 
-    /// Serialize to canonical CBOR bytes for hashing.
+   /// Serialize to canonical bytes for hashing.
+    ///
+    /// Format: `[block_height:u64 LE][anchor_id_len:u32 LE][anchor_id][metadata_len:u32 LE][metadata]`
     ///
     /// This is the ONLY approved method for serializing CommitAnchor in hashing paths.
-    /// Manual `to_vec()` is forbidden in protocol-critical hashing.
     ///
     /// # Errors
     /// Returns `anyhow::Error::SerializationError` if encoding fails.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, anyhow::Error> {
-        to_canonical_cbor(self).map_err(|e| anyhow::Error::msg(e.to_string()))
+        let mut out = Vec::with_capacity(8 + 4 + self.anchor_id.len() + 4 + self.metadata.len());
+        out.extend_from_slice(&self.block_height.to_le_bytes());
+        out.extend_from_slice(&(self.anchor_id.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.anchor_id);
+        out.extend_from_slice(&(self.metadata.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.metadata);
+        Ok(out)
     }
 
-    /// Deserialize from canonical CBOR bytes.
+    /// Deserialize from canonical bytes.
     ///
     /// # Errors
     /// Returns `anyhow::Error::DeserializationError` if decoding fails.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, anyhow::Error> {
-        from_canonical_cbor(bytes).map_err(|e| anyhow::Error::msg(e.to_string()))
+        if bytes.len() < 8 {
+            return Err(anyhow::anyhow!("insufficient bytes for block_height"));
+        }
+        let block_height = u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]);
+        let mut pos = 8;
+        if bytes.len() < pos + 4 {
+            return Err(anyhow::anyhow!("insufficient bytes for anchor_id_len"));
+        }
+        let anchor_id_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        pos += 4;
+        if bytes.len() < pos + anchor_id_len {
+            return Err(anyhow::anyhow!("insufficient bytes for anchor_id"));
+        }
+        let anchor_id = bytes[pos..pos + anchor_id_len].to_vec();
+        pos += anchor_id_len;
+        if bytes.len() < pos + 4 {
+            return Err(anyhow::anyhow!("insufficient bytes for metadata_len"));
+        }
+        let metadata_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        pos += 4;
+        if bytes.len() < pos + metadata_len {
+            return Err(anyhow::anyhow!("insufficient bytes for metadata"));
+        }
+        let metadata = bytes[pos..pos + metadata_len].to_vec();
+        Ok(Self { block_height, anchor_id, metadata })
     }
 }
 

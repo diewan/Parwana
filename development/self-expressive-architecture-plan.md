@@ -1,5 +1,17 @@
 # Self-Expressive Architecture Plan
 
+**Status: POSTPONED** — Last validated 2025-06-09. This plan addresses naming and organization but does not address security, correctness, or architectural purity concerns. All other plans (AUDIT.md, Contracts-Audit.md, UNWIRED.md, config-data-oriented) have higher priority.
+
+**This plan is deferred until:**
+1. All critical security blockers (B-003 through B-015) are resolved
+2. Placeholder proof validation is replaced with real verification
+3. Sanad descriptor and canonical state machine are implemented
+4. Secret handling is centralized
+
+**Renaming files does not fix placeholder validation, fake proofs, or missing canonical schemas.** The ambiguous names are a symptom, not a cause.
+
+---
+
 This plan addresses ambiguous entity naming and organization across the CSV Protocol codebase to ensure every module self-expresses its purpose, location, and architectural role.
 
 ## Ambiguous Entities Identified

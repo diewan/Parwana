@@ -2985,6 +2985,8 @@ dependencies = [
 name = "csv-examples"
 version = "0.1.0"
 dependencies = [
+ "csv-hash",
+ "csv-protocol",
  "csv-sdk",
  "tokio",
 ]
@@ -3096,6 +3098,7 @@ dependencies = [
 name = "csv-protocol"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bincode",
  "blake2",
@@ -3103,6 +3106,7 @@ dependencies = [
  "ciborium",
  "csv-codec",
  "csv-hash",
+ "csv-keys",
  "ed25519-dalek",
  "hex",
  "lazy_static",
@@ -3116,7 +3120,9 @@ dependencies = [
  "sha2",
  "sha3 0.10.9",
  "thiserror 1.0.69",
+ "toml",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]

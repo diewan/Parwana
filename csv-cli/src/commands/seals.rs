@@ -80,8 +80,28 @@ async fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateMa
     // Generate a commitment for seal creation
     let commitment = Hash::new(generate_commitment());
 
+    // Create a minimal SanadPayloadDescriptor
+    let descriptor = csv_protocol::SanadPayloadDescriptor::new(
+        csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
+        Hash::new([0u8; 32]),
+        1,
+        commitment,
+        None,
+        Hash::new([0u8; 32]),
+        Hash::new([0u8; 32]),
+    );
+
+    // Create ownership proof with empty owner
+    let ownership_proof = csv_protocol::OwnershipProof {
+        owner: vec![],
+        proof: vec![],
+        scheme: None,
+    };
+
+    let salt: [u8; 16] = rand::random();
+
     // Create the sanad (which internally creates a seal via the runtime)
-    match sanads.create(commitment, core_chain) {
+    match sanads.create(&descriptor, commitment, ownership_proof, &salt, core_chain) {
         Ok(sanad) => {
             let seal_id = hex::encode(sanad.id.as_bytes());
             let value_sat = value.unwrap_or(100_000);

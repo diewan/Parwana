@@ -38,6 +38,7 @@ fn parse_chain_pair(s: &str) -> Result<(Chain, Chain), String> {
         "ethereum" => Chain::new("ethereum"),
         "sui" => Chain::new("sui"),
         "aptos" => Chain::new("aptos"),
+        "solana" => Chain::new("solana"),
         other => return Err(format!("Unknown chain: {}", other)),
     };
 
@@ -46,6 +47,7 @@ fn parse_chain_pair(s: &str) -> Result<(Chain, Chain), String> {
         "ethereum" => Chain::new("ethereum"),
         "sui" => Chain::new("sui"),
         "aptos" => Chain::new("aptos"),
+        "solana" => Chain::new("solana"),
         other => return Err(format!("Unknown chain: {}", other)),
     };
 
@@ -72,6 +74,10 @@ fn cmd_run(
             (Chain::new("bitcoin"), Chain::new("sui")),
             (Chain::new("bitcoin"), Chain::new("ethereum")),
             (Chain::new("bitcoin"), Chain::new("aptos")),
+            // Solana as source
+            (Chain::new("solana"), Chain::new("sui")),
+            (Chain::new("solana"), Chain::new("ethereum")),
+            (Chain::new("solana"), Chain::new("aptos")),
             // Sui as source
             (Chain::new("sui"), Chain::new("ethereum")),
             (Chain::new("sui"), Chain::new("aptos")),
@@ -214,8 +220,34 @@ fn check_chain_connectivity(chain: &Chain, config: &Config) -> Result<()> {
             }
         }
         "solana" => {
-            output::info("Solana test support coming soon");
-            Ok(())
+            // Solana RPC - simple health check
+            let url = format!("{}/", chain_config.rpc_url.trim_end_matches('/'));
+            let body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getHealth"
+            });
+            let resp = reqwest::blocking::Client::new()
+                .post(&url)
+                .json(&body)
+                .send()?;
+            if resp.status().is_success() {
+                let resp_body: serde_json::Value = resp.json()?;
+                if let Some(result) = resp_body.get("result") {
+                    if result == &serde_json::json!(null) {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("Solana health check failed: {:?}", result))
+                    }
+                } else {
+                    Err(anyhow::anyhow!("Solana health check returned no result"))
+                }
+            } else {
+                Err(anyhow::anyhow!(
+                    "Solana RPC returned status {}",
+                    resp.status()
+                ))
+            }
         }
         _ => {
             output::warning(&format!("Unknown chain: {}", chain));

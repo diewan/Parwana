@@ -16,6 +16,7 @@
 pub mod backend;
 pub mod canonical_proof;
 pub mod chain_config;
+pub mod chain_registry;
 pub mod commitment;
 pub mod cross_chain;
 pub mod deployment_manifest;
@@ -29,6 +30,7 @@ pub mod proof;
 pub mod proof_types;
 pub mod proof_verification;
 pub mod sanad;
+pub mod secret;
 pub mod seal;
 pub mod seal_protocol;
 pub mod signature;
@@ -109,7 +111,7 @@ pub use verification::VerificationLevel;
 pub use cross_chain::HashEntry;
 
 // Re-export sanad types
-pub use sanad::{OwnershipProof, SCHEMA_VERSION, Sanad, SanadEnvelope, SanadId, Schema};
+pub use sanad::{OwnershipProof, SCHEMA_VERSION, Sanad, SanadEnvelope, SanadId, SanadPayloadDescriptor, Schema};
 
 // Re-export seal types
 pub use seal::{CommitAnchor, SealPoint};
@@ -137,3 +139,6 @@ pub use verified::{
 
 // Re-export canonical proof types
 pub use canonical_proof::{CanonicalProof, ProofValidationError};
+
+// Re-export secret handling types
+pub use secret::{SecretHandle, SharedSecretHandle};

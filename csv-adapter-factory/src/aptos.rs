@@ -55,16 +55,17 @@ impl AdapterFactory for AptosFactory {
             ..Default::default()
         };
 
-        let seal_protocol = if let Some(ref private_key_hex) = config.private_key {
+        let seal_protocol = if let Some(key_bytes) = config.secret_key.as_bytes() {
             log::info!("Factory: Creating Aptos seal protocol with signing key");
+            let key_hex = hex::encode(key_bytes);
             AptosSealProtocol::with_rpc_and_signing_key(
                 aptos_config,
                 &rest_endpoint.url,
-                private_key_hex,
+                &key_hex,
             )
             .map_err(|e| FactoryError::CreationFailed(format!("Failed to create seal protocol with signing key: {}", e)))?
         } else {
-            log::warn!("Factory: No private key provided, creating Aptos seal protocol without signing key (read-only mode)");
+            log::warn!("Factory: No secret key provided, creating Aptos seal protocol without signing key (read-only mode)");
             AptosSealProtocol::from_config(
                 aptos_config,
                 Box::new(AptosNode::new(&rest_endpoint.url)) as Box<dyn AptosRpc + Send + Sync>

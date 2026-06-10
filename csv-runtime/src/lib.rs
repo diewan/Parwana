@@ -12,8 +12,8 @@
 // Re-exports from csv-coordinator
 pub use csv_coordinator::{
     CapabilityNegotiator, CellCircuitBreaker, CellConfig, CellError, CellTask, ChainCell,
-    CircuitState, InboundTransfer, MemoryCeiling, NegotiatedPlan, NegotiationError, RouterError,
-    SecurityRequirements, TransferRouter,
+    CircuitState, MemoryCeiling, NegotiatedPlan, NegotiationError, RouterError,
+    SecurityRequirements, TransferRouter, TransferTask,
 };
 
 // Re-exports from csv-admission

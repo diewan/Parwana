@@ -49,7 +49,8 @@ pub const COMMITMENT_VERSION: u8 = 2;
 /// `"commitment-protocol-id"`) using [`csv_tagged_hash`]. This prevents
 /// cross-field collisions and ensures that different commitment versions
 /// produce different hashes even if their fields are otherwise identical.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Commitment {
     /// Commitment format version (MUST be `COMMITMENT_VERSION`)
     pub version: u8,
@@ -185,17 +186,23 @@ impl Commitment {
         Hash::new(csv_tagged_hash("seal-id", &seal_bytes))
     }
 
-    /// Serialize to canonical bytes for hashing.
+   /// Serialize to canonical bytes for hashing.
+    ///
+    /// Format: `[version][protocol_id][mpc_root][contract_id][previous_commitment][transition_payload_hash][seal_id][domain_separator]`
     ///
     /// # Returns
-    /// The canonical CBOR encoding of this commitment.
-    ///
-    /// If canonical serialization fails, returns deterministic error bytes so callers
-    /// never panic while still getting a domain-separated value.
+    /// The canonical encoding of this commitment.
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        csv_codec::canonical::to_canonical_cbor(self).unwrap_or_else(|err| {
-            format!("commitment-canonical-serialization-error:{err}").into_bytes()
-        })
+        let mut data = Vec::with_capacity(1 + 32 * 6 + 32);
+        data.push(self.version);
+        data.extend_from_slice(self.protocol_id.as_bytes());
+        data.extend_from_slice(self.mpc_root.as_bytes());
+        data.extend_from_slice(self.contract_id.as_bytes());
+        data.extend_from_slice(self.previous_commitment.as_bytes());
+        data.extend_from_slice(self.transition_payload_hash.as_bytes());
+        data.extend_from_slice(self.seal_id.as_bytes());
+        data.extend_from_slice(&self.domain_separator);
+        data
     }
 
     /// Check if this is a genesis commitment (no previous commitment).

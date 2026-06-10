@@ -12,6 +12,45 @@
 //! To transfer a Sanad, the seal is consumed on-chain and the new owner
 //! verifies the consumption proof locally — no bridges, no minting,
 //! no cross-chain messaging.
+//!
+//! # Wallet Integration
+//!
+//! Creating a Sanad requires:
+//! 1. A [`SanadPayloadDescriptor`] binding content metadata to the Sanad ID
+//! 2. A signed [`OwnershipProof`] from the wallet
+//!
+//! Use [`SanadsManager::create`] which accepts both the descriptor and owner proof.
+//!
+//! ## Example: Creating a Sanad with Real Wallet
+//!
+//! ```ignore
+//! use csv_sdk::prelude::*;
+//! use csv_protocol::{SanadPayloadDescriptor, OwnershipProof};
+//! use csv_keys::memory::SecretKey;
+//!
+//! // 1. Create a payload descriptor
+//! let descriptor = SanadPayloadDescriptor::new(
+//!     "csv.sanad.content.v1",
+//!     schema_hash,
+//!     1, // CBOR codec
+//!     payload_hash,
+//!     None, // no content root
+//!     disclosure_policy_hash,
+//!     proof_policy_hash,
+//! );
+//!
+//! // 2. Sign the descriptor hash with the wallet
+//! let owner_proof = wallet.sign_descriptor(&descriptor)?;
+//!
+//! // 3. Create the Sanad
+//! let sanad = sanads.create(
+//!     &descriptor,
+//!     commitment,
+//!     owner_proof,
+//!     salt,
+//!     chain,
+//! )?;
+//! ```
 
 use std::sync::Arc;
 
@@ -70,53 +109,65 @@ impl SanadsManager {
 
     /// Create a new Sanad anchored to the specified chain.
     ///
-    /// This method:
-    /// 1. Creates a single-use seal on the target chain
-    /// 2. Constructs a Sanad with the given commitment
-    /// 3. Records the seal consumption in the local store
+    /// This is the **only** method for creating Sanads. It requires:
+    /// 1. A [`SanadPayloadDescriptor`] binding content metadata to the Sanad ID
+    /// 2. A signed [`OwnershipProof`] from the wallet
+    /// 3. A commitment hash binding the Sanad's state
+    /// 4. Salt bytes for uniqueness in ID derivation
+    ///
+    /// ## Workflow
+    ///
+    /// 1. Create a [`SanadPayloadDescriptor`] with schema, payload hash, and content roots
+    /// 2. Sign the descriptor hash with the wallet's secret key
+    /// 3. Create the seal on the target chain (via chain adapter)
+    /// 4. Construct the Sanad with the descriptor, commitment, and ownership proof
+    /// 5. Persist to local store and emit event
     ///
     /// # Arguments
     ///
-    /// * `commitment` — The commitment hash binding the Sanad's state.
-    /// * `chain` — The chain where the seal will be anchored.
+    /// * `descriptor` — The payload descriptor binding content metadata to the Sanad
+    /// * `commitment` — The commitment hash binding the Sanad's state
+    /// * `owner` — The ownership proof (wallet signature over descriptor hash)
+    /// * `salt` — Salt bytes for uniqueness in ID derivation
+    /// * `chain` — The chain where the seal will be anchored
     ///
     /// # Returns
     ///
-    /// The newly created [`Sanad`] with a unique [`SanadId`].
+    /// The newly created [`Sanad`] with a unique [`SanadId`] that binds:
+    /// - The descriptor hash (content metadata)
+    /// - The commitment hash (state binding)
+    /// - The salt (uniqueness)
     ///
     /// # Errors
     ///
     /// - [`CsvError::ChainNotSupported`] if the chain is not enabled.
-    /// - [`CsvError::InsufficientFunds`] if the wallet lacks funds for seal creation.
-    /// - [`CsvError::ProtocolError`] if the underlying chain operation fails.
-    pub fn create(&self, commitment: Hash, chain: ChainId) -> Result<Sanad, CsvError> {
+    /// - [`CsvError::InvalidInput`] if the ownership proof is malformed.
+    /// - [`CsvError::SerializationError`] if the Sanad cannot be serialized.
+    pub fn create(
+        &self,
+        descriptor: &csv_protocol::SanadPayloadDescriptor,
+        commitment: Hash,
+        owner: csv_protocol::OwnershipProof,
+        salt: &[u8],
+        chain: ChainId,
+    ) -> Result<Sanad, CsvError> {
         if !self.client.is_chain_enabled(chain.clone()) {
-            return Err(CsvError::ChainNotSupported(chain));
+            return Err(CsvError::ChainNotSupported(chain.clone()));
         }
 
-        // In a full implementation, this would:
-        // 1. Call the chain adapter's SealProtocol::create_seal()
-        // 2. Construct the Sanad with the seal reference
-        // 3. Publish the commitment via SealProtocol::publish()
-        // 4. Record the seal in the local store
-        // 5. Emit a SanadCreated event
-        //
-        // The chain adapters (csv-adapter-bitcoin, etc.) provide the
-        // actual SealPoint types and publishing logic.
-        //
-        // Example for Bitcoin:
-        //   let btc_adapter = csv_bitcoin::BitcoinSealProtocol::signet()?;
-        //   let seal = btc_adapter.create_seal(None)?;
-        //   let sanad = Sanad::new(commitment.hash(), owner_proof, salt);
+        // Validate ownership proof structure
+        if owner.owner.is_empty() {
+            return Err(CsvError::InvalidInput(
+                "Ownership proof owner field is empty".to_string(),
+            ));
+        }
+        if owner.proof.is_empty() {
+            return Err(CsvError::InvalidInput(
+                "Ownership proof signature bytes are empty".to_string(),
+            ));
+        }
 
-        let salt = generate_salt();
-        let owner = csv_protocol::OwnershipProof {
-            proof: vec![0u8; 32], // Derived from wallet in full implementation
-            owner: vec![0u8; 32],
-            scheme: None,
-        };
-
-        let sanad = Sanad::new(commitment, owner, &salt);
+        let sanad = Sanad::new(descriptor, commitment, owner, salt);
 
         // Persist the Sanad to the store
         let record = SanadRecord {
@@ -288,17 +339,4 @@ impl SanadsManager {
             sanad_id
         )))
     }
-}
-
-/// Generate a random 16-byte salt.
-fn generate_salt() -> Vec<u8> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-    let mut salt = Vec::with_capacity(16);
-    salt.extend_from_slice(&timestamp.to_le_bytes());
-    salt.extend_from_slice(&timestamp.rotate_left(32).to_le_bytes());
-    salt
 }

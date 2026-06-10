@@ -135,7 +135,7 @@ impl AptosSealProtocol {
         private_key_hex: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         use crate::node::AptosNode;
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         // Parse private key
         let private_key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
@@ -177,7 +177,7 @@ impl AptosSealProtocol {
         signing_key: ed25519_dalek::SigningKey,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         use crate::node::AptosNode;
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         // Derive Aptos account address from signing key
         // Aptos authentication key = SHA3-256(public_key || 0x00)
@@ -454,7 +454,7 @@ impl AptosSealProtocol {
         seal: &AptosSealPoint,
         commitment: [u8; 32],
     ) -> Result<(serde_json::Value, Vec<u8>), Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         let signing_key = self
             .signing_key
@@ -628,7 +628,7 @@ impl AptosSealProtocol {
         &self,
         payload: crate::entry_function::EntryFunctionPayload,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         let signing_key = self
             .signing_key
@@ -1442,7 +1442,7 @@ impl AptosSealProtocol {
         &self,
         account_address: [u8; 32],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         let signing_key = self
             .signing_key
@@ -1528,7 +1528,7 @@ impl AptosSealProtocol {
         &self,
         account_address: [u8; 32],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         let signing_key = self
             .signing_key
@@ -1699,7 +1699,7 @@ impl AptosSealProtocol {
         seal_address: [u8; 32],
         nonce: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::Sha3_256;
+        use sha3::{Digest, Sha3_256};
 
         let signing_key = self
             .signing_key

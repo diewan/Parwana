@@ -51,6 +51,7 @@ use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_adapter_factory::{AdapterFactory, AdapterConfig, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol, BitcoinFactory, EthereumFactory, SuiFactory, AptosFactory, SolanaFactory, AdapterResult as FactoryAdapterResult};
+use csv_protocol::secret::SharedSecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
 // Type alias for factory result
@@ -509,7 +510,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    private_key: bitcoin_seed,
+                    secret_key: bitcoin_seed.and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: chain_config.map(|c| c.account).unwrap_or(0),
                     index: chain_config.map(|c| c.index).unwrap_or(0),
                     contract_address: None,
@@ -588,7 +589,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    private_key: eth_private_key,
+                    secret_key: eth_private_key.and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: Some(address.to_string()),
@@ -653,7 +654,7 @@ impl CsvClient {
                     finality_depth: if _is_testnet { 15 } else { 12 },
                     use_checkpoint_finality: !_is_testnet,
                     rpc_url: rpc_url.clone(),
-                    private_key: None,
+                    secret_key: SharedSecretHandle::none(),
                     contract_address: Some(csv_seal_address),
                 };
                 let mut rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, csv_seal_address)
@@ -733,7 +734,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    private_key: sui_private_key,
+                    secret_key: sui_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: Some(contract_address.to_string()),
@@ -887,7 +888,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    private_key: aptos_private_key,
+                    secret_key: aptos_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: chain_config.and_then(|c| c.contract_address.clone()),
@@ -977,7 +978,7 @@ impl CsvClient {
                         csv_aptos::config::AptosNetwork::Mainnet
                     },
                     rpc_url: rpc_url.clone(),
-                    private_key: aptos_private_key.map(|k| k.to_string()),
+                    secret_key: aptos_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     ..Default::default()
                 };
                 // Set module_address from config if available
@@ -1055,7 +1056,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    private_key: solana_private_key,
+                    secret_key: solana_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: None,

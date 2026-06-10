@@ -447,6 +447,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -513,6 +514,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(msg.clone()),
                             attempt: 1,
+                transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ReplayDbError(msg.to_string()));
@@ -530,6 +532,7 @@ impl TransferCoordinator {
                                 "Replay ID not found".to_string(),
                             ),
                             attempt: 1,
+                transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ReplayDbError(
@@ -550,6 +553,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -629,6 +633,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -729,6 +734,7 @@ impl TransferCoordinator {
                             .unwrap_or_else(|| "Unknown error".to_string()),
                     ),
                     attempt: 1,
+                transfer_context: None,
                 });
             TransferCoordinatorError::LockFailed(
                 last_error
@@ -749,6 +755,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -785,6 +792,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -858,6 +866,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
                             attempt: 1,
+                transfer_context: None,
                         });
                 TransferCoordinatorError::FinalityFailed(e)
             })?;
@@ -873,6 +882,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -888,6 +898,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1012,6 +1023,7 @@ impl TransferCoordinator {
                                     .join("; "),
                             ),
                             attempt: 1,
+                transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ProofVerificationFailed(
@@ -1073,6 +1085,7 @@ impl TransferCoordinator {
                         ts: std::time::SystemTime::now(),
                         outcome: crate::execution_journal::PhaseOutcome::Completed,
                         attempt: 1,
+                transfer_context: None,
                     })
                     .map_err(|e| {
                         TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e))
@@ -1090,6 +1103,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
                             attempt: 1,
+                transfer_context: None,
                         });
                 return Err(TransferCoordinatorError::ProofVerificationFailed(
                     e.to_string(),
@@ -1115,6 +1129,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1149,6 +1164,7 @@ impl TransferCoordinator {
                                 "Circuit breaker is open".to_string(),
                             ),
                             attempt: 1,
+                transfer_context: None,
                         });
                 let typed_replay_id = replay_id_from_hash(replay_id);
                 let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
@@ -1169,6 +1185,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1221,6 +1238,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(error.clone()),
                             attempt: 1,
+                transfer_context: None,
                         });
                 let typed_replay_id = replay_id_from_hash(replay_id);
                 let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
@@ -1249,6 +1267,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1263,6 +1282,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1353,6 +1373,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 1,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1530,28 +1551,127 @@ impl TransferCoordinator {
                 }
             }
             crate::recovery::TransferStage::LockConfirmed => {
-                if let Some(transfer) = cached_transfer {
-                    tracing::info!("Resuming from LockConfirmed - will regenerate proof");
-                    self.execute_from_lock(transfer, adapter_registry, runtime_ctx)
-                        .await
+                // Try to reconstruct transfer from journal context
+                let transfer = if let Some(transfer) = cached_transfer {
+                    transfer
+                } else if let Some(ctx) = recovery_entry.transfer_context {
+                    // Reconstruct transfer from journal context
+                    tracing::info!("Reconstructing transfer from journal context for LockConfirmed recovery");
+                    CrossChainTransfer {
+                        id: transfer_id.to_string(),
+                        source_chain: ctx.source_chain.clone(),
+                        destination_chain: ctx.destination_chain.clone(),
+                        lock_tx_hash: ctx.lock_tx_hash.to_vec(),
+                        lock_output_index: 0,
+                        sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                        transition_id: vec![],
+                    }
                 } else {
-                    Err(TransferCoordinatorError::RuntimeError(
-                        "Cannot resume from LockConfirmed phase - persisted transfer missing"
+                    return Err(TransferCoordinatorError::RuntimeError(
+                        "Cannot resume from LockConfirmed phase - transfer context missing from journal"
                             .to_string(),
-                    ))
-                }
+                    ));
+                };
+                self.execute_from_lock(transfer, adapter_registry, runtime_ctx)
+                    .await
             }
             crate::recovery::TransferStage::ProofBuilding => {
-                // Proof was being built - resume from proof generation
-                if let Some(transfer) = cached_transfer {
-                    tracing::info!("Resuming from ProofBuilding - regenerating proof");
+                // Check for persisted proof checkpoint before regenerating
+                if let Some(proof_payload) = &recovery_entry.proof_payload {
+                    if !proof_payload.is_empty() {
+                        tracing::info!("Resuming from ProofBuilding - using persisted proof checkpoint");
+                        // Proof was already built and persisted, skip regeneration
+                        let proof_bundle: csv_protocol::proof_types::ProofBundle =
+                            csv_codec::from_canonical_cbor(proof_payload).map_err(|e| {
+                                TransferCoordinatorError::ProofVerificationFailed(format!(
+                                    "Persisted proof checkpoint is malformed: {}",
+                                    e
+                                ))
+                            })?;
+                        
+                        // Reconstruct transfer from journal context if needed
+                        let transfer = if let Some(transfer) = cached_transfer {
+                            transfer
+                        } else if let Some(ctx) = &recovery_entry.transfer_context {
+                            CrossChainTransfer {
+                                id: transfer_id.to_string(),
+                                source_chain: ctx.source_chain.clone(),
+                                destination_chain: ctx.destination_chain.clone(),
+                                lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                                lock_output_index: 0,
+                                sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                                transition_id: vec![],
+                            }
+                        } else {
+                            return Err(TransferCoordinatorError::RuntimeError(
+                                "Cannot resume from ProofBuilding - transfer context missing"
+                                    .to_string(),
+                            ));
+                        };
+                        
+                        // Verify the persisted proof and proceed to mint
+                        let lock_tx_hash = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
+                        let confirmed_lock = adapter_registry
+                            .confirm_tx(&transfer.source_chain, &lock_tx_hash)
+                            .await
+                            .map_err(|e| TransferCoordinatorError::FinalityFailed(e.to_string()))?;
+                        
+                        self.verify_recovery_proof(
+                            &transfer,
+                            &proof_bundle,
+                            confirmed_lock.block_height,
+                            adapter_registry,
+                            &runtime_ctx,
+                        )
+                        .await?;
+                        
+                        self.execute_from_proof(transfer, proof_payload.clone(), adapter_registry, runtime_ctx)
+                            .await
+                    } else {
+                        // No persisted proof, need to regenerate
+                        let transfer = if let Some(transfer) = cached_transfer {
+                            transfer
+                        } else if let Some(ctx) = recovery_entry.transfer_context {
+                            CrossChainTransfer {
+                                id: transfer_id.to_string(),
+                                source_chain: ctx.source_chain.clone(),
+                                destination_chain: ctx.destination_chain.clone(),
+                                lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                                lock_output_index: 0,
+                                sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                                transition_id: vec![],
+                            }
+                        } else {
+                            return Err(TransferCoordinatorError::RuntimeError(
+                                "Cannot resume from ProofBuilding phase - transfer state lost"
+                                    .to_string(),
+                            ));
+                        };
+                        self.execute_from_lock(transfer, adapter_registry, runtime_ctx)
+                            .await
+                    }
+                } else {
+                    // No proof payload in journal, need to regenerate
+                    let transfer = if let Some(transfer) = cached_transfer {
+                        transfer
+                    } else if let Some(ctx) = recovery_entry.transfer_context {
+                        CrossChainTransfer {
+                            id: transfer_id.to_string(),
+                            source_chain: ctx.source_chain.clone(),
+                            destination_chain: ctx.destination_chain.clone(),
+                            lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                            lock_output_index: 0,
+                            sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                            transition_id: vec![],
+                        }
+                    } else {
+                        return Err(TransferCoordinatorError::RuntimeError(
+                            "Cannot resume from ProofBuilding phase - transfer state lost"
+                                .to_string(),
+                        ));
+                    };
                     self.execute_from_lock(transfer, adapter_registry, runtime_ctx)
                         .await
-                } else {
-                    Err(TransferCoordinatorError::RuntimeError(
-                        "Cannot resume from ProofBuilding phase - transfer state lost (cache miss)"
-                            .to_string(),
-                    ))
                 }
             }
             crate::recovery::TransferStage::ProofValidated => {
@@ -1579,15 +1699,28 @@ impl TransferCoordinator {
             }
             crate::recovery::TransferStage::AwaitingFinality => {
                 // Awaiting finality - resume from finality check
-                if let Some(transfer) = cached_transfer {
-                    tracing::info!("Resuming from AwaitingFinality - checking finality");
-                    self.execute_from_lock(transfer, adapter_registry, runtime_ctx)
-                        .await
+                // Re-poll finality monitor with proof height from journal
+                let transfer = if let Some(transfer) = cached_transfer {
+                    transfer
+                } else if let Some(ctx) = recovery_entry.transfer_context {
+                    tracing::info!("Reconstructing transfer from journal context for AwaitingFinality recovery");
+                    CrossChainTransfer {
+                        id: transfer_id.to_string(),
+                        source_chain: ctx.source_chain.clone(),
+                        destination_chain: ctx.destination_chain.clone(),
+                        lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                        lock_output_index: 0,
+                        sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                        transition_id: vec![],
+                    }
                 } else {
-                    Err(TransferCoordinatorError::RuntimeError(
-                        "Cannot resume from AwaitingFinality phase - transfer state lost (cache miss)".to_string()
-                    ))
-                }
+                    return Err(TransferCoordinatorError::RuntimeError(
+                        "Cannot resume from AwaitingFinality phase - transfer context missing from journal"
+                            .to_string(),
+                    ));
+                };
+                self.execute_from_lock(transfer, adapter_registry, runtime_ctx)
+                    .await
             }
             crate::recovery::TransferStage::MintSubmitted => {
                 let entry = transfers
@@ -1812,6 +1945,25 @@ impl TransferCoordinator {
             block_height: confirmed_lock.block_height,
         };
 
+        // Build transfer context for crash recovery
+        let sanad_bytes: [u8; 32] = {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(transfer.sanad_id.as_bytes());
+            arr
+        };
+        let lock_bytes: [u8; 32] = {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&transfer.lock_tx_hash[..32]);
+            arr
+        };
+        let transfer_context = crate::execution_journal::TransferContext {
+            sanad_id: csv_hash::SanadId(csv_hash::Hash::new(sanad_bytes)),
+            source_chain: transfer.source_chain.clone(),
+            destination_chain: transfer.destination_chain.clone(),
+            lock_tx_hash: csv_hash::Hash::new(lock_bytes),
+            destination_owner: String::new(),
+        };
+
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
@@ -1822,6 +1974,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 2,
+                transfer_context: Some(transfer_context.clone()),
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         runtime_ctx
@@ -1838,6 +1991,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -1851,6 +2005,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         let proof_bundle = adapter_registry
@@ -1878,6 +2033,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         self.execution_journal
@@ -1890,6 +2046,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         self.execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
@@ -1960,6 +2117,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Entered,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         let mint_result = adapter_registry
@@ -1982,6 +2140,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         self.execute_from_mint(
@@ -2072,6 +2231,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         self.execution_journal
@@ -2084,6 +2244,7 @@ impl TransferCoordinator {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
@@ -2424,6 +2585,7 @@ mod tests {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 1,
+                transfer_context: None,
             })
             .unwrap();
         let mut registry = AdapterRegistryImpl::new();
@@ -2606,6 +2768,7 @@ mod tests {
                 ts: std::time::SystemTime::now(),
                 outcome: crate::execution_journal::PhaseOutcome::Completed,
                 attempt: 2,
+                transfer_context: None,
             })
             .unwrap();
 

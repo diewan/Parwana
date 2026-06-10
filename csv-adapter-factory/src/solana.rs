@@ -48,25 +48,20 @@ impl AdapterFactory for SolanaFactory {
             if let Some(program_id) = config.program_id {
                 cfg = cfg.with_csv_program_id(program_id);
             }
-            if let Some(pk) = config.private_key {
-                let cleaned = pk.trim().trim_start_matches("0x");
-                if let Ok(key_bytes) = hex::decode(cleaned) {
-                    if key_bytes.len() == 32 {
-                        use ed25519_dalek::SigningKey;
-                        let key_array: [u8; 32] = key_bytes
-                            .try_into()
-                            .map_err(|_| {
-                                FactoryError::InvalidConfig(
-                                    "Invalid Solana private key length".to_string(),
-                                )
-                            })?;
-                        let signing_key = SigningKey::from_bytes(&key_array);
-                        let public_key = signing_key.verifying_key();
-                        let mut keypair_bytes = [0u8; 64];
-                        keypair_bytes[..32].copy_from_slice(&key_array);
-                        keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
-                        cfg = cfg.with_keypair(bs58::encode(keypair_bytes).into_string());
-                    }
+            if let Some(key_bytes) = config.secret_key.as_bytes() {
+                if key_bytes.len() == 32 {
+                    use ed25519_dalek::SigningKey;
+                    let key_array: [u8; 32] = {
+                        let mut arr = [0u8; 32];
+                        arr.copy_from_slice(key_bytes);
+                        arr
+                    };
+                    let signing_key = SigningKey::from_bytes(&key_array);
+                    let public_key = signing_key.verifying_key();
+                    let mut keypair_bytes = [0u8; 64];
+                    keypair_bytes[..32].copy_from_slice(&key_array);
+                    keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
+                    cfg = cfg.with_keypair(bs58::encode(keypair_bytes).into_string());
                 }
             }
             cfg

@@ -1,4 +1,4 @@
-use crate::cell::{CellConfig, CellError, CellTask, ChainCell, InboundTransfer};
+use crate::cell::{CellConfig, CellError, CellTask, ChainCell, TransferTask};
 use csv_verifier::CryptographicAnchor;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,11 +37,12 @@ impl TransferRouter {
     }
 
     /// Route a transfer to the appropriate chain cell.
-    pub async fn route(&self, transfer: InboundTransfer) -> Result<(), RouterError> {
+    pub async fn route(&self, transfer: TransferTask) -> Result<(), RouterError> {
+        // Route based on destination chain
         let cell = self
             .cells
-            .get(&transfer.source_chain)
-            .ok_or(RouterError::UnknownChain(transfer.source_chain))?;
+            .get(&transfer.destination_chain.parse::<u32>().unwrap_or(0))
+            .ok_or(RouterError::UnknownChain(transfer.destination_chain.parse::<u32>().unwrap_or(0)))?;
 
         cell.submit(CellTask::Process(transfer))
             .await

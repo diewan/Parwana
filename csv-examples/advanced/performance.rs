@@ -1,9 +1,10 @@
-//! Performance Benchmarking Example
-//!
-//! This example demonstrates performance characteristics of the CSV Adapter,
-//! including Sanad creation and transfer throughput.
-//!
-//! Run with: `cargo run --example performance --features "all-chains,tokio" --release`
+use csv_hash::Hash;
+// Performance Benchmarking Example
+// 
+// This example demonstrates performance characteristics of the CSV Adapter,
+// including Sanad creation and transfer throughput.
+// 
+// Run with: `cargo run --example performance --features "all-chains,tokio" --release`
 
 use csv_sdk::prelude::*;
 use std::time::Instant;
@@ -26,7 +27,7 @@ async fn main() -> Result<()> {
 
     for i in 0..iterations {
         let commitment = Hash::from([i as u8; 32]);
-        let _ = client.sanads().create(commitment, ChainId::new("bitcoin"));
+        let _ = client.sanads().create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"));
     }
 
     let duration = start.elapsed();
@@ -44,7 +45,7 @@ async fn main() -> Result<()> {
     let test_commitment = Hash::from([255u8; 32]);
     let test_sanad = client
         .sanads()
-        .create(test_commitment, ChainId::new("bitcoin"))?;
+        .create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, test_commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), test_commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"))?;
 
     let iterations = 1000;
     let start = Instant::now();
@@ -68,7 +69,7 @@ async fn main() -> Result<()> {
     // Create and transfer a sanad
     let sanad = client
         .sanads()
-        .create(Hash::from([42u8; 32]), ChainId::new("bitcoin"))?;
+        .create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, Hash::from([42u8; 32]), None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), Hash::from([42u8; 32]), csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"))?;
 
     let transfer_id = client
         .transfers()
