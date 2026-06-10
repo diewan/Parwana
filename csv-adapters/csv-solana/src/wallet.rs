@@ -1,13 +1,105 @@
 //! Solana wallet implementation for CSV
 
+use async_trait::async_trait;
+use csv_protocol::signature::SignatureScheme;
+use csv_wallet::{Signer, SignerRef, Signature as WalletSignature, WalletError, Result as WalletResult};
+use secrecy::{SecretVec, ExposeSecret};
 use solana_sdk::{
     pubkey::Pubkey,
-    signature::{Keypair, Signature, Signer},
+    signature::{Keypair, Signature, Signer as SolanaSignerTrait},
     transaction::Transaction,
 };
+use std::fmt;
 
 use crate::error::{SolanaError, SolanaResult};
 use crate::types::SolanaCommitAnchor;
+
+/// Solana Signer implementation using csv-wallet Signer trait
+pub struct SolanaSigner {
+    id: String,
+    secret_key: SecretVec<u8>,
+    public_key: Vec<u8>,
+}
+
+impl SolanaSigner {
+    /// Create a new Solana signer from a private key
+    ///
+    /// # Arguments
+    /// * `id` - Signer identifier
+    /// * `secret_key` - 64-byte keypair (32 bytes secret + 32 bytes public)
+    pub fn new(id: String, secret_key: Vec<u8>) -> SolanaResult<Self> {
+        if secret_key.len() != 64 {
+            return Err(SolanaError::Wallet(
+                "Keypair must be 64 bytes".to_string(),
+            ));
+        }
+
+        let secret_bytes: [u8; 32] = secret_key[..32]
+            .try_into()
+            .map_err(|_| SolanaError::Wallet("Invalid secret key data".to_string()))?;
+
+        let keypair = Keypair::new_from_array(secret_bytes);
+        let public_key = keypair.pubkey().to_bytes();
+
+        Ok(Self {
+            id,
+            secret_key: SecretVec::new(secret_key),
+            public_key: public_key.to_vec(),
+        })
+    }
+
+    /// Get the Solana public key for this signer
+    pub fn pubkey(&self) -> Pubkey {
+        let bytes: [u8; 32] = self.public_key[..32]
+            .try_into()
+            .expect("Public key must be at least 32 bytes");
+        Pubkey::from(bytes)
+    }
+}
+
+#[async_trait]
+impl Signer for SolanaSigner {
+    async fn sign(&self, message: &[u8]) -> WalletResult<WalletSignature> {
+        let secret_bytes: [u8; 32] = self.secret_key.expose_secret()[..32]
+            .try_into()
+            .map_err(|_| WalletError::InvalidFormat("Invalid secret key data".to_string()))?;
+
+        let keypair = Keypair::new_from_array(secret_bytes);
+        let signature = keypair.sign_message(message);
+        let sig_bytes = signature.as_ref().to_vec();
+
+        Ok(WalletSignature::new(sig_bytes, SignatureScheme::Ed25519))
+    }
+
+    fn public_key(&self) -> &[u8] {
+        &self.public_key
+    }
+
+    fn signature_scheme(&self) -> SignatureScheme {
+        SignatureScheme::Ed25519
+    }
+
+    fn as_ref(&self) -> SignerRef {
+        SignerRef {
+            id: self.id.clone(),
+            chain: "solana".to_string(),
+            public_key: self.public_key.clone(),
+        }
+    }
+
+    fn chain(&self) -> &str {
+        "solana"
+    }
+}
+
+impl fmt::Debug for SolanaSigner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SolanaSigner")
+            .field("id", &self.id)
+            .field("public_key", &hex::encode(&self.public_key))
+            .finish()
+    }
+}
 
 /// Solana program wallet
 pub struct ProgramWallet {
@@ -124,9 +216,9 @@ impl ProgramWallet {
     }
 }
 
-/// Wallet error type
+/// Solana wallet error type
 #[derive(Debug, thiserror::Error)]
-pub enum WalletError {
+pub enum SolanaWalletError {
     #[error("Key error: {0}")]
     KeyError(String),
     #[error("Serialization error: {0}")]
@@ -137,8 +229,8 @@ pub enum WalletError {
     TransactionError(String),
 }
 
-impl From<WalletError> for SolanaError {
-    fn from(err: WalletError) -> Self {
+impl From<SolanaWalletError> for SolanaError {
+    fn from(err: SolanaWalletError) -> Self {
         SolanaError::Wallet(err.to_string())
     }
 }

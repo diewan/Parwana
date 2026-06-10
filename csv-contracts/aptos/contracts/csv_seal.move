@@ -38,6 +38,72 @@ module csv_seal::CSVSeal {
     const REFUND_TIMEOUT_SECS: u64 = 24 * 60 * 60;
 
     // =========================================================================
+    // Canonical ProofLeafV1 Schema
+    // =========================================================================
+
+    /// Canonical ProofLeafV1 schema for cross-chain proof verification
+    /// This struct matches the canonical schema defined in csv-protocol
+    struct ProofLeafV1 has copy, drop {
+        /// Version of the proof leaf schema
+        version: u32,
+        /// Source chain identifier
+        source_chain: u8,
+        /// Destination chain identifier
+        destination_chain: u8,
+        /// Sanad identifier
+        sanad_id: vector<u8>,
+        /// Commitment hash
+        commitment: vector<u8>,
+        /// Content descriptor hash (optional, default empty)
+        content_descriptor_hash: vector<u8>,
+        /// Source seal reference hash (optional, default empty)
+        source_seal_ref_hash: vector<u8>,
+        /// Destination owner hash (optional, default empty)
+        destination_owner_hash: vector<u8>,
+        /// Nullifier hash (optional, default empty)
+        nullifier: vector<u8>,
+        /// Lock event ID hash (optional, default empty)
+        lock_event_id: vector<u8>,
+        /// Metadata hash (optional, default empty)
+        metadata_hash: vector<u8>,
+        /// Proof policy hash (optional, default empty)
+        proof_policy_hash: vector<u8>,
+    }
+
+    /// Compute the canonical hash of a ProofLeafV1 using sha3_256 (Aptos's native hash)
+    /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    public fun hash_proof_leaf_v1(leaf: &ProofLeafV1): vector<u8> {
+        let mut data = vector::empty();
+        // Domain separator for tagged hashing
+        let domain = b"csv.proof.leaf.v1";
+        vector::append(&mut data, domain);
+        
+        // Serialize all fields in canonical order
+        let version_bytes = bcs::to_bytes(&leaf.version);
+        vector::append(&mut data, version_bytes);
+        vector::push_back(&mut data, leaf.source_chain);
+        vector::push_back(&mut data, leaf.destination_chain);
+        vector::append(&mut data, leaf.sanad_id);
+        vector::append(&mut data, leaf.commitment);
+        vector::append(&mut data, leaf.content_descriptor_hash);
+        vector::append(&mut data, leaf.source_seal_ref_hash);
+        vector::append(&mut data, leaf.destination_owner_hash);
+        vector::append(&mut data, leaf.nullifier);
+        vector::append(&mut data, leaf.lock_event_id);
+        vector::append(&mut data, leaf.metadata_hash);
+        vector::append(&mut data, leaf.proof_policy_hash);
+        
+        // Use sha3_256 (Aptos's native hash)
+        hash::sha3_256(&data)
+    }
+
+    /// Compute ProofLeafV1 hash using chain-specific hash function
+    /// For Aptos, this uses sha3_256 (native hash function)
+    public fun hash_proof_leaf_v1_with_chain_function(leaf: &ProofLeafV1, _chain: u8): vector<u8> {
+        hash_proof_leaf_v1(leaf)
+    }
+
+    // =========================================================================
     // Error Codes
     // =========================================================================
 
@@ -424,6 +490,93 @@ module csv_seal::CSVSeal {
         );
     }
 
+    /// Mint a new Sanad using canonical ProofLeafV1 schema
+    /// This is the recommended method for cross-chain minting
+    #[cmd]
+    public entry fun mint_sanad_with_proof_leaf(
+        account: &signer,
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        state_root: vector<u8>,
+        source_chain: u8,
+        destination_chain: u8,
+        source_seal_ref: vector<u8>,
+        proof: vector<u8>,
+        proof_root: vector<u8>,
+        leaf_position: u64,
+        content_descriptor_hash: vector<u8>,
+        source_seal_ref_hash: vector<u8>,
+        destination_owner_hash: vector<u8>,
+        nullifier: vector<u8>,
+        lock_event_id: vector<u8>,
+        metadata_hash: vector<u8>,
+        proof_policy_hash: vector<u8>,
+        asset_class: u8,
+        asset_id: vector<u8>,
+        proof_system: u8,
+    ) {
+        let addr = signer::address_of(account);
+
+        // Verify cross-chain proof using canonical ProofLeafV1 schema
+        verify_cross_chain_proof_with_proof_leaf(
+            &sanad_id,
+            &commitment,
+            source_chain,
+            destination_chain,
+            &proof,
+            &proof_root,
+            leaf_position,
+            content_descriptor_hash,
+            source_seal_ref_hash,
+            destination_owner_hash,
+            nullifier,
+            lock_event_id,
+            metadata_hash,
+            proof_policy_hash,
+        );
+
+        assert!(!exists<Seal>(addr), EAnchorDataExists);
+
+        let timestamp = timestamp::now_seconds();
+        move_to(account, Seal {
+            nonce: 0,
+            sanad_id: sanad_id.clone(),
+            commitment: commitment.clone(),
+            state: SANAD_STATE_MINTED,
+            owner: addr,
+            asset_class,
+            asset_id,
+            metadata_hash,
+            proof_system,
+            proof_root,
+            created_at: timestamp,
+            minted_at: timestamp,
+            locked_at: 0,
+            consumed_at: 0,
+            refunded_at: 0,
+        });
+
+        assert!(!exists<AnchorData>(addr), EAnchorDataExists);
+        move_to(account, AnchorData {
+            commitment,
+            consumed_at: timestamp,
+            nonce: 0,
+            sanad_id,
+        });
+
+        event::emit_event<SanadMinted>(
+            &mut borrow_global_mut<AnchorEventHandle>(@csv_seal).events,
+            SanadMinted {
+                sanad_id,
+                commitment,
+                owner: addr,
+                source_chain,
+                source_seal_ref,
+                timestamp_secs: timestamp,
+            },
+        );
+    }
+
     /// Refund a locked Sanad after timeout (canonical name)
     #[cmd]
     public entry fun refund_sanad(account: &signer) {
@@ -562,6 +715,48 @@ module csv_seal::CSVSeal {
         vector::append(&mut leaf_data, &bcs::to_bytes(&source_chain));
         let leaf_hash = keccak256(&leaf_data);
 
+        let is_valid = verify_merkle_proof(proof, proof_root, &leaf_hash, leaf_position);
+        assert!(is_valid, ESealNotFound);
+    }
+
+    /// Verify cross-chain proof using canonical ProofLeafV1 schema
+    /// This is the recommended verification method for cross-chain proofs
+    fun verify_cross_chain_proof_with_proof_leaf(
+        sanad_id: &vector<u8>,
+        commitment: &vector<u8>,
+        source_chain: u8,
+        destination_chain: u8,
+        proof: &vector<u8>,
+        proof_root: &vector<u8>,
+        leaf_position: u64,
+        content_descriptor_hash: vector<u8>,
+        source_seal_ref_hash: vector<u8>,
+        destination_owner_hash: vector<u8>,
+        nullifier: vector<u8>,
+        lock_event_id: vector<u8>,
+        metadata_hash: vector<u8>,
+        proof_policy_hash: vector<u8>,
+    ) {
+        // Construct canonical ProofLeafV1
+        let leaf = ProofLeafV1 {
+            version: 1,  // ProofLeafV1 version
+            source_chain,
+            destination_chain,
+            sanad_id: sanad_id.clone(),
+            commitment: commitment.clone(),
+            content_descriptor_hash,
+            source_seal_ref_hash,
+            destination_owner_hash,
+            nullifier,
+            lock_event_id,
+            metadata_hash,
+            proof_policy_hash,
+        };
+
+        // Compute canonical hash using sha3_256 (Aptos's native hash)
+        let leaf_hash = hash_proof_leaf_v1(&leaf);
+
+        // Verify Merkle proof using sha3_256 (Aptos's native hash)
         let is_valid = verify_merkle_proof(proof, proof_root, &leaf_hash, leaf_position);
         assert!(is_valid, ESealNotFound);
     }

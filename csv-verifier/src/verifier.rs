@@ -44,6 +44,7 @@
 
 use csv_protocol::error::ProtocolError;
 use csv_protocol::proof::ProofBundle;
+use csv_protocol::proof_types::{HashFunction, ProofLeafV1};
 use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};
 use csv_protocol::verification::VerificationLevel;
 use serde::Serialize;
@@ -334,6 +335,24 @@ pub trait CanonicalVerifier: Send + Sync {
         seal_id: &[u8],
         context: &VerificationContext,
     ) -> Result<SealRegistryStatus>;
+
+    /// Verify a ProofLeafV1 using the source chain's native hash function.
+    ///
+    /// This method computes the leaf hash using the chain's native hash function
+    /// and verifies it matches the expected hash. This is critical for cross-chain
+    /// verification where each chain uses its native hash to avoid gas costs.
+    ///
+    /// # Arguments
+    /// * `leaf` - The proof leaf to verify
+    /// * `expected_hash` - The expected hash value
+    ///
+    /// # Returns
+    /// Verification result indicating if the leaf hash matches.
+    fn verify_proof_leaf(
+        &self,
+        leaf: &ProofLeafV1,
+        expected_hash: &csv_hash::Hash,
+    ) -> Result<VerificationResult>;
 }
 
 /// Status of a seal in the registry.
@@ -521,6 +540,38 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
             }
         }
         Ok(SealRegistryStatus::Available)
+    }
+
+    fn verify_proof_leaf(
+        &self,
+        leaf: &ProofLeafV1,
+        expected_hash: &csv_hash::Hash,
+    ) -> Result<VerificationResult> {
+        // Get the native hash function for the source chain
+        let hash_fn = leaf.native_hash_function();
+
+        // Compute the leaf hash using the chain's native hash function
+        let computed_hash = leaf.hash_with_function(hash_fn)
+            .map_err(|e| ProtocolError::InvalidInput(format!("Failed to compute leaf hash: {}", e)))?;
+
+        // Verify the computed hash matches the expected hash
+        if computed_hash == *expected_hash {
+            Ok(VerificationResult::fully_verified())
+        } else {
+            Ok(VerificationResult {
+                is_valid: false,
+                level: VerificationLevel::StructuralOnly,
+                errors: vec![VerificationError {
+                    code: VerificationErrorCode::InclusionProofInvalid,
+                    message: format!(
+                        "Proof leaf hash mismatch: computed {:?}, expected {:?} (using {:?})",
+                        computed_hash, expected_hash, hash_fn
+                    ),
+                    retryable: false,
+                }],
+                warnings: vec![],
+            })
+        }
     }
 }
 

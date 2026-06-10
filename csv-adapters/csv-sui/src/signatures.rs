@@ -4,8 +4,99 @@
 //! Signature format: 64 bytes (R || S)
 //! Public key format: 32 bytes
 
+use async_trait::async_trait;
 use csv_protocol::error::ProtocolError;
-use csv_protocol::error::Result;
+use csv_protocol::error::Result as ProtocolResult;
+use csv_protocol::signature::SignatureScheme;
+use csv_wallet::{Signer, SignerRef, Signature as WalletSignature, WalletError, Result as WalletResult};
+use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
+use secrecy::{SecretVec, ExposeSecret};
+use std::fmt;
+
+/// Sui Signer implementation using csv-wallet Signer trait
+pub struct SuiSigner {
+    id: String,
+    secret_key: SecretVec<u8>,
+    public_key: Vec<u8>,
+}
+
+impl SuiSigner {
+    /// Create a new Sui signer from a private key
+    ///
+    /// # Arguments
+    /// * `id` - Signer identifier
+    /// * `secret_key` - 32-byte Ed25519 private key
+    pub fn new(id: String, secret_key: Vec<u8>) -> ProtocolResult<Self> {
+        if secret_key.len() != 32 {
+            return Err(ProtocolError::InvalidInput(
+                "Private key must be 32 bytes".to_string(),
+            ));
+        }
+
+        let secret_bytes: [u8; 32] = secret_key.clone().try_into()
+            .map_err(|_| ProtocolError::InvalidInput("Invalid secret key data".to_string()))?;
+
+        let signing_key = SigningKey::from_bytes(&secret_bytes);
+        
+        let verifying_key = signing_key.verifying_key();
+        let public_key = verifying_key.to_bytes().to_vec();
+
+        Ok(Self {
+            id,
+            secret_key: SecretVec::new(secret_key),
+            public_key,
+        })
+    }
+
+    /// Get the Sui public key for this signer
+    pub fn public_key_bytes(&self) -> &[u8] {
+        &self.public_key
+    }
+}
+
+#[async_trait]
+impl Signer for SuiSigner {
+    async fn sign(&self, message: &[u8]) -> WalletResult<WalletSignature> {
+        let secret_bytes: [u8; 32] = self.secret_key.expose_secret().as_slice().try_into()
+            .map_err(|_| WalletError::InvalidFormat("Invalid secret key data".to_string()))?;
+
+        let signing_key = SigningKey::from_bytes(&secret_bytes);
+        
+        let signature = signing_key.sign(message);
+        let sig_bytes = signature.to_bytes().to_vec();
+
+        Ok(WalletSignature::new(sig_bytes, SignatureScheme::Ed25519))
+    }
+
+    fn public_key(&self) -> &[u8] {
+        &self.public_key
+    }
+
+    fn signature_scheme(&self) -> SignatureScheme {
+        SignatureScheme::Ed25519
+    }
+
+    fn as_ref(&self) -> SignerRef {
+        SignerRef {
+            id: self.id.clone(),
+            chain: "sui".to_string(),
+            public_key: self.public_key.clone(),
+        }
+    }
+
+    fn chain(&self) -> &str {
+        "sui"
+    }
+}
+
+impl fmt::Debug for SuiSigner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SuiSigner")
+            .field("id", &self.id)
+            .field("public_key", &hex::encode(&self.public_key))
+            .finish()
+    }
+}
 
 /// Verify a Sui Ed25519 signature
 ///
@@ -16,7 +107,7 @@ use csv_protocol::error::Result;
 ///
 /// # Returns
 /// Ok(()) if signature is valid, Err otherwise
-pub fn verify_sui_signature(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result<()> {
+pub fn verify_sui_signature(signature: &[u8], public_key: &[u8], message: &[u8]) -> ProtocolResult<()> {
     // Validate inputs
     if signature.len() != 64 {
         return Err(ProtocolError::SignatureVerificationFailed(format!(
@@ -63,7 +154,7 @@ pub fn verify_sui_signature(signature: &[u8], public_key: &[u8], message: &[u8])
 }
 
 /// Verify multiple Sui signatures
-pub fn verify_sui_signatures(signatures: &[(Vec<u8>, Vec<u8>, Vec<u8>)]) -> Result<()> {
+pub fn verify_sui_signatures(signatures: &[(Vec<u8>, Vec<u8>, Vec<u8>)]) -> ProtocolResult<()> {
     if signatures.is_empty() {
         return Err(ProtocolError::SignatureVerificationFailed(
             "No signatures to verify".to_string(),

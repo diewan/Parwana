@@ -10,12 +10,59 @@
 //! Both implementations are cryptographically equivalent and produce identical results.
 
 use bitcoin_hashes::Hash as _;
+use csv_protocol::proof_types::ProofLeafV1;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure-Rust Merkle Tree Implementation (no `bitcoin` crate dependency)
 // ─────────────────────────────────────────────────────────────────────────────
 
 use crate::types::BitcoinInclusionProof;
+
+/// Compute the canonical hash of a ProofLeafV1 using double_sha256 (Bitcoin's native hash)
+/// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+pub fn hash_proof_leaf_v1(leaf: &ProofLeafV1) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    
+    // Domain separator for tagged hashing
+    let domain = b"csv.proof.leaf.v1";
+    
+    // Serialize all fields in canonical order
+    let mut data = Vec::new();
+    data.extend_from_slice(domain);
+    data.extend_from_slice(&leaf.version.to_le_bytes());
+    data.extend_from_slice(leaf.source_chain.as_bytes());
+    data.extend_from_slice(leaf.destination_chain.as_bytes());
+    data.extend_from_slice(leaf.sanad_id.as_ref());
+    data.extend_from_slice(leaf.commitment.as_ref());
+    data.extend_from_slice(leaf.content_descriptor_hash.as_ref());
+    data.extend_from_slice(leaf.source_seal_ref_hash.as_ref());
+    data.extend_from_slice(leaf.destination_owner_hash.as_ref());
+    data.extend_from_slice(leaf.nullifier.as_ref());
+    data.extend_from_slice(leaf.lock_event_id.as_ref());
+    data.extend_from_slice(leaf.metadata_hash.as_ref());
+    data.extend_from_slice(leaf.proof_policy_hash.as_ref());
+    
+    // Use double_sha256 (Bitcoin's native hash)
+    // First SHA256
+    let mut hasher1 = Sha256::new();
+    hasher1.update(&data);
+    let first = hasher1.finalize();
+    
+    // Second SHA256 (double)
+    let mut hasher2 = Sha256::new();
+    hasher2.update(first.as_slice());
+    let result = hasher2.finalize();
+    
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&result);
+    bytes
+}
+
+/// Compute ProofLeafV1 hash using chain-specific hash function
+/// For Bitcoin, this uses double_sha256 (native hash function)
+pub fn hash_proof_leaf_v1_with_chain_function(leaf: &ProofLeafV1, _chain: u8) -> [u8; 32] {
+    hash_proof_leaf_v1(leaf)
+}
 
 /// Convert a 32-byte array to a Txid using hex encoding.
 #[inline]

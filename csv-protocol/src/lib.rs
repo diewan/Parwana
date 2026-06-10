@@ -124,6 +124,7 @@ pub use envelope::{CanonicalSanadEnvelope, TypeId, decode_envelope};
 
 // Re-export proof types (excluding FinalityProof to avoid conflict with finality module)
 pub use proof::{InclusionProof, ProofBundle};
+pub use proof_types::{HashFunction, ProofLeafV1};
 
 // Re-export transfer state types
 pub use transfer_state::TransferStage;

@@ -28,6 +28,7 @@ csv-codec = { path = "../../csv-codec" }
 csv-wire = { path = "../../csv-wire" }
 csv-store = { path = "../../csv-store", optional = true }
 csv-keys = { path = "../../csv-keys" }
+csv-wallet = { path = "../../csv-wallet" }
 async-trait.workspace = true
 rand = "0.8"
 serde = { workspace = true, features = ["derive"] }
@@ -38,6 +39,7 @@ sha2 = "0.10"
 sha3 = "0.10"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 secp256k1 = { version = "0.28", features = ["global-context", "rand-std", "recovery"] }
+secrecy = "0.8"
 log = "0.4"
 alloy-primitives = "1.5"
 alloy-rlp = "0.3"

@@ -27,6 +27,7 @@ csv-proof = { path = "../../csv-proof" }
 csv-wire = { path = "../../csv-wire" }
 csv-codec = { path = "../../csv-codec" }
 csv-keys = { path = "../../csv-keys" }
+csv-wallet = { path = "../../csv-wallet" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
@@ -41,6 +42,7 @@ bytes = "1.5"
 blake2 = "0.10"
 prost-types = "0.14"
 base64 = "0.22"
+secrecy = "0.8"
 
 # Sui Rust SDK for gRPC-based RPC client
 # Updated to use latest API structure

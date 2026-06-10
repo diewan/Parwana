@@ -1,0 +1,27 @@
+[package]
+name = "csv-wallet"
+version = "0.1.0"
+edition = "2024"
+description = "CSV Wallet - Unified wallet abstraction with Signer trait"
+
+[dependencies]
+csv-hash = { path = "../csv-hash", features = ["serde"] }
+csv-protocol = { path = "../csv-protocol" }
+csv-keys = { path = "../csv-keys" }
+thiserror = "1"
+anyhow = "1"
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zeroize = "1.5"
+secrecy = { version = "0.8", features = ["serde"] }
+log = "0.4"
+getrandom = "0.2"
+hex = "0.4"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[features]
+default = []
+wasm = ["getrandom/js"]

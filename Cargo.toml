@@ -25,6 +25,7 @@ members = [
     "csv-sdk",
     "csv-cli",
     "csv-keys",
+    "csv-wallet",
     "csv-store",
     "csv-p2p",
     "csv-observability",

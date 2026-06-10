@@ -21,6 +21,62 @@ contract CSVSeal {
     uint8 public constant CHAIN_ETHEREUM = 3;
     uint8 public constant CHAIN_SOLANA = 4;
 
+    // ==================== Canonical ProofLeafV1 Schema ====================
+
+    /// @notice Canonical ProofLeafV1 schema for cross-chain proof verification
+    /// @dev This struct matches the canonical schema defined in csv-protocol
+    struct ProofLeafV1 {
+        uint32 version;                    // Version of the proof leaf schema
+        uint8 sourceChain;                 // Source chain identifier
+        uint8 destinationChain;            // Destination chain identifier
+        bytes32 sanadId;                   // Sanad identifier
+        bytes32 commitment;                // Commitment hash
+        bytes32 contentDescriptorHash;     // Content descriptor hash (optional, default 0)
+        bytes32 sourceSealRefHash;          // Source seal reference hash (optional, default 0)
+        bytes32 destinationOwnerHash;      // Destination owner hash (optional, default 0)
+        bytes32 nullifier;                 // Nullifier hash (optional, default 0)
+        bytes32 lockEventId;               // Lock event ID hash (optional, default 0)
+        bytes32 metadataHash;              // Metadata hash (optional, default 0)
+        bytes32 proofPolicyHash;           // Proof policy hash (optional, default 0)
+    }
+
+    /// @notice Compute the canonical hash of a ProofLeafV1 using keccak256
+    /// @dev Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    /// @param leaf The proof leaf to hash
+    /// @return The canonical hash of the proof leaf
+    function hashProofLeafV1(ProofLeafV1 memory leaf) internal pure returns (bytes32) {
+        // Domain separator for tagged hashing
+        bytes32 domain = keccak256(abi.encodePacked("csv.proof.leaf.v1"));
+        
+        // Encode all fields in canonical order
+        bytes memory encoded = abi.encodePacked(
+            leaf.version,
+            leaf.sourceChain,
+            leaf.destinationChain,
+            leaf.sanadId,
+            leaf.commitment,
+            leaf.contentDescriptorHash,
+            leaf.sourceSealRefHash,
+            leaf.destinationOwnerHash,
+            leaf.nullifier,
+            leaf.lockEventId,
+            leaf.metadataHash,
+            leaf.proofPolicyHash
+        );
+        
+        // Tagged hash: keccak256(domain || encoded)
+        return keccak256(abi.encodePacked(domain, encoded));
+    }
+
+    /// @notice Compute ProofLeafV1 hash using chain-specific hash function
+    /// @dev For Ethereum, this uses keccak256 (native hash function)
+    /// @param leaf The proof leaf to hash
+    /// @return The hash of the proof leaf using chain-specific function
+    function hashProofLeafV1WithChainFunction(ProofLeafV1 memory leaf, uint8 chain) internal pure returns (bytes32) {
+        // Ethereum uses keccak256 natively
+        return hashProofLeafV1(leaf);
+    }
+
     // ==================== Canonical State Enum ====================
 
     /// @notice Sanad lifecycle state — canonical values across all chains
@@ -354,13 +410,13 @@ contract CSVSeal {
         bytes32 proofRoot,
         uint256 leafPosition
     ) external returns (bool) {
-        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
+        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, CHAIN_ETHEREUM, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
             assetClass: ASSET_CLASS_UNSPECIFIED,
             assetId: bytes32(0),
             metadataHash: bytes32(0),
             proofSystem: PROOF_SYSTEM_UNSPECIFIED,
             proofRoot: proofRoot
-        }));
+        }), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0));
     }
 
     /// @notice Mint a Sanad with metadata
@@ -378,13 +434,45 @@ contract CSVSeal {
         uint8 proofSystem,
         uint256 leafPosition
     ) external returns (bool) {
-        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
+        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, CHAIN_ETHEREUM, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
             assetClass: assetClass,
             assetId: assetId,
             metadataHash: metadataHash,
             proofSystem: proofSystem,
             proofRoot: proofRoot
-        }));
+        }), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0));
+    }
+
+    /// @notice Mint a Sanad using canonical ProofLeafV1 schema
+    /// @dev This is the recommended method for cross-chain minting
+    function mint_sanad_with_proof_leaf(
+        bytes32 sanadId,
+        bytes32 commitment,
+        bytes32 stateRoot,
+        uint8 sourceChain,
+        uint8 destinationChain,
+        bytes calldata sourceSealPoint,
+        bytes calldata proof,
+        bytes32 proofRoot,
+        uint256 leafPosition,
+        bytes32 contentDescriptorHash,
+        bytes32 sourceSealRefHash,
+        bytes32 destinationOwnerHash,
+        bytes32 nullifier,
+        bytes32 lockEventId,
+        bytes32 metadataHash,
+        bytes32 proofPolicyHash,
+        uint8 assetClass,
+        bytes32 assetId,
+        uint8 proofSystem
+    ) external returns (bool) {
+        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, destinationChain, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
+            assetClass: assetClass,
+            assetId: assetId,
+            metadataHash: metadataHash,
+            proofSystem: proofSystem,
+            proofRoot: proofRoot
+        }), contentDescriptorHash, sourceSealRefHash, destinationOwnerHash, nullifier, lockEventId, metadataHash, proofPolicyHash);
     }
 
     function _mint_sanad_internal(
@@ -392,11 +480,19 @@ contract CSVSeal {
         bytes32 commitment,
         bytes32 stateRoot,
         uint8 sourceChain,
+        uint8 destinationChain,
         bytes calldata sourceSealPoint,
         bytes calldata proof,
         bytes32 proofRoot,
         uint256 leafPosition,
-        SanadMetadata memory metadata
+        SanadMetadata memory metadata,
+        bytes32 contentDescriptorHash,
+        bytes32 sourceSealRefHash,
+        bytes32 destinationOwnerHash,
+        bytes32 nullifier,
+        bytes32 lockEventId,
+        bytes32 proofLeafMetadataHash,
+        bytes32 proofPolicyHash
     ) internal returns (bool) {
         if (proofRoot != trustedProofRoot) revert InvalidProofRoot();
         if (mintedSanads[sanadId]) revert SanadAlreadyMinted();
@@ -405,7 +501,22 @@ contract CSVSeal {
         if (sourceChain == CHAIN_BITCOIN) {
             _verify_bitcoin_proof(sanadId, commitment, proof, proofRoot, leafPosition);
         } else {
-            _verify_cross_chain_proof(sanadId, commitment, sourceChain, proof, proofRoot, leafPosition);
+            _verify_cross_chain_proof_with_proof_leaf(
+                sanadId,
+                commitment,
+                sourceChain,
+                destinationChain,
+                proof,
+                proofRoot,
+                leafPosition,
+                contentDescriptorHash,
+                sourceSealRefHash,
+                destinationOwnerHash,
+                nullifier,
+                lockEventId,
+                proofLeafMetadataHash,
+                proofPolicyHash
+            );
         }
 
         mintedSanads[sanadId] = true;
@@ -638,6 +749,52 @@ contract CSVSeal {
         }
     }
 
+    /// @notice Verify cross-chain proof using canonical ProofLeafV1 schema
+    /// @dev This is the recommended verification method for cross-chain proofs
+    function _verify_cross_chain_proof_with_proof_leaf(
+        bytes32 sanadId,
+        bytes32 commitment,
+        uint8 sourceChain,
+        uint8 destinationChain,
+        bytes calldata proof,
+        bytes32 proofRoot,
+        uint256 leafPosition,
+        bytes32 contentDescriptorHash,
+        bytes32 sourceSealRefHash,
+        bytes32 destinationOwnerHash,
+        bytes32 nullifier,
+        bytes32 lockEventId,
+        bytes32 metadataHash,
+        bytes32 proofPolicyHash
+    ) internal view {
+        if (proof.length == 0) revert InvalidProof();
+        if (proofRoot == bytes32(0)) revert InvalidProof();
+        if (sanadId == bytes32(0)) revert InvalidProof();
+        if (commitment == bytes32(0)) revert InvalidProof();
+
+        // Construct canonical ProofLeafV1
+        ProofLeafV1 memory leaf = ProofLeafV1({
+            version: 1,  // ProofLeafV1 version
+            sourceChain: sourceChain,
+            destinationChain: destinationChain,
+            sanadId: sanadId,
+            commitment: commitment,
+            contentDescriptorHash: contentDescriptorHash,
+            sourceSealRefHash: sourceSealRefHash,
+            destinationOwnerHash: destinationOwnerHash,
+            nullifier: nullifier,
+            lockEventId: lockEventId,
+            metadataHash: metadataHash,
+            proofPolicyHash: proofPolicyHash
+        });
+
+        // Compute canonical hash using keccak256 (Ethereum's native hash)
+        bytes32 leafHash = hashProofLeafV1(leaf);
+
+        // Verify Merkle proof using keccak256
+        if (!_verify_merkle_proof_keccak256(proof, proofRoot, leafHash, leafPosition)) revert InvalidProof();
+    }
+
     function _verify_bitcoin_proof(
         bytes32 sanadId,
         bytes32 commitment,
@@ -766,7 +923,13 @@ contract CSVSeal {
         if (sanadIds.length != commitments.length || sanadIds.length != stateRoots.length || sanadIds.length != proofs.length || sanadIds.length != leafPositions.length) revert ArraysMismatch();
 
         for (uint256 i = 0; i < sanadIds.length; i++) {
-            mint_sanad(sanadIds[i], commitments[i], stateRoots[i], sourceChain, sourceSealPoint, proofs[i], proofRoot, leafPositions[i]);
+            _mint_sanad_internal(sanadIds[i], commitments[i], stateRoots[i], sourceChain, CHAIN_ETHEREUM, sourceSealPoint, proofs[i], proofRoot, leafPositions[i], SanadMetadata({
+                assetClass: ASSET_CLASS_UNSPECIFIED,
+                assetId: bytes32(0),
+                metadataHash: bytes32(0),
+                proofSystem: PROOF_SYSTEM_UNSPECIFIED,
+                proofRoot: proofRoot
+            }), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0));
         }
     }
 }

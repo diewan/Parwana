@@ -12,13 +12,94 @@ use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
 use serde::{Deserialize, Serialize};
 
+/// Hash function types supported by different chains
+///
+/// Each chain uses its native hash function to avoid extra gas costs:
+/// - Ethereum: Keccak256
+/// - Solana: SHA256
+/// - Sui: Blake2b256
+/// - Bitcoin: Double SHA256
+/// - Aptos: SHA3-256 (Keccak256 variant)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HashFunction {
+    /// Keccak256 (Ethereum native)
+    Keccak256,
+    /// SHA256 (Solana native)
+    Sha256,
+    /// Blake2b256 (Sui native)
+    Blake2b256,
+    /// Double SHA256 (Bitcoin native)
+    DoubleSha256,
+    /// SHA3-256 (Aptos native)
+    Sha3_256,
+}
+
+impl HashFunction {
+    /// Get the native hash function for a given chain
+    pub fn for_chain(chain: &str) -> Self {
+        match chain.to_lowercase().as_str() {
+            "ethereum" | "eth" => HashFunction::Keccak256,
+            "solana" | "sol" => HashFunction::Sha256,
+            "sui" => HashFunction::Blake2b256,
+            "bitcoin" | "btc" => HashFunction::DoubleSha256,
+            "aptos" => HashFunction::Sha3_256,
+            _ => HashFunction::Sha256, // Default to SHA256 for unknown chains
+        }
+    }
+
+    /// Compute hash of bytes using this hash function
+    pub fn hash_bytes(&self, bytes: &[u8]) -> Hash {
+        match self {
+            HashFunction::Keccak256 => {
+                use tiny_keccak::{Hasher, Keccak};
+                let mut hasher = Keccak::v256();
+                let mut output = [0u8; 32];
+                hasher.update(bytes);
+                hasher.finalize(&mut output);
+                Hash(output)
+            }
+            HashFunction::Sha256 => {
+                use sha2::Sha256;
+                use sha2::Digest;
+                let mut hasher = Sha256::new();
+                hasher.update(bytes);
+                Hash(hasher.finalize().into())
+            }
+            HashFunction::Blake2b256 => {
+                use blake2::Blake2s256;
+                use blake2::Digest;
+                let mut hasher = Blake2s256::new();
+                hasher.update(bytes);
+                Hash(hasher.finalize().into())
+            }
+            HashFunction::DoubleSha256 => {
+                use sha2::Sha256;
+                use sha2::Digest;
+                let mut hasher = Sha256::new();
+                hasher.update(bytes);
+                let first = hasher.finalize();
+                let mut hasher2 = Sha256::new();
+                hasher2.update(&first);
+                Hash(hasher2.finalize().into())
+            }
+            HashFunction::Sha3_256 => {
+                use sha3::Sha3_256;
+                use sha3::Digest;
+                let mut hasher = Sha3_256::new();
+                hasher.update(bytes);
+                Hash(hasher.finalize().into())
+            }
+        }
+    }
+}
+
 /// Chain-independent proof leaf schema (canonical)
 ///
 /// This is the single canonical proof leaf schema that all chain adapters
 /// and contracts MUST use. No chain-specific leaf schemas are allowed.
 ///
-/// The leaf is hashed using canonical CBOR serialization + tagged hashing
-/// with the `csv.proof.leaf.v1` domain.
+/// The leaf is hashed using canonical CBOR serialization, then the hash
+/// is computed using the chain's native hash function to avoid extra gas costs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofLeafV1 {
     /// Protocol version (must be 1)
@@ -81,14 +162,28 @@ impl ProofLeafV1 {
         }
     }
 
-    /// Compute the canonical hash of this proof leaf
+    /// Compute the canonical hash of this proof leaf using the source chain's native hash function
     ///
-    /// Uses canonical CBOR serialization + tagged hashing with the
-    /// `csv.proof.leaf.v1` domain.
+    /// Uses canonical CBOR serialization, then hashes with the chain's native hash function
+    /// to avoid extra gas costs on-chain.
     pub fn hash(&self) -> Result<Hash, String> {
+        self.hash_with_function(HashFunction::for_chain(&self.source_chain))
+    }
+
+    /// Compute the canonical hash of this proof leaf using a specific hash function
+    ///
+    /// Uses canonical CBOR serialization, then hashes with the specified hash function.
+    /// This is used for cross-chain verification where the verifier needs to compute
+    /// the hash using the source chain's native hash function.
+    pub fn hash_with_function(&self, hash_fn: HashFunction) -> Result<Hash, String> {
         let cbor = to_canonical_cbor(self)
             .map_err(|e| format!("Failed to serialize proof leaf: {}", e))?;
-        Ok(tagged_hash(HashDomain::ProofLeafV1, &cbor).hash)
+        Ok(hash_fn.hash_bytes(&cbor))
+    }
+
+    /// Get the native hash function for this proof leaf's source chain
+    pub fn native_hash_function(&self) -> HashFunction {
+        HashFunction::for_chain(&self.source_chain)
     }
 
     /// Set the content descriptor hash

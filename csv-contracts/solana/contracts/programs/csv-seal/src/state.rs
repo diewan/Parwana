@@ -1,6 +1,72 @@
 //! State definitions for CSV Seal program
 
 use anchor_lang::prelude::*;
+use solana_program::keccak::hashv;
+use std::io::Cursor;
+
+/// Canonical ProofLeafV1 schema for cross-chain proof verification
+/// This struct matches the canonical schema defined in csv-protocol
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct ProofLeafV1 {
+    /// Version of the proof leaf schema
+    pub version: u32,
+    /// Source chain identifier
+    pub source_chain: u8,
+    /// Destination chain identifier
+    pub destination_chain: u8,
+    /// Sanad identifier
+    pub sanad_id: [u8; 32],
+    /// Commitment hash
+    pub commitment: [u8; 32],
+    /// Content descriptor hash (optional, default 0)
+    pub content_descriptor_hash: [u8; 32],
+    /// Source seal reference hash (optional, default 0)
+    pub source_seal_ref_hash: [u8; 32],
+    /// Destination owner hash (optional, default 0)
+    pub destination_owner_hash: [u8; 32],
+    /// Nullifier hash (optional, default 0)
+    pub nullifier: [u8; 32],
+    /// Lock event ID hash (optional, default 0)
+    pub lock_event_id: [u8; 32],
+    /// Metadata hash (optional, default 0)
+    pub metadata_hash: [u8; 32],
+    /// Proof policy hash (optional, default 0)
+    pub proof_policy_hash: [u8; 32],
+}
+
+impl ProofLeafV1 {
+    /// Compute the canonical hash of a ProofLeafV1 using sha256 (Solana's native hash)
+    /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    pub fn hash(&self) -> [u8; 32] {
+        // Domain separator for tagged hashing
+        let domain = b"csv.proof.leaf.v1";
+        
+        // Serialize the leaf structure
+        let mut data = Vec::new();
+        data.extend_from_slice(domain);
+        data.extend_from_slice(&self.version.to_le_bytes());
+        data.push(self.source_chain);
+        data.push(self.destination_chain);
+        data.extend_from_slice(&self.sanad_id);
+        data.extend_from_slice(&self.commitment);
+        data.extend_from_slice(&self.content_descriptor_hash);
+        data.extend_from_slice(&self.source_seal_ref_hash);
+        data.extend_from_slice(&self.destination_owner_hash);
+        data.extend_from_slice(&self.nullifier);
+        data.extend_from_slice(&self.lock_event_id);
+        data.extend_from_slice(&self.metadata_hash);
+        data.extend_from_slice(&self.proof_policy_hash);
+        
+        // Use sha256 (Solana's native hash)
+        solana_program::hash::hash(&data).to_bytes()
+    }
+    
+    /// Compute ProofLeafV1 hash using chain-specific hash function
+    /// For Solana, this uses sha256 (native hash function)
+    pub fn hash_with_chain_function(&self, _chain: u8) -> [u8; 32] {
+        self.hash()
+    }
+}
 
 /// Canonical Sanad lifecycle state — matches Ethereum/Sui/Aptos
 /// 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred, 7=Refunded, 8=Burned, 9=Invalid

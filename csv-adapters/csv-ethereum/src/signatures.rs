@@ -3,8 +3,108 @@
 //! Ethereum uses ECDSA signatures over the secp256k1 curve.
 //! Signature format: 64 bytes [r (32)] [s (32)] or 65 bytes [recovery_id (1)] [r (32)] [s (32)]
 
+use async_trait::async_trait;
 use csv_protocol::error::ProtocolError;
-use csv_protocol::error::Result;
+use csv_protocol::error::Result as ProtocolResult;
+use csv_protocol::signature::SignatureScheme;
+use csv_wallet::{Signer, SignerRef, Signature as WalletSignature, WalletError, Result as WalletResult};
+use secrecy::{SecretVec, ExposeSecret};
+use std::fmt;
+
+/// Ethereum Signer implementation using csv-wallet Signer trait
+pub struct EthereumSigner {
+    id: String,
+    secret_key: SecretVec<u8>,
+    public_key: Vec<u8>,
+    address: Vec<u8>,
+}
+
+impl EthereumSigner {
+    /// Create a new Ethereum signer from a private key
+    ///
+    /// # Arguments
+    /// * `id` - Signer identifier
+    /// * `secret_key` - 32-byte private key
+    pub fn new(id: String, secret_key: Vec<u8>) -> ProtocolResult<Self> {
+        if secret_key.len() != 32 {
+            return Err(ProtocolError::InvalidInput(
+                "Private key must be 32 bytes".to_string(),
+            ));
+        }
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key_obj = secp256k1::SecretKey::from_slice(&secret_key)
+            .map_err(|e| ProtocolError::InvalidInput(format!("Invalid private key: {}", e)))?;
+        
+        let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key_obj);
+        let public_key_bytes = public_key.serialize_uncompressed();
+        
+        // Derive Ethereum address from public key (last 20 bytes of keccak256 hash)
+        use sha3::{Digest, Keccak256};
+        let hash = Keccak256::digest(&public_key_bytes[1..]); // Skip uncompressed prefix
+        let address = hash[hash.len() - 20..].to_vec();
+
+        Ok(Self {
+            id,
+            secret_key: SecretVec::new(secret_key),
+            public_key: public_key_bytes.to_vec(),
+            address,
+        })
+    }
+
+    /// Get the Ethereum address for this signer
+    pub fn address(&self) -> &[u8] {
+        &self.address
+    }
+}
+
+#[async_trait]
+impl Signer for EthereumSigner {
+    async fn sign(&self, message: &[u8]) -> WalletResult<WalletSignature> {
+        use secp256k1::{Secp256k1, SecretKey, Message};
+        
+        let secret_key = SecretKey::from_slice(self.secret_key.expose_secret())
+            .map_err(|e| WalletError::Signing(format!("Invalid secret key: {}", e)))?;
+        
+        let secp = Secp256k1::new();
+        let msg = Message::from_digest_slice(message)
+            .map_err(|e| WalletError::Signing(format!("Invalid message: {}", e)))?;
+        
+        let signature = secp.sign_ecdsa(&msg, &secret_key);
+        let sig_bytes = signature.serialize_compact();
+        
+        Ok(WalletSignature::new(sig_bytes.to_vec(), SignatureScheme::Secp256k1))
+    }
+
+    fn public_key(&self) -> &[u8] {
+        &self.public_key
+    }
+
+    fn signature_scheme(&self) -> SignatureScheme {
+        SignatureScheme::Secp256k1
+    }
+
+    fn as_ref(&self) -> SignerRef {
+        SignerRef {
+            id: self.id.clone(),
+            chain: "ethereum".to_string(),
+            public_key: self.address.clone(),
+        }
+    }
+
+    fn chain(&self) -> &str {
+        "ethereum"
+    }
+}
+
+impl fmt::Debug for EthereumSigner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EthereumSigner")
+            .field("id", &self.id)
+            .field("address", &hex::encode(&self.address))
+            .finish()
+    }
+}
 
 /// Verify an Ethereum ECDSA signature
 ///
@@ -19,7 +119,7 @@ pub fn verify_ethereum_signature(
     signature: &[u8],
     public_key: &[u8],
     message: &[u8],
-) -> Result<()> {
+) -> ProtocolResult<()> {
     // Validate inputs
     if message.len() != 32 {
         return Err(ProtocolError::SignatureVerificationFailed(format!(
@@ -101,7 +201,7 @@ pub fn verify_ethereum_signature(
 }
 
 /// Verify multiple Ethereum signatures
-pub fn verify_ethereum_signatures(signatures: &[(Vec<u8>, Vec<u8>, Vec<u8>)]) -> Result<()> {
+pub fn verify_ethereum_signatures(signatures: &[(Vec<u8>, Vec<u8>, Vec<u8>)]) -> ProtocolResult<()> {
     if signatures.is_empty() {
         return Err(ProtocolError::SignatureVerificationFailed(
             "No signatures to verify".to_string(),

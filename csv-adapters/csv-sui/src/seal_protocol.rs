@@ -152,9 +152,11 @@ impl SuiSealProtocol {
     #[cfg(test)]
     pub fn with_test() -> SuiResult<Self> {
         // Generate a test signing key
-        use ed25519_dalek::{Signer, SigningKey};
+        use ed25519_dalek::SigningKey;
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
         let key_bytes = signing_key.to_bytes();
+        
+        let secret_key = csv_keys::memory::SecretKey::new(key_bytes);
         
         let config = SuiConfig {
             seal_contract: crate::SealContractConfig {
@@ -164,7 +166,7 @@ impl SuiSealProtocol {
                 ),
                 ..Default::default()
             },
-            signer_private_key: Some(key_bytes.to_vec()),
+            signer_private_key: Some(secret_key),
             ..Default::default()
         };
         

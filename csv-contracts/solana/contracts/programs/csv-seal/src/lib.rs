@@ -252,6 +252,112 @@ pub mod csv_seal {
         Ok(())
     }
 
+    /// Mint a new Sanad using canonical ProofLeafV1 schema
+    /// This is the recommended method for cross-chain minting
+    ///
+    /// # Arguments
+    /// * `sanad_id` - Unique Sanad identifier from source chain
+    /// * `commitment` - Commitment hash preserved across chains
+    /// * `state_root` - Off-chain state root
+    /// * `source_chain` - Source chain ID
+    /// * `destination_chain` - Destination chain ID
+    /// * `source_seal_ref` - Reference to source chain seal
+    /// * `proof` - Cross-chain Merkle proof bytes
+    /// * `proof_root` - Trusted proof root for verification
+    /// * `leaf_position` - Position of leaf in Merkle tree for deterministic verification
+    /// * `content_descriptor_hash` - Content descriptor hash (optional)
+    /// * `source_seal_ref_hash` - Source seal reference hash (optional)
+    /// * `destination_owner_hash` - Destination owner hash (optional)
+    /// * `nullifier` - Nullifier hash (optional)
+    /// * `lock_event_id` - Lock event ID hash (optional)
+    /// * `metadata_hash` - Metadata hash (optional)
+    /// * `proof_policy_hash` - Proof policy hash (optional)
+    /// * `asset_class` - Asset class for the minted sanad
+    /// * `asset_id` - Chain-native asset id
+    /// * `proof_system` - Proof system identifier
+    pub fn mint_sanad_with_proof_leaf(
+        ctx: Context<MintSanadWithProofLeaf>,
+        sanad_id: [u8; 32],
+        commitment: [u8; 32],
+        state_root: [u8; 32],
+        source_chain: u8,
+        destination_chain: u8,
+        source_seal_ref: [u8; 32],
+        proof: Vec<u8>,
+        proof_root: [u8; 32],
+        leaf_position: u64,
+        content_descriptor_hash: [u8; 32],
+        source_seal_ref_hash: [u8; 32],
+        destination_owner_hash: [u8; 32],
+        nullifier: [u8; 32],
+        lock_event_id: [u8; 32],
+        metadata_hash: [u8; 32],
+        proof_policy_hash: [u8; 32],
+        asset_class: u8,
+        asset_id: [u8; 32],
+        proof_system: u8,
+    ) -> Result<()> {
+        // Input validation: 32-byte checks for hashes
+        require!(proof_root != [0u8; 32], CsvError::InvalidProof);
+
+        // Verify cross-chain proof using canonical ProofLeafV1 schema
+        verify_cross_chain_proof_with_proof_leaf(
+            &sanad_id,
+            &commitment,
+            source_chain,
+            destination_chain,
+            &proof,
+            &proof_root,
+            leaf_position,
+            content_descriptor_hash,
+            source_seal_ref_hash,
+            destination_owner_hash,
+            nullifier,
+            lock_event_id,
+            metadata_hash,
+            proof_policy_hash,
+        )?;
+
+        let sanad = &mut ctx.accounts.sanad_account;
+        let minted_sanad = &mut ctx.accounts.minted_sanad;
+        let owner = ctx.accounts.owner.key();
+        let now = Clock::get()?.unix_timestamp;
+
+        // Mark sanad_id as minted (replay protection)
+        minted_sanad.sanad_id = sanad_id;
+        minted_sanad.minted_at = now;
+        minted_sanad.bump = ctx.bumps.minted_sanad;
+
+        sanad.owner = owner;
+        sanad.sanad_id = sanad_id;
+        sanad.commitment = commitment;
+        sanad.state_root = state_root;
+        sanad.nullifier = nullifier;
+        sanad.asset_class = asset_class;
+        sanad.asset_id = asset_id;
+        sanad.metadata_hash = metadata_hash;
+        sanad.proof_system = proof_system;
+        sanad.proof_root = proof_root;
+        sanad.state = SanadState::Minted as u8;
+        sanad.created_at = now;
+        sanad.minted_at = now;
+        sanad.locked_at = 0;
+        sanad.consumed_at = 0;
+        sanad.refunded_at = 0;
+        sanad.bump = ctx.bumps.sanad_account;
+
+        emit!(SanadMinted {
+            sanad_id,
+            commitment,
+            owner,
+            source_chain,
+            source_seal_ref,
+            account: sanad.key(),
+        });
+
+        Ok(())
+    }
+
 
     /// Refund a Sanad after the lock timeout has elapsed
     /// Re-creates the SanadAccount if the lock has expired and not refunded
@@ -619,6 +725,83 @@ pub fn verify_bitcoin_proof(
     Ok(())
 }
 
+/// Verify cross-chain proof using canonical ProofLeafV1 schema
+/// This is the recommended verification method for cross-chain proofs
+pub fn verify_cross_chain_proof_with_proof_leaf(
+    sanad_id: &[u8; 32],
+    commitment: &[u8; 32],
+    source_chain: u8,
+    destination_chain: u8,
+    proof: &[u8],
+    proof_root: &[u8; 32],
+    leaf_position: u64,
+    content_descriptor_hash: [u8; 32],
+    source_seal_ref_hash: [u8; 32],
+    destination_owner_hash: [u8; 32],
+    nullifier: [u8; 32],
+    lock_event_id: [u8; 32],
+    metadata_hash: [u8; 32],
+    proof_policy_hash: [u8; 32],
+) -> Result<()> {
+    use solana_program::hash::hashv;
+    
+    // Validate inputs
+    if proof_root == &[0u8; 32] {
+        return Err(CsvError::InvalidProof.into());
+    }
+    if proof.len() % 32 != 0 {
+        return Err(CsvError::InvalidProof.into());
+    }
+    
+    // Construct canonical ProofLeafV1
+    let leaf = state::ProofLeafV1 {
+        version: 1,  // ProofLeafV1 version
+        source_chain,
+        destination_chain,
+        sanad_id: *sanad_id,
+        commitment: *commitment,
+        content_descriptor_hash,
+        source_seal_ref_hash,
+        destination_owner_hash,
+        nullifier,
+        lock_event_id,
+        metadata_hash,
+        proof_policy_hash,
+    };
+    
+    // Compute canonical hash using sha256 (Solana's native hash)
+    let leaf_hash = leaf.hash();
+    
+    // Verify Merkle proof using sha256 (Solana's native hash)
+    let mut current = leaf_hash;
+    let num_levels = proof.len() / 32;
+    
+    for i in 0..num_levels {
+        let start = i * 32;
+        let end = start + 32;
+        let sibling: [u8; 32] = proof[start..end].try_into().unwrap();
+        
+        // Use leaf_position bit to determine ordering
+        let bit = (leaf_position >> i) & 1;
+        if bit == 0 {
+            // Current is left child
+            let hash_data: &[&[u8]] = &[&current, &sibling];
+            current = hashv(hash_data).to_bytes();
+        } else {
+            // Current is right child
+            let hash_data: &[&[u8]] = &[&sibling, &current];
+            current = hashv(hash_data).to_bytes();
+        }
+    }
+    
+    // Verify computed root matches expected root
+    if current != *proof_root {
+        return Err(CsvError::InvalidProof.into());
+    }
+    
+    Ok(())
+}
+
 /// Check if commitment is anchored (off-chain helper)
 /// In Solana, commitment anchoring is tracked via SanadAccount existence
 /// This would require a separate registry; return true if sanad exists
@@ -716,6 +899,56 @@ pub struct LockSanad<'info> {
 #[derive(Accounts)]
 #[instruction(sanad_id: [u8; 32], commitment: [u8; 32], state_root: [u8; 32], source_chain: u8, source_seal_ref: [u8; 32])]
 pub struct MintSanad<'info> {
+    #[account(
+        init,
+        payer = owner,
+        space = SanadAccount::SIZE,
+        seeds = [b"sanad", owner.key().as_ref(), &sanad_id],
+        bump
+    )]
+    pub sanad_account: Account<'info, SanadAccount>,
+    
+    /// MintedSanad PDA for replay protection (seeds: ["minted", sanad_id])
+    /// This account is created to mark the sanad_id as already minted
+    #[account(
+        init,
+        payer = owner,
+        space = MintedSanad::SIZE,
+        seeds = [b"minted", sanad_id.as_ref()],
+        bump
+    )]
+    pub minted_sanad: Account<'info, MintedSanad>,
+    
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    
+    pub system_program: Program<'info, System>,
+}
+
+/// Mint a sanad with ProofLeafV1 accounts
+#[derive(Accounts)]
+#[instruction(
+    sanad_id: [u8; 32],
+    commitment: [u8; 32],
+    state_root: [u8; 32],
+    source_chain: u8,
+    destination_chain: u8,
+    source_seal_ref: [u8; 32],
+    proof: Vec<u8>,
+    proof_root: [u8; 32],
+    leaf_position: u64,
+    content_descriptor_hash: [u8; 32],
+    source_seal_ref_hash: [u8; 32],
+    destination_owner_hash: [u8; 32],
+    nullifier: [u8; 32],
+    lock_event_id: [u8; 32],
+    metadata_hash: [u8; 32],
+    proof_policy_hash: [u8; 32],
+    asset_class: u8,
+    asset_id: [u8; 32],
+    proof_system: u8
+)]
+pub struct MintSanadWithProofLeaf<'info> {
     #[account(
         init,
         payer = owner,
