@@ -17,6 +17,10 @@ pub enum WalletError {
     #[error("Signing failed: {0}")]
     Signing(String),
 
+    /// Signing failed error (alias for consistency)
+    #[error("Signing failed: {0}")]
+    SigningFailed(String),
+
     /// Signature verification error
     #[error("Signature verification failed: {0}")]
     Verification(String),

@@ -4,7 +4,10 @@ use crate::error::{Result, WalletError};
 use crate::keystore::{KeyStore, KeyPurpose};
 use crate::signer::{MemorySigner, Signer, SignerRef};
 use csv_hash::chain_id::ChainId;
-use csv_keys::{Mnemonic, MnemonicType, Passphrase, Seed, derive_key};
+use csv_keys::{
+    Mnemonic, MnemonicType, Passphrase, Seed, derive_key,
+    bip44::{derive_address_from_key, derive_all_chain_keys},
+};
 use csv_protocol::signature::SignatureScheme;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -205,6 +208,164 @@ impl WalletManager {
     /// Get the key store
     pub fn keystore(&self) -> Arc<RwLock<KeyStore>> {
         Arc::clone(&self.keystore)
+    }
+}
+
+/// Static wallet operations for address derivation (similar to csv-coordinator)
+///
+/// These functions take seed as input and don't require a WalletManager instance.
+/// This is useful for CLI operations where the mnemonic/seed is already available.
+pub mod address {
+    use super::*;
+    use csv_keys::bip44::{derive_all_chain_keys, derive_address_from_key};
+
+    /// Derive a funding address for a specific chain from seed
+    ///
+    /// # Arguments
+    /// * `seed` - 64-byte BIP-39 seed
+    /// * `chain` - Chain identifier
+    /// * `account` - Account index
+    /// * `index` - Address index
+    ///
+    /// # Returns
+    /// The derived address as a string
+    pub fn derive_funding_address(
+        seed: &[u8],
+        chain: &str,
+        account: u32,
+        index: u32,
+    ) -> Result<String> {
+        // Convert seed slice to array
+        let mut seed_array = [0u8; 64];
+        if seed.len() >= 64 {
+            seed_array.copy_from_slice(&seed[..64]);
+        } else {
+            return Err(WalletError::KeyDerivation(format!(
+                "Seed must be at least 64 bytes, got {}",
+                seed.len()
+            )));
+        }
+
+        let chain_id = ChainId::new(chain);
+
+        // Derive keys for all chains
+        let keys = derive_all_chain_keys(&seed_array, account);
+
+        // Get the key for the requested chain
+        let key = keys
+            .get(&chain_id)
+            .ok_or_else(|| WalletError::UnsupportedChain(chain.to_string()))?;
+
+        // Derive address from key
+        let address = derive_address_from_key(key.expose_secret(), &chain_id)
+            .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive address: {}", e)))?;
+
+        Ok(address)
+    }
+}
+
+/// Bitcoin-specific wallet operations
+pub mod bitcoin {
+    use super::*;
+    use csv_keys::bip44::{derive_all_chain_keys, derive_address_from_key};
+
+    /// Network type for Bitcoin wallet operations
+    #[derive(Debug, Clone, Copy)]
+    pub enum Network {
+        Main,
+        Test,
+        Dev,
+    }
+
+    /// UTXO data structure
+    #[derive(Debug, Clone)]
+    pub struct WalletUtxo {
+        pub txid: String,
+        pub vout: u32,
+        pub value: u64,
+        pub scriptpubkey_hex: Option<String>,
+    }
+
+    /// Derive a Bitcoin funding address from seed
+    pub fn derive_funding_address(
+        seed: &[u8],
+        network: Network,
+        account: u32,
+        index: u32,
+    ) -> Result<String> {
+        // Use the generic address derivation with Bitcoin-specific network handling
+        // Note: csv-keys handles network internally for Bitcoin
+        address::derive_funding_address(seed, "bitcoin", account, index)
+    }
+
+    /// Scan for UTXOs on Bitcoin network
+    ///
+    /// # Arguments
+    /// * `seed` - 64-byte BIP-39 seed
+    /// * `network` - Bitcoin network
+    /// * `account` - Account index
+    /// * `gap_limit` - Number of addresses to scan
+    /// * `rpc_url` - RPC URL for UTXO queries
+    ///
+    /// # Returns
+    /// Vector of found UTXOs
+    pub async fn scan_utxos(
+        seed: &[u8],
+        network: Network,
+        account: u32,
+        gap_limit: usize,
+        rpc_url: &str,
+    ) -> Result<Vec<WalletUtxo>> {
+        let mut wallet_utxos = Vec::new();
+
+        for index in 0..gap_limit as u32 {
+            let address = derive_funding_address(seed, network, account, index)?;
+
+            // Fetch UTXOs for this address using mempool RPC
+            let url = format!("{}/address/{}/utxo", rpc_url, address);
+            let response = reqwest::get(&url).await;
+
+            match response {
+                Ok(resp) if resp.status().is_success() => {
+                    let utxo_list: Vec<serde_json::Value> = resp
+                        .json()
+                        .await
+                        .map_err(|e| WalletError::SigningFailed(format!("Failed to parse UTXO response: {}", e)))?;
+
+                    for utxo in utxo_list {
+                        let txid = utxo
+                            .get("txid")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| WalletError::InvalidFormat("Missing txid".to_string()))?
+                            .to_string();
+                        let vout = utxo
+                            .get("vout")
+                            .and_then(|v| v.as_u64())
+                            .ok_or_else(|| WalletError::InvalidFormat("Missing vout".to_string()))? as u32;
+                        let value = utxo
+                            .get("value")
+                            .and_then(|v| v.as_u64())
+                            .ok_or_else(|| WalletError::InvalidFormat("Missing value".to_string()))?;
+                        let scriptpubkey_hex = utxo.get("scriptpubkey").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                        wallet_utxos.push(WalletUtxo {
+                            txid,
+                            vout,
+                            value,
+                            scriptpubkey_hex,
+                        });
+                    }
+                }
+                Ok(resp) => {
+                    log::warn!("Failed to fetch UTXOs for address {}: HTTP {}", address, resp.status());
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch UTXOs for address {}: {}", address, e);
+                }
+            }
+        }
+
+        Ok(wallet_utxos)
     }
 }
 

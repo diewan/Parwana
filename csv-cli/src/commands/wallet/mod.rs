@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
+use csv_wallet::{address, bitcoin};
 
 /// Execute wallet command.
 pub async fn execute(
@@ -70,102 +71,27 @@ async fn cmd_address(
     let seed = mnemonic.to_seed(None);
     let seed_array = *seed.as_bytes();
 
-    match chain.as_str() {
-        "bitcoin" => {
-            // Use csv-coordinator for wallet operations (architecture compliant)
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
-                crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
-                crate::config::Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
-            };
-            let address = csv_coordinator::wallet::bitcoin::derive_funding_address(
-                &seed_array,
-                network,
-                account,
-                index,
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Use csv-wallet for address derivation (unified wallet abstraction)
+    let address = address::derive_funding_address(&seed_array, chain.as_str(), account, index)
+        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
-            output::kv("Address", &address);
-            output::kv("Account", &account.to_string());
-            output::kv("Index", &index.to_string());
-            output::kv("Derivation Path", &format!("m/86'/1'/{}'/0/{}", account, index));
-            output::info("Send Bitcoin to this address, then run 'csv wallet scan --chain bitcoin' to discover UTXOs.");
-        }
-        "ethereum" => {
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_coordinator::wallet::ethereum::Network::Main,
-                crate::config::Network::Test => csv_coordinator::wallet::ethereum::Network::Test,
-                crate::config::Network::Dev => csv_coordinator::wallet::ethereum::Network::Dev,
-            };
-            let address = csv_coordinator::wallet::ethereum::derive_funding_address(
-                &seed_array,
-                network,
-                account,
-                index,
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    output::kv("Address", &address);
+    output::kv("Account", &account.to_string());
+    output::kv("Index", &index.to_string());
 
-            output::kv("Address", &address);
-            output::kv("Account", &account.to_string());
-            output::kv("Index", &index.to_string());
-            output::kv("Derivation Path", &format!("m/44'/60'/{}'/0/{}", account, index));
-        }
-        "sui" => {
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_coordinator::wallet::sui::Network::Main,
-                crate::config::Network::Test => csv_coordinator::wallet::sui::Network::Test,
-                crate::config::Network::Dev => csv_coordinator::wallet::sui::Network::Dev,
-            };
-            let address = csv_coordinator::wallet::sui::derive_funding_address(
-                &seed_array,
-                network,
-                account,
-                index,
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Show derivation path based on chain
+    let derivation_path = match chain.as_str() {
+        "bitcoin" => format!("m/86'/1'/{}'/0/{}", account, index),
+        "ethereum" => format!("m/44'/60'/{}'/0/{}", account, index),
+        "sui" => format!("m/44'/784'/{}'/0/{}", account, index),
+        "aptos" => format!("m/44'/637'/{}'/0/{}", account, index),
+        "solana" => format!("m/44'/501'/{}'/0/{}", account, index),
+        _ => format!("m/44'/0'/{}'/0/{}", account, index),
+    };
+    output::kv("Derivation Path", &derivation_path);
 
-            output::kv("Address", &address);
-            output::kv("Account", &account.to_string());
-            output::kv("Index", &index.to_string());
-            output::kv("Derivation Path", &format!("m/44'/784'/{}'/0/{}", account, index));
-        }
-        "aptos" => {
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_coordinator::wallet::aptos::Network::Main,
-                crate::config::Network::Test => csv_coordinator::wallet::aptos::Network::Test,
-                crate::config::Network::Dev => csv_coordinator::wallet::aptos::Network::Dev,
-            };
-            let address = csv_coordinator::wallet::aptos::derive_funding_address(
-                &seed_array,
-                network,
-                account,
-                index,
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-
-            output::kv("Address", &address);
-            output::kv("Account", &account.to_string());
-            output::kv("Index", &index.to_string());
-            output::kv("Derivation Path", &format!("m/44'/637'/{}'/0/{}", account, index));
-        }
-        "solana" => {
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_coordinator::wallet::solana::Network::Main,
-                crate::config::Network::Test => csv_coordinator::wallet::solana::Network::Test,
-                crate::config::Network::Dev => csv_coordinator::wallet::solana::Network::Dev,
-            };
-            let address = csv_coordinator::wallet::solana::derive_funding_address(
-                &seed_array,
-                network,
-                account,
-                index,
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-
-            output::kv("Address", &address);
-            output::kv("Account", &account.to_string());
-            output::kv("Index", &index.to_string());
-            output::kv("Derivation Path", &format!("m/44'/501'/{}'/0/{}", account, index));
-        }
-        _ => {
-            output::info(&format!("Funding address for {} is not yet implemented.", chain));
-        }
+    if chain.as_str() == "bitcoin" {
+        output::info("Send Bitcoin to this address, then run 'csv wallet scan --chain bitcoin' to discover UTXOs.");
     }
 
     Ok(())
@@ -198,13 +124,13 @@ async fn cmd_scan(
         // Get RPC URL
         let rpc_url = config.chain(&chain)?.rpc_url.clone();
 
-        // Use csv-coordinator for wallet operations (architecture compliant)
+        // Use csv-wallet for Bitcoin UTXO scanning (unified wallet abstraction)
         let network = match config.chain(&chain)?.network {
-            crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
-            crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
-            crate::config::Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
+            crate::config::Network::Main => bitcoin::Network::Main,
+            crate::config::Network::Test => bitcoin::Network::Test,
+            crate::config::Network::Dev => bitcoin::Network::Dev,
         };
-        let (_wallet, wallet_utxos) = csv_coordinator::wallet::bitcoin::scan_utxos_with_wallet(
+        let wallet_utxos = bitcoin::scan_utxos(
             &seed_array,
             network,
             account,

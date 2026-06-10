@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_protocol::signature::SignatureScheme;
-use secrecy::SecretVec;
+use secrecy::{ExposeSecret, SecretVec};
 use std::fmt;
 
 /// Unified signature result
@@ -140,10 +140,14 @@ impl MemorySigner {
 
 #[async_trait]
 impl Signer for MemorySigner {
-    async fn sign(&self, _message: &[u8]) -> Result<Signature, crate::error::WalletError> {
-        // TODO: Implement actual signing based on scheme
-        // For now, return a placeholder
-        Ok(Signature::new(vec![0u8; 64], self.scheme))
+    async fn sign(&self, message: &[u8]) -> Result<Signature, crate::error::WalletError> {
+        match self.scheme {
+            SignatureScheme::Secp256k1 => self.sign_secp256k1(message),
+            SignatureScheme::Ed25519 => self.sign_ed25519(message),
+            SignatureScheme::MlDsa65 => Err(crate::error::WalletError::SigningFailed(
+                "MlDsa65 signing not yet implemented".to_string(),
+            )),
+        }
     }
 
     fn public_key(&self) -> &[u8] {
@@ -164,5 +168,49 @@ impl Signer for MemorySigner {
 
     fn chain(&self) -> &str {
         &self.chain
+    }
+}
+
+impl MemorySigner {
+    fn sign_secp256k1(&self, message: &[u8]) -> Result<Signature, crate::error::WalletError> {
+        use secp256k1::{Message, SecretKey, Secp256k1};
+
+        let secret_key = SecretKey::from_slice(self.secret_key.expose_secret())
+            .map_err(|e| crate::error::WalletError::SigningFailed(format!("Invalid secret key: {}", e)))?;
+
+        let secp = Secp256k1::new();
+        let message = Message::from_digest_slice(message)
+            .map_err(|e| crate::error::WalletError::SigningFailed(format!("Invalid message: {}", e)))?;
+
+        let signature = secp.sign_ecdsa(&message, &secret_key);
+        let signature_bytes = signature.serialize_compact().to_vec();
+
+        Ok(Signature {
+            bytes: signature_bytes,
+            scheme: SignatureScheme::Secp256k1,
+        })
+    }
+
+    fn sign_ed25519(&self, message: &[u8]) -> Result<Signature, crate::error::WalletError> {
+        use ed25519_dalek::{SigningKey, Signer as EdSigner};
+
+        let secret_bytes = self.secret_key.expose_secret();
+        if secret_bytes.len() != 32 {
+            return Err(crate::error::WalletError::SigningFailed(
+                "Invalid secret key length".to_string(),
+            ));
+        }
+
+        let mut key_array = [0u8; 32];
+        key_array.copy_from_slice(secret_bytes);
+
+        let signing_key = SigningKey::from_bytes(&key_array);
+        let signature = signing_key.sign(message);
+        let signature_bytes = signature.to_bytes().to_vec();
+
+        Ok(Signature {
+            bytes: signature_bytes,
+            scheme: SignatureScheme::Ed25519,
+        })
     }
 }

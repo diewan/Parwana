@@ -30,5 +30,7 @@ pub mod keystore;
 pub use error::{WalletError, Result};
 pub use signer::{Signer, SignerRef, Signature};
 pub use wallet::{Wallet, WalletManager, WalletConfig};
+pub use wallet::address; // Static address derivation functions
+pub use wallet::bitcoin; // Bitcoin-specific wallet operations
 pub use keystore::{KeyStore, SecretHandle, KeyPurpose};
 pub use csv_protocol::signature::SignatureScheme;

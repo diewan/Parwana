@@ -1,6 +1,6 @@
 //! Wallet generation for all chains (Phase 5 Compliant).
 //!
-//! Uses csv-keys file keystore for encrypted key storage.
+//! Uses csv-wallet for unified wallet abstraction.
 //! Mnemonics and private keys are encrypted with user passphrase.
 
 //! To add a new chain:
@@ -22,6 +22,7 @@ use csv_keys::{
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
+use csv_wallet::address;
 
 /// Initialize wallet with one-command setup.
 pub fn cmd_init(
@@ -150,25 +151,23 @@ fn generate_wallet_for_chain(
     keystore: &mut FileKeystore,
     passphrase: &Passphrase,
 ) -> Result<String> {
-    // Phase 5: Use keystore's BIP-86 derivation for Bitcoin, BIP-44 for other chains
-    let core_chain = ChainId::new(chain.as_str());
-
+    // Phase 5: Use csv-wallet for unified address derivation
     // Convert mnemonic to seed
     let mnemonic_obj =
         Mnemonic::from_phrase(mnemonic).map_err(|e| anyhow::anyhow!("Invalid mnemonic: {}", e))?;
     let seed = mnemonic_obj.to_seed(None);
+    let seed_array = *seed.as_bytes();
 
-    // Derive keys for all chains
-    let keys = derive_all_chain_keys(seed.as_bytes(), account);
+    // Use csv-wallet for address derivation (unified wallet abstraction)
+    let address = address::derive_funding_address(&seed_array, chain.as_str(), account, 0)
+        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
-    // Get the key for the requested chain
+    // Derive keys for keystore storage
+    let core_chain = ChainId::new(chain.as_str());
+    let keys = derive_all_chain_keys(&seed_array, account);
     let key = keys
         .get(&core_chain)
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for {:?}", chain))?;
-
-    // Derive address from key
-    let address = derive_address_from_key(key.expose_secret(), &core_chain)
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
     // Store private key in encrypted file keystore
     let key_id = format!("{}-{}", chain.to_string().to_lowercase(), account);
@@ -219,18 +218,9 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
     let xpub = derive_xpub(&seed_array, bitcoin_network, 0)
         .map_err(|e| anyhow::anyhow!("Failed to derive xpub: {}", e))?;
 
-    // Use csv-coordinator for wallet operations (architecture compliant)
-    let runtime_network = match network {
-        Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
-        Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
-        Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
-    };
-    let address = csv_coordinator::wallet::bitcoin::derive_funding_address(
-        &seed_array,
-        runtime_network,
-        0,
-        0,
-    ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Use csv-wallet for address derivation (unified wallet abstraction)
+    let address = address::derive_funding_address(&seed_array, "bitcoin", 0, 0)
+        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
     // Store address in state
     state.store_address(Chain::new("bitcoin"), address.clone());
@@ -264,16 +254,16 @@ fn generate_from_mnemonic(
     let seed = mnemonic.to_seed(None);
     let seed_array = *seed.as_bytes();
 
-    // Derive key for the requested chain
+    // Use csv-wallet for address derivation (unified wallet abstraction)
+    let address = address::derive_funding_address(&seed_array, chain.as_str(), 0, 0)
+        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+
+    // Derive key for keystore storage
     let core_chain = ChainId::new(chain.as_str());
     let keys = derive_all_chain_keys(&seed_array, 0);
     let secret_key = keys
         .get(&core_chain)
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
-
-    // Derive address from key
-    let address = derive_address_from_key(secret_key.expose_secret(), &core_chain)
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
     // Store private key in encrypted file keystore
     use csv_keys::file_keystore::FileKeystore;

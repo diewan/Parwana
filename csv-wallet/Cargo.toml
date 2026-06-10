@@ -18,6 +18,9 @@ secrecy = { version = "0.8", features = ["serde"] }
 log = "0.4"
 getrandom = "0.2"
 hex = "0.4"
+secp256k1 = { version = "0.28", features = ["rand-std"] }
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

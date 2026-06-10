@@ -164,7 +164,7 @@ impl BrowserKeystore {
 
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
-            .encrypt(nonce, secret_key.expose_secret())
+            .encrypt(nonce, secret_key.expose_secret().as_slice())
             .map_err(|e| BrowserKeystoreError::Crypto(e.to_string()))?;
 
         // Store metadata
