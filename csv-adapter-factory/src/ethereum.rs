@@ -50,17 +50,15 @@ impl AdapterFactory for EthereumFactory {
             None
         };
 
-        // Extract secret key bytes for signer
-        let private_key_hex = config.secret_key
-            .as_bytes()
-            .map(|bytes| hex::encode(bytes));
+        // Extract secret key for signer
+        let secret_key = config.secret_key;
 
         let eth_config = EthereumConfig {
             network,
             finality_depth: if config.network == NetworkType::Testnet { 15 } else { 12 },
             use_checkpoint_finality: config.network == NetworkType::Mainnet,
             rpc_url: rest_endpoint.url.clone(),
-            private_key: private_key_hex.clone(),
+            private_key: None, // SharedSecretHandle is not compatible with Option<SecretKey>
             contract_address,
         };
 
@@ -71,8 +69,9 @@ impl AdapterFactory for EthereumFactory {
             .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Ethereum RPC client: {}", e)))?;
 
         // Add signer if private key is provided
-        if let Some(ref private_key) = private_key_hex {
-            rpc = rpc.with_signer(private_key).map_err(|e| {
+        if let Some(key_bytes) = secret_key.as_bytes() {
+            let private_key_hex = hex::encode(key_bytes);
+            rpc = rpc.with_signer(&private_key_hex).map_err(|e| {
                 FactoryError::CreationFailed(format!("Failed to configure Ethereum signer: {}", e))
             })?;
         }

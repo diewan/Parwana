@@ -47,6 +47,8 @@ pub enum TypedHashDomain {
     FinalityProof,
     /// Inclusion proof hash
     InclusionProof,
+    /// Proof leaf hash (canonical chain-independent proof leaf)
+    ProofLeaf,
 }
 
 impl TypedHashDomain {
@@ -66,6 +68,7 @@ impl TypedHashDomain {
             TypedHashDomain::VerificationProof => b"csv.verification.proof.v1",
             TypedHashDomain::FinalityProof => b"csv.finality.proof.v1",
             TypedHashDomain::InclusionProof => b"csv.inclusion.proof.v1",
+            TypedHashDomain::ProofLeaf => b"csv.proof.leaf.v1",
         }
     }
 }
@@ -174,6 +177,7 @@ mod tests {
             TypedHashDomain::VerificationProof,
             TypedHashDomain::FinalityProof,
             TypedHashDomain::InclusionProof,
+            TypedHashDomain::ProofLeaf,
         ];
 
         let tags: Vec<_> = domains.iter().map(|d| d.as_bytes()).collect();

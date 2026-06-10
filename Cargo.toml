@@ -88,6 +88,8 @@ lazy_static = "1.4"
 dioxus = { version = "0.7", features = ["web"] }
 dioxus-web = "0.7"
 dioxus-desktop = "0.7"
+secrecy = { version = "0.8", features = ["serde"] }
+zeroize = "1.7"
 
 # spl-token-2022-interface 2.1.0: ambiguous PodU64 `.into()` with solana_zero_copy (Rust 1.93+).
 # Local patch: third_party/spl-token-2022-interface — remove when upstream fixes land.

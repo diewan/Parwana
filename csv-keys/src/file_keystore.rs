@@ -344,7 +344,7 @@ impl FileKeystore {
         // Check session cache first
         if let Some(session) = &self.session {
             if let Some(cached) = session.get_cached(id) {
-                let bytes = cached.as_bytes();
+                let bytes = cached.expose_secret();
                 let mut key_array = [0u8; 32];
                 key_array.copy_from_slice(bytes);
                 return Ok(SecretKey::new(key_array));
@@ -374,7 +374,7 @@ impl FileKeystore {
         // Cache in session
         if let Some(session) = &mut self.session {
             let mut key_copy = [0u8; 32];
-            key_copy.copy_from_slice(secret_key.as_bytes());
+            key_copy.copy_from_slice(secret_key.expose_secret());
             session.cache_key(id.to_string(), SecretKey::new(key_copy));
         }
 

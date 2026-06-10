@@ -167,7 +167,7 @@ fn generate_wallet_for_chain(
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for {:?}", chain))?;
 
     // Derive address from key
-    let address = derive_address_from_key(key.as_bytes(), &core_chain)
+    let address = derive_address_from_key(key.expose_secret(), &core_chain)
         .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
     // Store private key in encrypted file keystore
@@ -272,7 +272,7 @@ fn generate_from_mnemonic(
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
 
     // Derive address from key
-    let address = derive_address_from_key(secret_key.as_bytes(), &core_chain)
+    let address = derive_address_from_key(secret_key.expose_secret(), &core_chain)
         .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
     // Store private key in encrypted file keystore

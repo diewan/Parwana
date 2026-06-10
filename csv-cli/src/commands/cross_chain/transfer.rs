@@ -147,7 +147,7 @@ pub async fn cmd_transfer(
         hex::encode(seed_array)
     } else {
         let (secret_key, _) = signing_key_for_chain(&from, 0, &seed_array, state)?;
-        hex::encode(secret_key.as_bytes())
+        hex::encode(secret_key.expose_secret())
     };
     private_keys.insert(from.to_string(), Some(from_key_hex));
 
@@ -156,7 +156,7 @@ pub async fn cmd_transfer(
         hex::encode(seed_array)
     } else {
         let (secret_key, _) = signing_key_for_chain(&to, 0, &seed_array, state)?;
-        hex::encode(secret_key.as_bytes())
+        hex::encode(secret_key.expose_secret())
     };
     private_keys.insert(to.to_string(), Some(to_key_hex));
 

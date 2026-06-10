@@ -154,9 +154,20 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             vec![],
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
+        // Create a canonical ProofLeafV1 for this transfer
+        use csv_protocol::proof_types::ProofLeafV1;
+        let proof_leaf = ProofLeafV1::new(
+            transfer.source_chain.clone(),
+            transfer.destination_chain.clone(),
+            transfer.sanad_id,
+            transfer.sanad_id, // Use sanad_id as commitment for now
+        );
+        let leaf_hash = proof_leaf.hash()
+            .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
+
         let commitment = csv_hash::Hash::new(*transfer.sanad_id.as_bytes());
         let dag_node = csv_hash::dag::DAGNode::new(
-            commitment,
+            leaf_hash,
             vec![],
             vec![],
             vec![],

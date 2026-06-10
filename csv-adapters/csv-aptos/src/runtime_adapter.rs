@@ -167,9 +167,20 @@ impl ChainAdapter for AptosRuntimeAdapter {
             transfer.destination_chain.as_bytes().to_vec(),
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
-        // Create minimal DAG with one node for verification
+        // Create a canonical ProofLeafV1 for this transfer
+        use csv_protocol::proof_types::ProofLeafV1;
+        let proof_leaf = ProofLeafV1::new(
+            transfer.source_chain.clone(),
+            transfer.destination_chain.clone(),
+            transfer.sanad_id,
+            transfer.sanad_id, // Use sanad_id as commitment for now
+        );
+        let leaf_hash = proof_leaf.hash()
+            .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
+
+        // Create minimal DAG with one node using the canonical proof leaf hash
         let node = DAGNode::new(
-            csv_hash::Hash::new([1u8; 32]),
+            leaf_hash,
             vec![],
             vec![],
             vec![],

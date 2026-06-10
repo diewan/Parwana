@@ -41,28 +41,17 @@ impl AdapterFactory for SolanaFactory {
         // Create RPC client
         let rpc = Box::new(SolanaNode::new(&jsonrpc_endpoint.url));
 
-        // Build SolanaConfig with optional keypair from private_key
+        // Build SolanaConfig with keypair from secret_key
         let sol_config = {
             let mut cfg = SolanaConfig::for_network(network);
             cfg.rpc_url = jsonrpc_endpoint.url.clone();
             if let Some(program_id) = config.program_id {
                 cfg = cfg.with_csv_program_id(program_id);
             }
+            // Convert SharedSecretHandle to SecretKey for SolanaConfig
             if let Some(key_bytes) = config.secret_key.as_bytes() {
-                if key_bytes.len() == 32 {
-                    use ed25519_dalek::SigningKey;
-                    let key_array: [u8; 32] = {
-                        let mut arr = [0u8; 32];
-                        arr.copy_from_slice(key_bytes);
-                        arr
-                    };
-                    let signing_key = SigningKey::from_bytes(&key_array);
-                    let public_key = signing_key.verifying_key();
-                    let mut keypair_bytes = [0u8; 64];
-                    keypair_bytes[..32].copy_from_slice(&key_array);
-                    keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
-                    cfg = cfg.with_keypair(bs58::encode(keypair_bytes).into_string());
-                }
+                let secret_key = csv_keys::memory::SecretKey::new(*key_bytes);
+                cfg = cfg.with_keypair(secret_key);
             }
             cfg
         };

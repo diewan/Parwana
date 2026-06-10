@@ -26,6 +26,7 @@ csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
 csv-wire = { path = "../../csv-wire" }
 csv-codec = { path = "../../csv-codec" }
+csv-keys = { path = "../../csv-keys" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

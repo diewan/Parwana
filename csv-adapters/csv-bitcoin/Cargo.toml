@@ -26,6 +26,7 @@ csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
 csv-wire = { path = "../../csv-wire" }
 csv-store = { path = "../../csv-store", optional = true, default-features = false }
+csv-keys = { path = "../../csv-keys" }
 async-trait.workspace = true
 bitcoin = { version = "0.32", default-features = false, features = ["serde", "rand-std", "std"] }
 bitcoin_hashes = "0.14"

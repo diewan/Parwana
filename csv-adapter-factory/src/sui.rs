@@ -52,9 +52,7 @@ impl AdapterFactory for SuiFactory {
                 ..Default::default()
             },
             signer_address: None,
-            signer_private_key: config.secret_key
-                .as_bytes()
-                .map(|bytes| bytes.to_vec()),
+            signer_private_key: None, // SharedSecretHandle is not compatible with Option<SecretKey>
         };
 
         // Create RPC client
@@ -67,35 +65,34 @@ impl AdapterFactory for SuiFactory {
         let seal_protocol = SuiSealProtocol::from_config(sui_config, node.clone())
             .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui seal protocol: {}", e)))?;
 
-        // Create ChainBackend with signing key if secret key is provided
-        let sui_backend = if let Some(key_bytes) = config.secret_key.as_bytes() {
-            log::info!("Factory: Creating Sui seal protocol with signing key");
-            if key_bytes.len() == 32 {
-                use ed25519_dalek::SigningKey;
-                let key_array: [u8; 32] = {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(key_bytes);
-                    arr
-                };
-                let signing_key = SigningKey::from_bytes(&key_array);
-                Arc::new(
-                    SuiBackend::from_seal_protocol_with_key(Arc::new(seal_protocol), node.clone(), signing_key)
-                        .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend with key: {}", e)))?
-                )
-            } else {
-                log::warn!("Factory: Invalid Sui private key length (expected 32 bytes, got {})", key_bytes.len());
-                Arc::new(
-                    SuiBackend::from_seal_protocol(Arc::new(seal_protocol), node.clone())
-                        .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e)))?
-                )
-            }
-        } else {
-            log::warn!("Factory: No secret key provided, creating Sui seal protocol without signing key (read-only mode)");
-            Arc::new(
-                SuiBackend::from_seal_protocol(Arc::new(seal_protocol), node.clone())
-                    .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e)))?
-            )
-        };
+        // Create ChainBackend with signing key
+        log::info!("Factory: Creating Sui seal protocol with signing key");
+        let secret_key = &config.secret_key;
+        if let Some(key_bytes) = secret_key.as_bytes() {
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(key_bytes);
+            let sui_backend = Arc::new(
+                SuiBackend::from_seal_protocol_with_key(Arc::new(seal_protocol), node.clone(), signing_key)
+                    .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend with key: {}", e)))?
+            );
+            let chain_backend: Arc<dyn ChainBackend> = sui_backend.clone();
+
+            // Create ChainAdapter for TransferCoordinator using SuiRuntimeAdapter
+            let chain_adapter: Box<dyn ChainAdapter> = Box::new(
+                SuiRuntimeAdapter::new(sui_backend)
+            );
+
+            return Ok(AdapterResult {
+                chain_backend,
+                chain_adapter: Some(chain_adapter),
+            });
+        }
+
+        // Fallback: create backend without signing key
+        log::warn!("Factory: No secret key available, creating Sui backend without signing key");
+        let sui_backend = Arc::new(
+            SuiBackend::from_seal_protocol(Arc::new(seal_protocol), node.clone())
+                .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e)))?
+        );
         
         let chain_backend: Arc<dyn ChainBackend> = sui_backend.clone();
 

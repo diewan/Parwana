@@ -10,6 +10,7 @@ use csv_protocol::proof_types::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Keypair;
 use solana_sdk::instruction::Instruction;
 use std::str::FromStr;
 
@@ -87,12 +88,12 @@ impl SolanaSealProtocol {
     ) -> crate::error::SolanaResult<Self> {
         // Build wallet from config keypair if provided
         let wallet = match &config.keypair {
-            Some(keypair_str) => Some(ProgramWallet::from_base58(keypair_str).map_err(|e| {
-                crate::error::SolanaError::Wallet(format!(
-                    "Failed to create wallet from keypair: {}",
-                    e
-                ))
-            })?),
+            Some(keypair) => {
+                // Convert SecretKey to bytes and create Keypair
+                let secret_bytes = keypair.expose_secret();
+                let keypair = Keypair::new_from_array(*secret_bytes);
+                Some(ProgramWallet::from_keypair(keypair))
+            }
             None => {
                 log::debug!("No keypair provided in config, wallet operations will be unavailable");
                 None

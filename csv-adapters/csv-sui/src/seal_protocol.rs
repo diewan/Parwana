@@ -109,15 +109,9 @@ impl SuiSealProtocol {
 
         // Extract signing key from config if available
         #[cfg(feature = "rpc")]
-     let signing_key = if let Some(private_key_bytes) = &config.signer_private_key {
-            if private_key_bytes.len() == 32 {
-                let mut key_bytes = [0u8; 32];
-                key_bytes.copy_from_slice(private_key_bytes);
-                Some(ed25519_dalek::SigningKey::from_bytes(&key_bytes))
-            } else {
-                log::warn!("Invalid signing key length in config (expected 32 bytes, got {})", private_key_bytes.len());
-                None
-            }
+     let signing_key = if let Some(private_key) = &config.signer_private_key {
+            let private_key_bytes = private_key.expose_secret();
+            Some(ed25519_dalek::SigningKey::from_bytes(private_key_bytes))
         } else {
             None
         };

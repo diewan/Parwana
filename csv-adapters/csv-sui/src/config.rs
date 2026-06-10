@@ -3,7 +3,9 @@
 //! This module provides comprehensive configuration for the Sui adapter,
 //! including network selection, checkpoint settings, and transaction parameters.
 
-use serde::{Deserialize, Serialize};
+use csv_keys::memory::SecretKey;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::Error;
 
 /// Sui network type
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,8 +129,41 @@ pub struct SuiConfig {
     /// Signer address for transaction signing (required for deployment).
     pub signer_address: Option<String>,
     /// Signer private key bytes (32 bytes, required for deployment).
-    #[serde(with = "serde_bytes")]
-    pub signer_private_key: Option<Vec<u8>>,
+    #[serde(
+        serialize_with = "serialize_secret_key",
+        deserialize_with = "deserialize_secret_key"
+    )]
+    pub signer_private_key: Option<SecretKey>,
+}
+
+/// Helper for serializing/deserializing Option<SecretKey> as hex string
+fn serialize_secret_key<S>(key: &Option<SecretKey>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match key {
+        Some(k) => serializer.serialize_some(&hex::encode(k.expose_secret())),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_secret_key<'de, D>(deserializer: D) -> Result<Option<SecretKey>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt_str: Option<String> = Option::deserialize(deserializer)?;
+    match opt_str {
+        Some(s) => {
+            let bytes = hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
+            if bytes.len() != 32 {
+                return Err(D::Error::custom(format!("private key must be 32 bytes, got {}", bytes.len())));
+            }
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(&bytes);
+            Ok(Some(SecretKey::new(key_bytes)))
+        }
+        None => Ok(None),
+    }
 }
 
 impl SuiConfig {

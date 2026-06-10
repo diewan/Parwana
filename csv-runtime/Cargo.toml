@@ -38,6 +38,7 @@ tempfile = "3"
 csv-codec = { path = "../csv-codec" }
 csv-hash = { path = "../csv-hash" }
 csv-proof = { path = "../csv-proof" }
+csv-testkit = { path = "../csv-testkit" }
 ed25519-dalek = "2"
 
 [features]

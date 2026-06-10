@@ -379,7 +379,7 @@ pub mod ethereum {
             .ok_or_else(|| anyhow::anyhow!("Failed to derive key for ethereum"))?;
 
         // Derive address from key
-        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+        let address = derive_address_from_key(key.expose_secret(), &core_chain)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
         Ok(address)
@@ -426,7 +426,7 @@ pub mod sui {
             .ok_or_else(|| anyhow::anyhow!("Failed to derive key for sui"))?;
 
         // Derive address from key
-        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+        let address = derive_address_from_key(key.expose_secret(), &core_chain)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
         Ok(address)
@@ -473,7 +473,7 @@ pub mod aptos {
             .ok_or_else(|| anyhow::anyhow!("Failed to derive key for aptos"))?;
 
         // Derive address from key
-        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+        let address = derive_address_from_key(key.expose_secret(), &core_chain)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
         Ok(address)
@@ -520,7 +520,7 @@ pub mod solana {
             .ok_or_else(|| anyhow::anyhow!("Failed to derive key for solana"))?;
 
         // Derive address from key
-        let address = derive_address_from_key(key.as_bytes(), &core_chain)
+        let address = derive_address_from_key(key.expose_secret(), &core_chain)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
         Ok(address)

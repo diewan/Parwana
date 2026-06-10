@@ -3,7 +3,9 @@
 //! This module provides configuration for the Aptos adapter including
 //! network selection, RPC endpoints, and production settings.
 
-use serde::{Deserialize, Serialize};
+use csv_keys::memory::SecretKey;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::Error;
 
 // Import deployment manifest reader
 use csv_protocol::deployment_manifest::get_aptos_module_address;
@@ -162,7 +164,41 @@ pub struct AptosConfig {
     pub seal_contract: SealContractConfig,
     /// Optional private key for transaction signing (hex format).
     /// Required for spending transactions. Not stored in config for security.
-    pub private_key: Option<String>,
+    #[serde(
+        serialize_with = "serialize_secret_key",
+        deserialize_with = "deserialize_secret_key"
+    )]
+    pub private_key: Option<SecretKey>,
+}
+
+/// Helper for serializing/deserializing Option<SecretKey> as hex string
+fn serialize_secret_key<S>(key: &Option<SecretKey>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match key {
+        Some(k) => serializer.serialize_some(&hex::encode(k.expose_secret())),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_secret_key<'de, D>(deserializer: D) -> Result<Option<SecretKey>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt_str: Option<String> = Option::deserialize(deserializer)?;
+    match opt_str {
+        Some(s) => {
+            let bytes = hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
+            if bytes.len() != 32 {
+                return Err(D::Error::custom(format!("private key must be 32 bytes, got {}", bytes.len())));
+            }
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(&bytes);
+            Ok(Some(SecretKey::new(key_bytes)))
+        }
+        None => Ok(None),
+    }
 }
 
 impl Default for AptosConfig {

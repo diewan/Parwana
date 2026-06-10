@@ -3,14 +3,14 @@
 //! This module provides types that securely hold cryptographic key material
 //! and automatically clear memory when dropped.
 
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use secrecy::{Secret, ExposeSecret, Zeroize};
+use zeroize::ZeroizeOnDrop;
 
 /// A 32-byte secret key that is automatically zeroed when dropped.
 ///
-/// This type is designed to never expose the raw key material except
-/// when absolutely necessary for signing operations. It does not
-/// implement `Clone`, `Copy`, or `Serialize` to prevent accidental
-/// duplication of sensitive data.
+/// This type uses the `secrecy` crate to ensure the key material is never
+/// accidentally exposed through Debug, Display, or serialization. The Secret
+/// type implements ZeroizeOnDrop to securely clear memory when the value is dropped.
 ///
 /// # Example
 ///
@@ -20,8 +20,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// let key = SecretKey::new([1u8; 32]);
 /// // Key is automatically zeroed when dropped
 /// ```
-#[derive(Zeroize, ZeroizeOnDrop)]
-pub struct SecretKey([u8; 32]);
+#[derive(Clone)]
+pub struct SecretKey(Secret<[u8; 32]>);
 
 impl std::fmt::Debug for SecretKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -44,7 +44,7 @@ impl SecretKey {
     /// let key = SecretKey::new([0u8; 32]);
     /// ```
     pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+        Self(Secret::new(bytes))
     }
 
     /// Generate a new random secret key.
@@ -53,25 +53,17 @@ impl SecretKey {
     pub fn random() -> Self {
         let mut bytes = [0u8; 32];
         getrandom::getrandom(&mut bytes).expect("OS RNG failed");
-        Self(bytes)
+        Self(Secret::new(bytes))
     }
 
-    /// Get a reference to the internal key bytes.
+    /// Expose the secret key bytes for cryptographic operations.
     ///
     /// # Security Warning
     /// This exposes the raw key material. Only use this when absolutely
-    /// necessary for cryptographic operations.
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-
-    /// Get a mutable reference to the internal key bytes.
-    ///
-    /// # Security Warning
-    /// This exposes the raw key material and allows modification.
-    /// Use with extreme caution.
-    pub fn as_bytes_mut(&mut self) -> &mut [u8; 32] {
-        &mut self.0
+    /// necessary for signing operations. The returned reference is tied to
+    /// the lifetime of the SecretKey to prevent accidental copying.
+    pub fn expose_secret(&self) -> &[u8; 32] {
+        self.0.expose_secret()
     }
 
     /// Convert to a Vec<u8>.
@@ -80,7 +72,7 @@ impl SecretKey {
     /// The returned Vec is NOT zeroized on drop. The caller is
     /// responsible for securely clearing the memory.
     pub fn to_vec(&self) -> Vec<u8> {
-        self.0.to_vec()
+        self.0.expose_secret().to_vec()
     }
 }
 
@@ -180,7 +172,7 @@ mod tests {
     #[test]
     fn test_secret_key_creation() {
         let key = SecretKey::new([1u8; 32]);
-        assert_eq!(key.as_bytes(), &[1u8; 32]);
+        assert_eq!(key.expose_secret(), &[1u8; 32]);
     }
 
     #[test]
@@ -188,7 +180,7 @@ mod tests {
         let key1 = SecretKey::random();
         let key2 = SecretKey::random();
         // Keys should be different with overwhelming probability
-        assert_ne!(key1.as_bytes(), key2.as_bytes());
+        assert_ne!(key1.expose_secret(), key2.expose_secret());
     }
 
     #[test]

@@ -14,6 +14,6 @@ pub mod traces;
 pub use adversarial::{
     AdversarialConfig, AdversarialRunner, ByzantineBehavior, ByzantineFaultMode, ByzantineRpcReader,
 };
-pub use fixtures::{TestProofBundle, TestTransfer};
+pub use fixtures::{TestAdapter, TestProofBundle, TestTransfer};
 pub use helpers::{TestBuilder, TestContext};
 pub use traces::{CanonicalTrace, ExpectedOutput, InjectedFault, RecordedRpcInteraction};

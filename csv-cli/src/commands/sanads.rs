@@ -36,6 +36,18 @@ pub enum SanadAction {
         /// Skip publishing the commitment (for testing lock functionality)
         #[arg(long)]
         skip_publish: bool,
+        /// Schema hash (hex) for content descriptor
+        #[arg(long)]
+        schema_hash: Option<String>,
+        /// Content root hash (hex) for content-addressed data
+        #[arg(long)]
+        content_root: Option<String>,
+        /// Disclosure policy hash (hex)
+        #[arg(long)]
+        disclosure_policy_hash: Option<String>,
+        /// Proof policy hash (hex)
+        #[arg(long)]
+        proof_policy_hash: Option<String>,
     },
     /// Show Sanad details
     Show {
@@ -99,8 +111,8 @@ pub async fn execute(
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     match action {
-        SanadAction::Create { chain, value, account, index, skip_publish } => {
-            cmd_create(chain, value, account, index, skip_publish, config, state).await
+        SanadAction::Create { chain, value, account, index, skip_publish, schema_hash, content_root, disclosure_policy_hash, proof_policy_hash } => {
+            cmd_create(chain, value, account, index, skip_publish, schema_hash, content_root, disclosure_policy_hash, proof_policy_hash, config, state).await
         }
         SanadAction::Show { sanad_id } => cmd_show(sanad_id, state),
         SanadAction::List { chain, update } => cmd_list(chain, update, config, state).await,
@@ -118,6 +130,10 @@ async fn cmd_create(
     account: u32,
     index: u32,
     skip_publish: bool,
+    schema_hash: Option<String>,
+    content_root: Option<String>,
+    disclosure_policy_hash: Option<String>,
+    proof_policy_hash: Option<String>,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
@@ -349,12 +365,12 @@ async fn cmd_create(
             chain.as_str().to_uppercase(),
             key_source
         );
-        let pk_hex = hex::encode(secret_key.as_bytes());
+        let pk_hex = hex::encode(secret_key.expose_secret());
         log::info!("CLI LAYER: Private key (first 8 bytes): 0x{}", &pk_hex[..16]);
 
         // Derive and log the address for this key
         let core_chain = csv_hash::ChainId::new(chain.as_str());
-        if let Ok(address) = csv_keys::bip44::derive_address_from_key(secret_key.as_bytes(), &core_chain) {
+        if let Ok(address) = csv_keys::bip44::derive_address_from_key(secret_key.expose_secret(), &core_chain) {
             log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
             eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
         }
@@ -542,15 +558,68 @@ async fn cmd_create(
         }
     };
 
-    // Create a minimal SanadPayloadDescriptor
+    // Parse content descriptor hashes from hex strings
+    let schema_hash_parsed = if let Some(ref hash_str) = schema_hash {
+        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+            .map_err(|e| anyhow::anyhow!("Invalid schema hash hex: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(anyhow::anyhow!("Schema hash must be 32 bytes"));
+        }
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes.copy_from_slice(&bytes);
+        Some(Hash::new(hash_bytes))
+    } else {
+        None
+    };
+
+    let content_root_parsed = if let Some(ref hash_str) = content_root {
+        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+            .map_err(|e| anyhow::anyhow!("Invalid content root hex: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(anyhow::anyhow!("Content root must be 32 bytes"));
+        }
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes.copy_from_slice(&bytes);
+        Some(Hash::new(hash_bytes))
+    } else {
+        None
+    };
+
+    let disclosure_policy_hash_parsed = if let Some(ref hash_str) = disclosure_policy_hash {
+        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+            .map_err(|e| anyhow::anyhow!("Invalid disclosure policy hash hex: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(anyhow::anyhow!("Disclosure policy hash must be 32 bytes"));
+        }
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes.copy_from_slice(&bytes);
+        Some(Hash::new(hash_bytes))
+    } else {
+        None
+    };
+
+    let proof_policy_hash_parsed = if let Some(ref hash_str) = proof_policy_hash {
+        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+            .map_err(|e| anyhow::anyhow!("Invalid proof policy hash hex: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(anyhow::anyhow!("Proof policy hash must be 32 bytes"));
+        }
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes.copy_from_slice(&bytes);
+        Some(Hash::new(hash_bytes))
+    } else {
+        None
+    };
+
+    // Create a SanadPayloadDescriptor with content descriptor support
     let descriptor = csv_protocol::SanadPayloadDescriptor::new(
         csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
-        Hash::new([0u8; 32]), // schema_hash: not applicable for CLI creation
+        schema_hash_parsed.unwrap_or(Hash::new([0u8; 32])), // schema_hash
         1, // payload_codec: canonical CBOR
         commitment, // payload_hash: the commitment is the payload
-        None, // content_root
-        Hash::new([0u8; 32]), // disclosure_policy_hash
-        Hash::new([0u8; 32]), // proof_policy_hash
+        content_root_parsed, // content_root
+        disclosure_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32])), // disclosure_policy_hash
+        proof_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32])), // proof_policy_hash
     );
 
     // Create ownership proof from the owner address
@@ -1416,7 +1485,7 @@ async fn cmd_consume(
         hex::encode(seed_array)
     } else {
         let (secret_key, _key_source) = signing_key_for_chain(&chain, 0, &seed_array, state)?;
-        hex::encode(secret_key.as_bytes())
+        hex::encode(secret_key.expose_secret())
     };
 
     let mut private_keys = std::collections::HashMap::new();

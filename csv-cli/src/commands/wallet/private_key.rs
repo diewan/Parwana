@@ -41,7 +41,7 @@ pub fn cmd_private_key(
         .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
 
     // Format as hex with 0x prefix
-    let hex_key = format!("0x{}", hex::encode(secret_key.as_bytes()));
+    let hex_key = format!("0x{}", hex::encode(secret_key.expose_secret()));
 
     // Display with security warning
     println!();

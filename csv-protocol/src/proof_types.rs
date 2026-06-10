@@ -12,6 +12,128 @@ use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
 use serde::{Deserialize, Serialize};
 
+/// Chain-independent proof leaf schema (canonical)
+///
+/// This is the single canonical proof leaf schema that all chain adapters
+/// and contracts MUST use. No chain-specific leaf schemas are allowed.
+///
+/// The leaf is hashed using canonical CBOR serialization + tagged hashing
+/// with the `csv.proof.leaf.v1` domain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProofLeafV1 {
+    /// Protocol version (must be 1)
+    pub version: u32,
+    /// Source chain identifier (e.g., "ethereum", "bitcoin", "solana")
+    pub source_chain: String,
+    /// Destination chain identifier
+    pub destination_chain: String,
+    /// Sanad ID (unique identifier for the Sanad)
+    pub sanad_id: Hash,
+    /// Commitment hash (the commitment being proven)
+    pub commitment: Hash,
+    /// Content descriptor hash (optional, for content-addressed data)
+    #[serde(default = "default_hash")]
+    pub content_descriptor_hash: Hash,
+    /// Source seal reference hash (the seal being consumed)
+    #[serde(default = "default_hash")]
+    pub source_seal_ref_hash: Hash,
+    /// Destination owner hash (the owner on the destination chain)
+    #[serde(default = "default_hash")]
+    pub destination_owner_hash: Hash,
+    /// Nullifier (for replay prevention)
+    #[serde(default = "default_hash")]
+    pub nullifier: Hash,
+    /// Lock event ID (the event that locked the seal)
+    #[serde(default = "default_hash")]
+    pub lock_event_id: Hash,
+    /// Metadata hash (optional additional metadata)
+    #[serde(default = "default_hash")]
+    pub metadata_hash: Hash,
+    /// Proof policy hash (the policy governing this proof)
+    #[serde(default = "default_hash")]
+    pub proof_policy_hash: Hash,
+}
+
+impl ProofLeafV1 {
+    /// Current version of the proof leaf schema
+    pub const CURRENT_VERSION: u32 = 1;
+
+    /// Create a new proof leaf
+    pub fn new(
+        source_chain: String,
+        destination_chain: String,
+        sanad_id: Hash,
+        commitment: Hash,
+    ) -> Self {
+        Self {
+            version: Self::CURRENT_VERSION,
+            source_chain,
+            destination_chain,
+            sanad_id,
+            commitment,
+            content_descriptor_hash: Hash::zero(),
+            source_seal_ref_hash: Hash::zero(),
+            destination_owner_hash: Hash::zero(),
+            nullifier: Hash::zero(),
+            lock_event_id: Hash::zero(),
+            metadata_hash: Hash::zero(),
+            proof_policy_hash: Hash::zero(),
+        }
+    }
+
+    /// Compute the canonical hash of this proof leaf
+    ///
+    /// Uses canonical CBOR serialization + tagged hashing with the
+    /// `csv.proof.leaf.v1` domain.
+    pub fn hash(&self) -> Result<Hash, String> {
+        let cbor = to_canonical_cbor(self)
+            .map_err(|e| format!("Failed to serialize proof leaf: {}", e))?;
+        Ok(tagged_hash(HashDomain::ProofLeafV1, &cbor).hash)
+    }
+
+    /// Set the content descriptor hash
+    pub fn with_content_descriptor_hash(mut self, hash: Hash) -> Self {
+        self.content_descriptor_hash = hash;
+        self
+    }
+
+    /// Set the source seal reference hash
+    pub fn with_source_seal_ref_hash(mut self, hash: Hash) -> Self {
+        self.source_seal_ref_hash = hash;
+        self
+    }
+
+    /// Set the destination owner hash
+    pub fn with_destination_owner_hash(mut self, hash: Hash) -> Self {
+        self.destination_owner_hash = hash;
+        self
+    }
+
+    /// Set the nullifier
+    pub fn with_nullifier(mut self, hash: Hash) -> Self {
+        self.nullifier = hash;
+        self
+    }
+
+    /// Set the lock event ID
+    pub fn with_lock_event_id(mut self, hash: Hash) -> Self {
+        self.lock_event_id = hash;
+        self
+    }
+
+    /// Set the metadata hash
+    pub fn with_metadata_hash(mut self, hash: Hash) -> Self {
+        self.metadata_hash = hash;
+        self
+    }
+
+    /// Set the proof policy hash
+    pub fn with_proof_policy_hash(mut self, hash: Hash) -> Self {
+        self.proof_policy_hash = hash;
+        self
+    }
+}
+
 /// Maximum allowed size for proof bytes (64KB)
 pub const MAX_PROOF_BYTES: usize = 64 * 1024;
 

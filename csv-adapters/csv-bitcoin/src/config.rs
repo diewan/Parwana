@@ -1,7 +1,11 @@
 //! Bitcoin adapter configuration
 
+use csv_keys::memory::SecretKey;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::Error;
+
 /// Configuration for the Bitcoin anchor layer
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BitcoinConfig {
     /// Bitcoin network (mainnet, testnet, signet, regtest)
     pub network: Network,
@@ -20,10 +24,15 @@ pub struct BitcoinConfig {
     pub xpub: Option<String>,
     /// Optional private key for transaction signing (hex format, WIF, or base58)
     /// Required for spending transactions. Not stored in config for security.
-    pub private_key: Option<String>,
+    #[serde(
+        serialize_with = "serialize_secret_key",
+        deserialize_with = "deserialize_secret_key"
+    )]
+    pub private_key: Option<SecretKey>,
     /// Optional seed for HD wallet derivation (128 hex chars = 64 bytes)
     /// If provided, takes precedence over xpub for wallet creation.
     /// Both CLI and adapter use the same seed to derive addresses via BIP-32.
+    /// Note: Seed remains as String because it's 64 bytes (BIP-39 seed), not 32 bytes like SecretKey.
     pub seed: Option<String>,
     /// Account index for HD wallet derivation (default: 0)
     pub account: u32,
@@ -35,8 +44,38 @@ pub struct BitcoinConfig {
     pub sanad_seals: Vec<SanadSealConfig>,
 }
 
+/// Helper for serializing/deserializing Option<SecretKey> as hex string
+fn serialize_secret_key<S>(key: &Option<SecretKey>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match key {
+        Some(k) => serializer.serialize_some(&hex::encode(k.expose_secret())),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_secret_key<'de, D>(deserializer: D) -> Result<Option<SecretKey>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt_str: Option<String> = Option::deserialize(deserializer)?;
+    match opt_str {
+        Some(s) => {
+            let bytes = hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
+            if bytes.len() != 32 {
+                return Err(D::Error::custom(format!("key must be 32 bytes, got {}", bytes.len())));
+            }
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(&bytes);
+            Ok(Some(SecretKey::new(key_bytes)))
+        }
+        None => Ok(None),
+    }
+}
+
 /// UTXO configuration for Bitcoin wallet
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UtxoConfig {
     /// Transaction ID (hex)
     pub txid: String,
@@ -53,7 +92,7 @@ pub struct UtxoConfig {
 }
 
 /// Sanad seal configuration for cross-chain lock lookups
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SanadSealConfig {
     /// Sanad ID (hex)
     pub sanad_id: String,
@@ -67,7 +106,7 @@ pub struct SanadSealConfig {
 /// 
 /// This enum explicitly specifies which transport protocol the RPC endpoint uses.
 /// Different backends have different API semantics and response formats.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BitcoinRpcBackend {
     /// Bitcoin Core JSON-RPC (native Bitcoin Core, QuickNode, Alchemy Bitcoin RPC)
     /// Supports: getrawtransaction, gettxout, sendrawtransaction, listunspent
@@ -142,7 +181,7 @@ impl BitcoinRpcBackend {
 }
 
 /// Bitcoin network type
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Network {
     /// Bitcoin mainnet
     Mainnet,

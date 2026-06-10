@@ -2371,18 +2371,7 @@ mod tests {
     use csv_protocol::proof_types::{InclusionProof, ProofBundle};
     use csv_storage::ReplayDatabase;
     use std::sync::Arc;
-
-    struct TestAdapter {
-        caps: ChainCapabilities,
-    }
-
-    impl TestAdapter {
-        fn new() -> Self {
-            Self {
-                caps: ChainCapabilities::bitcoin(),
-            }
-        }
-    }
+    use csv_testkit::fixtures::TestAdapter;
 
     #[test]
     fn test_registry_entry_roundtrip_preserves_lock_tx_and_output_index() {
@@ -2444,10 +2433,7 @@ mod tests {
             &self,
             _transfer: &CrossChainTransfer,
         ) -> Result<LockResult, csv_adapter_core::AdapterError> {
-            Ok(LockResult {
-                tx_hash: hex::encode([0x11u8; 32]),
-                block_height: 100,
-            })
+            Ok(TestAdapter::build_fake_lock_result())
         }
 
         async fn mint_sanad(
@@ -2455,10 +2441,7 @@ mod tests {
             _transfer: &CrossChainTransfer,
             _proof_bundle: &[u8],
         ) -> Result<MintResult, csv_adapter_core::AdapterError> {
-            Ok(MintResult {
-                tx_hash: hex::encode([0x22u8; 32]),
-                block_height: 200,
-            })
+            Ok(TestAdapter::build_fake_mint_result())
         }
 
         async fn build_inclusion_proof(
@@ -2466,36 +2449,8 @@ mod tests {
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
         ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
-            use csv_hash::dag::{DAGNode, DAGSegment};
-            use csv_hash::seal::{CommitAnchor, SealPoint};
-            use csv_protocol::signature::SignatureScheme;
-            use ed25519_dalek::{Signer, SigningKey};
-            let root_commitment = csv_hash::Hash::new([9u8; 32]);
-            let signing_key = SigningKey::from_bytes(&[7u8; 32]);
-            let signature = signing_key.sign(root_commitment.as_bytes());
-            let mut encoded_signature = Vec::with_capacity(100);
-            encoded_signature.extend_from_slice(&32u32.to_le_bytes());
-            encoded_signature.extend_from_slice(signing_key.verifying_key().as_bytes());
-            encoded_signature.extend_from_slice(&signature.to_bytes());
-            let proof_bytes = vec![0xA5u8; 32];
-            let node = DAGNode::new(
-                csv_hash::Hash::new([1u8; 32]),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-            );
-            Ok(ProofBundle::with_signature_scheme(
-                SignatureScheme::Ed25519,
-                DAGSegment::new(vec![node], root_commitment),
-                vec![encoded_signature],
-                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None).unwrap(),
-                CommitAnchor::new(vec![0xCCu8; 32], 100, proof_bytes.clone()).unwrap(),
-                InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0)
-                    .unwrap(),
-                csv_protocol::proof_types::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
-            )
-            .map_err(|e| csv_adapter_core::AdapterError::Generic(e.to_string()))?)
+            TestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+                .map_err(|e| csv_adapter_core::AdapterError::Generic(e))
         }
 
         async fn validate_source_proof(
@@ -2590,7 +2545,7 @@ mod tests {
             .unwrap();
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
         let owner = uuid::Uuid::new_v4();
         let runtime_ctx = crate::lease::RuntimeExecutionContext {
@@ -2676,7 +2631,7 @@ mod tests {
             sanad_id: csv_hash::Hash::new([44u8; 32]),
             transition_id: vec![3u8; 32],
         };
-        let proof_bundle = TestAdapter::new()
+        let proof_bundle = TestAdapter::new_bitcoin()
             .build_inclusion_proof(
                 &expected_transfer,
                 &LockResult {
@@ -2744,7 +2699,7 @@ mod tests {
             sanad_id: csv_hash::Hash::new([44u8; 32]),
             transition_id: vec![3u8; 32],
         };
-        let bundle = TestAdapter::new()
+        let bundle = TestAdapter::new_bitcoin()
             .build_inclusion_proof(
                 &expected_transfer,
                 &LockResult {
@@ -2790,7 +2745,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -2994,7 +2949,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3054,7 +3009,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3098,7 +3053,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         // Open the circuit breaker by recording failures
@@ -3193,7 +3148,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3263,7 +3218,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3333,7 +3288,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3443,7 +3398,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3509,7 +3464,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3708,7 +3663,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3791,7 +3746,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {
@@ -3877,7 +3832,7 @@ mod tests {
 
         let mut registry = AdapterRegistryImpl::new();
         registry
-            .register_adapter(Box::new(TestAdapter::new()))
+            .register_adapter(Box::new(TestAdapter::new_bitcoin()))
             .unwrap();
 
         let transfer = CrossChainTransfer {

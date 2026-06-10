@@ -208,8 +208,27 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         )
         .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
-        // Create minimal DAG segment for the lock transition
-        let transition_dag = DAGSegment::new(vec![], csv_hash::Hash::new(lock_tx_hash_bytes));
+        // Create a canonical ProofLeafV1 for this transfer
+        use csv_protocol::proof_types::ProofLeafV1;
+        let proof_leaf = ProofLeafV1::new(
+            transfer.source_chain.clone(),
+            transfer.destination_chain.clone(),
+            transfer.sanad_id,
+            transfer.sanad_id, // Use sanad_id as commitment for now
+        );
+        let leaf_hash = proof_leaf.hash()
+            .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
+
+        // Create minimal DAG segment with one node using the canonical proof leaf hash
+        use csv_hash::dag::DAGNode;
+        let node = DAGNode::new(
+            leaf_hash,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let transition_dag = DAGSegment::new(vec![node], csv_hash::Hash::new(lock_tx_hash_bytes));
 
         // Use empty signatures for now (signature verification is done via inclusion proof)
         let signatures = vec![];

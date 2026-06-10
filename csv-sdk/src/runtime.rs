@@ -862,29 +862,15 @@ impl AdapterBuilder {
             })?;
 
         // Configure signing key if private key is provided in config
-        let operations = if let Some(private_key_bytes) = config.signer_private_key {
-            if private_key_bytes.len() == 32 {
-                use ed25519_dalek::SigningKey;
-                let key_array: [u8; 32] = private_key_bytes
-                    .try_into()
-                    .map_err(|_| CsvError::ConfigError(
-                        "Invalid Sui private key length".to_string()
-                    ))?;
-                let signing_key = SigningKey::from_bytes(&key_array);
-                SuiBackend::from_seal_protocol_with_key(Arc::new(seal), node, signing_key).map_err(|e| {
-                    CsvError::ProtocolError {
-                        chain: ChainId::new("sui"),
-                        message: format!("Failed to create Sui chain operations: {}", e),
-                    }
-                })?
-            } else {
-                SuiBackend::from_seal_protocol(Arc::new(seal), node).map_err(|e| {
-                    CsvError::ProtocolError {
-                        chain: ChainId::new("sui"),
-                        message: format!("Failed to create Sui chain operations: {}", e),
-                    }
-                })?
-            }
+        let operations = if let Some(private_key) = config.signer_private_key {
+            let key_bytes = private_key.expose_secret();
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(key_bytes);
+            SuiBackend::from_seal_protocol_with_key(Arc::new(seal), node, signing_key).map_err(|e| {
+                CsvError::ProtocolError {
+                    chain: ChainId::new("sui"),
+                    message: format!("Failed to create Sui chain operations: {}", e),
+                }
+            })?
         } else {
             SuiBackend::from_seal_protocol(Arc::new(seal), node).map_err(|e| {
                 CsvError::ProtocolError {
@@ -914,20 +900,10 @@ impl AdapterBuilder {
             })?;
 
         // Configure signing key if private key is provided in config
-        if let Some(ref private_key_hex) = config.private_key {
-            let cleaned = private_key_hex.trim().trim_start_matches("0x");
-            if let Ok(key_bytes) = hex::decode(cleaned) {
-                if key_bytes.len() == 32 {
-                    use ed25519_dalek::SigningKey;
-                    let key_array: [u8; 32] = key_bytes
-                        .try_into()
-                        .map_err(|_| CsvError::ConfigError(
-                            "Invalid Aptos private key length".to_string()
-                        ))?;
-                    let signing_key = SigningKey::from_bytes(&key_array);
-                    seal = seal.with_signing_key(signing_key);
-                }
-            }
+        if let Some(ref private_key) = config.private_key {
+            let key_bytes = private_key.expose_secret();
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(key_bytes);
+            seal = seal.with_signing_key(signing_key);
         }
 
         let operations = AptosBackend::from_seal_protocol(Arc::new(seal)).map_err(|e| {

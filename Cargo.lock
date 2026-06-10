@@ -2709,6 +2709,7 @@ dependencies = [
  "csv-bitcoin",
  "csv-ethereum",
  "csv-hash",
+ "csv-keys",
  "csv-protocol",
  "csv-solana",
  "csv-sui",
@@ -2747,6 +2748,7 @@ dependencies = [
  "chrono",
  "csv-adapter-core",
  "csv-hash",
+ "csv-keys",
  "csv-proof",
  "csv-protocol",
  "csv-verifier",
@@ -2786,6 +2788,7 @@ dependencies = [
  "bitcoincore-rpc",
  "csv-adapter-core",
  "csv-hash",
+ "csv-keys",
  "csv-proof",
  "csv-protocol",
  "csv-store",
@@ -2961,6 +2964,7 @@ dependencies = [
  "csv-adapter-core",
  "csv-codec",
  "csv-hash",
+ "csv-keys",
  "csv-proof",
  "csv-protocol",
  "csv-store",
@@ -3033,6 +3037,7 @@ dependencies = [
  "rand 0.8.6",
  "scrypt",
  "secp256k1 0.29.1",
+ "secrecy",
  "serde",
  "serde_json",
  "sha2",
@@ -3141,6 +3146,7 @@ dependencies = [
  "csv-proof",
  "csv-protocol",
  "csv-storage",
+ "csv-testkit",
  "csv-verifier",
  "ed25519-dalek",
  "hex",
@@ -3227,6 +3233,7 @@ dependencies = [
  "csv-adapter-core",
  "csv-codec",
  "csv-hash",
+ "csv-keys",
  "csv-proof",
  "csv-protocol",
  "csv-store",
@@ -3312,6 +3319,7 @@ dependencies = [
  "csv-adapter-core",
  "csv-codec",
  "csv-hash",
+ "csv-keys",
  "csv-proof",
  "csv-protocol",
  "csv-verifier",
@@ -3339,6 +3347,7 @@ dependencies = [
 name = "csv-testkit"
 version = "0.1.0"
 dependencies = [
+ "csv-adapter-core",
  "csv-codec",
  "csv-hash",
  "csv-proof",
@@ -3346,6 +3355,8 @@ dependencies = [
  "csv-runtime",
  "csv-storage",
  "csv-verifier",
+ "ed25519-dalek",
+ "hex",
  "serde",
  "serde_json",
  "tokio",
@@ -7193,6 +7204,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcb913707158fadaf0d8702c2db0e857de66eb003ccfdda5924b5f5ac98efb38"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "secrecy"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
+dependencies = [
+ "serde",
+ "zeroize",
 ]
 
 [[package]]

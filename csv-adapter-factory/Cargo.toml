@@ -7,6 +7,7 @@ edition = "2024"
 csv-protocol = { path = "../csv-protocol" }
 csv-adapter-core = { path = "../csv-adapters/csv-adapter-core" }
 csv-hash = { path = "../csv-hash" }
+csv-keys = { path = "../csv-keys" }
 csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true, features = ["signet-rest"] }
 csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }
 csv-sui = { path = "../csv-adapters/csv-sui", optional = true, features = ["rpc"] }

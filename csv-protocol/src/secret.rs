@@ -110,7 +110,7 @@ impl SecretHandle {
     /// stored, transmitted, or logged.
     pub fn as_bytes(&self) -> Option<&[u8; 32]> {
         match &self.source {
-            SecretSource::Raw(key) => Some(key.as_bytes()),
+            SecretSource::Raw(key) => Some(key.expose_secret()),
             SecretSource::Keystore { .. } => {
                 // For keystore-backed handles, we would decrypt on demand.
                 // This is a simplification — in production, you'd load the

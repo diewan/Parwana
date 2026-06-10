@@ -173,10 +173,21 @@ impl ChainAdapter for SuiRuntimeAdapter {
             vec![],
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
-        // Create a minimal DAG with one node for verification
+        // Create a canonical ProofLeafV1 for this transfer
+        use csv_protocol::proof_types::ProofLeafV1;
+        let proof_leaf = ProofLeafV1::new(
+            transfer.source_chain.clone(),
+            transfer.destination_chain.clone(),
+            transfer.sanad_id,
+            transfer.sanad_id, // Use sanad_id as commitment for now
+        );
+        let leaf_hash = proof_leaf.hash()
+            .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
+
+        // Create a minimal DAG with one node using the canonical proof leaf hash
         let root_commitment = csv_hash::Hash::new([9u8; 32]);
         let node = csv_hash::dag::DAGNode::new(
-            csv_hash::Hash::new([1u8; 32]),
+            leaf_hash,
             vec![],
             vec![],
             vec![],

@@ -152,7 +152,7 @@ impl KeystoreFile {
             .map_err(|e| KeystoreError::EncryptionFailed(e.to_string()))?;
 
         let nonce = Nonce::from_slice(&iv_bytes[..12]);
-        let plaintext = secret_key.as_bytes();
+        let plaintext = secret_key.expose_secret();
 
         let ciphertext = cipher
             .encrypt(nonce, plaintext.as_ref())

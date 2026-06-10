@@ -56,7 +56,7 @@ pub fn cmd_import(
     let mut imported = 0u32;
     for (core_chain, secret_key) in chain_keys {
         // Derive address
-        let address = derive_address_from_key(secret_key.as_bytes(), &core_chain)
+        let address = derive_address_from_key(secret_key.expose_secret(), &core_chain)
             .map_err(|e| anyhow::anyhow!("Failed to derive address for {:?}: {}", core_chain, e))?;
 
         // Get coin type for derivation path

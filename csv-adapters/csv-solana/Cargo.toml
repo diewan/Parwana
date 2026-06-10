@@ -27,6 +27,7 @@ csv-proof = { path = "../../csv-proof" }
 csv-codec = { path = "../../csv-codec" }
 csv-wire = { path = "../../csv-wire" }
 csv-store = { path = "../../csv-store", optional = true }
+csv-keys = { path = "../../csv-keys" }
 solana-sdk = "3.0"
 solana-program = "3.0"
 solana-rpc-client = { version = "3.1", optional = true }

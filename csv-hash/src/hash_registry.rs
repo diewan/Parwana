@@ -223,6 +223,7 @@ pub enum HashDomain {
     // Verification domains
     VerificationProofV1,
     VerificationResult,
+    ProofLeafV1,
 
     // Stealth domains
     StealthAddressV1,
@@ -263,6 +264,7 @@ impl HashDomain {
             Self::ReplayIdV1 => b"csv.replay.id.v1",
             Self::VerificationProofV1 => b"csv.verification.proof.v1",
             Self::VerificationResult => b"csv.verification.result",
+            Self::ProofLeafV1 => b"csv.proof.leaf.v1",
             Self::StealthAddressV1 => b"csv.stealth.address.v1",
             Self::StealthNonceV1 => b"csv.stealth.nonce.v1",
             Self::EphemeralPointV1 => b"csv.stealth.ephemeral.v1",
@@ -313,7 +315,7 @@ impl HashDomain {
             | Self::CommitmentSeal
             | Self::CommitmentDomain => DomainCategory::Commitment,
             Self::SanadId | Self::Nullifier | Self::ReplayIdV1 => DomainCategory::Identity,
-            Self::VerificationProofV1 | Self::VerificationResult => DomainCategory::Verification,
+            Self::VerificationProofV1 | Self::VerificationResult | Self::ProofLeafV1 => DomainCategory::Verification,
             Self::StealthAddressV1 | Self::StealthNonceV1 | Self::EphemeralPointV1 => {
                 DomainCategory::Stealth
             }
