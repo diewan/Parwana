@@ -22,6 +22,8 @@
 //! - Checksums use SHA-256 of canonical bytecode
 
 use csv_hash::Hash;
+use csv_keys::memory::SecretKey;
+use csv_protocol::secret::SecretHandle;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -272,13 +274,14 @@ pub struct DeploymentConfig {
 impl DeploymentConfig {
     /// Convert private_key String to typed SecretHandle (zeroize-on-drop)
     /// This should be called immediately after deserialization to ensure secrets are never exposed as raw strings
-    pub fn to_secret_handle(&self) -> csv_wallet::SecretHandle {
+    pub fn to_secret_handle(&self) -> SecretHandle {
         let bytes = hex::decode(&self.private_key).unwrap_or_else(|_| self.private_key.as_bytes().to_vec());
-        csv_wallet::SecretHandle::new(
-            bytes,
-            csv_wallet::KeyPurpose::Signing,
-            self.chain_id.clone(),
-        )
+        // Pad or truncate to 32 bytes for SecretKey
+        let mut key_bytes = [0u8; 32];
+        let len = bytes.len().min(32);
+        key_bytes[..len].copy_from_slice(&bytes[..len]);
+        let key = SecretKey::new(key_bytes);
+        SecretHandle::from_key(key)
     }
 }
 

@@ -29,7 +29,14 @@ pub enum SchemaError {
 
     /// Resource limit exceeds maximum
     #[error("Resource limit {field} ({value}) exceeds maximum ({max})")]
-    ResourceLimitExceeded { field: &'static str, value: u64, max: u64 },
+    ResourceLimitExceeded {
+        /// The field name that exceeded the limit
+        field: &'static str,
+        /// The actual value that exceeded the limit
+        value: u64,
+        /// The maximum allowed value
+        max: u64,
+    },
 
     /// Descriptor hash is zero (not computed)
     #[error("Descriptor hash is zero. Must be computed from canonical CBOR serialization")]

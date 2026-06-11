@@ -36,16 +36,31 @@ pub enum SanadAction {
         /// Skip publishing the commitment (for testing lock functionality)
         #[arg(long)]
         skip_publish: bool,
-        /// Schema hash (hex) for content descriptor
+        /// Schema ID or file path for content descriptor
         #[arg(long)]
-        schema_hash: Option<String>,
+        schema: Option<String>,
+        /// Payload file path (JSON or binary)
+        #[arg(long)]
+        payload: Option<String>,
         /// Content root hash (hex) for content-addressed data
         #[arg(long)]
         content_root: Option<String>,
-        /// Disclosure policy hash (hex)
+        /// Attachment file paths (comma-separated)
+        #[arg(long)]
+        attachments: Option<String>,
+        /// Disclosure policy file path or parameters
+        #[arg(long)]
+        disclosure_policy: Option<String>,
+        /// Proof policy file path or parameters
+        #[arg(long)]
+        proof_policy: Option<String>,
+        /// Schema hash (hex) for content descriptor (legacy, use --schema instead)
+        #[arg(long)]
+        schema_hash: Option<String>,
+        /// Disclosure policy hash (hex) (legacy, use --disclosure-policy instead)
         #[arg(long)]
         disclosure_policy_hash: Option<String>,
-        /// Proof policy hash (hex)
+        /// Proof policy hash (hex) (legacy, use --proof-policy instead)
         #[arg(long)]
         proof_policy_hash: Option<String>,
     },
@@ -111,8 +126,8 @@ pub async fn execute(
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     match action {
-        SanadAction::Create { chain, value, account, index, skip_publish, schema_hash, content_root, disclosure_policy_hash, proof_policy_hash } => {
-            cmd_create(chain, value, account, index, skip_publish, schema_hash, content_root, disclosure_policy_hash, proof_policy_hash, config, state).await
+        SanadAction::Create { chain, value, account, index, skip_publish, schema, payload, content_root, attachments, disclosure_policy, proof_policy, schema_hash, disclosure_policy_hash, proof_policy_hash } => {
+            cmd_create(chain, value, account, index, skip_publish, schema, payload, content_root, attachments, disclosure_policy, proof_policy, schema_hash, disclosure_policy_hash, proof_policy_hash, config, state).await
         }
         SanadAction::Show { sanad_id } => cmd_show(sanad_id, state),
         SanadAction::List { chain, update } => cmd_list(chain, update, config, state).await,
@@ -130,14 +145,35 @@ async fn cmd_create(
     account: u32,
     index: u32,
     skip_publish: bool,
-    schema_hash: Option<String>,
+    schema: Option<String>,
+    payload: Option<String>,
     content_root: Option<String>,
+    attachments: Option<String>,
+    disclosure_policy: Option<String>,
+    proof_policy: Option<String>,
+    schema_hash: Option<String>,
     disclosure_policy_hash: Option<String>,
     proof_policy_hash: Option<String>,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header(&format!("Creating Sanad on {}", chain));
+
+    // Handle content descriptor parameters (B-013)
+    // For now, log that these parameters are provided but not yet fully implemented
+    if schema.is_some() || payload.is_some() || attachments.is_some() {
+        output::info("Content descriptor parameters provided (B-013 - partial implementation)");
+        if let Some(ref s) = schema {
+            output::kv("Schema", s);
+        }
+        if let Some(ref p) = payload {
+            output::kv("Payload", p);
+        }
+        if let Some(ref a) = attachments {
+            output::kv("Attachments", a);
+        }
+        output::info("Note: Full content descriptor integration requires SanadPayloadDescriptor implementation");
+    }
 
     // Show derivation parameters for Bitcoin
     if chain.as_str() == "bitcoin" {
@@ -152,7 +188,7 @@ async fn cmd_create(
             let seed = mnemonic.to_seed(None);
             let seed_array = *seed.as_bytes();
 
-            // Use csv-coordinator for wallet operations (architecture compliant)
+            // Use csv-coordinator for wallet operations (B-014: csv-coordinator is part of runtime layer)
             let network = match config.chain(&chain)?.network {
                 crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
                 crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
@@ -181,7 +217,7 @@ async fn cmd_create(
         let seed = mnemonic.to_seed(None);
         let seed_array = *seed.as_bytes();
 
-        // Use csv-coordinator for wallet operations (architecture compliant)
+        // Use csv-coordinator for wallet operations (B-014: csv-coordinator is part of runtime layer)
         let network = match config.chain(&chain)?.network {
             crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
             crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,

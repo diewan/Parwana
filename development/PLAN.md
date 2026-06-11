@@ -587,14 +587,23 @@ Currently only Ethereum has both get_sanad_state and get_seal_state query functi
 **Current Status:** **PARTIALLY COMPLETED**
 
 **Completed:**
+
 - T1: Finality enforcement - runtime_mode.rs enforces_strict_finality() always returns true
 - T3: Eliminated .expect() call from lease.rs production path (changed to proper error handling)
 - T4: Lease/Transfer state out of CLI - verified (CLI has no protocol authority state)
 - T6: Resolved csv-wallet workspace drift - removed csv-wallet references from SECURITY.md
 
 **Remaining High Priority:**
-- T2: TransferExecutionLog integration - execution_journal.rs exists but needs integration into TransferCoordinator with resume_transfer()
-- T5: Unify replay storage backend - create ReplayDatabase trait, add conformance tests
+
+- Phase 7.3-7.5: Solana/Sui/Aptos CBOR encoding and golden vectors (blocked by Move CBOR libraries)
+- Phase 15: Contract freeze - governance, adversarial tests (large scope task)
+
+**Recently Completed:**
+
+- T2: TransferExecutionLog integration - execution_journal.rs integrated into TransferCoordinator with resume_transfer()
+- T5: Unify replay storage backend - ReplayDatabase trait and conformance tests implemented
+- Phase 12: Wallet unification - typed secret handles (B-015) - added to_secret_handle() conversion methods
+- Bitcoin CLI fix: Added 64-byte seed support to SharedSecretHandle for HD wallet derivation
 
 ---
 
@@ -602,11 +611,12 @@ Currently only Ethereum has both get_sanad_state and get_seal_state query functi
 
 **Source:** `AUDIT.md` Section 2.5, B-012
 
-**Current Status:** Not started
+**Current Status:** Partially complete (7.1 done, 7.2 partial, 7.3-7.5 blocked)
 
 ### Problem
 
 Each contract computes proof leaf hashes differently:
+
 - Ethereum: keccak256
 - Solana: blake2b256
 - Sui: sha3_256
@@ -663,11 +673,18 @@ impl ProofLeafV1 {
 
 ### Exit Criteria
 
-- All contracts use ProofLeafV1 for leaf computation
-- Cross-language golden vectors pass
-- `cargo test --workspace --all-features` passes
+- [x] ProofLeafV1 schema defined in csv-protocol/src/proof_taxonomy.rs
+- [x] Canonical leaf hash computation implemented with chain-specific hash functions
+- [x] Test vectors updated to use canonical CBOR encoding (csv-protocol/tests/proof_leaf_vectors.rs)
+- [x] Ethereum contract updated to use simplified CBOR encoding (partial - true canonical CBOR blocked by Solidity stack limitations)
+- [ ] Solana contract to use canonical CBOR encoding (blocked - requires Move CBOR libraries)
+- [ ] Sui/Aptos contracts to use canonical CBOR encoding (blocked - requires Move CBOR libraries)
+- [ ] Cross-language golden vectors (blocked - depends on contract CBOR implementation)
+- [x] `cargo test --package csv-protocol --test proof_leaf_vectors` passes
 
 **Estimated Effort:** 24-32 hours (3-4 days)
+
+**Status:** Phase 7.1 and 7.2 (partial) complete. Phase 7.3-7.5 blocked by Move CBOR library requirements and Solidity stack limitations.
 
 **Source:** `AUDIT.md` Section 5.4, Section 9.2; `UNWIRED.md` serde item; `serde_audit_manifest.md`
 
@@ -997,9 +1014,11 @@ See CANONICAL-NAMING.md for complete cross-chain mapping tables and implementati
 ### Pending (Priority Order)
 
 **Critical:**
+
 - Phase 7: Chain-independent proof leaf schema (B-012)
 
 **High:**
+
 - Phase 10: Recovery implementation (T2: TransferExecutionLog integration)
 - Phase 12: Wallet unification (B-014: centralized csv-wallet crate)
 - Security: Private key as Option<String> (B-015: typed secret handles)
@@ -1007,6 +1026,7 @@ See CANONICAL-NAMING.md for complete cross-chain mapping tables and implementati
 - Phase 15: Contract freeze (governance, adversarial tests)
 
 **Medium:**
+
 - Phase 8: Serde audit manifest + L0-L4 stripping
 - Phase 9: Chain registry + config-driven addition
 - Phase 11: CLI content descriptor support (B-013)

@@ -10,7 +10,7 @@
 //! - Descriptor hash binds content metadata to the ID
 //! - Domain separation prevents cross-protocol replay
 
-use crate::{Hash, csv_tagged_hash, tagged_hash_str};
+use crate::{Hash, tagged_hash_str};
 
 /// Preimage for Sanad ID derivation.
 ///

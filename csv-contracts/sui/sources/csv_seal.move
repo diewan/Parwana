@@ -93,18 +93,25 @@ module csv_seal::csv_seal {
     }
 
     /// Compute the canonical hash of a ProofLeafV1 using blake2b256 (Sui's native hash)
-    /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    /// Uses Minimal Canonical Encoding (MCE) - fixed-width byte layout without serialization libraries
+    /// This matches the Rust ProofLeafV1::to_canonical_bytes() implementation exactly.
     public fun hash_proof_leaf_v1(leaf: &ProofLeafV1): vector<u8> {
         let mut data = vector::empty();
-        // Domain separator for tagged hashing
+        
+        // Domain tag (17 bytes): "csv.proof.leaf.v1"
         let domain = b"csv.proof.leaf.v1";
         vector::append(&mut data, domain);
         
-        // Serialize all fields in canonical order
+        // Version (4 bytes, little-endian u32)
+        // BCS for u32 produces exactly 4 bytes LE, matching Rust's to_le_bytes()
         let version_bytes = bcs::to_bytes(&leaf.version);
         vector::append(&mut data, version_bytes);
+        
+        // Chain IDs (1 byte each)
         vector::push_back(&mut data, leaf.source_chain);
         vector::push_back(&mut data, leaf.destination_chain);
+        
+        // Fixed-width hashes (32 bytes each)
         vector::append(&mut data, leaf.sanad_id);
         vector::append(&mut data, leaf.commitment);
         vector::append(&mut data, leaf.content_descriptor_hash);

@@ -36,12 +36,26 @@ pub struct ProofLeafV1 {
 
 impl ProofLeafV1 {
     /// Compute the canonical hash of a ProofLeafV1 using sha256 (Solana's native hash)
-    /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    /// Uses Minimal Canonical Encoding (MCE) - fixed-width byte layout without serialization libraries
+    /// This matches the Rust ProofLeafV1::to_canonical_bytes() implementation exactly.
     pub fn hash(&self) -> [u8; 32] {
-        // Domain separator for tagged hashing
+        // MCE byte layout (exactly matching Rust implementation):
+        // - domain_tag(17 bytes): "csv.proof.leaf.v1"
+        // - version(4 bytes, little-endian u32)
+        // - source_chain(1 byte u8)
+        // - destination_chain(1 byte u8)
+        // - sanad_id(32 bytes)
+        // - commitment(32 bytes)
+        // - content_descriptor_hash(32 bytes)
+        // - source_seal_ref_hash(32 bytes)
+        // - destination_owner_hash(32 bytes)
+        // - nullifier(32 bytes)
+        // - lock_event_id(32 bytes)
+        // - metadata_hash(32 bytes)
+        // - proof_policy_hash(32 bytes)
+        
         let domain = b"csv.proof.leaf.v1";
         
-        // Serialize the leaf structure
         let mut data = Vec::new();
         data.extend_from_slice(domain);
         data.extend_from_slice(&self.version.to_le_bytes());

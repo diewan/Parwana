@@ -7,6 +7,8 @@ description = "CSV Contract Bindings - Type-safe smart contract ABI bindings for
 [dependencies]
 csv-hash = { path = "../csv-hash", features = ["serde"] }
 csv-codec = { path = "../csv-codec" }
+csv-keys = { path = "../csv-keys" }
+csv-protocol = { path = "../csv-protocol" }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -144,6 +144,9 @@ impl ProofLeafV1 {
     /// Current version of the proof leaf schema
     pub const CURRENT_VERSION: u32 = 1;
 
+    /// Domain tag for MCE encoding
+    pub const DOMAIN_TAG: &[u8] = b"csv.proof.leaf.v1";
+
     /// Create a new proof leaf
     pub fn new(
         source_chain: String,
@@ -167,23 +170,85 @@ impl ProofLeafV1 {
         }
     }
 
+    /// Convert this proof leaf to its Minimal Canonical Encoding (MCE) byte sequence.
+    ///
+    /// This is the authoritative MCE implementation that all chain contracts must reproduce.
+    /// The byte layout is fixed-width with no variable-length encoding:
+    ///
+    /// - domain_tag(17 bytes): "csv.proof.leaf.v1"
+    /// - version(4 bytes): little-endian u32
+    /// - source_chain(1 byte): u8 chain ID
+    /// - destination_chain(1 byte): u8 chain ID
+    /// - sanad_id(32 bytes): fixed hash
+    /// - commitment(32 bytes): fixed hash
+    /// - content_descriptor_hash(32 bytes): fixed hash
+    /// - source_seal_ref_hash(32 bytes): fixed hash
+    /// - destination_owner_hash(32 bytes): fixed hash
+    /// - nullifier(32 bytes): fixed hash
+    /// - lock_event_id(32 bytes): fixed hash
+    /// - metadata_hash(32 bytes): fixed hash
+    /// - proof_policy_hash(32 bytes): fixed hash
+    ///
+    /// Total: 311 bytes
+    ///
+    /// This encoding is designed to be trivially implementable in any language without
+    /// serialization libraries - just byte concatenation of fixed-width fields.
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(311);
+
+        // Domain tag (17 bytes)
+        bytes.extend_from_slice(Self::DOMAIN_TAG);
+
+        // Version (4 bytes, little-endian)
+        bytes.extend_from_slice(&self.version.to_le_bytes());
+
+        // Chain IDs (1 byte each - convert string to u8)
+        bytes.push(self.chain_id_to_u8(&self.source_chain));
+        bytes.push(self.chain_id_to_u8(&self.destination_chain));
+
+        // Fixed-width hashes (32 bytes each)
+        bytes.extend_from_slice(&self.sanad_id.0);
+        bytes.extend_from_slice(&self.commitment.0);
+        bytes.extend_from_slice(&self.content_descriptor_hash.0);
+        bytes.extend_from_slice(&self.source_seal_ref_hash.0);
+        bytes.extend_from_slice(&self.destination_owner_hash.0);
+        bytes.extend_from_slice(&self.nullifier.0);
+        bytes.extend_from_slice(&self.lock_event_id.0);
+        bytes.extend_from_slice(&self.metadata_hash.0);
+        bytes.extend_from_slice(&self.proof_policy_hash.0);
+
+        bytes
+    }
+
+    /// Convert chain name string to u8 chain ID
+    fn chain_id_to_u8(&self, chain: &str) -> u8 {
+        match chain.to_lowercase().as_str() {
+            "ethereum" | "eth" => 0,
+            "solana" | "sol" => 1,
+            "sui" => 2,
+            "bitcoin" | "btc" => 3,
+            "aptos" => 4,
+            "celestia" => 5,
+            _ => 255, // Unknown chain
+        }
+    }
+
     /// Compute the canonical hash of this proof leaf using the source chain's native hash function
     ///
-    /// Uses canonical CBOR serialization, then hashes with the chain's native hash function
-    /// to avoid extra gas costs on-chain.
+    /// Uses MCE (Minimal Canonical Encoding) for the preimage, then hashes with the chain's
+    /// native hash function to avoid extra gas costs on-chain.
     pub fn hash(&self) -> Result<Hash, String> {
         self.hash_with_function(HashFunction::for_chain(&self.source_chain))
     }
 
     /// Compute the canonical hash of this proof leaf using a specific hash function
     ///
-    /// Uses canonical CBOR serialization, then hashes with the specified hash function.
-    /// This is used for cross-chain verification where the verifier needs to compute
-    /// the hash using the source chain's native hash function.
+    /// Uses MCE (Minimal Canonical Encoding) for the preimage, then hashes with the specified
+    /// hash function. This is used for cross-chain verification where the verifier needs to
+    /// compute the hash using the source chain's native hash function.
     pub fn hash_with_function(&self, hash_fn: HashFunction) -> Result<Hash, String> {
-        let cbor = to_canonical_cbor(self)
-            .map_err(|e| format!("Failed to serialize proof leaf: {}", e))?;
-        Ok(hash_fn.hash_bytes(&cbor))
+        let mce = self.to_canonical_bytes();
+        Ok(hash_fn.hash_bytes(&mce))
     }
 
     /// Get the native hash function for this proof leaf's source chain
