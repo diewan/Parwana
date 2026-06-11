@@ -104,14 +104,16 @@ impl Signature {
                 // Derive secp256k1 public key from secret key
                 #[cfg(feature = "secp256k1")]
                 {
-                    use k256::SecretKey as K256SecretKey;
-                    use k256::PublicKey as K256PublicKey;
-                    let sk = K256SecretKey::from_slice(secret_key)
+                    use secp256k1::SecretKey;
+                    use secp256k1::PublicKey;
+                    use secp256k1::Secp256k1;
+                    let secp = Secp256k1::new();
+                    let sk = SecretKey::from_slice(secret_key)
                         .map_err(|e| ProtocolError::SignatureVerificationFailed(
                             format!("Invalid secp256k1 secret key: {}", e)
                         ))?;
-                    let pk = K256PublicKey::from_secret_key(&sk, false);
-                    pk.to_sec1_bytes().to_vec()
+                    let pk = PublicKey::from_secret_key(&secp, &sk);
+                    pk.serialize().to_vec()
                 }
                 #[cfg(not(feature = "secp256k1"))]
                 {
@@ -125,13 +127,13 @@ impl Signature {
                 #[cfg(feature = "ed25519")]
                 {
                     use ed25519_dalek::SigningKey;
-                    use ed25519_dalek::PublicKey as Ed25519PublicKey;
+                    use ed25519_dalek::VerifyingKey;
                     let sk = SigningKey::from_bytes(secret_key.try_into().map_err(|_| {
                         ProtocolError::SignatureVerificationFailed(
                             "Invalid Ed25519 secret key: must be 32 bytes".to_string()
                         )
                     })?);
-                    Ed25519PublicKey::from(&sk).to_bytes().to_vec()
+                    VerifyingKey::from(&sk).to_bytes().to_vec()
                 }
                 #[cfg(not(feature = "ed25519"))]
                 {

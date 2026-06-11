@@ -379,7 +379,12 @@ async fn cmd_create(
     };
 
     let mut private_keys = std::collections::HashMap::new();
-    private_keys.insert(chain.as_str().to_string(), Some(key_hex));
+    let key_bytes = hex::decode(&key_hex)
+        .map_err(|e| anyhow::anyhow!("Failed to decode private key hex: {}", e))?;
+    let key_array: [u8; 32] = key_bytes.try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid private key length"))?;
+    let secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(key_array);
+    private_keys.insert(chain.as_str().to_string(), secret_handle);
 
     // Build CSV client with the requested chain enabled
     eprintln!("CLI LAYER: Building client with SDK config RPC URL: {}", sdk_config.chains.get(chain.as_str()).map(|c| &c.rpc.url).unwrap_or(&"N/A".to_string()));
@@ -1489,7 +1494,12 @@ async fn cmd_consume(
     };
 
     let mut private_keys = std::collections::HashMap::new();
-    private_keys.insert(chain.as_str().to_string(), Some(key_hex));
+    let key_bytes = hex::decode(&key_hex)
+        .map_err(|e| anyhow::anyhow!("Failed to decode private key hex: {}", e))?;
+    let key_array: [u8; 32] = key_bytes.try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid private key length"))?;
+    let secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(key_array);
+    private_keys.insert(chain.as_str().to_string(), secret_handle);
 
     // Note: SDK adapters are automatically created during client build
     // Do NOT call init_adapters here as it has been removed from SDK

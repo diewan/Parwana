@@ -149,7 +149,12 @@ pub async fn cmd_transfer(
         let (secret_key, _) = signing_key_for_chain(&from, 0, &seed_array, state)?;
         hex::encode(secret_key.expose_secret())
     };
-    private_keys.insert(from.to_string(), Some(from_key_hex));
+    let from_key_bytes = hex::decode(&from_key_hex)
+        .map_err(|e| anyhow::anyhow!("Failed to decode from private key hex: {}", e))?;
+    let from_key_array: [u8; 32] = from_key_bytes.try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid from private key length"))?;
+    let from_secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(from_key_array);
+    private_keys.insert(from.to_string(), from_secret_handle);
 
     // Derive private key for destination chain
     let to_key_hex = if to.as_str() == "bitcoin" {
@@ -158,7 +163,12 @@ pub async fn cmd_transfer(
         let (secret_key, _) = signing_key_for_chain(&to, 0, &seed_array, state)?;
         hex::encode(secret_key.expose_secret())
     };
-    private_keys.insert(to.to_string(), Some(to_key_hex));
+    let to_key_bytes = hex::decode(&to_key_hex)
+        .map_err(|e| anyhow::anyhow!("Failed to decode to private key hex: {}", e))?;
+    let to_key_array: [u8; 32] = to_key_bytes.try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid to private key length"))?;
+    let to_secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(to_key_array);
+    private_keys.insert(to.to_string(), to_secret_handle);
 
     let client = CsvClient::builder()
         .with_chain(from_chain.clone())

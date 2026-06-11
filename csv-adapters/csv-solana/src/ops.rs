@@ -73,6 +73,11 @@ impl SolanaBackend {
         }
     }
 
+    /// Get seal protocol reference
+    pub fn seal_protocol(&self) -> &Arc<SolanaSealProtocol> {
+        &self.seal_protocol
+    }
+
     /// Create from SolanaSealProtocol
     pub fn from_seal_protocol(seal: Arc<SolanaSealProtocol>) -> ChainOpResult<Self> {
         let rpc = seal
@@ -116,7 +121,7 @@ impl SolanaBackend {
     }
 
     /// Get RPC client reference
-    fn rpc(&self) -> &dyn SolanaRpc {
+    pub fn rpc(&self) -> &dyn SolanaRpc {
         self.rpc.as_ref()
     }
 }

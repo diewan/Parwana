@@ -48,6 +48,7 @@ use crate::wallet::WalletManager;
 
 // Import adapter registry for cross-chain transfers
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
+use csv_protocol::secret::SecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_adapter_factory::{AdapterFactory, AdapterConfig, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol, BitcoinFactory, EthereumFactory, SuiFactory, AptosFactory, SolanaFactory, AdapterResult as FactoryAdapterResult};
@@ -181,8 +182,8 @@ pub struct CsvClient {
     /// Transfer coordinator for production-grade cross-chain transfer execution.
     #[cfg(feature = "runtime-coordinator")]
     pub(crate) transfer_coordinator: Option<Arc<TransferCoordinator>>,
-    /// Private keys for chain adapters (chain name -> hex-encoded key/seed)
-    pub(crate) private_keys: Option<std::collections::HashMap<String, Option<String>>>,
+    /// Private keys for chain adapters (chain name -> typed SharedSecretHandle)
+    pub(crate) private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
 }
 
 impl CsvClient {
@@ -432,7 +433,7 @@ impl CsvClient {
         chain: ChainId,
         _config: &crate::config::Config,
         network: NetworkType,
-        private_keys: Option<std::collections::HashMap<String, Option<String>>>,
+        private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
     ) -> Result<Option<AdapterResult>, CsvError> {
         let _builder = crate::runtime::AdapterBuilder::new();
         let _is_testnet = matches!(network, NetworkType::Testnet);
@@ -489,7 +490,7 @@ impl CsvClient {
                 let bitcoin_seed = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("bitcoin"))
-                    .and_then(|k| k.clone());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
                 // Create RPC endpoint configuration
                 let rpc_endpoint = RpcEndpoint {
@@ -510,7 +511,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: bitcoin_seed.and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: bitcoin_seed.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: chain_config.map(|c| c.account).unwrap_or(0),
                     index: chain_config.map(|c| c.index).unwrap_or(0),
                     contract_address: None,
@@ -568,7 +569,7 @@ impl CsvClient {
                 let eth_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("ethereum"))
-                    .and_then(|k| k.clone());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
                 // Create RPC endpoint configuration
                 let rpc_endpoint = RpcEndpoint {
@@ -589,7 +590,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: eth_private_key.and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: eth_private_key.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: Some(address.to_string()),
@@ -668,7 +669,7 @@ impl CsvClient {
                 let eth_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("ethereum"))
-                    .and_then(|k| k.as_deref());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
                 if let Some(private_key) = eth_private_key {
                     rpc = rpc.with_signer(private_key).map_err(|e| CsvError::ProtocolError {
                         chain: ChainId::new("ethereum"),
@@ -713,7 +714,7 @@ impl CsvClient {
                 let sui_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("sui"))
-                    .and_then(|k| k.clone());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
                 // Create RPC endpoint configuration
                 let rpc_endpoint = RpcEndpoint {
@@ -734,7 +735,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: sui_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: sui_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: Some(contract_address.to_string()),
@@ -794,7 +795,7 @@ impl CsvClient {
                 let sui_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("sui"))
-                    .and_then(|k| k.as_deref());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
                 let signer_address = if let Some(pk) = sui_private_key {
                     let cleaned = pk.trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
@@ -867,7 +868,7 @@ impl CsvClient {
                 let aptos_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("aptos"))
-                    .and_then(|k| k.clone());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
                 // Create RPC endpoint configuration
                 let rpc_endpoint = RpcEndpoint {
@@ -888,7 +889,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: aptos_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: aptos_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: chain_config.and_then(|c| c.contract_address.clone()),
@@ -932,7 +933,7 @@ impl CsvClient {
                 let aptos_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("aptos"))
-                    .and_then(|k| k.as_deref());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
                 let signer_address = if let Some(pk) = aptos_private_key {
                     let cleaned = pk.trim().trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
@@ -1035,7 +1036,7 @@ impl CsvClient {
                 let solana_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("solana"))
-                    .and_then(|k| k.clone());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
                 // Create RPC endpoint configuration
                 let rpc_endpoint = RpcEndpoint {
@@ -1056,7 +1057,7 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: solana_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: solana_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
                     account: 0,
                     index: 0,
                     contract_address: None,
@@ -1104,7 +1105,7 @@ impl CsvClient {
                 let solana_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("solana"))
-                    .and_then(|k| k.as_deref());
+                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
                 let keypair_base58 = if let Some(pk) = solana_private_key {
                     let cleaned = pk.trim().trim_start_matches("0x");
                     if let Ok(key_bytes) = hex::decode(cleaned) {
@@ -1211,9 +1212,9 @@ pub(crate) struct ClientRef {
     /// Chain runtime for unified chain operations.
     #[allow(dead_code)]
     pub(crate) chain_runtime: Option<crate::runtime::ChainRuntime>,
-    /// Private keys for chain adapters (chain name -> hex-encoded key/seed)
+    /// Private keys for chain adapters (chain name -> typed SharedSecretHandle)
     #[allow(dead_code)]
-    pub(crate) private_keys: Option<std::collections::HashMap<String, Option<String>>>,
+    pub(crate) private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
 }
 
 impl ClientRef {

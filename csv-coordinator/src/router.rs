@@ -32,7 +32,9 @@ impl TransferRouter {
             chain_id,
             ..Default::default()
         };
-        let cell = ChainCell::spawn(config, anchor);
+        // Create a default handler for the cell
+        let handler = Arc::new(crate::handler::DefaultTransferHandler::empty());
+        let cell = ChainCell::spawn(config, anchor, handler);
         self.cells.insert(chain_id, cell);
     }
 

@@ -7,6 +7,8 @@ use crate::cell::TransferPhaseHandler;
 use csv_hash::Hash;
 use csv_protocol::transfer_state::TransferStage;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// Default handler that delegates to chain adapters.
@@ -24,39 +26,39 @@ pub struct DefaultTransferHandler {
 /// cross-chain transfer execution.
 pub trait ChainAdapter: Send + Sync {
     /// Verify lock transaction and check finality.
-    async fn verify_lock_confirmed(
+    fn verify_lock_confirmed(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Verify proof and mint on destination chain.
-    async fn verify_proof_and_mint(
+    fn verify_proof_and_mint(
         &self,
         transfer_id: &str,
         proof_payload: &[u8],
         destination_owner: &str,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Check finality threshold.
-    async fn check_finality(
+    fn check_finality(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Build inclusion proof.
-    async fn build_proof(
+    fn build_proof(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Confirm mint transaction.
-    async fn confirm_mint(
+    fn confirm_mint(
         &self,
         transfer_id: &str,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 }
 
 impl DefaultTransferHandler {
@@ -85,64 +87,104 @@ impl DefaultTransferHandler {
 
 #[async_trait::async_trait]
 impl TransferPhaseHandler for DefaultTransferHandler {
-    async fn execute_lock_confirmed(
+    fn execute_lock_confirmed(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
         source_chain: &str,
-    ) -> Result<TransferStage, String> {
-        let adapter = self.get_adapter(source_chain)
-            .ok_or_else(|| format!("No adapter registered for chain: {}", source_chain))?;
-
-        adapter.verify_lock_confirmed(transfer_id, lock_tx_hash).await
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        let adapter = match self.get_adapter(source_chain) {
+            Some(a) => a.clone(),
+            None => {
+                let error = format!("No adapter registered for chain: {}", source_chain);
+                return Box::pin(async move { Err(error) });
+            },
+        };
+        let transfer_id = transfer_id.to_string();
+        let lock_tx_hash = *lock_tx_hash;
+        Box::pin(async move {
+            adapter.verify_lock_confirmed(&transfer_id, &lock_tx_hash).await
+        })
     }
 
-    async fn execute_proof_validated(
+    fn execute_proof_validated(
         &self,
         transfer_id: &str,
         proof_payload: &[u8],
         destination_chain: &str,
         destination_owner: &str,
-    ) -> Result<TransferStage, String> {
-        let adapter = self.get_adapter(destination_chain)
-            .ok_or_else(|| format!("No adapter registered for chain: {}", destination_chain))?;
-
-        adapter.verify_proof_and_mint(transfer_id, proof_payload, destination_owner).await
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        let adapter = match self.get_adapter(destination_chain) {
+            Some(a) => a.clone(),
+            None => {
+                let error = format!("No adapter registered for chain: {}", destination_chain);
+                return Box::pin(async move { Err(error) });
+            },
+        };
+        let transfer_id = transfer_id.to_string();
+        let proof_payload = proof_payload.to_vec();
+        let destination_owner = destination_owner.to_string();
+        Box::pin(async move {
+            adapter.verify_proof_and_mint(&transfer_id, &proof_payload, &destination_owner).await
+        })
     }
 
-    async fn execute_awaiting_finality(
+    fn execute_awaiting_finality(
         &self,
         transfer_id: &str,
         source_chain: &str,
         lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String> {
-        let adapter = self.get_adapter(source_chain)
-            .ok_or_else(|| format!("No adapter registered for chain: {}", source_chain))?;
-
-        adapter.check_finality(transfer_id, lock_tx_hash).await
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        let adapter = match self.get_adapter(source_chain) {
+            Some(a) => a.clone(),
+            None => {
+                let error = format!("No adapter registered for chain: {}", source_chain);
+                return Box::pin(async move { Err(error) });
+            },
+        };
+        let transfer_id = transfer_id.to_string();
+        let lock_tx_hash = *lock_tx_hash;
+        Box::pin(async move {
+            adapter.check_finality(&transfer_id, &lock_tx_hash).await
+        })
     }
 
-    async fn execute_proof_building(
+    fn execute_proof_building(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
         source_chain: &str,
-    ) -> Result<TransferStage, String> {
-        let adapter = self.get_adapter(source_chain)
-            .ok_or_else(|| format!("No adapter registered for chain: {}", source_chain))?;
-
-        adapter.build_proof(transfer_id, lock_tx_hash).await
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        let adapter = match self.get_adapter(source_chain) {
+            Some(a) => a.clone(),
+            None => {
+                let error = format!("No adapter registered for chain: {}", source_chain);
+                return Box::pin(async move { Err(error) });
+            },
+        };
+        let transfer_id = transfer_id.to_string();
+        let lock_tx_hash = *lock_tx_hash;
+        Box::pin(async move {
+            adapter.build_proof(&transfer_id, &lock_tx_hash).await
+        })
     }
 
-    async fn execute_mint_submitted(
+    fn execute_mint_submitted(
         &self,
         transfer_id: &str,
         destination_chain: &str,
-    ) -> Result<TransferStage, String> {
-        let adapter = self.get_adapter(destination_chain)
-            .ok_or_else(|| format!("No adapter registered for chain: {}", destination_chain))?;
-
-        adapter.confirm_mint(transfer_id).await
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        let adapter = match self.get_adapter(destination_chain) {
+            Some(a) => a.clone(),
+            None => {
+                let error = format!("No adapter registered for chain: {}", destination_chain);
+                return Box::pin(async move { Err(error) });
+            },
+        };
+        let transfer_id = transfer_id.to_string();
+        Box::pin(async move {
+            adapter.confirm_mint(&transfer_id).await
+        })
     }
 }
 
@@ -160,50 +202,59 @@ impl MockChainAdapter {
     }
 }
 
-#[async_trait::async_trait]
 impl ChainAdapter for MockChainAdapter {
-    async fn verify_lock_confirmed(
+    fn verify_lock_confirmed(
         &self,
         _transfer_id: &str,
         _lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String> {
-        // Simulate successful lock confirmation
-        Ok(TransferStage::ProofBuilding)
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        Box::pin(async move {
+            // Simulate successful lock confirmation
+            Ok(TransferStage::ProofBuilding)
+        })
     }
 
-    async fn verify_proof_and_mint(
+    fn verify_proof_and_mint(
         &self,
         _transfer_id: &str,
         _proof_payload: &[u8],
         _destination_owner: &str,
-    ) -> Result<TransferStage, String> {
-        // Simulate successful proof validation and mint
-        Ok(TransferStage::MintSubmitted)
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        Box::pin(async move {
+            // Simulate successful proof validation and mint
+            Ok(TransferStage::MintSubmitted)
+        })
     }
 
-    async fn check_finality(
+    fn check_finality(
         &self,
         _transfer_id: &str,
         _lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String> {
-        // Simulate finality check passing
-        Ok(TransferStage::ProofBuilding)
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        Box::pin(async move {
+            // Simulate finality check passing
+            Ok(TransferStage::ProofBuilding)
+        })
     }
 
-    async fn build_proof(
+    fn build_proof(
         &self,
         _transfer_id: &str,
         _lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String> {
-        // Simulate successful proof building
-        Ok(TransferStage::ProofValidated)
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        Box::pin(async move {
+            // Simulate successful proof building
+            Ok(TransferStage::ProofValidated)
+        })
     }
 
-    async fn confirm_mint(
+    fn confirm_mint(
         &self,
         _transfer_id: &str,
-    ) -> Result<TransferStage, String> {
-        // Simulate successful mint confirmation
-        Ok(TransferStage::MintConfirmed)
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>> {
+        Box::pin(async move {
+            // Simulate successful mint confirmation
+            Ok(TransferStage::MintConfirmed)
+        })
     }
 }

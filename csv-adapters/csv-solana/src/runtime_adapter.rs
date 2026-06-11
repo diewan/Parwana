@@ -122,12 +122,12 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         let proof_bundle = serde_json::from_slice::<ProofBundle>(proof_bundle)
             .map_err(|e| AdapterError::Generic(format!("Failed to deserialize proof bundle: {}", e)))?;
 
-        // Get the program ID from config
-        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+        // Get the program ID from backend seal_protocol config
+        let program_id = Pubkey::from_str(&self.backend.seal_protocol().config.csv_program_id)
             .map_err(|e| AdapterError::Generic(format!("Invalid program ID: {}", e)))?;
 
-        // Get the wallet for signing
-        let wallet = self.seal_protocol.wallet.as_ref()
+        // Get the wallet for signing from backend seal_protocol
+        let wallet = self.backend.seal_protocol().wallet.as_ref()
             .ok_or_else(|| AdapterError::Generic("Wallet not configured for mint operation".to_string()))?;
 
         // Build the mint instruction
@@ -136,7 +136,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         // - The commitment from the proof bundle
         // - The source chain seal reference
         let sanad_id_bytes = transfer.sanad_id.as_bytes();
-        let commitment_bytes = proof_bundle.transition_dag.commitment.as_bytes();
+        let commitment_bytes = proof_bundle.transition_dag.root_commitment.as_bytes();
 
         // Create the instruction data
         // This is a simplified version - the actual instruction format depends on the Solana program
@@ -158,33 +158,30 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             accounts: vec![
                 solana_sdk::instruction::AccountMeta::new(sanad_pda, false),
                 solana_sdk::instruction::AccountMeta::new(wallet.pubkey(), true),
-                solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::pubkey::Pubkey::from([0u8; 32]), false),
             ],
             data: instruction_data,
         };
 
-        // Get recent blockhash
-        let rpc = self.seal_protocol.rpc_client.as_ref()
-            .ok_or_else(|| AdapterError::Generic("RPC client not configured".to_string()))?;
-
-        let recent_blockhash = rpc.get_latest_blockhash().await
+        // Get recent blockhash from backend RPC
+        let recent_blockhash = self.backend.rpc().get_recent_blockhash()
             .map_err(|e| AdapterError::Generic(format!("Failed to get recent blockhash: {}", e)))?;
 
         // Build and sign the transaction
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
             Some(&wallet.pubkey()),
-            &[wallet.keypair()],
+            &[&wallet.keypair],
             recent_blockhash,
         );
 
         // Send the transaction
-        let signature = rpc.send_transaction(&transaction).await
+        let signature = self.backend.rpc().send_transaction(&transaction)
             .map_err(|e| AdapterError::Generic(format!("Failed to send transaction: {}", e)))?;
 
-        // Get the block height
-        let block_height = rpc.get_block_height().await
-            .map_err(|e| AdapterError::Generic(format!("Failed to get block height: {}", e)))?;
+        // Get the block height - use slot as proxy since get_block_height not available in SolanaRpc
+        let block_height = self.backend.rpc().get_latest_slot()
+            .map_err(|e| AdapterError::Generic(format!("Failed to get slot: {}", e)))?;
 
         Ok(MintResult {
             tx_hash: signature.to_string(),

@@ -30,6 +30,7 @@ use crate::error::CsvError;
 use crate::wallet::Wallet;
 
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
+use csv_protocol::secret::SecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::{
@@ -54,7 +55,7 @@ struct BuilderState {
     wallet: Option<Wallet>,
     store_backend: Option<StoreBackend>,
     config: Option<Config>,
-    private_keys: Option<std::collections::HashMap<String, Option<String>>>,
+    private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
     #[cfg(feature = "runtime-coordinator")]
     enable_runtime_coordinator: bool,
 }
@@ -156,16 +157,18 @@ impl ClientBuilder {
     /// Set private keys for chain adapters.
     ///
     /// This is required for chains that need to sign transactions (e.g., Bitcoin).
-    /// The keys are passed as a HashMap mapping chain names to optional hex-encoded private keys/seeds.
+    /// The keys are passed as a HashMap mapping chain names to typed SecretHandle.
     ///
     /// # Example
     ///
     /// ```ignore
     /// use csv_sdk::prelude::*;
+    /// use csv_wallet::{SecretHandle, KeyPurpose};
     /// use std::collections::HashMap;
     ///
     /// let mut keys = HashMap::new();
-    /// keys.insert("bitcoin".to_string(), Some("64-byte-hex-seed".to_string()));
+    /// let secret_handle = SecretHandle::new(vec![...], KeyPurpose::Signing, "bitcoin".to_string());
+    /// keys.insert("bitcoin".to_string(), secret_handle);
     ///
     /// let client = CsvClient::builder()
     ///     .with_chain("bitcoin")
@@ -173,7 +176,7 @@ impl ClientBuilder {
     ///     .build()?;
     /// # Ok::<_, csv_sdk::CsvError>(())
     /// ```
-    pub fn with_private_keys(mut self, keys: std::collections::HashMap<String, Option<String>>) -> Self {
+    pub fn with_private_keys(mut self, keys: std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>) -> Self {
         self.state.private_keys = Some(keys);
         self
     }

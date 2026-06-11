@@ -14,6 +14,8 @@ use crate::memory::MemoryCeiling;
 use csv_hash::{Hash, sanad::SanadId};
 use csv_protocol::transfer_state::TransferStage;
 use csv_verifier::CryptographicAnchor;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -23,44 +25,44 @@ use tokio::sync::mpsc;
 /// can execute transfer phases without directly depending on chain adapters.
 pub trait TransferPhaseHandler: Send + Sync {
     /// Execute the LockConfirmed phase: verify lock transaction and finality.
-    async fn execute_lock_confirmed(
+    fn execute_lock_confirmed(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
         source_chain: &str,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Execute the ProofValidated phase: verify proof and mint on destination.
-    async fn execute_proof_validated(
+    fn execute_proof_validated(
         &self,
         transfer_id: &str,
         proof_payload: &[u8],
         destination_chain: &str,
         destination_owner: &str,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Execute the AwaitingFinality phase: check finality threshold.
-    async fn execute_awaiting_finality(
+    fn execute_awaiting_finality(
         &self,
         transfer_id: &str,
         source_chain: &str,
         lock_tx_hash: &Hash,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Execute the ProofBuilding phase: build inclusion proof.
-    async fn execute_proof_building(
+    fn execute_proof_building(
         &self,
         transfer_id: &str,
         lock_tx_hash: &Hash,
         source_chain: &str,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 
     /// Execute the MintSubmitted phase: confirm mint on destination.
-    async fn execute_mint_submitted(
+    fn execute_mint_submitted(
         &self,
         transfer_id: &str,
         destination_chain: &str,
-    ) -> Result<TransferStage, String>;
+    ) -> Pin<Box<dyn Future<Output = Result<TransferStage, String>> + Send + '_>>;
 }
 
 /// Task submitted to a chain cell.
@@ -436,13 +438,15 @@ async fn execute_transfer_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handler::DefaultTransferHandler;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_cell_submit_and_process() {
         let config = CellConfig::default();
         let anchor = Arc::new(MockAnchor);
-        let cell = ChainCell::spawn(config, anchor);
+        let handler = Arc::new(DefaultTransferHandler::new(std::collections::HashMap::new()));
+        let cell = ChainCell::spawn(config, anchor, handler);
 
         let task = CellTask::Process(TransferTask::new(
             "test-transfer".to_string(),
@@ -476,7 +480,8 @@ mod tests {
             max_memory_bytes: 100 * 1024 * 1024,
         };
         let anchor = Arc::new(MockAnchor);
-        let cell = ChainCell::spawn(config, anchor);
+        let handler = Arc::new(DefaultTransferHandler::new(std::collections::HashMap::new()));
+        let cell = ChainCell::spawn(config, anchor, handler);
 
         // Verify initial state is Closed
         assert!(cell.circuit_state() == CircuitState::Closed);

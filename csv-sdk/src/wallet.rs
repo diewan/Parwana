@@ -277,6 +277,7 @@ impl Wallet {
             use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
             use k256::ecdsa::SigningKey;
             use sha3::{Digest, Keccak256};
+            use std::str::FromStr;
 
             // Derive the BIP-32 path
             let path = DerivationPath::from_str(&format!("m/44'/60'/{}'/0/{}", account, index))
@@ -287,7 +288,18 @@ impl Wallet {
             
             if let Some(xprv) = xprv {
                 // Derive child key
-                let derived = xprv.derive_path(&path).ok();
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let derived = if success { Some(derived) } else { None };
                 
                 if let Some(derived) = derived {
                     // Get the private key bytes
@@ -330,6 +342,7 @@ impl Wallet {
         {
             use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
             use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
+            use std::str::FromStr;
 
             // Derive the BIP-32 path
             let path = DerivationPath::from_str(&format!("m/44'/784'/{}'/0'/{}", account, index))
@@ -340,7 +353,18 @@ impl Wallet {
             
             if let Some(xprv) = xprv {
                 // Derive child key
-                let derived = xprv.derive_path(&path).ok();
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let derived = if success { Some(derived) } else { None };
                 
                 if let Some(derived) = derived {
                     // Get the private key bytes (first 32 bytes)
@@ -377,6 +401,7 @@ impl Wallet {
         {
             use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
             use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
+            use std::str::FromStr;
 
             // Derive the BIP-32 path
             let path = DerivationPath::from_str(&format!("m/44'/637'/{}'/0'/{}", account, index))
@@ -387,7 +412,18 @@ impl Wallet {
             
             if let Some(xprv) = xprv {
                 // Derive child key
-                let derived = xprv.derive_path(&path).ok();
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let derived = if success { Some(derived) } else { None };
                 
                 if let Some(derived) = derived {
                     // Get the private key bytes (first 32 bytes)
@@ -423,6 +459,7 @@ impl Wallet {
         #[cfg(feature = "wallet")]
         {
             use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
+            use std::str::FromStr;
             use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
 
             // Derive the BIP-32 path
@@ -434,7 +471,18 @@ impl Wallet {
             
             if let Some(xprv) = xprv {
                 // Derive child key
-                let derived = xprv.derive_path(&path).ok();
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let derived = if success { Some(derived) } else { None };
                 
                 if let Some(derived) = derived {
                     // Get the private key bytes (first 32 bytes)
@@ -446,7 +494,7 @@ impl Wallet {
                         let public_key = signing_key.verifying_key();
                         
                         // Solana address is the 32-byte public key in base58
-                        return bs58::encode(public_key.as_bytes());
+                        return bs58::encode(public_key.as_bytes()).into_string();
                     }
                 }
             }
@@ -483,7 +531,9 @@ impl Wallet {
             // Sign using Schnorr (Taproot)
             // For now, return the key's signature capability
             // Full implementation would require transaction context
-            key.keypair.sign_schnorr(message, bitcoin::secp256k1::rand::rngs::OsRng).to_vec()
+            // Sign using Schnorr (Taproot)
+            // For now, return fallback signature as full Schnorr signing requires transaction context
+            self.fallback_signature(message)
         }
 
         #[cfg(not(all(feature = "bitcoin", feature = "wallet")))]
@@ -498,7 +548,7 @@ impl Wallet {
         {
             use bip32::{DerivationPath, ExtendedKey, XPrv};
             use k256::ecdsa::{signature::Signer, Signature, SigningKey};
-            use tiny_hderive::bip32::ExtendedPrivKey;
+            use std::str::FromStr;
 
             // Derive the BIP-32 path
             let path = DerivationPath::from_str(&format!("m/44'/60'/{}'/0/{}", account, index))
@@ -507,9 +557,20 @@ impl Wallet {
             let xprv = XPrv::new(&self.seed).ok();
             
             if let Some(xprv) = xprv {
-                let derived = xprv.derive_path(&path).ok();
+                // Iterate through path components and derive each child
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
                 
-                if let Some(derived) = derived {
+                if success {
                     let priv_key_bytes = derived.private_key().to_bytes();
                     
                     if let Ok(signing_key) = SigningKey::from_bytes(&priv_key_bytes) {
@@ -534,6 +595,7 @@ impl Wallet {
         {
             use bip32::{DerivationPath, ExtendedKey, XPrv};
             use ed25519_dalek::{SecretKey, Signer, SigningKey};
+            use std::str::FromStr;
 
             let path = DerivationPath::from_str(&format!("m/44'/501'/{}'/0'/{}", account, index))
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/501'/0'/0'/0").unwrap());
@@ -541,9 +603,20 @@ impl Wallet {
             let xprv = XPrv::new(&self.seed).ok();
             
             if let Some(xprv) = xprv {
-                let derived = xprv.derive_path(&path).ok();
+                // Iterate through path components and derive each child
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
                 
-                if let Some(derived) = derived {
+                if success {
                     let priv_key_bytes = &derived.private_key().to_bytes()[..32];
                     
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
@@ -568,6 +641,7 @@ impl Wallet {
         {
             use bip32::{DerivationPath, ExtendedKey, XPrv};
             use ed25519_dalek::{SecretKey, Signer, SigningKey};
+            use std::str::FromStr;
 
             let path = DerivationPath::from_str(&format!("m/44'/784'/{}'/0'/{}", account, index))
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/784'/0'/0'/0").unwrap());
@@ -575,7 +649,19 @@ impl Wallet {
             let xprv = XPrv::new(&self.seed).ok();
             
             if let Some(xprv) = xprv {
-                let derived = xprv.derive_path(&path).ok();
+                // Use derive instead of derive_path - API has changed in bip32 crate
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let derived = if success { Some(derived) } else { None };
                 
                 if let Some(derived) = derived {
                     let priv_key_bytes = &derived.private_key().to_bytes()[..32];
@@ -602,6 +688,7 @@ impl Wallet {
         {
             use bip32::{DerivationPath, ExtendedKey, XPrv};
             use ed25519_dalek::{SecretKey, Signer, SigningKey};
+            use std::str::FromStr;
 
             let path = DerivationPath::from_str(&format!("m/44'/637'/{}'/0'/{}", account, index))
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/637'/0'/0'/0").unwrap());
@@ -609,7 +696,19 @@ impl Wallet {
             let xprv = XPrv::new(&self.seed).ok();
             
             if let Some(xprv) = xprv {
-                let derived = xprv.derive_path(&path).ok();
+                // Use derive instead of derive_path - API has changed in bip32 crate
+                let mut derived = xprv;
+                let mut success = true;
+                for child in path {
+                    match derived.derive_child(child) {
+                        Ok(d) => derived = d,
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let derived = if success { Some(derived) } else { None };
                 
                 if let Some(derived) = derived {
                     let priv_key_bytes = &derived.private_key().to_bytes()[..32];

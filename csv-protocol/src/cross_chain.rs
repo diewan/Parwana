@@ -520,6 +520,8 @@ pub enum CrossChainError {
     UnsupportedChainPair(ChainId, ChainId),
     #[error("Lease validation failed: {0}")]
     LeaseError(String),
+    #[error("Proof verification failed: {0}")]
+    ProofVerificationFailed(String),
 }
 
 /// Trait for locking a Hash on a source chain.
@@ -733,27 +735,81 @@ impl StandardTransferVerifier {
     /// is cryptographically valid. The proof must demonstrate that the commitment
     /// was included in a finalized block on the source chain.
     fn verify_inclusion_proof(&self, proof: &CrossChainTransferProof) -> Result<(), CrossChainError> {
-        use csv_proof::proof_validation::ProofValidator;
-        use csv_protocol::proof_taxonomy::ProofBundle;
+        use crate::proof_validation::CanonicalProof;
+        use csv_hash::Hash;
         
-        // Construct a minimal proof bundle for validation
-        // The inclusion proof from the transfer proof is validated independently
         let inclusion_proof = &proof.inclusion_proof;
         
-        // Validate the inclusion proof structure and cryptographic correctness
-        // This checks: non-empty siblings, non-zero leaf/root, Merkle path verification
-        if !ProofValidator::validate_inclusion(inclusion_proof) {
-            return Err(CrossChainError::ProofVerificationFailed(
-                "Inclusion proof cryptographic verification failed".to_string()
-            ));
-        }
+        // Convert chain-specific InclusionProof to CanonicalProof for validation
+        let canonical_proof = match inclusion_proof {
+            InclusionProof::Bitcoin(proof) => {
+                let block_hash: [u8; 32] = if proof.block_header.len() >= 32 {
+                    proof.block_header[..32].try_into().unwrap_or([0u8; 32])
+                } else {
+                    [0u8; 32]
+                };
+                CanonicalProof::new(
+                    proof.block_height,
+                    block_hash,
+                    [0u8; 32], // Bitcoin doesn't have state root in the same way
+                    proof.merkle_branch.iter().map(|h| h.to_vec()).collect(),
+                )
+            }
+            InclusionProof::Ethereum(proof) => {
+                let block_hash: [u8; 32] = if proof.block_header.len() >= 32 {
+                    proof.block_header[..32].try_into().unwrap_or([0u8; 32])
+                } else {
+                    [0u8; 32]
+                };
+                CanonicalProof::new(
+                    proof.confirmations,
+                    block_hash,
+                    proof.receipt_root,
+                    proof.merkle_nodes.clone(),
+                )
+            }
+            InclusionProof::Solana(proof) => {
+                CanonicalProof::new(
+                    proof.slot,
+                    proof.block_hash,
+                    [0u8; 32],
+                    vec![proof.signature.clone()],
+                )
+            }
+            InclusionProof::Sui(proof) => {
+                CanonicalProof::new(
+                    proof.checkpoint_sequence,
+                    proof.checkpoint_contents_hash,
+                    [0u8; 32],
+                    vec![proof.effects.clone(), proof.events.clone()],
+                )
+            }
+            InclusionProof::Aptos(proof) => {
+                CanonicalProof::new(
+                    proof.version,
+                    [0u8; 32], // Block hash not directly available
+                    [0u8; 32], // State root not directly available
+                    vec![proof.transaction_proof.clone(), proof.ledger_info.clone()],
+                )
+            }
+            InclusionProof::ZkSeal(proof) => {
+                CanonicalProof::new(
+                    proof.public_inputs.block_height,
+                    {
+                        let mut hash = [0u8; 32];
+                        hash.copy_from_slice(&proof.public_inputs.block_hash.as_bytes()[..32]);
+                        hash
+                    },
+                    [0u8; 32],
+                    vec![proof.proof_bytes.clone()],
+                )
+            }
+        };
         
-        // Verify the proof material is within size bounds
-        if !ProofValidator::verify_material(&inclusion_proof.proof_bytes) {
-            return Err(CrossChainError::ProofVerificationFailed(
-                "Inclusion proof material exceeds size bounds".to_string()
-            ));
-        }
+        // Validate the canonical proof structure
+        canonical_proof.validate().map_err(|e| {
+            CrossChainError::ProofVerificationFailed(format!("Inclusion proof validation failed: {}", e))
+        })?;
         
         Ok(())
     }
