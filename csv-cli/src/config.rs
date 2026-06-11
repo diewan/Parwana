@@ -66,11 +66,27 @@ fn get_csv_wallet_cache() -> &'static Mutex<HashMap<Chain, LegacyWalletConfig>> 
 /// Legacy wallet config for backwards compatibility (maps to unified WalletAccount)
 #[derive(Debug, Clone)]
 pub(crate) struct LegacyWalletConfig {
+    /// Private key (raw string for TOML deserialization only - converted to SecretHandle immediately)
     pub private_key: Option<String>,
     pub xpub: Option<String>,
     pub mnemonic: Option<String>,
     pub mnemonic_passphrase: Option<String>,
     pub derivation_path: Option<String>,
+}
+
+impl LegacyWalletConfig {
+    /// Convert private_key String to typed SecretHandle (zeroize-on-drop)
+    /// This should be called immediately after deserialization to ensure secrets are never exposed as raw strings
+    pub fn to_secret_handle(&self, chain: &str) -> Option<csv_wallet::SecretHandle> {
+        self.private_key.as_ref().map(|pk| {
+            let bytes = hex::decode(pk).unwrap_or_else(|_| pk.as_bytes().to_vec());
+            csv_wallet::SecretHandle::new(
+                bytes,
+                csv_wallet::KeyPurpose::Signing,
+                chain.to_string(),
+            )
+        })
+    }
 }
 
 /// Parse chain from string (for clap)

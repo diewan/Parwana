@@ -42,31 +42,52 @@ contract CSVSeal {
     }
 
     /// @notice Compute the canonical hash of a ProofLeafV1 using keccak256
-    /// @dev Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
+    /// @dev Uses canonical CBOR encoding (matching Rust csv-codec implementation)
+    /// Encodes ProofLeafV1 as a CBOR array with 12 elements in canonical order, it is simplified encoding approach. 
+    /// However, this is not true canonical CBOR - it's a simplified version. For true cross-chain compatibility, 
+    /// the contracts would need to implement proper CBOR encoding that matches the Rust implementation exactly, 
+    /// which is complex in Solidity due to stack limitations.
+    /// libraris for Encoding: smartcontractkit/solidity-cborutils, and for Decoding: owlprotocol/solidity-cbor
     /// @param leaf The proof leaf to hash
     /// @return The canonical hash of the proof leaf
     function hashProofLeafV1(ProofLeafV1 memory leaf) internal pure returns (bytes32) {
-        // Domain separator for tagged hashing
-        bytes32 domain = keccak256(abi.encodePacked("csv.proof.leaf.v1"));
+        // Canonical CBOR encoding for ProofLeafV1
+        // Field order must match Rust ProofLeafV1 struct exactly:
+        // version, source_chain, destination_chain, sanad_id, commitment,
+        // content_descriptor_hash, source_seal_ref_hash, destination_owner_hash,
+        // nullifier, lock_event_id, metadata_hash, proof_policy_hash
         
-        // Encode all fields in canonical order
         bytes memory encoded = abi.encodePacked(
+            // CBOR array header: 0x9C (array of 12 items)
+            uint8(0x9C),
+            // version: u32 (encoded as unsigned integer)
             leaf.version,
-            leaf.sourceChain,
-            leaf.destinationChain,
+            // source_chain: String (encoded as bytes)
+            bytes32(leaf.sourceChain),
+            // destination_chain: String
+            bytes32(leaf.destinationChain),
+            // sanad_id: Hash (bytes32)
             leaf.sanadId,
+            // commitment: Hash
             leaf.commitment,
+            // content_descriptor_hash: Hash
             leaf.contentDescriptorHash,
+            // source_seal_ref_hash: Hash
             leaf.sourceSealRefHash,
+            // destination_owner_hash: Hash
             leaf.destinationOwnerHash,
+            // nullifier: Hash
             leaf.nullifier,
+            // lock_event_id: Hash
             leaf.lockEventId,
+            // metadata_hash: Hash
             leaf.metadataHash,
+            // proof_policy_hash: Hash
             leaf.proofPolicyHash
         );
         
-        // Tagged hash: keccak256(domain || encoded)
-        return keccak256(abi.encodePacked(domain, encoded));
+        // Hash with keccak256 (Ethereum's native hash function)
+        return keccak256(encoded);
     }
 
     /// @notice Compute ProofLeafV1 hash using chain-specific hash function

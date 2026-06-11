@@ -7,6 +7,15 @@ optimizer = true
 optimizer_runs = 200
 via_ir = true
 
+# Remappings for CBOR dependencies
+remappings = [
+    "@ensdomains/buffer/=lib/buffer/",
+]
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 [rpc_endpoints]
 sepolia = "https://sepolia.infura.io/v3"
+
+# CBOR libraries for canonical ProofLeafV1 encoding
+# smartcontractkit/solidity-cborutils for encoding
+# owlprotocol/solidity-cbor for decoding

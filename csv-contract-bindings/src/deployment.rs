@@ -259,7 +259,7 @@ pub struct DeploymentConfig {
     pub chain_id: String,
     /// RPC endpoint
     pub rpc_url: String,
-    /// Private key for deployment
+    /// Private key for deployment (raw string for deserialization only - convert to SecretHandle immediately)
     pub private_key: String,
     /// Gas price (in wei)
     pub gas_price: Option<u64>,
@@ -267,6 +267,19 @@ pub struct DeploymentConfig {
     pub gas_limit: Option<u64>,
     /// Confirmations required
     pub confirmations: u64,
+}
+
+impl DeploymentConfig {
+    /// Convert private_key String to typed SecretHandle (zeroize-on-drop)
+    /// This should be called immediately after deserialization to ensure secrets are never exposed as raw strings
+    pub fn to_secret_handle(&self) -> csv_wallet::SecretHandle {
+        let bytes = hex::decode(&self.private_key).unwrap_or_else(|_| self.private_key.as_bytes().to_vec());
+        csv_wallet::SecretHandle::new(
+            bytes,
+            csv_wallet::KeyPurpose::Signing,
+            self.chain_id.clone(),
+        )
+    }
 }
 
 impl Default for DeploymentConfig {
