@@ -5,6 +5,7 @@
 
 pub mod cell;
 pub mod circuit;
+pub mod handler;
 pub mod memory;
 pub mod negotiation;
 pub mod router;

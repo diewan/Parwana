@@ -17,6 +17,52 @@ use csv_verifier::CryptographicAnchor;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// Handler for executing transfer phase operations.
+///
+/// This trait abstracts chain adapter operations so that ChainCell
+/// can execute transfer phases without directly depending on chain adapters.
+pub trait TransferPhaseHandler: Send + Sync {
+    /// Execute the LockConfirmed phase: verify lock transaction and finality.
+    async fn execute_lock_confirmed(
+        &self,
+        transfer_id: &str,
+        lock_tx_hash: &Hash,
+        source_chain: &str,
+    ) -> Result<TransferStage, String>;
+
+    /// Execute the ProofValidated phase: verify proof and mint on destination.
+    async fn execute_proof_validated(
+        &self,
+        transfer_id: &str,
+        proof_payload: &[u8],
+        destination_chain: &str,
+        destination_owner: &str,
+    ) -> Result<TransferStage, String>;
+
+    /// Execute the AwaitingFinality phase: check finality threshold.
+    async fn execute_awaiting_finality(
+        &self,
+        transfer_id: &str,
+        source_chain: &str,
+        lock_tx_hash: &Hash,
+    ) -> Result<TransferStage, String>;
+
+    /// Execute the ProofBuilding phase: build inclusion proof.
+    async fn execute_proof_building(
+        &self,
+        transfer_id: &str,
+        lock_tx_hash: &Hash,
+        source_chain: &str,
+    ) -> Result<TransferStage, String>;
+
+    /// Execute the MintSubmitted phase: confirm mint on destination.
+    async fn execute_mint_submitted(
+        &self,
+        transfer_id: &str,
+        destination_chain: &str,
+    ) -> Result<TransferStage, String>;
+}
+
 /// Task submitted to a chain cell.
 #[derive(Debug, Clone)]
 pub enum CellTask {
@@ -138,6 +184,7 @@ pub enum CellResult {
 /// - Its own bounded mpsc queue (not shared with other cells)
 /// - Its own circuit breaker
 /// - Its own memory ceiling
+/// - A transfer phase handler for executing chain operations
 ///
 /// A cell degradation CANNOT propagate to sibling cells.
 pub struct ChainCell {
@@ -154,10 +201,15 @@ impl ChainCell {
     ///
     /// * `config` - Cell configuration (chain_id, queue depth, circuit breaker, memory)
     /// * `anchor` - Cryptographic anchor for verification
-    pub fn spawn(config: CellConfig, anchor: Arc<dyn CryptographicAnchor>) -> Self {
+    /// * `handler` - Transfer phase handler for executing chain operations
+    pub fn spawn(
+        config: CellConfig,
+        anchor: Arc<dyn CryptographicAnchor>,
+        handler: Arc<dyn TransferPhaseHandler>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<CellTask>(config.max_queue_depth);
 
-        tokio::spawn(cell_worker(rx, anchor, config.clone()));
+        tokio::spawn(cell_worker(rx, anchor, handler, config.clone()));
 
         ChainCell {
             chain_id: config.chain_id,
@@ -222,6 +274,7 @@ impl ChainCell {
 async fn cell_worker(
     mut rx: mpsc::Receiver<CellTask>,
     anchor: Arc<dyn CryptographicAnchor>,
+    handler: Arc<dyn TransferPhaseHandler>,
     config: CellConfig,
 ) {
     let mut circuit_breaker = CellCircuitBreaker::new(config.circuit_breaker);
@@ -252,7 +305,7 @@ async fn cell_worker(
                 }
 
                 // Execute the transfer phase based on stage
-                let result = execute_transfer_phase(&transfer, &anchor).await;
+                let result = execute_transfer_phase(&transfer, &anchor, &handler).await;
 
                 match result {
                     Ok(new_stage) => {
@@ -312,90 +365,44 @@ async fn cell_worker(
 async fn execute_transfer_phase(
     transfer: &TransferTask,
     _anchor: &Arc<dyn CryptographicAnchor>,
+    handler: &Arc<dyn TransferPhaseHandler>,
 ) -> Result<TransferStage, String> {
     match &transfer.stage {
         TransferStage::LockConfirmed => {
-            // Verify lock on source chain and check finality
-            tracing::info!(
-                transfer_id = %transfer.transfer_id,
-                "Executing LockConfirmed phase: verifying lock and finality"
-            );
-            
-            // In production, this would:
-            // 1. Query the source chain adapter to confirm the lock transaction
-            // 2. Check that the finality threshold is met
-            // 3. Build the inclusion proof
-            // 4. Record the proof in the execution journal
-            // 5. Transition to ProofBuilding
-            
-            // For now, simulate successful execution
-            Ok(TransferStage::ProofBuilding)
+            handler.execute_lock_confirmed(
+                &transfer.transfer_id,
+                &transfer.lock_tx_hash,
+                &transfer.source_chain,
+            ).await
         }
         TransferStage::ProofValidated => {
-            // Verify proof and mint on destination chain
-            tracing::info!(
-                transfer_id = %transfer.transfer_id,
-                "Executing ProofValidated phase: minting on destination"
-            );
-            
-            // In production, this would:
-            // 1. Verify the proof bundle using the canonical verifier
-            // 2. Check for replay/nullifier conflicts
-            // 3. Mint the Sanad on the destination chain
-            // 4. Record the mint transaction in the execution journal
-            // 5. Transition to MintSubmitted
-            
-            // For now, simulate successful execution
-            Ok(TransferStage::MintSubmitted)
+            let proof_payload = transfer.proof_payload.as_deref().unwrap_or(&[]);
+            handler.execute_proof_validated(
+                &transfer.transfer_id,
+                proof_payload,
+                &transfer.destination_chain,
+                &transfer.destination_owner,
+            ).await
         }
         TransferStage::AwaitingFinality => {
-            // Re-check finality threshold
-            tracing::info!(
-                transfer_id = %transfer.transfer_id,
-                "Executing AwaitingFinality phase: checking finality"
-            );
-            
-            // In production, this would:
-            // 1. Query the source chain for current block height
-            // 2. Check if the finality threshold is met
-            // 3. If not met, return AwaitingFinality to retry later
-            // 4. If met, transition to ProofBuilding
-            
-            // For now, assume finality is met
-            Ok(TransferStage::ProofBuilding)
+            handler.execute_awaiting_finality(
+                &transfer.transfer_id,
+                &transfer.source_chain,
+                &transfer.lock_tx_hash,
+            ).await
         }
         TransferStage::ProofBuilding => {
-            // Build or regenerate proof
-            tracing::info!(
-                transfer_id = %transfer.transfer_id,
-                "Executing ProofBuilding phase: building proof"
-            );
-            
-            // In production, this would:
-            // 1. Check if a proof checkpoint exists in the journal
-            // 2. If yes, load and verify the checkpointed proof
-            // 3. If no, build a new proof from the lock transaction
-            // 4. Record the proof in the execution journal
-            // 5. Transition to ProofValidated
-            
-            // For now, simulate successful execution
-            Ok(TransferStage::ProofValidated)
+            handler.execute_proof_building(
+                &transfer.transfer_id,
+                &transfer.lock_tx_hash,
+                &transfer.source_chain,
+            ).await
         }
         TransferStage::MintSubmitted => {
-            // Confirm mint on destination chain
-            tracing::info!(
-                transfer_id = %transfer.transfer_id,
-                "Executing MintSubmitted phase: confirming mint"
-            );
-            
-            // In production, this would:
-            // 1. Query the destination chain for mint transaction status
-            // 2. Check finality on destination chain
-            // 3. If confirmed, transition to MintConfirmed
-            // 4. If not confirmed, return MintSubmitted to retry later
-            
-            // For now, simulate successful execution
-            Ok(TransferStage::MintConfirmed)
+            handler.execute_mint_submitted(
+                &transfer.transfer_id,
+                &transfer.destination_chain,
+            ).await
         }
         TransferStage::MintConfirmed => {
             // Transfer is complete

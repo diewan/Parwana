@@ -75,6 +75,8 @@ bitcoin = { version = "0.32", features = ["serde", "rand"], optional = true }
 ed25519-dalek = { version = "2.0", features = ["rand_core"], optional = true }
 bip32 = { version = "0.5", features = ["std", "mnemonic"], optional = true }
 solana-sdk = { version = "3.0", optional = true }
+k256 = { version = "0.13", features = ["ecdsa"], optional = true }
+tiny-hderive = { version = "0.3", optional = true }
 
 # Chain adapters that depend on C libraries (c-kzg, etc.) which don't compile for wasm32
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -120,7 +122,7 @@ cross-chain-persist = ["dep:csv-storage", "dep:sqlx", "dep:chrono"]
 runtime-coordinator = ["dep:csv-storage", "tokio", "dep:csv-adapter-factory", "csv-adapter-factory/bitcoin", "csv-adapter-factory/ethereum", "csv-adapter-factory/sui", "csv-adapter-factory/aptos", "csv-adapter-factory/solana"]
 
 # Wallet / crypto
-wallet = ["dep:csv-keys", "dep:ed25519-dalek", "dep:bip32"]
+wallet = ["dep:csv-keys", "dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]
 
 # P2P proof delivery
 p2p = ["dep:csv-p2p"]

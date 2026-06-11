@@ -179,7 +179,7 @@ impl ChainAdapter for SuiRuntimeAdapter {
             transfer.source_chain.clone(),
             transfer.destination_chain.clone(),
             transfer.sanad_id,
-            transfer.sanad_id, // Use sanad_id as commitment for now
+            lock_tx_hash, // Use the lock transaction hash as commitment
         );
         let leaf_hash = proof_leaf.hash()
             .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;

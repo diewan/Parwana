@@ -98,12 +98,76 @@ impl Signature {
             }
         };
 
-        // The public key is expected to be derived from the secret key
-        // by the caller and passed separately. For now, we use an empty
-        // public key that the caller must set before verification.
+        // Derive the public key from the secret key for the signature scheme
+        let public_key = match scheme {
+            SignatureScheme::Secp256k1 => {
+                // Derive secp256k1 public key from secret key
+                #[cfg(feature = "secp256k1")]
+                {
+                    use k256::SecretKey as K256SecretKey;
+                    use k256::PublicKey as K256PublicKey;
+                    let sk = K256SecretKey::from_slice(secret_key)
+                        .map_err(|e| ProtocolError::SignatureVerificationFailed(
+                            format!("Invalid secp256k1 secret key: {}", e)
+                        ))?;
+                    let pk = K256PublicKey::from_secret_key(&sk, false);
+                    pk.to_sec1_bytes().to_vec()
+                }
+                #[cfg(not(feature = "secp256k1"))]
+                {
+                    return Err(ProtocolError::SignatureVerificationFailed(
+                        "secp256k1 support requires the 'secp256k1' feature to be enabled".to_string()
+                    ));
+                }
+            }
+            SignatureScheme::Ed25519 => {
+                // Derive Ed25519 public key from secret key
+                #[cfg(feature = "ed25519")]
+                {
+                    use ed25519_dalek::SigningKey;
+                    use ed25519_dalek::PublicKey as Ed25519PublicKey;
+                    let sk = SigningKey::from_bytes(secret_key.try_into().map_err(|_| {
+                        ProtocolError::SignatureVerificationFailed(
+                            "Invalid Ed25519 secret key: must be 32 bytes".to_string()
+                        )
+                    })?);
+                    Ed25519PublicKey::from(&sk).to_bytes().to_vec()
+                }
+                #[cfg(not(feature = "ed25519"))]
+                {
+                    return Err(ProtocolError::SignatureVerificationFailed(
+                        "Ed25519 support requires the 'ed25519' feature to be enabled".to_string()
+                    ));
+                }
+            }
+            SignatureScheme::MlDsa65 => {
+                // ML-DSA-65 public key derivation
+                #[cfg(feature = "pq")]
+                {
+                    // ML-DSA-65 public key is the first 1312 bytes of the expanded seed
+                    // For now, we use a simplified derivation - the full ML-DSA key generation
+                    // is more complex and requires the pqcrypto-ml-dsa crate
+                    if secret_key.len() < 32 {
+                        return Err(ProtocolError::SignatureVerificationFailed(
+                            "Invalid ML-DSA-65 secret key: must be at least 32 bytes".to_string()
+                        ));
+                    }
+                    // Placeholder: In production, use proper ML-DSA key generation
+                    // For now, use the first 32 bytes as a placeholder public key
+                    secret_key[..32.min(secret_key.len())].to_vec()
+                }
+                #[cfg(not(feature = "pq"))]
+                {
+                    return Err(ProtocolError::SignatureVerificationFailed(
+                        "ML-DSA-65 support requires the 'pq' feature to be enabled".to_string()
+                    ));
+                }
+            }
+        };
+
         Ok(Self {
             signature,
-            public_key: Vec::new(),
+            public_key,
             message: message.to_vec(),
         })
     }

@@ -38,6 +38,7 @@ chrono = { version = "0.4", features = ["serde"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 base64 = "0.22"
 secrecy = "0.8"
+blst = { version = "0.3", optional = true }
 
 # Native Aptos SDK (required per Phase 3)
 aptos-sdk = { version = "0.5", optional = true }
@@ -65,6 +66,8 @@ default = []
 rpc = ["tokio/macros", "reqwest"]
 # Enables aptos-sdk integration (native only)
 native-sdk = ["aptos-sdk"]
+# Enables BLS signature verification for anchor verification
+bls = ["dep:blst"]
 # Dev/mocks feature for test utilities
 dev-mocks = []
 

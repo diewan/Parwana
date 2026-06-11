@@ -728,11 +728,33 @@ impl TransferVerifier for StandardTransferVerifier {
 
 impl StandardTransferVerifier {
     /// Internal helper to verify inclusion proof validity.
-    /// In a full implementation, this would call the CanonicalVerifier.
-    fn verify_inclusion_proof(&self, _proof: &CrossChainTransferProof) -> Result<(), CrossChainError> {
-        // Placeholder: In production, this delegates to CanonicalVerifier
-        // For now, return Ok to allow the verification flow to proceed
-        // The actual proof verification happens in the TransferCoordinator
+    /// 
+    /// This verifies that the inclusion proof in the cross-chain transfer proof
+    /// is cryptographically valid. The proof must demonstrate that the commitment
+    /// was included in a finalized block on the source chain.
+    fn verify_inclusion_proof(&self, proof: &CrossChainTransferProof) -> Result<(), CrossChainError> {
+        use csv_proof::proof_validation::ProofValidator;
+        use csv_protocol::proof_taxonomy::ProofBundle;
+        
+        // Construct a minimal proof bundle for validation
+        // The inclusion proof from the transfer proof is validated independently
+        let inclusion_proof = &proof.inclusion_proof;
+        
+        // Validate the inclusion proof structure and cryptographic correctness
+        // This checks: non-empty siblings, non-zero leaf/root, Merkle path verification
+        if !ProofValidator::validate_inclusion(inclusion_proof) {
+            return Err(CrossChainError::ProofVerificationFailed(
+                "Inclusion proof cryptographic verification failed".to_string()
+            ));
+        }
+        
+        // Verify the proof material is within size bounds
+        if !ProofValidator::verify_material(&inclusion_proof.proof_bytes) {
+            return Err(CrossChainError::ProofVerificationFailed(
+                "Inclusion proof material exceeds size bounds".to_string()
+            ));
+        }
+        
         Ok(())
     }
 }

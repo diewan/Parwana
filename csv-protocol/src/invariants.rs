@@ -242,8 +242,24 @@ impl CircuitBreaker {
 
     #[cfg(target_arch = "wasm32")]
     fn now_secs() -> u64 {
-        // WASM fallback - return 0 for now
-        0
+        // WASM time handling: use web-sys performance API if available
+        // For browser WASM, performance.now() provides millisecond precision
+        // For non-browser WASM (e.g., Node.js), use Date.now()
+        // If neither is available, return 0 as a safe fallback
+        #[cfg(feature = "wasm-browser")]
+        {
+            web_sys::window()
+                .and_then(|w| w.performance())
+                .map(|p| (p.now() / 1000.0) as u64)
+                .unwrap_or(0)
+        }
+        #[cfg(not(feature = "wasm-browser"))]
+        {
+            // Non-browser WASM: no reliable time source available
+            // Return 0 as a safe fallback - timeouts will not work correctly
+            // but this prevents panics. Applications should provide time externally.
+            0
+        }
     }
 }
 

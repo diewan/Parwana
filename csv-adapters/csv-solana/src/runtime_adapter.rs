@@ -99,22 +99,96 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
     async fn mint_sanad(
         &self,
-        _transfer: &CrossChainTransfer,
-        _proof_bundle: &[u8],
+        transfer: &CrossChainTransfer,
+        proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
         // For Solana, minting means calling the mint function on the smart contract
         // with the lock proof from the source chain
-        // This is a simplified stub implementation - the actual implementation would:
-        // 1. Validate the lock proof
-        // 2. Build the mint transaction
-        // 3. Sign and broadcast the transaction
-        // 4. Return the mint_tx_hash as result
+        //
+        // This implementation:
+        // 1. Deserializes the proof bundle
+        // 2. Builds the mint transaction instruction
+        // 3. Signs the transaction with the wallet
+        // 4. Broadcasts the transaction via RPC
+        // 5. Returns the mint_tx_hash as result
 
-        // For now, return a mock result to allow the transfer flow to proceed
-        // TODO: Implement actual Solana mint transaction logic
+        use csv_protocol::proof_taxonomy::ProofBundle;
+        use solana_sdk::instruction::Instruction;
+        use solana_sdk::transaction::Transaction;
+        use solana_sdk::pubkey::Pubkey;
+        use std::str::FromStr;
+
+        // Deserialize the proof bundle
+        let proof_bundle = serde_json::from_slice::<ProofBundle>(proof_bundle)
+            .map_err(|e| AdapterError::Generic(format!("Failed to deserialize proof bundle: {}", e)))?;
+
+        // Get the program ID from config
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|e| AdapterError::Generic(format!("Invalid program ID: {}", e)))?;
+
+        // Get the wallet for signing
+        let wallet = self.seal_protocol.wallet.as_ref()
+            .ok_or_else(|| AdapterError::Generic("Wallet not configured for mint operation".to_string()))?;
+
+        // Build the mint instruction
+        // The mint instruction should include:
+        // - The sanad_id from the transfer
+        // - The commitment from the proof bundle
+        // - The source chain seal reference
+        let sanad_id_bytes = transfer.sanad_id.as_bytes();
+        let commitment_bytes = proof_bundle.transition_dag.commitment.as_bytes();
+
+        // Create the instruction data
+        // This is a simplified version - the actual instruction format depends on the Solana program
+        let mut instruction_data = Vec::new();
+        instruction_data.push(0x04); // Mint instruction discriminator
+        instruction_data.extend_from_slice(sanad_id_bytes);
+        instruction_data.extend_from_slice(commitment_bytes);
+
+        // Derive the PDA for the sanad account
+        let sanad_pda = Pubkey::create_with_seed(
+            &wallet.pubkey(),
+            &hex::encode(sanad_id_bytes),
+            &program_id,
+        ).map_err(|e| AdapterError::Generic(format!("Failed to derive PDA: {}", e)))?;
+
+        // Build the instruction
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(sanad_pda, false),
+                solana_sdk::instruction::AccountMeta::new(wallet.pubkey(), true),
+                solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            ],
+            data: instruction_data,
+        };
+
+        // Get recent blockhash
+        let rpc = self.seal_protocol.rpc_client.as_ref()
+            .ok_or_else(|| AdapterError::Generic("RPC client not configured".to_string()))?;
+
+        let recent_blockhash = rpc.get_latest_blockhash().await
+            .map_err(|e| AdapterError::Generic(format!("Failed to get recent blockhash: {}", e)))?;
+
+        // Build and sign the transaction
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&wallet.pubkey()),
+            &[wallet.keypair()],
+            recent_blockhash,
+        );
+
+        // Send the transaction
+        let signature = rpc.send_transaction(&transaction).await
+            .map_err(|e| AdapterError::Generic(format!("Failed to send transaction: {}", e)))?;
+
+        // Get the block height
+        let block_height = rpc.get_block_height().await
+            .map_err(|e| AdapterError::Generic(format!("Failed to get block height: {}", e)))?;
+
         Ok(MintResult {
-            tx_hash: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-            block_height: 0,
+            tx_hash: signature.to_string(),
+            block_height,
         })
     }
 
