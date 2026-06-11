@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use csv_hash::{Hash, commitment::Commitment};
 use csv_protocol::finality::ChainCapabilities;
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 use serde::{Deserialize, Serialize};
 

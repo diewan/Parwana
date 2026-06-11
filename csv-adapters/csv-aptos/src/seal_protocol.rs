@@ -1215,8 +1215,8 @@ impl SealProtocol for AptosSealProtocol {
                 |e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>,
             )?;
 
-        // Use csv_protocol::proof::InclusionProof (struct) instead of csv_protocol::cross_chain::InclusionProof (enum)
-        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
+        // Use csv_protocol::proof_taxonomy::InclusionProof (struct) instead of csv_protocol::cross_chain::InclusionProof (enum)
+        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
             inclusion.transaction_proof.clone(),
             csv_hash::Hash::zero(), // block_hash - would need to extract from proof
             inclusion.version,

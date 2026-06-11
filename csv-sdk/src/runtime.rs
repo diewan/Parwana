@@ -218,7 +218,7 @@ impl ChainRuntime {
         commitment: &Hash,
         block_height: u64,
         anchor_id: &[u8],
-    ) -> Result<csv_protocol::proof_types::InclusionProof, CsvError> {
+    ) -> Result<csv_protocol::proof_taxonomy::InclusionProof, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
         let result = adapter

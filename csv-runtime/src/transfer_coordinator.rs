@@ -9,13 +9,13 @@
 #![allow(missing_docs)]
 
 use csv_adapter_core::{AdapterRegistry, CrossChainTransfer};
-use crate::coordinator_lease::{CoordinatorId, CoordinatorLease};
+use crate::distributed_coordinator_lease::{CoordinatorId, CoordinatorLease};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
 use crate::event_envelope::{EventType, RuntimeEventEnvelope};
-use crate::event_store::EventStore;
+use crate::event_persistence::EventStore;
 #[cfg(test)]
-use crate::event_store::InMemoryEventStore;
+use crate::event_persistence::InMemoryEventStore;
 use crate::execution_journal::ExecutionJournal;
 #[cfg(test)]
 use crate::execution_journal::InMemoryJournal;
@@ -58,9 +58,9 @@ fn runtime_signature_scheme(
     Ok(scheme)
 }
 
-fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_protocol::proof_types::ReplayId {
-    csv_protocol::proof_types::ReplayId {
-        version: csv_protocol::proof_types::ReplayId::CURRENT_VERSION,
+fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_protocol::proof_taxonomy::ReplayId {
+    csv_protocol::proof_taxonomy::ReplayId {
+        version: csv_protocol::proof_taxonomy::ReplayId::CURRENT_VERSION,
         id: *replay_id.0.as_bytes(),
     }
 }
@@ -189,7 +189,7 @@ pub struct TransferCoordinator {
     admission_controller: AdmissionController,
     /// Current lease observed for each transfer in this coordinator process.
     active_execution_leases:
-        std::sync::Mutex<std::collections::HashMap<csv_hash::SanadId, crate::lease::TransferLease>>,
+        std::sync::Mutex<std::collections::HashMap<csv_hash::SanadId, crate::user_runtime_lease::TransferLease>>,
 }
 
 impl TransferCoordinator {
@@ -328,7 +328,7 @@ impl TransferCoordinator {
 
     fn accept_execution_lease(
         &self,
-        lease: &crate::lease::TransferLease,
+        lease: &crate::user_runtime_lease::TransferLease,
     ) -> Result<(), TransferCoordinatorError> {
         let now = std::time::SystemTime::now();
         let mut active = self
@@ -387,7 +387,7 @@ impl TransferCoordinator {
         &self,
         transfer: CrossChainTransfer,
         adapter_registry: &dyn AdapterRegistry,
-        runtime_ctx: crate::lease::RuntimeExecutionContext,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
         self.assert_single_active_coordinator(&transfer.id).await?;
@@ -1491,7 +1491,7 @@ impl TransferCoordinator {
         &self,
         transfer_id: &str,
         adapter_registry: &dyn AdapterRegistry,
-        runtime_ctx: crate::lease::RuntimeExecutionContext,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
         self.assert_single_active_coordinator(transfer_id).await?;
@@ -1581,7 +1581,7 @@ impl TransferCoordinator {
                     if !proof_payload.is_empty() {
                         tracing::info!("Resuming from ProofBuilding - using persisted proof checkpoint");
                         // Proof was already built and persisted, skip regeneration
-                        let proof_bundle: csv_protocol::proof_types::ProofBundle =
+                        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
                             csv_codec::from_canonical_cbor(proof_payload).map_err(|e| {
                                 TransferCoordinatorError::ProofVerificationFailed(format!(
                                     "Persisted proof checkpoint is malformed: {}",
@@ -1780,7 +1780,7 @@ impl TransferCoordinator {
     async fn validate_recovery_context(
         &self,
         transfer: &CrossChainTransfer,
-        runtime_ctx: &crate::lease::RuntimeExecutionContext,
+        runtime_ctx: &crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<csv_hash::ReplayIdHash, TransferCoordinatorError> {
         self.assert_single_active_coordinator(&transfer.id).await?;
         if runtime_ctx.lease.owner_runtime_id != runtime_ctx.runtime_instance
@@ -1814,10 +1814,10 @@ impl TransferCoordinator {
     async fn verify_recovery_proof(
         &self,
         transfer: &CrossChainTransfer,
-        proof_bundle: &csv_protocol::proof_types::ProofBundle,
+        proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle,
         confirmed_height: u64,
         adapter_registry: &dyn AdapterRegistry,
-        runtime_ctx: &crate::lease::RuntimeExecutionContext,
+        runtime_ctx: &crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<(), TransferCoordinatorError> {
         runtime_ctx
             .policy
@@ -1930,7 +1930,7 @@ impl TransferCoordinator {
         &self,
         transfer: CrossChainTransfer,
         adapter_registry: &dyn AdapterRegistry,
-        runtime_ctx: crate::lease::RuntimeExecutionContext,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         let replay_id = self
             .validate_recovery_context(&transfer, &runtime_ctx)
@@ -2073,7 +2073,7 @@ impl TransferCoordinator {
         transfer: CrossChainTransfer,
         proof_payload: Vec<u8>,
         adapter_registry: &dyn AdapterRegistry,
-        runtime_ctx: crate::lease::RuntimeExecutionContext,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         let replay_id = self
             .validate_recovery_context(&transfer, &runtime_ctx)
@@ -2083,7 +2083,7 @@ impl TransferCoordinator {
                 "Persisted proof payload is empty".to_string(),
             ));
         }
-        let proof_bundle: csv_protocol::proof_types::ProofBundle =
+        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
             csv_codec::from_canonical_cbor(&proof_payload).map_err(|e| {
                 TransferCoordinatorError::ProofVerificationFailed(format!(
                     "Persisted proof payload is malformed: {}",
@@ -2171,7 +2171,7 @@ impl TransferCoordinator {
         transfer_id: &str,
         mint_tx_hash: &str,
         adapter_registry: &dyn AdapterRegistry,
-        runtime_ctx: crate::lease::RuntimeExecutionContext,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
         // Assert lease ownership invariant
         self.assert_single_active_coordinator(transfer_id).await?;
@@ -2356,7 +2356,7 @@ pub trait RecoveryContextProvider: Send + Sync {
     async fn context_for(
         &self,
         transfer_id: &str,
-    ) -> Result<crate::lease::RuntimeExecutionContext, TransferCoordinatorError>;
+    ) -> Result<crate::user_runtime_lease::RuntimeExecutionContext, TransferCoordinatorError>;
 }
 
 #[cfg(test)]
@@ -2543,7 +2543,7 @@ mod tests {
         TransferCoordinator,
         AdapterRegistryImpl,
         CrossChainTransfer,
-        crate::lease::RuntimeExecutionContext,
+        crate::user_runtime_lease::RuntimeExecutionContext,
     ) {
         let transfer = CrossChainTransfer {
             id: "recover-transfer".to_string(),
@@ -2586,8 +2586,8 @@ mod tests {
             .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
             .unwrap();
         let owner = uuid::Uuid::new_v4();
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
-            lease: crate::lease::TransferLease {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
+            lease: crate::user_runtime_lease::TransferLease {
                 transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
                 epoch: 1,
                 owner_runtime_id: owner,
@@ -2796,14 +2796,14 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -2842,14 +2842,14 @@ mod tests {
             transition_id: vec![7u8; 32],             // different transition
         };
 
-        let pending_lease = crate::lease::TransferLease {
+        let pending_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*pending_transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
-        let pending_ctx = crate::lease::RuntimeExecutionContext {
+        let pending_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: pending_lease.clone(),
             runtime_instance: pending_lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -2959,14 +2959,14 @@ mod tests {
         };
 
         // Celestia cannot be a source (DA only)
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3000,7 +3000,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3010,7 +3010,7 @@ mod tests {
 
         // Test with production policy (no RPC fallback, strict finality)
         let production_policy = crate::policy::RuntimePolicy::production();
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: production_policy,
@@ -3026,7 +3026,7 @@ mod tests {
 
         // Test with development policy (allows RPC fallback)
         let dev_policy = crate::policy::RuntimePolicy::development();
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: dev_policy,
@@ -3060,7 +3060,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3073,7 +3073,7 @@ mod tests {
         policy.max_retries = 3;
         policy.retry_delay = std::time::Duration::from_millis(10);
 
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy,
@@ -3113,7 +3113,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3121,7 +3121,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3203,7 +3203,7 @@ mod tests {
         let failover_runtime_id = uuid::Uuid::new_v4();
 
         // Original runtime acquires lease
-        let original_lease = crate::lease::TransferLease {
+        let original_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: original_runtime_id,
@@ -3211,7 +3211,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let original_ctx = crate::lease::RuntimeExecutionContext {
+        let original_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: original_lease.clone(),
             runtime_instance: original_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3224,7 +3224,7 @@ mod tests {
         assert!(result.is_ok(), "Original runtime should succeed");
 
         // Failover runtime tries to execute with different runtime ID (should fail)
-        let failover_lease = crate::lease::TransferLease {
+        let failover_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: failover_runtime_id,
@@ -3232,7 +3232,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let failover_ctx = crate::lease::RuntimeExecutionContext {
+        let failover_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: failover_lease,
             runtime_instance: failover_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3273,7 +3273,7 @@ mod tests {
         let failover_runtime_id = uuid::Uuid::new_v4();
 
         // Original runtime acquires expired lease
-        let expired_lease = crate::lease::TransferLease {
+        let expired_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: original_runtime_id,
@@ -3281,7 +3281,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() - std::time::Duration::from_secs(1800),
         };
 
-        let expired_ctx = crate::lease::RuntimeExecutionContext {
+        let expired_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: expired_lease,
             runtime_instance: original_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3297,7 +3297,7 @@ mod tests {
         ));
 
         // Failover runtime with new lease should succeed
-        let failover_lease = crate::lease::TransferLease {
+        let failover_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 2, // Incremented epoch
             owner_runtime_id: failover_runtime_id,
@@ -3305,7 +3305,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let failover_ctx = crate::lease::RuntimeExecutionContext {
+        let failover_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: failover_lease,
             runtime_instance: failover_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3339,7 +3339,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3347,7 +3347,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3450,7 +3450,7 @@ mod tests {
         };
 
         let runtime_id = uuid::Uuid::new_v4();
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: runtime_id,
@@ -3471,7 +3471,7 @@ mod tests {
             let runtime_id_clone = runtime_id;
 
             handles.push(tokio::spawn(async move {
-                let ctx = crate::lease::RuntimeExecutionContext {
+                let ctx = crate::user_runtime_lease::RuntimeExecutionContext {
                     lease: lease_clone,
                     runtime_instance: runtime_id_clone,
                     policy: crate::policy::RuntimePolicy::new(),
@@ -3518,7 +3518,7 @@ mod tests {
         let runtime_id_1 = uuid::Uuid::new_v4();
         let runtime_id_2 = uuid::Uuid::new_v4();
 
-        let lease_1 = crate::lease::TransferLease {
+        let lease_1 = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: runtime_id_1,
@@ -3526,7 +3526,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let lease_2 = crate::lease::TransferLease {
+        let lease_2 = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: runtime_id_2,
@@ -3546,7 +3546,7 @@ mod tests {
             let runtime_id = if i == 0 { runtime_id_1 } else { runtime_id_2 };
 
             handles.push(tokio::spawn(async move {
-                let ctx = crate::lease::RuntimeExecutionContext {
+                let ctx = crate::user_runtime_lease::RuntimeExecutionContext {
                     lease,
                     runtime_instance: runtime_id,
                     policy: crate::policy::RuntimePolicy::new(),
@@ -3670,7 +3670,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3678,7 +3678,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3714,7 +3714,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3722,7 +3722,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3751,7 +3751,7 @@ mod tests {
             transition_id: transfer.transition_id,
         };
 
-        let replay_lease = crate::lease::TransferLease {
+        let replay_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*replay_transfer.sanad_id.as_bytes()),
             epoch: 2,
             owner_runtime_id: lease.owner_runtime_id,
@@ -3759,7 +3759,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let replay_ctx = crate::lease::RuntimeExecutionContext {
+        let replay_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: replay_lease.clone(),
             runtime_instance: replay_lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3800,7 +3800,7 @@ mod tests {
         let runtime_id = uuid::Uuid::new_v4();
 
         // Acquire lease with epoch 1
-        let lease_epoch_1 = crate::lease::TransferLease {
+        let lease_epoch_1 = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: runtime_id,
@@ -3808,7 +3808,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let ctx_epoch_1 = crate::lease::RuntimeExecutionContext {
+        let ctx_epoch_1 = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease_epoch_1,
             runtime_instance: runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3820,7 +3820,7 @@ mod tests {
         assert!(result.is_ok(), "Epoch 1 should succeed");
 
         // Try to use stale lease with epoch 1 after epoch 2 has been issued
-        let lease_epoch_2 = crate::lease::TransferLease {
+        let lease_epoch_2 = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 2,
             owner_runtime_id: runtime_id,
@@ -3828,7 +3828,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let ctx_epoch_2 = crate::lease::RuntimeExecutionContext {
+        let ctx_epoch_2 = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease_epoch_2,
             runtime_instance: runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3840,7 +3840,7 @@ mod tests {
         assert!(result.is_ok(), "Epoch 2 should succeed");
 
         // Try to use stale epoch 1 lease again - should fail
-        let stale_lease = crate::lease::TransferLease {
+        let stale_lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: runtime_id,
@@ -3848,7 +3848,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let stale_ctx = crate::lease::RuntimeExecutionContext {
+        let stale_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: stale_lease,
             runtime_instance: runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
@@ -3883,7 +3883,7 @@ mod tests {
             transition_id: vec![3u8; 32],
         };
 
-        let lease = crate::lease::TransferLease {
+        let lease = crate::user_runtime_lease::TransferLease {
             transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
@@ -3891,7 +3891,7 @@ mod tests {
             expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         };
 
-        let runtime_ctx = crate::lease::RuntimeExecutionContext {
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),

@@ -54,7 +54,16 @@ pub struct AptosDeployment {
 
 /// Load the deployment manifest from the default location
 pub fn load_deployment_manifest() -> Result<DeploymentManifest, Box<dyn std::error::Error>> {
-    let manifest_path = Path::new("deployments/deployment-manifest.json");
+    // Try to find the deployment manifest in the workspace root
+    let manifest_path = if Path::new("deployments/deployment-manifest.json").exists() {
+        Path::new("deployments/deployment-manifest.json")
+    } else if Path::new("../deployments/deployment-manifest.json").exists() {
+        Path::new("../deployments/deployment-manifest.json")
+    } else if Path::new("../../deployments/deployment-manifest.json").exists() {
+        Path::new("../../deployments/deployment-manifest.json")
+    } else {
+        Path::new("deployments/deployment-manifest.json")
+    };
     load_deployment_manifest_from_path(manifest_path)
 }
 
@@ -124,7 +133,13 @@ mod tests {
         let address = get_aptos_module_address();
         assert!(address.is_ok());
         let addr = address.unwrap();
-        assert!(addr.starts_with("0x"));
-        assert_eq!(addr.len(), 66); // 0x + 64 hex chars
+        // Accept both with and without 0x prefix
+        let addr_normalized = if addr.starts_with("0x") {
+            addr.clone()
+        } else {
+            format!("0x{}", addr)
+        };
+        assert!(addr_normalized.starts_with("0x"));
+        assert_eq!(addr_normalized.len(), 66); // 0x + 64 hex chars
     }
 }

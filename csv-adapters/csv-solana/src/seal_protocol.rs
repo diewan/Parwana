@@ -534,7 +534,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create inclusion proof
         let inclusion_proof = unsafe {
-            csv_protocol::proof::InclusionProof::new_unchecked(
+            csv_protocol::proof_taxonomy::InclusionProof::new_unchecked(
                 solana_inclusion
                     .account_proofs
                     .iter()
@@ -552,7 +552,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         // Create finality proof - Solana has deterministic finality after 31 slots
         let finality_proof = unsafe {
-            csv_protocol::proof::FinalityProof::new_unchecked(
+            csv_protocol::proof_taxonomy::FinalityProof::new_unchecked(
                 solana_finality.block_hash.as_bytes().to_vec(),
                 solana_finality.confirmation_depth,
                 true, // Solana has deterministic finality
@@ -562,7 +562,7 @@ impl SealProtocol for SolanaSealProtocol {
         // Create a complete proof bundle
         let dag_segment: csv_proof::dag::DAGSegment = csv_codec::from_canonical_cbor(&segment)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        let bundle = csv_protocol::proof::ProofBundle::with_signature_scheme(
+        let bundle = csv_protocol::proof_taxonomy::ProofBundle::with_signature_scheme(
             csv_protocol::SignatureScheme::Ed25519,
             dag_segment,
             vec![anchor_ref.signature.as_ref().to_vec()],

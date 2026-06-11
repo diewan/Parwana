@@ -10,7 +10,7 @@
 //! Both implementations are cryptographically equivalent and produce identical results.
 
 use bitcoin_hashes::Hash as _;
-use csv_protocol::proof_types::ProofLeafV1;
+use csv_protocol::proof_taxonomy::ProofLeafV1;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure-Rust Merkle Tree Implementation (no `bitcoin` crate dependency)
@@ -763,7 +763,7 @@ mod tests {
         proof_bytes.extend_from_slice(&[0xCD; 32]);
         proof_bytes.extend_from_slice(&5u64.to_le_bytes());
         proof_bytes.extend_from_slice(&100u64.to_le_bytes());
-        let core_proof = csv_protocol::proof_types::InclusionProof::new(
+        let core_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
             proof_bytes,
             CoreHash::new([1u8; 32]),
             5,

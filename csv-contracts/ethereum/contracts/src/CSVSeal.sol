@@ -14,12 +14,13 @@ contract CSVSeal {
     uint8 public constant ASSET_CLASS_PROOF_SANAD = 3;
     uint8 public constant PROOF_SYSTEM_UNSPECIFIED = 0;
 
-    /// @notice Chain IDs — canonical across all chains
-    uint8 public constant CHAIN_BITCOIN = 0;
-    uint8 public constant CHAIN_SUI = 1;
-    uint8 public constant CHAIN_APTOS = 2;
-    uint8 public constant CHAIN_ETHEREUM = 3;
-    uint8 public constant CHAIN_SOLANA = 4;
+    /// @notice Chain IDs — canonical across all chains (now using hashed values)
+    /// @dev ChainIdHash = H(canonical(ChainIdentity)) for cross-chain consistency
+    bytes32 public constant CHAIN_BITCOIN = keccak256(abi.encodePacked("csv.chain.bitcoin"));
+    bytes32 public constant CHAIN_SUI = keccak256(abi.encodePacked("csv.chain.sui"));
+    bytes32 public constant CHAIN_APTOS = keccak256(abi.encodePacked("csv.chain.aptos"));
+    bytes32 public constant CHAIN_ETHEREUM = keccak256(abi.encodePacked("csv.chain.ethereum"));
+    bytes32 public constant CHAIN_SOLANA = keccak256(abi.encodePacked("csv.chain.solana"));
 
     // ==================== Canonical ProofLeafV1 Schema ====================
 
@@ -27,8 +28,8 @@ contract CSVSeal {
     /// @dev This struct matches the canonical schema defined in csv-protocol
     struct ProofLeafV1 {
         uint32 version;                    // Version of the proof leaf schema
-        uint8 sourceChain;                 // Source chain identifier
-        uint8 destinationChain;            // Destination chain identifier
+        bytes32 sourceChain;               // Source chain identifier (hashed)
+        bytes32 destinationChain;          // Destination chain identifier (hashed)
         bytes32 sanadId;                   // Sanad identifier
         bytes32 commitment;                // Commitment hash
         bytes32 contentDescriptorHash;     // Content descriptor hash (optional, default 0)
@@ -72,7 +73,7 @@ contract CSVSeal {
     /// @dev For Ethereum, this uses keccak256 (native hash function)
     /// @param leaf The proof leaf to hash
     /// @return The hash of the proof leaf using chain-specific function
-    function hashProofLeafV1WithChainFunction(ProofLeafV1 memory leaf, uint8 chain) internal pure returns (bytes32) {
+    function hashProofLeafV1WithChainFunction(ProofLeafV1 memory leaf, bytes32 chain) internal pure returns (bytes32) {
         // Ethereum uses keccak256 natively
         return hashProofLeafV1(leaf);
     }
@@ -112,9 +113,9 @@ contract CSVSeal {
         bytes32 sealId;
         bytes32 commitment;
         address owner;
-        uint8 sourceChain;
-        uint8 currentChain;
-        uint8 destinationChain;
+        bytes32 sourceChain;
+        bytes32 currentChain;
+        bytes32 destinationChain;
         SanadState state;
         bytes32 nullifier;
         uint256 createdAt;
@@ -195,7 +196,7 @@ contract CSVSeal {
         bytes32 commitment;
         address owner;
         uint256 timestamp;
-        uint8 destinationChain;
+        bytes32 destinationChain;
         bytes32 destinationOwnerRoot;
         SanadMetadata metadata;
         bool refunded;
@@ -229,7 +230,7 @@ contract CSVSeal {
         bytes32 indexed sanadId,
         bytes32 indexed commitment,
         address indexed owner,
-        uint8 destinationChain,
+        bytes32 destinationChain,
         bytes destinationOwner,
         uint256 timestamp
     );
@@ -239,7 +240,7 @@ contract CSVSeal {
         bytes32 indexed sanadId,
         bytes32 indexed commitment,
         address indexed owner,
-        uint8 sourceChain,
+        bytes32 sourceChain,
         bytes sourceSealRef,
         uint256 timestamp
     );
@@ -257,7 +258,7 @@ contract CSVSeal {
     event SanadTransferred(bytes32 indexed sanadId, address indexed from, address indexed to, uint256 timestamp);
 
     /// @notice Emitted when a nullifier is registered
-    event NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanadId, uint8 sourceChain, uint256 timestamp);
+    event NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanadId, bytes32 sourceChain, uint256 timestamp);
 
     /// @notice Emitted when a commitment is anchored
     event CommitmentAnchored(bytes32 indexed commitment, bytes32 indexed sealId, address indexed owner, uint256 timestamp);
@@ -282,7 +283,7 @@ contract CSVSeal {
 
     // Legacy events (backward compatibility — emit alongside canonical events during transition)
     event SealUsed(bytes32 indexed sealId, bytes32 commitment);
-    event CrossChainLock(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint8 destinationChain, bytes destinationOwner, uint256 timestamp);
+    event CrossChainLock(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 destinationChain, bytes destinationOwner, uint256 timestamp);
 
     // ==================== Errors ====================
 
@@ -490,6 +491,7 @@ contract CSVSeal {
     function consume_seal(bytes32 sealId, bytes32 nullifier) external {
         if (usedSeals[sealId]) revert SanadAlreadyConsumed();
         if (sealOwners[sealId] != msg.sender) revert NotOwner();
+        if (nullifier != bytes32(0) && nullifiers[nullifier]) revert NullifierAlreadyRegistered();
 
         usedSeals[sealId] = true;
         if (nullifier != bytes32(0)) {
@@ -511,7 +513,7 @@ contract CSVSeal {
     function lock_sanad(
         bytes32 sanadId,
         bytes32 commitment,
-        uint8 destinationChain,
+        bytes32 destinationChain,
         bytes calldata destinationOwner
     ) external {
         _lock_sanad_internal(sanadId, commitment, destinationChain, destinationOwner, SanadMetadata({
@@ -527,7 +529,7 @@ contract CSVSeal {
     function lock_sanad_with_metadata(
         bytes32 sanadId,
         bytes32 commitment,
-        uint8 destinationChain,
+        bytes32 destinationChain,
         bytes calldata destinationOwner,
         uint8 assetClass,
         bytes32 assetId,
@@ -547,14 +549,13 @@ contract CSVSeal {
     function _lock_sanad_internal(
         bytes32 sanadId,
         bytes32 commitment,
-        uint8 destinationChain,
+        bytes32 destinationChain,
         bytes calldata destinationOwner,
         SanadMetadata memory metadata
     ) internal {
-        if (usedSeals[sanadId]) revert SanadAlreadyConsumed();
-
         (uint256 lockTimestamp, bool lockRefunded) = (locks[sanadId].timestamp, locks[sanadId].refunded);
         if (lockTimestamp != 0 && !lockRefunded) revert SanadAlreadyLocked();
+        if (usedSeals[sanadId]) revert SanadAlreadyConsumed();
 
         bytes32 destinationOwnerRoot = keccak256(destinationOwner);
 
@@ -582,7 +583,7 @@ contract CSVSeal {
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
-        uint8 sourceChain,
+        bytes32 sourceChain,
         bytes calldata sourceSealPoint,
         bytes calldata proof,
         bytes32 proofRoot,
@@ -602,7 +603,7 @@ contract CSVSeal {
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
-        uint8 sourceChain,
+        bytes32 sourceChain,
         bytes calldata sourceSealPoint,
         bytes calldata proof,
         bytes32 proofRoot,
@@ -627,8 +628,8 @@ contract CSVSeal {
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
-        uint8 sourceChain,
-        uint8 destinationChain,
+        bytes32 sourceChain,
+        bytes32 destinationChain,
         bytes calldata sourceSealPoint,
         bytes calldata proof,
         bytes32 proofRoot,
@@ -657,8 +658,8 @@ contract CSVSeal {
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 stateRoot,
-        uint8 sourceChain,
-        uint8 destinationChain,
+        bytes32 sourceChain,
+        bytes32 destinationChain,
         bytes calldata sourceSealPoint,
         bytes calldata proof,
         bytes32 proofRoot,
@@ -743,7 +744,7 @@ contract CSVSeal {
     }
 
     /// @notice Register nullifier for replay protection
-    function register_nullifier(bytes32 nullifier, bytes32 sanadId, uint8 sourceChain) external {
+    function register_nullifier(bytes32 nullifier, bytes32 sanadId, bytes32 sourceChain) external {
         if (nullifiers[nullifier]) revert NullifierAlreadyRegistered();
 
         nullifiers[nullifier] = true;
@@ -877,7 +878,7 @@ contract CSVSeal {
     function get_lock_info(bytes32 sanadId) external view returns (
         bytes32 commitment,
         uint256 timestamp,
-        uint8 destinationChain,
+        bytes32 destinationChain,
         bool refunded
     ) {
         LockRecord storage lock = locks[sanadId];
@@ -901,7 +902,7 @@ contract CSVSeal {
     function _verify_cross_chain_proof(
         bytes32 sanadId,
         bytes32 commitment,
-        uint8 sourceChain,
+        bytes32 sourceChain,
         bytes calldata proof,
         bytes32 proofRoot,
         uint256 leafPosition
@@ -932,8 +933,8 @@ contract CSVSeal {
     function _verify_cross_chain_proof_with_proof_leaf(
         bytes32 sanadId,
         bytes32 commitment,
-        uint8 sourceChain,
-        uint8 destinationChain,
+        bytes32 sourceChain,
+        bytes32 destinationChain,
         bytes calldata proof,
         bytes32 proofRoot,
         uint256 leafPosition,
@@ -1091,7 +1092,7 @@ contract CSVSeal {
         bytes32[] calldata sanadIds,
         bytes32[] calldata commitments,
         bytes32[] calldata stateRoots,
-        uint8 sourceChain,
+        bytes32 sourceChain,
         bytes calldata sourceSealPoint,
         bytes[] calldata proofs,
         bytes32 proofRoot,

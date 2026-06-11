@@ -272,13 +272,13 @@ impl CelestiaFinalityProof {
     }
 
     /// Convert to core FinalityProof
-    pub fn to_core_finality(&self) -> csv_protocol::proof::FinalityProof {
+    pub fn to_core_finality(&self) -> csv_protocol::proof_taxonomy::FinalityProof {
         let finality_data = serde_json::to_vec(&self).unwrap_or_else(|_| {
             // Fallback to empty data if serialization fails
             vec![]
         });
 
-        csv_protocol::proof::FinalityProof::new(
+        csv_protocol::proof_taxonomy::FinalityProof::new(
             finality_data.clone(),
             self.quorum_signatures.len() as u64,
             true, // Tendermint has deterministic finality
@@ -287,7 +287,7 @@ impl CelestiaFinalityProof {
             // SAFETY: We're falling back to unchecked creation only when the safe API fails,
             // and the data is derived from valid internal state.
             unsafe {
-                csv_protocol::proof::FinalityProof::new_unchecked(
+                csv_protocol::proof_taxonomy::FinalityProof::new_unchecked(
                     finality_data,
                     self.quorum_signatures.len() as u64,
                     true,

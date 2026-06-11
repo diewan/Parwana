@@ -15,7 +15,7 @@ use sqlx::{PgPool, Row};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::event_envelope::{AggregateSnapshot, EventFilter, RuntimeEventEnvelope, StreamPosition};
-use crate::lease::TransferLease;
+use crate::user_runtime_lease::TransferLease;
 use crate::replay_record::GlobalReplayRecord;
 use csv_protocol::sanad::SanadId;
 use csv_hash::Hash;
@@ -343,7 +343,7 @@ impl AsyncPostgresEventStore {
     }
 
     /// Append an event to the store.
-    pub async fn append(&self, event: &RuntimeEventEnvelope) -> Result<(), crate::event_store::EventStoreError> {
+    pub async fn append(&self, event: &RuntimeEventEnvelope) -> Result<(), crate::event_persistence::EventStoreError> {
         sqlx::query(
             r#"
             INSERT INTO runtime_events (event_id, aggregate_id, event_type, version, causation_id, correlation_id, payload, timestamp, runtime_id)
@@ -361,7 +361,7 @@ impl AsyncPostgresEventStore {
         .bind(event.runtime_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         Ok(())
     }
@@ -370,12 +370,12 @@ impl AsyncPostgresEventStore {
     pub async fn append_batch(
         &self,
         events: &[RuntimeEventEnvelope],
-    ) -> Result<(), crate::event_store::EventStoreError> {
+    ) -> Result<(), crate::event_persistence::EventStoreError> {
         if events.is_empty() {
             return Ok(());
         }
 
-        let mut tx = self.pool.begin().await.map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         for event in events {
             sqlx::query(
@@ -395,10 +395,10 @@ impl AsyncPostgresEventStore {
             .bind(event.runtime_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+            .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
         }
 
-        tx.commit().await.map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        tx.commit().await.map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
         Ok(())
     }
 
@@ -407,7 +407,7 @@ impl AsyncPostgresEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
-    ) -> Result<Vec<RuntimeEventEnvelope>, crate::event_store::EventStoreError> {
+    ) -> Result<Vec<RuntimeEventEnvelope>, crate::event_persistence::EventStoreError> {
         let mut query = sqlx::query_as::<_, (Uuid, Vec<u8>, String, i64, Option<Uuid>, Uuid, String, chrono::DateTime<chrono::Utc>, Uuid)>(
             r#"
             SELECT event_id, aggregate_id, event_type, version, causation_id, correlation_id, payload, timestamp, runtime_id
@@ -432,14 +432,14 @@ impl AsyncPostgresEventStore {
         let rows = query
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+            .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         let events: Result<Vec<_>, _> = rows
             .into_iter()
             .map(|row| {
                 Ok(RuntimeEventEnvelope {
                     event_id: row.0,
-                    aggregate_id: SanadId::new(row.1.try_into().map_err(|_| crate::event_store::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
+                    aggregate_id: SanadId::new(row.1.try_into().map_err(|_| crate::event_persistence::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
                     event_type: crate::event_envelope::EventType(row.2),
                     version: row.3 as u64,
                     causation_id: row.4,
@@ -458,7 +458,7 @@ impl AsyncPostgresEventStore {
     pub async fn get_latest_version(
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
-    ) -> Result<u64, crate::event_store::EventStoreError> {
+    ) -> Result<u64, crate::event_persistence::EventStoreError> {
         let version: Option<i64> = sqlx::query_scalar(
             r#"
             SELECT MAX(version) FROM runtime_events WHERE aggregate_id = $1
@@ -467,13 +467,13 @@ impl AsyncPostgresEventStore {
         .bind(aggregate_id.as_bytes())
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         Ok(version.unwrap_or(0) as u64)
     }
 
     /// Save an aggregate snapshot.
-    pub async fn save_snapshot(&self, snapshot: &AggregateSnapshot) -> Result<(), crate::event_store::EventStoreError> {
+    pub async fn save_snapshot(&self, snapshot: &AggregateSnapshot) -> Result<(), crate::event_persistence::EventStoreError> {
         sqlx::query(
             r#"
             INSERT INTO aggregate_snapshots (aggregate_id, version, state, created_at)
@@ -487,7 +487,7 @@ impl AsyncPostgresEventStore {
         .bind(chrono::DateTime::<chrono::Utc>::from(snapshot.created_at))
         .execute(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         Ok(())
     }
@@ -496,7 +496,7 @@ impl AsyncPostgresEventStore {
     pub async fn load_snapshot(
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
-    ) -> Result<Option<AggregateSnapshot>, crate::event_store::EventStoreError> {
+    ) -> Result<Option<AggregateSnapshot>, crate::event_persistence::EventStoreError> {
         let row: Option<(Vec<u8>, i64, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
             SELECT aggregate_id, version, state, created_at FROM aggregate_snapshots WHERE aggregate_id = $1
@@ -505,12 +505,12 @@ impl AsyncPostgresEventStore {
         .bind(aggregate_id.as_bytes())
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         match row {
             Some((agg_id, version, state, created_at)) => {
                 Ok(Some(AggregateSnapshot {
-                    aggregate_id: SanadId::new(agg_id.try_into().map_err(|_| crate::event_store::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
+                    aggregate_id: SanadId::new(agg_id.try_into().map_err(|_| crate::event_persistence::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
                     version: version as u64,
                     state,
                     created_at: created_at.into(),
@@ -525,7 +525,7 @@ impl AsyncPostgresEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
-    ) -> Result<usize, crate::event_store::EventStoreError> {
+    ) -> Result<usize, crate::event_persistence::EventStoreError> {
         let result = sqlx::query(
             r#"
             DELETE FROM aggregate_snapshots WHERE aggregate_id = $1 AND version < $2
@@ -535,7 +535,7 @@ impl AsyncPostgresEventStore {
         .bind(keep_after_version as i64)
         .execute(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         Ok(result.rows_affected() as usize)
     }
@@ -545,7 +545,7 @@ impl AsyncPostgresEventStore {
         &self,
         position: &StreamPosition,
         limit: usize,
-    ) -> Result<Vec<RuntimeEventEnvelope>, crate::event_store::EventStoreError> {
+    ) -> Result<Vec<RuntimeEventEnvelope>, crate::event_persistence::EventStoreError> {
         let rows = sqlx::query_as::<_, (Uuid, Vec<u8>, String, i64, Option<Uuid>, Uuid, String, chrono::DateTime<chrono::Utc>, Uuid)>(
             r#"
             SELECT event_id, aggregate_id, event_type, version, causation_id, correlation_id, payload, timestamp, runtime_id
@@ -560,14 +560,14 @@ impl AsyncPostgresEventStore {
         .bind(limit as i32)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         let events: Result<Vec<_>, _> = rows
             .into_iter()
             .map(|row| {
                 Ok(RuntimeEventEnvelope {
                     event_id: row.0,
-                    aggregate_id: SanadId::new(row.1.try_into().map_err(|_| crate::event_store::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
+                    aggregate_id: SanadId::new(row.1.try_into().map_err(|_| crate::event_persistence::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
                     event_type: crate::event_envelope::EventType(row.2),
                     version: row.3 as u64,
                     causation_id: row.4,
@@ -583,7 +583,7 @@ impl AsyncPostgresEventStore {
     }
 
     /// Update the stream position after processing events.
-    pub async fn update_position(&self, position: &StreamPosition) -> Result<(), crate::event_store::EventStoreError> {
+    pub async fn update_position(&self, position: &StreamPosition) -> Result<(), crate::event_persistence::EventStoreError> {
         sqlx::query(
             r#"
             INSERT INTO stream_positions (aggregate_id, last_version, last_event_id, updated_at)
@@ -597,7 +597,7 @@ impl AsyncPostgresEventStore {
         .bind(chrono::DateTime::<chrono::Utc>::from(position.updated_at))
         .execute(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         Ok(())
     }
@@ -606,7 +606,7 @@ impl AsyncPostgresEventStore {
     pub async fn get_position(
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
-    ) -> Result<Option<StreamPosition>, crate::event_store::EventStoreError> {
+    ) -> Result<Option<StreamPosition>, crate::event_persistence::EventStoreError> {
         let row: Option<(Vec<u8>, i64, Option<Uuid>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
             SELECT aggregate_id, last_version, last_event_id, updated_at FROM stream_positions WHERE aggregate_id = $1
@@ -615,12 +615,12 @@ impl AsyncPostgresEventStore {
         .bind(aggregate_id.as_bytes())
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         match row {
             Some((agg_id, last_version, last_event_id, updated_at)) => {
                 Ok(Some(StreamPosition {
-                    aggregate_id: SanadId::new(agg_id.try_into().map_err(|_| crate::event_store::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
+                    aggregate_id: SanadId::new(agg_id.try_into().map_err(|_| crate::event_persistence::EventStoreError::Io("Invalid aggregate_id length".to_string()))?),
                     last_version: last_version as u64,
                     last_event_id,
                     updated_at: updated_at.into(),
@@ -631,7 +631,7 @@ impl AsyncPostgresEventStore {
     }
 
     /// Get all aggregates that have events in the store.
-    pub async fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, crate::event_store::EventStoreError> {
+    pub async fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, crate::event_persistence::EventStoreError> {
         let rows: Vec<Vec<u8>> = sqlx::query_scalar(
             r#"
             SELECT DISTINCT aggregate_id FROM runtime_events ORDER BY aggregate_id
@@ -639,12 +639,12 @@ impl AsyncPostgresEventStore {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         let aggregates: Result<Vec<_>, _> = rows
             .into_iter()
             .map(|agg_id| {
-                Ok(SanadId::new(agg_id.try_into().map_err(|_| crate::event_store::EventStoreError::Io("Invalid aggregate_id length".to_string()))?))
+                Ok(SanadId::new(agg_id.try_into().map_err(|_| crate::event_persistence::EventStoreError::Io("Invalid aggregate_id length".to_string()))?))
             })
             .collect();
 
@@ -652,7 +652,7 @@ impl AsyncPostgresEventStore {
     }
 
     /// Count the total number of events in the store.
-    pub async fn event_count(&self) -> Result<usize, crate::event_store::EventStoreError> {
+    pub async fn event_count(&self) -> Result<usize, crate::event_persistence::EventStoreError> {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) FROM runtime_events
@@ -660,34 +660,34 @@ impl AsyncPostgresEventStore {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         Ok(count as usize)
     }
 
     /// Clear all events and snapshots for an aggregate.
-    pub async fn clear_aggregate(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), crate::event_store::EventStoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+    pub async fn clear_aggregate(&self, aggregate_id: &csv_protocol::sanad::SanadId) -> Result<(), crate::event_persistence::EventStoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         sqlx::query("DELETE FROM runtime_events WHERE aggregate_id = $1")
             .bind(aggregate_id.as_bytes())
             .execute(&mut *tx)
             .await
-            .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+            .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         sqlx::query("DELETE FROM aggregate_snapshots WHERE aggregate_id = $1")
             .bind(aggregate_id.as_bytes())
             .execute(&mut *tx)
             .await
-            .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+            .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
         sqlx::query("DELETE FROM stream_positions WHERE aggregate_id = $1")
             .bind(aggregate_id.as_bytes())
             .execute(&mut *tx)
             .await
-            .map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+            .map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
 
-        tx.commit().await.map_err(|e| crate::event_store::EventStoreError::Io(e.to_string()))?;
+        tx.commit().await.map_err(|e| crate::event_persistence::EventStoreError::Io(e.to_string()))?;
         Ok(())
     }
 }

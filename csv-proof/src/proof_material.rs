@@ -11,7 +11,7 @@ use std::vec::Vec;
 
 use crate::provenance::ProofProvenance;
 use csv_hash::Hash;
-use csv_protocol::proof::InclusionProof;
+use csv_protocol::proof_taxonomy::InclusionProof;
 
 /// A bundle of proof material fetched from a chain.
 ///

@@ -33,7 +33,7 @@ use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::{
-    event_bus::EventBus, event_store::InMemoryEventStore, execution_journal::InMemoryJournal,
+    event_bus::EventBus, event_persistence::InMemoryEventStore, execution_journal::InMemoryJournal,
 };
 #[cfg(feature = "runtime-coordinator")]
 use csv_storage::InMemoryReplayDb;
@@ -264,7 +264,7 @@ impl ClientBuilder {
                 event_store,
                 execution_journal,
                 verifier,
-                Box::new(csv_runtime::coordinator_lease::InMemoryLease::new()) as Box<dyn csv_runtime::CoordinatorLease>,
+                Box::new(csv_runtime::distributed_coordinator_lease::InMemoryLease::new()) as Box<dyn csv_runtime::CoordinatorLease>,
             );
 
             // Clear coordinator lease for single-instance deployments to skip the distributed lease check

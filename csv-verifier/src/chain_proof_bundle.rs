@@ -135,7 +135,7 @@ impl From<ChainOpError> for ChainBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_protocol::proof::{FinalityProof, InclusionProof};
+    use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 
     struct AlwaysValid;
 

@@ -171,6 +171,7 @@ fn intentional_workspace_crates_are_allowlisted() {
         "csv-sui",
         "csv-testkit",
         "csv-verifier",
+        "csv-wallet",
         "csv-wire",
     ];
     let unregistered: Vec<_> = metadata

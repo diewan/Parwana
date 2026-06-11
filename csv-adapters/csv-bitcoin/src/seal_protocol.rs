@@ -22,7 +22,7 @@ use csv_hash::sanad::SanadId;
 use csv_hash::seal::CommitAnchor as CoreCommitAnchor;
 use csv_hash::seal::SealPoint as CoreSealPoint;
 use csv_protocol::error::ProtocolError;
-use csv_protocol::proof_types::{FinalityProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, ProofBundle};
 use csv_protocol::seal_protocol::SealProtocol;
 
 use crate::config::BitcoinConfig;
@@ -911,7 +911,7 @@ impl SealProtocol for BitcoinSealProtocol {
         proof_bytes.extend_from_slice(&inclusion.block_hash);
         proof_bytes.extend_from_slice(&inclusion.tx_index.to_le_bytes());
 
-        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
+        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
             proof_bytes,
             Hash::new(inclusion.block_hash),
             inclusion.tx_index as u64,

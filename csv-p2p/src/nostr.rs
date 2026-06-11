@@ -19,7 +19,7 @@ use std::{fs, sync::Arc, time::Duration};
 #[cfg(all(unix, feature = "nostr"))]
 use std::os::unix::fs::PermissionsExt;
 
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use nostr_sdk::{Client, Keys, Kind, RelayPoolNotification};
 use tracing::{debug, info, warn};
 

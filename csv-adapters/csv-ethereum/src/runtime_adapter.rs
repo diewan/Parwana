@@ -63,7 +63,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
         // Use the backend's lock_sanad method which properly constructs and signs the transaction
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
@@ -89,14 +89,14 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
         // Use the backend's mint_sanad method which properly constructs and signs the transaction
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let source_chain = &transfer.source_chain;
 
         // Parse proof bundle to extract commitment and state_root
         // The proof bundle is CBOR-encoded ProofBundle
-        let proof_bundle: csv_protocol::proof_types::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
+        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
             .map_err(|e| AdapterError::Generic(format!("Failed to decode proof bundle: {}", e)))?;
 
         // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])
@@ -143,7 +143,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 
         // Convert to ProofBundle - need to construct it properly
         // For now, return a minimal ProofBundle with the inclusion proof
-        use csv_protocol::proof_types::{FinalityProof};
+        use csv_protocol::proof_taxonomy::{FinalityProof};
         use csv_hash::seal::{CommitAnchor, SealPoint};
 
         let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)
@@ -155,7 +155,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
         // Create a canonical ProofLeafV1 for this transfer
-        use csv_protocol::proof_types::ProofLeafV1;
+        use csv_protocol::proof_taxonomy::ProofLeafV1;
         let proof_leaf = ProofLeafV1::new(
             transfer.source_chain.clone(),
             transfer.destination_chain.clone(),
@@ -203,7 +203,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
     ) -> Result<SealRegistryStatus, AdapterError> {
         #[cfg(feature = "rpc")]
         {
-            use csv_protocol::backend::ChainSanadOps;
+            use csv_protocol::chain_adapter_traits::ChainSanadOps;
             match self.backend.is_sanad_locked(seal_id).await {
                 Ok(locked) => {
                     if locked {

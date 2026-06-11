@@ -70,11 +70,11 @@ impl CsvSealMethod {
         match self {
             Self::CreateSeal => "create_seal(bytes32,bytes32)",
             Self::ConsumeSeal => "consume_seal(bytes32,bytes32)",
-            Self::LockSanad => "lock_sanad(bytes32,bytes32,uint8,bytes)",
-            Self::MintSanad => "mint_sanad(bytes32,bytes32,bytes32,uint8,bytes,bytes,bytes32,uint256)",
+            Self::LockSanad => "lock_sanad(bytes32,bytes32,bytes32,bytes)",
+            Self::MintSanad => "mint_sanad(bytes32,bytes32,bytes32,bytes32,bytes,bytes,bytes32,uint256)",
             Self::RefundSanad => "refund_sanad(bytes32,bytes32)",
             Self::TransferSanad => "transfer_sanad(bytes32,address)",
-            Self::RegisterNullifier => "register_nullifier(bytes32,bytes32,uint8)",
+            Self::RegisterNullifier => "register_nullifier(bytes32,bytes32,bytes32)",
             Self::AnchorCommitment => "anchor_commitment(bytes32,bytes32)",
             Self::RecordSanadMetadata => "record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)",
             Self::UpdateProofRoot => "update_proof_root(bytes32)",
@@ -131,21 +131,21 @@ pub enum CsvSealEvent {
         consumer: Vec<u8>,
         timestamp: u64,
     },
-    /// SanadLocked(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint8 destinationChain, bytes destinationOwner, uint256 timestamp)
+    /// SanadLocked(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 destinationChain, bytes destinationOwner, uint256 timestamp)
     SanadLocked {
         sanad_id: [u8; 32],
         commitment: [u8; 32],
         owner: Vec<u8>,
-        destination_chain: u8,
+        destination_chain: [u8; 32],
         destination_owner: Vec<u8>,
         timestamp: u64,
     },
-    /// SanadMinted(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint8 sourceChain, bytes sourceSealRef, uint256 timestamp)
+    /// SanadMinted(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 sourceChain, bytes sourceSealRef, uint256 timestamp)
     SanadMinted {
         sanad_id: [u8; 32],
         commitment: [u8; 32],
         owner: Vec<u8>,
-        source_chain: u8,
+        source_chain: [u8; 32],
         source_seal_ref: Vec<u8>,
         timestamp: u64,
     },
@@ -164,11 +164,11 @@ pub enum CsvSealEvent {
         to: Vec<u8>,
         timestamp: u64,
     },
-    /// NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanadId, uint8 sourceChain, uint256 timestamp)
+    /// NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanadId, bytes32 sourceChain, uint256 timestamp)
     NullifierRegistered {
         nullifier: [u8; 32],
         sanad_id: [u8; 32],
-        source_chain: u8,
+        source_chain: [u8; 32],
         timestamp: u64,
     },
     /// CommitmentAnchored(bytes32 indexed commitment, bytes32 indexed sealId, address indexed owner, uint256 timestamp)

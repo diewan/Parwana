@@ -13,8 +13,8 @@ use csv_protocol::finality::capabilities::{
     ReplayProtectionModel, ReorgRisk, ChainRole
 };
 use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_types::ProofBundle;
-use csv_protocol::backend::ChainBackend;
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::chain_adapter_traits::ChainBackend;
 use std::sync::Arc;
 
 use crate::ops::SolanaBackend;
@@ -81,7 +81,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         &self,
         transfer: &CrossChainTransfer,
     ) -> Result<LockResult, AdapterError> {
-        use csv_protocol::backend::ChainSanadOps;
+        use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;

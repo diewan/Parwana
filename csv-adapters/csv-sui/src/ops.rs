@@ -240,7 +240,7 @@ impl ChainQuery for SuiBackend {
             // Build token information from balance response
             // Sui uses coin objects, so we extract the coin type and balance
             let tokens = if let Some(coin_type) = balance.coin_type {
-                vec![csv_protocol::backend::TokenBalance {
+                vec![csv_protocol::chain_adapter_traits::TokenBalance {
                     symbol: "SUI".to_string(), // Default to SUI for native token
                     decimals: 9, // SUI has 9 decimals
                     balance: balance.balance.unwrap_or(0),
@@ -997,7 +997,7 @@ impl ChainSanadOps for SuiBackend {
 
         Ok(SanadOperationResult {
             sanad_id,
-            operation: csv_protocol::backend::SanadOperation::Create,
+            operation: csv_protocol::chain_adapter_traits::SanadOperation::Create,
             transaction_hash: hex::encode(digest_array),
             block_height: 0, // Simplified since we don't have checkpoint from sign_and_execute
             chain_id: self.config.chain_id().to_string(),
@@ -1102,7 +1102,7 @@ impl ChainSanadOps for SuiBackend {
 
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),
-            operation: csv_protocol::backend::SanadOperation::Consume,
+            operation: csv_protocol::chain_adapter_traits::SanadOperation::Consume,
             transaction_hash: hex::encode(digest_array),
             block_height: 0, // Simplified since we don't have checkpoint from sign_and_execute
             chain_id: self.config.chain_id().to_string(),
@@ -1268,7 +1268,7 @@ impl ChainSanadOps for SuiBackend {
 
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),
-            operation: csv_protocol::backend::SanadOperation::Lock,
+            operation: csv_protocol::chain_adapter_traits::SanadOperation::Lock,
             transaction_hash: hex::encode(digest_array),
             block_height: checkpoint,
             chain_id: self.config.chain_id().to_string(),
@@ -1328,7 +1328,7 @@ impl ChainSanadOps for SuiBackend {
 
         Ok(SanadOperationResult {
             sanad_id,
-            operation: csv_protocol::backend::SanadOperation::Mint,
+            operation: csv_protocol::chain_adapter_traits::SanadOperation::Mint,
             transaction_hash: tx_digest,
             block_height: 0,
             chain_id: "sui".to_string(),

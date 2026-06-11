@@ -22,7 +22,7 @@
 //!   including signature verification, nullifier checks, and policy enforcement.
 
 use csv_hash::{Hash, verify_merkle_proof};
-use csv_protocol::proof::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Maximum allowed proof bytes size (1 MB)
 const MAX_PROOF_BYTES: usize = 1_048_576;

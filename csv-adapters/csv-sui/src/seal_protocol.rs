@@ -1154,7 +1154,7 @@ impl SealProtocol for SuiSealProtocol {
     }
 
     #[cfg(not(feature = "rpc"))]
-    async fn build_proof_bundle(&self, _anchor: Self::CommitAnchor, _extra_data: Vec<u8>) -> Result<csv_protocol::proof_types::ProofBundle, Box<dyn std::error::Error + 'static>> {
+    async fn build_proof_bundle(&self, _anchor: Self::CommitAnchor, _extra_data: Vec<u8>) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
         Err("RPC feature not enabled".into())
     }
 }

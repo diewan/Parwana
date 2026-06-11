@@ -111,7 +111,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
         let source_chain = &transfer.source_chain;
 
         // Parse proof bundle to extract inclusion proof
-        let proof_bundle_parsed: csv_protocol::proof_types::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
+        let proof_bundle_parsed: csv_protocol::proof_taxonomy::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
             .map_err(|e| AdapterError::Generic(format!("Failed to decode proof bundle: {}", e)))?;
 
         let inclusion_proof = &proof_bundle_parsed.inclusion_proof;

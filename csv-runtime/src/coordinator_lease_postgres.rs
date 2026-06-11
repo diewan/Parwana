@@ -10,7 +10,7 @@
 //! If two coordinators attempt to acquire the same lease concurrently,
 //! exactly one succeeds. The other gets a `LeaseConflict` error.
 
-use crate::coordinator_lease::{CoordinatorId, CoordinatorLease, LeaseError};
+use crate::distributed_coordinator_lease::{CoordinatorId, CoordinatorLease, LeaseError};
 use async_trait::async_trait;
 use std::time::Duration;
 

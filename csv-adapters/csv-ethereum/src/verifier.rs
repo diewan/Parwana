@@ -1,7 +1,7 @@
 //! Ethereum chain-specific verification helpers (MPT, seal registry).
 
 use csv_hash::Hash;
-use csv_protocol::verified::{
+use csv_protocol::verification_results::{
     FinalityStrength, InclusionStrength, VerificationAssurance, VerificationResult,
     VerifiedComponents,
 };

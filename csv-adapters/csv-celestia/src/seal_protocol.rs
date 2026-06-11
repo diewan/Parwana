@@ -275,7 +275,7 @@ where
             proof_bytes.extend_from_slice(hash);
         }
 
-        let inclusion_proof = csv_protocol::proof::InclusionProof::new(
+        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
             proof_bytes,
             csv_hash::Hash::new(inclusion.block_hash),
             inclusion.height,
@@ -288,7 +288,7 @@ where
             )) as Box<dyn std::error::Error>
         })?;
 
-        let finality_proof = csv_protocol::proof::FinalityProof::new(
+        let finality_proof = csv_protocol::proof_taxonomy::FinalityProof::new(
             anchor.block_hash.to_vec(),
             anchor.height,
             !finality.quorum_signatures.is_empty(),
@@ -312,7 +312,7 @@ where
         // Signatures would need to be extracted from the DAG bytes if needed
         let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
 
-        csv_protocol::proof_types::ProofBundle::with_signature_scheme(
+        csv_protocol::proof_taxonomy::ProofBundle::with_signature_scheme(
             csv_protocol::signature::SignatureScheme::Secp256k1,
             dag_segment,
             signatures,

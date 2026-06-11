@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use csv_hash::ReplayIdHash;
-use csv_protocol::verified::VerificationAssurance;
+use csv_protocol::verification_results::VerificationAssurance;
 use std::string::String;
 use uuid::Uuid;
 

@@ -332,7 +332,7 @@ async fn test_recovery_with_deterministic_proof_fixture() {
     assert_eq!(incomplete[0].phase, TransferStage::ProofBuilding);
     
     // Verify the proof payload can be deserialized
-    let recovered_bundle: csv_protocol::proof_types::ProofBundle = 
+    let recovered_bundle: csv_protocol::proof_taxonomy::ProofBundle = 
         csv_codec::from_canonical_cbor(&proof_payload).unwrap();
     
     // Verify the recovered bundle has valid structure (access field directly)

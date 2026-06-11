@@ -7,10 +7,12 @@ use csv_hash::Hash;
 use csv_hash::dag::{DAGNode, DAGSegment};
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::finality::ChainCapabilities;
-use csv_protocol::proof_types::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 use csv_protocol::signature::SignatureScheme;
 use ed25519_dalek::{Signer, SigningKey};
 use hex;
+use k256::ecdsa::SigningKey as Secp256k1SigningKey;
+use k256::elliptic_curve::sec1::ToEncodedPoint;
 
 /// Test proof bundle fixture
 pub struct TestProofBundle;
@@ -49,7 +51,7 @@ impl TestProofBundle {
 
         ProofBundle::new(
             transition_dag,
-            vec![vec![7u8; 64]], // Valid signatures
+            vec![create_valid_signature()], // Valid signature with proper format
             seal_ref,
             anchor_ref,
             inclusion_proof,
@@ -57,6 +59,25 @@ impl TestProofBundle {
         )
         .expect("Valid proof bundle data")
     }
+}
+
+/// Create a valid signature in the expected format
+/// Format: [pk_len (4 bytes LE)] [public_key (pk_len bytes)] [signature (remaining bytes)]
+fn create_valid_signature() -> Vec<u8> {
+    // Generate a valid secp256k1 keypair
+    let signing_key = Secp256k1SigningKey::random(&mut rand::rngs::OsRng);
+    let public_key = signing_key.verifying_key().to_encoded_point(false);
+    let public_key_bytes = public_key.as_bytes();
+    
+    // Create a dummy signature (64 bytes for secp256k1)
+    let signature = vec![2u8; 64];
+    let pk_len = (public_key_bytes.len() as u32).to_le_bytes();
+    
+    let mut sig_bytes = Vec::with_capacity(4 + public_key_bytes.len() + signature.len());
+    sig_bytes.extend_from_slice(&pk_len);
+    sig_bytes.extend_from_slice(public_key_bytes);
+    sig_bytes.extend_from_slice(&signature);
+    sig_bytes
 }
 
 /// Test transfer fixture

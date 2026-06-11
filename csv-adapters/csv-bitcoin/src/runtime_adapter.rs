@@ -141,7 +141,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
             .map_err(|e| AdapterError::Generic(format!("Failed to derive owner key: {}", e)))?;
 
         // Delegate to BitcoinChainSanadOps::lock_sanad for actual transaction building and broadcasting
-        let result = csv_protocol::backend::ChainSanadOps::lock_sanad(&*self.sanad_ops, &sanad_id, destination_chain, &owner_key_id)
+        let result = csv_protocol::chain_adapter_traits::ChainSanadOps::lock_sanad(&*self.sanad_ops, &sanad_id, destination_chain, &owner_key_id)
             .await
             .map_err(|e| AdapterError::Generic(format!("Lock sanad failed: {}", e)))?;
 
@@ -209,7 +209,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
         // Create a canonical ProofLeafV1 for this transfer
-        use csv_protocol::proof_types::ProofLeafV1;
+        use csv_protocol::proof_taxonomy::ProofLeafV1;
         let proof_leaf = ProofLeafV1::new(
             transfer.source_chain.clone(),
             transfer.destination_chain.clone(),

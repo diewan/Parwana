@@ -236,7 +236,7 @@ pub struct TransferRecord {
     pub lock_tx_hash: Option<String>,
     /// Inclusion proof of the lock transaction (populated after proof generation)
     #[allow(dead_code)]
-    pub inclusion_proof: Option<csv_protocol::proof::InclusionProof>,
+    pub inclusion_proof: Option<csv_protocol::proof_taxonomy::InclusionProof>,
 }
 
 /// Fluent builder for a cross-chain transfer.

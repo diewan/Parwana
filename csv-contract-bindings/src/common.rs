@@ -191,6 +191,86 @@ impl ContractAbi {
 
     /// Deserialize from JSON string
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
+        // Handle Foundry ABI format which wraps the actual ABI in an "abi" field
+        let parsed: serde_json::Value = serde_json::from_str(json)?;
+        let abi_array = if parsed.is_object() && parsed.get("abi").is_some() {
+            parsed.get("abi").unwrap().as_array().unwrap()
+        } else if parsed.is_array() {
+            parsed.as_array().unwrap()
+        } else {
+            return Err(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid ABI format",
+            )));
+        };
+
+        let mut events = Vec::new();
+        let mut methods = Vec::new();
+
+        for item in abi_array {
+            if let Some(obj) = item.as_object() {
+                let item_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                match item_type {
+                    "function" => {
+                        if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
+                            let inputs: Vec<MethodInput> = obj.get("inputs")
+                                .and_then(|i| i.as_array())
+                                .map(|arr| arr.iter().filter_map(|inp| {
+                                    inp.as_object().map(|obj| MethodInput {
+                                        name: obj.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+                                        r#type: obj.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                                    })
+                                }).collect())
+                                .unwrap_or_default();
+
+                            let outputs: Vec<MethodOutput> = obj.get("outputs")
+                                .and_then(|o| o.as_array())
+                                .map(|arr| arr.iter().filter_map(|out| {
+                                    out.as_object().map(|obj| MethodOutput {
+                                        r#type: obj.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                                    })
+                                }).collect())
+                                .unwrap_or_default();
+
+                            methods.push(ContractMethod {
+                                name: name.to_string(),
+                                signature: name.to_string(), // Simplified
+                                inputs,
+                                outputs,
+                            });
+                        }
+                    }
+                    "event" => {
+                        if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
+                            let inputs: Vec<EventInput> = obj.get("inputs")
+                                .and_then(|i| i.as_array())
+                                .map(|arr| arr.iter().filter_map(|inp| {
+                                    inp.as_object().map(|obj| EventInput {
+                                        name: obj.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+                                        r#type: obj.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                                        indexed: obj.get("indexed").and_then(|i| i.as_bool()).unwrap_or(false),
+                                    })
+                                }).collect())
+                                .unwrap_or_default();
+
+                            events.push(ContractEvent {
+                                name: name.to_string(),
+                                signature: name.to_string(), // Simplified
+                                anonymous: obj.get("anonymous").and_then(|a| a.as_bool()).unwrap_or(false),
+                                inputs,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(Self {
+            name: "CSVSeal".to_string(),
+            version: ContractVersion::current(),
+            events,
+            methods,
+        })
     }
 }

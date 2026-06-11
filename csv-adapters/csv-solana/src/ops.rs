@@ -10,13 +10,13 @@
 //!
 use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_protocol::backend::{
+use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
     FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
 };
-use csv_protocol::proof_types::{FinalityProof, InclusionProof as CoreInclusionProof};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};
 use csv_protocol::seal_protocol::SealProtocol;
@@ -668,7 +668,7 @@ impl ChainSanadOps for SolanaBackend {
         sanad_id: &SanadId,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        use csv_protocol::backend::SanadOperation;
+        use csv_protocol::chain_adapter_traits::SanadOperation;
         use sha2::Digest;
         use solana_sdk::instruction::AccountMeta;
         use solana_sdk::instruction::Instruction;
@@ -737,7 +737,7 @@ impl ChainSanadOps for SolanaBackend {
         destination_chain: &str,
         _owner_key_id: &str,
    ) -> ChainOpResult<SanadOperationResult> {
-        use csv_protocol::backend::SanadOperation;
+        use csv_protocol::chain_adapter_traits::SanadOperation;
         use sha2::Digest;
         use solana_sdk::instruction::AccountMeta;
         use solana_sdk::instruction::Instruction;

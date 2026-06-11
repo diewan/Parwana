@@ -5,7 +5,7 @@ use csv_adapter_core::{
     AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus,
 };
 use csv_hash::Hash;
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 use std::sync::Arc;
 
 use crate::BitcoinRpc;

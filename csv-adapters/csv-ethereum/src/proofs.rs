@@ -424,7 +424,7 @@ fn check_for_seal_used_event(
 /// Convert Ethereum inclusion proof to core type
 pub fn to_core_inclusion_proof(
     proof: &EthereumInclusionProof,
-) -> csv_protocol::proof::InclusionProof {
+) -> csv_protocol::proof_taxonomy::InclusionProof {
     let mut proof_bytes = Vec::new();
     proof_bytes.extend_from_slice(&proof.receipt_rlp);
     proof_bytes.extend_from_slice(&proof.merkle_proof);
@@ -432,7 +432,7 @@ pub fn to_core_inclusion_proof(
     proof_bytes.extend_from_slice(&proof.block_number.to_le_bytes());
     proof_bytes.extend_from_slice(&proof.log_index.to_le_bytes());
 
-    csv_protocol::proof::InclusionProof::new(
+    csv_protocol::proof_taxonomy::InclusionProof::new(
         proof_bytes,
         Hash::new(proof.block_hash),
         proof.block_number,

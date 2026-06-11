@@ -5,7 +5,7 @@
 use thiserror::Error;
 
 use crate::failure_domain::FailureDomain;
-use csv_protocol::verified::VerificationFailure;
+use csv_protocol::verification_results::VerificationFailure;
 
 /// Runtime errors that can occur during transfer execution
 #[derive(Error, Debug)]

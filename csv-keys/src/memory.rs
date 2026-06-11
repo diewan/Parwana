@@ -66,6 +66,16 @@ impl SecretKey {
         self.0.expose_secret()
     }
 
+    /// Get the secret key bytes.
+    ///
+    /// # Security Warning
+    /// This exposes the raw key material. Only use this when absolutely
+    /// necessary for signing operations. The returned reference is tied to
+    /// the lifetime of the SecretKey to prevent accidental copying.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        self.0.expose_secret()
+    }
+
     /// Convert to a Vec<u8>.
     ///
     /// # Security Warning

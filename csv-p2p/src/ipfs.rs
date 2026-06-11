@@ -7,7 +7,7 @@
 #[cfg(feature = "ipfs")]
 use async_trait::async_trait;
 #[cfg(feature = "ipfs")]
-use csv_protocol::proof_types::ProofBundle;
+use csv_protocol::proof_taxonomy::ProofBundle;
 #[cfg(feature = "ipfs")]
 use tokio_stream::wrappers::ReceiverStream;
 #[cfg(feature = "ipfs")]

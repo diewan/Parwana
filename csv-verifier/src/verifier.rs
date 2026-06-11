@@ -43,10 +43,10 @@
 //! unauthorized state transitions or double-spends.
 
 use csv_protocol::error::ProtocolError;
-use csv_protocol::proof::ProofBundle;
-use csv_protocol::proof_types::{HashFunction, ProofLeafV1};
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::proof_taxonomy::{HashFunction, ProofLeafV1};
 use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};
-use csv_protocol::verification::VerificationLevel;
+use csv_protocol::verification_levels::VerificationLevel;
 use serde::Serialize;
 
 type Result<T> = std::result::Result<T, ProtocolError>;
@@ -863,7 +863,7 @@ fn validate_domain_separation(bundle: &ProofBundle) -> Result<()> {
 /// # Security
 /// - Rejects empty proofs
 /// - Validates proof structure before chain-specific verification
-fn validate_inclusion_proof(proof: &csv_protocol::proof::InclusionProof) -> Result<()> {
+fn validate_inclusion_proof(proof: &csv_protocol::proof_taxonomy::InclusionProof) -> Result<()> {
     // Check for empty proof
     if proof.proof_bytes.is_empty() {
         return Err(ProtocolError::InclusionProofFailed(
@@ -872,11 +872,11 @@ fn validate_inclusion_proof(proof: &csv_protocol::proof::InclusionProof) -> Resu
     }
 
     // Validate proof size (prevent DoS via oversized proofs)
-    if proof.proof_bytes.len() > csv_protocol::proof::MAX_PROOF_BYTES {
+    if proof.proof_bytes.len() > csv_protocol::proof_taxonomy::MAX_PROOF_BYTES {
         return Err(ProtocolError::InclusionProofFailed(format!(
             "Inclusion proof too large: {} bytes (max {})",
             proof.proof_bytes.len(),
-            csv_protocol::proof::MAX_PROOF_BYTES
+            csv_protocol::proof_taxonomy::MAX_PROOF_BYTES
         )));
     }
 
@@ -895,7 +895,7 @@ fn validate_inclusion_proof(proof: &csv_protocol::proof::InclusionProof) -> Resu
 /// # Security
 /// - Enforces minimum confirmation count
 /// - Validates finality data is present
-fn validate_finality_proof(proof: &csv_protocol::proof::FinalityProof) -> Result<()> {
+fn validate_finality_proof(proof: &csv_protocol::proof_taxonomy::FinalityProof) -> Result<()> {
     // Enforce minimum confirmation count
     if proof.confirmations < MIN_REQUIRED_CONFIRMATIONS {
         return Err(ProtocolError::FinalityNotReached(format!(
@@ -912,11 +912,11 @@ fn validate_finality_proof(proof: &csv_protocol::proof::FinalityProof) -> Result
     }
 
     // Validate finality data size
-    if proof.finality_data.len() > csv_protocol::proof::MAX_FINALITY_DATA {
+    if proof.finality_data.len() > csv_protocol::proof_taxonomy::MAX_FINALITY_DATA {
         return Err(ProtocolError::FinalityNotReached(format!(
             "Finality proof too large: {} bytes (max {})",
             proof.finality_data.len(),
-            csv_protocol::proof::MAX_FINALITY_DATA
+            csv_protocol::proof_taxonomy::MAX_FINALITY_DATA
         )));
     }
 
@@ -1047,7 +1047,7 @@ mod tests {
     use csv_hash::Hash;
     use csv_hash::dag::{DAGNode, DAGSegment};
     use csv_hash::seal::{CommitAnchor, SealPoint};
-    use csv_protocol::proof::{FinalityProof, InclusionProof};
+    use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
     use csv_protocol::signature::SignatureScheme;
 
     fn make_ed25519_signature_bytes(message: &[u8]) -> Vec<u8> {

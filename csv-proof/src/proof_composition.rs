@@ -2,7 +2,7 @@
 //!
 //! This module provides utilities for composing proofs.
 
-use csv_protocol::proof::{FinalityProof, InclusionProof, ProofBundle};
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 
 /// Proof composer for combining proofs
 pub struct ProofComposer {
