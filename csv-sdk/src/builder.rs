@@ -288,6 +288,7 @@ impl ClientBuilder {
             crate::client::NetworkType::Mainnet
         };
 
+        #[cfg(feature = "runtime-coordinator")]
         for chain in &self.state.enabled_chains {
             if let Some(result) = crate::client::CsvClient::build_adapter_for_chain(
                 chain.clone(),
@@ -303,6 +304,19 @@ impl ClientBuilder {
                     let _ = adapter_registry.lock().unwrap_or_else(|e| e.into_inner()).register_adapter(chain_adapter);
                     log::info!("Automatically registered ChainAdapter for chain: {:?}", chain);
                 }
+            }
+        }
+
+        #[cfg(not(feature = "runtime-coordinator"))]
+        for chain in &self.state.enabled_chains {
+            if let Some(result) = crate::client::CsvClient::build_adapter_for_chain(
+                chain.clone(),
+                &config,
+                network_type,
+                self.state.private_keys.clone(),
+            ).await? {
+                chain_runtime.register_adapter(chain.clone(), result.clone()).await;
+                log::info!("Automatically initialized ChainBackend for chain: {:?}", chain);
             }
         }
 

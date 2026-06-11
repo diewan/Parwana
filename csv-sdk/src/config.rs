@@ -85,6 +85,10 @@ pub struct ChainConfig {
     /// Extended public key for HD wallet derivation (Bitcoin xpub).
     /// Used to derive addresses and watch for transactions without spending.
     pub xpub: Option<String>,
+    /// BIP-39 seed for HD wallet derivation (64 bytes, 128 hex chars).
+    /// Used for Bitcoin wallet creation when xpub is not available.
+    /// Takes precedence over xpub for wallet creation if provided.
+    pub seed: Option<String>,
     /// Deployed seal or mint contract/package address required for mutation.
     pub contract_address: Option<String>,
     /// Deployed program identifier for program-based chains.
@@ -135,6 +139,7 @@ pub struct SanadSealConfig {
             finality_depth: 6,
             enabled: false,
             xpub: None,
+            seed: None,
             contract_address: None,
             program_id: None,
             account: 0,

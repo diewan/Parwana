@@ -54,7 +54,7 @@ pub async fn cmd_balance(
         output::kv("Address", &addr);
 
         // Query balance from chain using csv-sdk runtime
-        match query_balance(&chain, &addr, config).await {
+        match query_balance(&chain, &addr, config, state).await {
             Ok(balance) => {
                 output::kv("Balance", &format!("{} {}", balance, chain_symbol(&chain)));
             }
@@ -144,7 +144,7 @@ pub fn cmd_list(
 ///
 /// This function uses only the unified CsvClient runtime, avoiding direct
 /// chain adapter dependencies per Phase 5 of the Production Guarantee Plan.
-async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<f64> {
+async fn query_balance(chain: &Chain, address: &str, config: &Config, state: &UnifiedStateManager) -> Result<f64> {
     use csv_sdk::config::{ChainConfig, RpcConfig, StoreConfig};
     use csv_sdk::prelude::NetworkType;
     use std::collections::HashMap;
@@ -152,12 +152,46 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
 
-    // Build SDK config from CLI config, passing through xpub
+    // Build SDK config from CLI config, passing through seed for Bitcoin
     let sdk_chain = config.chains.get(&core_chain.clone()).cloned();
     let wallet_xpub = config
         .wallets
         .get(&core_chain.clone())
         .and_then(|w| w.xpub.clone());
+
+    // For Bitcoin, derive seed from mnemonic if available
+    let wallet_seed = if chain.as_str() == "bitcoin" {
+        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
+            let mnemonic = Mnemonic::from_phrase(mnemonic_phrase)
+                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+            let seed = mnemonic.to_seed(None);
+            Some(hex::encode(seed.as_bytes()))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Derive private keys from mnemonic for chains that require signing
+    let mut private_keys = std::collections::HashMap::new();
+    if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
+        let mnemonic = Mnemonic::from_phrase(mnemonic_phrase)
+            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+        let seed = mnemonic.to_seed(None);
+        let seed_array = *seed.as_bytes();
+
+        // Derive Ethereum private key
+        if chain.as_str() == "ethereum" {
+            use csv_keys::bip44;
+            let eth_key = bip44::derive_key_from_name(&seed_array, "ethereum", 0, 0)
+                .map_err(|e| anyhow::anyhow!("Failed to derive Ethereum key: {}", e))?;
+            private_keys.insert(
+                "ethereum".to_string(),
+                csv_protocol::secret::SharedSecretHandle::from_bytes(*eth_key.expose_secret()),
+            );
+        }
+    }
 
     let mut sdk_chains = HashMap::new();
     if let Some(cc) = &sdk_chain {
@@ -174,6 +208,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 finality_depth: cc.finality_depth as u32,
                 enabled: true,
                 xpub: wallet_xpub,
+                seed: wallet_seed,
                 contract_address: cc.contract_address.clone(),
                 program_id: cc.program_id.clone(),
                 account: 0,
@@ -183,7 +218,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
             },
         );
     } else {
-        // Use default chain config with xpub from wallet config
+        // Use default chain config with seed/xpub from wallet config
         let rpc_url = config.get_rpc_url(&core_chain);
         let rpc = RpcConfig {
             url: rpc_url,
@@ -198,6 +233,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
                 finality_depth: 6,
                 enabled: true,
                 xpub: wallet_xpub,
+                seed: wallet_seed,
                 contract_address: None,
                 program_id: config.chain(&core_chain).ok().and_then(|c| c.program_id.clone()),
                 account: 0,
@@ -221,13 +257,23 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config) -> Result<
     };
 
     // Build CSV client with the requested chain enabled and config
-    let client = CsvClient::builder()
+    let client_builder = CsvClient::builder()
         .with_chain(core_chain.clone())
         .with_store_backend(StoreBackend::InMemory)
-        .with_config(sdk_config)
-        .build()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
+        .with_config(sdk_config);
+
+    let client = if !private_keys.is_empty() {
+        client_builder
+            .with_private_keys(private_keys)
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?
+    } else {
+        client_builder
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?
+    };
 
     // Get chain runtime and query balance through the unified runtime
     let clean_address = address.strip_prefix("0x").unwrap_or(address);

@@ -2,8 +2,8 @@
 
 **Created:** 2026-06-09
 **Last Updated:** 2026-06-11
-**Status:** Phase 6 complete (AUDIT critical blockers resolved). Phases 7-12 pending.
-**Priority Order:** Chain-independent proof leaf schema > Wallet unification > CLI content descriptor support > Serde stripping > Chain registry > Recovery > Naming reorganization
+**Status:** Phases 1-6, 10-11 complete. Critical AUDIT blockers resolved. Phases 7-9, 12 pending.
+**Priority Order:** Chain-independent proof leaf schema (Critical) > Wallet unification (High) > Secret handling security (High) > Replay storage unification (High) > TransferExecutionLog integration (High) > CLI content descriptor support (Medium) > Serde stripping > Chain registry > Recovery > Contract freeze
 
 ---
 
@@ -44,6 +44,8 @@
 | 2026-06-10 | 6.5 | B-008 Ethereum MPT real verification - csv-adapters/csv-ethereum/src/mpt.rs already has real account proof decoding using keccak256(address), alloy-trie MPT verification, storage root extraction, and storage slot derivation |
 | 2026-06-10 | 6.6 | B-009 Move fake proofs to csv-testkit - Fake proof bytes mentioned in AUDIT.md (line 2319) not found in current codebase, all test code properly gated behind #[cfg(test)], item appears already resolved or AUDIT.md reference is outdated |
 | 2026-06-11 | 6.1-6.7 | AUDIT critical blockers resolved: B-003 (SanadPayloadDescriptor), B-004 (SDK fake bytes), B-005 (schema validation), B-006 (proof validation), B-008 (Ethereum MPT), B-009 (fake proofs), B-010/B-011 (contract unification) |
+| 2026-06-11 | M1.x | csv-core migration completed: signature.rs, backend.rs, VerificationLevel moved to csv-protocol; csv-verifier and csv-storage dependencies migrated to csv-protocol + csv-proof + csv-hash |
+| 2026-06-11 | T1,T3,T4,T6 | Critical tasks resolved: Finality enforcement (always strict), lease.rs .expect() removed, CLI has no protocol authority state, csv-wallet workspace drift resolved |
 
 ---
 
@@ -85,28 +87,28 @@
 
 ## Phase Overview
 
-| Phase | Description | Depends On | Est. Days | Status |
-|---|---|---|---|---|
-| 1.1 | Canonical state types in csv-store | — | 0.5 | **DONE** |
-| 1.2 | CLI state/trace subcommands | 1.1 | 1 | **DONE** |
-| 1.3 | Fix state collapsing in cmd_list | 1.2 | 0.5 | **DONE** |
-| 1.4 | Fix Ethereum state mapping | 1.3 | 0.5 | **DONE** |
-| 1.5 | Fix Sui/Solana/Aptos state mapping | 1.3 | 0.5 | **DONE** |
-| 1.6 | Display formatting | 1.3 | 0.5 | **DONE** |
-| 2 | Ethereum contract unification + canonical events | Phase 1 | 3-4 | **DONE** |
-| 3 | ABI constitution alignment + binding generation | Phase 2 | 2-3 | **DONE** |
-| 4 | Solana/Sui/Aptos canonical state + events | Phase 1 | 3-4 | **DONE** |
-| 5 | CLI adapter trait SanadStateReader | Phase 1 | 2-3 | **DONE** |
-| 6 | AUDIT critical blockers (Sanad ID, proof, schema, ZK, MPT, secrets) | Phase 1 | 5-7 | **DONE** |
-| 7 | Chain-independent proof leaf schema | Phase 6 | 3-4 | Pending |
-| 8 | Serde audit manifest + L0-L4 stripping | Phase 7 | 5-7 | Pending |
-| 9 | Chain registry + config-driven addition | Phase 8 | 4-6 | Pending |
-| 10 | Recovery implementation (execute_from_lock/proof, AwaitingFinality, ProofBuilding) | Phase 6, 7 | 4-6 | Pending |
-| 11 | CLI content descriptor support | Phase 6 | 2-3 | Pending |
-| 12 | Wallet unification (csv-wallet crate, typed secret handles) | Phase 6 | 4-6 | Pending |
-| 13 | Solana test matrix + chain management wiring | Phase 6 | 2-3 | **DONE** |
-| 14 | Self-expressive naming reorganization | Phase 1-10 | 5-7 | **DONE** |
-| 15 | Contract freeze (ABI hash, bytecode hash, governance, adversarial tests) | Phase 2-4 | 4-6 | Pending |
+| Phase | Description | Depends On | Est. Days | Status | Priority |
+|---|---|---|---|---|---|
+| 1.1 | Canonical state types in csv-store | — | 0.5 | **DONE** | - |
+| 1.2 | CLI state/trace subcommands | 1.1 | 1 | **DONE** | - |
+| 1.3 | Fix state collapsing in cmd_list | 1.2 | 0.5 | **DONE** | - |
+| 1.4 | Fix Ethereum state mapping | 1.3 | 0.5 | **DONE** | - |
+| 1.5 | Fix Sui/Solana/Aptos state mapping | 1.3 | 0.5 | **DONE** | - |
+| 1.6 | Display formatting | 1.3 | 0.5 | **DONE** | - |
+| 2 | Ethereum contract unification + canonical events | Phase 1 | 3-4 | **DONE** | - |
+| 3 | ABI constitution alignment + binding generation | Phase 2 | 2-3 | **DONE** | - |
+| 4 | Solana/Sui/Aptos canonical state + events | Phase 1 | 3-4 | **DONE** | - |
+| 5 | CLI adapter trait SanadStateReader | Phase 1 | 2-3 | **DONE** | - |
+| 6 | AUDIT critical blockers (Sanad ID, proof, schema, ZK, MPT, secrets) | Phase 1 | 5-7 | **DONE** | - |
+| 7 | Chain-independent proof leaf schema | Phase 6 | 3-4 | Pending | **Critical** |
+| 8 | Serde audit manifest + L0-L4 stripping | Phase 7 | 5-7 | Pending | Medium |
+| 9 | Chain registry + config-driven addition | Phase 8 | 4-6 | Pending | Medium |
+| 10 | Recovery implementation (execute_from_lock/proof, AwaitingFinality, ProofBuilding) | Phase 6, 7 | 4-6 | Pending | High |
+| 11 | CLI content descriptor support | Phase 6 | 2-3 | Pending | Medium |
+| 12 | Wallet unification (csv-wallet crate, typed secret handles) | Phase 6 | 4-6 | Pending | High |
+| 13 | Solana test matrix + chain management wiring | Phase 6 | 2-3 | **DONE** | - |
+| 14 | Self-expressive naming reorganization | Phase 1-10 | 5-7 | **DONE** | - |
+| 15 | Contract freeze (ABI hash, bytecode hash, governance, adversarial tests) | Phase 2-4 | 4-6 | Pending | High |
 
 ---
 
@@ -578,6 +580,24 @@ Currently only Ethereum has both get_sanad_state and get_seal_state query functi
 
 ---
 
+## Additional Critical/High Priority Tasks
+
+**Source:** `csv_migration_plan.md` (Critical Tasks T1-T6)
+
+**Current Status:** **PARTIALLY COMPLETED**
+
+**Completed:**
+- T1: Finality enforcement - runtime_mode.rs enforces_strict_finality() always returns true
+- T3: Eliminated .expect() call from lease.rs production path (changed to proper error handling)
+- T4: Lease/Transfer state out of CLI - verified (CLI has no protocol authority state)
+- T6: Resolved csv-wallet workspace drift - removed csv-wallet references from SECURITY.md
+
+**Remaining High Priority:**
+- T2: TransferExecutionLog integration - execution_journal.rs exists but needs integration into TransferCoordinator with resume_transfer()
+- T5: Unify replay storage backend - create ReplayDatabase trait, add conformance tests
+
+---
+
 ## Phase 7: Chain-Independent Proof Leaf Schema
 
 **Source:** `AUDIT.md` Section 2.5, B-012
@@ -961,14 +981,35 @@ See CANONICAL-NAMING.md for complete cross-chain mapping tables and implementati
 - Phase 0 (preparation): Source documents read, conflicts resolved, plan created
 - Phase 1 (CLI canonical state): DONE — 2026-06-09
 - Phase 2 (Ethereum contract unification + canonical events): DONE — 2026-06-09
+- Phase 3 (ABI constitution alignment): DONE — 2026-06-10
+- Phase 4 (Solana/Sui/Aptos canonical state): DONE — 2026-06-10
+- Phase 5 (CLI adapter trait SanadStateReader): DONE — 2026-06-10
+- Phase 6 (AUDIT critical blockers): DONE — 2026-06-11
+- Phase 10 (Solana test matrix + chain management): DONE — 2026-06-10
+- Phase 11 (Self-expressive naming reorganization): DONE — 2026-06-10
+- M1.x (csv-core migration): DONE — 2026-06-11
+- T1, T3, T4, T6 (Critical tasks): DONE — 2026-06-11
 
 ### In Progress
 
 - None
 
-### Pending
+### Pending (Priority Order)
 
-- Phase 3-12: See status column above
+**Critical:**
+- Phase 7: Chain-independent proof leaf schema (B-012)
+
+**High:**
+- Phase 10: Recovery implementation (T2: TransferExecutionLog integration)
+- Phase 12: Wallet unification (B-014: centralized csv-wallet crate)
+- Security: Private key as Option<String> (B-015: typed secret handles)
+- Storage: Unify replay storage backend (T5: ReplayDatabase trait)
+- Phase 15: Contract freeze (governance, adversarial tests)
+
+**Medium:**
+- Phase 8: Serde audit manifest + L0-L4 stripping
+- Phase 9: Chain registry + config-driven addition
+- Phase 11: CLI content descriptor support (B-013)
 
 ### Cross-Document Task References
 

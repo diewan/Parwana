@@ -61,7 +61,7 @@ pub type AdapterResult = FactoryAdapterResult;
 
 #[cfg(not(feature = "runtime-coordinator"))]
 // Type alias for legacy result (no factory support)
-pub type AdapterResult = std::sync::Arc<dyn csv_protocol::backend::ChainBackend>;
+pub type AdapterResult = std::sync::Arc<dyn csv_protocol::chain_adapter_traits::ChainBackend>;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::TransferCoordinator;
@@ -486,8 +486,11 @@ impl CsvClient {
                     }
                 }
 
-                // Extract Bitcoin seed from private_keys if available
-                let bitcoin_seed = private_keys
+                // Extract Bitcoin seed from chain config if available (64-byte BIP-39 seed)
+                let bitcoin_seed_hex = chain_config.and_then(|c| c.seed.clone());
+                
+                // Extract Bitcoin private key from private_keys if available (32-byte)
+                let bitcoin_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("bitcoin"))
                     .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
@@ -511,7 +514,8 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: bitcoin_seed.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: bitcoin_private_key.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    seed: bitcoin_seed_hex,
                     account: chain_config.map(|c| c.account).unwrap_or(0),
                     index: chain_config.map(|c| c.index).unwrap_or(0),
                     contract_address: None,
@@ -591,6 +595,7 @@ impl CsvClient {
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
                     secret_key: eth_private_key.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    seed: None,
                     account: 0,
                     index: 0,
                     contract_address: Some(address.to_string()),
@@ -736,6 +741,7 @@ impl CsvClient {
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
                     secret_key: sui_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    seed: None,
                     account: 0,
                     index: 0,
                     contract_address: Some(contract_address.to_string()),
@@ -890,6 +896,7 @@ impl CsvClient {
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
                     secret_key: aptos_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    seed: None,
                     account: 0,
                     index: 0,
                     contract_address: chain_config.and_then(|c| c.contract_address.clone()),
@@ -1058,6 +1065,7 @@ impl CsvClient {
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
                     secret_key: solana_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    seed: None,
                     account: 0,
                     index: 0,
                     contract_address: None,

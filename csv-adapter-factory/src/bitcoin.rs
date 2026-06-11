@@ -29,11 +29,16 @@ impl AdapterFactory for BitcoinFactory {
             NetworkType::Mainnet => BtcNetwork::Mainnet,
         };
 
-        // Extract secret key bytes for wallet creation
-        let seed = config.secret_key
-            .as_bytes()
-            .map(|bytes| hex::encode(bytes))
-            .ok_or_else(|| FactoryError::InvalidConfig("Secret key not available".to_string()))?;
+        // Extract seed for wallet creation (64-byte BIP-39 seed takes precedence)
+        let seed = if let Some(seed_hex) = &config.seed {
+            seed_hex.clone()
+        } else {
+            // Fallback to secret_key (32-byte) - this will fail validation but provides a better error
+            config.secret_key
+                .as_bytes()
+                .map(|bytes| hex::encode(bytes))
+                .ok_or_else(|| FactoryError::InvalidConfig("Neither seed nor secret key available".to_string()))?
+        };
 
         // Select the highest priority REST endpoint
         let rest_endpoint = config.rpc_endpoints

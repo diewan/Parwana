@@ -58,6 +58,9 @@ pub struct AdapterConfig {
     pub rpc_endpoints: Vec<RpcEndpoint>,
     /// Secret key handle for signing operations (shared via Arc)
     pub secret_key: SharedSecretHandle,
+    /// BIP-39 seed for HD wallet derivation (64 bytes, 128 hex chars)
+    /// Used for Bitcoin wallet creation when available.
+    pub seed: Option<String>,
     /// Account index for HD derivation
     pub account: u32,
     /// Index for HD derivation

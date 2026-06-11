@@ -3,11 +3,15 @@
 **Last validated:** 2026-06-11
 **Scope:** Full repository checkout. This version reflects the actual current state.
 
-**Verdict:** **Critical blockers resolved. Core protocol types are production-ready. Remaining work is in runtime orchestration and wallet integration.**
+**Verdict:** **Critical blockers resolved. Core protocol types are production-ready. Remaining work is in runtime orchestration, wallet integration, and cross-chain proof leaf schema.**
 
 **Recent progress (2026-06-11):**
 
 - Phase 6 completed: All AUDIT critical blockers (B-003, B-004, B-005, B-006, B-008) resolved with real implementations
+- Phase 10 completed: Solana test matrix + chain management wiring
+- Phase 11 completed: Self-expressive naming reorganization
+- M1.x completed: csv-core migration (signature.rs, backend.rs, VerificationLevel moved to csv-protocol)
+- T1, T3, T4, T6 completed: Finality enforcement, lease.rs .expect() removed, CLI protocol authority state verified, csv-wallet workspace drift resolved
 - SanadPayloadDescriptor fully implemented with domain-separated ID derivation
 - Schema validation has comprehensive real validation with tests
 - Proof validation has real cryptographic Merkle verification
@@ -46,6 +50,10 @@
 **High priority remaining:** B-014 (scattered wallet), B-015 (unsafe secret handling).
 
 **Medium priority remaining:** B-013 (CLI sanad create needs content descriptor support).
+
+**Additional high priority tasks (from csv_migration_plan.md):**
+- T2: TransferExecutionLog integration (execution_journal.rs needs integration into TransferCoordinator)
+- T5: Unify replay storage backend (create ReplayDatabase trait, add conformance tests)
 
 **Note:** B-001, B-002, B-007 were resolved (csv-core removal) and removed from this list. See PLAN.md progress log for details.
 
@@ -435,17 +443,15 @@ csv conformance verify-contract --abi abi.json --events events.json --vectors ve
 - `csv-adapters-*`: chain-specific proof/seal backends
 - `csv-apps-*`: CLI, MCP, examples
 
-Remaining concern: `csv-protocol` still carries concrete crypto dependencies (ed25519, secp256k1, ML-DSA). Consider moving to `csv-keys`/`csv-crypto`.
+**Additional migration completed (M1.x):**
+- signature.rs moved from csv-core to csv-protocol
+- backend.rs moved from csv-core to csv-protocol
+- VerificationLevel moved from csv-core/mcp to csv-protocol
+- csv-verifier dependency migrated to csv-protocol + csv-proof + csv-hash
+- csv-storage dependency migrated to csv-protocol + csv-hash
+- HashEntry added to csv-protocol cross_chain module for csv-storage compatibility
 
-- `csv-primitives`: hashes, ids, domain tags, bytes, errors.
-- `csv-codec`: canonical encoding only.
-- `csv-protocol`: versioned Sanad/proof/seal state machine, no storage, no contracts, no runtime.
-- `csv-proof`: proof object model and verifier traits.
-- `csv-content`: payload descriptor, content tree, selective disclosure.
-- `csv-runtime`: orchestration, persistence, recovery, backpressure.
-- `csv-sdk`: ergonomic wrapper only.
-- `csv-adapters-*`: chain-specific proof/seal backends.
-- `csv-apps-*`: CLI, MCP, examples.
+Remaining concern: `csv-protocol` still carries concrete crypto dependencies (ed25519, secp256k1, ML-DSA). Consider moving to `csv-keys`/`csv-crypto`.
 
 ### 5.2 Adapter factory duplicates type names in compressed snapshot
 
