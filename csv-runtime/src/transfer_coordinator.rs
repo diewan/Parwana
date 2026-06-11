@@ -2395,7 +2395,7 @@ mod tests {
 
         fn build_fake_mint_result() -> MintResult {
             MintResult {
-                tx_hash: "0x123".to_string(),
+                tx_hash: hex::encode([0u8; 32]),
                 block_height: 100,
             }
         }
@@ -2464,7 +2464,7 @@ mod tests {
         }
 
         fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
-            csv_protocol::signature::SignatureScheme::Secp256k1
+            csv_protocol::signature::SignatureScheme::Ed25519
         }
 
         async fn lock_sanad(
@@ -2549,7 +2549,7 @@ mod tests {
             id: "recover-transfer".to_string(),
             source_chain: "test-chain".to_string(),
             destination_chain: "test-chain".to_string(),
-            lock_tx_hash: vec![1u8; 32],
+            lock_tx_hash: vec![1u8; 32], // Raw 32-byte hash
             lock_output_index: 0,
             sanad_id: csv_hash::Hash::new([44u8; 32]),
             transition_id: vec![3u8; 32],

@@ -80,7 +80,7 @@ fn protocol_hashes_are_stable() {
     assert_eq!(h1, h2, "Commitment hash must be stable across calls");
 
     // 6. Verify roundtrip preserves hash
-    let cbor_c = commitment.to_canonical_bytes();
+    let cbor_c = to_canonical_cbor(&commitment).expect("commitment serialization");
     let restored_commitment: Commitment =
         from_canonical_cbor(&cbor_c).expect("commitment deserialization");
     assert_eq!(

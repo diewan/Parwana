@@ -22,11 +22,12 @@ impl TestProofBundle {
     /// Uses safe constructors with cryptographically valid test data
     pub fn minimal() -> ProofBundle {
         // Use valid test data that passes validation
+        let proof_bytes = vec![1u8; 32]; // Proof bytes that will be used in both anchor and inclusion
         let inclusion_proof = InclusionProof::new(
-            vec![1u8; 32],        // Valid block hash (non-zero)
-            Hash::new([2u8; 32]), // Valid commitment hash
-            100,                  // Valid block height
-            0,                    // Valid transaction index
+            proof_bytes.clone(),      // Proof bytes
+            Hash::new([2u8; 32]),    // Valid commitment hash
+            100,                     // Valid block height
+            0,                       // Valid transaction index
         )
         .expect("Valid inclusion proof data");
 
@@ -45,13 +46,19 @@ impl TestProofBundle {
             vec![vec![]],
             vec![],
         );
-        let transition_dag = DAGSegment::new(vec![dag_node], Hash::new([4u8; 32]));
+        let root_commitment = Hash::new([4u8; 32]);
+        let transition_dag = DAGSegment::new(vec![dag_node], root_commitment);
         let seal_ref = SealPoint::new(vec![5u8; 32], Some(42), None).unwrap();
-        let anchor_ref = CommitAnchor::new(vec![6u8; 32], 100, vec![]).unwrap();
+        // anchor_ref.metadata must match inclusion_proof.proof_bytes
+        let anchor_ref = CommitAnchor::new(vec![1u8; 32], 100, proof_bytes.clone()).unwrap();
 
-        ProofBundle::new(
+        // Create signature that signs the actual root commitment
+        let signature = create_valid_signature(&root_commitment);
+
+        ProofBundle::with_signature_scheme(
+            SignatureScheme::Ed25519,
             transition_dag,
-            vec![create_valid_signature()], // Valid signature with proper format
+            vec![signature], // Valid signature with proper format
             seal_ref,
             anchor_ref,
             inclusion_proof,
@@ -63,20 +70,20 @@ impl TestProofBundle {
 
 /// Create a valid signature in the expected format
 /// Format: [pk_len (4 bytes LE)] [public_key (pk_len bytes)] [signature (remaining bytes)]
-fn create_valid_signature() -> Vec<u8> {
-    // Generate a valid secp256k1 keypair
-    let signing_key = Secp256k1SigningKey::random(&mut rand::rngs::OsRng);
-    let public_key = signing_key.verifying_key().to_encoded_point(false);
-    let public_key_bytes = public_key.as_bytes();
+fn create_valid_signature(commitment: &Hash) -> Vec<u8> {
+    use ed25519_dalek::{Signer, SigningKey};
     
-    // Create a dummy signature (64 bytes for secp256k1)
-    let signature = vec![2u8; 64];
-    let pk_len = (public_key_bytes.len() as u32).to_le_bytes();
+    // Use a deterministic keypair for reproducible test signatures
+    let signing_key_bytes = [1u8; 32]; // Fixed seed for deterministic key
+    let signing_key = SigningKey::from_bytes(&signing_key_bytes);
+    let verifying_key = signing_key.verifying_key();
+    let signature = signing_key.sign(commitment.as_bytes());
     
-    let mut sig_bytes = Vec::with_capacity(4 + public_key_bytes.len() + signature.len());
-    sig_bytes.extend_from_slice(&pk_len);
-    sig_bytes.extend_from_slice(public_key_bytes);
-    sig_bytes.extend_from_slice(&signature);
+    // Format: [pk_len (4 bytes LE)] [public_key (32 bytes)] [signature (64 bytes)]
+    let mut sig_bytes = Vec::with_capacity(4 + 32 + 64);
+    sig_bytes.extend_from_slice(&32u32.to_le_bytes());
+    sig_bytes.extend_from_slice(verifying_key.as_bytes());
+    sig_bytes.extend_from_slice(signature.to_bytes().as_slice());
     sig_bytes
 }
 
@@ -126,12 +133,20 @@ impl TestAdapter {
         sanad_id: &csv_hash::Hash,
     ) -> Result<ProofBundle, String> {
         let root_commitment = csv_hash::Hash::new([9u8; 32]);
-        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        
+        // Use deterministic ed25519 signature for consistency
+        use ed25519_dalek::{Signer, SigningKey};
+        
+        let signing_key_bytes = [2u8; 32]; // Different fixed seed
+        let signing_key = SigningKey::from_bytes(&signing_key_bytes);
+        let verifying_key = signing_key.verifying_key();
         let signature = signing_key.sign(root_commitment.as_bytes());
-        let mut encoded_signature = Vec::with_capacity(100);
+        
+        let mut encoded_signature = Vec::with_capacity(4 + 32 + 64);
         encoded_signature.extend_from_slice(&32u32.to_le_bytes());
-        encoded_signature.extend_from_slice(signing_key.verifying_key().as_bytes());
-        encoded_signature.extend_from_slice(&signature.to_bytes());
+        encoded_signature.extend_from_slice(verifying_key.as_bytes());
+        encoded_signature.extend_from_slice(signature.to_bytes().as_slice());
+        
         let proof_bytes = vec![0xA5u8; 32]; // Fake proof bytes for testing only
         let node = DAGNode::new(
             csv_hash::Hash::new([1u8; 32]),
@@ -145,7 +160,8 @@ impl TestAdapter {
             DAGSegment::new(vec![node], root_commitment),
             vec![encoded_signature],
             SealPoint::new(sanad_id.as_bytes().to_vec(), Some(0), None).unwrap(),
-            CommitAnchor::new(vec![0xCCu8; 32], 100, proof_bytes.clone()).unwrap(),
+            // anchor_ref.metadata must match inclusion_proof.proof_bytes
+            CommitAnchor::new(vec![1u8; 32], 100, proof_bytes.clone()).unwrap(),
             InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0)
                 .unwrap(),
             FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),

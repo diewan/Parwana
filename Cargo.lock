@@ -3369,8 +3369,11 @@ dependencies = [
  "csv-verifier",
  "ed25519-dalek",
  "hex",
+ "k256",
+ "rand 0.8.6",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 

@@ -14,7 +14,7 @@
 //! ## Usage
 //!
 //! ```
-//! use csv_protocol::secret::{SecretHandle, SecretSource};
+//! use csv_protocol::secret::SecretHandle;
 //! use csv_keys::memory::SecretKey;
 //!
 //! // Create from raw key (temporary, e.g., for testing)
@@ -22,7 +22,8 @@
 //! let handle = SecretHandle::from_key(key);
 //!
 //! // Create from keystore reference (production)
-//! let handle = SecretHandle::from_keystore("path/to/keystore.json", "passphrase");
+//! let passphrase = csv_keys::memory::Passphrase::new("passphrase");
+//! let handle = SecretHandle::from_keystore("path/to/keystore.json", passphrase);
 //! ```
 
 use csv_keys::memory::SecretKey;
