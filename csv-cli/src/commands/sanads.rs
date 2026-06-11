@@ -382,9 +382,20 @@ async fn cmd_create(
     let mut private_keys = std::collections::HashMap::new();
     let key_bytes = hex::decode(&key_hex)
         .map_err(|e| anyhow::anyhow!("Failed to decode private key hex: {}", e))?;
-    let key_array: [u8; 32] = key_bytes.try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid private key length"))?;
-    let secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(key_array);
+
+    // Bitcoin uses 64-byte seed for HD derivation, other chains use 32-byte private key
+    let secret_handle = if chain.as_str() == "bitcoin" {
+        // For Bitcoin, use the 64-byte seed directly
+        let seed_array: [u8; 64] = key_bytes.try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid seed length for Bitcoin (expected 64 bytes)"))?;
+        csv_protocol::secret::SharedSecretHandle::from_seed(seed_array)
+    } else {
+        // For other chains, use 32-byte private key
+        let key_array: [u8; 32] = key_bytes.try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid private key length (expected 32 bytes)"))?;
+        csv_protocol::secret::SharedSecretHandle::from_bytes(key_array)
+    };
+
     private_keys.insert(chain.as_str().to_string(), secret_handle);
 
     // Build CSV client with the requested chain enabled
@@ -1498,9 +1509,20 @@ async fn cmd_consume(
     let mut private_keys = std::collections::HashMap::new();
     let key_bytes = hex::decode(&key_hex)
         .map_err(|e| anyhow::anyhow!("Failed to decode private key hex: {}", e))?;
-    let key_array: [u8; 32] = key_bytes.try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid private key length"))?;
-    let secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(key_array);
+
+    // Bitcoin uses 64-byte seed for HD derivation, other chains use 32-byte private key
+    let secret_handle = if chain.as_str() == "bitcoin" {
+        // For Bitcoin, use the 64-byte seed directly
+        let seed_array: [u8; 64] = key_bytes.try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid seed length for Bitcoin (expected 64 bytes)"))?;
+        csv_protocol::secret::SharedSecretHandle::from_seed(seed_array)
+    } else {
+        // For other chains, use 32-byte private key
+        let key_array: [u8; 32] = key_bytes.try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid private key length (expected 32 bytes)"))?;
+        csv_protocol::secret::SharedSecretHandle::from_bytes(key_array)
+    };
+
     private_keys.insert(chain.as_str().to_string(), secret_handle);
 
     // Note: SDK adapters are automatically created during client build

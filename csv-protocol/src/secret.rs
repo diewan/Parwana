@@ -59,6 +59,8 @@ impl std::fmt::Debug for SecretHandle {
 enum SecretSource {
     /// Raw secret key (temporary, e.g., for testing)
     Raw(SecretKey),
+    /// 64-byte BIP-39 seed for HD wallet derivation (used by Bitcoin)
+    Seed([u8; 64]),
     /// Reference to encrypted keystore file
     Keystore {
         /// Path to the keystore file
@@ -78,6 +80,14 @@ impl SecretHandle {
     pub fn from_key(key: SecretKey) -> Self {
         Self {
             source: SecretSource::Raw(key),
+        }
+    }
+
+    /// Create a secret handle from a 64-byte BIP-39 seed (for HD wallet derivation).
+    /// This is used by Bitcoin and other chains that require the full seed for HD derivation.
+    pub fn from_seed(seed: [u8; 64]) -> Self {
+        Self {
+            source: SecretSource::Seed(seed),
         }
     }
 
@@ -112,12 +122,21 @@ impl SecretHandle {
     pub fn as_bytes(&self) -> Option<&[u8; 32]> {
         match &self.source {
             SecretSource::Raw(key) => Some(key.expose_secret()),
+            SecretSource::Seed(_) => None, // 64-byte seed, not a 32-byte key
             SecretSource::Keystore { .. } => {
                 // For keystore-backed handles, we would decrypt on demand.
                 // This is a simplification — in production, you'd load the
                 // key from the keystore when needed.
                 None
             }
+        }
+    }
+
+    /// Get the 64-byte seed bytes, if available (for Bitcoin HD derivation).
+    pub fn as_seed(&self) -> Option<&[u8; 64]> {
+        match &self.source {
+            SecretSource::Seed(seed) => Some(seed),
+            _ => None,
         }
     }
 
@@ -158,10 +177,16 @@ impl SharedSecretHandle {
         Self(std::sync::Arc::new(handle))
     }
 
-    /// Create a shared secret handle from raw bytes.
+    /// Create a shared secret handle from raw bytes (32-byte private key).
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         let key = SecretKey::new(bytes);
         Self::new(SecretHandle::from_key(key))
+    }
+
+    /// Create a shared secret handle from a 64-byte BIP-39 seed (for HD wallet derivation).
+    /// This is used by Bitcoin and other chains that require the full seed for HD derivation.
+    pub fn from_seed(seed: [u8; 64]) -> Self {
+        Self::new(SecretHandle::from_seed(seed))
     }
 
     /// Create a shared secret handle with no key (read-only mode).
