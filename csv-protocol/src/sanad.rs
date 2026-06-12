@@ -16,7 +16,8 @@
 
 pub use csv_hash::sanad::SanadId;
 
-use serde::{Deserialize, Serialize};
+use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
+use csv_codec::CodecError;
 
 use crate::error::{ProtocolError, Result};
 use crate::signature::SignatureScheme;
@@ -51,9 +52,8 @@ use csv_hash::{Commitment, Hash};
 /// - `resource_limits_hash`: Hash of resource limits (max size, depth, etc.)
 ///
 /// **Layer:** L1
-/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
-/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SanadPayloadDescriptor {
     /// Schema identifier (e.g., "csv.sanad.content.v1")
     pub schema_id: String,
@@ -108,11 +108,11 @@ impl SanadPayloadDescriptor {
         }
     }
 
-    /// Compute the canonical descriptor hash (CBOR-serialized, then hashed).
+    /// Compute the canonical descriptor hash (manually encoded, then hashed).
     ///
     /// This hash is what gets bound into the SanadId derivation.
     pub fn compute_hash(&self) -> Hash {
-        match to_canonical_cbor(self) {
+        match self.encode_mce() {
             Ok(bytes) => Hash::sha256(&bytes),
             Err(_) => {
                 // Fallback: if canonical serialization fails, use a zero hash.
@@ -147,12 +147,192 @@ impl SanadPayloadDescriptor {
     }
 }
 
+impl CanonicalEncoding for SanadPayloadDescriptor {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => {
+                // MCE: fixed-width byte concatenation
+                let mut result = Vec::new();
+                
+                // schema_id: length-prefixed string
+                let schema_id_bytes = self.schema_id.as_bytes();
+                result.extend_from_slice(&ManualEncoder::encode_u32_le(schema_id_bytes.len() as u32));
+                result.extend_from_slice(schema_id_bytes);
+                
+                // schema_hash: 32 bytes
+                result.extend_from_slice(&self.schema_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // payload_codec: 1 byte
+                result.push(self.payload_codec);
+                
+                // payload_hash: 32 bytes
+                result.extend_from_slice(&self.payload_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // content_root: optional 32 bytes (1 byte flag + 32 bytes if present)
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.content_root.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                // attachment_root: optional 32 bytes
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.attachment_root.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                // claims_root: optional 32 bytes
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.claims_root.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                // participants_root: optional 32 bytes
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.participants_root.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                // disclosure_policy_hash: 32 bytes
+                result.extend_from_slice(&self.disclosure_policy_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // proof_policy_hash: 32 bytes
+                result.extend_from_slice(&self.proof_policy_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // resource_limits_hash: 32 bytes
+                result.extend_from_slice(&self.resource_limits_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                Ok(result)
+            }
+            EncodingFormat::ManualBinary => {
+                // Manual binary: same as MCE for now
+                self.encode(EncodingFormat::MCE)
+            }
+        }
+    }
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
+        let mut pos = 0;
+        
+        // schema_id: length-prefixed string
+        let schema_id_len = ManualEncoder::decode_u32_le(bytes, &mut pos)?;
+        if bytes.len() < pos + schema_id_len as usize {
+            return Err(CodecError::DeserializationError("Insufficient bytes for schema_id".to_string()));
+        }
+        let schema_id = String::from_utf8(bytes[pos..pos + schema_id_len as usize].to_vec())
+            .map_err(|e| CodecError::DeserializationError(format!("Invalid UTF-8 for schema_id: {}", e)))?;
+        pos += schema_id_len as usize;
+        
+        // schema_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for schema_hash".to_string()));
+        }
+        let mut schema_hash_arr = [0u8; 32];
+        schema_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let schema_hash = HashWire { bytes: hex::encode(schema_hash_arr) };
+        pos += 32;
+        
+        // payload_codec: 1 byte
+        if bytes.len() < pos + 1 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for payload_codec".to_string()));
+        }
+        let payload_codec = bytes[pos];
+        pos += 1;
+        
+        // payload_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for payload_hash".to_string()));
+        }
+        let mut payload_hash_arr = [0u8; 32];
+        payload_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let payload_hash = HashWire { bytes: hex::encode(payload_hash_arr) };
+        pos += 32;
+        
+        // content_root: optional 32 bytes
+        let content_root = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        // attachment_root: optional 32 bytes
+        let attachment_root = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        // claims_root: optional 32 bytes
+        let claims_root = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        // participants_root: optional 32 bytes
+        let participants_root = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        // disclosure_policy_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for disclosure_policy_hash".to_string()));
+        }
+        let mut disclosure_policy_hash_arr = [0u8; 32];
+        disclosure_policy_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let disclosure_policy_hash = HashWire { bytes: hex::encode(disclosure_policy_hash_arr) };
+        pos += 32;
+        
+        // proof_policy_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for proof_policy_hash".to_string()));
+        }
+        let mut proof_policy_hash_arr = [0u8; 32];
+        proof_policy_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let proof_policy_hash = HashWire { bytes: hex::encode(proof_policy_hash_arr) };
+        pos += 32;
+        
+        // resource_limits_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for resource_limits_hash".to_string()));
+        }
+        let mut resource_limits_hash_arr = [0u8; 32];
+        resource_limits_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let resource_limits_hash = HashWire { bytes: hex::encode(resource_limits_hash_arr) };
+        
+        Ok(Self {
+            schema_id,
+            schema_hash,
+            payload_codec,
+            payload_hash,
+            content_root,
+            attachment_root,
+            claims_root,
+            participants_root,
+            disclosure_policy_hash,
+            proof_policy_hash,
+            resource_limits_hash,
+        })
+    }
+}
+
 /// Ownership proof binding a Sanad to an owner.
 ///
 /// **Layer:** L1
-/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
-/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnershipProof {
     /// Proof bytes (chain-specific or generic)
     pub proof: Vec<u8>,
@@ -162,6 +342,77 @@ pub struct OwnershipProof {
     pub scheme: Option<SignatureScheme>,
 }
 
+impl CanonicalEncoding for OwnershipProof {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => {
+                // MCE: fixed-width byte concatenation
+                let mut result = Vec::new();
+                
+                // proof: length-prefixed bytes
+                result.extend_from_slice(&ManualEncoder::encode_bytes(&self.proof));
+                
+                // owner: length-prefixed bytes
+                result.extend_from_slice(&ManualEncoder::encode_bytes(&self.owner));
+                
+                // scheme: optional 1 byte tag
+                match &self.scheme {
+                    Some(scheme) => {
+                        result.push(1u8);
+                        result.extend_from_slice(&scheme.encode_mce()?);
+                    }
+                    None => {
+                        result.push(0u8);
+                    }
+                }
+                
+                Ok(result)
+            }
+            EncodingFormat::ManualBinary => {
+                // Manual binary: same as MCE for now
+                self.encode(EncodingFormat::MCE)
+            }
+        }
+    }
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
+        let mut pos = 0;
+        
+        // proof: length-prefixed bytes
+        let proof = ManualEncoder::decode_bytes(bytes, &mut pos)?;
+        
+        // owner: length-prefixed bytes
+        let owner = ManualEncoder::decode_bytes(bytes, &mut pos)?;
+        
+        // scheme: optional 1 byte tag
+        if bytes.len() < pos + 1 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for scheme flag".to_string()));
+        }
+        let scheme_flag = bytes[pos];
+        pos += 1;
+        
+        let scheme = if scheme_flag == 1 {
+            if bytes.len() < pos + 1 {
+                return Err(CodecError::DeserializationError("Insufficient bytes for scheme tag".to_string()));
+            }
+            let scheme_bytes = &bytes[pos..pos + 1];
+            pos += 1;
+            Some(SignatureScheme::decode_mce(scheme_bytes)?)
+        } else {
+            None
+        };
+        
+        Ok(Self {
+            proof,
+            owner,
+            scheme,
+        })
+    }
+}
+
 /// A verifiable, single-use digital Sanad (client-side state).
 ///
 /// The Sanad binds a payload descriptor to a commitment and owner.
@@ -169,9 +420,8 @@ pub struct OwnershipProof {
 /// ensuring content metadata is cryptographically bound to the identity.
 ///
 /// **Layer:** L1
-/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
-/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sanad {
     /// Unique Sanad identifier (domain-separated hash of descriptor || commitment || salt)
     pub id: SanadIdWire,
@@ -229,23 +479,114 @@ impl Sanad {
         Self::new(descriptor, commitment.commitment_hash(), owner, salt)
     }
 
-    /// Serialize to canonical CBOR bytes.
+    /// Serialize to canonical bytes using manual encoding.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>> {
-        to_canonical_cbor(self).map_err(|e| ProtocolError::SerializationError(e.to_string()))
+        self.encode_mce().map_err(|e| ProtocolError::SerializationError(e.to_string()))
     }
 
-    /// Deserialize from canonical CBOR bytes.
+    /// Deserialize from canonical bytes using manual encoding.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self> {
-        from_canonical_cbor(bytes).map_err(|e| ProtocolError::SerializationError(e.to_string()))
+        Self::decode_mce(bytes).map_err(|e| ProtocolError::SerializationError(e.to_string()))
+    }
+}
+
+impl CanonicalEncoding for Sanad {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => {
+                // MCE: fixed-width byte concatenation
+                let mut result = Vec::new();
+                
+                // id: length-prefixed bytes
+                let id_bytes = self.id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
+                result.extend_from_slice(&ManualEncoder::encode_bytes(&id_bytes));
+                
+                // commitment: 32 bytes
+                result.extend_from_slice(&self.commitment.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // owner: length-prefixed bytes
+                result.extend_from_slice(&ManualEncoder::encode_bytes(&self.owner.encode_mce()?));
+                
+                // salt: length-prefixed bytes
+                result.extend_from_slice(&ManualEncoder::encode_bytes(&self.salt));
+                
+                // nullifier: optional 32 bytes
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.nullifier.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                // descriptor_hash: 32 bytes
+                result.extend_from_slice(&self.descriptor_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                Ok(result)
+            }
+            EncodingFormat::ManualBinary => {
+                // Manual binary: same as MCE for now
+                self.encode(EncodingFormat::MCE)
+            }
+        }
+    }
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
+        let mut pos = 0;
+        
+        // id: length-prefixed bytes
+        let id_bytes = ManualEncoder::decode_bytes(bytes, &mut pos)?;
+        let id = SanadIdWire { bytes: hex::encode(id_bytes) };
+        
+        // commitment: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for commitment".to_string()));
+        }
+        let mut commitment_arr = [0u8; 32];
+        commitment_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let commitment = HashWire { bytes: hex::encode(commitment_arr) };
+        pos += 32;
+        
+        // owner: length-prefixed bytes
+        let owner_bytes = ManualEncoder::decode_bytes(bytes, &mut pos)?;
+        let owner = OwnershipProof::decode_mce(&owner_bytes)?;
+        
+        // salt: length-prefixed bytes
+        let salt = ManualEncoder::decode_bytes(bytes, &mut pos)?;
+        
+        // nullifier: optional 32 bytes
+        let nullifier = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        // descriptor_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for descriptor_hash".to_string()));
+        }
+        let mut descriptor_hash_arr = [0u8; 32];
+        descriptor_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let descriptor_hash = HashWire { bytes: hex::encode(descriptor_hash_arr) };
+        
+        Ok(Self {
+            id,
+            commitment,
+            owner,
+            salt,
+            nullifier,
+            descriptor_hash,
+        })
     }
 }
 
 /// Wire-format Sanad envelope (golden corpus schema `csv.sanad.envelope.v1`).
 ///
 /// **Layer:** L1
-/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
-/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SanadEnvelope {
     /// Envelope schema version
     pub version: u8,
@@ -281,6 +622,117 @@ impl SanadEnvelope {
             merkle_root: None,
             descriptor_hash: Some(sanad.descriptor_hash.clone()),
         }
+    }
+}
+
+impl CanonicalEncoding for SanadEnvelope {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => {
+                // MCE: fixed-width byte concatenation
+                let mut result = Vec::new();
+                
+                // version: 1 byte
+                result.push(self.version);
+                
+                // schema_id: length-prefixed string
+                let schema_id_bytes = self.schema_id.as_bytes();
+                result.extend_from_slice(&ManualEncoder::encode_u32_le(schema_id_bytes.len() as u32));
+                result.extend_from_slice(schema_id_bytes);
+                
+                // sanad_id: 32 bytes
+                result.extend_from_slice(&self.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // payload_hash: 32 bytes
+                result.extend_from_slice(&self.payload_hash.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                
+                // merkle_root: optional 32 bytes
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.merkle_root.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                // descriptor_hash: optional 32 bytes
+                result.extend_from_slice(&ManualEncoder::encode_option_bytes(
+                    &self.descriptor_hash.as_ref().map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32]))
+                ));
+                
+                Ok(result)
+            }
+            EncodingFormat::ManualBinary => {
+                // Manual binary: same as MCE for now
+                self.encode(EncodingFormat::MCE)
+            }
+        }
+    }
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
+        let mut pos = 0;
+        
+        // version: 1 byte
+        if bytes.len() < pos + 1 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for version".to_string()));
+        }
+        let version = bytes[pos];
+        pos += 1;
+        
+        // schema_id: length-prefixed string
+        let schema_id_len = ManualEncoder::decode_u32_le(bytes, &mut pos)?;
+        if bytes.len() < pos + schema_id_len as usize {
+            return Err(CodecError::DeserializationError("Insufficient bytes for schema_id".to_string()));
+        }
+        let schema_id = String::from_utf8(bytes[pos..pos + schema_id_len as usize].to_vec())
+            .map_err(|e| CodecError::DeserializationError(format!("Invalid UTF-8 for schema_id: {}", e)))?;
+        pos += schema_id_len as usize;
+        
+        // sanad_id: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for sanad_id".to_string()));
+        }
+        let mut sanad_id_arr = [0u8; 32];
+        sanad_id_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let sanad_id = HashWire { bytes: hex::encode(sanad_id_arr) };
+        pos += 32;
+        
+        // payload_hash: 32 bytes
+        if bytes.len() < pos + 32 {
+            return Err(CodecError::DeserializationError("Insufficient bytes for payload_hash".to_string()));
+        }
+        let mut payload_hash_arr = [0u8; 32];
+        payload_hash_arr.copy_from_slice(&bytes[pos..pos + 32]);
+        let payload_hash = HashWire { bytes: hex::encode(payload_hash_arr) };
+        pos += 32;
+        
+        // merkle_root: optional 32 bytes
+        let merkle_root = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        // descriptor_hash: optional 32 bytes
+        let descriptor_hash = ManualEncoder::decode_option_bytes(bytes, &mut pos)?
+            .map(|b| {
+                let mut arr = [0u8; 32];
+                if b.len() == 32 {
+                    arr.copy_from_slice(&b);
+                }
+                HashWire { bytes: hex::encode(arr) }
+            });
+        
+        Ok(Self {
+            version,
+            schema_id,
+            sanad_id,
+            payload_hash,
+            merkle_root,
+            descriptor_hash,
+        })
     }
 }
 

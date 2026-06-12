@@ -13,7 +13,8 @@
 //! (Secp256k1, Ed25519) are forgeable by 2030+ quantum adversaries.
 //! Long-lived proof bundles must use ML-DSA-65.
 
-use serde::{Deserialize, Serialize};
+use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
+use csv_codec::CodecError;
 
 use crate::error::{ProtocolError, Result as ProtocolResult};
 
@@ -28,9 +29,8 @@ pub type Result<T> = core::result::Result<T, ProtocolError>;
 /// Ed25519 and Secp256k1 are retained for legacy chain compatibility.
 ///
 /// **Layer:** L1
-/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
-/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignatureScheme {
     /// ECDSA over secp256k1 (Bitcoin, Ethereum, Celestia) — LEGACY, not PQ
     Secp256k1,
@@ -47,6 +47,71 @@ impl Default for SignatureScheme {
     /// configuration. See PROTOCOL_INVARIANTS.md for signature scheme derivation.
     fn default() -> Self {
         SignatureScheme::Secp256k1
+    }
+}
+
+impl CanonicalEncoding for SignatureScheme {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => {
+                // MCE: single byte tag
+                let tag = match self {
+                    SignatureScheme::Secp256k1 => 0u8,
+                    SignatureScheme::Ed25519 => 1u8,
+                    SignatureScheme::MlDsa65 => 2u8,
+                };
+                Ok(vec![tag])
+            }
+            EncodingFormat::ManualBinary => {
+                // Manual binary: single byte tag (same as MCE for enums)
+                let tag = match self {
+                    SignatureScheme::Secp256k1 => 0u8,
+                    SignatureScheme::Ed25519 => 1u8,
+                    SignatureScheme::MlDsa65 => 2u8,
+                };
+                Ok(vec![tag])
+            }
+        }
+    }
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
+        match format {
+            EncodingFormat::MCE => {
+                if bytes.is_empty() {
+                    return Err(CodecError::DeserializationError(
+                        "Empty bytes for SignatureScheme".to_string(),
+                    ));
+                }
+                match bytes[0] {
+                    0 => Ok(SignatureScheme::Secp256k1),
+                    1 => Ok(SignatureScheme::Ed25519),
+                    2 => Ok(SignatureScheme::MlDsa65),
+                    _ => Err(CodecError::DeserializationError(format!(
+                        "Invalid SignatureScheme tag: {}",
+                        bytes[0]
+                    ))),
+                }
+            }
+            EncodingFormat::ManualBinary => {
+                if bytes.is_empty() {
+                    return Err(CodecError::DeserializationError(
+                        "Empty bytes for SignatureScheme".to_string(),
+                    ));
+                }
+                match bytes[0] {
+                    0 => Ok(SignatureScheme::Secp256k1),
+                    1 => Ok(SignatureScheme::Ed25519),
+                    2 => Ok(SignatureScheme::MlDsa65),
+                    _ => Err(CodecError::DeserializationError(format!(
+                        "Invalid SignatureScheme tag: {}",
+                        bytes[0]
+                    ))),
+                }
+            }
+        }
     }
 }
 
