@@ -1,18 +1,43 @@
-//! CSV Content - Content tree system
+//! CSV Content - L2: Content tree system
+//!
+//! **Layer:** L2 (Content and schema types)
+//! **Encoding:** MAY use serde or canonical_cbor
+//! **Serde Policy:** MAY use serde (serialization is the primary use case)
 //!
 //! Provides Merkleized content trees, selective disclosure proofs,
 //! attachment references, and resource accounting for the CSV protocol.
 //!
-//! # Modules
+//! # Architecture
 //!
-//! - `content_tree` - Merkleized content tree with selective disclosure
-//! - `claims` - Content claims and rights management
-//! - `attachments` - External attachment reference model
-//! - `participants` - Content participant roles and identities
-//! - `addressing` - Content addressing utilities
-//! - `selective_disclosure` - Selective disclosure proofs
-//! - `encryption` - Encryption envelopes for content
-//! - `resource_accounting` - Verification resource limits
+//! - **ContentTree**: Merkleized content tree with selective disclosure
+//! - **Claims**: Content claims and rights management
+//! - **Attachments**: External attachment reference model
+//! - **Participants**: Content participant roles and identities
+//! - **Addressing**: Content addressing utilities
+//! - **SelectiveDisclosure**: Selective disclosure proofs
+//! - **Encryption**: Encryption envelopes for content
+//! - **ResourceAccounting**: Verification resource limits
+//!
+//! # Quick Start
+//!
+//! ```no_run
+//! use csv_content::ContentTree;
+//!
+//! // Create a content tree
+//! let tree = ContentTree::new(...);
+//!
+//! // Use serde for serialization (L2 allows serde)
+//! let json = serde_json::to_string(&tree)?;
+//! ```
+//!
+//! # Migration Guide
+//!
+//! When working with L2 types:
+//! - ✅ MAY use serde for serialization
+//! - ✅ MAY use canonical_cbor for cross-chain compatibility
+//! - No strict encoding requirements for protocol correctness
+//!
+//! See [csv-docs/LAYERING.md](../../csv-docs/LAYERING.md) for detailed layer information.
 
 #![warn(missing_docs)]
 #![allow(missing_docs)]

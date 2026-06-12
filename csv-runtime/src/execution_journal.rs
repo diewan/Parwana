@@ -73,8 +73,8 @@ pub enum PhaseOutcome {
 pub struct TransferPhaseEntry {
     /// Unique transfer identifier
     pub transfer_id: String,
-    /// Replay ID hash for this transfer
-    pub replay_id: csv_hash::ReplayIdHash,
+    /// Replay ID hash for this transfer (stored as Hash for serialization compatibility)
+    pub replay_id: csv_hash::Hash,
     /// Hash of the proof bundle (if available)
     pub proof_hash: [u8; 32],
     /// Canonical proof bundle bytes needed to resume after validation.

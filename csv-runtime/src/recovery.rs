@@ -52,16 +52,16 @@ pub struct RecoveryCheckpoint {
 }
 
 /// Replay checkpoint for replay registry state
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ReplayCheckpoint {
     /// Unique checkpoint identifier
     pub id: CheckpointId,
     /// Timestamp when checkpoint was created
     pub timestamp: SystemTime,
-    /// Replay IDs that were consumed
-    pub consumed_replay_ids: Vec<csv_hash::ReplayIdHash>,
-    /// Replay IDs that were pending
-    pub pending_replay_ids: Vec<csv_hash::ReplayIdHash>,
+    /// Replay IDs that were consumed (stored as Hash for serialization compatibility)
+    pub consumed_replay_ids: Vec<csv_hash::Hash>,
+    /// Replay IDs that were pending (stored as Hash for serialization compatibility)
+    pub pending_replay_ids: Vec<csv_hash::Hash>,
     /// Checkpoint data (additional state)
     pub data: Vec<u8>,
 }
@@ -76,20 +76,30 @@ impl ReplayCheckpoint {
         Self {
             id: CheckpointId::from_timestamp(SystemTime::now()),
             timestamp: SystemTime::now(),
-            consumed_replay_ids: consumed,
-            pending_replay_ids: pending,
+            consumed_replay_ids: consumed.into_iter().map(|h| h.0).collect(),
+            pending_replay_ids: pending.into_iter().map(|h| h.0).collect(),
             data,
         }
     }
 
     /// Check if a replay ID was consumed at this checkpoint
     pub fn is_consumed(&self, replay_id: &csv_hash::ReplayIdHash) -> bool {
-        self.consumed_replay_ids.contains(replay_id)
+        self.consumed_replay_ids.contains(&replay_id.0)
     }
 
     /// Check if a replay ID was pending at this checkpoint
     pub fn is_pending(&self, replay_id: &csv_hash::ReplayIdHash) -> bool {
-        self.pending_replay_ids.contains(replay_id)
+        self.pending_replay_ids.contains(&replay_id.0)
+    }
+
+    /// Get consumed replay IDs as ReplayIdHash
+    pub fn get_consumed_as_replay_ids(&self) -> Vec<csv_hash::ReplayIdHash> {
+        self.consumed_replay_ids.iter().map(|&h| csv_hash::ReplayIdHash(h)).collect()
+    }
+
+    /// Get pending replay IDs as ReplayIdHash
+    pub fn get_pending_as_replay_ids(&self) -> Vec<csv_hash::ReplayIdHash> {
+        self.pending_replay_ids.iter().map(|&h| csv_hash::ReplayIdHash(h)).collect()
     }
 }
 

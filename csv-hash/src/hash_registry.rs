@@ -1,7 +1,29 @@
-//! Hash registry
+//! Hash registry - L0: Typed hash wrappers
+//!
+//! **Layer:** L0 (Hash types)
+//! **Encoding:** MUST use canonical_cbor for protocol-critical paths
+//! **Serde Policy:** MUST NOT use serde derives (enforced by deny.toml)
 //!
 //! This module defines the hash domains and hash types used in the CSV protocol.
-//! Migrated from csv-core/src/hash.rs as part of Phase 1 restructuring.
+//! All types in this module are L0 types and must NOT use serde for serialization.
+//!
+//! # Types
+//!
+//! - `Hash`: Core 32-byte hash value
+//! - `ReplayIdHash`: Replay protection identifier
+//! - `SealHash`: Seal commitment hash
+//! - `SanadIdHash`: Sanad identifier hash
+//! - `CommitmentHash`: Commitment identifier
+//! - `NullifierHash`: Nullifier for double-spend protection
+//! - `VerificationHash`: Proof verification hash
+//! - `MerkleHash`: Merkle tree hash
+//!
+//! # Important
+//!
+//! The core `Hash` struct has serde derives for compatibility with L2 type serialization,
+//! but all typed hash wrappers (ReplayIdHash, SealHash, etc.) MUST NOT have serde derives.
+//! For protocol-critical hashing paths, use `to_canonical_bytes()` / `from_canonical_bytes()`
+//! via `csv_codec::canonical` for deterministic serialization.
 
 use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
@@ -10,12 +32,18 @@ use std::str::FromStr;
 
 /// A 32-byte hash value.
 ///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()` for protocol-critical paths
+/// **Serde:** Has derives for L2 compatibility, but MUST NOT use serde in hash computation paths
+///
 /// This is the fundamental building block for commitments, sanad IDs,
 /// seal references, and all cryptographic operations in CSV.
 ///
-/// L0 type: uses serde for compatibility with L2 type serialization.
-/// For protocol-critical hashing paths, use `to_canonical_bytes()` / `from_canonical_bytes()`
-/// via `csv_codec::canonical` for deterministic serialization.
+/// # Security
+///
+/// For protocol-critical hashing (computing commitments, replay IDs, etc.),
+/// use `to_canonical_bytes()` to ensure deterministic encoding. Serde serialization
+/// is only for L2 type compatibility and MUST NOT be used in hash computation paths.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hash(pub [u8; 32]);
 
@@ -328,6 +356,10 @@ impl HashDomain {
 }
 
 /// Typed hash wrapper for seal hashes.
+///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Forbidden (enforced by deny.toml)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SealHash(pub Hash);
 
@@ -353,6 +385,10 @@ impl SealHash {
 }
 
 /// Typed hash wrapper for commitment hashes.
+///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Forbidden (enforced by deny.toml)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CommitmentHash(pub Hash);
 
@@ -389,6 +425,10 @@ impl SanadIdHash {
 }
 
 /// Typed hash wrapper for nullifier hashes.
+///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Forbidden (enforced by deny.toml)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NullifierHash(pub Hash);
 
@@ -407,6 +447,10 @@ impl NullifierHash {
 }
 
 /// Typed hash wrapper for replay ID hashes.
+///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Forbidden (enforced by deny.toml)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ReplayIdHash(pub Hash);
 
@@ -425,6 +469,10 @@ impl ReplayIdHash {
 }
 
 /// Typed hash wrapper for verification hashes.
+///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Forbidden (enforced by deny.toml)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct VerificationHash(pub Hash);
 
@@ -443,6 +491,10 @@ impl VerificationHash {
 }
 
 /// Typed hash wrapper for Merkle tree hashes.
+///
+/// **Layer:** L0
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Forbidden (enforced by deny.toml)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MerkleHash(pub Hash);
 

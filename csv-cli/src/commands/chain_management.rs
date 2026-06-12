@@ -96,7 +96,7 @@ impl ChainCommands {
             println!("  ID: {}", cfg.id);
             println!("  Name: {}", cfg.name);
             println!("  Network: {}", cfg.network);
-            println!("  RPC URL: {}", cfg.rpc_url);
+            println!("  RPC URLs: {:?}", cfg.rpc_urls);
             if let Some(contract) = &cfg.contract_address {
                 println!("  Contract Address: {}", contract);
             }

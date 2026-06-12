@@ -1,13 +1,48 @@
-//! Formal proof taxonomy
+//! Formal proof taxonomy - L1: Proof types
+//!
+//! **Layer:** L1 (Proof types)
+//! **Encoding:** MUST use canonical_cbor for verification
+//! **Serde Policy:** SHOULD NOT use serde - verification must use canonical_cbor
 //!
 //! This module defines the canonical proof types used across the CSV protocol.
 //! All proofs must be one of these variants, ensuring consistent semantics
 //! and enabling unified verification.
 //!
-//! **Layer Classification:**
-//! - L1 (Proof types): All types in this module use canonical_cbor for serialization
-//!   to ensure deterministic encoding across all chains. Serde derives are required
-//!   by canonical_cbor but non-canonical formats (serde_json) are forbidden.
+//! # Architecture
+//!
+//! - **ProofBundle**: Complete proof bundle for peer-to-peer verification
+//! - **InclusionProof**: Merkle inclusion proof
+//! - **FinalityProof**: Chain finality proof
+//! - **DAGSegment**: State transition DAG segment
+//!
+//! # Security
+//!
+//! L1 types are critical for verification consistency:
+//! - Verification MUST use canonical_cbor encoding
+//! - Serde derives may be present for canonical_cbor compatibility
+//! - Non-canonical formats (serde_json) are FORBIDDEN in verification paths
+//!
+//! # Quick Start
+//!
+//! ```no_run
+//! use csv_protocol::proof_taxonomy::ProofBundle;
+//!
+//! // Create a proof bundle
+//! let proof = ProofBundle { ... };
+//!
+//! // Use canonical encoding for verification
+//! let bytes = proof.to_canonical_bytes()?;
+//! let hash = sha256(&bytes);
+//! ```
+//!
+//! # Migration Guide
+//!
+//! When working with L1 types:
+//! - ❌ NEVER use serde_json for verification
+//! - ✅ ALWAYS use `to_canonical_bytes()` / `from_canonical_bytes()`
+//! - ✅ MAY use serde derives only if required by canonical_cbor
+//!
+//! See [csv-docs/LAYERING.md](../../csv-docs/LAYERING.md) for detailed layer information.
 
 use csv_hash::Hash;
 use csv_hash::HashDomain;
@@ -106,7 +141,9 @@ impl HashFunction {
 ///
 /// The leaf is hashed using canonical CBOR serialization, then the hash
 /// is computed using the chain's native hash function to avoid extra gas costs.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofLeafV1 {
     /// Protocol version (must be 1)
@@ -311,7 +348,9 @@ pub const MAX_SIGNATURES_TOTAL_SIZE: usize = 1024 * 1024;
 /// - Unified verification through the canonical verifier
 /// - Composable proof DAGs with typed nodes
 /// - Clear proof lifecycle management
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Proof {
     /// Proves inclusion of a leaf in a Merkle tree.
@@ -426,7 +465,9 @@ impl Proof {
 }
 
 /// The category of a proof.
-/// L1 type: proof data - uses Display/FromStr for serialization
+/// **Layer:** L1
+/// **Encoding:** Use Display/FromStr for serialization
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofCategory {
     /// Inclusion proof
@@ -464,7 +505,9 @@ impl ProofCategory {
 }
 
 /// An inclusion proof (Merkle proof).
-/// L1 type: proof data - uses manual canonical_cbor serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InclusionProof {
     /// Raw proof bytes
@@ -620,7 +663,9 @@ impl InclusionProof {
 }
 
 /// A finality proof.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinalityProof {
     /// Finality data bytes
@@ -750,7 +795,9 @@ impl FinalityProof {
 }
 
 /// An ownership proof.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnershipProof {
     /// The owner's public key or address.
@@ -781,7 +828,9 @@ impl OwnershipProof {
 }
 
 /// A transition proof.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransitionProof {
     /// The previous state hash.
@@ -811,7 +860,9 @@ impl TransitionProof {
 }
 
 /// A replay proof.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayProof {
     /// The replay nullifier.
@@ -838,7 +889,9 @@ impl ReplayProof {
 }
 
 /// An execution proof.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionProof {
     /// The computation being proven.
@@ -865,7 +918,9 @@ impl ExecutionProof {
 }
 
 /// A zero-knowledge proof.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZKProof {
     /// The proof system used (e.g., "groth16", "stark", "dilithium").
@@ -899,7 +954,9 @@ impl ZKProof {
 }
 
 /// A composite proof (composition of multiple proofs).
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompositeProof {
     /// The child proofs.
@@ -928,7 +985,9 @@ impl CompositeProof {
 }
 
 /// The composition rule for composite proofs.
-/// L1 type: proof data - uses Display/FromStr for serialization
+/// **Layer:** L1
+/// **Encoding:** Use Display/FromStr for serialization
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompositionRule {
     /// All child proofs must be valid.
@@ -954,7 +1013,9 @@ impl CompositionRule {
 /// No transfer may mint unless the phase reaches `ConsensusBound`.
 /// Authorization for mint is determined by `VerificationResult::meets_chain_thresholds`,
 /// not by comparing this enum to `ConsensusBound` directly.
-/// L1 type: proof data - uses Display/FromStr for serialization
+/// **Layer:** L1
+/// **Encoding:** Use Display/FromStr for serialization
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProofPhase {
     /// Proof has been constructed but not validated.
@@ -977,7 +1038,9 @@ pub enum ProofPhase {
 /// Every transfer MUST derive a ReplayId before any state transition.
 /// The replay database is append-only; a ReplayId already present means
 /// the transfer has been seen before.
-/// L1 type: proof data - uses canonical_cbor for serialization
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReplayId {
     /// Protocol version this replay ID was generated for
@@ -1037,7 +1100,10 @@ impl ReplayId {
 }
 
 /// Complete proof bundle for peer-to-peer verification
-/// L1 type: proof data - uses manual canonical_cbor serialization
+///
+/// **Layer:** L1
+/// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
+/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProofBundle {
     /// Protocol version this bundle conforms to

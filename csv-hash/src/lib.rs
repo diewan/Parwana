@@ -1,8 +1,51 @@
-//! CSV Hash - Hash registry, tagged hashing, domain separation, Merkle construction, proof commitments
+//! CSV Hash - L0: Hash types and domain separation
+//!
+//! **Layer:** L0 (Hash types)
+//! **Encoding:** MUST use canonical_cbor for protocol-critical paths
+//! **Serde Policy:** MUST NOT use serde derives (enforced by deny.toml)
 //!
 //! This crate provides cryptographic hashing utilities for the CSV protocol.
 //! All hash operations must use this crate to ensure domain separation and
 //! cross-chain compatibility.
+//!
+//! # Architecture
+//!
+//! - **Hash**: Core 32-byte hash value (the fundamental building block)
+//! - **Typed Hash Wrappers**: Domain-separated hash types (ReplayIdHash, SealHash, etc.)
+//! - **Hash Domains**: Domain separation for different hash purposes
+//! - **Merkle Trees**: Merkle tree construction and verification
+//!
+//! # Security
+//!
+//! L0 types are critical for protocol security:
+//! - Hash computations MUST use canonical encoding
+//! - Serde derives are FORBIDDEN (enforced by deny.toml)
+//! - Non-canonical encoding in hash paths can lead to hash collisions
+//!
+//! # Quick Start
+//!
+//! ```no_run
+//! use csv_hash::{Hash, ReplayIdHash};
+//!
+//! // Create a hash from bytes
+//! let hash = Hash::new([0u8; 32]);
+//!
+//! // Wrap in a typed hash wrapper
+//! let replay_id = ReplayIdHash(hash);
+//!
+//! // Use canonical encoding for serialization
+//! let bytes = replay_id.0.to_canonical_bytes()?;
+//! ```
+//!
+//! # Migration Guide
+//!
+//! When working with L0 types:
+//! - ❌ NEVER use serde_json or other non-canonical formats
+//! - ❌ NEVER add serde derives to L0 types
+//! - ✅ ALWAYS use `to_canonical_bytes()` / `from_canonical_bytes()`
+//! - ✅ ALWAYS use the underlying `Hash` type for serialization contexts
+//!
+//! See [csv-docs/LAYERING.md](../../csv-docs/LAYERING.md) for detailed layer information.
 
 #![warn(missing_docs)]
 #![allow(deprecated)]

@@ -107,13 +107,13 @@ pub fn cmd_list(
                 let seed = mnemonic.to_seed(None);
                 let seed_array = *seed.as_bytes();
 
-                // Use csv-coordinator for wallet operations (architecture compliant)
+                // Use csv-wallet for wallet operations (architecture compliant)
                 let network = match config.chain(&chain)?.network {
-                    crate::config::Network::Main => csv_coordinator::wallet::bitcoin::Network::Main,
-                    crate::config::Network::Test => csv_coordinator::wallet::bitcoin::Network::Test,
-                    crate::config::Network::Dev => csv_coordinator::wallet::bitcoin::Network::Dev,
+                    crate::config::Network::Main => csv_wallet::bitcoin::Network::Main,
+                    crate::config::Network::Test => csv_wallet::bitcoin::Network::Test,
+                    crate::config::Network::Dev => csv_wallet::bitcoin::Network::Dev,
                 };
-                let address = csv_coordinator::wallet::bitcoin::derive_funding_address(
+                let address = csv_wallet::bitcoin::derive_funding_address(
                     &seed_array,
                     network,
                     account,

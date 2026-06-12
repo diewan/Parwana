@@ -40,7 +40,7 @@ pub enum RuntimeError {
 
     /// Replay detected — transfer already executed
     #[error("Replay detected: transfer with this ReplayId already exists")]
-    ReplayDetected(csv_hash::ReplayIdHash),
+    ReplayDetected(csv_hash::Hash),
 
     /// Mint failed after insert — needs recovery
     #[error("Mint failed: {cause}")]
@@ -79,7 +79,7 @@ impl RuntimeError {
 pub enum TransferCoordinatorError {
     /// Replay detected — transfer already executed
     #[error("Replay detected: transfer with this ReplayId already exists")]
-    ReplayDetected(csv_hash::ReplayIdHash),
+    ReplayDetected(csv_hash::Hash),
 
     /// Unknown chain — adapter not registered
     #[error("Unknown chain: {0}")]

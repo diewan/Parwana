@@ -258,7 +258,7 @@ where
             .await
             .map_err(|e| match e {
                 ReplayDbError::AlreadyExists => {
-                    RuntimeError::ReplayDetected(csv_hash::ReplayIdHash(replay_id))
+                    RuntimeError::ReplayDetected(replay_id)
                 }
                 ReplayDbError::Storage(s) => RuntimeError::Storage(s.to_string()),
                 ReplayDbError::NotFound => RuntimeError::Storage("Replay ID not found".to_string()),

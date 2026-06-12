@@ -154,8 +154,8 @@ fn registry_entry_to_transfer(
 pub struct TransferReceipt {
     /// Transfer ID
     pub transfer_id: String,
-    /// Replay ID used for this transfer
-    pub replay_id: csv_hash::ReplayIdHash,
+    /// Replay ID used for this transfer (stored as Hash for serialization compatibility)
+    pub replay_id: csv_hash::Hash,
     /// Transaction hash of the lock on source chain
     pub lock_tx_hash: String,
     /// Transaction hash of the mint on destination chain
@@ -434,7 +434,7 @@ impl TransferCoordinator {
 
         // Step 1: Compute ReplayId and check for replay
         // Runtime coordinates only - use sanad_id (Hash) directly for replay detection
-        let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
+        let replay_id = transfer.sanad_id;
 
         // Record phase entry: Initialized (Entered)
         self.execution_journal
@@ -454,7 +454,7 @@ impl TransferCoordinator {
         // Atomic idempotent consume-if-unconsumed: prevents duplicate mints
         let consume_result = self
             .replay_db
-            .consume_if_unconsumed(replay_id.0.as_bytes())
+            .consume_if_unconsumed(&replay_id.0)
             .await;
         match consume_result {
             Ok(()) => {}
@@ -1113,7 +1113,7 @@ impl TransferCoordinator {
 
         // Serialize proof bundle for minting using canonical CBOR
         let proof_bundle_bytes =
-            csv_codec::canonical::to_canonical_cbor(&proof_bundle).map_err(|e| {
+            proof_bundle.to_canonical_bytes().map_err(|e| {
                 TransferCoordinatorError::ProofBuildFailed(format!("Serialization failed: {}", e))
             })?;
         let proof_hash = proof_payload_hash(&proof_bundle_bytes);
@@ -1166,7 +1166,7 @@ impl TransferCoordinator {
                             attempt: 1,
                 transfer_context: None,
                         });
-                let typed_replay_id = replay_id_from_hash(replay_id);
+                let typed_replay_id = replay_id_from_hash(csv_hash::ReplayIdHash(replay_id));
                 let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
                 return Err(TransferCoordinatorError::RuntimeError(
                     "Circuit breaker is open - RPC calls blocked".to_string(),
@@ -1240,7 +1240,7 @@ impl TransferCoordinator {
                             attempt: 1,
                 transfer_context: None,
                         });
-                let typed_replay_id = replay_id_from_hash(replay_id);
+                let typed_replay_id = replay_id_from_hash(csv_hash::ReplayIdHash(replay_id));
                 let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
                 return Err(TransferCoordinatorError::MintFailed(error));
             }
@@ -1298,7 +1298,7 @@ impl TransferCoordinator {
 
         // Promote replay entry Pending → Consumed after mint confirms on-chain
         self.replay_db
-            .confirm_consumed(replay_id.0.as_bytes())
+            .confirm_consumed(&replay_id.0)
             .await
             .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
 
@@ -1582,12 +1582,13 @@ impl TransferCoordinator {
                         tracing::info!("Resuming from ProofBuilding - using persisted proof checkpoint");
                         // Proof was already built and persisted, skip regeneration
                         let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
-                            csv_codec::from_canonical_cbor(proof_payload).map_err(|e| {
-                                TransferCoordinatorError::ProofVerificationFailed(format!(
-                                    "Persisted proof checkpoint is malformed: {}",
-                                    e
-                                ))
-                            })?;
+                            csv_protocol::proof_taxonomy::ProofBundle::from_canonical_bytes(proof_payload)
+                                .map_err(|e| {
+                                    TransferCoordinatorError::ProofVerificationFailed(format!(
+                                        "Persisted proof checkpoint is malformed: {}",
+                                        e
+                                    ))
+                                })?;
                         
                         // Reconstruct transfer from journal context if needed
                         let transfer = if let Some(transfer) = cached_transfer {
@@ -1797,10 +1798,10 @@ impl TransferCoordinator {
             ));
         }
         self.accept_execution_lease(&runtime_ctx.lease)?;
-        let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
+        let replay_id = transfer.sanad_id;
         if !self
             .replay_db
-            .contains(replay_id.0.as_bytes())
+            .contains(replay_id.as_bytes())
             .await
             .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?
         {
@@ -1808,7 +1809,7 @@ impl TransferCoordinator {
                 "Recovery refused: replay reservation is missing".to_string(),
             ));
         }
-        Ok(replay_id)
+        Ok(csv_hash::ReplayIdHash(replay_id))
     }
 
     async fn verify_recovery_proof(
@@ -1967,7 +1968,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::AwaitingFinality,
@@ -1984,7 +1985,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::AwaitingFinality,
@@ -1998,7 +1999,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::ProofBuilding,
@@ -2020,13 +2021,14 @@ impl TransferCoordinator {
             &runtime_ctx,
         )
         .await?;
-        let proof_payload = csv_codec::to_canonical_cbor(&proof_bundle)
+        let proof_payload = proof_bundle
+            .to_canonical_bytes()
             .map_err(|e| TransferCoordinatorError::ProofBuildFailed(e.to_string()))?;
         let proof_hash = proof_payload_hash(&proof_payload);
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash,
                 proof_payload: Some(proof_payload.clone()),
                 phase: TransferStage::ProofBuilding,
@@ -2039,7 +2041,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash,
                 proof_payload: Some(proof_payload.clone()),
                 phase: TransferStage::ProofValidated,
@@ -2084,12 +2086,13 @@ impl TransferCoordinator {
             ));
         }
         let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
-            csv_codec::from_canonical_cbor(&proof_payload).map_err(|e| {
-                TransferCoordinatorError::ProofVerificationFailed(format!(
-                    "Persisted proof payload is malformed: {}",
-                    e
-                ))
-            })?;
+            csv_protocol::proof_taxonomy::ProofBundle::from_canonical_bytes(&proof_payload)
+                .map_err(|e| {
+                    TransferCoordinatorError::ProofVerificationFailed(format!(
+                        "Persisted proof payload is malformed: {}",
+                        e
+                    ))
+                })?;
         let lock_tx_hash = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
         let confirmed_lock = adapter_registry
             .confirm_tx(&transfer.source_chain, &lock_tx_hash)
@@ -2110,7 +2113,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash: proof_payload_hash(&proof_payload),
                 proof_payload: Some(proof_payload.clone()),
                 phase: TransferStage::MintSubmitted,
@@ -2133,7 +2136,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id.0,
                 proof_hash: proof_payload_hash(&proof_payload),
                 proof_payload: Some(proof_payload),
                 phase: TransferStage::MintSubmitted,
@@ -2203,9 +2206,9 @@ impl TransferCoordinator {
             .await
             .map_err(|e| TransferCoordinatorError::RuntimeError(e.to_string()))?;
 
-        let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
+        let replay_id = transfer.sanad_id;
         self.replay_db
-            .confirm_consumed(replay_id.0.as_bytes())
+            .confirm_consumed(replay_id.as_bytes())
             .await
             .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
 
@@ -2562,7 +2565,7 @@ mod tests {
             .await
             .unwrap();
         let coordinator = TransferCoordinator::new(Box::new(db), EventBus::new());
-        let replay_id = csv_hash::ReplayIdHash(transfer.sanad_id);
+        let replay_id = transfer.sanad_id;
         let proof_hash = proof_payload
             .as_ref()
             .map(|payload| proof_payload_hash(payload))
@@ -2754,7 +2757,7 @@ mod tests {
             .execution_journal()
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: csv_hash::ReplayIdHash(transfer.sanad_id),
+                replay_id: transfer.sanad_id,
                 proof_hash: [0xFF; 32],
                 proof_payload: Some(payload),
                 phase: TransferStage::ProofValidated,

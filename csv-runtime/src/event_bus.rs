@@ -2,7 +2,7 @@
 
 #![allow(missing_docs)]
 
-use csv_hash::ReplayIdHash;
+use csv_hash::Hash;
 use csv_protocol::verification_results::VerificationAssurance;
 use std::string::String;
 use uuid::Uuid;
@@ -15,8 +15,8 @@ use uuid::Uuid;
 pub struct TransferContext {
     /// Transfer identifier
     pub transfer_id: String,
-    /// Replay ID (if available)
-    pub replay_id: Option<ReplayIdHash>,
+    /// Replay ID (if available, stored as Hash for serialization compatibility)
+    pub replay_id: Option<Hash>,
     /// Proof hash (if available)
     pub proof_hash: Option<[u8; 32]>,
     /// Coordinator instance identifier

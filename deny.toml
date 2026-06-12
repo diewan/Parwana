@@ -101,6 +101,12 @@ to   = "serde_json"
 message = "csv-verifier (L0/L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding."
 
 [[graph.forbidden-edges]]
+# L0 hash types MUST NOT use serde derives - use canonical_cbor via csv-codec
+from = "csv-hash"
+to   = "serde"
+message = "csv-hash (L0) types MUST NOT use serde derives. Hash types require canonical_cbor via csv-codec for deterministic encoding. See PLAN.md Phase 8."
+
+[[graph.forbidden-edges]]
 # csv-runtime must not depend on csv-core (legacy crate)
 from = "csv-runtime"
 to   = "csv-core"
