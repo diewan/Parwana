@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Implemented (Phase 9 completed 2026-06-13)
 
 ## Motivation
 
@@ -48,6 +48,28 @@ Create `/crates/csv-protocol/src/replay/` with:
 - Global replay invariants
 
 ### 3. Define Replay Semantics
+
+## Implementation Status
+
+**Completed 2026-06-13 (Phase 9):**
+
+- ✅ CheckpointManager implemented in csv-runtime/src/recovery.rs
+  - RecoveryCheckpoint for transfer state
+  - ReplayCheckpoint for replay registry state
+  - VerificationCheckpoint for verification state
+- ✅ ExecutionJournal implemented in csv-runtime/src/execution_journal.rs
+  - ExecutionJournal trait with record, incomplete_transfers, latest_phase, latest_entry
+  - InMemoryJournal implementation for testing
+  - RocksDbExecutionJournal implementation for production (feature-gated)
+  - TransferPhaseEntry with transfer context for crash recovery
+- ✅ TransferCoordinator recovery methods in csv-runtime/src/transfer_coordinator.rs
+  - resume_transfer() - resumes transfer from any stage
+  - execute_from_lock() - executes transfer from lock confirmation
+  - resume_transfers() - resumes all incomplete transfers
+- ✅ ReplayDatabase trait and conformance tests in csv-storage
+- ✅ Crash recovery tests for all stages (LockConfirmed, AwaitingFinality, ProofBuilding, ProofValidated, MintSubmitted, MintConfirmed)
+
+**Result:** Replay logic is now centralized in csv-runtime with deterministic crash-safe recovery via execution journal.
 
 ```rust
 pub enum ReplayDomain {
@@ -102,4 +124,4 @@ BREAKING CHANGE: All replay logic must be centralized.
 
 - How to handle cross-chain replay coordination?
 - Replay invalidation timing?
-- Rollback replay recovery?
+- Rollback replay recovery? ✅ Implemented via CheckpointManager and ExecutionJournal

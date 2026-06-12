@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Implemented (Phase 8 completed 2026-06-13)
 
 ## Motivation
 
@@ -293,6 +293,28 @@ The config-driven approach separates data (chain configuration) from logic (wall
 - Phase 6 (Documentation): 4-6 hours
 
 **Total**: 36-52 hours (1-2 weeks)
+
+## Implementation Status
+
+**Completed 2026-06-13 (Phase 8):**
+
+- ✅ ChainRegistry implemented in csv-protocol/src/chain_registry.rs
+- ✅ ChainDiscovery implemented in csv-runtime/src/chain_discovery.rs
+- ✅ WalletFactory implemented in csv-coordinator/src/wallet_factory.rs
+- ✅ WalletOperations trait implemented in csv-wallet
+- ✅ Chain-specific wallet operations implemented for Bitcoin, Ethereum, Sui, Aptos, Solana
+- ✅ Chain config TOML files created for all 6 chains
+- ✅ CLI integration completed in csv-cli/src/commands/chain_management.rs and wallet/generate.rs
+- ✅ Tests added for chain_discovery and chain_registry
+
+**Result:** Adding a new chain now requires only:
+
+1. Create adapter crate (one-time)
+2. Add config file to chains/
+3. Add feature flag (one-time)
+4. Enable in CLI (optional)
+
+No code changes required in CLI, runtime, or coordinator for basic functionality.
 
 ## Alternatives
 

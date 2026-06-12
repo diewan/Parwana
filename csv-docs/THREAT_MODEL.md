@@ -77,8 +77,8 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Mitigation:**
 
 - Configurable finality depth per chain
-- Timeout handling in `csv-core/src/cross_chain.rs`
-- Recovery engine (`csv-core/src/recovery_engine.rs`) handles stuck transfers
+- Timeout handling in csv-runtime
+- Recovery engine (csv-runtime/src/recovery.rs, csv-runtime/src/execution_journal.rs) handles stuck transfers ✅ Implemented (Phase 9)
 
 ### 3.5 Partial Chain Partitions
 
@@ -90,7 +90,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 
 - Multiple RPC endpoints per chain
 - Timeout-based fallback to alternative providers
-- Recovery engine can retry with different providers
+- Recovery engine can retry with different providers ✅ Implemented (Phase 9)
 
 ## 4. Protocol-Specific Threats
 
@@ -103,9 +103,9 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Mitigation:**
 
 - Source chain lock consumes the seal, preventing reuse
-- Cross-chain registry (`CrossChainRegistry`) tracks all transfers
+- Cross-chain registry tracks all transfers via ReplayDatabase
 - Lease system prevents concurrent transfer attempts on same Sanad
-- `csv-core/src/lease.rs` enforces exclusive access during transfer window
+- csv-runtime/src/distributed_coordinator_lease.rs enforces exclusive access during transfer window
 
 ### 4.2 Replay Attacks
 
@@ -170,7 +170,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 - Mint submission stores the destination transaction hash before confirmation recovery
 - Confirmed mints promote replay state to `Consumed` and persist the completed transfer entry
 - Failed mint paths mark replay state `RolledBack`
-- Recovery checkpoints carry canonical CBOR payloads rather than empty placeholders
+- Recovery checkpoints carry canonical CBOR payloads rather than empty placeholders ✅ Implemented (Phase 9)
 
 ### 4.6 Sanad Consumption
 
@@ -180,7 +180,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 
 **Mitigation:**
 
-- Recovery engine (`csv-core/src/recovery_engine.rs`) detects stuck transfers
+- Recovery engine (csv-runtime/src/recovery.rs, csv-runtime/src/execution_journal.rs) detects stuck transfers ✅ Implemented (Phase 9)
 - Timeout-based recovery releases locked seals
 - Transfer status tracking enables monitoring
 
@@ -300,7 +300,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 - [x] RPC quorum client requires multi-provider agreement
 - [x] Finality depth checks prevent premature action
 - [x] Reorg detection handles chain reorganizations
-- [x] Recovery engine handles stuck transfers
+- [x] Recovery engine handles stuck transfers ✅ Implemented (Phase 9)
 - [x] Encrypted state storage for wallet keys
 - [x] Zod schema validation on all MCP inputs
 - [x] Structured audit logging for all operations

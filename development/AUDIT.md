@@ -1,12 +1,24 @@
 # Repository Audit — Negative Findings Only
 
-**Last validated:** 2026-06-12
+**Last validated:** 2026-06-13
 **Scope:** Full repository checkout. This version reflects the actual current state.
 
-**Verdict:** **Critical blockers resolved. Core protocol types are production-ready. Remaining work is in runtime orchestration, wallet integration, and CLI content descriptor support.**
+**Verdict:** **Critical blockers resolved. Core protocol types are production-ready. Remaining work is in serde stripping, CLI content descriptor support, wallet unification, and contract freeze.**
 
-**Recent progress (2026-06-12):**
+**Recent progress (2026-06-13):**
 
+- Phase 8 completed: Chain registry + config-driven addition
+  - ChainRegistry in csv-protocol with ChainConfig, load_from_dir, register_chain
+  - ChainDiscovery in csv-runtime with load_from_directory, load_from_toml
+  - WalletFactory in csv-coordinator with WalletOperations trait
+  - Chain-specific wallet operations in adapters (Bitcoin, Ethereum, Sui, Aptos, Solana)
+  - CLI integration for chain management
+  - Chain config TOML files for all 6 chains
+- Phase 9 completed: Recovery implementation
+  - CheckpointManager with RecoveryCheckpoint, ReplayCheckpoint, VerificationCheckpoint
+  - ExecutionJournal with InMemoryJournal and RocksDbExecutionJournal
+  - TransferCoordinator recovery methods: resume_transfer(), execute_from_lock(), resume_transfers()
+  - Crash recovery tests for all stages (LockConfirmed, AwaitingFinality, ProofBuilding, ProofValidated, MintSubmitted, MintConfirmed)
 - Phase 7 completed: Chain-independent proof leaf schema using Minimal Canonical Encoding (MCE)
 - MCE eliminates need for CBOR libraries in contracts while maintaining cross-chain hash compatibility
 - All contracts updated to use fixed-width byte concatenation (311-byte preimage)

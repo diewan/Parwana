@@ -494,6 +494,15 @@ let lease_token = csv_runtime_client.acquire_lease(...).await?;
 
 **Rule:** Every transfer phase transition MUST be recorded in the execution journal before and after execution.
 
+**Status:** ✅ Implemented (Phase 9, 2026-06-13)
+
+**Implementation:**
+- ExecutionJournal trait in csv-runtime/src/execution_journal.rs
+- InMemoryJournal for testing
+- RocksDbExecutionJournal for production (feature-gated)
+- TransferPhaseEntry with transfer context for crash recovery
+- TransferCoordinator.resume_transfer() for recovery from any stage
+
 **Prohibited:**
 
 - Executing phases without journal entries

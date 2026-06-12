@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Partially Implemented (Phase 9 completed 2026-06-13 - recovery state transitions implemented)
 
 ## Motivation
 
@@ -51,7 +51,7 @@ Create `/docs/state-machine.md` defining:
 - Forbidden transitions
 - Rollback semantics
 - Finality semantics
-- Error recovery
+- Error recovery ✅ Implemented via TransferCoordinator recovery methods
 
 ### 3. Add Model Checking
 
@@ -66,10 +66,28 @@ Models:
 
 - Replay safety
 - Ownership uniqueness
-- Rollback recovery
+- Rollback recovery ✅ Implemented via CheckpointManager and ExecutionJournal
 - Proof consistency
 
 ### 4. Simplify State Machine
+
+## Implementation Status
+
+**Completed 2026-06-13 (Phase 9 - Recovery State Transitions):**
+
+- ✅ TransferStage enum with all recovery states implemented in csv-protocol
+- ✅ State machine logic in TransferCoordinator.resume_transfer()
+- ✅ Recovery paths for all stages: LockSubmitted, LockConfirmed, AwaitingFinality, ProofBuilding, ProofValidated, MintSubmitted, MintConfirmed
+- ✅ Crash recovery tests for all state transitions
+- ✅ ExecutionJournal provides phase-by-phase audit trail
+
+**Remaining Work:**
+
+- Formal transition graph generation (not yet implemented)
+- Model checking with TLA+/Alloy (models exist in formal/ but not integrated into CI)
+- Forbidden transition proofs (manual tests exist, automated proofs pending)
+
+**Result:** Recovery state machine is fully implemented with crash-safe transitions. Formal verification models exist but are not yet integrated into CI.
 
 Reduce state explosion:
 

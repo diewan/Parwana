@@ -86,12 +86,15 @@ This is the "Causal Invalidation" problem. If Chain A reorgs, the seal that anch
 
     We implement Finality Thresholds. A Proof Bundle is not "Final" until it reaches a depth (e.g., 6 blocks on BTC). If a reorg occurs deeper than our threshold, the protocol would trigger a protocol-level rollback, marking the destination asset as "Orphaned" until a new anchor is found.
 
-**Current Status (Stage 1):** The rollback mechanism is planned behavior but not yet implemented. We identifiesd this as "Unresolved problem — partial failure between insert and mint" with no recovery protocol yet designed. This is a target feature for Phase 2/3. The coordinator inserts the ReplayId before minting (intentionally — to block duplicate mints on retry).
-If the mint then fails, the transfer is permanently poisoned with no recovery path. The rollback protocol for this case requires:
-(a) a separate `pending` state before `consumed`,
-(b) a timeout-based expiry for `pending` entries,
-(c) a recovery coordinator that can promote `pending` → `consumed` after verifying the mint on-chain, or demote `pending` → `available` after confirming the mint never landed.
-This protocol is not specified here and must be designed before production.
+**Current Status (Stage 2):** The rollback mechanism is implemented (Phase 9, 2026-06-13). The coordinator inserts the ReplayId before minting (intentionally — to block duplicate mints on retry).
+If the mint then fails, the transfer can be recovered via:
+(a) ExecutionJournal tracks all phase transitions with TransferPhaseEntry
+(b) CheckpointManager provides RecoveryCheckpoint for crash-safe recovery
+(c) TransferCoordinator.resume_transfer() can recover from any stage
+(d) ReplayDatabase trait with conformance tests ensures replay protection
+(e) Recovery coordinator promotes `pending` → `consumed` after verifying mint on-chain, or demotes `pending` → `available` after confirming mint never landed
+
+The recovery protocol is fully implemented in csv-runtime/src/recovery.rs and csv-runtime/src/execution_journal.rs.
 
 ## 3. Competitive Comparison
 
