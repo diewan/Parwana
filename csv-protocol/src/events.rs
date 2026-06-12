@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use csv_hash::Hash;
-use csv_hash::sanad::SanadId;
+use crate::wire::{HashWire, SanadIdWire};
 
 /// Standard event names in the CSV protocol
 pub mod event_names {
@@ -110,75 +110,75 @@ pub struct CsvEvent {
 pub enum EventData {
     /// Sanad created event
     SanadCreated {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         owner: String,
-        commitment: Hash,
+        commitment: HashWire,
         asset_class: String,
         asset_id: String,
         metadata: Option<HashMap<String, String>>,
     },
     /// Sanad consumed event
     SanadConsumed {
-        sanad_id: SanadId,
-        nullifier: Hash,
+        sanad_id: SanadIdWire,
+        nullifier: HashWire,
         consumed_by: String,
     },
     /// Sanad transferred event
     SanadTransferred {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         from: String,
         to: String,
         metadata: Option<HashMap<String, String>>,
     },
     /// Sanad-chain lock event
     CrossChainLock {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         source_chain: String,
         destination_chain: String,
         destination_owner: String,
-        proof_hash: Hash,
+        proof_hash: HashWire,
     },
     /// Cross-chain mint event
     CrossChainMint {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         source_chain: String,
-        source_sanad_id: SanadId,
+        source_sanad_id: SanadIdWire,
         owner: String,
-        proof_hash: Hash,
+        proof_hash: HashWire,
     },
     /// Cross-chain refund event
     CrossChainRefund {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         source_chain: String,
         destination_chain: String,
         refunded_to: String,
     },
     /// Nullifier registered event
     NullifierRegistered {
-        sanad_id: SanadId,
-        nullifier: Hash,
+        sanad_id: SanadIdWire,
+        nullifier: HashWire,
         chain: String,
     },
     /// Sanad metadata recorded event
     SanadMetadataRecorded {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         metadata: HashMap<String, String>,
     },
     /// Proof accepted event
     ProofAccepted {
-        proof_hash: Hash,
+        proof_hash: HashWire,
         chain: String,
         validator: String,
     },
     /// Proof rejected event
     ProofRejected {
-        proof_hash: Hash,
+        proof_hash: HashWire,
         chain: String,
         reason: String,
     },
     /// Replay detected event
     ReplayDetected {
-        proof_hash: Hash,
+        proof_hash: HashWire,
         chain: String,
         original_timestamp: u64,
         replay_timestamp: u64,
@@ -206,7 +206,7 @@ pub enum EventData {
     },
     /// Mint compromised event
     MintCompromised {
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         chain: String,
         compromise_type: String,
         details: String,
@@ -221,9 +221,9 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         owner: &str,
-        commitment: Hash,
+        commitment: HashWire,
         asset_class: &str,
         asset_id: &str,
         metadata: Option<HashMap<String, String>>,
@@ -255,8 +255,8 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
-        nullifier: Hash,
+        sanad_id: SanadIdWire,
+        nullifier: HashWire,
         consumed_by: &str,
     ) -> Self {
         Self {
@@ -284,7 +284,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         from: &str,
         to: &str,
         metadata: Option<HashMap<String, String>>,
@@ -315,11 +315,11 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         source_chain: &str,
         destination_chain: &str,
         destination_owner: &str,
-        proof_hash: Hash,
+        proof_hash: HashWire,
     ) -> Self {
         Self {
             event_type: event_names::CROSS_CHAIN_LOCK.to_string(),
@@ -348,11 +348,11 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         source_chain: &str,
-        source_sanad_id: SanadId,
+        source_sanad_id: SanadIdWire,
         owner: &str,
-        proof_hash: Hash,
+        proof_hash: HashWire,
     ) -> Self {
         Self {
             event_type: event_names::CROSS_CHAIN_MINT.to_string(),
@@ -381,7 +381,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         source_chain: &str,
         destination_chain: &str,
         refunded_to: &str,
@@ -411,8 +411,8 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
-        nullifier: Hash,
+        sanad_id: SanadIdWire,
+        nullifier: HashWire,
     ) -> Self {
         Self {
             event_type: event_names::NULLIFIER_REGISTERED.to_string(),
@@ -438,7 +438,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         metadata: HashMap<String, String>,
     ) -> Self {
         Self {
@@ -461,7 +461,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        proof_hash: Hash,
+        proof_hash: HashWire,
         validator: &str,
     ) -> Self {
         Self {
@@ -488,7 +488,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        proof_hash: Hash,
+        proof_hash: HashWire,
         reason: &str,
     ) -> Self {
         Self {
@@ -515,7 +515,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        proof_hash: Hash,
+        proof_hash: HashWire,
         original_timestamp: u64,
         replay_timestamp: u64,
     ) -> Self {
@@ -631,7 +631,7 @@ impl CsvEvent {
         block_height: u64,
         tx_hash: &str,
         timestamp: u64,
-        sanad_id: SanadId,
+        sanad_id: SanadIdWire,
         compromise_type: &str,
         details: &str,
     ) -> Self {
@@ -681,7 +681,7 @@ pub struct EventFilter {
     /// Filter by chain
     pub chain: Option<String>,
     /// Filter by sanad ID
-    pub sanad_id: Option<SanadId>,
+    pub sanad_id: Option<SanadIdWire>,
     /// Filter by owner address
     pub owner: Option<String>,
     /// Filter by date range (start)
@@ -707,7 +707,7 @@ pub trait EventIndexer: Send + Sync {
     /// Get event by sanad ID
     async fn get_by_sanad_id(
         &self,
-        sanad_id: &SanadId,
+        sanad_id: &SanadIdWire,
     ) -> Result<Vec<CsvEvent>, Box<dyn std::error::Error>>;
 }
 
@@ -893,7 +893,7 @@ impl CanonicalEvent {
     /// Compute the canonical event signature hash.
     ///
     /// This is keccak256("EventName(type1,type2,...)") used for event filtering.
-    pub fn signature_hash(&self) -> Hash {
+    pub fn signature_hash(&self) -> HashWire {
         let signature = match self {
             CanonicalEvent::SealCreated(_) => "SealCreated(bytes32,address,bytes32)",
             CanonicalEvent::SealConsumed(_) => "SealConsumed(bytes32,address,uint256)",
@@ -904,7 +904,7 @@ impl CanonicalEvent {
             CanonicalEvent::ReplayNullifierRegistered(_) => "ReplayNullifierRegistered(bytes32)",
             CanonicalEvent::ProofRootUpdated(_) => "ProofRootUpdated(bytes32)",
         };
-        Hash::sha256(signature.as_bytes())
+        Hash::sha256(signature.as_bytes()).into()
     }
 }
 
@@ -915,11 +915,11 @@ impl CanonicalEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealCreatedEvent {
     /// Unique seal identifier (32-byte hash)
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Owner address (chain-specific encoding)
     pub owner: Vec<u8>,
     /// Commitment hash
-    pub commitment: Hash,
+    pub commitment: HashWire,
 }
 
 /// SealConsumed event data.
@@ -929,7 +929,7 @@ pub struct SealCreatedEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealConsumedEvent {
     /// Unique seal identifier (32-byte hash)
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Owner address (chain-specific encoding)
     pub owner: Vec<u8>,
     /// Consumption timestamp (Unix epoch seconds)
@@ -943,7 +943,7 @@ pub struct SealConsumedEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealLockedEvent {
     /// Unique seal identifier (32-byte hash)
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Owner address (chain-specific encoding)
     pub owner: Vec<u8>,
     /// Destination chain ID (uint8)
@@ -959,13 +959,13 @@ pub struct SealLockedEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealMintedEvent {
     /// Unique seal identifier (32-byte hash)
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Owner address (chain-specific encoding)
     pub owner: Vec<u8>,
     /// Source chain ID (uint8)
     pub source_chain: u8,
     /// Source seal reference (transaction hash or seal point)
-    pub source_seal_ref: Hash,
+    pub source_seal_ref: HashWire,
 }
 
 /// SealRefunded event data.
@@ -975,7 +975,7 @@ pub struct SealMintedEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealRefundedEvent {
     /// Unique seal identifier (32-byte hash)
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Owner address (chain-specific encoding)
     pub owner: Vec<u8>,
     /// Refund timestamp (Unix epoch seconds)
@@ -991,9 +991,9 @@ pub struct SealRefundedEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentAnchoredEvent {
     /// Commitment hash
-    pub commitment: Hash,
+    pub commitment: HashWire,
     /// Associated seal ID
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Anchor timestamp (Unix epoch seconds)
     pub timestamp: u64,
 }
@@ -1005,7 +1005,7 @@ pub struct CommitmentAnchoredEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayNullifierEvent {
     /// Nullifier hash (prevents replay attacks)
-    pub nullifier: Hash,
+    pub nullifier: HashWire,
     /// Registration timestamp (Unix epoch seconds)
     pub timestamp: u64,
 }
@@ -1017,7 +1017,7 @@ pub struct ReplayNullifierEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofRootUpdatedEvent {
     /// New proof root hash
-    pub proof_root: Hash,
+    pub proof_root: HashWire,
     /// Update timestamp (Unix epoch seconds)
     pub timestamp: u64,
     /// Block height at which root was updated
@@ -1060,9 +1060,9 @@ impl EventEncoder for EthereumEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(e.seal_id.as_ref());
+                data.extend_from_slice(&e.seal_id.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(e.commitment.as_ref());
+                data.extend_from_slice(&e.commitment.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),
@@ -1083,9 +1083,9 @@ impl EventEncoder for SolanaEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(e.seal_id.as_ref());
+                data.extend_from_slice(&e.seal_id.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(e.commitment.as_ref());
+                data.extend_from_slice(&e.commitment.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),
@@ -1106,9 +1106,9 @@ impl EventEncoder for SuiEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(e.seal_id.as_ref());
+                data.extend_from_slice(&e.seal_id.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(e.commitment.as_ref());
+                data.extend_from_slice(&e.commitment.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),
@@ -1129,9 +1129,9 @@ impl EventEncoder for AptosEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(e.seal_id.as_ref());
+                data.extend_from_slice(&e.seal_id.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(e.commitment.as_ref());
+                data.extend_from_slice(&e.commitment.as_bytes().map_err(|e| EventEncodeError::EncodingFailed(e))?);
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),

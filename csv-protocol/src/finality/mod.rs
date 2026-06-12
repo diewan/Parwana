@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use thiserror::Error;
 
+use crate::wire::HashWire;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 
@@ -463,7 +464,7 @@ pub struct FinalityAnchor {
     /// The finalized block/checkpoint height.
     pub finalized_height: u64,
     /// The finalized block/checkpoint hash.
-    pub finalized_hash: Hash,
+    pub finalized_hash: HashWire,
     /// Cumulative work (Bitcoin/Proof-of-work chains). `None` for DPoS/BFT.
     pub cumulative_work: Option<u128>,
     /// When this anchor was persisted (Unix timestamp in seconds).
@@ -483,7 +484,7 @@ impl FinalityAnchor {
         Self {
             chain,
             finalized_height,
-            finalized_hash,
+            finalized_hash: finalized_hash.into(),
             cumulative_work,
             finalized_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -501,7 +502,7 @@ impl FinalityAnchor {
     pub fn is_valid_successor(&self, new: &FinalityAnchor) -> bool {
         self.chain == new.chain
             && new.finalized_height > self.finalized_height
-            && new.finalized_hash != Hash::zero()
+            && new.finalized_hash != HashWire { bytes: hex::encode([0u8; 32]) }
     }
 
     /// Check if this anchor is older than the given duration.
@@ -517,7 +518,7 @@ impl FinalityAnchor {
 
     /// Check if this anchor's hash is valid (non-zero).
     pub fn is_valid(&self) -> bool {
-        self.finalized_hash != Hash::zero()
+        self.finalized_hash != HashWire { bytes: hex::encode([0u8; 32]) }
     }
 }
 
@@ -538,7 +539,7 @@ pub struct AncestorContinuityProof {
     /// The anchor at the time this proof was generated.
     pub anchor: FinalityAnchor,
     /// Ancestor hashes in descending height order (tip → genesis).
-    pub ancestor_hashes: Vec<(u64, Hash)>,
+    pub ancestor_hashes: Vec<(u64, HashWire)>,
     /// Minimum depth of ancestor hashes stored.
     pub min_depth: u64,
 }
@@ -567,7 +568,7 @@ impl AncestorContinuityProof {
         Self {
             chain,
             anchor,
-            ancestor_hashes,
+            ancestor_hashes: ancestor_hashes.into_iter().map(|(h, hash)| (h, hash.into())).collect(),
             min_depth,
         }
     }
@@ -577,7 +578,7 @@ impl AncestorContinuityProof {
     /// The safety threshold is `anchor.finalized_height - max_safe_reorg_depth`.
     /// This hash serves as a checkpoint that must exist on-chain for the
     /// anchor to be considered valid after restart.
-    pub fn safety_hash(&self, max_safe_reorg_depth: u64) -> Option<(u64, Hash)> {
+    pub fn safety_hash(&self, max_safe_reorg_depth: u64) -> Option<(u64, HashWire)> {
         let threshold = self
             .anchor
             .finalized_height
@@ -585,13 +586,13 @@ impl AncestorContinuityProof {
         self.ancestor_hashes
             .iter()
             .find(|(h, _)| *h <= threshold)
-            .copied()
+            .cloned()
     }
 
     /// Look up the ancestor hash at a specific height.
     ///
     /// Returns `None` if the height is outside the stored range.
-    pub fn get_at_height(&self, height: u64) -> Option<&Hash> {
+    pub fn get_at_height(&self, height: u64) -> Option<&HashWire> {
         self.ancestor_hashes
             .iter()
             .find(|(h, _)| *h == height)
@@ -647,7 +648,7 @@ impl AncestorContinuityProof {
     }
 
     /// Check if a given hash exists in this continuity proof.
-    pub fn contains(&self, hash: &Hash) -> bool {
+    pub fn contains(&self, hash: &HashWire) -> bool {
         self.ancestor_hashes.iter().any(|(_, h)| h == hash)
     }
 

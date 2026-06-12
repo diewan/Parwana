@@ -18,6 +18,7 @@
 //! - Checksum for integrity verification
 
 use csv_hash::Hash;
+use crate::wire::{HashWire, SanadIdWire};
 use crate::transfer_state::TransferStage;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -41,7 +42,7 @@ pub struct RuntimeCheckpoint {
     /// Cross-chain registry state
     pub registry_state: RegistryState,
     /// Checkpoint checksum (SHA-256 of canonical checkpoint payload)
-    pub checksum: Hash,
+    pub checksum: HashWire,
 }
 
 #[derive(Serialize)]
@@ -71,7 +72,7 @@ impl RuntimeCheckpoint {
             leases,
             transfers,
             registry_state,
-            checksum: Hash::zero(),
+            checksum: Hash::zero().into(),
         };
 
         checkpoint.checksum = checkpoint.compute_checksum()?;
@@ -90,10 +91,11 @@ impl RuntimeCheckpoint {
         }
     }
 
-    fn compute_checksum(&self) -> Result<Hash, RecoveryError> {
+    fn compute_checksum(&self) -> Result<HashWire, RecoveryError> {
         let cbor = csv_codec::to_canonical_cbor(&self.checksum_payload())
             .map_err(|e| RecoveryError::SerializationError(e.to_string()))?;
-        Ok(Hash::sha256(&cbor))
+        let hash = csv_hash::Hash::sha256(&cbor);
+        Ok(hash.into())
     }
 
     /// Serialize the checkpoint to canonical CBOR.
@@ -149,7 +151,7 @@ pub struct TransferState {
     /// Transfer ID
     pub transfer_id: String,
     /// Sanad ID
-    pub sanad_id: Hash,
+    pub sanad_id: SanadIdWire,
     /// Source chain
     pub source_chain: String,
     /// Destination chain
@@ -157,9 +159,9 @@ pub struct TransferState {
     /// Current status
     pub status: String,
     /// Lock transaction hash
-    pub lock_tx_hash: Option<Hash>,
+    pub lock_tx_hash: Option<HashWire>,
     /// Mint transaction hash
-    pub mint_tx_hash: Option<Hash>,
+    pub mint_tx_hash: Option<HashWire>,
     /// Transfer creation timestamp
     pub created_at: u64,
     /// Last update timestamp
@@ -179,7 +181,7 @@ pub struct RegistryState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegistryEntry {
     /// Sanad ID
-    pub sanad_id: Hash,
+    pub sanad_id: SanadIdWire,
     /// Source chain
     pub source_chain: String,
     /// Source seal
@@ -189,9 +191,9 @@ pub struct RegistryEntry {
     /// Destination seal
     pub destination_seal: Vec<u8>,
     /// Lock transaction hash
-    pub lock_tx_hash: Hash,
+    pub lock_tx_hash: HashWire,
     /// Mint transaction hash
-    pub mint_tx_hash: Hash,
+    pub mint_tx_hash: HashWire,
     /// Transfer timestamp
     pub timestamp: u64,
 }

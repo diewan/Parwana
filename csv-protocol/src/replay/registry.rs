@@ -30,6 +30,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
 use thiserror::Error;
 
+use crate::wire::HashWire;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::{DomainSeparatedHash, HashDomain, ReplayRegistryDomain, tagged_hash};
@@ -44,11 +45,11 @@ pub const NULLIFIER_EXPIRY_SECONDS: u64 = 604_800;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ReplayKey {
     /// Hash of the proof bundle
-    pub proof_hash: Hash,
+    pub proof_hash: HashWire,
     /// Seal ID that was consumed
-    pub seal_id: Hash,
+    pub seal_id: HashWire,
     /// Commitment hash
-    pub commitment_hash: Hash,
+    pub commitment_hash: HashWire,
     /// Source chain
     pub source_chain: ChainId,
     /// Destination chain
@@ -65,9 +66,9 @@ impl ReplayKey {
         destination_chain: ChainId,
     ) -> Self {
         Self {
-            proof_hash,
-            seal_id,
-            commitment_hash,
+            proof_hash: proof_hash.into(),
+            seal_id: seal_id.into(),
+            commitment_hash: commitment_hash.into(),
             source_chain,
             destination_chain,
         }
@@ -85,9 +86,9 @@ impl ReplayKey {
     pub fn hash(&self) -> Hash {
         use csv_codec::to_canonical_cbor;
         let payload = to_canonical_cbor(&(
-            self.proof_hash,
-            self.seal_id,
-            self.commitment_hash,
+            self.proof_hash.clone(),
+            self.seal_id.clone(),
+            self.commitment_hash.clone(),
             self.source_chain.clone(),
             self.destination_chain.clone(),
         ))
@@ -293,13 +294,13 @@ pub trait ReplayRegistryBackend: Send + Sync + 'static {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayNullifier {
     /// Unique nullifier hash
-    pub nullifier: Hash,
+    pub nullifier: HashWire,
     /// Associated sanad ID
-    pub sanad_id: Hash,
+    pub sanad_id: HashWire,
     /// Source chain ID
     pub source_chain: u8,
     /// Source seal reference (transaction hash or seal point)
-    pub source_seal_ref: Hash,
+    pub source_seal_ref: HashWire,
     /// Registration timestamp (Unix epoch seconds)
     pub registered_at: u64,
     /// Expiry timestamp (Unix epoch seconds)
@@ -322,10 +323,10 @@ impl ReplayNullifier {
         let expires_at = now + NULLIFIER_EXPIRY_SECONDS;
 
         Self {
-            nullifier,
-            sanad_id,
+            nullifier: nullifier.into(),
+            sanad_id: sanad_id.into(),
             source_chain,
-            source_seal_ref,
+            source_seal_ref: source_seal_ref.into(),
             registered_at: now,
             expires_at,
             consumed: false,
@@ -392,7 +393,7 @@ impl NullifierRegistry {
 
     /// Register a replay nullifier.
     pub fn register(&mut self, nullifier: ReplayNullifier) -> Result<(), ReplayError> {
-        let nullifier_key: String = hex::encode(nullifier.nullifier.as_ref() as &[u8]);
+        let nullifier_key: String = hex::encode(nullifier.nullifier.as_bytes().unwrap_or_else(|_| vec![0u8; 32]).as_slice());
 
         // Check if nullifier already exists
         if self.nullifiers.contains_key(&nullifier_key) {
@@ -404,7 +405,7 @@ impl NullifierRegistry {
             .insert(nullifier_key.clone(), nullifier.clone());
 
         // Add to sanad ID index
-        let sanad_key: String = hex::encode(nullifier.sanad_id.as_ref() as &[u8]);
+        let sanad_key: String = hex::encode(nullifier.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]).as_slice());
         self.by_sanad_id
             .entry(sanad_key)
             .or_default()
@@ -483,7 +484,7 @@ impl NullifierRegistry {
     fn remove(&mut self, nullifier_key: &str) {
         if let Some(nullifier) = self.nullifiers.remove(nullifier_key) {
             // Remove from sanad ID index
-            let sanad_key: String = hex::encode(nullifier.sanad_id.as_ref() as &[u8]);
+            let sanad_key: String = hex::encode(nullifier.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]).as_slice());
             if let Some(keys) = self.by_sanad_id.get_mut(&sanad_key) {
                 keys.retain(|k| k != nullifier_key);
                 if keys.is_empty() {
@@ -559,12 +560,12 @@ impl ReplayConstitutionValidator {
     /// Validate that a replay nullifier follows the constitution.
     pub fn validate_nullifier(nullifier: &ReplayNullifier) -> Result<(), ReplayError> {
         // Check nullifier is not zero
-        if nullifier.nullifier == Hash::zero() {
+        if nullifier.nullifier == (HashWire { bytes: hex::encode([0u8; 32]) }) {
             return Err(ReplayError::InvalidNullifier);
         }
 
         // Check sanad ID is not zero
-        if nullifier.sanad_id == Hash::zero() {
+        if nullifier.sanad_id == (HashWire { bytes: hex::encode([0u8; 32]) }) {
             return Err(ReplayError::InvalidNullifier);
         }
 
@@ -579,12 +580,23 @@ impl ReplayConstitutionValidator {
         }
 
         // Check nullifier hash matches computed value
+        let sanad_id_bytes = nullifier.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
+        let source_seal_ref_bytes = nullifier.source_seal_ref.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
+        let mut sanad_id_arr = [0u8; 32];
+        let mut source_seal_ref_arr = [0u8; 32];
+        if sanad_id_bytes.len() == 32 {
+            sanad_id_arr.copy_from_slice(&sanad_id_bytes);
+        }
+        if source_seal_ref_bytes.len() == 32 {
+            source_seal_ref_arr.copy_from_slice(&source_seal_ref_bytes);
+        }
+        
         let computed = ReplayNullifier::compute_nullifier(
-            nullifier.sanad_id,
+            Hash::new(sanad_id_arr),
             nullifier.source_chain,
-            nullifier.source_seal_ref,
+            Hash::new(source_seal_ref_arr),
         );
-        if computed != nullifier.nullifier {
+        if HashWire::from(computed) != nullifier.nullifier {
             return Err(ReplayError::InvalidNullifier);
         }
 

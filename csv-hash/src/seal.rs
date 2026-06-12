@@ -4,7 +4,6 @@
 //! Anchors represent on-chain references containing commitments.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
 /// Maximum allowed size for seal identifiers (1KB)
@@ -26,8 +25,10 @@ pub const MAX_ANCHOR_METADATA_SIZE: usize = 4096;
 /// - Ethereum: Contract address + storage slot
 /// - Sui: Object ID
 /// - Aptos: Resource address + key
-/// L0 type: uses serde for compatibility with L2 type serialization
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// **Layer:** L0
+/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SealPoint {
     /// Chain-specific seal identifier
     pub id: Vec<u8>,
@@ -271,8 +272,10 @@ impl SealPoint {
 /// - Bitcoin: Transaction ID + output index
 /// - Ethereum: Transaction hash + log index
 /// - Sui: Object ID + version
-/// L0 type: uses serde for compatibility with L2 type serialization
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// **Layer:** L0
+/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CommitAnchor {
     /// Chain-specific anchor identifier
     pub anchor_id: Vec<u8>,

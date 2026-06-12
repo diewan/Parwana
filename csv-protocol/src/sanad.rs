@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ProtocolError, Result};
 use crate::signature::SignatureScheme;
+use crate::wire::{HashWire, SanadIdWire};
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_hash::{Commitment, Hash};
 
@@ -48,30 +49,34 @@ use csv_hash::{Commitment, Hash};
 /// - `disclosure_policy_hash`: Hash of the disclosure policy
 /// - `proof_policy_hash`: Hash of the proof policy
 /// - `resource_limits_hash`: Hash of resource limits (max size, depth, etc.)
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SanadPayloadDescriptor {
     /// Schema identifier (e.g., "csv.sanad.content.v1")
     pub schema_id: String,
     /// Hash of the schema definition for versioning
-    pub schema_hash: Hash,
+    pub schema_hash: HashWire,
     /// Canonical serialization codec identifier
     pub payload_codec: u8,
     /// Hash of the payload content
-    pub payload_hash: Hash,
+    pub payload_hash: HashWire,
     /// Optional Merkle root over content subtrees
-    pub content_root: Option<Hash>,
+    pub content_root: Option<HashWire>,
     /// Optional root over attachment hashes
-    pub attachment_root: Option<Hash>,
+    pub attachment_root: Option<HashWire>,
     /// Optional root over claim hashes
-    pub claims_root: Option<Hash>,
+    pub claims_root: Option<HashWire>,
     /// Optional root over participant hashes
-    pub participants_root: Option<Hash>,
+    pub participants_root: Option<HashWire>,
     /// Hash of the disclosure policy
-    pub disclosure_policy_hash: Hash,
+    pub disclosure_policy_hash: HashWire,
     /// Hash of the proof policy
-    pub proof_policy_hash: Hash,
+    pub proof_policy_hash: HashWire,
     /// Hash of resource limits
-    pub resource_limits_hash: Hash,
+    pub resource_limits_hash: HashWire,
 }
 
 impl SanadPayloadDescriptor {
@@ -90,16 +95,16 @@ impl SanadPayloadDescriptor {
     ) -> Self {
         Self {
             schema_id: schema_id.into(),
-            schema_hash,
+            schema_hash: schema_hash.into(),
             payload_codec,
-            payload_hash,
-            content_root,
+            payload_hash: payload_hash.into(),
+            content_root: content_root.map(|h| h.into()),
             attachment_root: None,
             claims_root: None,
             participants_root: None,
-            disclosure_policy_hash,
-            proof_policy_hash,
-            resource_limits_hash: Hash::new([0u8; 32]), // Default: no resource limits
+            disclosure_policy_hash: disclosure_policy_hash.into(),
+            proof_policy_hash: proof_policy_hash.into(),
+            resource_limits_hash: Hash::new([0u8; 32]).into(), // Default: no resource limits
         }
     }
 
@@ -119,30 +124,34 @@ impl SanadPayloadDescriptor {
 
     /// Set the attachment root.
     pub fn with_attachment_root(mut self, root: Hash) -> Self {
-        self.attachment_root = Some(root);
+        self.attachment_root = Some(root.into());
         self
     }
 
     /// Set the claims root.
     pub fn with_claims_root(mut self, root: Hash) -> Self {
-        self.claims_root = Some(root);
+        self.claims_root = Some(root.into());
         self
     }
 
     /// Set the participants root.
     pub fn with_participants_root(mut self, root: Hash) -> Self {
-        self.participants_root = Some(root);
+        self.participants_root = Some(root.into());
         self
     }
 
     /// Set the resource limits hash.
     pub fn with_resource_limits(mut self, hash: Hash) -> Self {
-        self.resource_limits_hash = hash;
+        self.resource_limits_hash = hash.into();
         self
     }
 }
 
 /// Ownership proof binding a Sanad to an owner.
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnershipProof {
     /// Proof bytes (chain-specific or generic)
@@ -158,21 +167,24 @@ pub struct OwnershipProof {
 /// The Sanad binds a payload descriptor to a commitment and owner.
 /// The Sanad ID is derived from the descriptor hash, commitment, and salt,
 /// ensuring content metadata is cryptographically bound to the identity.
-/// L1 type: uses serde for wire encoding
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sanad {
     /// Unique Sanad identifier (domain-separated hash of descriptor || commitment || salt)
-    pub id: SanadId,
+    pub id: SanadIdWire,
     /// Commitment hash binding state
-    pub commitment: Hash,
+    pub commitment: HashWire,
     /// Ownership proof
     pub owner: OwnershipProof,
     /// Salt used in ID derivation
     pub salt: Vec<u8>,
     /// Consumption nullifier when the Sanad seal has been spent
-    pub nullifier: Option<Hash>,
+    pub nullifier: Option<HashWire>,
     /// The payload descriptor hash (bound into SanadId)
-    pub descriptor_hash: Hash,
+    pub descriptor_hash: HashWire,
 }
 
 impl Sanad {
@@ -198,12 +210,12 @@ impl Sanad {
         let descriptor_hash = descriptor.compute_hash();
         let id = SanadId::from_descriptor_commitment(descriptor_hash, commitment, salt);
         Self {
-            id,
-            commitment,
+            id: id.into(),
+            commitment: commitment.into(),
             owner,
             salt: salt.to_vec(),
             nullifier: None,
-            descriptor_hash,
+            descriptor_hash: descriptor_hash.into(),
         }
     }
 
@@ -229,6 +241,10 @@ impl Sanad {
 }
 
 /// Wire-format Sanad envelope (golden corpus schema `csv.sanad.envelope.v1`).
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SanadEnvelope {
     /// Envelope schema version
@@ -236,13 +252,13 @@ pub struct SanadEnvelope {
     /// Registered schema identifier
     pub schema_id: String,
     /// Sanad identity hash
-    pub sanad_id: Hash,
+    pub sanad_id: HashWire,
     /// Payload content hash
-    pub payload_hash: Hash,
+    pub payload_hash: HashWire,
     /// Optional Merkle root over content subtrees
-    pub merkle_root: Option<Hash>,
+    pub merkle_root: Option<HashWire>,
     /// Descriptor hash (new in v2)
-    pub descriptor_hash: Option<Hash>,
+    pub descriptor_hash: Option<HashWire>,
 }
 
 impl SanadEnvelope {
@@ -251,13 +267,19 @@ impl SanadEnvelope {
 
     /// Build envelope from a [`Sanad`].
     pub fn from_sanad(sanad: &Sanad) -> Self {
+        let id_bytes = sanad.id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
+        let mut arr = [0u8; 32];
+        if id_bytes.len() == 32 {
+            arr.copy_from_slice(&id_bytes);
+        }
+        
         Self {
             version: 2,
             schema_id: Self::SCHEMA_ID.to_string(),
-            sanad_id: Hash::new(*sanad.id.as_bytes()),
-            payload_hash: sanad.commitment,
+            sanad_id: HashWire { bytes: hex::encode(arr) },
+            payload_hash: sanad.commitment.clone(),
             merkle_root: None,
-            descriptor_hash: Some(sanad.descriptor_hash),
+            descriptor_hash: Some(sanad.descriptor_hash.clone()),
         }
     }
 }
@@ -266,7 +288,10 @@ impl SanadEnvelope {
 pub const SCHEMA_VERSION: u8 = 2;
 
 /// Minimal schema descriptor for SDK consumers.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Schema {
     pub id: String,
     pub version: u8,

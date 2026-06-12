@@ -26,7 +26,6 @@
 //! via `csv_codec::canonical` for deterministic serialization.
 
 use sha2::{Digest, Sha256};
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
@@ -34,7 +33,7 @@ use std::str::FromStr;
 ///
 /// **Layer:** L0
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()` for protocol-critical paths
-/// **Serde:** Has derives for L2 compatibility, but MUST NOT use serde in hash computation paths
+/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
 ///
 /// This is the fundamental building block for commitments, sanad IDs,
 /// seal references, and all cryptographic operations in CSV.
@@ -42,9 +41,9 @@ use std::str::FromStr;
 /// # Security
 ///
 /// For protocol-critical hashing (computing commitments, replay IDs, etc.),
-/// use `to_canonical_bytes()` to ensure deterministic encoding. Serde serialization
-/// is only for L2 type compatibility and MUST NOT be used in hash computation paths.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// use `to_canonical_bytes()` to ensure deterministic encoding. For wire format,
+/// use `csv-wire` which owns all serialization.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {

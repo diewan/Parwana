@@ -8,6 +8,7 @@ use csv_keys::{
     Mnemonic, MnemonicType, Passphrase, Seed, derive_key,
     bip44::{derive_address_from_key, derive_all_chain_keys},
 };
+use csv_protocol::secret::SharedSecretHandle;
 use csv_protocol::signature::SignatureScheme;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

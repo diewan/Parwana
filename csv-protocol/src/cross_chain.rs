@@ -12,15 +12,16 @@ use csv_hash::canonical::to_canonical_cbor;
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
 use sha3::{Keccak256, Sha3_256};
 use blake2::{Blake2b512, Digest as Blake2Digest};
 use std::vec::Vec;
 
 /// Hash algorithm used by the source chain's proof model.
-/// L1 type: uses serde for wire encoding (pragmatic compromise for cross-chain compatibility)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrossChainHashAlgorithm {
     /// SHA-256
     Sha256,
@@ -143,7 +144,10 @@ impl CrossChainHashAlgorithm {
 /// Each domain represents a distinct cryptographic context.
 /// Hashes in different domains are cryptographically separated
 /// even if the underlying content is identical.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrossChainDomain {
     /// Hashing a lock event commitment
     LockEventCommitment,
@@ -168,7 +172,10 @@ impl CrossChainDomain {
 }
 
 /// Event emitted when a Hash is locked on the source chain for cross-chain transfer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrossChainLockEvent {
     /// The Hash being locked
     pub sanad_id: Hash,
@@ -361,8 +368,10 @@ impl TransferState {
 }
 
 /// Inclusion proof — chain-specific format.
-/// L1 type: uses serde for wire encoding (pragmatic compromise for cross-chain compatibility)
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InclusionProof {
     /// Bitcoin: Merkle branch + block header
     Bitcoin(BitcoinMerkleProof),
@@ -418,7 +427,10 @@ impl InclusionProof {
 }
 
 /// Bitcoin Merkle proof of transaction inclusion in a block.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct BitcoinMerkleProof {
     /// Transaction ID
@@ -434,7 +446,10 @@ pub struct BitcoinMerkleProof {
 }
 
 /// Ethereum MPT proof of receipt inclusion in state.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct EthereumMPTProof {
     /// Transaction hash
@@ -454,7 +469,10 @@ pub struct EthereumMPTProof {
 }
 
 /// Sui checkpoint proof of transaction effects certification.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct SuiCheckpointProof {
     /// Transaction digest
@@ -472,7 +490,10 @@ pub struct SuiCheckpointProof {
 }
 
 /// Aptos ledger info proof of transaction execution.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct AptosLedgerProof {
     /// Transaction version
@@ -488,7 +509,10 @@ pub struct AptosLedgerProof {
 }
 
 /// Solana slot-based proof of transaction inclusion.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct SolanaSlotProof {
     /// Slot number where the transaction was included
@@ -508,7 +532,10 @@ pub struct SolanaSlotProof {
 }
 
 /// ZK seal proof for chain-agnostic verification.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZkSealProof {
     /// The ZK proof bytes
     pub proof_bytes: Vec<u8>,
@@ -519,7 +546,10 @@ pub struct ZkSealProof {
 }
 
 /// Verifier key for ZK proof verification.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifierKey {
     /// Chain this verifier is for
     pub chain: ChainId,
@@ -534,7 +564,10 @@ pub struct VerifierKey {
 }
 
 /// Public inputs from a ZK seal proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZkPublicInputs {
     /// The seal reference being proven
     pub seal_ref: SealPoint,
@@ -551,7 +584,10 @@ pub struct ZkPublicInputs {
 }
 
 /// Finality proof confirming source transaction is finalized.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrossChainFinalityProof {
     /// Source chain identifier
     pub source_chain: ChainId,
@@ -566,7 +602,10 @@ pub struct CrossChainFinalityProof {
 }
 
 /// Complete proof bundle submitted to the destination chain.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrossChainTransferProof {
     /// The lock event data from the source chain
     pub lock_event: CrossChainLockEvent,
@@ -581,10 +620,12 @@ pub struct CrossChainTransferProof {
 }
 
 /// Entry in the cross-chain seal registry recording a completed transfer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HashEntry {
     /// Runtime transfer identifier used for deterministic crash recovery.
-    #[serde(default)]
     pub transfer_id: String,
     /// The Hash's unique ID (preserved across chains)
     pub sanad_id: Hash,

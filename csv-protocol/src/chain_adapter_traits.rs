@@ -219,8 +219,10 @@ pub enum SanadOperation {
 }
 
 /// Result of a sanad operation
-/// L1 type: uses serde for wire encoding
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Debug, Clone)]
 pub struct SanadOperationResult {
     /// Sanad ID affected by the operation.
     pub sanad_id: SanadId,
@@ -233,7 +235,7 @@ pub struct SanadOperationResult {
     /// Chain ID
     pub chain_id: String,
     /// Additional chain-specific operational metadata (non-canonical; not hashed).
-    pub metadata: serde_json::Value,
+    pub metadata: Vec<u8>,
 }
 
 /// Trait for querying chain state
@@ -506,7 +508,10 @@ pub trait ChainSanadOps: Send + Sync {
 }
 
 /// Canonical Sanad state for cross-chain consistency
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalSanadState {
     /// The canonical state value (0-9)
     pub state: u8,
@@ -529,7 +534,10 @@ pub struct CanonicalSanadState {
 }
 
 /// Canonical lifecycle event for traceability
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalLifecycleEvent {
     /// Event type
     pub event_type: String,
@@ -558,7 +566,10 @@ pub trait SanadStateReader: Send + Sync {
 }
 
 /// Canonical Seal state for cross-chain consistency
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalSealState {
     /// The canonical state value
     pub state: u8,

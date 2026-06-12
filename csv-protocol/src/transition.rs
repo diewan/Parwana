@@ -76,7 +76,12 @@ impl Transition {
 
     /// Get all seals that receive new state from this transition
     pub fn assigned_seals(&self) -> Vec<SealPoint> {
-        self.owned_outputs.iter().map(|o| o.seal.clone()).collect()
+        self.owned_outputs
+            .iter()
+            .filter_map(|o| {
+                o.seal.clone().try_into().ok()
+            })
+            .collect()
     }
 
     /// Check if this transition has no inputs (genesis-like transition)

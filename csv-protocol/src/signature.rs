@@ -13,6 +13,8 @@
 //! (Secp256k1, Ed25519) are forgeable by 2030+ quantum adversaries.
 //! Long-lived proof bundles must use ML-DSA-65.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{ProtocolError, Result as ProtocolResult};
 
 /// Result type for signature operations
@@ -24,7 +26,11 @@ pub type Result<T> = core::result::Result<T, ProtocolError>;
 ///
 /// ML-DSA-65 is the required default. All new proof bundles should use it.
 /// Ed25519 and Secp256k1 are retained for legacy chain compatibility.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureScheme {
     /// ECDSA over secp256k1 (Bitcoin, Ethereum, Celestia) — LEGACY, not PQ
     Secp256k1,
@@ -263,6 +269,7 @@ fn verify_secp256k1(_signature: &[u8], _public_key: &[u8], _message: &[u8]) -> R
 /// Signature format: 64 bytes (R || S)
 /// Public key format: 32 bytes
 /// Message: arbitrary length
+#[cfg(feature = "ed25519")]
 fn verify_ed25519(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result<()> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
@@ -304,20 +311,29 @@ fn verify_ed25519(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result
     })?;
 
     // Parse signature
-    let sig_bytes_arr: [u8; 64] = signature.try_into().map_err(|_| {
+    let sig = Signature::from_bytes(signature.try_into().map_err(|_| {
         ProtocolError::SignatureVerificationFailed("Invalid Ed25519 signature length".to_string())
+    })?)
+    .map_err(|e| {
+        ProtocolError::SignatureVerificationFailed(format!("Invalid Ed25519 signature: {}", e))
     })?;
-    let sig = Signature::from_bytes(&sig_bytes_arr);
 
-    // Perform actual cryptographic verification
-    verifying_key.verify(message, &sig).map_err(|e| {
-        ProtocolError::SignatureVerificationFailed(format!(
-            "Ed25519 signature verification failed: {}",
-            e
-        ))
-    })?;
+    // Verify signature
+    verifying_key
+        .verify(message, &sig)
+        .map_err(|e| {
+            ProtocolError::SignatureVerificationFailed(format!("Ed25519 verification failed: {}", e))
+        })?;
 
     Ok(())
+}
+
+/// Verify an Ed25519 signature (fallback when feature not enabled)
+#[cfg(not(feature = "ed25519"))]
+fn verify_ed25519(_signature: &[u8], _public_key: &[u8], _message: &[u8]) -> Result<()> {
+    Err(ProtocolError::SignatureVerificationFailed(
+        "ed25519 verification requires the 'ed25519' feature to be enabled".to_string(),
+    ))
 }
 
 /// Sign a message using Ed25519
@@ -328,6 +344,7 @@ fn verify_ed25519(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result
 ///
 /// # Returns
 /// Signature bytes (64 bytes: R || S)
+#[cfg(feature = "ed25519")]
 fn sign_ed25519(message: &[u8], secret_key: &[u8]) -> Result<Vec<u8>> {
     use ed25519_dalek::{Signature, Signer, SigningKey};
 
@@ -339,6 +356,14 @@ fn sign_ed25519(message: &[u8], secret_key: &[u8]) -> Result<Vec<u8>> {
     let sig: Signature = signing_key.sign(message);
 
     Ok(sig.to_bytes().to_vec())
+}
+
+/// Sign a message using Ed25519 (fallback when feature not enabled)
+#[cfg(not(feature = "ed25519"))]
+fn sign_ed25519(_message: &[u8], _secret_key: &[u8]) -> Result<Vec<u8>> {
+    Err(ProtocolError::SignatureVerificationFailed(
+        "ed25519 signing requires the 'ed25519' feature to be enabled".to_string(),
+    ))
 }
 
 /// ML-DSA-65 (FIPS 204) key generation

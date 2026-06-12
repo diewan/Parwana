@@ -31,25 +31,30 @@ use csv_hash::Hash;
 use csv_hash::csv_tagged_hash;
 use serde::{Deserialize, Serialize};
 
+use crate::wire::{HashWire, SanadIdWire};
+
 /// Unique lease identifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LeaseId(pub Hash);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LeaseId(pub HashWire);
 
 impl LeaseId {
     /// Create a new lease ID from raw bytes
     pub fn new(hash: Hash) -> Self {
-        Self(hash)
+        Self(hash.into())
     }
 
     /// Return the raw 32-byte lease ID
-    pub fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_bytes(&self) -> Result<Vec<u8>, String> {
         self.0.as_bytes()
     }
 }
 
 impl fmt::Display for LeaseId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{}", hex::encode(self.as_bytes()))
+        match self.as_bytes() {
+            Ok(bytes) => write!(f, "0x{}", hex::encode(bytes)),
+            Err(_) => write!(f, "0x<invalid>"),
+        }
     }
 }
 
@@ -59,9 +64,9 @@ pub struct Lease {
     /// Unique lease identifier
     pub id: LeaseId,
     /// Sanad ID being transferred
-    pub sanad_id: Hash,
+    pub sanad_id: SanadIdWire,
     /// Party authorized to execute the transfer
-    pub owner: Hash,
+    pub owner: HashWire,
     /// Timestamp when the lease was created (Unix epoch seconds)
     pub created_at: u64,
     /// Time-to-live in seconds
@@ -75,9 +80,9 @@ impl Lease {
     /// * `sanad_id` — The sanad being transferred
     /// * `owner` — The party authorized to execute the transfer
     /// * `ttl_secs` — Time-to-live in seconds (must be > 0)
-    pub fn new(sanad_id: Hash, owner: Hash, ttl_secs: u64) -> Self {
+    pub fn new(sanad_id: SanadIdWire, owner: HashWire, ttl_secs: u64) -> Self {
         Self {
-            id: LeaseId(Hash::new([0u8; 32])), // Set by LeaseManager
+            id: LeaseId(HashWire { bytes: "0".repeat(64) }), // Set by LeaseManager
             sanad_id,
             owner,
             created_at: now_secs(),
@@ -131,7 +136,7 @@ pub fn now_secs() -> u64 {
 #[derive(Debug, Default)]
 pub struct LeaseManager {
     /// Active leases keyed by sanad_id
-    pub leases: std::collections::HashMap<Hash, Lease>,
+    pub leases: std::collections::HashMap<SanadIdWire, Lease>,
 }
 
 impl LeaseManager {
@@ -153,8 +158,8 @@ impl LeaseManager {
     /// * `ttl_secs` — Time-to-live in seconds
     pub fn acquire(
         &mut self,
-        sanad_id: Hash,
-        owner: Hash,
+        sanad_id: SanadIdWire,
+        owner: HashWire,
         ttl_secs: u64,
     ) -> Result<LeaseId, LeaseError> {
         if ttl_secs == 0 {
@@ -165,17 +170,20 @@ impl LeaseManager {
             && existing.is_valid_now()
         {
             return Err(LeaseError::AlreadyLeased {
-                owner: existing.owner,
+                owner: existing.owner.clone(),
                 expires_at: existing.expires_at(),
             });
             // Expired lease — allow re-acquisition
         }
 
-        let mut lease = Lease::new(sanad_id, owner, ttl_secs);
-        lease.id = LeaseId(Hash::new(csv_tagged_hash(
-            "csv.lease.id.v1",
-            &lease.id.as_bytes()[..],
-        )));
+        let mut lease = Lease::new(sanad_id.clone(), owner.clone(), ttl_secs);
+        let id_bytes = lease.id.0.as_bytes().map_err(|e| LeaseError::InvalidLeaseId(e))?;
+        lease.id = LeaseId(HashWire {
+            bytes: hex::encode(Hash::new(csv_tagged_hash(
+                "csv.lease.id.v1",
+                &id_bytes,
+            )).as_slice()),
+        });
 
         self.leases.insert(sanad_id, lease.clone());
         Ok(lease.id)
@@ -192,8 +200,8 @@ impl LeaseManager {
     pub fn validate(
         &self,
         lease_id: LeaseId,
-        sanad_id: Hash,
-        owner: Hash,
+        sanad_id: SanadIdWire,
+        owner: HashWire,
     ) -> Result<(), LeaseError> {
         let lease = self.leases.get(&sanad_id).ok_or(LeaseError::NotFound)?;
 
@@ -203,7 +211,7 @@ impl LeaseManager {
 
         if lease.owner != owner {
             return Err(LeaseError::OwnerMismatch {
-                expected: lease.owner,
+                expected: lease.owner.clone(),
             });
         }
 
@@ -217,12 +225,12 @@ impl LeaseManager {
     }
 
     /// Release a lease, allowing a new lease to be acquired
-    pub fn release(&mut self, sanad_id: Hash) -> bool {
+    pub fn release(&mut self, sanad_id: SanadIdWire) -> bool {
         self.leases.remove(&sanad_id).is_some()
     }
 
     /// Check if a lease exists for a sanad
-    pub fn has_lease(&self, sanad_id: Hash) -> bool {
+    pub fn has_lease(&self, sanad_id: SanadIdWire) -> bool {
         self.leases
             .get(&sanad_id)
             .map(|l| l.is_valid_now())
@@ -230,7 +238,7 @@ impl LeaseManager {
     }
 
     /// Get the remaining time-to-live for a lease, if it exists and is valid
-    pub fn remaining_ttl(&self, sanad_id: Hash) -> Option<u64> {
+    pub fn remaining_ttl(&self, sanad_id: SanadIdWire) -> Option<u64> {
         self.leases
             .get(&sanad_id)
             .filter(|l| l.is_valid_now())
@@ -249,16 +257,19 @@ pub enum LeaseError {
     IdMismatch,
 
     #[error("Owner mismatch: expected {expected:?}")]
-    OwnerMismatch { expected: Hash },
+    OwnerMismatch { expected: HashWire },
 
     #[error("Lease expired at {expires_at}")]
     Expired { expires_at: u64 },
 
     #[error("Sanad already leased by {owner:?}, expires at {expires_at}")]
-    AlreadyLeased { owner: Hash, expires_at: u64 },
+    AlreadyLeased { owner: HashWire, expires_at: u64 },
 
     #[error("TTL must be greater than 0")]
     InvalidTtl,
+
+    #[error("Invalid lease ID: {0}")]
+    InvalidLeaseId(String),
 }
 
 #[cfg(test)]

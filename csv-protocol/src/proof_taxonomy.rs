@@ -51,7 +51,6 @@ use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
-use serde::{Deserialize, Serialize};
 
 /// Hash function types supported by different chains
 ///
@@ -1067,26 +1066,18 @@ impl ReplayId {
         transition_id: &[u8],
         destination_chain: &str,
     ) -> Result<Self, String> {
-        #[derive(Serialize)]
-        struct ReplayIdInputs<'a> {
-            source_chain: &'a str,
-            source_txid: &'a [u8],
-            source_output_index: u32,
-            seal_id: &'a [u8],
-            transition_id: &'a [u8],
-            destination_chain: &'a str,
-        }
-        let inputs = ReplayIdInputs {
-            source_chain,
-            source_txid,
-            source_output_index,
-            seal_id,
-            transition_id,
-            destination_chain,
-        };
-        let cbor = to_canonical_cbor(&inputs)
-            .map_err(|e| format!("Failed to serialize replay ID inputs: {}", e))?;
-        let id = tagged_hash(HashDomain::ReplayIdV1, &cbor).hash.0;
+        // Manual canonical serialization to avoid serde dependency
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(source_chain.as_bytes());
+        bytes.push(0); // null terminator for string
+        bytes.extend_from_slice(source_txid);
+        bytes.extend_from_slice(&source_output_index.to_le_bytes());
+        bytes.extend_from_slice(seal_id);
+        bytes.extend_from_slice(transition_id);
+        bytes.extend_from_slice(destination_chain.as_bytes());
+        bytes.push(0); // null terminator for string
+
+        let id = tagged_hash(HashDomain::ReplayIdV1, &bytes).hash.0;
         Ok(ReplayId {
             version: Self::CURRENT_VERSION,
             id,

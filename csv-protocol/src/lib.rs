@@ -22,6 +22,7 @@ pub mod deployment_manifest;
 pub mod deterministic_recovery;
 pub mod envelope;
 pub mod error;
+pub mod wire;
 pub mod events;
 pub mod failure_domains;
 pub mod lease;

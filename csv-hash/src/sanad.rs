@@ -11,14 +11,15 @@
 /// - Domain separation prevents cross-protocol replay
 
 use crate::{Hash, tagged_hash_str};
-use serde::{Deserialize, Serialize};
 
 /// Preimage for Sanad ID derivation.
 ///
 /// This struct contains all the inputs that go into the Sanad ID hash.
 /// Using a preimage ensures type safety and makes the derivation explicit.
+///
+/// **Layer:** L0
+/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SanadIdPreimage {
     /// Descriptor hash (32-byte hash of the SanadPayloadDescriptor)
     pub descriptor_hash: [u8; 32],
@@ -62,8 +63,10 @@ pub const DOMAIN_SANAD_ID_V1: &str = "urn:lnp-bp:csv:csv.sanad.id.v1";
 ///
 /// The domain tag `csv.sanad.id.v1` ensures Sanad IDs are cryptographically
 /// separated from all other protocol hashes (commitments, nullifiers, proof leaves).
-/// L0 type: uses serde for compatibility with L2 type serialization
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// **Layer:** L0
+/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SanadId(pub Hash);
 
 impl SanadId {

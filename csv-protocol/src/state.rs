@@ -4,6 +4,7 @@
 //! Unlike opaque byte vectors, typed state enables schema validation
 //! and consumer-friendly decoding.
 
+use crate::wire::{HashWire, SealPointWire};
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
 use serde::{Deserialize, Serialize};
@@ -58,7 +59,7 @@ pub struct OwnedState {
     /// Type identifier (defined in the schema)
     pub type_id: StateTypeId,
     /// The seal that owns this state
-    pub seal: SealPoint,
+    pub seal: SealPointWire,
     /// Serialized state data (schema-defined format)
     pub data: Vec<u8>,
 }
@@ -68,7 +69,7 @@ impl OwnedState {
     pub fn new(type_id: StateTypeId, seal: SealPoint, data: Vec<u8>) -> Self {
         Self {
             type_id,
-            seal,
+            seal: seal.into(),
             data,
         }
     }
@@ -77,7 +78,7 @@ impl OwnedState {
     pub fn from_hash(type_id: StateTypeId, seal: SealPoint, value: Hash) -> Self {
         Self {
             type_id,
-            seal,
+            seal: seal.into(),
             data: value.to_vec(),
         }
     }
@@ -137,7 +138,7 @@ pub struct StateAssignment {
     /// Type of state being assigned
     pub type_id: StateTypeId,
     /// Seal that will own this state
-    pub seal: SealPoint,
+    pub seal: SealPointWire,
     /// State data
     pub data: Vec<u8>,
 }
@@ -147,7 +148,7 @@ impl StateAssignment {
     pub fn new(type_id: StateTypeId, seal: SealPoint, data: Vec<u8>) -> Self {
         Self {
             type_id,
-            seal,
+            seal: seal.into(),
             data,
         }
     }
@@ -161,7 +162,7 @@ pub struct StateRef {
     /// Type of state being referenced
     pub type_id: StateTypeId,
     /// Commitment hash that created this state
-    pub commitment: Hash,
+    pub commitment: HashWire,
     /// Index within the commitment's outputs
     pub output_index: u32,
 }
@@ -171,7 +172,7 @@ impl StateRef {
     pub fn new(type_id: StateTypeId, commitment: Hash, output_index: u32) -> Self {
         Self {
             type_id,
-            commitment,
+            commitment: commitment.into(),
             output_index,
         }
     }

@@ -1,13 +1,13 @@
 //! Verification levels for proof verification results
 
-use serde::Serialize;
-
 /// Explicit verification tier returned by all proof verification paths.
 ///
 /// Callers MUST check this. `is_valid: true` with `StructuralOnly`
 /// does not constitute cryptographic proof of state transition validity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationLevel {
     /// Script/structure checked. No cryptographic proof verified.
     StructuralOnly,

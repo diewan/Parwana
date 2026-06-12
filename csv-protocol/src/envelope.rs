@@ -10,6 +10,10 @@ use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_hash::csv_tagged_hash;
 
 /// Signature scheme used to sign envelopes.
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureScheme {
     Secp256k1,
@@ -17,6 +21,10 @@ pub enum SignatureScheme {
 }
 
 /// Canonical serialization encoding type.
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncodingType {
     /// Canonical CBOR (sorted keys, no extra whitespace)
@@ -27,6 +35,10 @@ pub enum EncodingType {
 ///
 /// This is what gets hashed, committed, and verified — not chain account data.
 /// Chain contracts store only `envelope_commitment` (the hash of this struct).
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalSanadEnvelope {
     /// Protocol version that defines this envelope's schema.
@@ -74,6 +86,10 @@ pub struct CanonicalSanadEnvelope {
 }
 
 /// Type identifier for Sanad semantic types.
+///
+/// **Layer:** L1
+/// **Serde:** Used for canonical CBOR encoding only (to_canonical_cbor/from_canonical_cbor).
+/// Non-canonical formats (serde_json) are FORBIDDEN in verification paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeId(pub [u8; 32]);
 

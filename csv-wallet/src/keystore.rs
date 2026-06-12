@@ -1,7 +1,12 @@
 //! Secure key storage with zeroization
+//!
+//! This module now uses the canonical SecretHandle from csv-protocol
+//! to ensure consistency across the codebase.
 
-use secrecy::{ExposeSecret, SecretVec, Zeroize};
-use std::fmt;
+use csv_protocol::secret::{SecretHandle, SharedSecretHandle};
+use csv_keys::memory::SecretKey;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Key purpose for derivation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,95 +19,59 @@ pub enum KeyPurpose {
     Authentication,
 }
 
-/// Handle to a secret key with automatic zeroization
-pub struct SecretHandle {
-    /// Secret key bytes (zeroized on drop)
-    secret: SecretVec<u8>,
-    /// Key purpose
-    purpose: KeyPurpose,
-    /// Chain this key is for
-    chain: String,
-}
-
-impl SecretHandle {
-    /// Create a new secret handle
-    ///
-    /// # Arguments
-    /// * `secret` - Secret key bytes (will be zeroized on drop)
-    /// * `purpose` - Key purpose
-    /// * `chain` - Chain identifier
-    pub fn new(secret: Vec<u8>, purpose: KeyPurpose, chain: String) -> Self {
-        Self {
-            secret: SecretVec::new(secret),
-            purpose,
-            chain,
-        }
-    }
-
-    /// Get the secret bytes (for internal use only)
-    ///
-    /// # Safety
-    /// This exposes the secret bytes. Use with extreme caution.
-    pub fn expose_secret(&self) -> &[u8] {
-        self.secret.expose_secret()
-    }
-
-    /// Get the key purpose
-    pub fn purpose(&self) -> KeyPurpose {
-        self.purpose
-    }
-
-    /// Get the chain
-    pub fn chain(&self) -> &str {
-        &self.chain
-    }
-}
-
-impl Zeroize for SecretHandle {
-    fn zeroize(&mut self) {
-        // SecretVec already handles zeroization
-    }
-}
-
-impl fmt::Debug for SecretHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecretHandle")
-            .field("purpose", &self.purpose)
-            .field("chain", &self.chain)
-            .field("secret", &"[REDACTED]")
-            .finish()
-    }
-}
-
 /// Key store for managing multiple secret handles
+///
+/// This uses the canonical SecretHandle from csv-protocol which supports:
+/// - Raw secret keys (for testing)
+/// - 64-byte BIP-39 seeds (for HD wallet derivation)
+/// - Keystore references (for production)
 pub struct KeyStore {
-    /// Map of key ID to secret handle
-    keys: std::collections::HashMap<String, SecretHandle>,
+    /// Map of key ID to shared secret handle (Arc for thread-safe sharing)
+    keys: HashMap<String, SharedSecretHandle>,
 }
 
 impl KeyStore {
     /// Create a new key store
     pub fn new() -> Self {
         Self {
-            keys: std::collections::HashMap::new(),
+            keys: HashMap::new(),
         }
     }
 
-    /// Add a key to the store
+    /// Add a key to the store from raw bytes
     ///
     /// # Arguments
     /// * `id` - Key identifier
-    /// * `secret` - Secret key bytes
-    /// * `purpose` - Key purpose
-    /// * `chain` - Chain identifier
+    /// * `secret` - Secret key bytes (32 bytes for private key, 64 bytes for seed)
+    /// * `purpose` - Key purpose (metadata only, not stored in SecretHandle)
+    /// * `chain` - Chain identifier (metadata only, not stored in SecretHandle)
     pub fn add_key(
         &mut self,
         id: String,
         secret: Vec<u8>,
-        purpose: KeyPurpose,
-        chain: String,
+        _purpose: KeyPurpose,
+        _chain: String,
     ) {
-        let handle = SecretHandle::new(secret, purpose, chain);
+        // Determine if this is a 64-byte seed or 32-byte key
+        let handle = if secret.len() == 64 {
+            let mut seed_array = [0u8; 64];
+            seed_array.copy_from_slice(&secret);
+            SharedSecretHandle::from_seed(seed_array)
+        } else {
+            let mut key_array = [0u8; 32];
+            let len = secret.len().min(32);
+            key_array[..len].copy_from_slice(&secret[..len]);
+            SharedSecretHandle::from_bytes(key_array)
+        };
+        self.keys.insert(id, handle);
+    }
+
+    /// Add a shared secret handle directly
+    ///
+    /// # Arguments
+    /// * `id` - Key identifier
+    /// * `handle` - Shared secret handle
+    pub fn add_handle(&mut self, id: String, handle: SharedSecretHandle) {
         self.keys.insert(id, handle);
     }
 
@@ -112,8 +81,8 @@ impl KeyStore {
     /// * `id` - Key identifier
     ///
     /// # Returns
-    /// The secret handle if found
-    pub fn get_key(&self, id: &str) -> Option<&SecretHandle> {
+    /// The shared secret handle if found
+    pub fn get_key(&self, id: &str) -> Option<&SharedSecretHandle> {
         self.keys.get(id)
     }
 
@@ -123,8 +92,8 @@ impl KeyStore {
     /// * `id` - Key identifier
     ///
     /// # Returns
-    /// The secret handle if found
-    pub fn remove_key(&mut self, id: &str) -> Option<SecretHandle> {
+    /// The shared secret handle if found
+    pub fn remove_key(&mut self, id: &str) -> Option<SharedSecretHandle> {
         self.keys.remove(id)
     }
 

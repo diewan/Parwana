@@ -8,6 +8,7 @@
 //! - L3 (Storage type): Genesis MAY use serde for persistence layer serialization.
 
 use crate::state::{GlobalState, Metadata, OwnedState};
+use crate::wire::HashWire;
 use csv_hash::Hash;
 use csv_hash::{DomainSeparatedHash, GenesisDomain};
 use serde::{Deserialize, Serialize};
@@ -19,9 +20,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Genesis {
     /// Unique contract identifier (user-facing, e.g., "USDT-on-Bitcoin:1")
-    pub contract_id: Hash,
+    pub contract_id: HashWire,
     /// Schema identifier binding this genesis to a contract schema
-    pub schema_id: Hash,
+    pub schema_id: HashWire,
     /// Initial global state values
     pub global_state: Vec<GlobalState>,
     /// Initial owned state assignments (e.g., initial token distribution)
@@ -40,8 +41,8 @@ impl Genesis {
         metadata: Vec<Metadata>,
     ) -> Self {
         Self {
-            contract_id,
-            schema_id,
+            contract_id: contract_id.into(),
+            schema_id: schema_id.into(),
             global_state,
             owned_state,
             metadata,
