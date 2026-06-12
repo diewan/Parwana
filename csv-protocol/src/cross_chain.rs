@@ -7,17 +7,19 @@
 //! 4. Registry — Records transfer, prevents cross-chain double-spend
 
 use async_trait::async_trait;
+use csv_hash::Hash;
+use csv_hash::canonical::to_canonical_cbor;
+use csv_hash::chain_id::ChainId;
+use csv_hash::seal::SealPoint;
+use csv_codec::{CanonicalEncoding, EncodingFormat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
 use sha3::{Keccak256, Sha3_256};
 use blake2::{Blake2b512, Digest as Blake2Digest};
 use std::vec::Vec;
 
-use csv_hash::Hash;
-use csv_hash::chain_id::ChainId;
-use csv_hash::seal::SealPoint;
-
 /// Hash algorithm used by the source chain's proof model.
+/// L1 type: uses serde for wire encoding (pragmatic compromise for cross-chain compatibility)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CrossChainHashAlgorithm {
     /// SHA-256
@@ -196,7 +198,8 @@ pub struct CrossChainLockEvent {
 /// MintDestination) but this is not modeled as an explicit state machine.
 /// Junior devs are adding code that skips steps. This state machine makes
 /// the flow explicit and prevents skipping steps.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// L1/L2 type: uses manual canonical_cbor serialization
+#[derive(Debug, Clone, PartialEq)]
 pub enum TransferState {
     /// Seal locked on source chain, tx submitted
     Locked {
@@ -216,14 +219,12 @@ pub enum TransferState {
     BuildingProof,
     /// Proof bundle ready, transmitting to destination
     ProofReady {
-        /// The proof bundle
-        #[serde(skip_serializing_if = "Option::is_none")]
-        bundle: Option<Box<crate::proof_taxonomy::ProofBundle>>,
+        /// The proof bundle serialized as canonical CBOR bytes
+        bundle_bytes: Option<Vec<u8>>,
     },
     /// Minting on destination chain
     Minting {
         /// Destination transaction hash (if known)
-        #[serde(skip_serializing_if = "Option::is_none")]
         dest_tx: Option<String>,
     },
     /// Transfer complete
@@ -242,7 +243,125 @@ pub enum TransferState {
     },
 }
 
+impl CanonicalEncoding for TransferState {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+        }
+    }
+    
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+        }
+    }
+}
+
+impl TransferState {
+    /// Encode using MCE format (fixed-width byte concatenation)
+    fn encode_mce(&self) -> csv_codec::CodecResult<Vec<u8>> {
+        // MCE format for TransferState - same as manual binary for now
+        self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e))
+    }
+    
+    /// Decode using MCE format
+    fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
+        // MCE format for TransferState - same as manual binary for now
+        Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e))
+    }
+
+    /// Serialize to canonical bytes (manual implementation for L1/L2 type)
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        // Manual serialization to avoid serde dependency
+        let mut bytes = Vec::new();
+        
+        // Variant discriminator (u8)
+        let variant = match self {
+            TransferState::Locked { .. } => 0u8,
+            TransferState::AwaitingFinality { .. } => 1u8,
+            TransferState::BuildingProof => 2u8,
+            TransferState::ProofReady { .. } => 3u8,
+            TransferState::Minting { .. } => 4u8,
+            TransferState::Complete { .. } => 5u8,
+            TransferState::Failed { .. } => 6u8,
+        };
+        bytes.push(variant);
+        
+        // Variant-specific data
+        match self {
+            TransferState::Locked { source_tx, lock_height } => {
+                bytes.extend_from_slice(&(source_tx.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(source_tx.as_bytes());
+                bytes.extend_from_slice(&lock_height.to_le_bytes());
+            }
+            TransferState::AwaitingFinality { confirmations_needed, confirmations_have } => {
+                bytes.extend_from_slice(&confirmations_needed.to_le_bytes());
+                bytes.extend_from_slice(&confirmations_have.to_le_bytes());
+            }
+            TransferState::BuildingProof => {}
+            TransferState::ProofReady { bundle_bytes } => {
+                match bundle_bytes {
+                    Some(b) => {
+                        bytes.push(1u8);
+                        bytes.extend_from_slice(&(b.len() as u32).to_le_bytes());
+                        bytes.extend_from_slice(b);
+                    }
+                    None => {
+                        bytes.push(0u8);
+                    }
+                }
+            }
+            TransferState::Minting { dest_tx } => {
+                match dest_tx {
+                    Some(tx) => {
+                        bytes.push(1u8);
+                        bytes.extend_from_slice(&(tx.len() as u32).to_le_bytes());
+                        bytes.extend_from_slice(tx.as_bytes());
+                    }
+                    None => {
+                        bytes.push(0u8);
+                    }
+                }
+            }
+            TransferState::Complete { dest_tx, dest_seal } => {
+                bytes.extend_from_slice(&(dest_tx.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(dest_tx.as_bytes());
+                bytes.extend_from_slice(&(dest_seal.id.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(&dest_seal.id);
+                if let Some(nonce) = dest_seal.nonce {
+                    bytes.push(1u8);
+                    bytes.extend_from_slice(&nonce.to_le_bytes());
+                } else {
+                    bytes.push(0u8);
+                }
+                if let Some(version) = dest_seal.version {
+                    bytes.push(1u8);
+                    bytes.extend_from_slice(&version.to_le_bytes());
+                } else {
+                    bytes.push(0u8);
+                }
+            }
+            TransferState::Failed { reason, recoverable } => {
+                bytes.extend_from_slice(&(reason.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(reason.as_bytes());
+                bytes.push(if *recoverable { 1u8 } else { 0u8 });
+            }
+        }
+        
+        Ok(bytes)
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for L1/L2 type)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        // Note: Deserialization not yet implemented
+        Err("TransferState deserialization not yet implemented".to_string())
+    }
+}
+
 /// Inclusion proof — chain-specific format.
+/// L1 type: uses serde for wire encoding (pragmatic compromise for cross-chain compatibility)
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InclusionProof {
     /// Bitcoin: Merkle branch + block header

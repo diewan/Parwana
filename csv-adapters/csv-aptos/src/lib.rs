@@ -54,6 +54,7 @@ pub mod seal;
 pub mod seal_protocol;
 pub mod signatures;
 pub mod types;
+pub mod wallet_operations;
 // pub mod verifier;  // REMOVED: verification centralized in csv-verifier per implementation.md
 
 #[cfg(feature = "rpc")]

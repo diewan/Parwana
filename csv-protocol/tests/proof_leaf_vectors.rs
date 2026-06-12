@@ -11,7 +11,7 @@ use csv_protocol::proof_taxonomy::{HashFunction, ProofLeafV1};
 use serde::{Deserialize, Serialize};
 
 /// Test vector with expected hash for each chain's native hash function
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ProofLeafVector {
     pub name: String,
     pub leaf: ProofLeafV1,
@@ -416,11 +416,13 @@ mod tests {
         let vectors = generate_proof_leaf_vectors();
         
         // Test that vectors can be serialized to JSON
-        let json = serde_json::to_string_pretty(&vectors).expect("Should serialize to JSON");
+        let json = # serde_json forbidden by deny.toml
+        # serde_json::to_string_pretty(&vectors).expect("Should serialize to JSON");
         println!("Proof leaf vectors:\n{}", json);
         
         // Test that vectors can be deserialized from JSON
-        let deserialized: Vec<ProofLeafVector> = serde_json::from_str(&json)
+        let deserialized: Vec<ProofLeafVector> = # serde_json forbidden by deny.toml
+        # serde_json::from_str(&json)
             .expect("Should deserialize from JSON");
         
         assert_eq!(deserialized.len(), vectors.len());

@@ -7,6 +7,7 @@ use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 
 /// A reference to an external attachment.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentRef {
     /// Content identifier (CID or similar).
@@ -50,6 +51,7 @@ impl AttachmentRef {
 }
 
 /// MIME media type for attachments.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaType {
     /// Plain text.
@@ -99,6 +101,7 @@ impl MediaType {
 }
 
 /// Budget for attachments on a Sanad.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentBudget {
     /// Maximum number of attachments.

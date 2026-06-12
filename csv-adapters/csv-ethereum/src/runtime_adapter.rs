@@ -96,7 +96,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 
         // Parse proof bundle to extract commitment and state_root
         // The proof bundle is CBOR-encoded ProofBundle
-        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle = csv_hash::canonical::from_canonical_cbor(proof_bundle)
+        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle = ProofBundle::from_canonical_bytes(proof_bundle).map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
             .map_err(|e| AdapterError::Generic(format!("Failed to decode proof bundle: {}", e)))?;
 
         // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])

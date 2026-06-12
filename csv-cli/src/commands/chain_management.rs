@@ -119,32 +119,15 @@ impl ChainCommands {
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let discovery = ChainDiscovery::new(adapter_registry);
         
-        // Read TOML files from directory
-        let entries = std::fs::read_dir(chains_dir)?;
-        let mut count = 0;
-        
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
-                // Parse TOML file and register chain
-                if let Some(chain_id) = path.file_stem().and_then(|s| s.to_str()) {
-                    let config = ChainConfig {
-                        id: chain_id.to_string(),
-                        name: chain_id.to_string(),
-                        network: "mainnet".to_string(),
-                        rpc_url: "http://localhost:8545".to_string(),
-                        contract_address: None,
-                        enabled: true,
-                    };
-                    discovery.register_chain(config);
-                    count += 1;
-                }
+        // Use the new load_from_directory method that properly parses TOML files
+        match discovery.load_from_directory(chains_dir) {
+            Ok(count) => {
+                println!("Discovered {} chain configurations from '{}'", count, directory);
+            }
+            Err(e) => {
+                return Err(format!("Failed to load chain configurations: {}", e).into());
             }
         }
-        
-        println!("Discovered {} chain configurations from '{}'", count, directory);
         
         Ok(())
     }

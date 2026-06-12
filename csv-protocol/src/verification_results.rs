@@ -12,7 +12,8 @@ use thiserror::Error;
 /// Coarse assurance level. Useful for UI display and logging.
 /// NOT a total ordering suitable for mint authorization — use
 /// `VerificationResult::meets_chain_thresholds` for that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses manual canonical_cbor serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationAssurance {
     /// Proof structure was parsed but no cryptographic check performed.
     Structural,
@@ -26,7 +27,8 @@ pub enum VerificationAssurance {
 }
 
 /// Typed strength for inclusion proof verification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses manual canonical_cbor serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InclusionStrength {
     /// Not checked.
     None,
@@ -52,7 +54,7 @@ pub enum FinalityStrength {
 /// Per-component verification record. Each field is independently checked.
 /// The production gate reads this struct directly — it does not reduce
 /// components to a scalar before comparing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct VerifiedComponents {
     pub inclusion: InclusionStrength,
     pub finality: FinalityStrength,
@@ -61,7 +63,7 @@ pub struct VerifiedComponents {
 }
 
 /// Explicit failure reason. Replaces `Ok(false)`, `Ok(vec![])`, `Err(String)`.
-#[derive(Debug, Clone, Serialize, Deserialize, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum VerificationFailure {
     #[error("Inclusion proof Merkle path is invalid")]
     InvalidMerklePath,
@@ -95,7 +97,7 @@ pub enum VerificationFailure {
 
 /// A strongly-typed verification result.
 /// `valid: false` means the proof was checked and failed — not that it was skipped.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct VerificationResult {
     pub valid: bool,
     pub assurance: VerificationAssurance,

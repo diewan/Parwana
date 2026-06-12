@@ -1,18 +1,13 @@
 //! Provenance metadata for chain-sourced proof material.
 
-use serde::{Deserialize, Serialize};
-
 /// Proof provenance
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofProvenance {
     /// Chain ID
-    #[serde(default)]
     pub chain_id: String,
     /// Block height
-    #[serde(default)]
     pub block_height: u64,
     /// Timestamp
-    #[serde(default)]
     pub timestamp: u64,
 }
 

@@ -347,7 +347,7 @@ impl NostrTransport {
     /// Serialize a proof bundle to JSON for the Nostr event content.
     pub fn proof_to_content(&self, proof: &ProofBundle) -> Result<String, TransportError> {
         // Check proof size before serialization to final string
-        match serde_json::to_vec(proof) {
+        match proof.to_canonical_bytes().map_err(|e| TransportError::Serialization(e)) {
             Ok(bytes) => {
                 if bytes.len() > MAX_PROOF_SIZE {
                     return Err(TransportError::Serialization(format!(
@@ -364,12 +364,14 @@ impl NostrTransport {
                 )));
             }
         }
-        serde_json::to_string(proof).map_err(|e| TransportError::Serialization(e.to_string()))
+        proof.to_canonical_bytes().map(|b| hex::encode(b)).map_err(|e| TransportError::Serialization(e.to_string()))
     }
 
     /// Deserialize a proof bundle from Nostr event content.
     pub fn content_to_proof(&self, content: &str) -> Result<ProofBundle, TransportError> {
-        serde_json::from_str(content).map_err(|e| TransportError::Serialization(e.to_string()))
+        // Content should be hex-encoded canonical bytes, not JSON
+        let bytes = hex::decode(content).map_err(|e| TransportError::Serialization(e.to_string()))?;
+        ProofBundle::from_canonical_bytes(&bytes).map_err(|e| TransportError::Serialization(e.to_string()))
     }
 
     /// Build a Nostr event content string with metadata.
@@ -381,8 +383,7 @@ impl NostrTransport {
         let mut content = serde_json::Map::new();
         content.insert(
             "proof".to_string(),
-            serde_json::to_value(proof)
-                .map_err(|e| TransportError::Serialization(e.to_string()))?,
+            serde_json::Value::String(proof.to_canonical_bytes().map(|b| hex::encode(b)).map_err(|e| TransportError::Serialization(e.to_string()))?),
         );
         if let Some(meta) = metadata.as_object() {
             for (k, v) in meta {
@@ -511,7 +512,7 @@ impl ProofTransport for NostrTransport {
 
         // Validate proof size
         let proof_bytes =
-            serde_json::to_vec(proof).map_err(|e| TransportError::Serialization(e.to_string()))?;
+            proof.to_canonical_bytes().map_err(|e| TransportError::Serialization(e)).map_err(|e| TransportError::Serialization(e.to_string()))?;
         if proof_bytes.len() > MAX_PROOF_SIZE {
             warn!(
                 size = proof_bytes.len(),
@@ -699,7 +700,7 @@ impl ProofTransport for NostrTransport {
                     }
 
                     // Parse the event content into a ProofBundle
-                    let proof = match serde_json::from_str::<ProofBundle>(&event.content) {
+                    let proof = match ProofBundle::from_canonical_bytes(event.content.as_bytes()).map_err(|e| TransportError::Serialization(e)) {
                         Ok(p) => p,
                         Err(e) => {
                             warn!(event_id = %event.id, error = %e, "Failed to parse proof from Nostr event");

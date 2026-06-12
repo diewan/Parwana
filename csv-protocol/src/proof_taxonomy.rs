@@ -15,6 +15,7 @@ use csv_hash::canonical::to_canonical_cbor;
 use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
+use csv_codec::{CanonicalEncoding, EncodingFormat};
 use serde::{Deserialize, Serialize};
 
 /// Hash function types supported by different chains
@@ -25,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// - Sui: Blake2b256
 /// - Bitcoin: Double SHA256
 /// - Aptos: SHA3-256 (Keccak256 variant)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashFunction {
     /// Keccak256 (Ethereum native)
     Keccak256,
@@ -105,7 +106,8 @@ impl HashFunction {
 ///
 /// The leaf is hashed using canonical CBOR serialization, then the hash
 /// is computed using the chain's native hash function to avoid extra gas costs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofLeafV1 {
     /// Protocol version (must be 1)
     pub version: u32,
@@ -118,25 +120,18 @@ pub struct ProofLeafV1 {
     /// Commitment hash (the commitment being proven)
     pub commitment: Hash,
     /// Content descriptor hash (optional, for content-addressed data)
-    #[serde(default = "default_hash")]
     pub content_descriptor_hash: Hash,
     /// Source seal reference hash (the seal being consumed)
-    #[serde(default = "default_hash")]
     pub source_seal_ref_hash: Hash,
     /// Destination owner hash (the owner on the destination chain)
-    #[serde(default = "default_hash")]
     pub destination_owner_hash: Hash,
     /// Nullifier (for replay prevention)
-    #[serde(default = "default_hash")]
     pub nullifier: Hash,
     /// Lock event ID (the event that locked the seal)
-    #[serde(default = "default_hash")]
     pub lock_event_id: Hash,
     /// Metadata hash (optional additional metadata)
-    #[serde(default = "default_hash")]
     pub metadata_hash: Hash,
     /// Proof policy hash (the policy governing this proof)
-    #[serde(default = "default_hash")]
     pub proof_policy_hash: Hash,
 }
 
@@ -316,7 +311,8 @@ pub const MAX_SIGNATURES_TOTAL_SIZE: usize = 1024 * 1024;
 /// - Unified verification through the canonical verifier
 /// - Composable proof DAGs with typed nodes
 /// - Clear proof lifecycle management
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Proof {
     /// Proves inclusion of a leaf in a Merkle tree.
     ///
@@ -430,7 +426,8 @@ impl Proof {
 }
 
 /// The category of a proof.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses Display/FromStr for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofCategory {
     /// Inclusion proof
     Inclusion,
@@ -467,31 +464,26 @@ impl ProofCategory {
 }
 
 /// An inclusion proof (Merkle proof).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses manual canonical_cbor serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InclusionProof {
     /// Raw proof bytes
     pub proof_bytes: Vec<u8>,
     /// The block hash
     pub block_hash: Hash,
     /// Legacy adapter field: transaction index / checkpoint position.
-    #[serde(default)]
     pub position: u64,
     /// The block number
     pub block_number: u64,
     /// The leaf being proven.
-    #[serde(default = "default_hash")]
     pub leaf: Hash,
     /// The Merkle root.
-    #[serde(default = "default_hash")]
     pub root: Hash,
     /// The sibling path.
-    #[serde(default)]
     pub siblings: Vec<Hash>,
     /// The leaf index.
-    #[serde(default)]
     pub leaf_index: usize,
     /// The chain or source of this proof.
-    #[serde(default)]
     pub source: String,
 }
 
@@ -515,7 +507,48 @@ impl Default for InclusionProof {
     }
 }
 
+impl CanonicalEncoding for InclusionProof {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+        }
+    }
+    
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+        }
+    }
+}
+
 impl InclusionProof {
+    /// Serialize to canonical bytes (manual implementation for L1 type)
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(self.proof_bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.proof_bytes);
+        bytes.extend_from_slice(self.block_hash.as_bytes());
+        bytes.extend_from_slice(&self.position.to_le_bytes());
+        bytes.extend_from_slice(&self.block_number.to_le_bytes());
+        bytes.extend_from_slice(self.leaf.as_bytes());
+        bytes.extend_from_slice(self.root.as_bytes());
+        bytes.extend_from_slice(&(self.siblings.len() as u32).to_le_bytes());
+        for sibling in &self.siblings {
+            bytes.extend_from_slice(sibling.as_bytes());
+        }
+        bytes.extend_from_slice(&self.leaf_index.to_le_bytes());
+        bytes.extend_from_slice(&(self.source.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(self.source.as_bytes());
+        Ok(bytes)
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for L1 type)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        Err("InclusionProof deserialization not yet implemented".to_string())
+    }
+
     /// Create a new inclusion proof.
     ///
     /// # Arguments
@@ -587,23 +620,20 @@ impl InclusionProof {
 }
 
 /// A finality proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinalityProof {
     /// Finality data bytes
     pub finality_data: Vec<u8>,
     /// The block or checkpoint being finalized.
-    #[serde(default = "default_hash")]
     pub block_hash: Hash,
     /// The finality threshold (e.g., 2/3 of validators).
-    #[serde(default)]
     pub threshold: u32,
     /// The number of confirmations.
     pub confirmations: u64,
     /// Finality data (e.g., signatures, checkpoints).
-    #[serde(default)]
     pub data: Vec<u8>,
     /// The chain or source.
-    #[serde(default)]
     pub source: String,
     /// Whether this is a deterministic finality proof
     pub is_deterministic: bool,
@@ -623,7 +653,44 @@ impl Default for FinalityProof {
     }
 }
 
+impl CanonicalEncoding for FinalityProof {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+        }
+    }
+    
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+        }
+    }
+}
+
 impl FinalityProof {
+    /// Serialize to canonical bytes (manual implementation for L1 type)
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(self.finality_data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.finality_data);
+        bytes.extend_from_slice(self.block_hash.as_bytes());
+        bytes.extend_from_slice(&self.threshold.to_le_bytes());
+        bytes.extend_from_slice(&self.confirmations.to_le_bytes());
+        bytes.extend_from_slice(&(self.data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.data);
+        bytes.extend_from_slice(&(self.source.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(self.source.as_bytes());
+        bytes.push(if self.is_deterministic { 1u8 } else { 0u8 });
+        Ok(bytes)
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for L1 type)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        Err("FinalityProof deserialization not yet implemented".to_string())
+    }
+
     /// Create a new finality proof.
     ///
     /// # Arguments
@@ -683,7 +750,8 @@ impl FinalityProof {
 }
 
 /// An ownership proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnershipProof {
     /// The owner's public key or address.
     pub owner: Vec<u8>,
@@ -713,7 +781,8 @@ impl OwnershipProof {
 }
 
 /// A transition proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransitionProof {
     /// The previous state hash.
     pub previous_state: Hash,
@@ -742,7 +811,8 @@ impl TransitionProof {
 }
 
 /// A replay proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayProof {
     /// The replay nullifier.
     pub nullifier: Hash,
@@ -768,7 +838,8 @@ impl ReplayProof {
 }
 
 /// An execution proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionProof {
     /// The computation being proven.
     pub computation_hash: Hash,
@@ -794,7 +865,8 @@ impl ExecutionProof {
 }
 
 /// A zero-knowledge proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZKProof {
     /// The proof system used (e.g., "groth16", "stark", "dilithium").
     pub system: String,
@@ -827,7 +899,8 @@ impl ZKProof {
 }
 
 /// A composite proof (composition of multiple proofs).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompositeProof {
     /// The child proofs.
     pub children: Vec<Proof>,
@@ -855,7 +928,8 @@ impl CompositeProof {
 }
 
 /// The composition rule for composite proofs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses Display/FromStr for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompositionRule {
     /// All child proofs must be valid.
     And,
@@ -880,7 +954,8 @@ impl CompositionRule {
 /// No transfer may mint unless the phase reaches `ConsensusBound`.
 /// Authorization for mint is determined by `VerificationResult::meets_chain_thresholds`,
 /// not by comparing this enum to `ConsensusBound` directly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// L1 type: proof data - uses Display/FromStr for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProofPhase {
     /// Proof has been constructed but not validated.
     Constructed = 0,
@@ -902,7 +977,8 @@ pub enum ProofPhase {
 /// Every transfer MUST derive a ReplayId before any state transition.
 /// The replay database is append-only; a ReplayId already present means
 /// the transfer has been seen before.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReplayId {
     /// Protocol version this replay ID was generated for
     pub version: u32,
@@ -961,7 +1037,8 @@ impl ReplayId {
 }
 
 /// Complete proof bundle for peer-to-peer verification
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses manual canonical_cbor serialization
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProofBundle {
     /// Protocol version this bundle conforms to
     pub version: u32,
@@ -981,7 +1058,290 @@ pub struct ProofBundle {
     pub finality_proof: FinalityProof,
 }
 
+impl CanonicalEncoding for ProofBundle {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+        }
+    }
+    
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+        }
+    }
+}
+
 impl ProofBundle {
+    /// Serialize to canonical bytes (manual implementation for L1 type)
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.version.to_le_bytes());
+        
+        // Serialize DAGSegment using its manual serialization
+        let dag_bytes = self.transition_dag.to_canonical_bytes();
+        bytes.extend_from_slice(&(dag_bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&dag_bytes);
+        
+        // Serialize signatures
+        bytes.extend_from_slice(&(self.signatures.len() as u32).to_le_bytes());
+        for sig in &self.signatures {
+            bytes.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(sig);
+        }
+        
+        // Serialize signature scheme
+        bytes.push(self.signature_scheme as u8);
+        
+        // Serialize seal_ref
+        bytes.extend_from_slice(&(self.seal_ref.id.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.seal_ref.id);
+        if let Some(nonce) = self.seal_ref.nonce {
+            bytes.push(1u8);
+            bytes.extend_from_slice(&nonce.to_le_bytes());
+        } else {
+            bytes.push(0u8);
+        }
+        if let Some(version) = self.seal_ref.version {
+            bytes.push(1u8);
+            bytes.extend_from_slice(&version.to_le_bytes());
+        } else {
+            bytes.push(0u8);
+        }
+        
+        // Serialize anchor_ref
+        bytes.extend_from_slice(&(self.anchor_ref.anchor_id.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.anchor_ref.anchor_id);
+        bytes.extend_from_slice(&self.anchor_ref.block_height.to_le_bytes());
+        bytes.extend_from_slice(&(self.anchor_ref.metadata.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.anchor_ref.metadata);
+        
+        // Serialize inclusion_proof
+        let inc_bytes = self.inclusion_proof.to_canonical_bytes()?;
+        bytes.extend_from_slice(&(inc_bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&inc_bytes);
+        
+        // Serialize finality_proof
+        let fin_bytes = self.finality_proof.to_canonical_bytes()?;
+        bytes.extend_from_slice(&(fin_bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&fin_bytes);
+        
+        Ok(bytes)
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for L1 type)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let mut pos = 0;
+        
+        let version = if bytes.len() >= pos + 4 {
+            let v = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+            pos += 4;
+            v
+        } else {
+            return Err("Insufficient bytes for version".to_string());
+        };
+        
+        let dag_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for DAG length".to_string());
+        };
+        
+        let transition_dag = if bytes.len() >= pos + dag_len {
+            let dag_bytes = &bytes[pos..pos + dag_len];
+            pos += dag_len;
+            DAGSegment::from_canonical_bytes(dag_bytes).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))?
+        } else {
+            return Err("Insufficient bytes for DAG data".to_string());
+        };
+        
+        let sigs_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for signatures length".to_string());
+        };
+        
+        let mut signatures = Vec::with_capacity(sigs_len);
+        for _ in 0..sigs_len {
+            let sig_len = if bytes.len() >= pos + 4 {
+                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+                len
+            } else {
+                return Err("Insufficient bytes for signature length".to_string());
+            };
+            let sig = if bytes.len() >= pos + sig_len {
+                let sig_bytes = &bytes[pos..pos + sig_len];
+                pos += sig_len;
+                sig_bytes.to_vec()
+            } else {
+                return Err("Insufficient bytes for signature data".to_string());
+            };
+            signatures.push(sig);
+        }
+        
+        let signature_scheme = if bytes.len() >= pos + 1 {
+            let scheme = bytes[pos];
+            pos += 1;
+            match scheme {
+                0 => crate::signature::SignatureScheme::Secp256k1,
+                1 => crate::signature::SignatureScheme::Ed25519,
+                _ => return Err("Invalid signature scheme".to_string()),
+            }
+        } else {
+            return Err("Insufficient bytes for signature scheme".to_string());
+        };
+        
+        let seal_id_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for seal id length".to_string());
+        };
+        
+        let seal_id = if bytes.len() >= pos + seal_id_len {
+            let id_bytes = &bytes[pos..pos + seal_id_len];
+            pos += seal_id_len;
+            id_bytes.to_vec()
+        } else {
+            return Err("Insufficient bytes for seal id data".to_string());
+        };
+        
+        let seal_nonce = if bytes.len() >= pos + 1 {
+            let has_nonce = bytes[pos] == 1;
+            pos += 1;
+            if has_nonce {
+                if bytes.len() >= pos + 8 {
+                    let nonce = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    Some(nonce)
+                } else {
+                    return Err("Insufficient bytes for seal nonce".to_string());
+                }
+            } else {
+                None
+            }
+        } else {
+            return Err("Insufficient bytes for seal nonce flag".to_string());
+        };
+        
+        let seal_version = if bytes.len() >= pos + 1 {
+            let has_version = bytes[pos] == 1;
+            pos += 1;
+            if has_version {
+                if bytes.len() >= pos + 8 {
+                    let version = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    Some(version)
+                } else {
+                    return Err("Insufficient bytes for seal version".to_string());
+                }
+            } else {
+                None
+            }
+        } else {
+            return Err("Insufficient bytes for seal version flag".to_string());
+        };
+        
+        let anchor_id_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for anchor id length".to_string());
+        };
+        
+        let anchor_id = if bytes.len() >= pos + anchor_id_len {
+            let id_bytes = &bytes[pos..pos + anchor_id_len];
+            pos += anchor_id_len;
+            id_bytes.to_vec()
+        } else {
+            return Err("Insufficient bytes for anchor id data".to_string());
+        };
+        
+        let block_height = if bytes.len() >= pos + 8 {
+            let height = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+            pos += 8;
+            height
+        } else {
+            return Err("Insufficient bytes for block height".to_string());
+        };
+        
+        let metadata_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for metadata length".to_string());
+        };
+        
+        let metadata = if bytes.len() >= pos + metadata_len {
+            let metadata_bytes = &bytes[pos..pos + metadata_len];
+            pos += metadata_len;
+            metadata_bytes.to_vec()
+        } else {
+            return Err("Insufficient bytes for metadata data".to_string());
+        };
+        
+        let inc_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for inclusion proof length".to_string());
+        };
+        
+        let inclusion_proof = if bytes.len() >= pos + inc_len {
+            let inc_bytes = &bytes[pos..pos + inc_len];
+            pos += inc_len;
+            InclusionProof::from_canonical_bytes(inc_bytes).map_err(|e| format!("Failed to deserialize InclusionProof: {}", e))?
+        } else {
+            return Err("Insufficient bytes for inclusion proof data".to_string());
+        };
+        
+        let fin_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for finality proof length".to_string());
+        };
+        
+        let finality_proof = if bytes.len() >= pos + fin_len {
+            let fin_bytes = &bytes[pos..pos + fin_len];
+            pos += fin_len;
+            FinalityProof::from_canonical_bytes(fin_bytes).map_err(|e| format!("Failed to deserialize FinalityProof: {}", e))?
+        } else {
+            return Err("Insufficient bytes for finality proof data".to_string());
+        };
+        
+        Ok(Self {
+            version,
+            transition_dag,
+            signatures,
+            signature_scheme,
+            seal_ref: SealPoint {
+                id: seal_id,
+                nonce: seal_nonce,
+                version: seal_version,
+            },
+            anchor_ref: CommitAnchor {
+                anchor_id,
+                block_height,
+                metadata,
+            },
+            inclusion_proof,
+            finality_proof,
+        })
+    }
+
     /// Current protocol version for proof bundles.
     pub const CURRENT_VERSION: u32 = 1;
 

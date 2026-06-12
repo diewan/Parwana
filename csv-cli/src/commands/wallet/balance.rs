@@ -7,7 +7,7 @@ use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 
-use csv_coordinator::wallet::bitcoin;
+use csv_coordinator::wallet_factory::{init_wallet_factory, get_wallet_operations};
 use csv_hash::ChainId;
 use csv_keys::Mnemonic;
 use csv_sdk::CsvClient;
@@ -28,18 +28,19 @@ pub async fn cmd_balance(
             let seed = mnemonic.to_seed(None);
             let seed_array = *seed.as_bytes();
 
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => bitcoin::Network::Main,
-                crate::config::Network::Test => bitcoin::Network::Test,
-                crate::config::Network::Dev => bitcoin::Network::Dev,
-            };
+            // Initialize wallet factory and get Bitcoin operations
+            let _factory = init_wallet_factory();
+            let chain_id = ChainId::from(chain.as_str());
+            let wallet_ops = get_wallet_operations(&chain_id);
 
-            let derived_address = bitcoin::derive_funding_address(
-                &seed_array,
-                network,
-                0, // account 0
-                0, // index 0
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+            let derived_address = if let Some(ops) = wallet_ops {
+                ops.derive_address(&seed_array, 0, 0)
+                    .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+            } else {
+                // Fallback to csv-wallet if factory not available
+                state.get_address(&chain).map(|s| s.to_string())
+                    .ok_or_else(|| anyhow::anyhow!("Wallet operations not available for {}", chain))?
+            };
 
             Some(derived_address)
         } else {

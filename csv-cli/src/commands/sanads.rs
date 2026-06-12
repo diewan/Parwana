@@ -160,20 +160,141 @@ async fn cmd_create(
     output::header(&format!("Creating Sanad on {}", chain));
 
     // Handle content descriptor parameters (B-013)
-    // For now, log that these parameters are provided but not yet fully implemented
-    if schema.is_some() || payload.is_some() || attachments.is_some() {
-        output::info("Content descriptor parameters provided (B-013 - partial implementation)");
-        if let Some(ref s) = schema {
-            output::kv("Schema", s);
+    // Parse schema file, load payload, process attachments
+    let (schema_hash_final, payload_hash_final, attachment_root_final) = if schema.is_some() || payload.is_some() || attachments.is_some() {
+        output::info("Processing content descriptor parameters (B-013)");
+        
+        // Parse schema file if provided
+        let schema_hash_val = if let Some(ref schema_path) = schema {
+            output::kv("Schema file", schema_path);
+            
+            // Check if it's a file path or a direct hex hash
+            if schema_path.starts_with("0x") || schema_path.len() == 64 {
+                // Direct hex hash
+                let bytes = hex::decode(schema_path.trim_start_matches("0x"))
+                    .map_err(|e| anyhow::anyhow!("Invalid schema hash hex: {}", e))?;
+                if bytes.len() != 32 {
+                    return Err(anyhow::anyhow!("Schema hash must be 32 bytes"));
+                }
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes.copy_from_slice(&bytes);
+                Some(Hash::new(hash_bytes))
+            } else {
+                // File path - read and parse JSON schema
+                let schema_content = std::fs::read_to_string(schema_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read schema file: {}", e))?;
+                
+                // Parse JSON schema to extract schema_hash
+                let schema_json: serde_json::Value = serde_json::from_str(&schema_content)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse schema JSON: {}", e))?;
+                
+                let schema_hash_str = schema_json.get("schema_hash")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Schema file missing 'schema_hash' field"))?;
+                
+                let bytes = hex::decode(schema_hash_str.trim_start_matches("0x"))
+                    .map_err(|e| anyhow::anyhow!("Invalid schema_hash in file: {}", e))?;
+                if bytes.len() != 32 {
+                    return Err(anyhow::anyhow!("Schema hash must be 32 bytes"));
+                }
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes.copy_from_slice(&bytes);
+                
+                output::kv("Schema hash", schema_hash_str);
+                Some(Hash::new(hash_bytes))
+            }
+        } else {
+            None
+        };
+        
+        // Load payload file if provided
+        let payload_hash_val = if let Some(ref payload_path) = payload {
+            output::kv("Payload file", payload_path);
+            
+            // Read payload file
+            let payload_bytes = std::fs::read(payload_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read payload file: {}", e))?;
+            
+            // Check if it's JSON or binary
+            if payload_path.ends_with(".json") {
+                // Validate JSON
+                let _payload_json: serde_json::Value = serde_json::from_slice(&payload_bytes)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse payload JSON: {}", e))?;
+            }
+            
+            // Compute SHA256 hash of payload
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&payload_bytes);
+            let hash_bytes = hasher.finalize();
+            
+            let hash_hex = hex::encode(&hash_bytes);
+            output::kv("Payload hash", &hash_hex);
+            Some(Hash::new(hash_bytes))
+        } else {
+            None
+        };
+        
+        // Process attachments if provided
+        let attachment_root_val = if let Some(ref attachments_str) = attachments {
+            output::kv("Attachments", attachments_str);
+            
+            // Split comma-separated file paths
+            let attachment_paths: Vec<&str> = attachments_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            
+            if !attachment_paths.is_empty() {
+                // Compute Merkle root of attachment hashes
+                let mut attachment_hashes = Vec::new();
+                
+                for (i, attachment_path) in attachment_paths.iter().enumerate() {
+                    output::info(&format!("Processing attachment {}/{}: {}", i + 1, attachment_paths.len(), attachment_path));
+                    
+                    // Read attachment file
+                    let attachment_bytes = std::fs::read(attachment_path)
+                        .map_err(|e| anyhow::anyhow!("Failed to read attachment file {}: {}", attachment_path, e))?;
+                    
+                    // Compute SHA256 hash
+                    let mut hasher = sha2::Sha256::new();
+                    hasher.update(&attachment_bytes);
+                    let hash_bytes = hasher.finalize();
+                    attachment_hashes.push(hash_bytes);
+                    
+                    output::kv(&format!("Attachment {} hash", i + 1), &hex::encode(&hash_bytes));
+                }
+                
+                // Compute simple Merkle root (for now, just hash all hashes concatenated)
+                // In production, this should use the csv-content Merkle tree implementation
+                let mut hasher = sha2::Sha256::new();
+                for hash in &attachment_hashes {
+                    hasher.update(hash);
+                }
+                let root_bytes = hasher.finalize();
+                
+                let root_hex = hex::encode(&root_bytes);
+                output::kv("Attachment root", &root_hex);
+                Some(Hash::new(root_bytes))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // Parse disclosure policy if provided
+        if let Some(ref disclosure_policy_path) = disclosure_policy {
+            output::kv("Disclosure policy", disclosure_policy_path);
+            // For now, just log - full implementation would parse policy file
         }
-        if let Some(ref p) = payload {
-            output::kv("Payload", p);
+        
+        // Parse proof policy if provided
+        if let Some(ref proof_policy_path) = proof_policy {
+            output::kv("Proof policy", proof_policy_path);
+            // For now, just log - full implementation would parse policy file
         }
-        if let Some(ref a) = attachments {
-            output::kv("Attachments", a);
-        }
-        output::info("Note: Full content descriptor integration requires SanadPayloadDescriptor implementation");
-    }
+        
+        (schema_hash_val, payload_hash_val, attachment_root_val)
+    } else {
+        (None, None, None)
+    };
 
     // Show derivation parameters for Bitcoin
     if chain.as_str() == "bitcoin" {
@@ -611,8 +732,8 @@ async fn cmd_create(
         }
     };
 
-    // Parse content descriptor hashes from hex strings
-    let schema_hash_parsed = if let Some(ref hash_str) = schema_hash {
+    // Parse content descriptor hashes from hex strings (legacy parameters, take precedence over file-parsed values)
+    let schema_hash_legacy = if let Some(ref hash_str) = schema_hash {
         let bytes = hex::decode(hash_str.trim_start_matches("0x"))
             .map_err(|e| anyhow::anyhow!("Invalid schema hash hex: {}", e))?;
         if bytes.len() != 32 {
@@ -664,15 +785,22 @@ async fn cmd_create(
         None
     };
 
-    // Create a SanadPayloadDescriptor with content descriptor support
+    // Use legacy hash parameters if provided, otherwise use file-parsed values
+    let final_schema_hash = schema_hash_legacy.or(schema_hash_final).unwrap_or(Hash::new([0u8; 32]));
+    let final_payload_hash = payload_hash_final.unwrap_or(commitment); // Use commitment as default payload hash
+    let final_attachment_root = attachment_root_final.or(content_root_parsed);
+    let final_disclosure_policy_hash = disclosure_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32]));
+    let final_proof_policy_hash = proof_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32]));
+
+    // Create a SanadPayloadDescriptor with content descriptor support (B-013)
     let descriptor = csv_protocol::SanadPayloadDescriptor::new(
         csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
-        schema_hash_parsed.unwrap_or(Hash::new([0u8; 32])), // schema_hash
+        final_schema_hash, // schema_hash
         1, // payload_codec: canonical CBOR
-        commitment, // payload_hash: the commitment is the payload
-        content_root_parsed, // content_root
-        disclosure_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32])), // disclosure_policy_hash
-        proof_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32])), // proof_policy_hash
+        final_payload_hash, // payload_hash
+        final_attachment_root, // attachment_root (includes content_root)
+        final_disclosure_policy_hash, // disclosure_policy_hash
+        final_proof_policy_hash, // proof_policy_hash
     );
 
     // Create ownership proof from the owner address

@@ -113,8 +113,15 @@ fn cmd_proof(
         _ => SignatureScheme::Secp256k1,
     };
 
-    // Parse proof bundle from JSON using serde
-    let proof_bundle: ProofBundle = serde_json::from_value(proof)
+    // Parse proof bundle from canonical bytes (not JSON)
+    // Note: Proof files should be stored in binary canonical format, not JSON
+    let proof_bytes = hex::decode(proof.get("data")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid proof data hex: {}", e))?;
+    
+    let proof_bundle = ProofBundle::from_canonical_bytes(&proof_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to parse proof bundle: {}", e))?;
 
     let seal_registry = |_seal_id: &[u8]| false;
@@ -201,11 +208,13 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
     output::header("Offline Proof Verification");
 
     // Read and parse proof bundle from file
-    let content = std::fs::read_to_string(&file)
+    let content = std::fs::read(&file)
         .map_err(|e| anyhow::anyhow!("Failed to read proof file: {}", e))?;
 
-    let proof_bundle: ProofBundle = serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Invalid proof bundle JSON: {}", e))?;
+    // Parse proof bundle from canonical bytes (not JSON)
+    // Note: Proof files should be stored in binary canonical format, not JSON
+    let proof_bundle = ProofBundle::from_canonical_bytes(&content)
+        .map_err(|e| anyhow::anyhow!("Invalid proof bundle bytes: {}", e))?;
 
     output::progress(1, 5, "Parsing proof bundle...");
     output::kv(

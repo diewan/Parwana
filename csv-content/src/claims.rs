@@ -5,8 +5,11 @@
 
 use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
+// L2 types containing L0 Hash fields cannot use serde
+// Use manual serialization instead
 
 /// A claim about content.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claim {
     /// The subject of the claim (who made it).
@@ -22,6 +25,7 @@ pub struct Claim {
 }
 
 /// The type of claim.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClaimPredicate {
     /// The content is authentic.
@@ -76,6 +80,7 @@ impl Claim {
 }
 
 /// Rights management for content.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContentRights {
     /// Who owns this content.
@@ -113,6 +118,7 @@ impl ContentRights {
 }
 
 /// A rights transfer request.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RightsTransfer {
     /// The content being transferred.

@@ -158,6 +158,7 @@ pub struct OwnershipProof {
 /// The Sanad binds a payload descriptor to a commitment and owner.
 /// The Sanad ID is derived from the descriptor hash, commitment, and salt,
 /// ensuring content metadata is cryptographically bound to the identity.
+/// L1 type: uses serde for wire encoding
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sanad {
     /// Unique Sanad identifier (domain-separated hash of descriptor || commitment || salt)

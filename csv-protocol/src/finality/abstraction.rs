@@ -8,7 +8,7 @@
 //!   for serialization. Serde derives are required by canonical_cbor but non-canonical
 //!   formats (serde_json) are forbidden.
 
-use serde::{Deserialize, Serialize};
+// L1 types: proof data - uses canonical_cbor for serialization
 
 /// Canonical finality types
 ///
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// - Checkpoint: Sui-style checkpoint finality
 /// - Quorum: Aptos-style validator quorum
 /// - Instant: Instant finality chains
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FinalityType {
     /// Probabilistic finality (e.g., Bitcoin confirmations)
     Probabilistic {
@@ -80,7 +80,8 @@ impl FinalityType {
 /// Finality requirements
 ///
 /// Defines what level of finality is required for a given operation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FinalityRequirement {
     /// Require N confirmations
     Confirmations(u64),
@@ -97,7 +98,8 @@ pub enum FinalityRequirement {
 /// Finality proof
 ///
 /// Evidence that a block has reached finality according to chain rules.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses canonical_cbor for serialization
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FinalityProof {
     /// Block height
     pub block_height: u64,

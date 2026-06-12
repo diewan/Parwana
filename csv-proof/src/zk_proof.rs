@@ -6,7 +6,6 @@
 
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
-use serde::{Deserialize, Serialize};
 
 // L0/L1 types (proof data) must NOT use serde - use canonical_cbor instead
 // L2 types (metadata) MAY use serde for configuration/indexing
@@ -15,7 +14,8 @@ use serde::{Deserialize, Serialize};
 pub const MAX_ZK_PROOF_SIZE: usize = 1024 * 1024;
 
 /// Supported zero-knowledge proof systems.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses Display/FromStr for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofSystem {
     SP1,
     Risc0,
@@ -38,7 +38,7 @@ impl core::fmt::Display for ProofSystem {
 
 /// Verification key identifying the proof backend and source chain.
 /// L1 type: proof data - uses canonical_cbor for serialization
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifierKey {
     pub chain: csv_hash::chain_id::ChainId,
     pub key_bytes: Vec<u8>,
@@ -66,7 +66,7 @@ impl VerifierKey {
 
 /// Public outputs bound by a zero-knowledge seal proof.
 /// L1 type: proof data - uses canonical_cbor for serialization
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZkPublicInputs {
     pub seal_ref: SealPoint,
     pub block_hash: Hash,
@@ -78,7 +78,7 @@ pub struct ZkPublicInputs {
 
 /// Complete proof envelope submitted by an adapter.
 /// L1 type: proof data - uses canonical_cbor for serialization
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZkSealProof {
     pub proof_bytes: Vec<u8>,
     pub verifier_key: VerifierKey,
@@ -107,7 +107,7 @@ impl ZkSealProof {
 
 /// Chain witness supplied to a zero-knowledge prover.
 /// L1 type: proof data - uses canonical_cbor for serialization
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ChainWitness {
     pub chain: csv_hash::chain_id::ChainId,
     pub block_hash: Hash,

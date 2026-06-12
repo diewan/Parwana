@@ -50,7 +50,6 @@ pub const COMMITMENT_VERSION: u8 = 2;
 /// cross-field collisions and ensures that different commitment versions
 /// produce different hashes even if their fields are otherwise identical.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Commitment {
     /// Commitment format version (MUST be `COMMITMENT_VERSION`)
     pub version: u8,

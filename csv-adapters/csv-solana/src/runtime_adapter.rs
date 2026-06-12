@@ -119,7 +119,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         use std::str::FromStr;
 
         // Deserialize the proof bundle
-        let proof_bundle = serde_json::from_slice::<ProofBundle>(proof_bundle)
+        let proof_bundle = ProofBundle::from_canonical_bytes(proof_bundle).map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
             .map_err(|e| AdapterError::Generic(format!("Failed to deserialize proof bundle: {}", e)))?;
 
         // Get the program ID from backend seal_protocol config

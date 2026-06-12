@@ -76,9 +76,9 @@ to   = "serde_json"
 message = "csv-content must not use serde_json. Use csv-wire for transport encoding."
 
 [[graph.forbidden-edges]]
-# L0-L4 internal crates must not use serde directly for wire encoding.
-# csv-wire owns all serde and transport encoding.
-# Exception: serde derives are allowed for canonical serialization via csv-codec::canonical.
+# L0-L4 internal crates must not use serde_json for wire encoding.
+# csv-wire owns all transport encoding. Use csv-wire wire types instead.
+# Serde derives are allowed for canonical serialization via csv-codec::canonical.
 # L0/L1 types MUST use canonical_cbor for serialization (not serde_json).
 # L2+ types MAY use serde for configuration/indexing/persistence.
 from = "csv-hash"
@@ -86,14 +86,14 @@ to   = "serde_json"
 message = "csv-hash (L0) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding."
 
 [[graph.forbidden-edges]]
-from = "csv-protocol"
-to   = "serde_json"
-message = "csv-protocol (L0/L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding. L2+ types MAY use serde for non-critical paths."
-
-[[graph.forbidden-edges]]
 from = "csv-proof"
 to   = "serde_json"
-message = "csv-proof (L0/L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding. L2+ types MAY use serde for non-critical paths."
+message = "csv-proof (L1) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding. L2+ types MAY use serde for non-critical paths."
+
+[[graph.forbidden-edges]]
+from = "csv-protocol"
+to   = "serde_json"
+message = "csv-protocol (L0/L1 proof types) must not use serde_json. Use canonical_cbor via csv-codec for deterministic encoding. L2+ types MAY use serde for non-critical paths."
 
 [[graph.forbidden-edges]]
 from = "csv-verifier"

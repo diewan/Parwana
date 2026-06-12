@@ -5,10 +5,11 @@
 
 use crate::Hash;
 use crate::csv_tagged_hash;
+use csv_codec::{CanonicalEncoding, EncodingFormat};
 
 /// A single node in the state transition DAG
+/// L0 type: uses canonical_cbor for serialization (manual implementation)
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DAGNode {
     /// Unique identifier for this node
     pub node_id: Hash,
@@ -20,6 +21,22 @@ pub struct DAGNode {
     pub witnesses: Vec<Vec<u8>>,
     /// Hash of parent node(s) - empty for root
     pub parents: Vec<Hash>,
+}
+
+impl CanonicalEncoding for DAGNode {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => Ok(self.to_canonical_bytes()),
+        }
+    }
+    
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
+        }
+    }
 }
 
 impl DAGNode {
@@ -64,11 +81,146 @@ impl DAGNode {
         }
         Hash::new(csv_tagged_hash("dag-node", &data))
     }
+
+    /// Serialize to canonical bytes (manual implementation for L0 type)
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(self.node_id.as_bytes());
+        data.extend_from_slice(&(self.bytecode.len() as u32).to_le_bytes());
+        data.extend_from_slice(&self.bytecode);
+        data.extend_from_slice(&(self.signatures.len() as u32).to_le_bytes());
+        for sig in &self.signatures {
+            data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+            data.extend_from_slice(sig);
+        }
+        data.extend_from_slice(&(self.witnesses.len() as u32).to_le_bytes());
+        for wit in &self.witnesses {
+            data.extend_from_slice(&(wit.len() as u32).to_le_bytes());
+            data.extend_from_slice(wit);
+        }
+        data.extend_from_slice(&(self.parents.len() as u32).to_le_bytes());
+        for parent in &self.parents {
+            data.extend_from_slice(parent.as_bytes());
+        }
+        data
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for L0 type)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
+        let mut pos = 0;
+
+        let node_id = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash::new(hash)
+        } else {
+            return Err("Insufficient bytes for node_id");
+        };
+
+        let bytecode_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for bytecode length");
+        };
+
+        let bytecode = if bytes.len() >= pos + bytecode_len {
+            let data = bytes[pos..pos + bytecode_len].to_vec();
+            pos += bytecode_len;
+            data
+        } else {
+            return Err("Insufficient bytes for bytecode");
+        };
+
+        let signatures_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for signatures length");
+        };
+
+        let mut signatures = Vec::with_capacity(signatures_len);
+        for _ in 0..signatures_len {
+            let sig_len = if bytes.len() >= pos + 4 {
+                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+                len
+            } else {
+                return Err("Insufficient bytes for signature length");
+            };
+            let sig = if bytes.len() >= pos + sig_len {
+                let data = bytes[pos..pos + sig_len].to_vec();
+                pos += sig_len;
+                data
+            } else {
+                return Err("Insufficient bytes for signature");
+            };
+            signatures.push(sig);
+        }
+
+        let witnesses_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for witnesses length");
+        };
+
+        let mut witnesses = Vec::with_capacity(witnesses_len);
+        for _ in 0..witnesses_len {
+            let witness_len = if bytes.len() >= pos + 4 {
+                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+                len
+            } else {
+                return Err("Insufficient bytes for witness length");
+            };
+            let witness = if bytes.len() >= pos + witness_len {
+                let data = bytes[pos..pos + witness_len].to_vec();
+                pos += witness_len;
+                data
+            } else {
+                return Err("Insufficient bytes for witness");
+            };
+            witnesses.push(witness);
+        }
+
+        let parents_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for parents length");
+        };
+
+        let mut parents = Vec::with_capacity(parents_len);
+        for _ in 0..parents_len {
+            if bytes.len() >= pos + 32 {
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(&bytes[pos..pos + 32]);
+                pos += 32;
+                parents.push(Hash::new(hash));
+            } else {
+                return Err("Insufficient bytes for parent hash");
+            }
+        }
+
+        Ok(Self {
+            node_id,
+            bytecode,
+            signatures,
+            witnesses,
+            parents,
+        })
+    }
 }
 
 /// A segment of the state transition DAG
+/// L0 type: uses manual canonical_cbor serialization
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DAGSegment {
     /// Nodes in this segment
     pub nodes: Vec<DAGNode>,
@@ -76,13 +228,147 @@ pub struct DAGSegment {
     pub root_commitment: Hash,
 }
 
+impl CanonicalEncoding for DAGSegment {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => Ok(self.to_canonical_bytes()),
+        }
+    }
+    
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
+        }
+    }
+}
+
 impl DAGSegment {
+    /// Encode using MCE format (fixed-width byte concatenation)
+    fn encode_mce(&self) -> csv_codec::CodecResult<Vec<u8>> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&(self.nodes.len() as u32).to_le_bytes());
+        for node in &self.nodes {
+            let node_bytes = node.encode_mce()?;
+            data.extend_from_slice(&(node_bytes.len() as u32).to_le_bytes());
+            data.extend_from_slice(&node_bytes);
+        }
+        data.extend_from_slice(self.root_commitment.as_bytes());
+        Ok(data)
+    }
+    
+    /// Decode using MCE format
+    fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
+        let mut pos = 0;
+        
+        let nodes_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for nodes length".to_string()));
+        };
+        
+        let mut nodes = Vec::with_capacity(nodes_len);
+        for _ in 0..nodes_len {
+            let node_len = if bytes.len() >= pos + 4 {
+                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+                len
+            } else {
+                return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for node length".to_string()));
+            };
+            let node = if bytes.len() >= pos + node_len {
+                let node_bytes = &bytes[pos..pos + node_len];
+                pos += node_len;
+                DAGNode::decode_mce(node_bytes)?
+            } else {
+                return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for node data".to_string()));
+            };
+            nodes.push(node);
+        }
+        
+        let root_commitment = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash::new(hash)
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for root commitment".to_string()));
+        };
+        
+        Ok(Self {
+            nodes,
+            root_commitment,
+        })
+    }
+
     /// Create a new DAG segment
     pub fn new(nodes: Vec<DAGNode>, root_commitment: Hash) -> Self {
         Self {
             nodes,
             root_commitment,
         }
+    }
+
+    /// Serialize to canonical bytes (manual implementation for L0 type)
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&(self.nodes.len() as u32).to_le_bytes());
+        for node in &self.nodes {
+            let node_bytes = node.to_canonical_bytes();
+            data.extend_from_slice(&(node_bytes.len() as u32).to_le_bytes());
+            data.extend_from_slice(&node_bytes);
+        }
+        data.extend_from_slice(self.root_commitment.as_bytes());
+        data
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for L0 type)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
+        let mut pos = 0;
+
+        let nodes_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for nodes length");
+        };
+
+        let mut nodes = Vec::with_capacity(nodes_len);
+        for _ in 0..nodes_len {
+            let node_len = if bytes.len() >= pos + 4 {
+                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+                len
+            } else {
+                return Err("Insufficient bytes for node length");
+            };
+            let node = if bytes.len() >= pos + node_len {
+                let node_bytes = &bytes[pos..pos + node_len];
+                pos += node_len;
+                DAGNode::from_canonical_bytes(node_bytes)?
+            } else {
+                return Err("Insufficient bytes for node");
+            };
+            nodes.push(node);
+        }
+
+        let root_commitment = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash::new(hash)
+        } else {
+            return Err("Insufficient bytes for root_commitment");
+        };
+
+        Ok(Self {
+            nodes,
+            root_commitment,
+        })
     }
 
     /// Validate DAG structure (topological ordering)
@@ -350,8 +636,8 @@ mod tests {
             vec![Hash::new([4u8; 32])],
         );
 
-        let bytes = csv_codec::to_canonical_cbor(&node).unwrap();
-        let restored: DAGNode = csv_codec::from_canonical_cbor(&bytes).unwrap();
+        let bytes = node.to_canonical_bytes();
+        let restored = DAGNode::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(node, restored);
     }
 
@@ -368,8 +654,8 @@ mod tests {
 
         let segment = DAGSegment::new(vec![parent, child], Hash::new([99u8; 32]));
 
-        let bytes = csv_codec::to_canonical_cbor(&segment).unwrap();
-        let restored: DAGSegment = csv_codec::from_canonical_cbor(&bytes).unwrap();
+        let bytes = segment.to_canonical_bytes();
+        let restored = DAGSegment::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(segment, restored);
     }
 
@@ -384,8 +670,8 @@ mod tests {
         );
         let original_hash = node.hash();
 
-        let bytes = csv_codec::to_canonical_cbor(&node).unwrap();
-        let restored: DAGNode = csv_codec::from_canonical_cbor(&bytes).unwrap();
+        let bytes = node.to_canonical_bytes();
+        let restored = DAGNode::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(original_hash, restored.hash());
     }
 

@@ -8,6 +8,7 @@ use crate::error::{Result, WalletError};
 use async_trait::async_trait;
 use csv_hash::chain_id::ChainId;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Generic wallet operations trait
 ///
@@ -79,7 +80,7 @@ pub trait WalletOperations: Send + Sync {
 /// implementations and provides methods to retrieve them by chain ID.
 pub struct WalletFactory {
     /// Registry of wallet operations implementations by chain ID
-    registry: HashMap<ChainId, Box<dyn WalletOperations>>,
+    registry: HashMap<ChainId, Arc<dyn WalletOperations>>,
 }
 
 impl WalletFactory {
@@ -96,7 +97,7 @@ impl WalletFactory {
     /// * `ops` - The wallet operations implementation
     pub fn register(&mut self, ops: Box<dyn WalletOperations>) {
         let chain_id = ops.chain_id();
-        self.registry.insert(chain_id, ops);
+        self.registry.insert(chain_id, Arc::from(ops));
     }
 
     /// Get wallet operations for a chain
@@ -106,8 +107,8 @@ impl WalletFactory {
     ///
     /// # Returns
     /// The wallet operations implementation if found
-    pub fn get(&self, chain_id: &ChainId) -> Option<&dyn WalletOperations> {
-        self.registry.get(chain_id).map(|ops| ops.as_ref())
+    pub fn get(&self, chain_id: &ChainId) -> Option<Arc<dyn WalletOperations>> {
+        self.registry.get(chain_id).cloned()
     }
 
     /// Get all registered chain IDs

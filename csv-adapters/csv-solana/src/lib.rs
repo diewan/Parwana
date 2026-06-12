@@ -24,6 +24,7 @@ pub mod sync_coordinator;
 pub mod types;
 // pub mod verifier;  // REMOVED: verification centralized in csv-verifier per implementation.md
 pub mod wallet;
+pub mod wallet_operations;
 
 pub use config::{Network, SolanaConfig};
 pub use error::{SolanaError, SolanaResult};

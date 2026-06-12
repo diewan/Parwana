@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use csv_hash::Hash;
+use csv_hash::dag::DAGSegment;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
 use sha2::{Digest, Sha256};
@@ -560,8 +561,8 @@ impl SealProtocol for SolanaSealProtocol {
         };
 
         // Create a complete proof bundle
-        let dag_segment: csv_proof::dag::DAGSegment = csv_codec::from_canonical_cbor(&segment)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        let dag_segment: csv_hash::dag::DAGSegment = DAGSegment::from_canonical_bytes(&segment).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))
+            .map_err(|e| Box::new(ProtocolError::Generic(e)) as Box<dyn std::error::Error>)?;
         let bundle = csv_protocol::proof_taxonomy::ProofBundle::with_signature_scheme(
             csv_protocol::SignatureScheme::Ed25519,
             dag_segment,

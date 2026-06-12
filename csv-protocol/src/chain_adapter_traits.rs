@@ -219,6 +219,7 @@ pub enum SanadOperation {
 }
 
 /// Result of a sanad operation
+/// L1 type: uses serde for wire encoding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SanadOperationResult {
     /// Sanad ID affected by the operation.

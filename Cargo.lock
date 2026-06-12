@@ -2986,6 +2986,7 @@ dependencies = [
  "csv-storage",
  "csv-sui",
  "csv-verifier",
+ "csv-wallet",
  "hex",
  "reqwest 0.12.28",
  "serde_json",
@@ -3213,6 +3214,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml",
  "tracing",
  "uuid",
 ]

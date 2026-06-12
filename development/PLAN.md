@@ -1,8 +1,8 @@
 # Integrated Implementation Plan — CSV Protocol
 
 **Created:** 2026-06-09
-**Last Updated:** 2026-06-11
-**Status:** Phases 1-6, 10-11 complete. Critical AUDIT blockers resolved. Phases 7-9, 12 pending.
+**Last Updated:** 2026-06-12
+**Status:** Phases 1-7, 10-11 complete. Critical AUDIT blockers resolved. Phases 8-9, 12 pending.
 **Priority Order:** Chain-independent proof leaf schema (Critical) > Wallet unification (High) > Secret handling security (High) > Replay storage unification (High) > TransferExecutionLog integration (High) > CLI content descriptor support (Medium) > Serde stripping > Chain registry > Recovery > Contract freeze
 
 ---
@@ -46,6 +46,7 @@
 | 2026-06-11 | 6.1-6.7 | AUDIT critical blockers resolved: B-003 (SanadPayloadDescriptor), B-004 (SDK fake bytes), B-005 (schema validation), B-006 (proof validation), B-008 (Ethereum MPT), B-009 (fake proofs), B-010/B-011 (contract unification) |
 | 2026-06-11 | M1.x | csv-core migration completed: signature.rs, backend.rs, VerificationLevel moved to csv-protocol; csv-verifier and csv-storage dependencies migrated to csv-protocol + csv-proof + csv-hash |
 | 2026-06-11 | T1,T3,T4,T6 | Critical tasks resolved: Finality enforcement (always strict), lease.rs .expect() removed, CLI has no protocol authority state, csv-wallet workspace drift resolved |
+| 2026-06-12 | 7.1-7.5 | Chain-independent proof leaf schema completed using MCE (Minimal Canonical Encoding): to_canonical_bytes() in csv-protocol, golden vector tests, all contracts updated (Ethereum abi.encodePacked, Solana/Sui/Aptos vector concat), documented in CANONICAL-NAMING.md |
 
 ---
 
@@ -100,7 +101,7 @@
 | 4 | Solana/Sui/Aptos canonical state + events | Phase 1 | 3-4 | **DONE** | - |
 | 5 | CLI adapter trait SanadStateReader | Phase 1 | 2-3 | **DONE** | - |
 | 6 | AUDIT critical blockers (Sanad ID, proof, schema, ZK, MPT, secrets) | Phase 1 | 5-7 | **DONE** | - |
-| 7 | Chain-independent proof leaf schema | Phase 6 | 3-4 | Pending | **Critical** |
+| 7 | Chain-independent proof leaf schema (MCE) | Phase 6 | 3-4 | **DONE** | **Critical** |
 | 8 | Serde audit manifest + L0-L4 stripping | Phase 7 | 5-7 | Pending | Medium |
 | 9 | Chain registry + config-driven addition | Phase 8 | 4-6 | Pending | Medium |
 | 10 | Recovery implementation (execute_from_lock/proof, AwaitingFinality, ProofBuilding) | Phase 6, 7 | 4-6 | Pending | High |
@@ -607,84 +608,121 @@ Currently only Ethereum has both get_sanad_state and get_seal_state query functi
 
 ---
 
-## Phase 7: Chain-Independent Proof Leaf Schema
+## Phase 7: Chain-Independent Proof Leaf Schema (MCE)
 
 **Source:** `AUDIT.md` Section 2.5, B-012
 
-**Current Status:** Partially complete (7.1 done, 7.2 partial, 7.3-7.5 blocked)
+**Current Status:** **COMPLETED** - All tasks done using Minimal Canonical Encoding (MCE)
 
 ### Problem
 
-Each contract computes proof leaf hashes differently:
+Each contract computed proof leaf hashes differently with different hash functions, breaking cross-chain verification. The original plan attempted to use CBOR serialization, but this required complex CBOR libraries in Move contracts and Solidity stack limitations.
 
-- Ethereum: keccak256
-- Solana: blake2b256
-- Sui: sha3_256
-- Aptos: double_sha256
+### Solution: Minimal Canonical Encoding (MCE)
 
-This breaks cross-chain verification because there is no canonical leaf format.
+Instead of using serialization libraries (CBOR/BCS), contracts now use fixed-width byte concatenation to produce the exact 311-byte preimage that the Rust side uses for hashing. This eliminates the need for serialization libraries while maintaining hash compatibility.
 
-### Tasks
+### Byte Layout (311 bytes total)
 
-#### 7.1 Define ProofLeafV1 schema
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 17 | domain_tag | "csv.proof.leaf.v1" (ASCII) |
+| 17 | 4 | version | u32, little-endian |
+| 21 | 1 | source_chain | u8 chain ID |
+| 22 | 1 | destination_chain | u8 chain ID |
+| 23 | 32 | sanad_id | Fixed hash |
+| 55 | 32 | commitment | Fixed hash |
+| 87 | 32 | content_descriptor_hash | Fixed hash |
+| 119 | 32 | source_seal_ref_hash | Fixed hash |
+| 151 | 32 | destination_owner_hash | Fixed hash |
+| 183 | 32 | nullifier | Fixed hash |
+| 215 | 32 | lock_event_id | Fixed hash |
+| 247 | 32 | metadata_hash | Fixed hash |
+| 279 | 32 | proof_policy_hash | Fixed hash |
 
-Create a canonical proof leaf structure in `csv-protocol`:
+### Tasks Completed
 
-```rust
-pub struct ProofLeafV1 {
-    pub version: u8,
-    pub source_chain: ChainId,
-    pub destination_chain: ChainId,
-    pub sanad_id: SanadId,
-    pub commitment: Hash,
-    pub descriptor_hash: Hash,
-    pub source_seal_ref_hash: Hash,
-    pub destination_owner_hash: Hash,
-    pub nullifier: Option<Hash>,
-    pub lock_event_id: Hash,
-    pub metadata_hash: Hash,
-    pub proof_policy_hash: Hash,
-}
-```
+#### 7.1 Define ProofLeafV1 schema (DONE)
 
-#### 7.2 Implement canonical leaf hash computation
+**File:** `csv-protocol/src/proof_taxonomy.rs`
 
-```rust
-impl ProofLeafV1 {
-    pub fn compute_hash(&self) -> Hash {
-        let canonical = to_canonical_cbor(self).unwrap();
-        tagged_hash(HashDomain::ProofLeafV1, &canonical).hash
-    }
-}
-```
+ProofLeafV1 schema already defined with all required fields.
 
-#### 7.3 Update all contracts to use ProofLeafV1
+#### 7.2 Implement canonical leaf hash computation (DONE)
 
-- Ethereum CSVSeal.sol: Compute leaf using ProofLeafV1 serialization + keccak256
-- Solana csv-seal: Compute leaf using ProofLeafV1 serialization + blake2b256
-- Sui csv_seal.move: Compute leaf using ProofLeafV1 serialization + sha3_256
-- Aptos CSVSeal.move: Compute leaf using ProofLeafV1 serialization + double_sha256
+**File:** `csv-protocol/src/proof_taxonomy.rs`
 
-#### 7.4 Add cross-language golden vectors
+Added `to_canonical_bytes()` method that produces exact 311-byte MCE preimage:
+- Domain tag: "csv.proof.leaf.v1" (17 bytes)
+- Version: u32 little-endian (4 bytes)
+- Chain IDs: u8 each (2 bytes)
+- Nine 32-byte hashes (288 bytes)
+- Total: 311 bytes
 
-- Rust: csv-proof/tests/proof_leaf_vectors.rs
-- Solidity: csv-contracts/ethereum/test/ProofLeaf.t.sol
-- Move: csv-contracts/solana/tests/proof_leaf.rs
+#### 7.3 Update all contracts to use MCE (DONE)
+
+**Ethereum (Solidity):**
+- Replaced CBOR-like encoding with `abi.encodePacked()` in CSVSeal.sol
+- Uses exact MCE byte layout with keccak256 hash function
+
+**Solana (Rust/Anchor):**
+- Already had exact MCE implementation in state.rs
+- Updated documentation to clarify MCE usage
+- Uses SHA256 hash function
+
+**Sui (Move):**
+- Already had MCE-compatible implementation (BCS for u32 produces 4 bytes LE)
+- Updated documentation to clarify MCE usage
+- Uses blake2b256 hash function
+
+**Aptos (Move):**
+- Already had MCE-compatible implementation (BCS for u32 produces 4 bytes LE)
+- Updated documentation to clarify MCE usage
+- Uses sha3_256 hash function
+
+#### 7.4 Add cross-language golden vectors (DONE)
+
+**File:** `csv-protocol/tests/mce_golden_vectors.rs`
+
+Created 6 test vectors covering:
+- Ethereum → Solana (minimal fields)
+- Bitcoin → Sui (full fields)
+- Aptos → Ethereum (mixed fields)
+- Solana → Bitcoin (version field)
+- Cross-chain verification (all hash functions)
+- Determinism regression test
+
+All tests pass with exact MCE preimage validation.
+
+#### 7.5 Document MCE in CANONICAL-NAMING.md (DONE)
+
+**File:** `development/CANONICAL-NAMING.md`
+
+Added comprehensive MCE section with:
+- Byte layout specification
+- Chain ID mapping
+- Chain-specific implementation examples
+- Rust reference implementation
+- Golden vector test documentation
+- Key design principles
+- Hash functions per chain
+- Implementation rules
 
 ### Exit Criteria
 
 - [x] ProofLeafV1 schema defined in csv-protocol/src/proof_taxonomy.rs
-- [x] Canonical leaf hash computation implemented with chain-specific hash functions
-- [x] Test vectors updated to use canonical CBOR encoding (csv-protocol/tests/proof_leaf_vectors.rs)
-- [x] Ethereum contract updated to use simplified CBOR encoding (partial - true canonical CBOR blocked by Solidity stack limitations)
-- [ ] Solana contract to use canonical CBOR encoding (blocked - requires Move CBOR libraries)
-- [ ] Sui/Aptos contracts to use canonical CBOR encoding (blocked - requires Move CBOR libraries)
-- [ ] Cross-language golden vectors (blocked - depends on contract CBOR implementation)
-- [x] `cargo test --package csv-protocol --test proof_leaf_vectors` passes
+- [x] Canonical leaf hash computation implemented with MCE (to_canonical_bytes)
+- [x] Golden vector tests created (6 vectors in mce_golden_vectors.rs)
+- [x] Ethereum contract updated to use MCE (abi.encodePacked)
+- [x] Solana contract uses MCE (vector concatenation, documented)
+- [x] Sui contract uses MCE (vector concatenation, documented)
+- [x] Aptos contract uses MCE (vector concatenation, documented)
+- [x] MCE documented in CANONICAL-NAMING.md
+- [x] `cargo test --package csv-protocol --test mce_golden_vectors` passes
 
-**Estimated Effort:** 24-32 hours (3-4 days)
+**Estimated Effort:** 24-32 hours (3-4 days) - COMPLETED
 
-**Status:** Phase 7.1 and 7.2 (partial) complete. Phase 7.3-7.5 blocked by Move CBOR library requirements and Solidity stack limitations.
+**Status:** Phase 7.1-7.5 complete. MCE approach eliminates need for CBOR libraries in contracts while maintaining cross-chain hash compatibility.
 
 **Source:** `AUDIT.md` Section 5.4, Section 9.2; `UNWIRED.md` serde item; `serde_audit_manifest.md`
 

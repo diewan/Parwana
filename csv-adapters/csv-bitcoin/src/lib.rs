@@ -33,6 +33,7 @@ pub mod tx_builder;
 pub mod types;
 // pub mod verifier;  // REMOVED: verification centralized in csv-verifier per implementation.md
 pub mod wallet;
+pub mod wallet_operations;
 pub mod zk_prover;
 
 #[cfg(feature = "signet-rest")]
@@ -58,6 +59,7 @@ pub use types::{
     BitcoinCommitAnchor, BitcoinFinalityProof, BitcoinInclusionProof, BitcoinSealPoint,
 };
 pub use wallet::{Bip86Path, DerivedTaprootKey, SealWallet, WalletError, WalletUtxo};
+pub use wallet_operations::{BitcoinWalletOperations, Network as WalletNetwork, WalletUtxo as WalletOpsUtxo};
 pub use zk_prover::{BitcoinSpvProver, Sp1BtcSpvInput};
 
 // MPC batching for cost optimization

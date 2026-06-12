@@ -15,6 +15,7 @@ use crate::state::UnifiedStateManager;
 use anyhow::Result;
 use std::collections::HashMap;
 
+use csv_coordinator::wallet_factory::{init_wallet_factory, get_wallet_operations};
 use csv_hash::ChainId;
 use csv_keys::{
     Mnemonic, MnemonicType,
@@ -22,7 +23,6 @@ use csv_keys::{
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
-use csv_wallet::address;
 
 /// Initialize wallet with one-command setup.
 pub fn cmd_init(
@@ -151,16 +151,26 @@ fn generate_wallet_for_chain(
     keystore: &mut FileKeystore,
     passphrase: &Passphrase,
 ) -> Result<String> {
-    // Phase 5: Use csv-wallet for unified address derivation
+    // Phase 5: Use WalletFactory for unified address derivation
     // Convert mnemonic to seed
     let mnemonic_obj =
         Mnemonic::from_phrase(mnemonic).map_err(|e| anyhow::anyhow!("Invalid mnemonic: {}", e))?;
     let seed = mnemonic_obj.to_seed(None);
     let seed_array = *seed.as_bytes();
 
-    // Use csv-wallet for address derivation (unified wallet abstraction)
-    let address = address::derive_funding_address(&seed_array, chain.as_str(), account, 0)
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Initialize wallet factory and get chain-specific operations
+    let _factory = init_wallet_factory();
+    let chain_id = ChainId::from(chain.as_str());
+    let wallet_ops = get_wallet_operations(&chain_id);
+
+    // Use WalletFactory for address derivation (unified wallet abstraction)
+    let address = if let Some(ops) = wallet_ops {
+        ops.derive_address(&seed_array, account, 0)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+    } else {
+        // Fallback to csv-wallet if factory not available
+        return Err(anyhow::anyhow!("Wallet operations not available for {}", chain));
+    };
 
     // Derive keys for keystore storage
     let core_chain = ChainId::new(chain.as_str());
@@ -218,9 +228,17 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
     let xpub = derive_xpub(&seed_array, bitcoin_network, 0)
         .map_err(|e| anyhow::anyhow!("Failed to derive xpub: {}", e))?;
 
-    // Use csv-wallet for address derivation (unified wallet abstraction)
-    let address = address::derive_funding_address(&seed_array, "bitcoin", 0, 0)
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Use WalletFactory for address derivation (unified wallet abstraction)
+    let _factory = init_wallet_factory();
+    let chain_id = ChainId::from("bitcoin");
+    let wallet_ops = get_wallet_operations(&chain_id);
+
+    let address = if let Some(ops) = wallet_ops {
+        ops.derive_address(&seed_array, 0, 0)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+    } else {
+        return Err(anyhow::anyhow!("Wallet operations not available for bitcoin"));
+    };
 
     // Store address in state
     state.store_address(Chain::new("bitcoin"), address.clone());
@@ -254,9 +272,17 @@ fn generate_from_mnemonic(
     let seed = mnemonic.to_seed(None);
     let seed_array = *seed.as_bytes();
 
-    // Use csv-wallet for address derivation (unified wallet abstraction)
-    let address = address::derive_funding_address(&seed_array, chain.as_str(), 0, 0)
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    // Use WalletFactory for address derivation (unified wallet abstraction)
+    let _factory = init_wallet_factory();
+    let chain_id = ChainId::from(chain.as_str());
+    let wallet_ops = get_wallet_operations(&chain_id);
+
+    let address = if let Some(ops) = wallet_ops {
+        ops.derive_address(&seed_array, 0, 0)
+            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+    } else {
+        return Err(anyhow::anyhow!("Wallet operations not available for {}", chain));
+    };
 
     // Derive key for keystore storage
     let core_chain = ChainId::new(chain.as_str());

@@ -134,12 +134,12 @@ pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://purplepag.es",
 ];
 
-/// Serialize a proof bundle to JSON bytes.
+/// Serialize a proof bundle to canonical bytes.
 pub fn serialize_proof(proof: &ProofBundle) -> Result<Vec<u8>, TransportError> {
-    serde_json::to_vec(proof).map_err(|e| TransportError::Serialization(e.to_string()))
+    proof.to_canonical_bytes().map_err(|e| TransportError::Serialization(e))
 }
 
-/// Deserialize a proof bundle from JSON bytes.
+/// Deserialize a proof bundle from canonical bytes.
 pub fn deserialize_proof(data: &[u8]) -> Result<ProofBundle, TransportError> {
-    serde_json::from_slice(data).map_err(|e| TransportError::Serialization(e.to_string()))
+    ProofBundle::from_canonical_bytes(data).map_err(|e| TransportError::Serialization(e))
 }

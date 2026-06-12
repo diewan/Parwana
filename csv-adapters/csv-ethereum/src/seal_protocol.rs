@@ -12,6 +12,7 @@ use std::sync::Mutex;
 #[cfg(all(feature = "rpc", not(test)))]
 use crate::finality::FinalityCheckerTrait;
 use csv_hash::Hash;
+use csv_hash::dag::DAGSegment;
 use csv_protocol::commitment::Commitment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::proof_taxonomy::{FinalityProof, ProofBundle};
@@ -515,8 +516,8 @@ impl SealProtocol for EthereumSealProtocol {
         let finality = self.verify_finality(anchor.clone()).await?;
 
         let dag_segment: csv_hash::dag::DAGSegment =
-            csv_codec::from_canonical_cbor(&transition_dag)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            DAGSegment::from_canonical_bytes(&transition_dag).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))
+                .map_err(|e| Box::new(ProtocolError::Generic(e)) as Box<dyn std::error::Error>)?;
 
         let seal_ref = CoreSealPoint::new(anchor.tx_hash.to_vec(), Some(anchor.log_index), None)
             .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;

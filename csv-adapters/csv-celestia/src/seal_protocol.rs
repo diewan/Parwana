@@ -23,6 +23,7 @@
 
 use async_trait::async_trait;
 use csv_hash::Hash;
+use csv_hash::dag::DAGSegment;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
@@ -302,7 +303,7 @@ where
 
         // Deserialize transition_dag from Vec<u8> to DAGSegment
         let dag_segment: csv_hash::dag::DAGSegment =
-            csv_codec::from_canonical_cbor(&transition_dag).map_err(|e| {
+            DAGSegment::from_canonical_bytes(&transition_dag).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e)).map_err(|e| {
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("Failed to deserialize DAG: {}", e),
@@ -378,7 +379,7 @@ where
     /// Verify a full proof bundle from the DA layer
     pub async fn verify_bundle_from_da(&self, proof_id: &ProofId) -> Result<ProofBundle> {
         let blob = self.da_layer.get_blob(proof_id).await?;
-        let bundle: ProofBundle = serde_json::from_slice(&blob.data).map_err(|e| {
+        let bundle = ProofBundle::from_canonical_bytes(&blob.data).map_err(|e| {
             CelestiaError::DeserializationError(format!(
                 "Failed to deserialize proof bundle: {}",
                 e

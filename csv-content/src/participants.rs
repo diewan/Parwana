@@ -5,8 +5,11 @@
 
 use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
+// L2 types containing L0 Hash fields cannot use serde
+// Use manual serialization instead
 
 /// A participant in a Sanad's content lifecycle.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Participant {
     /// Unique identifier for this participant.
@@ -20,6 +23,7 @@ pub struct Participant {
 }
 
 /// Unique identifier for a participant.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParticipantId(pub Hash);
 
@@ -40,6 +44,7 @@ impl ParticipantId {
 }
 
 /// Role of a participant in content.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ParticipantRole {
     /// The creator of the content.
@@ -57,6 +62,7 @@ pub enum ParticipantRole {
 }
 
 /// A participant set for a content tree.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParticipantSet {
     /// All participants.

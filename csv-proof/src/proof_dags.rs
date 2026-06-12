@@ -8,7 +8,6 @@
 //! - Proof caching and reuse
 
 use csv_hash::Hash;
-use serde::{Deserialize, Serialize};
 
 use crate::Proof;
 
@@ -17,7 +16,7 @@ use crate::Proof;
 
 /// A unique identifier for a proof node.
 /// L0 type: hash wrapper - uses canonical_cbor for serialization
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProofId(pub Hash);
 
 impl ProofId {
@@ -39,7 +38,7 @@ impl ProofId {
 
 /// A node in a proof DAG.
 /// L1 type: proof data - uses canonical_cbor for serialization
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ProofNode {
     /// Unique identifier for this node.
     pub id: ProofId,
@@ -52,7 +51,7 @@ pub struct ProofNode {
 }
 
 /// Metadata for a proof node.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ProofNodeMetadata {
     /// When the proof was created.
     pub created_at: u64,
@@ -106,7 +105,7 @@ impl ProofNode {
 
 /// A directed acyclic graph of proof nodes.
 /// L1 type: proof data - uses canonical_cbor for serialization
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ProofDag {
     /// All nodes in the DAG.
     pub nodes: std::collections::HashMap<ProofId, ProofNode>,

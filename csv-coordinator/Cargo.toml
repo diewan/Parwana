@@ -10,6 +10,7 @@ csv-verifier = { path = "../csv-verifier" }
 csv-storage = { path = "../csv-storage" }
 csv-hash = { path = "../csv-hash" }
 csv-keys = { path = "../csv-keys" }
+csv-wallet = { path = "../csv-wallet" }
 # Chain adapters (coordinator can depend on these, runtime cannot)
 csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true }
 csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }

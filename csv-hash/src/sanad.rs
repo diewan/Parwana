@@ -7,10 +7,11 @@
 //!
 //! This ensures:
 //! - Salt affects the ID (prevents collision when same commitment used with different salts)
-//! - Descriptor hash binds content metadata to the ID
-//! - Domain separation prevents cross-protocol replay
+/// - Descriptor hash binds content metadata to the ID
+/// - Domain separation prevents cross-protocol replay
 
 use crate::{Hash, tagged_hash_str};
+use serde::{Deserialize, Serialize};
 
 /// Preimage for Sanad ID derivation.
 ///
@@ -61,8 +62,8 @@ pub const DOMAIN_SANAD_ID_V1: &str = "urn:lnp-bp:csv:csv.sanad.id.v1";
 ///
 /// The domain tag `csv.sanad.id.v1` ensures Sanad IDs are cryptographically
 /// separated from all other protocol hashes (commitments, nullifiers, proof leaves).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// L0 type: uses serde for compatibility with L2 type serialization
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SanadId(pub Hash);
 
 impl SanadId {

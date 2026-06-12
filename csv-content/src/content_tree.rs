@@ -15,8 +15,11 @@ use std::vec::Vec;
 
 use csv_hash::{Hash, merkle::tree::MerkleTree as CanonicalMerkleTree};
 use serde::{Deserialize, Serialize};
+// L2 types containing L0 Hash fields cannot use serde
+// Use manual serialization instead
 
 /// The type of a content node.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeType {
     /// A leaf node containing content data.
@@ -30,6 +33,7 @@ pub enum NodeType {
 }
 
 /// A node in the content tree.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentNode {
     /// The type of this node.
@@ -47,6 +51,7 @@ pub struct ContentNode {
 }
 
 /// Metadata for a content node.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeMetadata {
     /// Schema ID for this node.
@@ -62,6 +67,7 @@ pub struct NodeMetadata {
 }
 
 /// Access control for a content node.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccessControl {
     /// Who can read this node.
@@ -73,6 +79,7 @@ pub struct AccessControl {
 }
 
 /// A content tree with Merkle-based integrity.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentTree {
     /// The root hash of the tree.
@@ -203,6 +210,7 @@ impl Default for ContentTree {
 }
 
 /// A proof that a leaf is included in a content tree.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentProof {
     /// Index of the leaf in the tree.
@@ -257,6 +265,7 @@ impl ContentProof {
 ///
 /// Every verification path must calculate these costs
 /// to reject pathological content.
+/// L2 type without Hash fields - can use serde
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VerificationCost {
     /// Estimated CPU cycles.
@@ -348,6 +357,7 @@ pub enum VerificationCostError {
 /// A selective disclosure proof.
 ///
 /// Allows proving subtree validity without exposing the full content.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisclosureProof {
     /// The root of the disclosed subtree.
@@ -380,6 +390,7 @@ impl DisclosureProof {
 /// A redacted Merkle proof.
 ///
 /// Proves a leaf exists without revealing its content.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedactedMerkleProof {
     /// The hash of the redacted leaf.
@@ -400,6 +411,7 @@ impl RedactedMerkleProof {
 /// An encrypted subtree proof.
 ///
 /// Proves knowledge of an encrypted subtree without revealing its contents.
+/// L2 type: uses serde for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedSubtreeProof {
     /// The hash of the encrypted subtree root.

@@ -9,14 +9,15 @@
 //!   for serialization. Serde derives are required by canonical_cbor but non-canonical
 //!   formats (serde_json) are forbidden.
 
-use serde::{Deserialize, Serialize};
+// L1 types: proof data - uses canonical_cbor for serialization
 
 /// Solana commitment grades — never collapse these into `u64 confirmations`.
 ///
 /// Solana's consensus model has three distinct commitment levels with different
 /// safety guarantees. The protocol must respect these distinctions rather than
 /// treating them as scalar confirmation counts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses Display/FromStr for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolanaCommitmentGrade {
     /// Transaction was processed by the leader but not confirmed by any
     /// supermajority vote. Sub-second finality risk. NOT SAFE for minting.
@@ -35,7 +36,8 @@ pub enum SolanaCommitmentGrade {
 /// Ethereum post-merge has three distinct finality stages with different
 /// safety properties. Proof validation must respect these stages and
 /// should not authorize minting below `Finalized` unless in degraded mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// L1 type: proof data - uses Display/FromStr for serialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EthereumFinalityStage {
     /// The latest block tip — no finality guarantee.
     UnsafeHead,
