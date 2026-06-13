@@ -31,6 +31,7 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use csv_hash::{Hash, sanad::SanadId};
+use csv_wire::{HashWire, SanadIdWire};
 use csv_protocol::transfer_state::TransferStage;
 use serde::{Deserialize, Serialize};
 
@@ -43,13 +44,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransferContext {
     /// Sanad ID being transferred
-    pub sanad_id: SanadId,
+    pub sanad_id: SanadIdWire,
     /// Source chain ID
     pub source_chain: String,
     /// Destination chain ID
     pub destination_chain: String,
     /// Lock transaction hash (hex-encoded)
-    pub lock_tx_hash: Hash,
+    pub lock_tx_hash: HashWire,
     /// Destination owner address (hex-encoded)
     pub destination_owner: String,
 }
@@ -73,8 +74,8 @@ pub enum PhaseOutcome {
 pub struct TransferPhaseEntry {
     /// Unique transfer identifier
     pub transfer_id: String,
-    /// Replay ID hash for this transfer (stored as Hash for serialization compatibility)
-    pub replay_id: csv_hash::Hash,
+    /// Replay ID hash for this transfer (stored as HashWire for serialization compatibility)
+    pub replay_id: HashWire,
     /// Hash of the proof bundle (if available)
     pub proof_hash: [u8; 32],
     /// Canonical proof bundle bytes needed to resume after validation.

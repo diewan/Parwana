@@ -240,7 +240,7 @@ const MAX_PROOF_BUNDLE_SIZE: usize = 1024 * 1024;
 const MIN_REQUIRED_CONFIRMATIONS: u64 = 6;
 
 /// Result of a proof verification with explicit assurance level.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct VerificationResult {
     /// Whether the proof passed all checks.
     pub is_valid: bool,
@@ -250,6 +250,21 @@ pub struct VerificationResult {
     pub errors: Vec<VerificationError>,
     /// Warnings (non-fatal issues).
     pub warnings: Vec<String>,
+}
+
+impl serde::Serialize for VerificationResult {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("VerificationResult", 4)?;
+        s.serialize_field("is_valid", &self.is_valid)?;
+        s.serialize_field("level", &format!("{:?}", self.level))?;
+        s.serialize_field("errors", &self.errors)?;
+        s.serialize_field("warnings", &self.warnings)?;
+        s.end()
+    }
 }
 
 // ============================================================================

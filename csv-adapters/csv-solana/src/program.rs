@@ -1,5 +1,7 @@
 //! Solana program implementation for CSV
 
+use csv_hash::Hash;
+use csv_wire::HashWire;
 use solana_sdk::{
     account::Account,
     instruction::{AccountMeta, Instruction},
@@ -48,13 +50,13 @@ impl SolanaProgram {
         &self,
         seal_account: Pubkey,
         authority: Pubkey,
-        sanad_id: csv_hash::Hash,
-        commitment: csv_hash::Hash,
+        sanad_id: Hash,
+        commitment: Hash,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::CreateSanad {
-            sanad_id,
+            sanad_id: HashWire::from(sanad_id),
             owner: authority,
-            commitment,
+            commitment: HashWire::from(commitment),
         };
 
         let data = serialize(&instruction_data).map_err(|e| {
@@ -76,13 +78,13 @@ impl SolanaProgram {
         &self,
         anchor_account: Pubkey,
         authority: Pubkey,
-        commitment: csv_hash::Hash,
-        sanad_id: csv_hash::Hash,
+        commitment: Hash,
+        sanad_id: Hash,
         metadata: Vec<u8>,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::PublishCommitment {
-            commitment,
-            sanad_id,
+            commitment: HashWire::from(commitment),
+            sanad_id: HashWire::from(sanad_id),
             metadata,
         };
 
@@ -105,12 +107,12 @@ impl SolanaProgram {
         &self,
         seal_account: Pubkey,
         authority: Pubkey,
-        sanad_id: csv_hash::Hash,
+        sanad_id: Hash,
         new_owner: Pubkey,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::ConsumeSeal {
             seal_account,
-            sanad_id,
+            sanad_id: HashWire::from(sanad_id),
             new_owner,
         };
 
@@ -135,11 +137,11 @@ impl SolanaProgram {
         sanad_account: Pubkey,
         from_owner: Pubkey,
         to_owner: Pubkey,
-        sanad_id: csv_hash::Hash,
+        sanad_id: Hash,
         destination_chain: String,
     ) -> SolanaResult<Instruction> {
         let instruction_data = CsvInstruction::TransferSanad {
-            sanad_id,
+            sanad_id: HashWire::from(sanad_id),
             from_owner,
             to_owner,
             destination_chain,

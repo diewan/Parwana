@@ -51,6 +51,7 @@ use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
+use serde::{Deserialize, Serialize};
 
 /// Hash function types supported by different chains
 ///
@@ -142,7 +143,7 @@ impl HashFunction {
 /// is computed using the chain's native hash function to avoid extra gas costs.
 /// **Layer:** L1
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
-/// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
+/// **Serde:** Cannot use serde derives due to L0 Hash fields - use canonical encoding instead
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofLeafV1 {
     /// Protocol version (must be 1)

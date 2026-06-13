@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::dag::DAGSegment;
+use csv_wire::HashWire;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
 use sha2::{Digest, Sha256};
@@ -374,7 +375,7 @@ impl SealProtocol for SolanaSealProtocol {
                         data_hash: change.new_data.as_ref().map(|d| {
                             let mut hasher = Sha256::new();
                             hasher.update(d);
-                            Hash::new(hasher.finalize().into())
+                            HashWire::from(Hash::new(hasher.finalize().into()))
                         }),
                     }
                 })
@@ -405,7 +406,7 @@ impl SealProtocol for SolanaSealProtocol {
 
         let proof = SolanaFinalityProof {
             slot: anchor_ref.slot,
-            block_hash: Hash::new(block_hash),
+            block_hash: HashWire::from(Hash::new(block_hash)),
             confirmation_depth,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -552,9 +553,10 @@ impl SealProtocol for SolanaSealProtocol {
         };
 
         // Create finality proof - Solana has deterministic finality after 31 slots
+        let block_hash: Hash = solana_finality.block_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
         let finality_proof = unsafe {
             csv_protocol::proof_taxonomy::FinalityProof::new_unchecked(
-                solana_finality.block_hash.as_bytes().to_vec(),
+                block_hash.as_bytes().to_vec(),
                 solana_finality.confirmation_depth,
                 true, // Solana has deterministic finality
             )

@@ -1098,10 +1098,10 @@ impl ChainSanadOps for EthereumBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: receipt.block_number,
                 chain_id: self.config.network.chain_id().to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "consume",
                     "contract": hex::encode(contract),
-                }),
+                })).unwrap_or_default(),
             })
         }
 
@@ -1159,11 +1159,11 @@ impl ChainSanadOps for EthereumBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: receipt.block_number,
                 chain_id: self.config.network.chain_id().to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "lock",
                     "destination_chain": destination_chain,
                     "contract": hex::encode(contract),
-                }),
+                })).unwrap_or_default(),
             })
         }
 
@@ -1225,12 +1225,12 @@ impl ChainSanadOps for EthereumBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: receipt.block_number,
                 chain_id: self.config.network.chain_id().to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "mint",
                     "source_chain": source_chain,
                     "new_owner": new_owner,
                     "contract": hex::encode(contract),
-                }),
+                })).unwrap_or_default(),
             })
         }
 
@@ -1283,10 +1283,10 @@ impl ChainSanadOps for EthereumBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: receipt.block_number,
                 chain_id: self.config.network.chain_id().to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "refund",
                     "contract": hex::encode(contract),
-                }),
+                })).unwrap_or_default(),
             })
         }
 
@@ -1333,11 +1333,11 @@ impl ChainSanadOps for EthereumBackend {
                 transaction_hash: String::new(), // No separate tx - metadata recorded at lock
                 block_height: 0,
                 chain_id: self.config.network.chain_id().to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "record_metadata",
                     "note": "On Ethereum, metadata is recorded during lockSanad operation",
                     "contract": hex::encode(contract),
-                }),
+                })).unwrap_or_default(),
             })
         }
 

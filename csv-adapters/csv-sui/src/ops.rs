@@ -1001,11 +1001,11 @@ impl ChainSanadOps for SuiBackend {
             transaction_hash: hex::encode(digest_array),
             block_height: 0, // Simplified since we don't have checkpoint from sign_and_execute
             chain_id: self.config.chain_id().to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "owner": owner,
                 "asset_class": asset_class,
                 "asset_id": asset_id,
-            }),
+            })).unwrap_or_default(),
         })
     }
 
@@ -1106,7 +1106,7 @@ impl ChainSanadOps for SuiBackend {
             transaction_hash: hex::encode(digest_array),
             block_height: 0, // Simplified since we don't have checkpoint from sign_and_execute
             chain_id: self.config.chain_id().to_string(),
-            metadata: serde_json::json!({}),
+            metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
         })
     }
 
@@ -1272,7 +1272,7 @@ impl ChainSanadOps for SuiBackend {
             transaction_hash: hex::encode(digest_array),
             block_height: checkpoint,
             chain_id: self.config.chain_id().to_string(),
-            metadata: serde_json::json!({}),
+            metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
         })
     }
 
@@ -1332,7 +1332,7 @@ impl ChainSanadOps for SuiBackend {
             transaction_hash: tx_digest,
             block_height: 0,
             chain_id: "sui".to_string(),
-            metadata: serde_json::json!({}),
+            metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
         })
     }
 

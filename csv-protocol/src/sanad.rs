@@ -842,7 +842,7 @@ mod tests {
         let salt = b"test-salt";
 
         let sanad = Sanad::new(&desc, commitment, owner, salt);
-        assert_eq!(sanad.descriptor_hash, desc.compute_hash());
+        assert_eq!(sanad.descriptor_hash, HashWire::from(desc.compute_hash()));
     }
 
     #[test]
@@ -866,8 +866,8 @@ mod tests {
 
         let sanad = Sanad::new(&descriptor, commitment, owner, salt);
         // The descriptor_hash should be the hash of the descriptor, not zero
-        assert_ne!(sanad.descriptor_hash, Hash::new([0u8; 32]));
+        assert_ne!(sanad.descriptor_hash, HashWire::from(Hash::new([0u8; 32])));
         // Verify the descriptor_hash matches the descriptor's compute_hash
-        assert_eq!(sanad.descriptor_hash, descriptor.compute_hash());
+        assert_eq!(sanad.descriptor_hash, descriptor.compute_hash().into());
     }
 }

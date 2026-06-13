@@ -647,6 +647,190 @@ pub struct HashEntry {
     pub timestamp: u64,
 }
 
+impl HashEntry {
+    /// Serialize to canonical bytes for storage.
+    ///
+    /// This method manually serializes each field using their canonical encoding
+    /// to avoid serde derives on L0 types.
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        
+        // Serialize transfer_id as length-prefixed bytes
+        let transfer_id_bytes = self.transfer_id.as_bytes();
+        bytes.extend_from_slice(&(transfer_id_bytes.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(transfer_id_bytes);
+        
+        // Serialize Hash fields using their canonical encoding
+        bytes.extend_from_slice(self.sanad_id.as_bytes());
+        
+        // Serialize source_chain as length-prefixed string
+        let source_chain_bytes = self.source_chain.as_bytes();
+        bytes.extend_from_slice(&(source_chain_bytes.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(source_chain_bytes);
+        
+        // Serialize source_seal using its canonical encoding with length prefix
+        let source_seal_bytes = self.source_seal.to_canonical_bytes()
+            .map_err(|e| format!("source_seal serialization error: {}", e))?;
+        bytes.extend_from_slice(&(source_seal_bytes.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(&source_seal_bytes);
+        
+        // Serialize destination_chain as length-prefixed string
+        let destination_chain_bytes = self.destination_chain.as_bytes();
+        bytes.extend_from_slice(&(destination_chain_bytes.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(destination_chain_bytes);
+        
+        // Serialize destination_seal using its canonical encoding with length prefix
+        let destination_seal_bytes = self.destination_seal.to_canonical_bytes()
+            .map_err(|e| format!("destination_seal serialization error: {}", e))?;
+        bytes.extend_from_slice(&(destination_seal_bytes.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(&destination_seal_bytes);
+        
+        bytes.extend_from_slice(self.lock_tx_hash.as_bytes());
+        
+        // Serialize transition_id as length-prefixed bytes
+        bytes.extend_from_slice(&(self.transition_id.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(&self.transition_id);
+        
+        bytes.extend_from_slice(self.mint_tx_hash.as_bytes());
+        bytes.extend_from_slice(&self.timestamp.to_be_bytes());
+        
+        Ok(bytes)
+    }
+    
+    /// Deserialize from canonical bytes.
+    ///
+    /// This method manually deserializes each field using their canonical encoding
+    /// to avoid serde derives on L0 types.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let mut pos = 0;
+        
+        // Deserialize transfer_id
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for transfer_id length".to_string());
+        }
+        let transfer_id_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        pos += 8;
+        if pos + transfer_id_len > bytes.len() {
+            return Err("Insufficient bytes for transfer_id".to_string());
+        }
+        let transfer_id = String::from_utf8(bytes[pos..pos+transfer_id_len].to_vec())
+            .map_err(|e| format!("Invalid UTF-8 for transfer_id: {}", e))?;
+        pos += transfer_id_len;
+        
+        // Deserialize sanad_id
+        if pos + 32 > bytes.len() {
+            return Err("Insufficient bytes for sanad_id".to_string());
+        }
+        let mut sanad_id_arr = [0u8; 32];
+        sanad_id_arr.copy_from_slice(&bytes[pos..pos+32]);
+        let sanad_id = Hash::new(sanad_id_arr);
+        pos += 32;
+        
+        // Deserialize source_chain
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for source_chain length".to_string());
+        }
+        let source_chain_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        pos += 8;
+        if pos + source_chain_len > bytes.len() {
+            return Err("Insufficient bytes for source_chain".to_string());
+        }
+        let source_chain = String::from_utf8(bytes[pos..pos+source_chain_len].to_vec())
+            .map_err(|e| format!("Invalid UTF-8 for source_chain: {}", e))?;
+        let source_chain = ChainId::new(&source_chain);
+        pos += source_chain_len;
+        
+        // Deserialize source_seal
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for source_seal length".to_string());
+        }
+        let source_seal_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        pos += 8;
+        if pos + source_seal_len > bytes.len() {
+            return Err("Insufficient bytes for source_seal".to_string());
+        }
+        let source_seal = SealPoint::from_canonical_bytes(&bytes[pos..pos+source_seal_len])
+            .map_err(|e| format!("source_seal deserialization error: {}", e))?;
+        pos += source_seal_len;
+        
+        // Deserialize destination_chain
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for destination_chain length".to_string());
+        }
+        let destination_chain_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        pos += 8;
+        if pos + destination_chain_len > bytes.len() {
+            return Err("Insufficient bytes for destination_chain".to_string());
+        }
+        let destination_chain = String::from_utf8(bytes[pos..pos+destination_chain_len].to_vec())
+            .map_err(|e| format!("Invalid UTF-8 for destination_chain: {}", e))?;
+        let destination_chain = ChainId::new(&destination_chain);
+        pos += destination_chain_len;
+        
+        // Deserialize destination_seal
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for destination_seal length".to_string());
+        }
+        let destination_seal_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        pos += 8;
+        if pos + destination_seal_len > bytes.len() {
+            return Err("Insufficient bytes for destination_seal".to_string());
+        }
+        let destination_seal = SealPoint::from_canonical_bytes(&bytes[pos..pos+destination_seal_len])
+            .map_err(|e| format!("destination_seal deserialization error: {}", e))?;
+        pos += destination_seal_len;
+        
+        // Deserialize lock_tx_hash
+        if pos + 32 > bytes.len() {
+            return Err("Insufficient bytes for lock_tx_hash".to_string());
+        }
+        let mut lock_tx_hash_arr = [0u8; 32];
+        lock_tx_hash_arr.copy_from_slice(&bytes[pos..pos+32]);
+        let lock_tx_hash = Hash::new(lock_tx_hash_arr);
+        pos += 32;
+        
+        // Deserialize transition_id
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for transition_id length".to_string());
+        }
+        let transition_id_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        pos += 8;
+        if pos + transition_id_len > bytes.len() {
+            return Err("Insufficient bytes for transition_id".to_string());
+        }
+        let transition_id = bytes[pos..pos+transition_id_len].to_vec();
+        pos += transition_id_len;
+        
+        // Deserialize mint_tx_hash
+        if pos + 32 > bytes.len() {
+            return Err("Insufficient bytes for mint_tx_hash".to_string());
+        }
+        let mut mint_tx_hash_arr = [0u8; 32];
+        mint_tx_hash_arr.copy_from_slice(&bytes[pos..pos+32]);
+        let mint_tx_hash = Hash::new(mint_tx_hash_arr);
+        pos += 32;
+        
+        // Deserialize timestamp
+        if pos + 8 > bytes.len() {
+            return Err("Insufficient bytes for timestamp".to_string());
+        }
+        let timestamp = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap());
+        
+        Ok(HashEntry {
+            transfer_id,
+            sanad_id,
+            source_chain,
+            source_seal,
+            destination_chain,
+            destination_seal,
+            lock_tx_hash,
+            transition_id,
+            mint_tx_hash,
+            timestamp,
+        })
+    }
+}
+
 /// Result of a successful cross-chain transfer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrossChainTransferResult {

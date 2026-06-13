@@ -118,8 +118,8 @@ impl ContentRights {
 }
 
 /// A rights transfer request.
-/// L2 type: uses serde for serialization
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// L2 type: uses manual serialization for Hash field
+#[derive(Debug, Clone)]
 pub struct RightsTransfer {
     /// The content being transferred.
     pub content_hash: Hash,
@@ -147,5 +147,130 @@ impl RightsTransfer {
             self.new_rights.owner
         );
         tagged_hash(HashDomain::VerificationProofV1, data.as_bytes()).hash
+    }
+}
+
+impl serde::Serialize for RightsTransfer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("RightsTransfer", 5)?;
+        s.serialize_field("content_hash", &self.content_hash.0)?;
+        s.serialize_field("from", &self.from)?;
+        s.serialize_field("to", &self.to)?;
+        s.serialize_field("new_rights", &self.new_rights)?;
+        s.serialize_field("authorization_proof", &self.authorization_proof)?;
+        s.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RightsTransfer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            ContentHash,
+            From,
+            To,
+            NewRights,
+            AuthorizationProof,
+        }
+
+        struct RightsTransferVisitor;
+        
+        impl<'de> serde::de::Visitor<'de> for RightsTransferVisitor {
+            type Value = RightsTransfer;
+            
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct RightsTransfer")
+            }
+            
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let content_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let from = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let to = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let new_rights = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let authorization_proof = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                Ok(RightsTransfer {
+                    content_hash: Hash(content_hash_bytes),
+                    from,
+                    to,
+                    new_rights,
+                    authorization_proof,
+                })
+            }
+            
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut content_hash = None;
+                let mut from = None;
+                let mut to = None;
+                let mut new_rights = None;
+                let mut authorization_proof = None;
+                
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::ContentHash => {
+                            if content_hash.is_some() {
+                                return Err(serde::de::Error::duplicate_field("content_hash"));
+                            }
+                            let hash_bytes: [u8; 32] = map.next_value()?;
+                            content_hash = Some(Hash(hash_bytes));
+                        }
+                        Field::From => {
+                            if from.is_some() {
+                                return Err(serde::de::Error::duplicate_field("from"));
+                            }
+                            from = Some(map.next_value()?);
+                        }
+                        Field::To => {
+                            if to.is_some() {
+                                return Err(serde::de::Error::duplicate_field("to"));
+                            }
+                            to = Some(map.next_value()?);
+                        }
+                        Field::NewRights => {
+                            if new_rights.is_some() {
+                                return Err(serde::de::Error::duplicate_field("new_rights"));
+                            }
+                            new_rights = Some(map.next_value()?);
+                        }
+                        Field::AuthorizationProof => {
+                            if authorization_proof.is_some() {
+                                return Err(serde::de::Error::duplicate_field("authorization_proof"));
+                            }
+                            authorization_proof = Some(map.next_value()?);
+                        }
+                    }
+                }
+                
+                let content_hash = content_hash.ok_or_else(|| serde::de::Error::missing_field("content_hash"))?;
+                let from = from.ok_or_else(|| serde::de::Error::missing_field("from"))?;
+                let to = to.ok_or_else(|| serde::de::Error::missing_field("to"))?;
+                let new_rights = new_rights.ok_or_else(|| serde::de::Error::missing_field("new_rights"))?;
+                let authorization_proof = authorization_proof.ok_or_else(|| serde::de::Error::missing_field("authorization_proof"))?;
+                
+                Ok(RightsTransfer {
+                    content_hash,
+                    from,
+                    to,
+                    new_rights,
+                    authorization_proof,
+                })
+            }
+        }
+        
+        deserializer.deserialize_struct("RightsTransfer", &["content_hash", "from", "to", "new_rights", "authorization_proof"], RightsTransferVisitor)
     }
 }

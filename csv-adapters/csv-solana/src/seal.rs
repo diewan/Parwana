@@ -1,5 +1,6 @@
 //! Solana seal implementation for CSV
 
+use csv_hash::Hash;
 use crate::error::{SolanaError, SolanaResult};
 use crate::types::{SolanaFinalityProof, SolanaSealPoint};
 use bincode::{deserialize, serialize};
@@ -55,7 +56,8 @@ impl SolanaSeal {
         // If a finality proof is present, verify it
         if let Some(ref proof) = self.finality_proof {
             // Verify the proof's block hash is not empty
-            if proof.block_hash.as_bytes().iter().all(|&b| b == 0) {
+            let block_hash: Hash = proof.block_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+            if block_hash.as_bytes().iter().all(|&b| b == 0) {
                 return Err(SolanaError::InvalidInput(
                     "Invalid finality proof: empty block hash".to_string(),
                 ));

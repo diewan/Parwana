@@ -711,13 +711,13 @@ impl ChainSanadOps for AptosBackend {
             transaction_hash: String::new(),
             block_height: 0,
             chain_id: "aptos".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "owner": owner,
                 "asset_class": asset_class,
                 "asset_id": asset_id,
                 "seal_address": format_address(seal.account_address),
                 "seal_resource_type": seal.resource_type,
-            }),
+            })).unwrap_or_default(),
         })
     }
 
@@ -802,7 +802,7 @@ impl ChainSanadOps for AptosBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: tx.version,
                 chain_id: "aptos".to_string(),
-                metadata: serde_json::json!({}),
+                metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
             })
         }
 
@@ -953,10 +953,10 @@ impl ChainSanadOps for AptosBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: tx.version,
                 chain_id: "aptos".to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "destination_chain": destination_chain,
                     "seal_address": hex::encode(seal.account_address),
-                }),
+                })).unwrap_or_default(),
             })
         }
 
@@ -1094,11 +1094,11 @@ impl ChainSanadOps for AptosBackend {
                 transaction_hash: hex::encode(tx_hash),
                 block_height: tx.version,
                 chain_id: "aptos".to_string(),
-                metadata: serde_json::json!({
+                metadata: serde_json::to_vec(&serde_json::json!({
                     "source_chain": source_chain,
                     "new_owner": new_owner,
                     "seal_address": hex::encode(seal.account_address),
-                }),
+                })).unwrap_or_default(),
             })
         }
 

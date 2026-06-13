@@ -24,6 +24,7 @@
 use csv_hash::Hash;
 use csv_keys::memory::SecretKey;
 use csv_protocol::secret::SecretHandle;
+use csv_wire::HashWire;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -42,9 +43,9 @@ pub struct DeploymentManifest {
     /// Chain identifier
     pub chain_id: String,
     /// Deployment bytecode checksum (SHA-256)
-    pub bytecode_checksum: Hash,
+    pub bytecode_checksum: HashWire,
     /// ABI checksum (SHA-256 of canonical ABI JSON)
-    pub abi_checksum: Hash,
+    pub abi_checksum: HashWire,
     /// Constructor parameters (canonical CBOR encoded)
     pub constructor_params: Vec<u8>,
     /// Deployment timestamp (Unix epoch seconds)
@@ -54,7 +55,7 @@ pub struct DeploymentManifest {
     /// Contract address (after deployment, chain-specific encoding)
     pub contract_address: Vec<u8>,
     /// Transaction hash of deployment transaction
-    pub deployment_tx_hash: Hash,
+    pub deployment_tx_hash: HashWire,
     /// Block number of deployment
     pub deployment_block: u64,
     /// Additional metadata
@@ -72,8 +73,8 @@ impl DeploymentManifest {
         constructor_params: Vec<u8>,
         deployer_address: Vec<u8>,
     ) -> Self {
-        let bytecode_checksum = Hash::sha256(bytecode);
-        let abi_checksum = Hash::sha256(abi_json.as_bytes());
+        let bytecode_checksum = HashWire::from(Hash::sha256(bytecode));
+        let abi_checksum = HashWire::from(Hash::sha256(abi_json.as_bytes()));
         let deployment_timestamp = chrono::Utc::now().timestamp() as u64;
 
         Self {
@@ -87,7 +88,7 @@ impl DeploymentManifest {
             deployment_timestamp,
             deployer_address,
             contract_address: vec![],
-            deployment_tx_hash: Hash::zero(),
+            deployment_tx_hash: HashWire::from(Hash::zero()),
             deployment_block: 0,
             metadata: BTreeMap::new(),
         }
@@ -101,7 +102,7 @@ impl DeploymentManifest {
         deployment_block: u64,
     ) {
         self.contract_address = contract_address;
-        self.deployment_tx_hash = deployment_tx_hash;
+        self.deployment_tx_hash = HashWire::from(deployment_tx_hash);
         self.deployment_block = deployment_block;
     }
 
@@ -125,12 +126,12 @@ impl DeploymentManifest {
 
     /// Verify the bytecode checksum matches the manifest.
     pub fn verify_bytecode(&self, bytecode: &[u8]) -> bool {
-        self.bytecode_checksum == Hash::sha256(bytecode)
+        self.bytecode_checksum == HashWire::from(Hash::sha256(bytecode))
     }
 
     /// Verify the ABI checksum matches the manifest.
     pub fn verify_abi(&self, abi_json: &str) -> bool {
-        self.abi_checksum == Hash::sha256(abi_json.as_bytes())
+        self.abi_checksum == HashWire::from(Hash::sha256(abi_json.as_bytes()))
     }
 }
 
@@ -304,7 +305,7 @@ pub struct DeploymentResult {
     /// Contract address
     pub contract_address: Vec<u8>,
     /// Transaction hash
-    pub tx_hash: Hash,
+    pub tx_hash: HashWire,
     /// Block number
     pub block_number: u64,
     /// Gas used
@@ -319,9 +320,9 @@ pub struct ContractBytecode {
     /// Raw bytecode
     pub bytecode: Vec<u8>,
     /// Checksum (SHA-256)
-    pub checksum: Hash,
+    pub checksum: HashWire,
     /// Source hash (for verification)
-    pub source_hash: Hash,
+    pub source_hash: HashWire,
     /// Compiler version
     pub compiler_version: String,
     /// Compilation timestamp
@@ -331,8 +332,8 @@ pub struct ContractBytecode {
 impl ContractBytecode {
     /// Create new contract bytecode.
     pub fn new(bytecode: Vec<u8>, compiler_version: String) -> Self {
-        let checksum = Hash::sha256(&bytecode);
-        let source_hash = Hash::sha256(&bytecode); // In production, hash source code
+        let checksum = HashWire::from(Hash::sha256(&bytecode));
+        let source_hash = HashWire::from(Hash::sha256(&bytecode)); // In production, hash source code
         let compilation_timestamp = chrono::Utc::now().timestamp() as u64;
 
         Self {
@@ -346,7 +347,7 @@ impl ContractBytecode {
 
     /// Verify the bytecode checksum.
     pub fn verify(&self) -> bool {
-        self.checksum == Hash::sha256(&self.bytecode)
+        self.checksum == HashWire::from(Hash::sha256(&self.bytecode))
     }
 }
 

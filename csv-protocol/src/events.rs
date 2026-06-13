@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use csv_hash::Hash;
+use csv_hash::{Hash, SanadId};
 use crate::wire::{HashWire, SanadIdWire};
 
 /// Standard event names in the CSV protocol
@@ -1154,9 +1154,9 @@ mod tests {
             100,
             "tx123",
             1700000000,
-            SanadId::new([0xAB; 32]),
+            SanadIdWire::from(SanadId::new([0xAB; 32])),
             "owner1",
-            Hash::new([0xCD; 32]),
+            HashWire::from(Hash::new([0xCD; 32])),
             "RGB",
             "asset1",
             None,
@@ -1225,20 +1225,20 @@ mod tests {
     #[test]
     fn test_event_signature_hash() {
         let event = CanonicalEvent::SealCreated(SealCreatedEvent {
-            seal_id: Hash::zero(),
+            seal_id: HashWire::from(Hash::zero()),
             owner: vec![1, 2, 3],
-            commitment: Hash::zero(),
+            commitment: HashWire::from(Hash::zero()),
         });
         let hash = event.signature_hash();
-        assert_ne!(hash, Hash::zero());
+        assert_ne!(hash, HashWire::from(Hash::zero()));
     }
 
     #[test]
     fn test_event_name() {
         let event = CanonicalEvent::SealCreated(SealCreatedEvent {
-            seal_id: Hash::zero(),
+            seal_id: HashWire::from(Hash::zero()),
             owner: vec![],
-            commitment: Hash::zero(),
+            commitment: HashWire::from(Hash::zero()),
         });
         assert_eq!(event.event_name(), "SealCreated");
     }

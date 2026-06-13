@@ -645,7 +645,7 @@ mod tests {
             ChainId::new("bitcoin"),
             ChainId::new("ethereum"),
         );
-        assert_eq!(key.proof_hash, Hash::new([1u8; 32]));
+        assert_eq!(key.proof_hash, Hash::new([1u8; 32]).into());
     }
 
     #[test]

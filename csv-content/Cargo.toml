@@ -5,6 +5,6 @@ edition = "2024"
 description = "CSV Content - Content tree system with Merkleized structures"
 
 [dependencies]
-csv-hash = { path = "../csv-hash", features = ["serde"] }
+csv-hash = { path = "../csv-hash" }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"

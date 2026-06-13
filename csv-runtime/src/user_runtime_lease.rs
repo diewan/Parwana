@@ -37,6 +37,7 @@ use std::time::SystemTime;
 use uuid::Uuid;
 
 use csv_protocol::sanad::SanadId as TransferId;
+use csv_wire::SanadIdWire;
 
 /// Runtime instance identifier.
 ///
@@ -87,7 +88,7 @@ pub const MAX_LEASE_DURATION_SECS: u64 = 300;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TransferLease {
     /// Transfer identifier this lease protects.
-    pub transfer_id: TransferId,
+    pub transfer_id: SanadIdWire,
     /// Epoch counter to prevent stale lease adoption.
     ///
     /// Each time a lease is released and reacquired for the same transfer,
@@ -131,7 +132,7 @@ impl TransferLease {
     /// * `now` - The current system time
     /// * `duration` - How long the lease should be valid
     pub fn acquire(
-        transfer_id: TransferId,
+        transfer_id: SanadIdWire,
         runtime_id: RuntimeId,
         epoch: u64,
         now: SystemTime,
@@ -267,7 +268,7 @@ impl RuntimeExecutionContext {
     }
 
     /// Get the transfer ID this context authorizes.
-    pub fn transfer_id(&self) -> &TransferId {
+    pub fn transfer_id(&self) -> &SanadIdWire {
         &self.lease.transfer_id
     }
 
@@ -283,14 +284,14 @@ pub enum LeaseValidationError {
     /// The lease has expired.
     Expired {
         /// The transfer ID.
-        transfer_id: TransferId,
+        transfer_id: SanadIdWire,
         /// When the lease expired.
         expires_at: SystemTime,
     },
     /// The lease is owned by a different runtime.
     Stale {
         /// The transfer ID.
-        transfer_id: TransferId,
+        transfer_id: SanadIdWire,
         /// The runtime that owns this lease.
         owner: RuntimeId,
     },

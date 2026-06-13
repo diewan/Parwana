@@ -2,7 +2,7 @@ use csv_hash::{Commitment, Hash, SanadId};
 use serde::{Deserialize, Serialize};
 
 /// Wire format for hash.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HashWire {
     pub bytes: String,
 }
@@ -32,7 +32,7 @@ impl TryFrom<HashWire> for Hash {
 }
 
 /// Wire format for SanadId.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SanadIdWire {
     pub bytes: String,
 }
@@ -56,7 +56,7 @@ impl TryFrom<SanadIdWire> for SanadId {
 }
 
 /// Wire format for commitment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentWire {
     pub version: u8,
     pub protocol_id: String,

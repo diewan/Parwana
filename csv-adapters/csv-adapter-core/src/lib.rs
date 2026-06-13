@@ -100,7 +100,7 @@ pub enum MintStatus {
 }
 
 /// Mint receipt
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MintReceipt {
     /// Transaction hash
     pub tx_hash: Hash,
@@ -110,6 +110,117 @@ pub struct MintReceipt {
     pub timestamp: u64,
     /// Gas used
     pub gas_used: u64,
+}
+
+impl serde::Serialize for MintReceipt {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("MintReceipt", 4)?;
+        s.serialize_field("tx_hash", &self.tx_hash.0)?;
+        s.serialize_field("block_number", &self.block_number)?;
+        s.serialize_field("timestamp", &self.timestamp)?;
+        s.serialize_field("gas_used", &self.gas_used)?;
+        s.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MintReceipt {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            TxHash,
+            BlockNumber,
+            Timestamp,
+            GasUsed,
+        }
+
+        struct MintReceiptVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for MintReceiptVisitor {
+            type Value = MintReceipt;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct MintReceipt")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let tx_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let block_number = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let timestamp = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let gas_used = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                Ok(MintReceipt {
+                    tx_hash: Hash(tx_hash_bytes),
+                    block_number,
+                    timestamp,
+                    gas_used,
+                })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut tx_hash = None;
+                let mut block_number = None;
+                let mut timestamp = None;
+                let mut gas_used = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::TxHash => {
+                            if tx_hash.is_some() {
+                                return Err(serde::de::Error::duplicate_field("tx_hash"));
+                            }
+                            let hash_bytes: [u8; 32] = map.next_value()?;
+                            tx_hash = Some(Hash(hash_bytes));
+                        }
+                        Field::BlockNumber => {
+                            if block_number.is_some() {
+                                return Err(serde::de::Error::duplicate_field("block_number"));
+                            }
+                            block_number = Some(map.next_value()?);
+                        }
+                        Field::Timestamp => {
+                            if timestamp.is_some() {
+                                return Err(serde::de::Error::duplicate_field("timestamp"));
+                            }
+                            timestamp = Some(map.next_value()?);
+                        }
+                        Field::GasUsed => {
+                            if gas_used.is_some() {
+                                return Err(serde::de::Error::duplicate_field("gas_used"));
+                            }
+                            gas_used = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let tx_hash = tx_hash.ok_or_else(|| serde::de::Error::missing_field("tx_hash"))?;
+                let block_number = block_number.ok_or_else(|| serde::de::Error::missing_field("block_number"))?;
+                let timestamp = timestamp.ok_or_else(|| serde::de::Error::missing_field("timestamp"))?;
+                let gas_used = gas_used.ok_or_else(|| serde::de::Error::missing_field("gas_used"))?;
+
+                Ok(MintReceipt {
+                    tx_hash,
+                    block_number,
+                    timestamp,
+                    gas_used,
+                })
+            }
+        }
+
+        deserializer.deserialize_struct("MintReceipt", &["tx_hash", "block_number", "timestamp", "gas_used"], MintReceiptVisitor)
+    }
 }
 
 /// Trait for chain operations
@@ -145,7 +256,7 @@ pub enum TransactionStatus {
 pub use csv_protocol::seal_protocol::SealProtocol;
 
 /// Cross-chain transfer data passed to adapters.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CrossChainTransfer {
     /// Unique transfer ID
     pub id: String,
@@ -161,6 +272,156 @@ pub struct CrossChainTransfer {
     pub sanad_id: Hash,
     /// Transition ID for the transfer
     pub transition_id: Vec<u8>,
+}
+
+impl serde::Serialize for CrossChainTransfer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("CrossChainTransfer", 7)?;
+        s.serialize_field("id", &self.id)?;
+        s.serialize_field("source_chain", &self.source_chain)?;
+        s.serialize_field("destination_chain", &self.destination_chain)?;
+        s.serialize_field("lock_tx_hash", &self.lock_tx_hash)?;
+        s.serialize_field("lock_output_index", &self.lock_output_index)?;
+        s.serialize_field("sanad_id", &self.sanad_id.0)?;
+        s.serialize_field("transition_id", &self.transition_id)?;
+        s.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CrossChainTransfer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Id,
+            SourceChain,
+            DestinationChain,
+            LockTxHash,
+            LockOutputIndex,
+            SanadId,
+            TransitionId,
+        }
+
+        struct CrossChainTransferVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for CrossChainTransferVisitor {
+            type Value = CrossChainTransfer;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct CrossChainTransfer")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let source_chain = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let destination_chain = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let lock_tx_hash = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let lock_output_index = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                let sanad_id_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
+                let transition_id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(6, &self))?;
+                Ok(CrossChainTransfer {
+                    id,
+                    source_chain,
+                    destination_chain,
+                    lock_tx_hash,
+                    lock_output_index,
+                    sanad_id: Hash(sanad_id_bytes),
+                    transition_id,
+                })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut id = None;
+                let mut source_chain = None;
+                let mut destination_chain = None;
+                let mut lock_tx_hash = None;
+                let mut lock_output_index = None;
+                let mut sanad_id = None;
+                let mut transition_id = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Id => {
+                            if id.is_some() {
+                                return Err(serde::de::Error::duplicate_field("id"));
+                            }
+                            id = Some(map.next_value()?);
+                        }
+                        Field::SourceChain => {
+                            if source_chain.is_some() {
+                                return Err(serde::de::Error::duplicate_field("source_chain"));
+                            }
+                            source_chain = Some(map.next_value()?);
+                        }
+                        Field::DestinationChain => {
+                            if destination_chain.is_some() {
+                                return Err(serde::de::Error::duplicate_field("destination_chain"));
+                            }
+                            destination_chain = Some(map.next_value()?);
+                        }
+                        Field::LockTxHash => {
+                            if lock_tx_hash.is_some() {
+                                return Err(serde::de::Error::duplicate_field("lock_tx_hash"));
+                            }
+                            lock_tx_hash = Some(map.next_value()?);
+                        }
+                        Field::LockOutputIndex => {
+                            if lock_output_index.is_some() {
+                                return Err(serde::de::Error::duplicate_field("lock_output_index"));
+                            }
+                            lock_output_index = Some(map.next_value()?);
+                        }
+                        Field::SanadId => {
+                            if sanad_id.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sanad_id"));
+                            }
+                            let hash_bytes: [u8; 32] = map.next_value()?;
+                            sanad_id = Some(Hash(hash_bytes));
+                        }
+                        Field::TransitionId => {
+                            if transition_id.is_some() {
+                                return Err(serde::de::Error::duplicate_field("transition_id"));
+                            }
+                            transition_id = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let id = id.ok_or_else(|| serde::de::Error::missing_field("id"))?;
+                let source_chain = source_chain.ok_or_else(|| serde::de::Error::missing_field("source_chain"))?;
+                let destination_chain = destination_chain.ok_or_else(|| serde::de::Error::missing_field("destination_chain"))?;
+                let lock_tx_hash = lock_tx_hash.ok_or_else(|| serde::de::Error::missing_field("lock_tx_hash"))?;
+                let lock_output_index = lock_output_index.ok_or_else(|| serde::de::Error::missing_field("lock_output_index"))?;
+                let sanad_id = sanad_id.ok_or_else(|| serde::de::Error::missing_field("sanad_id"))?;
+                let transition_id = transition_id.ok_or_else(|| serde::de::Error::missing_field("transition_id"))?;
+
+                Ok(CrossChainTransfer {
+                    id,
+                    source_chain,
+                    destination_chain,
+                    lock_tx_hash,
+                    lock_output_index,
+                    sanad_id,
+                    transition_id,
+                })
+            }
+        }
+
+        deserializer.deserialize_struct("CrossChainTransfer", &["id", "source_chain", "destination_chain", "lock_tx_hash", "lock_output_index", "sanad_id", "transition_id"], CrossChainTransferVisitor)
+    }
 }
 
 /// Result of a lock operation.

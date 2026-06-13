@@ -27,7 +27,7 @@
 //! - Lease IDs are deterministically derived from lease parameters
 
 use core::fmt;
-use csv_hash::Hash;
+use csv_hash::{Hash, SanadId};
 use csv_hash::csv_tagged_hash;
 use serde::{Deserialize, Serialize};
 
@@ -278,9 +278,9 @@ mod tests {
 
     #[test]
     fn test_lease_creation() {
-        let sanad_id = Hash::new([1u8; 32]);
-        let owner = Hash::new([2u8; 32]);
-        let lease = Lease::new(sanad_id, owner, 300);
+        let sanad_id = SanadIdWire::from(SanadId(Hash::new([1u8; 32])));
+        let owner = HashWire::from(Hash::new([2u8; 32]));
+        let lease = Lease::new(sanad_id.clone(), owner.clone(), 300);
 
         assert_eq!(lease.sanad_id, sanad_id);
         assert_eq!(lease.owner, owner);
@@ -290,8 +290,8 @@ mod tests {
 
     #[test]
     fn test_lease_expiration() {
-        let sanad_id = Hash::new([1u8; 32]);
-        let owner = Hash::new([2u8; 32]);
+        let sanad_id = SanadIdWire::from(SanadId(Hash::new([1u8; 32])));
+        let owner = HashWire::from(Hash::new([2u8; 32]));
         let lease = Lease::new(sanad_id, owner, 60);
 
         assert!(lease.is_valid_now());
@@ -306,12 +306,12 @@ mod tests {
     #[test]
     fn test_lease_manager_acquire() {
         let mut manager = LeaseManager::new();
-        let sanad_id = Hash::new([1u8; 32]);
-        let owner = Hash::new([2u8; 32]);
+        let sanad_id = SanadIdWire::from(SanadId(Hash::new([1u8; 32])));
+        let owner = HashWire::from(Hash::new([2u8; 32]));
 
-        let _lease_id = manager.acquire(sanad_id, owner, 300).unwrap();
-        assert!(manager.has_lease(sanad_id));
-        assert_eq!(manager.remaining_ttl(sanad_id).unwrap(), 300);
+        let _lease_id = manager.acquire(sanad_id.clone(), owner.clone(), 300).unwrap();
+        assert!(manager.has_lease(sanad_id.clone()));
+        assert_eq!(manager.remaining_ttl(sanad_id.clone()).unwrap(), 300);
 
         // Try to acquire again — should fail
         let result = manager.acquire(sanad_id, owner, 300);
@@ -321,45 +321,45 @@ mod tests {
     #[test]
     fn test_lease_manager_validate() {
         let mut manager = LeaseManager::new();
-        let sanad_id = Hash::new([1u8; 32]);
-        let owner = Hash::new([2u8; 32]);
+        let sanad_id = SanadIdWire::from(SanadId(Hash::new([1u8; 32])));
+        let owner = HashWire::from(Hash::new([2u8; 32]));
 
-        let lease_id = manager.acquire(sanad_id, owner, 300).unwrap();
+        let lease_id = manager.acquire(sanad_id.clone(), owner.clone(), 300).unwrap();
 
         // Valid lease
-        assert!(manager.validate(lease_id, sanad_id, owner).is_ok());
+        assert!(manager.validate(lease_id.clone(), sanad_id.clone(), owner.clone()).is_ok());
 
         // Wrong owner
-        let wrong_owner = Hash::new([3u8; 32]);
-        assert!(manager.validate(lease_id, sanad_id, wrong_owner).is_err());
+        let wrong_owner = HashWire::from(Hash::new([3u8; 32]));
+        assert!(manager.validate(lease_id.clone(), sanad_id.clone(), wrong_owner).is_err());
 
         // Wrong sanad
-        let wrong_sanad = Hash::new([4u8; 32]);
+        let wrong_sanad = SanadIdWire::from(SanadId(Hash::new([4u8; 32])));
         assert!(manager.validate(lease_id, wrong_sanad, owner).is_err());
     }
 
     #[test]
     fn test_lease_manager_release() {
         let mut manager = LeaseManager::new();
-        let sanad_id = Hash::new([1u8; 32]);
-        let owner = Hash::new([2u8; 32]);
+        let sanad_id = SanadIdWire::from(SanadId(Hash::new([1u8; 32])));
+        let owner = HashWire::from(Hash::new([2u8; 32]));
 
-        manager.acquire(sanad_id, owner, 300).unwrap();
-        assert!(manager.has_lease(sanad_id));
+        manager.acquire(sanad_id.clone(), owner.clone(), 300).unwrap();
+        assert!(manager.has_lease(sanad_id.clone()));
 
-        manager.release(sanad_id);
-        assert!(!manager.has_lease(sanad_id));
+        manager.release(sanad_id.clone());
+        assert!(!manager.has_lease(sanad_id.clone()));
 
         // Should be able to acquire again after release
         let lease_id = manager.acquire(sanad_id, owner, 300).unwrap();
-        assert!(lease_id.as_bytes() != &[0u8; 32]);
+        assert!(lease_id.as_bytes().unwrap() != &[0u8; 32]);
     }
 
     #[test]
     fn test_lease_manager_invalid_ttl() {
         let mut manager = LeaseManager::new();
-        let sanad_id = Hash::new([1u8; 32]);
-        let owner = Hash::new([2u8; 32]);
+        let sanad_id = SanadIdWire::from(SanadId(Hash::new([1u8; 32])));
+        let owner = HashWire::from(Hash::new([2u8; 32]));
 
         let result = manager.acquire(sanad_id, owner, 0);
         assert!(result.is_err());

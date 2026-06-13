@@ -729,10 +729,10 @@ impl ChainSanadOps for SolanaBackend {
             transaction_hash: sig.to_string(),
             block_height: 0,
             chain_id: "solana".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "operation": "consume",
                 "seal_account": sanad_account.to_string(),
-            }),
+            })).unwrap_or_default(),
         })
     }
 
@@ -812,11 +812,11 @@ impl ChainSanadOps for SolanaBackend {
             transaction_hash: sig.to_string(),
             block_height: slot,
             chain_id: "solana".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "operation": "lock",
                 "destination_chain": destination_chain,
                 "seal_account": sanad_account.to_string(),
-            }),
+            })).unwrap_or_default(),
         })
     }
 

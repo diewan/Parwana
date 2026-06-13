@@ -1,7 +1,6 @@
 //! RocksDB-backed replay database with CAS semantics.
 
 use async_trait::async_trait;
-use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_protocol::proof_taxonomy::ReplayId;
 use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, DB, DBCompressionType, Options};
@@ -173,7 +172,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         entry: &CrossChainRegistryEntry,
     ) -> Result<(), ReplayDbError> {
         let key = entry.sanad_id.as_bytes();
-        let val = to_canonical_cbor(entry)
+        let val = entry.to_canonical_bytes()
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
         self.db
             .put_cf(self.cf_transfers()?, key, val)
@@ -189,7 +188,7 @@ impl ReplayDatabase for RocksDbReplayDb {
         {
             let (_key, value) = result
                 .map_err(|e| ReplayDbError::Storage(format!("RocksDB iterator error: {e}")))?;
-            let entry: CrossChainRegistryEntry = from_canonical_cbor(&value)
+            let entry: CrossChainRegistryEntry = CrossChainRegistryEntry::from_canonical_bytes(&value)
                 .map_err(|e| ReplayDbError::Storage(format!("Deserialization error: {e}")))?;
             transfers.push(entry);
         }

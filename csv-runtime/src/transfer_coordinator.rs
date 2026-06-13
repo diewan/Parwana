@@ -401,7 +401,8 @@ impl TransferCoordinator {
                 runtime_ctx.lease.owner_runtime_id, runtime_ctx.runtime_instance
             )));
         }
-        if runtime_ctx.lease.transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
+        let lease_transfer_id: csv_protocol::sanad::SanadId = runtime_ctx.lease.transfer_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+        if lease_transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
             return Err(TransferCoordinatorError::LeaseViolation(
                 "Lease does not authorize the transfer sanad".to_string(),
             ));
@@ -435,12 +436,13 @@ impl TransferCoordinator {
         // Step 1: Compute ReplayId and check for replay
         // Runtime coordinates only - use sanad_id (Hash) directly for replay detection
         let replay_id = transfer.sanad_id;
+        let replay_id_wire = csv_wire::HashWire::from(replay_id);
 
         // Record phase entry: Initialized (Entered)
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::Initialized,
@@ -463,14 +465,14 @@ impl TransferCoordinator {
                     // Append ReplayDetected event to EventStore (durable write FIRST)
                     if let Err(e) = self.event_store.append(
                         &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                            csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                            csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
                             crate::event_envelope::EventType::from_static(
                                 crate::event_envelope::EventType::TRANSFER_REPLAY_DETECTED,
                             ),
                             EVENT_VERSION_REPLAY_DETECTED,
                             serde_json::json!({
                                 "transfer_id": transfer.id,
-                                "replay_id": replay_id,
+                                "replay_id": hex::encode(replay_id.0),
                             })
                             .to_string(),
                             None,
@@ -507,7 +509,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::Initialized,
@@ -523,7 +525,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::Initialized,
@@ -546,7 +548,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::Initialized,
@@ -626,7 +628,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::LockConfirmed,
@@ -722,7 +724,7 @@ impl TransferCoordinator {
                 .execution_journal
                 .record(crate::execution_journal::TransferPhaseEntry {
                     transfer_id: transfer.id.clone(),
-                    replay_id,
+                    replay_id: replay_id_wire,
                     proof_hash: [0u8; 32],
                     proof_payload: None,
                     phase: crate::recovery::TransferStage::LockConfirmed,
@@ -748,7 +750,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::LockConfirmed,
@@ -785,7 +787,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::AwaitingFinality,
@@ -799,7 +801,7 @@ impl TransferCoordinator {
         // Append AwaitingFinality event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
             &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_FINALITY_AWAITED,
                 ),
@@ -859,7 +861,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::AwaitingFinality,
@@ -875,7 +877,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::AwaitingFinality,
@@ -891,7 +893,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::ProofBuilding,
@@ -905,7 +907,7 @@ impl TransferCoordinator {
         // Append BuildingProof event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
             &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_PROOF_BUILT,
                 ),
@@ -1009,7 +1011,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1039,7 +1041,7 @@ impl TransferCoordinator {
                 // Append ProofVerified event to EventStore (durable write FIRST)
                 if let Err(e) = self.event_store.append(
                     &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                        csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                        csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
                         crate::event_envelope::EventType::from_static(
                             crate::event_envelope::EventType::TRANSFER_PROOF_VERIFIED,
                         ),
@@ -1078,7 +1080,7 @@ impl TransferCoordinator {
                 self.execution_journal
                     .record(crate::execution_journal::TransferPhaseEntry {
                         transfer_id: transfer.id.clone(),
-                        replay_id,
+                        replay_id: replay_id_wire,
                         proof_hash: [0u8; 32],
                         proof_payload: None,
                         phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1096,7 +1098,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1122,7 +1124,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash,
                 proof_payload: Some(proof_bundle_bytes.clone()),
                 phase: crate::recovery::TransferStage::ProofValidated,
@@ -1155,7 +1157,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1178,7 +1180,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1231,7 +1233,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id,
+                            replay_id: replay_id_wire,
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1260,7 +1262,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::MintSubmitted,
@@ -1275,7 +1277,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1317,7 +1319,7 @@ impl TransferCoordinator {
         // Append Complete event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
             &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes()),
+                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_COMPLETE,
                 ),
@@ -1366,7 +1368,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::Completed,
@@ -1561,9 +1563,15 @@ impl TransferCoordinator {
                         id: transfer_id.to_string(),
                         source_chain: ctx.source_chain.clone(),
                         destination_chain: ctx.destination_chain.clone(),
-                        lock_tx_hash: ctx.lock_tx_hash.to_vec(),
+                        lock_tx_hash: {
+                            let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                            hash.as_slice().to_vec()
+                        },
                         lock_output_index: 0,
-                        sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                        sanad_id: {
+                            let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                            sanad_id.0
+                        },
                         transition_id: vec![],
                     }
                 } else {
@@ -1598,9 +1606,15 @@ impl TransferCoordinator {
                                 id: transfer_id.to_string(),
                                 source_chain: ctx.source_chain.clone(),
                                 destination_chain: ctx.destination_chain.clone(),
-                                lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                                lock_tx_hash: {
+                                    let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                                    hash.as_bytes().to_vec()
+                                },
                                 lock_output_index: 0,
-                                sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                                sanad_id: {
+                                    let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                                    sanad_id.0
+                                },
                                 transition_id: vec![],
                             }
                         } else {
@@ -1637,9 +1651,15 @@ impl TransferCoordinator {
                                 id: transfer_id.to_string(),
                                 source_chain: ctx.source_chain.clone(),
                                 destination_chain: ctx.destination_chain.clone(),
-                                lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                                lock_tx_hash: {
+                                    let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                                    hash.as_bytes().to_vec()
+                                },
                                 lock_output_index: 0,
-                                sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                                sanad_id: {
+                                    let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                                    sanad_id.0
+                                },
                                 transition_id: vec![],
                             }
                         } else {
@@ -1660,9 +1680,15 @@ impl TransferCoordinator {
                             id: transfer_id.to_string(),
                             source_chain: ctx.source_chain.clone(),
                             destination_chain: ctx.destination_chain.clone(),
-                            lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                            lock_tx_hash: {
+                                let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                                hash.as_bytes().to_vec()
+                            },
                             lock_output_index: 0,
-                            sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                            sanad_id: {
+                                let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                                sanad_id.0
+                            },
                             transition_id: vec![],
                         }
                     } else {
@@ -1709,9 +1735,15 @@ impl TransferCoordinator {
                         id: transfer_id.to_string(),
                         source_chain: ctx.source_chain.clone(),
                         destination_chain: ctx.destination_chain.clone(),
-                        lock_tx_hash: ctx.lock_tx_hash.as_bytes().to_vec(),
+                        lock_tx_hash: {
+                            let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                            hash.as_bytes().to_vec()
+                        },
                         lock_output_index: 0,
-                        sanad_id: csv_hash::Hash::new(*ctx.sanad_id.as_bytes()),
+                        sanad_id: {
+                            let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                            sanad_id.0
+                        },
                         transition_id: vec![],
                     }
                 } else {
@@ -1792,7 +1824,8 @@ impl TransferCoordinator {
                 "Recovery requires an active lease owned by the calling runtime".to_string(),
             ));
         }
-        if runtime_ctx.lease.transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
+        let lease_transfer_id: csv_protocol::sanad::SanadId = runtime_ctx.lease.transfer_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+        if lease_transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
             return Err(TransferCoordinatorError::LeaseViolation(
                 "Recovery lease does not authorize the transfer sanad".to_string(),
             ));
@@ -2207,6 +2240,7 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::RuntimeError(e.to_string()))?;
 
         let replay_id = transfer.sanad_id;
+        let replay_id_wire = csv_wire::HashWire::from(replay_id);
         self.replay_db
             .confirm_consumed(replay_id.as_bytes())
             .await
@@ -2227,7 +2261,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::MintConfirmed,
@@ -2240,7 +2274,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::Completed,
@@ -2566,6 +2600,7 @@ mod tests {
             .unwrap();
         let coordinator = TransferCoordinator::new(Box::new(db), EventBus::new());
         let replay_id = transfer.sanad_id;
+        let replay_id_wire = csv_wire::HashWire::from(replay_id);
         let proof_hash = proof_payload
             .as_ref()
             .map(|payload| proof_payload_hash(payload))
@@ -2574,7 +2609,7 @@ mod tests {
             .execution_journal()
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id,
+                replay_id: replay_id_wire,
                 proof_hash,
                 proof_payload,
                 phase,
@@ -2591,7 +2626,7 @@ mod tests {
         let owner = uuid::Uuid::new_v4();
         let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: crate::user_runtime_lease::TransferLease {
-                transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+                transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
                 epoch: 1,
                 owner_runtime_id: owner,
                 acquired_at: std::time::SystemTime::now(),
@@ -2682,7 +2717,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let payload = csv_codec::to_canonical_cbor(&proof_bundle).unwrap();
+        let payload = proof_bundle.to_canonical_bytes().unwrap();
         let (coordinator, registry, transfer, runtime_ctx) =
             recovery_fixture(TransferStage::ProofValidated, Some(payload)).await;
 
@@ -2750,7 +2785,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let payload = csv_codec::to_canonical_cbor(&bundle).unwrap();
+        let payload = bundle.to_canonical_bytes().unwrap();
         let (coordinator, registry, transfer, runtime_ctx) =
             recovery_fixture(TransferStage::ProofValidated, Some(payload.clone())).await;
         coordinator
@@ -2800,7 +2835,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -2846,7 +2881,7 @@ mod tests {
         };
 
         let pending_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*pending_transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*pending_transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -2963,7 +2998,7 @@ mod tests {
 
         // Celestia cannot be a source (DA only)
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3004,7 +3039,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3064,7 +3099,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3117,7 +3152,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3207,7 +3242,7 @@ mod tests {
 
         // Original runtime acquires lease
         let original_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: original_runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3228,7 +3263,7 @@ mod tests {
 
         // Failover runtime tries to execute with different runtime ID (should fail)
         let failover_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: failover_runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3277,7 +3312,7 @@ mod tests {
 
         // Original runtime acquires expired lease
         let expired_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: original_runtime_id,
             acquired_at: std::time::SystemTime::now() - std::time::Duration::from_secs(3600),
@@ -3301,7 +3336,7 @@ mod tests {
 
         // Failover runtime with new lease should succeed
         let failover_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 2, // Incremented epoch
             owner_runtime_id: failover_runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3343,7 +3378,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3454,7 +3489,7 @@ mod tests {
 
         let runtime_id = uuid::Uuid::new_v4();
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3522,7 +3557,7 @@ mod tests {
         let runtime_id_2 = uuid::Uuid::new_v4();
 
         let lease_1 = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: runtime_id_1,
             acquired_at: std::time::SystemTime::now(),
@@ -3530,7 +3565,7 @@ mod tests {
         };
 
         let lease_2 = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: runtime_id_2,
             acquired_at: std::time::SystemTime::now(),
@@ -3674,7 +3709,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3718,7 +3753,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),
@@ -3804,7 +3839,7 @@ mod tests {
 
         // Acquire lease with epoch 1
         let lease_epoch_1 = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3824,7 +3859,7 @@ mod tests {
 
         // Try to use stale lease with epoch 1 after epoch 2 has been issued
         let lease_epoch_2 = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 2,
             owner_runtime_id: runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3844,7 +3879,7 @@ mod tests {
 
         // Try to use stale epoch 1 lease again - should fail
         let stale_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: runtime_id,
             acquired_at: std::time::SystemTime::now(),
@@ -3887,7 +3922,7 @@ mod tests {
         };
 
         let lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             epoch: 1,
             owner_runtime_id: uuid::Uuid::new_v4(),
             acquired_at: std::time::SystemTime::now(),

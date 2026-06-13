@@ -22,6 +22,7 @@ use std::vec::Vec;
 
 use crate::event_envelope::{AggregateSnapshot, EventFilter, RuntimeEventEnvelope, StreamPosition};
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
+use csv_wire::SanadIdWire;
 
 /// Synchronous event store used to persist and retrieve event envelopes.
 ///
@@ -118,11 +119,11 @@ pub trait EventStore: Send + Sync {
 /// is not required.
 pub struct InMemoryEventStore {
     /// Events indexed by aggregate ID.
-    events: std::sync::Mutex<HashMap<csv_protocol::sanad::SanadId, Vec<RuntimeEventEnvelope>>>,
+    events: std::sync::Mutex<HashMap<SanadIdWire, Vec<RuntimeEventEnvelope>>>,
     /// Snapshots indexed by aggregate ID.
-    snapshots: std::sync::Mutex<HashMap<csv_protocol::sanad::SanadId, AggregateSnapshot>>,
+    snapshots: std::sync::Mutex<HashMap<SanadIdWire, AggregateSnapshot>>,
     /// Stream positions indexed by aggregate ID.
-    positions: std::sync::Mutex<HashMap<csv_protocol::sanad::SanadId, StreamPosition>>,
+    positions: std::sync::Mutex<HashMap<SanadIdWire, StreamPosition>>,
 }
 
 impl InMemoryEventStore {
@@ -414,30 +415,30 @@ impl RocksDbEventStore {
 
     /// Build a key for storing an event.
     /// Uses raw bytes for aggregate ID to avoid serde_json dependency.
-    fn event_key(aggregate_id: &csv_protocol::sanad::SanadId, version: u64) -> String {
+    fn event_key(aggregate_id: &SanadIdWire, version: u64) -> String {
         format!(
             "{}{}:{:x}",
             Self::EVENTS_PREFIX,
-            hex::encode(aggregate_id.as_bytes()),
+            hex::encode(aggregate_id.bytes.as_bytes()),
             version
         )
     }
 
     /// Build a key for storing a snapshot.
-    fn snapshot_key(aggregate_id: &csv_protocol::sanad::SanadId) -> String {
+    fn snapshot_key(aggregate_id: &SanadIdWire) -> String {
         format!(
             "{}{}",
             Self::SNAPSHOTS_PREFIX,
-            hex::encode(aggregate_id.as_bytes())
+            hex::encode(aggregate_id.bytes.as_bytes())
         )
     }
 
     /// Build a key for storing a position.
-    fn position_key(aggregate_id: &csv_protocol::sanad::SanadId) -> String {
+    fn position_key(aggregate_id: &SanadIdWire) -> String {
         format!(
             "{}{}",
             Self::POSITIONS_PREFIX,
-            hex::encode(aggregate_id.as_bytes())
+            hex::encode(aggregate_id.bytes.as_bytes())
         )
     }
 }

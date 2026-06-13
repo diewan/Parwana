@@ -1,7 +1,6 @@
 //! In-memory replay database (testing only).
 
 use async_trait::async_trait;
-use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_protocol::cross_chain::HashEntry as CrossChainRegistryEntry;
 use csv_protocol::proof_taxonomy::ReplayId;
 use std::collections::HashMap;
@@ -114,7 +113,7 @@ impl ReplayDatabase for InMemoryReplayDb {
         entry: &CrossChainRegistryEntry,
     ) -> Result<(), ReplayDbError> {
         let key = hex::encode(entry.sanad_id.as_bytes());
-        let val = to_canonical_cbor(entry)
+        let val = entry.to_canonical_bytes()
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
         let mut entries = self
             .transfer_entries
@@ -131,7 +130,7 @@ impl ReplayDatabase for InMemoryReplayDb {
             .map_err(|e| ReplayDbError::Storage(format!("Replay DB lock poisoned: {e}")))?;
         let mut out = Vec::new();
         for val in entries.values() {
-            let entry: CrossChainRegistryEntry = from_canonical_cbor(val)
+            let entry: CrossChainRegistryEntry = CrossChainRegistryEntry::from_canonical_bytes(val)
                 .map_err(|e| ReplayDbError::Storage(format!("Deserialization error: {e}")))?;
             out.push(entry);
         }

@@ -1,6 +1,7 @@
 //! Type definitions for Solana adapter
 
 use csv_hash::Hash;
+use csv_wire::HashWire;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
@@ -70,7 +71,7 @@ pub struct AccountProof {
     /// Merkle proof
     pub proof: Vec<Vec<u8>>,
     /// Account data hash
-    pub data_hash: Option<Hash>,
+    pub data_hash: Option<HashWire>,
 }
 
 /// Confirmation status for Solana transactions
@@ -90,7 +91,7 @@ pub struct SolanaFinalityProof {
     /// Final slot number
     pub slot: u64,
     /// Block hash
-    pub block_hash: Hash,
+    pub block_hash: HashWire,
     /// Confirmation depth
     pub confirmation_depth: u64,
     /// Timestamp
@@ -102,27 +103,27 @@ pub struct SolanaFinalityProof {
 pub enum CsvInstruction {
     /// Create a new sanad
     CreateSanad {
-        sanad_id: Hash,
+        sanad_id: HashWire,
         owner: Pubkey,
-        commitment: Hash,
+        commitment: HashWire,
     },
     /// Consume a seal
     ConsumeSeal {
         seal_account: Pubkey,
-        sanad_id: Hash,
+        sanad_id: HashWire,
         new_owner: Pubkey,
     },
     /// Transfer a sanad
     TransferSanad {
-        sanad_id: Hash,
+        sanad_id: HashWire,
         from_owner: Pubkey,
         to_owner: Pubkey,
         destination_chain: String,
     },
     /// Publish commitment
     PublishCommitment {
-        commitment: Hash,
-        sanad_id: Hash,
+        commitment: HashWire,
+        sanad_id: HashWire,
         metadata: Vec<u8>,
     },
 }
@@ -135,9 +136,9 @@ pub struct SealAccount {
     /// Owner of the sanad
     pub owner: Pubkey,
     /// Sanad ID
-    pub sanad_id: Hash,
+    pub sanad_id: HashWire,
     /// Commitment hash
-    pub commitment: Hash,
+    pub commitment: HashWire,
     /// Seal status
     pub status: SealStatus,
     /// Created at slot

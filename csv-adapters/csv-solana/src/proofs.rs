@@ -12,6 +12,7 @@
 
 use csv_hash::Hash;
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
+use csv_wire::HashWire;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
@@ -31,7 +32,7 @@ pub struct SlotProof {
     /// Transaction signature
     pub signature: Signature,
     /// Block hash of the slot
-    pub block_hash: Hash,
+    pub block_hash: HashWire,
     /// Number of confirmations at time of proof
     pub confirmations: u64,
     /// Whether the slot is finalized (32+ confirmations)
@@ -41,7 +42,7 @@ pub struct SlotProof {
     /// Program ID that was invoked
     pub program_id: Pubkey,
     /// Instruction data hash (for commitment verification)
-    pub instruction_data_hash: Hash,
+    pub instruction_data_hash: HashWire,
     /// Unix timestamp of when the slot was produced
     pub timestamp: u64,
 }
@@ -61,12 +62,12 @@ impl SlotProof {
     ) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(instruction_data);
-        let instruction_data_hash = Hash::new(hasher.finalize().into());
+        let instruction_data_hash = HashWire::from(Hash::new(hasher.finalize().into()));
 
         Self {
             slot,
             signature,
-            block_hash,
+            block_hash: HashWire::from(block_hash),
             confirmations,
             finalized: confirmations >= MIN_CONFIRMATIONS,
             account_keys,
@@ -91,16 +92,18 @@ impl SlotProof {
         let mut proof_data = Vec::with_capacity(128);
         proof_data.extend_from_slice(&self.slot.to_le_bytes());
         proof_data.extend_from_slice(self.signature.as_ref());
-        proof_data.extend_from_slice(self.block_hash.as_bytes());
+        let block_hash: Hash = self.block_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        proof_data.extend_from_slice(block_hash.as_bytes());
         proof_data.extend_from_slice(&self.confirmations.to_le_bytes());
         proof_data.push(if self.finalized { 1u8 } else { 0u8 });
         proof_data.extend_from_slice(commitment.as_bytes());
-        proof_data.extend_from_slice(self.instruction_data_hash.as_bytes());
+        let instruction_data_hash: Hash = self.instruction_data_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        proof_data.extend_from_slice(instruction_data_hash.as_bytes());
 
         // Position equals slot for Solana slot-based proofs
-        InclusionProof::new(proof_data, self.block_hash, self.slot, self.slot).unwrap_or_else(|e| {
+        InclusionProof::new(proof_data, block_hash, self.slot, self.slot).unwrap_or_else(|e| {
             tracing::error!("Failed to create inclusion proof: {}", e);
-            unsafe { InclusionProof::new_unchecked(vec![], self.block_hash, self.slot, self.slot) }
+            unsafe { InclusionProof::new_unchecked(vec![], block_hash, self.slot, self.slot) }
         })
     }
 
@@ -121,12 +124,12 @@ impl SlotProof {
         Some(Self {
             slot,
             signature,
-            block_hash,
+            block_hash: HashWire::from(block_hash),
             confirmations,
             finalized,
             account_keys: Vec::new(),
             program_id: Pubkey::default(),
-            instruction_data_hash: Hash::new([0u8; 32]),
+            instruction_data_hash: HashWire::from(Hash::new([0u8; 32])),
             timestamp: 0,
         })
     }
@@ -150,7 +153,7 @@ pub struct AccountProof {
     /// Rent epoch at that slot
     pub rent_epoch: u64,
     /// Hash of the account data for integrity verification
-    pub data_hash: Hash,
+    pub data_hash: HashWire,
 }
 
 impl AccountProof {
@@ -166,7 +169,7 @@ impl AccountProof {
     ) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(&data);
-        let data_hash = Hash::new(hasher.finalize().into());
+        let data_hash = HashWire::from(Hash::new(hasher.finalize().into()));
 
         Self {
             slot,
@@ -185,7 +188,8 @@ impl AccountProof {
         let mut hasher = Sha256::new();
         hasher.update(&self.data);
         let computed_hash = Hash::new(hasher.finalize().into());
-        computed_hash == self.data_hash
+        let data_hash: Hash = self.data_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        computed_hash == data_hash
     }
 }
 
@@ -197,7 +201,7 @@ pub struct MultiAccountProof {
     /// Individual account proofs
     pub accounts: Vec<AccountProof>,
     /// Slot hash for verification against cluster state
-    pub slot_hash: Hash,
+    pub slot_hash: HashWire,
     /// Parent slot for chain continuity
     pub parent_slot: u64,
     /// Whether this slot is finalized
@@ -213,9 +217,10 @@ impl MultiAccountProof {
         hasher.update([if finalized { 1u8 } else { 0u8 }]);
         for account in &accounts {
             hasher.update(account.pubkey.as_ref());
-            hasher.update(account.data_hash.as_bytes());
+            let data_hash: Hash = account.data_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+            hasher.update(data_hash.as_bytes());
         }
-        let slot_hash = Hash::new(hasher.finalize().into());
+        let slot_hash = HashWire::from(Hash::new(hasher.finalize().into()));
 
         Self {
             slot,

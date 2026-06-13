@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use csv_protocol::sanad::SanadId as TransferId;
+use csv_wire::SanadIdWire;
 
 /// Unique event type identifier.
 ///
@@ -111,7 +112,7 @@ pub struct RuntimeEventEnvelope {
     /// Unique event identifier.
     pub event_id: Uuid,
     /// The aggregate (transfer) this event belongs to.
-    pub aggregate_id: TransferId,
+    pub aggregate_id: SanadIdWire,
     /// Semantic type of this event.
     pub event_type: EventType,
     /// Monotonically increasing version within the aggregate.
@@ -143,7 +144,7 @@ impl RuntimeEventEnvelope {
     /// * `timestamp` - When the event occurred
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        aggregate_id: TransferId,
+        aggregate_id: SanadIdWire,
         event_type: EventType,
         version: u64,
         payload: String,
@@ -167,7 +168,7 @@ impl RuntimeEventEnvelope {
 
     /// Create a new event envelope with a generated correlation ID.
     pub fn new_with_auto_correlation(
-        aggregate_id: TransferId,
+        aggregate_id: SanadIdWire,
         event_type: EventType,
         version: u64,
         payload: String,
@@ -193,7 +194,7 @@ impl RuntimeEventEnvelope {
     }
 
     /// Get the aggregate ID.
-    pub fn aggregate_id(&self) -> &TransferId {
+    pub fn aggregate_id(&self) -> &SanadIdWire {
         &self.aggregate_id
     }
 
@@ -224,7 +225,7 @@ impl RuntimeEventEnvelope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamPosition {
     /// The aggregate this position belongs to.
-    pub aggregate_id: TransferId,
+    pub aggregate_id: SanadIdWire,
     /// The last consumed version number.
     pub last_version: u64,
     /// The event ID of the last consumed event.
@@ -235,7 +236,7 @@ pub struct StreamPosition {
 
 impl StreamPosition {
     /// Create a new stream position.
-    pub fn new(aggregate_id: TransferId, last_version: u64) -> Self {
+    pub fn new(aggregate_id: SanadIdWire, last_version: u64) -> Self {
         Self {
             aggregate_id,
             last_version,
@@ -325,7 +326,7 @@ impl EventFilter {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AggregateSnapshot {
     /// The aggregate this snapshot belongs to.
-    pub aggregate_id: TransferId,
+    pub aggregate_id: SanadIdWire,
     /// The version this snapshot represents.
     pub version: u64,
     /// Serialized aggregate state (JSON).
@@ -336,7 +337,7 @@ pub struct AggregateSnapshot {
 
 impl AggregateSnapshot {
     /// Create a new aggregate snapshot.
-    pub fn new(aggregate_id: TransferId, version: u64, state: String) -> Self {
+    pub fn new(aggregate_id: SanadIdWire, version: u64, state: String) -> Self {
         Self {
             aggregate_id,
             version,

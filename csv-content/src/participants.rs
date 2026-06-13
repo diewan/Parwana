@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 // Use manual serialization instead
 
 /// A participant in a Sanad's content lifecycle.
-/// L2 type: uses serde for serialization
+/// L2 type: uses serde for serialization (ParticipantId has manual serde impl)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Participant {
     /// Unique identifier for this participant.
@@ -23,8 +23,8 @@ pub struct Participant {
 }
 
 /// Unique identifier for a participant.
-/// L2 type: uses serde for serialization
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// L2 type: uses manual serialization for Hash field
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParticipantId(pub Hash);
 
 impl ParticipantId {
@@ -40,6 +40,25 @@ impl ParticipantId {
     /// Get the underlying hash.
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0.0
+    }
+}
+
+impl serde::Serialize for ParticipantId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.0.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ParticipantId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = <[u8; 32]>::deserialize(deserializer)?;
+        Ok(Self(Hash(bytes)))
     }
 }
 
@@ -62,7 +81,7 @@ pub enum ParticipantRole {
 }
 
 /// A participant set for a content tree.
-/// L2 type: uses serde for serialization
+/// L2 type: uses serde for serialization (ParticipantId has manual serde impl)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParticipantSet {
     /// All participants.

@@ -1089,11 +1089,11 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             transaction_hash: hex::encode(seal.txid),
             block_height: 0,
             chain_id: "bitcoin".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "description": metadata,
                 "owner": owner,
                 "seal_outpoint": format!("{}:{}", hex::encode(seal.txid), seal.vout)
-            }),
+            })).unwrap_or_default(),
         })
     }
 
@@ -1182,11 +1182,11 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             transaction_hash: signed_tx,
             block_height: self.adapter.get_current_height().await,
             chain_id: "bitcoin".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "destination_chain": destination_chain,
                 "lock_type": "utxo_csv",
                 "timeout_blocks": 144, // ~24 hours
-            }),
+            })).unwrap_or_default(),
         })
     }
 
@@ -1260,11 +1260,11 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             transaction_hash: format!("0x{}", hex::encode(signed_tx.as_bytes())),
             block_height: self.adapter.get_current_height().await,
             chain_id: "bitcoin".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "lock_txid": hex::encode(lock_seal_txid),
                 "lock_vout": lock_seal_vout,
                 "refund_height": current_height,
-            }),
+            })).unwrap_or_default(),
         })
     }
 
@@ -1274,6 +1274,9 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         metadata: serde_json::Value,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
+        // Convert metadata to Vec<u8> for storage
+        let metadata_bytes = serde_json::to_vec(&metadata)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
         // Record metadata for a sanad using OP_RETURN
         // This creates a transaction with metadata in the witness or OP_RETURN
 
@@ -1324,7 +1327,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             transaction_hash: signed_tx,
             block_height: self.adapter.get_current_height().await,
             chain_id: "bitcoin".to_string(),
-            metadata,
+            metadata: metadata_bytes,
         })
     }
 
@@ -1947,13 +1950,13 @@ impl ChainSanadOps for BitcoinBackend {
             transaction_hash: hex::encode(anchor.txid),
             block_height: anchor.block_height,
             chain_id: "bitcoin".to_string(),
-            metadata: serde_json::json!({
+            metadata: serde_json::to_vec(&serde_json::json!({
                 "owner": owner,
                 "asset_class": asset_class,
                 "asset_id": asset_id,
                 "seal_outpoint": format!("{}:{}", seal_txid, seal_vout),
                 "seal_nonce": seal_nonce,
-            }),
+            })).unwrap_or_default(),
         })
     }
 
