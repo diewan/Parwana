@@ -335,7 +335,9 @@ impl TransferCoordinator {
             .active_execution_leases
             .lock()
             .map_err(|e| TransferCoordinatorError::LeaseViolation(e.to_string()))?;
-        if let Some(current) = active.get(&lease.transfer_id) {
+        let transfer_id: csv_hash::SanadId = lease.transfer_id.clone().try_into()
+            .map_err(|_| TransferCoordinatorError::LeaseViolation("Invalid transfer ID".to_string()))?;
+        if let Some(current) = active.get(&transfer_id) {
             if lease.epoch < current.epoch {
                 return Err(TransferCoordinatorError::LeaseViolation(
                     "Lease epoch is stale for this transfer".to_string(),
@@ -355,7 +357,7 @@ impl TransferCoordinator {
                 ));
             }
         }
-        active.insert(lease.transfer_id.clone(), lease.clone());
+        active.insert(transfer_id.clone(), lease.clone());
         Ok(())
     }
 
@@ -442,7 +444,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::Initialized,
@@ -509,7 +511,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::Initialized,
@@ -525,7 +527,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::Initialized,
@@ -548,7 +550,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::Initialized,
@@ -628,7 +630,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::LockConfirmed,
@@ -641,7 +643,7 @@ impl TransferCoordinator {
 
         // Append durable event BEFORE emitting to subscribers (crash-safe ordering)
         if let Err(e) = self.event_store.append(&RuntimeEventEnvelope::new(
-            csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()),
+            csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
             EventType(EventType::TRANSFER_LOCKED.to_string()),
             EVENT_VERSION_LOCKED,
             serde_json::json!({
@@ -724,7 +726,7 @@ impl TransferCoordinator {
                 .execution_journal
                 .record(crate::execution_journal::TransferPhaseEntry {
                     transfer_id: transfer.id.clone(),
-                    replay_id: replay_id_wire,
+                    replay_id: replay_id_wire.clone(),
                     proof_hash: [0u8; 32],
                     proof_payload: None,
                     phase: crate::recovery::TransferStage::LockConfirmed,
@@ -750,7 +752,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::LockConfirmed,
@@ -787,7 +789,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::AwaitingFinality,
@@ -861,7 +863,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::AwaitingFinality,
@@ -877,7 +879,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::AwaitingFinality,
@@ -893,7 +895,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1011,7 +1013,7 @@ impl TransferCoordinator {
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1080,7 +1082,7 @@ impl TransferCoordinator {
                 self.execution_journal
                     .record(crate::execution_journal::TransferPhaseEntry {
                         transfer_id: transfer.id.clone(),
-                        replay_id: replay_id_wire,
+                        replay_id: replay_id_wire.clone(),
                         proof_hash: [0u8; 32],
                         proof_payload: None,
                         phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1098,7 +1100,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::ProofBuilding,
@@ -1124,7 +1126,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash,
                 proof_payload: Some(proof_bundle_bytes.clone()),
                 phase: crate::recovery::TransferStage::ProofValidated,
@@ -1157,7 +1159,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1180,7 +1182,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1233,7 +1235,7 @@ impl TransferCoordinator {
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire,
+                            replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1262,7 +1264,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::MintSubmitted,
@@ -1277,7 +1279,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::MintConfirmed,
@@ -1368,7 +1370,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: crate::recovery::TransferStage::Completed,
@@ -1991,17 +1993,17 @@ impl TransferCoordinator {
             arr
         };
         let transfer_context = crate::execution_journal::TransferContext {
-            sanad_id: csv_hash::SanadId(csv_hash::Hash::new(sanad_bytes)),
+            sanad_id: csv_hash::SanadId(csv_hash::Hash::new(sanad_bytes)).into(),
             source_chain: transfer.source_chain.clone(),
             destination_chain: transfer.destination_chain.clone(),
-            lock_tx_hash: csv_hash::Hash::new(lock_bytes),
+            lock_tx_hash: csv_hash::Hash::new(lock_bytes).into(),
             destination_owner: String::new(),
         };
 
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::AwaitingFinality,
@@ -2018,7 +2020,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::AwaitingFinality,
@@ -2032,7 +2034,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::ProofBuilding,
@@ -2061,7 +2063,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash,
                 proof_payload: Some(proof_payload.clone()),
                 phase: TransferStage::ProofBuilding,
@@ -2074,7 +2076,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash,
                 proof_payload: Some(proof_payload.clone()),
                 phase: TransferStage::ProofValidated,
@@ -2146,7 +2148,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash: proof_payload_hash(&proof_payload),
                 proof_payload: Some(proof_payload.clone()),
                 phase: TransferStage::MintSubmitted,
@@ -2169,7 +2171,7 @@ impl TransferCoordinator {
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id.0,
+                replay_id: replay_id.0.into(),
                 proof_hash: proof_payload_hash(&proof_payload),
                 proof_payload: Some(proof_payload),
                 phase: TransferStage::MintSubmitted,
@@ -2257,11 +2259,10 @@ impl TransferCoordinator {
                     e
                 ))
             })?;
-
-        self.execution_journal
+    self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::MintConfirmed,
@@ -2271,10 +2272,11 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::Completed,
@@ -2609,7 +2611,7 @@ mod tests {
             .execution_journal()
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: replay_id_wire,
+                replay_id: replay_id_wire.clone(),
                 proof_hash,
                 proof_payload,
                 phase,

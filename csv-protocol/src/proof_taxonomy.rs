@@ -51,7 +51,6 @@ use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
-use serde::{Deserialize, Serialize};
 
 /// Hash function types supported by different chains
 ///

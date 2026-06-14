@@ -162,10 +162,10 @@ Agent-facing tools MUST return `VerificationLevel` alongside `is_valid`.
 
 ### 4.4 Golden Proof Corpus
 
-Canonical proof fixtures live at `csv-core/tests/golden/`:
+Canonical proof fixtures live at `csv-testkit/fixtures/golden/`:
 
 ```
-csv-core/tests/golden/
+csv-testkit/fixtures/golden/
 ├── valid_proof_bundle_v1.cbor
 ├── valid_sanad_envelope_v1.cbor
 ├── replay_attempt_v1.cbor
@@ -178,7 +178,7 @@ These fixtures are:
 
 - Generated from a known-good runtime build
 - Signed with a release key
-- Validated in CI via `csv-core/tests/golden/mod.rs`
+- Validated in CI via `csv-testkit/tests/golden.rs`
 - Immutable once published (new versions use `_v2`, `_v3`, etc.)
 
 ---
@@ -624,9 +624,9 @@ All implementations MUST pass the following checks:
 
 - [Audit Report](./audit/audit.md) — Full security audit findings
 - [Implementation Plan](./audit/implementation.md) — Remediation roadmap
-- [Canonical Serialization](../csv-core/src/canonical.rs) — Rust implementation
-- [Tagged Hashing](../csv-core/src/tagged_hash.rs) — Rust implementation
-- [Proof Pipeline](../csv-core/src/proof_pipeline.rs) — Verification flow
+- [Canonical Serialization](../csv-codec/src/canonical.rs) — Rust implementation
+- [Tagged Hashing](../csv-hash/src/tagged_hash.rs) — Rust implementation
+- [Proof Validation](../csv-protocol/src/proof_validation.rs) — Canonical proof verification
 - [MCP Server](../csv-mcp-server/src/index.ts) — Agent-facing interface
 
 ---

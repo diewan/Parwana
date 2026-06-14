@@ -96,17 +96,38 @@ echo -e "  Address: $SEAL_ADDRESS"
 echo -e "  TX: $DEPLOYMENT_TX"
 echo -e "  Block: $BLOCK_NUMBER_DEC"
 
-# Compute bytecode hash
+# Compute bytecode hash using cast keccak (Ethereum's Keccak-256)
 BYTECODE_PATH="out/CSVSeal.sol/CSVSeal.json"
 BYTECODE_HASH="unknown"
 ABI_HASH="unknown"
+PINNED_BYTECODE_HASH="0x7227e552d193c02a3ca5f1c57bbd4e7fc5fb77fdddd3e054efd9c1ad54efa0ab"
+PINNED_ABI_HASH="0x74bac11175cda72653bd80bce55b616c2d81c9fc8e9da52668235235d3f80f41"
+
 if [ -f "$BYTECODE_PATH" ]; then
     BYTECODE=$(jq -r '.bytecode.object' "$BYTECODE_PATH")
     if [ -n "$BYTECODE" ] && [ "$BYTECODE" != "null" ]; then
-        BYTECODE_HASH=$(echo -n "$BYTECODE" | sha3sum | awk '{print "0x"$1}')
+        BYTECODE_HASH=$(cast keccak "$BYTECODE")
     fi
     # Compute ABI hash (hash of entire ABI JSON)
-    ABI_HASH=$(cat "$BYTECODE_PATH" | sha3sum | awk '{print "0x"$1}')
+    ABI_HASH=$(cast keccak "$(cat "$BYTECODE_PATH")")
+    
+    # Assert against pinned constants
+    echo -e "${YELLOW}Verifying hashes against pinned constants...${NC}"
+    if [ "$BYTECODE_HASH" != "$PINNED_BYTECODE_HASH" ]; then
+        echo -e "${RED}ERROR: Bytecode hash mismatch!${NC}"
+        echo -e "  Computed: $BYTECODE_HASH"
+        echo -e "  Pinned:   $PINNED_BYTECODE_HASH"
+        echo -e "${RED}Deployment aborted - contract bytecode does not match pinned hash${NC}"
+        exit 1
+    fi
+    if [ "$ABI_HASH" != "$PINNED_ABI_HASH" ]; then
+        echo -e "${RED}ERROR: ABI hash mismatch!${NC}"
+        echo -e "  Computed: $ABI_HASH"
+        echo -e "  Pinned:   $PINNED_ABI_HASH"
+        echo -e "${RED}Deployment aborted - contract ABI does not match pinned hash${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Hash verification passed${NC}"
 fi
 
 # Update ~/.csv/config.toml

@@ -25,7 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 ignored = ["serde"]
 
 [features]
-default = ["serde"]
+default = []
 std = ["bloomfilter"]
 # Enable serde derives for hash types (for serialization in non-critical paths)
 serde = ["dep:serde"]

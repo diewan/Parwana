@@ -548,7 +548,8 @@ impl EventStore for RocksDbEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, EventStoreError> {
-        let key = Self::snapshot_key(aggregate_id);
+        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
+        let key = Self::snapshot_key(&aggregate_id_wire);
         match self.db.get(key) {
             Ok(Some(value)) => {
                 let snapshot: AggregateSnapshot = from_canonical_cbor(&value)
@@ -565,7 +566,8 @@ impl EventStore for RocksDbEventStore {
         aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, EventStoreError> {
-        let key = Self::snapshot_key(aggregate_id);
+        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
+        let key = Self::snapshot_key(&aggregate_id_wire);
         match self.db.get(&key) {
             Ok(Some(value)) => {
                 let snapshot: AggregateSnapshot = from_canonical_cbor(&value)
@@ -621,7 +623,8 @@ impl EventStore for RocksDbEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, EventStoreError> {
-        let key = Self::position_key(aggregate_id);
+        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
+        let key = Self::position_key(&aggregate_id_wire);
         match self.db.get(key) {
             Ok(Some(value)) => {
                 let position: StreamPosition = from_canonical_cbor(&value)
@@ -682,11 +685,13 @@ impl EventStore for RocksDbEventStore {
         }
 
         // Delete snapshot
-        let snap_key = Self::snapshot_key(aggregate_id);
+        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
+        let snap_key = Self::snapshot_key(&aggregate_id_wire);
         let _ = self.db.delete(snap_key);
 
         // Delete position
-        let pos_key = Self::position_key(aggregate_id);
+        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
+        let pos_key = Self::position_key(&aggregate_id_wire);
         let _ = self.db.delete(pos_key);
 
         Ok(())
