@@ -231,11 +231,20 @@ pub fn from_canonical_cbor_full<T: serde::de::DeserializeOwned>(
     Ok(value)
 }
 
-/// Hash canonical CBOR encoding of `value` using tagged_hash.
+/// Hash canonical CBOR encoding of `value` using SHA-256.
 ///
-/// This function is a convenience wrapper that combines canonical serialization
-/// with tagged hashing. The domain separator is used to prevent cross-domain
-/// hash collisions.
+/// # WARNING: Testing/Utility Only
+///
+/// This function is provided for testing and utility purposes only. It does NOT
+/// provide the full protocol hash boundary. Production protocol hashing MUST use
+/// `csv-hash` crate's tagged_hash function, which provides:
+/// - Proper hash types (SanadId, ReplayId, etc.)
+/// - Domain separation with protocol-defined tags
+/// - Cross-chain hash compatibility guarantees
+///
+/// This function uses a simple SHA-256 hash with a domain separator string,
+/// which is insufficient for protocol commitments where hash type identity
+/// and cross-domain collision resistance are required.
 ///
 /// # Arguments
 /// * `domain` - Domain separator string (e.g., "proof-bundle", "commitment")
@@ -244,10 +253,8 @@ pub fn from_canonical_cbor_full<T: serde::de::DeserializeOwned>(
 /// # Errors
 /// Returns `CodecError` if serialization fails.
 ///
-/// # Note
-/// This is a simplified version that doesn't include the full Hash type.
-/// For production use, csv-hash provides the full implementation with
-/// proper hash types.
+/// # Production Alternative
+/// Use `csv-hash::tagged_hash` for all protocol-critical hashing.
 pub fn canonical_hash<T: serde::Serialize>(domain: &str, value: &T) -> Result<Vec<u8>, CodecError> {
     let cbor = to_canonical_cbor(value)?;
     // Simple hash using sha2 - in production this should use csv-hash's tagged_hash

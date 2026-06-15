@@ -45,12 +45,19 @@ impl BlsVerifier {
             // Create aggregate signature from single signature
             let agg_sig = AggregateSignature::from_signature(&sig);
 
-            // Aggregate the public keys of all signers
-            // For now, use a simpler approach: verify the signature against each public key individually
-            // This is less efficient but works with the current blst API
+            // Aggregate the public keys of all signers for efficient BLS verification
+            // This is the production approach using true BLS aggregation
             let mut total_voting_power = 0u64;
 
-            for (signer_pubkey, validator) in signers.iter().zip(&validator_set.validators) {
+            // Aggregate all public keys
+            let mut agg_pubkey = if let Some(first_signer) = signers.first() {
+                PublicKey::from_bytes(first_signer)
+                    .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse first public key: {:?}", e)))?
+            } else {
+                return Err(AnchorError::InvalidSignature("No signers provided".to_string()));
+            };
+
+            for signer_pubkey in signers.iter().skip(1) {
                 // BLS public keys are 48 bytes
                 if signer_pubkey.len() != 48 {
                     return Err(AnchorError::InvalidSignature(
@@ -61,39 +68,24 @@ impl BlsVerifier {
                 let pubkey = PublicKey::from_bytes(signer_pubkey)
                     .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse public key: {:?}", e)))?;
 
-                // Convert min_pk::PublicKey to min_sig::PublicKey for verification
-                let sig_pubkey = SigPublicKey::from_bytes(signer_pubkey)
-                    .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse public key for verification: {:?}", e)))?;
-
-                // Verify signature against individual public key using Signature type
-                // blst verify signature: verify(accept_multisig, pk_bytes, msg, dst, pubkey_ref, group_check)
-                let result = sig.verify(false, signer_pubkey, message, &[], &sig_pubkey, false);
-                
-                if result != BLST_ERROR::BLST_SUCCESS {
-                    return Err(AnchorError::InvalidSignature(
-                        "BLS signature verification failed for individual signer".to_string()
-                    ));
-                }
-
-                total_voting_power += validator.voting_power;
+                // Aggregate the public key
+                agg_pubkey = agg_pubkey.add(&pubkey)
+                    .map_err(|e| AnchorError::InvalidSignature(format!("Failed to aggregate public keys: {:?}", e)))?;
             }
 
-            // // Use the first public key as the aggregate for the final check
-            // let agg_pubkey = if let Some(first_signer) = signers.first() {
-            //     PublicKey::from_bytes(first_signer)
-            //         .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse first public key: {:?}", e)))?
-            // } else {
-            //     return Err(AnchorError::InvalidSignature("No signers provided".to_string()));
-            // };
+            // Verify the aggregate signature against the aggregated public key
+            let result = agg_sig.verify(false, &agg_pubkey, message, false);
 
-            // // Verify the aggregate signature against the aggregated public key
-            // let result = agg_sig.verify(false, &agg_pubkey, message, false);
-            
-            // if result != BLST_ERROR::BLST_SUCCESS {
-            //     return Err(AnchorError::InvalidSignature(
-            //         "BLS signature verification failed".to_string()
-            //     ));
-            // }
+            if result != BLST_ERROR::BLST_SUCCESS {
+                return Err(AnchorError::InvalidSignature(
+                    "BLS aggregate signature verification failed".to_string()
+                ));
+            }
+
+            // Calculate total voting power from validator set
+            for (signer_pubkey, validator) in signers.iter().zip(&validator_set.validators) {
+                total_voting_power += validator.voting_power;
+            }
 
             // Check that signers represent >= threshold fraction of voting power
             let total_power: u64 = validator_set.validators.iter().map(|v| v.voting_power).sum();
@@ -174,81 +166,71 @@ impl CryptographicAnchor for AptosAnchor {
         anchor: &VerifiedHeader,
     ) -> Result<(), AnchorError> {
         // Verify Merkle proof against the anchor's state root
-        // Aptos uses a sparse Merkle tree (SMT) for state
+        // Aptos uses a sparse Merkle tree (SMT) for state with SHA3-256 hashing
         //
         // The inclusion proof should contain:
         // 1. The leaf value (account/resource data)
         // 2. The Merkle path (siblings) to the state root
         // 3. The state root from the verified header
-        
-        #[cfg(feature = "bls")]
-        {
-            use blst::{min_sig::AggregateSignature, min_pk::PublicKey};
-            
-            // Extract the state root from the anchor (this should be in the header)
-            // For now, we'll implement a basic Merkle path verification
-            
-            // Check that the proof has the required components
-            if proof.key.is_empty() {
-                return Err(AnchorError::InvalidInclusionProof("Key is empty".to_string()));
-            }
-            
-            if proof.value.is_empty() {
-                return Err(AnchorError::InvalidInclusionProof("Value is empty".to_string()));
-            }
-            
-            if proof.proof.is_empty() {
-                return Err(AnchorError::InvalidInclusionProof("No proof nodes provided".to_string()));
-            }
-            
-            // Reconstruct the Merkle root from the key-value pair and proof nodes
-            // For Aptos sparse Merkle tree, we hash the key-value pair first
-            let mut current_hash = {
-                let mut combined = Vec::with_capacity(proof.key.len() + proof.value.len());
-                combined.extend_from_slice(&proof.key);
-                combined.extend_from_slice(&proof.value);
-                use sha2::{Digest, Sha256};
-                Sha256::digest(&combined).to_vec()
+
+        // Check that the proof has the required components
+        if proof.key.is_empty() {
+            return Err(AnchorError::InvalidInclusionProof("Key is empty".to_string()));
+        }
+
+        if proof.value.is_empty() {
+            return Err(AnchorError::InvalidInclusionProof("Value is empty".to_string()));
+        }
+
+        if proof.proof.is_empty() {
+            return Err(AnchorError::InvalidInclusionProof("No proof nodes provided".to_string()));
+        }
+
+        // Reconstruct the Merkle root from the key-value pair and proof nodes
+        // For Aptos sparse Merkle tree, we hash the key-value pair first using SHA3-256
+        let mut current_hash = {
+            let mut combined = Vec::with_capacity(proof.key.len() + proof.value.len());
+            combined.extend_from_slice(&proof.key);
+            combined.extend_from_slice(&proof.value);
+            use sha3::{Digest, Sha3_256};
+            Sha3_256::digest(&combined).to_vec()
+        };
+
+        // Walk up the Merkle tree using the proof nodes
+        for sibling in &proof.proof {
+            // Ordered hashing: min || max (Aptos SMT uses ordered hashing)
+            let (left, right) = if current_hash <= *sibling {
+                (&current_hash, sibling)
+            } else {
+                (sibling, &current_hash)
             };
-            
-            for sibling in &proof.proof {
-                // Ordered hashing: min || max
-                let (left, right) = if current_hash <= *sibling {
-                    (&current_hash, sibling)
-                } else {
-                    (sibling, &current_hash)
-                };
-                
-                // Hash the pair
-                let mut combined = Vec::with_capacity(left.len() + right.len());
-                combined.extend_from_slice(left);
-                combined.extend_from_slice(right);
-                
-                // Use SHA-256 for Merkle hashing (Aptos uses SHA3-256 in production)
-                use sha2::{Digest, Sha256};
-                let hash = Sha256::digest(&combined);
-                current_hash = hash.to_vec();
-            }
-            
-            // Verify the reconstructed root matches the expected state root
-            // Note: In production, this should use the actual state root from the header
-            // and Aptos's specific hash function (SHA3-256)
-            
-            // For now, we'll accept the proof if the reconstruction succeeds
-            // Full implementation requires:
-            // 1. Extract the actual state root from the header
-            // 2. Use Aptos's SHA3-256 instead of SHA-256
-            // 3. Handle the sparse Merkle tree structure properly
-            
-            Ok(())
+
+            // Hash the pair using SHA3-256 (Aptos's hash function)
+            let mut combined = Vec::with_capacity(left.len() + right.len());
+            combined.extend_from_slice(left);
+            combined.extend_from_slice(right);
+
+            use sha3::{Digest, Sha3_256};
+            let hash = Sha3_256::digest(&combined);
+            current_hash = hash.to_vec();
         }
-        
-        #[cfg(not(feature = "bls"))]
-        {
-            return Err(AnchorError::InvalidInclusionProof(
-                "Merkle proof verification requires the 'bls' feature to be enabled".to_string()
-            ));
+
+        // Verify the reconstructed root matches the expected state root from the header
+        // The header.hash should contain the state root for the block
+        if current_hash != anchor.hash {
+            return Err(AnchorError::InvalidInclusionProof(format!(
+                "Merkle root mismatch: reconstructed {:?}, expected {:?}",
+                hex::encode(&current_hash),
+                hex::encode(&anchor.hash)
+            )));
         }
+
+        log::debug!(
+            "APTOS: Merkle proof verified successfully (root: {})",
+            hex::encode(&current_hash)
+        );
+
+        Ok(())
     }
 }
 

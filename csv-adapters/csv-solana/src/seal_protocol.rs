@@ -390,19 +390,28 @@ impl SealProtocol for SolanaSealProtocol {
         &self,
         anchor_ref: Self::CommitAnchor,
     ) -> Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
-        let _rpc = self.check_rpc()?;
+        let rpc = self.check_rpc()?;
 
         // Solana has deterministic finality after ~32 slots (12-16 seconds)
         // For devnet/testnet, we use shorter confirmation
 
-        let current_slot = self.check_rpc()?.get_latest_slot()?;
+        let current_slot = rpc.get_latest_slot()?;
         let confirmation_depth = current_slot.saturating_sub(anchor_ref.slot);
 
         // Solana requires 32 slots for finality
-        let _is_finalized = confirmation_depth >= 32;
+        let is_finalized = confirmation_depth >= 32;
 
-        let mut block_hash = [0u8; 32];
-        block_hash.copy_from_slice(&anchor_ref.signature.as_ref()[..32]);
+        if !is_finalized {
+            return Err(SolanaError::Rpc(format!(
+                "Transaction not yet finalized (confirmation depth: {} slots, required: 32)",
+                confirmation_depth
+            ))
+            .into());
+        }
+
+        // Get the actual block hash from the slot
+        let block_hash = rpc.get_block_hash(anchor_ref.slot)
+            .map_err(|e| SolanaError::Rpc(format!("Failed to get block hash: {}", e)))?;
 
         let proof = SolanaFinalityProof {
             slot: anchor_ref.slot,

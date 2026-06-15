@@ -208,27 +208,53 @@ impl ChainAdapter for SuiRuntimeAdapter {
 
     async fn validate_source_proof(
         &self,
-        _transfer: &CrossChainTransfer,
-        _proof_bundle: &ProofBundle,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
     ) -> Result<(), AdapterError> {
-        // Validate source chain proof
-        // This is a simplified stub implementation
-        // TODO: Implement actual Sui proof validation logic
-        Err(AdapterError::Generic("Sui proof validation not implemented yet".to_string()))
+        use csv_protocol::chain_adapter_traits::ChainProofProvider;
+
+        // Validate the proof bundle using the backend's ChainProofProvider implementation
+        let inclusion_proof = &proof_bundle.inclusion_proof;
+        let finality_proof = &proof_bundle.finality_proof;
+        let commitment = &transfer.sanad_id;
+
+        let is_valid = self.backend
+            .verify_proof_bundle(inclusion_proof, finality_proof, commitment)
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to verify proof bundle: {}", e)))?;
+
+        if !is_valid {
+            return Err(AdapterError::Generic("Proof bundle validation failed".to_string()));
+        }
+
+        Ok(())
     }
 
-    async fn check_seal_registry(&self, _seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
-        // Verify seal registry status on Sui
-        // This is a simplified stub implementation
-        // TODO: Implement actual Sui seal registry verification
-        Err(AdapterError::Generic("Sui seal registry verification not implemented yet".to_string()))
+    async fn check_seal_registry(&self, seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
+        use csv_protocol::chain_adapter_traits::ChainQuery;
+
+        // Check if the seal object exists on-chain using the backend's ChainQuery implementation
+        // Convert seal_id to a string address for querying
+        let address_str = hex::encode(seal_id);
+
+        // Try to get object info to check if seal exists
+        match self.backend.get_object_info(&address_str).await {
+            Ok(Some(_)) => Ok(SealRegistryStatus::Registered),
+            Ok(None) => Ok(SealRegistryStatus::NotRegistered),
+            Err(e) => Err(AdapterError::Generic(format!("Failed to check seal registry: {}", e))),
+        }
     }
 
-    async fn get_balance(&self, _address: &str) -> Result<String, AdapterError> {
-        // Get balance for an address on Sui
-        // This is a simplified stub implementation
-        // TODO: Implement actual Sui balance query logic
-        Err(AdapterError::Generic("Sui balance query not implemented yet".to_string()))
+    async fn get_balance(&self, address: &str) -> Result<String, AdapterError> {
+        use csv_protocol::chain_adapter_traits::ChainQuery;
+
+        // Get balance using the backend's ChainQuery implementation
+        let balance_info = self.backend
+            .get_balance(address)
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to get balance: {}", e)))?;
+
+        Ok(balance_info.total.to_string())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

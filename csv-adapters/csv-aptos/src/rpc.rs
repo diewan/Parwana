@@ -203,6 +203,42 @@ impl AptosResource {
 
         Some(balance)
     }
+
+    /// Parse a u64 field from JSON-encoded resource data
+    ///
+    /// This is used when the resource data is in JSON format (from REST API)
+    /// rather than BCS format. The field_name should be the key in the JSON object.
+    pub fn parse_u64_field(&self, field_name: &str) -> Result<u64, String> {
+        // Try to parse as JSON first
+        if let Ok(json_value) = serde_json::from_slice::<serde_json::Value>(&self.data) {
+            if let Some(value) = json_value.get(field_name) {
+                if let Some(num) = value.as_u64() {
+                    return Ok(num);
+                }
+                if let Some(str) = value.as_str() {
+                    return str.parse::<u64>().map_err(|e| format!("Failed to parse {} as u64: {}", field_name, e));
+                }
+            }
+            return Err(format!("Field '{}' not found in JSON data", field_name));
+        }
+
+        // Fallback to BCS parsing (first 8 bytes as little-endian u64)
+        if self.data.len() < 8 {
+            return Err("Data too short for u64 field".to_string());
+        }
+
+        let value_bytes = &self.data[0..8];
+        Ok(u64::from_le_bytes([
+            value_bytes[0],
+            value_bytes[1],
+            value_bytes[2],
+            value_bytes[3],
+            value_bytes[4],
+            value_bytes[5],
+            value_bytes[6],
+            value_bytes[7],
+        ]))
+    }
 }
 
 /// Aptos transaction

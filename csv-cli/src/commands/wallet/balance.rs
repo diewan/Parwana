@@ -107,20 +107,21 @@ pub fn cmd_list(
                 let seed = mnemonic.to_seed(None);
                 let seed_array = *seed.as_bytes();
 
-                // Use csv-wallet for wallet operations (architecture compliant)
-                let network = match config.chain(&chain)?.network {
-                    crate::config::Network::Main => csv_wallet::bitcoin::Network::Main,
-                    crate::config::Network::Test => csv_wallet::bitcoin::Network::Test,
-                    crate::config::Network::Dev => csv_wallet::bitcoin::Network::Dev,
+                // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
+                let chain_id = ChainId::new("bitcoin");
+                let wallet_ops = get_wallet_operations(&chain_id);
+                let derived_address = if let Some(ops) = wallet_ops {
+                    ops.derive_address(&seed_array, 0, 0)
+                        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+                } else {
+                    // Fallback to csv-keys if factory not available
+                    let key = csv_keys::derive_key(&seed_array, &chain_id, 0, 0)
+                        .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
+                    csv_keys::bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+                        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
                 };
-                let address = csv_wallet::bitcoin::derive_funding_address(
-                    &seed_array,
-                    network,
-                    account,
-                    index,
-                ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
-                output::kv(&format!("{} (account {}, index {})", chain, account, index), &address);
+                output::kv(&format!("{} (account {}, index {})", chain, account, index), &derived_address);
                 found_any = true;
             }
         } else {

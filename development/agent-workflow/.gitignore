@@ -1,0 +1,2 @@
+context_packs/*.md
+!context_packs/.gitkeep

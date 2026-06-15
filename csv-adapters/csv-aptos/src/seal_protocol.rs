@@ -221,12 +221,24 @@ impl AptosSealProtocol {
             }
         }
 
-        // Check on-chain resource
+        // Check on-chain resource existence via RPC
         #[cfg(feature = "rpc")]
         let exists = {
-            // Skip on-chain existence check for now - seals are created locally
-            // TODO: Implement create_seal transaction to deploy seal on-chain first
-            true
+            // Verify seal resource exists on-chain before consumption
+            // This ensures the seal was properly created and deployed
+            let seal_resource_type = format!("{}::CSVSeal::Seal", self.config.seal_contract.module_address);
+            StateProofVerifier::verify_resource_exists_async(
+                seal.account_address,
+                &seal_resource_type,
+                self.rpc.as_ref() as &(dyn crate::rpc::AptosAccountReader + Send + Sync),
+            )
+            .await
+            .map_err(|e| {
+                AptosError::StateProofFailed(format!(
+                    "Failed to verify seal resource on-chain: {}",
+                    e
+                ))
+            })?
         };
 
         #[cfg(not(feature = "rpc"))]
@@ -1020,9 +1032,46 @@ impl SealProtocol for AptosSealProtocol {
                 ))) as Box<dyn std::error::Error>);
             }
 
-            // Note: We can't easily check if a specific nonce is consumed without a view function
-            // For now, we assume the seal is available if the collection exists
-            // The actual consumption check will happen when calling consume_seal on-chain
+            // Verify the specific seal nonce is available (not yet consumed)
+            // Query the SealCollection to check if the requested nonce exists and is unconsumed
+            let seal_collection_data = self
+                .rpc
+                .get_resource(
+                    seal.account_address,
+                    &seal_collection_type,
+                    None,
+                )
+                .await
+                .map_err(|e| {
+                    ProtocolError::NetworkError(format!(
+                        "Failed to query seal collection data: {}",
+                        e
+                    ))
+                })?
+                .ok_or_else(|| ProtocolError::SealReplay(
+                    "Seal collection resource not found".to_string()
+                ))?;
+
+            // Parse the next_nonce from the collection data
+            // If the seal's nonce is >= next_nonce, it has been consumed
+            let next_nonce = seal_collection_data
+                .parse_u64_field("next_nonce")
+                .map_err(|e| ProtocolError::SerializationError(format!(
+                    "Failed to parse next_nonce from seal collection: {}",
+                    e
+                )))?;
+
+            if seal.nonce >= next_nonce {
+                return Err(Box::new(ProtocolError::SealReplay(format!(
+                    "Seal with nonce {} has already been consumed (next_nonce: {})",
+                    seal.nonce, next_nonce
+                ))) as Box<dyn std::error::Error>);
+            }
+
+            log::debug!(
+                "APTOS: Verified seal nonce {} is available (next_nonce: {})",
+                seal.nonce, next_nonce
+            );
         }
 
         // Step 3: Mark seal as used in local registry
@@ -1419,8 +1468,8 @@ impl AptosSealProtocol {
                         
                         if let Some(next_nonce) = next_nonce {
                             log::debug!("APTOS: Found SealCollection with next_nonce {}", next_nonce);
-                            // The seal is stored in a SmartTable, but for now we can use the next_nonce - 1
-                            // as the most recent seal nonce
+                            // The seal nonce should be next_nonce - 1 for the most recent unconsumed seal
+                            // This is the correct production behavior for sequential nonce allocation
                             let nonce = if next_nonce > 0 { next_nonce - 1 } else { 0 };
                             return Ok(AptosSealPoint {
                                 account_address,

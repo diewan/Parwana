@@ -141,12 +141,11 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to build inclusion proof: {}", e)))?;
 
-        // Convert to ProofBundle - need to construct it properly
-        // For now, return a minimal ProofBundle with the inclusion proof
+        // Convert to ProofBundle with actual commitment from lock transaction
         use csv_protocol::proof_taxonomy::{FinalityProof};
         use csv_hash::seal::{CommitAnchor, SealPoint};
 
-        let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)
+        let seal_point = SealPoint::new(lock_tx_hash.as_bytes().to_vec(), Some(lock_result.block_height), None)
             .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
         let commit_anchor = CommitAnchor::new(
             lock_tx_hash.as_bytes().to_vec(),
@@ -154,18 +153,19 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             vec![],
         ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
-        // Create a canonical ProofLeafV1 for this transfer
+        // The commitment is the lock transaction hash, which was actually published to the chain
+        let commitment = lock_tx_hash;
+
+        // Create a canonical ProofLeafV1 for this transfer with the actual commitment
         use csv_protocol::proof_taxonomy::ProofLeafV1;
         let proof_leaf = ProofLeafV1::new(
             transfer.source_chain.clone(),
             transfer.destination_chain.clone(),
             transfer.sanad_id,
-            transfer.sanad_id, // Use sanad_id as commitment for now
+            commitment,
         );
         let leaf_hash = proof_leaf.hash()
             .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
-
-        let commitment = csv_hash::Hash::new(*transfer.sanad_id.as_bytes());
         let dag_node = csv_hash::dag::DAGNode::new(
             leaf_hash,
             vec![],

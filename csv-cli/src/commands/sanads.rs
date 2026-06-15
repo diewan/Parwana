@@ -313,18 +313,19 @@ async fn cmd_create(
             let seed = mnemonic.to_seed(None);
             let seed_array = *seed.as_bytes();
 
-            // Use csv-wallet for wallet operations (architecture compliant)
-            let network = match config.chain(&chain)?.network {
-                crate::config::Network::Main => csv_wallet::bitcoin::Network::Main,
-                crate::config::Network::Test => csv_wallet::bitcoin::Network::Test,
-                crate::config::Network::Dev => csv_wallet::bitcoin::Network::Dev,
+            // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
+            let chain_id = csv_hash::ChainId::new("bitcoin");
+            let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
+            let address = if let Some(ops) = wallet_ops {
+                ops.derive_address(&seed_array, account, index)
+                    .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+            } else {
+                // Fallback to csv-keys if factory not available
+                let key = csv_keys::derive_key(&seed_array, &chain_id, account, index)
+                    .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
+                csv_keys::bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+                    .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
             };
-            let address = csv_wallet::bitcoin::derive_funding_address(
-                &seed_array,
-                network,
-                account,
-                index,
-            ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
             output::kv("Funding Address", &address);
             output::info("Make sure this address has UTXOs before creating a sanad.");
@@ -342,18 +343,19 @@ async fn cmd_create(
         let seed = mnemonic.to_seed(None);
         let seed_array = *seed.as_bytes();
 
-        // Use csv-wallet for wallet operations (architecture compliant)
-        let network = match config.chain(&chain)?.network {
-            crate::config::Network::Main => csv_wallet::bitcoin::Network::Main,
-            crate::config::Network::Test => csv_wallet::bitcoin::Network::Test,
-            crate::config::Network::Dev => csv_wallet::bitcoin::Network::Dev,
+        // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
+        let chain_id = csv_hash::ChainId::new("bitcoin");
+        let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
+        let expected_address = if let Some(ops) = wallet_ops {
+            ops.derive_address(&seed_array, account, index)
+                .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
+        } else {
+            // Fallback to csv-keys if factory not available
+            let key = csv_keys::derive_key(&seed_array, &chain_id, account, index)
+                .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
+            csv_keys::bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+                .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
         };
-        let expected_address = csv_wallet::bitcoin::derive_funding_address(
-            &seed_array,
-            network,
-            account,
-            index,
-        ).map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
 
         output::kv("Expected Address", &expected_address);
         output::info("Refreshing UTXOs from blockchain...");
@@ -361,12 +363,9 @@ async fn cmd_create(
         // Clear old UTXOs for this account before scanning
         state.storage.wallet.utxos.retain(|u| u.account != account);
 
-        // Perform the scan
-        let wallet_utxos = csv_wallet::bitcoin::scan_utxos(
-            &seed_array,
-            network,
-            account,
-            20, // gap_limit
+        // Perform the scan using minimal implementation
+        let wallet_utxos = scan_bitcoin_utxos(
+            &expected_address,
             &config.chain(&chain)?.rpc_url,
         ).await.map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
 
@@ -2131,3 +2130,66 @@ async fn query_sanad_lifecycle_events(
 
     events
 }
+
+/// Minimal Bitcoin UTXO scanning implementation
+/// This replaces the removed csv-wallet::bitcoin::scan_utxos
+async fn scan_bitcoin_utxos(
+    address: &str,
+    rpc_url: &str,
+) -> Result<Vec<WalletUtxo>> {
+    let url = format!("{}/address/{}/utxo", rpc_url, address);
+    let response = reqwest::get(&url).await;
+
+    match response {
+        Ok(resp) if resp.status().is_success() => {
+            let utxo_list: Vec<serde_json::Value> = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to parse UTXO response: {}", e)))?;
+
+            let mut wallet_utxos = Vec::new();
+            for utxo in utxo_list {
+                let txid = utxo
+                    .get("txid")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Missing txid"))?
+                    .to_string();
+                let vout = utxo
+                    .get("vout")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| anyhow::anyhow!("Missing vout"))? as u32;
+                let value = utxo
+                    .get("value")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| anyhow::anyhow!("Missing value"))?;
+                let scriptpubkey_hex = utxo.get("scriptpubkey").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                wallet_utxos.push(WalletUtxo {
+                    txid,
+                    vout,
+                    value,
+                    scriptpubkey_hex,
+                });
+            }
+            Ok(wallet_utxos)
+        }
+        Ok(resp) => {
+            log::warn!("Failed to fetch UTXOs for address {}: HTTP {}", address, resp.status());
+            Ok(Vec::new())
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch UTXOs for address {}: {}", address, e);
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// Minimal UTXO structure for CLI use
+#[derive(Debug, Clone)]
+struct WalletUtxo {
+    txid: String,
+    vout: u32,
+    value: u64,
+    scriptpubkey_hex: Option<String>,
+}
+

@@ -125,6 +125,7 @@ cd csv-contracts/aptos/contracts && aptos move compile
 ## CLI Commands Reference
 
 ### Chain Management
+
 ```bash
 csv chain list                          # List all supported chains
 csv chain status --chain ethereum       # Check chain status
@@ -134,6 +135,7 @@ csv chain set-network --chain ethereum --network main # Change network
 ```
 
 ### Wallet Operations
+
 ```bash
 csv wallet init --network test --words 12   # Initialize wallet
 csv wallet import "<mnemonic>"              # Import existing wallet
@@ -145,6 +147,7 @@ csv wallet private-key --chain ethereum     # View private key (caution)
 ```
 
 ### Sanad Operations
+
 ```bash
 csv sanad create --chain bitcoin --value 100000    # Create Sanad
 csv sanad show <sanad_id>                          # Show Sanad details
@@ -154,6 +157,7 @@ csv sanad consume <sanad_id>                       # Consume Sanad
 ```
 
 ### Proof Operations
+
 ```bash
 csv proof generate --chain ethereum <sanad_id> -o proof.json    # Generate proof
 csv proof verify --chain sui --proof-file proof.json            # Verify proof
@@ -161,6 +165,7 @@ csv proof verify-cross-chain --source ethereum --dest sui proof.json  # Cross-ch
 ```
 
 ### Cross-Chain Transfers
+
 ```bash
 csv cross-chain transfer --from bitcoin --to sui --sanad-id <id> --dest-owner <addr>
 csv cross-chain status <transfer_id>
@@ -169,6 +174,7 @@ csv cross-chain retry <transfer_id>
 ```
 
 ### Seal Operations
+
 ```bash
 csv seal create --chain ethereum --value 1000000000000000000
 csv seal consume --chain ethereum <seal_ref>
@@ -177,6 +183,7 @@ csv seal list [--chain <chain>]
 ```
 
 ### Content Management
+
 ```bash
 csv content create --input leaves.txt --output tree.json    # Create content tree
 csv content prove --tree tree.json --index 0                # Generate Merkle proof
@@ -189,6 +196,7 @@ csv content claims create --tree tree.json -p <predicate> -d <description>
 ```
 
 ### Trust Management
+
 ```bash
 csv trust status                              # Check trust package status
 csv trust export -o trust-package.json        # Export trust package
@@ -198,6 +206,7 @@ csv trust rotate <height> <hash>              # Rotate checkpoint
 ```
 
 ### Runtime Monitoring
+
 ```bash
 csv runtime status        # Health status and mode
 csv runtime health        # Per-component health checks
@@ -206,6 +215,7 @@ csv runtime events --count 20  # Recent runtime events
 ```
 
 ### Validation & Inspection
+
 ```bash
 csv validate consignment <file>
 csv validate proof <proof> --chain <chain>
@@ -216,6 +226,7 @@ csv inspect merkle --root <hex>
 ```
 
 ### Schema Tooling
+
 ```bash
 csv schema validate --file <schema.json>
 csv schema compile --file <schema.json> --out <output>
@@ -223,6 +234,7 @@ csv schema diff --left <v1.json> --right <v2.json>
 ```
 
 ### End-to-End Testing
+
 ```bash
 csv test run --chain-pair bitcoin:sui   # Run specific chain pair
 csv test run-all                        # Run all 9 chain pairs

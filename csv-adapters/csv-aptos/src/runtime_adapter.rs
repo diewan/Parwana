@@ -86,8 +86,16 @@ impl ChainAdapter for AptosRuntimeAdapter {
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
 
-        // Use a placeholder owner key ID - in production this would come from wallet
-        let owner_key_id = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        // Derive owner key ID from the backend's signing key
+        let owner_key_id = if let Some(signing_key) = self.backend.seal_protocol.signing_key.as_ref() {
+            use sha3::{Digest, Sha3_256};
+            let public_key = signing_key.verifying_key().to_bytes();
+            let hash = Sha3_256::digest(&public_key);
+            format!("0x{}", hex::encode(&hash[..32]))
+        } else {
+            // Fallback to zero address if no signing key configured
+            "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
+        };
 
         let result = self.backend
             .lock_sanad(&sanad_id, destination_chain, owner_key_id)
@@ -116,8 +124,16 @@ impl ChainAdapter for AptosRuntimeAdapter {
 
         let inclusion_proof = &proof_bundle_parsed.inclusion_proof;
 
-        // Use a placeholder new owner - in production this would come from wallet
-        let new_owner = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        // Derive new owner from the backend's signing key
+        let new_owner = if let Some(signing_key) = self.backend.seal_protocol.signing_key.as_ref() {
+            use sha3::{Digest, Sha3_256};
+            let public_key = signing_key.verifying_key().to_bytes();
+            let hash = Sha3_256::digest(&public_key);
+            format!("0x{}", hex::encode(&hash[..32]))
+        } else {
+            // Fallback to zero address if no signing key configured
+            "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
+        };
 
         let result = self.backend
             .mint_sanad(source_chain, &sanad_id, inclusion_proof, new_owner)
