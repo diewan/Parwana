@@ -3,7 +3,7 @@
 	url = https://github.com/foundry-rs/forge-std
 [submodule "csv-contracts/ethereum/contracts/lib/solidity-cborutils"]
 	path = csv-contracts/ethereum/contracts/lib/solidity-cborutils
-	url = https://github.com/smartcontractkit/solidity-cborutils
+	url = https://github.com/foundry-rs/solidity-cborutils
 [submodule "csv-contracts/ethereum/contracts/lib/solidity-cbor"]
 	path = csv-contracts/ethereum/contracts/lib/solidity-cbor
 	url = https://github.com/owlprotocol/solidity-cbor
