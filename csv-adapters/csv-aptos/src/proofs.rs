@@ -9,6 +9,69 @@ use sha2::{Digest, Sha256};
 use crate::error::{AptosError, AptosResult};
 use crate::rpc::AptosAccountReader;
 
+/// Parsed lock proof fields for mint_sanad entry function
+///
+/// This struct represents the explicit fields required by the Move entry function.
+/// The proof format is: [state_root (32 bytes)] [leaf_position (8 bytes)] [proof_data...]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedLockProof {
+    /// State root from the source chain (32 bytes)
+    pub state_root: [u8; 32],
+    /// Leaf position in the Merkle tree (u64)
+    pub leaf_position: u64,
+    /// Raw proof bytes for Merkle verification
+    pub proof_data: Vec<u8>,
+}
+
+impl ParsedLockProof {
+    /// Parse lock proof from raw proof bytes
+    ///
+    /// # Proof Format
+    /// - Bytes 0-32: state_root
+    /// - Bytes 32-40: leaf_position (little-endian u64)
+    /// - Bytes 40+: proof_data
+    ///
+    /// # Errors
+    /// Returns `AptosError::InvalidProofFormat` if proof bytes are too short.
+    pub fn parse(proof_bytes: &[u8]) -> AptosResult<Self> {
+        const MIN_PROOF_LEN: usize = 40; // 32 bytes state_root + 8 bytes leaf_position
+
+        if proof_bytes.len() < MIN_PROOF_LEN {
+            return Err(AptosError::InvalidProofFormat(format!(
+                "Lock proof too short: expected >= {} bytes, got {}",
+                MIN_PROOF_LEN,
+                proof_bytes.len()
+            )));
+        }
+
+        let mut state_root = [0u8; 32];
+        state_root.copy_from_slice(&proof_bytes[0..32]);
+
+        let leaf_position = u64::from_le_bytes(
+            proof_bytes[32..40]
+                .try_into()
+                .map_err(|_| AptosError::InvalidProofFormat("Failed to parse leaf_position".to_string()))?,
+        );
+
+        let proof_data = proof_bytes[40..].to_vec();
+
+        Ok(Self {
+            state_root,
+            leaf_position,
+            proof_data,
+        })
+    }
+
+    /// Get the full proof bytes including state_root and leaf_position prefix
+    pub fn to_proof_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(40 + self.proof_data.len());
+        bytes.extend_from_slice(&self.state_root);
+        bytes.extend_from_slice(&self.leaf_position.to_le_bytes());
+        bytes.extend_from_slice(&self.proof_data);
+        bytes
+    }
+}
+
 /// Transaction proof containing the verified transaction data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransactionProof {
@@ -410,8 +473,83 @@ impl CommitmentEventBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AptosError;
     use crate::rpc::MockAptosRpc;
     use crate::rpc::{AptosEvent, AptosResource, AptosTransaction};
+
+    #[test]
+    fn test_parsed_lock_proof_valid() {
+        // Create a valid proof with state_root (32 bytes) + leaf_position (8 bytes) + proof_data
+        let mut proof_bytes = Vec::with_capacity(48);
+        
+        // state_root (32 bytes)
+        proof_bytes.extend_from_slice(&[1u8; 32]);
+        
+        // leaf_position (8 bytes, little-endian u64 = 42)
+        proof_bytes.extend_from_slice(&42u64.to_le_bytes());
+        
+        // proof_data (8 bytes)
+        proof_bytes.extend_from_slice(&[2u8; 8]);
+        
+        let parsed = ParsedLockProof::parse(&proof_bytes).unwrap();
+        
+        assert_eq!(parsed.state_root, [1u8; 32]);
+        assert_eq!(parsed.leaf_position, 42);
+        assert_eq!(parsed.proof_data, vec![2u8; 8]);
+    }
+
+    #[test]
+    fn test_parsed_lock_proof_too_short() {
+        // Proof too short (less than 40 bytes)
+        let proof_bytes = vec![1u8; 39];
+        
+        let result = ParsedLockProof::parse(&proof_bytes);
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AptosError::InvalidProofFormat(msg) => {
+                assert!(msg.contains("too short"));
+                assert!(msg.contains("expected >= 40 bytes"));
+            }
+            _ => panic!("Expected InvalidProofFormat error"),
+        }
+    }
+
+    #[test]
+    fn test_parsed_lock_proof_exact_minimum() {
+        // Proof with exactly 40 bytes (minimum valid length)
+        let mut proof_bytes = Vec::with_capacity(40);
+        
+        // state_root (32 bytes)
+        proof_bytes.extend_from_slice(&[1u8; 32]);
+        
+        // leaf_position (8 bytes)
+        proof_bytes.extend_from_slice(&0u64.to_le_bytes());
+        
+        // No proof_data (valid, just empty)
+        
+        let parsed = ParsedLockProof::parse(&proof_bytes).unwrap();
+        
+        assert_eq!(parsed.state_root, [1u8; 32]);
+        assert_eq!(parsed.leaf_position, 0);
+        assert!(parsed.proof_data.is_empty());
+    }
+
+    #[test]
+    fn test_parsed_lock_proof_roundtrip() {
+        let original = ParsedLockProof {
+            state_root: [5u8; 32],
+            leaf_position: 12345,
+            proof_data: vec![9u8; 16],
+        };
+        
+        let bytes = original.to_proof_bytes();
+        let parsed = ParsedLockProof::parse(&bytes).unwrap();
+        
+        assert_eq!(parsed.state_root, original.state_root);
+        assert_eq!(parsed.leaf_position, original.leaf_position);
+        assert_eq!(parsed.proof_data, original.proof_data);
+    }
 
     #[test]
     fn test_state_proof_leaf_hash() {

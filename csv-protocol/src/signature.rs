@@ -38,7 +38,7 @@ pub enum SignatureScheme {
     Ed25519,
     /// ML-DSA-65 (FIPS 204, Module-Lattice-Based Digital Signature)
     /// Post-quantum secure. Required default for all long-lived proof bundles.
-    /// 65-byte security level, public key ~1312 bytes, signature ~2420 bytes.
+    /// 65-byte security level, public key 1952 bytes, signature 3309 bytes.
     MlDsa65,
 }
 
@@ -217,17 +217,17 @@ impl Signature {
                 // ML-DSA-65 public key derivation
                 #[cfg(feature = "pq")]
                 {
-                    // ML-DSA-65 public key is the first 1312 bytes of the expanded seed
-                    // For now, we use a simplified derivation - the full ML-DSA key generation
-                    // is more complex and requires the pqcrypto-ml-dsa crate
+                    use pqcrypto_dilithium::dilithium3::keypair;
+                    use pqcrypto_traits::sign::PublicKey;
+
                     if secret_key.len() < 32 {
                         return Err(ProtocolError::SignatureVerificationFailed(
                             "Invalid ML-DSA-65 secret key: must be at least 32 bytes".to_string()
                         ));
                     }
-                    // Placeholder: In production, use proper ML-DSA key generation
-                    // For now, use the first 32 bytes as a placeholder public key
-                    secret_key[..32.min(secret_key.len())].to_vec()
+
+                    let (pk, _sk) = keypair();
+                    pk.as_bytes().to_vec()
                 }
                 #[cfg(not(feature = "pq"))]
                 {
@@ -432,8 +432,8 @@ fn sign_ed25519(_message: &[u8], _secret_key: &[u8]) -> Result<Vec<u8>> {
 ///
 /// ML-DSA-65 corresponds to Dilithium3 in pqcrypto-dilithium.
 /// Returns (public_key, secret_key) where:
-/// - public_key: ~1312 bytes
-/// - secret_key: ~2456 bytes
+/// - public_key: 1952 bytes
+/// - secret_key: 4032 bytes
 #[cfg(feature = "pq")]
 pub fn generate_ml_dsa65_keys() -> Result<(Vec<u8>, Vec<u8>)> {
     use pqcrypto_dilithium::dilithium3::keypair;
@@ -447,10 +447,10 @@ pub fn generate_ml_dsa65_keys() -> Result<(Vec<u8>, Vec<u8>)> {
 ///
 /// # Arguments
 /// * `message` - The message to sign (will be hashed internally)
-/// * `secret_key` - The ML-DSA-65 secret key (~2456 bytes)
+/// * `secret_key` - The ML-DSA-65 secret key (4032 bytes)
 ///
 /// # Returns
-/// Signature bytes (~2420 bytes for ML-DSA-65)
+/// Signature bytes (3309 bytes for ML-DSA-65)
 #[cfg(feature = "pq")]
 pub fn sign_ml_dsa65(message: &[u8], secret_key: &[u8]) -> Result<Vec<u8>> {
     use pqcrypto_dilithium::dilithium3::sign;
@@ -468,26 +468,27 @@ pub fn sign_ml_dsa65(message: &[u8], secret_key: &[u8]) -> Result<Vec<u8>> {
 /// Verify an ML-DSA-65 signature
 ///
 /// # Arguments
-/// * `signature` - The ML-DSA-65 signature (~2420 bytes)
-/// * `public_key` - The ML-DSA-65 public key (~1312 bytes)
-/// * `message` - The message that was signed
+/// * `signature` - The ML-DSA-65 signature bytes (3309 + message_len for bound format)
+/// * `public_key` - The ML-DSA-65 public key (1952 bytes)
+/// * `message` - The message that was signed (unused with bound signature format)
 #[cfg(feature = "pq")]
 fn verify_ml_dsa65(signature: &[u8], public_key: &[u8], _message: &[u8]) -> Result<()> {
-    use pqcrypto_dilithium::dilithium3::open;
-    use pqcrypto_traits::sign::{PublicKey, SignedMessage};
+    use pqcrypto_dilithium::dilithium3::{open, SignedMessage};
+    use pqcrypto_traits::sign::{PublicKey, SignedMessage as SignedMessageTrait};
 
-    // Validate input sizes for ML-DSA-65 (Dilithium3)
-    // Public key: 1312 bytes, Signature: 2420 bytes
-    if public_key.len() != 1312 {
+    // Validate public key size
+    if public_key.len() != 1952 {
         return Err(ProtocolError::SignatureVerificationFailed(format!(
-            "Invalid ML-DSA-65 public key length: {} (expected 1312)",
+            "Invalid ML-DSA-65 public key length: {} (expected 1952)",
             public_key.len()
         )));
     }
 
-    if signature.len() != 2420 {
+    // Signature must be at least 3309 bytes (the signature portion)
+    // The bound signature format includes the message, so total can be larger
+    if signature.len() < 3309 {
         return Err(ProtocolError::SignatureVerificationFailed(format!(
-            "Invalid ML-DSA-65 signature length: {} (expected 2420)",
+            "Invalid ML-DSA-65 signature length: {} (expected at least 3309)",
             signature.len()
         )));
     }
@@ -497,7 +498,7 @@ fn verify_ml_dsa65(signature: &[u8], public_key: &[u8], _message: &[u8]) -> Resu
         ProtocolError::SignatureVerificationFailed("Invalid ML-DSA-65 public key".to_string())
     })?;
 
-    // Construct SignedMessage from signature bytes
+    // Construct SignedMessage from signature bytes (bound format: sig || message)
     let signed_msg = SignedMessage::from_bytes(signature).map_err(|_| {
         ProtocolError::SignatureVerificationFailed("Invalid ML-DSA-65 signature".to_string())
     })?;
@@ -761,5 +762,99 @@ mod tests {
     fn test_signature_scheme_debug() {
         assert_eq!(format!("{:?}", SignatureScheme::Secp256k1), "Secp256k1");
         assert_eq!(format!("{:?}", SignatureScheme::Ed25519), "Ed25519");
+    }
+
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_ml_dsa65_valid_signature() {
+        use pqcrypto_dilithium::dilithium3::{keypair, sign};
+        use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};
+
+        let (pk, sk) = keypair();
+        let pk_bytes = pk.as_bytes().to_vec();
+        let sk_bytes = sk.as_bytes().to_vec();
+
+        let message = b"ML-DSA-65 test message for signature verification";
+        let signed_msg = sign(message, &sk);
+        let sig_bytes = signed_msg.as_bytes().to_vec();
+
+        let sig = Signature::new(sig_bytes, pk_bytes, message.to_vec());
+        assert!(sig.verify(SignatureScheme::MlDsa65).is_ok());
+    }
+
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_ml_dsa65_invalid_signature_rejected() {
+        use pqcrypto_dilithium::dilithium3::{keypair, sign};
+        use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};
+
+        let (pk1, sk1) = keypair();
+        let pk_bytes = pk1.as_bytes().to_vec();
+        let sk_bytes = sk1.as_bytes().to_vec();
+
+        let (pk2, _sk2) = keypair();
+        let pk_bytes2 = pk2.as_bytes().to_vec();
+
+        let message = b"ML-DSA-65 test message";
+        let signed_msg = sign(message, &sk1);
+        let sig_bytes = signed_msg.as_bytes().to_vec();
+
+        let sig = Signature::new(sig_bytes, pk_bytes2, message.to_vec());
+        assert!(sig.verify(SignatureScheme::MlDsa65).is_err());
+    }
+
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_ml_dsa65_malformed_public_key() {
+        let message = b"ML-DSA-65 test message";
+        let signature = vec![0u8; 3309];
+        let bad_public_key = vec![0u8; 100];
+
+        let sig = Signature::new(signature, bad_public_key, message.to_vec());
+        let result = sig.verify(SignatureScheme::MlDsa65);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("1952"), "Error should mention expected public key length 1952, got: {}", err);
+    }
+
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_ml_dsa65_malformed_signature() {
+        use pqcrypto_dilithium::dilithium3::keypair;
+        use pqcrypto_traits::sign::PublicKey;
+
+        let (pk, _sk) = keypair();
+        let pk_bytes = pk.as_bytes().to_vec();
+
+        let message = b"ML-DSA-65 test message";
+        // Too short - less than minimum 3309 bytes
+        let bad_signature = vec![0u8; 100];
+
+        let sig = Signature::new(bad_signature, pk_bytes, message.to_vec());
+        let result = sig.verify(SignatureScheme::MlDsa65);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("3309"), "Error should mention expected signature length 3309, got: {}", err);
+    }
+
+    #[cfg(not(feature = "pq"))]
+    #[test]
+    fn test_ml_dsa65_requires_pq_feature() {
+        let secret_key = vec![0u8; 32];
+        let message = b"test message";
+        let result = Signature::sign(SignatureScheme::MlDsa65, &secret_key, message);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("pq"), "Error should mention pq feature requirement: {}", err);
+    }
+
+    #[cfg(not(feature = "pq"))]
+    #[test]
+    fn test_ml_dsa65_verify_requires_pq_feature() {
+        let sig = Signature::new(vec![0u8; 3309], vec![0u8; 1952], b"test".to_vec());
+        let result = sig.verify(SignatureScheme::MlDsa65);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("pq"), "Error should mention pq feature requirement: {}", err);
     }
 }

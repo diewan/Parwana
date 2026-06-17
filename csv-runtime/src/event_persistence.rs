@@ -254,12 +254,13 @@ impl EventStore for InMemoryEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, EventStoreError> {
+        let aggregate_id_wire: SanadIdWire = aggregate_id.clone().into();
         let guard = self
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
         Ok(guard
-            .get(aggregate_id)
+            .get(&aggregate_id_wire)
             .and_then(|events| events.last())
             .map(|e| e.version)
             .unwrap_or(0))
@@ -278,11 +279,12 @@ impl EventStore for InMemoryEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, EventStoreError> {
+        let aggregate_id_wire: SanadIdWire = aggregate_id.clone().into();
         let guard = self
             .snapshots
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        Ok(guard.get(aggregate_id).cloned())
+        Ok(guard.get(&aggregate_id_wire).cloned())
     }
 
     fn prune_snapshots_before(
@@ -290,12 +292,13 @@ impl EventStore for InMemoryEventStore {
         aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, EventStoreError> {
+        let aggregate_id_wire: SanadIdWire = aggregate_id.clone().into();
         let guard = self
             .snapshots
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
         let removed = guard
-            .get(aggregate_id)
+            .get(&aggregate_id_wire)
             .filter(|s| s.version < keep_after_version)
             .map(|_| 1)
             .unwrap_or(0);
@@ -307,12 +310,13 @@ impl EventStore for InMemoryEventStore {
         position: &StreamPosition,
         limit: usize,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError> {
+        let aggregate_id_wire: SanadIdWire = position.aggregate_id.clone().into();
         let guard = self
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
         let events = guard
-            .get(&position.aggregate_id)
+            .get(&aggregate_id_wire)
             .cloned()
             .unwrap_or_default();
 
@@ -338,11 +342,12 @@ impl EventStore for InMemoryEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, EventStoreError> {
+        let aggregate_id_wire: SanadIdWire = aggregate_id.clone().into();
         let guard = self
             .positions
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        Ok(guard.get(aggregate_id).cloned())
+        Ok(guard.get(&aggregate_id_wire).cloned())
     }
 
     fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, EventStoreError> {

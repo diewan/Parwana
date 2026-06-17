@@ -106,6 +106,12 @@ pub enum AptosError {
     /// Core adapter error from csv-adapter-core.
     #[error(transparent)]
     CoreError(#[from] csv_protocol::ProtocolError),
+
+    /// Invalid proof format - proof bytes do not match expected structure.
+    /// Recovery: This is a fatal error indicating malformed proof data.
+    /// The proof must be properly formatted before attempting minting.
+    #[error("Invalid proof format: {0}")]
+    InvalidProofFormat(String),
 }
 
 impl AptosError {
@@ -123,6 +129,7 @@ impl AptosError {
             | AptosError::ReorgDetected { .. }
             | AptosError::NetworkMismatch { .. }
             | AptosError::FeatureNotEnabled(_)
+            | AptosError::InvalidProofFormat(_)
             | AptosError::CoreError(_) => false,
         }
     }
@@ -155,6 +162,7 @@ impl HasErrorSuggestion for AptosError {
             AptosError::ReorgDetected { .. } => 2009,
             AptosError::NetworkMismatch { .. } => 2010,
             AptosError::FeatureNotEnabled(_) => 2011,
+            AptosError::InvalidProofFormat(_) => 2012,
             AptosError::CoreError(_) => 1,
         }
     }
@@ -248,6 +256,15 @@ impl HasErrorSuggestion for AptosError {
                     feature, feature
                 )
             }
+            AptosError::InvalidProofFormat(msg) => {
+                format!(
+                    "The proof format is invalid: {}. \
+                     Proofs must be properly formatted with state_root (32 bytes), \
+                     leaf_position (8 bytes), and proof_data. \
+                     Ensure the proof is generated correctly by the source chain adapter.",
+                    msg
+                )
+            }
             AptosError::CoreError(e) => format!("Core error: {}", e),
         }
     }
@@ -286,6 +303,7 @@ impl HasErrorSuggestion for AptosError {
                 url: "https://github.com/Diewan/csv-adapter".to_string(),
                 what: "Enable required feature in Cargo.toml".to_string(),
             }),
+            AptosError::InvalidProofFormat(_) => None,
             AptosError::CoreError(_) => None,
             _ => None,
         }
@@ -320,6 +338,9 @@ impl From<AptosError> for csv_protocol::ProtocolError {
             )),
             AptosError::ReorgDetected { version } => {
                 csv_protocol::ProtocolError::ReorgInvalid(format!("Reorg at version {}", version))
+            }
+            AptosError::InvalidProofFormat(msg) => {
+                csv_protocol::ProtocolError::InvalidInput(format!("Invalid proof format: {}", msg))
             }
             aptos_err => csv_protocol::ProtocolError::NetworkError(format!("{}", aptos_err)),
         }

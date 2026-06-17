@@ -7,6 +7,7 @@
 #[cfg(feature = "rpc")]
 pub mod real_rpc_impl {
     use solana_commitment_config::CommitmentConfig;
+    use solana_rpc_client::rpc_client::RpcClient;
     use solana_sdk::{
         account::Account, pubkey::Pubkey, signature::Signature, transaction::Transaction,
     };
@@ -190,6 +191,59 @@ pub mod real_rpc_impl {
             self.client.get_balance(pubkey).map_err(|e| {
                 SolanaError::Rpc(format!("Failed to get balance for {}: {}", pubkey, e))
             })
+        }
+
+        fn get_block(&self, slot: u64) -> SolanaResult<Option<solana_transaction_status::EncodedConfirmedBlock>> {
+            use solana_transaction_status::{UiConfirmedBlock, EncodedConfirmedBlock};
+            
+            // Get the block using the RPC client with the correct method
+            let ui_block = self.client
+                .get_block(slot)
+                .map_err(|e| SolanaError::Rpc(format!("Failed to get block at slot {}: {}", slot, e)))?;
+
+            // Convert UiConfirmedBlock to EncodedConfirmedBlock
+            // This requires proper encoding of transactions
+            let transactions: Vec<solana_transaction_status::EncodedTransactionWithStatusMeta> = ui_block
+                .transactions
+                .into_iter()
+                .map(|tx| {
+                    // Convert EncodedTransactionWithMeta to EncodedTransactionWithStatusMeta
+                    solana_transaction_status::EncodedTransactionWithStatusMeta {
+                        transaction: tx.transaction,
+                        meta: tx.meta,
+                        version: tx.version,
+                    }
+                })
+                .collect();
+
+            let encoded_block = EncodedConfirmedBlock {
+                blockhash: ui_block.blockhash,
+                previous_blockhash: ui_block.previous_blockhash,
+                parent_slot: ui_block.parent_slot,
+                block_time: ui_block.block_time,
+                block_height: ui_block.block_height,
+                rewards: ui_block.rewards,
+                transactions: transactions,
+                num_partitions: None,
+            };
+
+            Ok(Some(encoded_block))
+        }
+
+        fn get_block_hash(&self, slot: u64) -> SolanaResult<solana_sdk::hash::Hash> {
+            // Get the block to extract its hash
+            let block = self.client
+                .get_block(slot)
+                .map_err(|e| SolanaError::Rpc(format!("Failed to get block at slot {}: {}", slot, e)))?;
+
+            // Convert String blockhash to Hash
+            let hash_bytes = bs58::decode(&block.blockhash)
+                .into_vec()
+                .map_err(|e| SolanaError::Rpc(format!("Failed to decode blockhash: {}", e)))?;
+            
+            let mut hash_array = [0u8; 32];
+            hash_array.copy_from_slice(&hash_bytes);
+            Ok(solana_sdk::hash::Hash::new_from_array(hash_array))
         }
 
         fn clone_boxed(&self) -> Box<dyn SolanaRpc> {

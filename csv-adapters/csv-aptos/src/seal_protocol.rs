@@ -209,7 +209,7 @@ impl AptosSealProtocol {
     }
 
     /// Verify that a seal resource is available before consumption.
-    async fn verify_seal_available(&self, seal: &AptosSealPoint) -> AptosResult<()> {
+    pub async fn verify_seal_available(&self, seal: &AptosSealPoint) -> AptosResult<()> {
         // Check registry first
         {
             let registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
@@ -834,11 +834,17 @@ impl SealProtocol for AptosSealProtocol {
             // as consumed before lock_sanad, causing ESealAlreadyConsumed errors.
             log::debug!("APTOS: Skipping consume_seal during publish - lock_sanad will handle commitment publishing");
 
-            // Return anchor without submitting a transaction
+            // SECURITY CRITICAL: Fetch actual ledger version from chain instead of using placeholder
+            // The anchor version must reflect the actual blockchain state at the time of commitment
+            let ledger_info = self.rpc.get_ledger_info().await
+                .map_err(|e| ProtocolError::NetworkError(format!("Failed to fetch ledger info: {}", e)))?;
+            let ledger_version = ledger_info.ledger_version;
+
+            // Return anchor with actual ledger version
             Ok(AptosCommitAnchor::new(
-                0, // version will be set when transaction is confirmed
+                ledger_version,
                 seal.account_address,
-                0, // placeholder version
+                ledger_version,
             ))
         }
 
@@ -1074,6 +1080,13 @@ impl SealProtocol for AptosSealProtocol {
             );
         }
 
+        #[cfg(not(feature = "rpc"))]
+        {
+            // In test mode without RPC, skip on-chain verification
+            // This is acceptable for unit tests but not for production
+            log::warn!("Skipping on-chain seal registry verification (RPC feature disabled)");
+        }
+
         // Step 3: Mark seal as used in local registry
         // This is done after the on-chain check to ensure consistency
         let mut registry = self.seal_registry.lock().unwrap_or_else(|e| e.into_inner());
@@ -1280,21 +1293,23 @@ impl SealProtocol for AptosSealProtocol {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;
 
-        // Convert Vec<u8> to DAGSegment for ProofBundle
-        use csv_hash::dag::{DAGNode, DAGSegment};
-        let dag_segment = DAGSegment {
-            nodes: vec![DAGNode {
-                node_id: csv_hash::Hash::zero(),
-                bytecode: transition_dag.clone(),
-                signatures: vec![],
-                witnesses: vec![],
-                parents: vec![],
-            }],
-            root_commitment: csv_hash::Hash::zero(),
-        };
+        // SECURITY CRITICAL: Deserialize transition_dag and extract actual signatures
+        // instead of using placeholder empty vector
+        let dag_segment: csv_hash::dag::DAGSegment =
+            csv_hash::dag::DAGSegment::from_canonical_bytes(&transition_dag)
+                .map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))?;
 
-        // Signatures would need to be extracted from the DAG bytes if needed
-        let signatures: Vec<Vec<u8>> = vec![]; // Placeholder - would need to parse from DAG bytes
+        // Extract signatures from all nodes in the DAGSegment
+        let signatures: Vec<Vec<u8>> = dag_segment.nodes
+            .iter()
+            .flat_map(|node| node.signatures.clone())
+            .collect();
+
+        if signatures.is_empty() {
+            log::warn!("APTOS: No signatures found in DAGSegment - proof bundle may not be verifiable");
+        } else {
+            log::info!("APTOS: Extracted {} signatures from DAGSegment", signatures.len());
+        }
 
         ProofBundle::with_signature_scheme(
             csv_protocol::SignatureScheme::Ed25519,

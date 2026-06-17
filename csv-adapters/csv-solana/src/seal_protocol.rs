@@ -409,13 +409,13 @@ impl SealProtocol for SolanaSealProtocol {
             .into());
         }
 
-        // Get the actual block hash from the slot
+        // Get the actual block hash from the slot using RPC
         let block_hash = rpc.get_block_hash(anchor_ref.slot)
             .map_err(|e| SolanaError::Rpc(format!("Failed to get block hash: {}", e)))?;
 
         let proof = SolanaFinalityProof {
             slot: anchor_ref.slot,
-            block_hash: HashWire::from(Hash::new(block_hash)),
+            block_hash: HashWire::from(Hash::new(block_hash.to_bytes())),
             confirmation_depth,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

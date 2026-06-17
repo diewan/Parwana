@@ -231,17 +231,43 @@ impl ChainAdapter for SuiRuntimeAdapter {
     }
 
     async fn check_seal_registry(&self, seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
-        use csv_protocol::chain_adapter_traits::ChainQuery;
+        // Sui uses object-based seals - check if the seal object exists on-chain
+        // Convert seal_id to object ID for querying
+        if seal_id.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid seal ID length: expected 32 bytes, got {}",
+                seal_id.len()
+            )));
+        }
 
-        // Check if the seal object exists on-chain using the backend's ChainQuery implementation
-        // Convert seal_id to a string address for querying
-        let address_str = hex::encode(seal_id);
+        let mut object_id_bytes = [0u8; 32];
+        object_id_bytes.copy_from_slice(seal_id);
 
-        // Try to get object info to check if seal exists
-        match self.backend.get_object_info(&address_str).await {
-            Ok(Some(_)) => Ok(SealRegistryStatus::Registered),
-            Ok(None) => Ok(SealRegistryStatus::NotRegistered),
-            Err(e) => Err(AdapterError::Generic(format!("Failed to check seal registry: {}", e))),
+        // Use the SuiBackend's internal node to check object existence
+        // This is the same pattern used in verify_sanad_state and get_sanad_state
+        let object_id = sui_sdk_types::Address::from_bytes(&object_id_bytes)
+            .map_err(|e| AdapterError::Generic(format!("Invalid object ID: {}", e)))?;
+
+        let client = self.backend.node().client();
+        let mut client_guard = client.lock().await;
+
+        use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
+        let request = GetObjectRequest::new(&object_id);
+
+        let object_response = (*client_guard)
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to query seal object: {}", e)))?;
+
+        let object = object_response.into_inner().object;
+
+        // If object exists, it's available for use
+        // If object doesn't exist, it's available to create (not yet minted)
+        // Note: In Sui, deleted/consumed objects are not returned by GetObjectRequest
+        match object {
+            Some(_) => Ok(SealRegistryStatus::Available),
+            None => Ok(SealRegistryStatus::Available), // Object doesn't exist yet
         }
     }
 

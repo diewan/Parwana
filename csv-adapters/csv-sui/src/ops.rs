@@ -115,6 +115,11 @@ impl SuiBackend {
         }
     }
 
+    /// Get the Sui node client (for use by runtime adapter)
+    pub fn node(&self) -> &Arc<SuiNode> {
+        &self.node
+    }
+
     /// Create from SuiSealProtocol
     pub fn from_seal_protocol(seal: Arc<SuiSealProtocol>, node: Arc<SuiNode>) -> ChainOpResult<Self> {
         let (module_addr, event_type) = seal.event_builder_config();
@@ -1291,8 +1296,8 @@ impl ChainSanadOps for SuiBackend {
     async fn mint_sanad(
         &self,
         source_chain: &str,
-        _source_sanad_id: &SanadId,
-        _lock_proof: &CoreInclusionProof,
+        source_sanad_id: &SanadId,
+        lock_proof: &CoreInclusionProof,
         _new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         use crate::mint::mint_sanad;
@@ -1307,12 +1312,23 @@ impl ChainSanadOps for SuiBackend {
         let package_id = self.config.seal_contract.package_id.as_ref()
             .ok_or_else(|| ChainOpError::InvalidInput("Package ID not configured".to_string()))?;
 
-        // Create a new sanad ID for the destination
-        let sanad_id = SanadId::new([0u8; 32]); // Placeholder - should derive from source
+        // Validate lock_proof is not empty/malformed
+        if lock_proof.proof_bytes.is_empty() {
+            return Err(ChainOpError::InvalidInput(
+                "Lock proof is empty - cannot mint without verified source proof".to_string(),
+            ));
+        }
 
-        let commitment = Hash::new([0u8; 32]); // Placeholder - should derive from lock_proof
+        // Use the source sanad_id directly (same as Ethereum reference implementation)
+        let sanad_id = source_sanad_id.clone();
+
+        // Derive commitment from the lock_proof leaf (the actual commitment being proven)
+        let commitment = lock_proof.leaf;
+
+        // Derive source_seal_ref from lock_proof block_hash (the block containing the lock transaction)
+        let source_seal_ref = lock_proof.block_hash;
+
         let source_chain_byte = source_chain.as_bytes()[0];
-        let _source_seal = SealPoint::new(vec![0u8; 32], Some(0), None).unwrap();
 
         let tx_digest = mint_sanad(
             &self.node,
@@ -1321,7 +1337,7 @@ impl ChainSanadOps for SuiBackend {
             sanad_id.clone(),
             commitment,
             source_chain_byte,
-            Hash::new([0u8; 32]),
+            source_seal_ref,
         )
         .await
         .map_err(|e| ChainOpError::TransactionError(format!("Minting failed: {}", e)))?;
@@ -1330,9 +1346,13 @@ impl ChainSanadOps for SuiBackend {
             sanad_id,
             operation: csv_protocol::chain_adapter_traits::SanadOperation::Mint,
             transaction_hash: tx_digest,
-            block_height: 0,
+            block_height: lock_proof.block_number,
             chain_id: "sui".to_string(),
-            metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
+            metadata: serde_json::to_vec(&serde_json::json!({
+                "source_chain": source_chain,
+                "lock_block_number": lock_proof.block_number,
+                "lock_block_hash": hex::encode(lock_proof.block_hash.as_bytes()),
+            })).unwrap_or_default(),
         })
     }
 
@@ -1418,17 +1438,16 @@ impl SanadStateReader for SuiBackend {
         let object = object_response.into_inner().object;
         
         match object {
-            Some(_) => Ok(CanonicalSanadState {
-                state: 1, // Created (placeholder)
-                owner: "unknown".to_string(),
-                commitment: Hash::new([0u8; 32]),
-                nullifier: None,
-                created_at: 0,
-                locked_at: None,
-                consumed_at: None,
-                minted_at: None,
-                refunded_at: None,
-            }),
+            Some(_) => {
+                // The Sui RPC/SDK types do not currently expose the sanad state fields
+                // (state, owner, commitment, timestamps) needed to populate CanonicalSanadState.
+                // Returning a capability error instead of placeholder data per security requirements.
+                // TODO: Add Move contract view function to expose sanad state fields via RPC
+                Err(ChainOpError::CapabilityUnavailable(
+                    "Sui object structure does not expose sanad state fields. \
+                     Add a view function to the Move contract to return state, owner, commitment, and timestamps.".to_string(),
+                ))
+            }
             None => Err(ChainOpError::RpcError("Sanad object not found".to_string())),
         }
     }
@@ -1641,5 +1660,110 @@ mod tests {
             )
             .expect("verify invalid signature");
         assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_mint_sanad_with_valid_proof_derives_parameters() {
+        use csv_protocol::proof_taxonomy::InclusionProof;
+        use csv_hash::Hash;
+
+        let config = SuiConfig {
+            seal_contract: crate::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let ops = SuiBackend::with_signing_key(config, node, Some(signing_key));
+
+        // Create a valid lock proof with non-zero values
+        let source_sanad_id = SanadId::new([1u8; 32]);
+        let lock_proof = InclusionProof {
+            proof_bytes: vec![1u8; 100], // Non-empty proof
+            block_hash: Hash::new([2u8; 32]),
+            position: 100,
+            block_number: 12345,
+            leaf: Hash::new([3u8; 32]), // This should be used as commitment
+            root: Hash::new([4u8; 32]),
+            siblings: vec![],
+            leaf_index: 0,
+            source: "ethereum".to_string(),
+        };
+
+        // Verify that mint_sanad uses the derived values
+        // Note: This will fail at RPC call since we don't have a real network,
+        // but we can verify the parameter derivation logic
+        let result = ops.mint_sanad("ethereum", &source_sanad_id, &lock_proof, "0xowner").await;
+
+        // The call should fail at the RPC/network level, not at parameter validation
+        // If it fails with "Signing key not set" or "Package ID not configured", that's a test setup issue
+        // If it fails with RPC/Transaction error, that's expected since we're not on a real network
+        // The important thing is it should NOT fail with "Lock proof is empty"
+        match result {
+            Err(ChainOpError::InvalidInput(msg)) if msg.contains("empty") => {
+                panic!("Should not fail with empty proof error when proof is valid");
+            }
+            Err(_) => {
+                // Expected - will fail at RPC/network level since we're not on a real network
+            }
+            Ok(_) => {
+                // Unexpected success - would require real network
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mint_sanad_rejects_empty_proof() {
+        use csv_protocol::proof_taxonomy::InclusionProof;
+        use csv_hash::Hash;
+
+        let config = SuiConfig {
+            seal_contract: crate::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let ops = SuiBackend::with_signing_key(config, node, Some(signing_key));
+
+        let source_sanad_id = SanadId::new([1u8; 32]);
+        let empty_proof = InclusionProof {
+            proof_bytes: vec![], // Empty proof - should be rejected
+            block_hash: Hash::new([2u8; 32]),
+            position: 100,
+            block_number: 12345,
+            leaf: Hash::new([3u8; 32]),
+            root: Hash::new([4u8; 32]),
+            siblings: vec![],
+            leaf_index: 0,
+            source: "ethereum".to_string(),
+        };
+
+        let result = ops.mint_sanad("ethereum", &source_sanad_id, &empty_proof, "0xowner").await;
+
+        // Should fail with InvalidInput error about empty proof
+        assert!(result.is_err());
+        match result {
+            Err(ChainOpError::InvalidInput(msg)) => {
+                assert!(msg.contains("empty") || msg.contains("proof"), 
+                    "Error message should mention empty proof: {}", msg);
+            }
+            Err(other) => {
+                panic!("Expected InvalidInput error for empty proof, got: {:?}", other);
+            }
+            Ok(_) => {
+                panic!("Should not succeed with empty proof");
+            }
+        }
     }
 }

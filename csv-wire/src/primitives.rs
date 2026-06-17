@@ -32,7 +32,7 @@ impl TryFrom<HashWire> for Hash {
 }
 
 /// Wire format for SanadId.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SanadIdWire {
     pub bytes: String,
 }

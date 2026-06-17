@@ -28,6 +28,20 @@ reference_patterns:
   - ""
 verify_commands:
   - ""
+forbidden_patterns:
+  - "todo!"
+  - "unimplemented!"
+  - "panic!"
+  - "unreachable!"
+  - "#[allow(dead_code)]"
+  - "#[allow(unused)]"
+  - "vec![0u8;"
+  - "Hash::new([0u8; 32])"
+  - "Ok(true) // Placeholder"
+  - "Ok(0) // Placeholder"
+contract_files:
+  - ""
+cross_boundary_check: false
 ---
 
 ## Problem

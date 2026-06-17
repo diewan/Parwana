@@ -49,8 +49,8 @@ pub struct WalletManager {
     config: WalletConfig,
     /// Key store for managing secrets
     keystore: Arc<RwLock<KeyStore>>,
-    /// Signers for each chain
-    signers: Arc<RwLock<HashMap<String, Box<dyn Signer>>>>,
+    /// Signers for each chain (Arc for cheap cloning)
+    signers: Arc<RwLock<HashMap<String, Arc<dyn Signer>>>>,
 }
 
 impl WalletManager {
@@ -63,6 +63,34 @@ impl WalletManager {
             config,
             keystore: Arc::new(RwLock::new(KeyStore::new())),
             signers: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Derive the public key from a secret key for the given chain/scheme
+    fn derive_public_key(secret_key: &[u8], scheme: SignatureScheme) -> Result<Vec<u8>> {
+        match scheme {
+            SignatureScheme::Secp256k1 => {
+                use secp256k1::{SecretKey, PublicKey, Secp256k1};
+                let sk = SecretKey::from_slice(secret_key)
+                    .map_err(|e| WalletError::KeyDerivation(format!("Invalid secp256k1 secret key: {}", e)))?;
+                let secp = Secp256k1::new();
+                let pk = PublicKey::from_secret_key(&secp, &sk);
+                Ok(pk.serialize().to_vec())
+            }
+            SignatureScheme::Ed25519 => {
+                use ed25519_dalek::{SigningKey, VerifyingKey};
+                let sk = SigningKey::from_bytes(
+                    secret_key.try_into().map_err(|_| {
+                        WalletError::KeyDerivation("Invalid Ed25519 secret key: must be 32 bytes".to_string())
+                    })?,
+                );
+                Ok(VerifyingKey::from(&sk).to_bytes().to_vec())
+            }
+            SignatureScheme::MlDsa65 => {
+                Err(WalletError::KeyDerivation(
+                    "ML-DSA-65 public key derivation not yet implemented".to_string(),
+                ))
+            }
         }
     }
 
@@ -102,7 +130,7 @@ impl WalletManager {
                 chain.clone(),
             );
             
-            // Create a signer for this chain
+            // Determine signature scheme for this chain
             let scheme = match chain.as_str() {
                 "ethereum" => SignatureScheme::Secp256k1,
                 "bitcoin" => SignatureScheme::Secp256k1,
@@ -112,24 +140,27 @@ impl WalletManager {
                 _ => SignatureScheme::Secp256k1,
             };
             
-            let signer = Box::new(MemorySigner::new(
+            // Derive the real public key from the secret key
+            let public_key = Self::derive_public_key(&key.to_vec(), scheme)?;
+            
+            let signer = Arc::new(MemorySigner::new(
                 format!("{}:0:0", chain),
                 chain.clone(),
                 key.to_vec(),
-                vec![0u8; 32], // Placeholder public key
+                public_key,
                 scheme,
             ));
             
             signers_map.insert(chain.clone(), signer);
         }
         
-        // Now insert all signers at once
+        // Insert all signers at once
         {
             let mut signers = wallet.signers.write().unwrap();
             for (chain, signer) in signers_map {
                 signers.insert(chain, signer);
             }
-        } // Drop the write guard before returning
+        }
         
         Ok(wallet)
     }
@@ -154,8 +185,8 @@ impl WalletManager {
     ///
     /// # Arguments
     /// * `chain` - Chain identifier
-    /// * `signer` - Signer implementation
-    pub fn add_signer(&self, chain: String, signer: Box<dyn Signer>) {
+    /// * `signer` - Signer implementation (wrapped in Arc)
+    pub fn add_signer(&self, chain: String, signer: Arc<dyn Signer>) {
         let mut signers = self.signers.write().unwrap();
         signers.insert(chain, signer);
     }
@@ -166,12 +197,10 @@ impl WalletManager {
     /// * `chain` - Chain identifier
     ///
     /// # Returns
-    /// The signer if found
-    pub fn get_signer(&self, chain: &str) -> Option<Box<dyn Signer>> {
+    /// The signer wrapped in Arc if found, None if not found
+    pub fn get_signer(&self, chain: &str) -> Option<Arc<dyn Signer>> {
         let signers = self.signers.read().unwrap();
-        // Clone the signer reference (actual implementation would need proper cloning)
-        // For now, return None as we can't clone trait objects
-        None
+        signers.get(chain).cloned()
     }
 
     /// Get a signer reference for a specific chain
@@ -183,7 +212,7 @@ impl WalletManager {
     /// The signer reference if found
     pub fn get_signer_ref(&self, chain: &str) -> Option<SignerRef> {
         let signers = self.signers.read().unwrap();
-        signers.get(chain).map(|s| Signer::as_ref(s.as_ref()))
+        signers.get(chain).map(|arc| Signer::as_ref(arc.as_ref()))
     }
 
     /// Sign a message using the appropriate chain's signer
@@ -292,5 +321,199 @@ impl Wallet for WalletManager {
 
     fn id(&self) -> &str {
         &self.config.id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_wallet_config() -> WalletConfig {
+        WalletConfig {
+            id: "test-wallet".to_string(),
+            chains: vec!["ethereum".to_string(), "solana".to_string()],
+            test_mode: true,
+        }
+    }
+
+    #[test]
+    fn test_wallet_generate() {
+        let config = test_wallet_config();
+        let (wallet, _mnemonic) = WalletManager::generate(config.clone()).unwrap();
+        assert_eq!(wallet.config.id, "test-wallet");
+        assert_eq!(wallet.config.chains, config.chains);
+    }
+
+    #[test]
+    fn test_wallet_from_mnemonic() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+        assert_eq!(wallet.config.id, "test-wallet");
+    }
+
+    #[test]
+    fn test_get_signer_returns_arc() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        // get_signer should return Some(Arc<dyn Signer>) for configured chains
+        let signer = wallet.get_signer("ethereum");
+        assert!(signer.is_some(), "get_signer should return Some for ethereum");
+
+        let signer = signer.unwrap();
+        // Verify the signer has a real public key (not all zeros)
+        let pk = signer.public_key();
+        assert!(!pk.is_empty(), "Public key should not be empty");
+        assert!(pk.iter().any(|&b| b != 0), "Public key should not be all zeros");
+    }
+
+    #[test]
+    fn test_get_signer_unsupported_chain() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        // get_signer should return None for unsupported chains
+        let signer = wallet.get_signer("bitcoin");
+        assert!(signer.is_none(), "get_signer should return None for unsupported chain");
+    }
+
+    #[test]
+    fn test_signer_public_key_not_placeholder() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        // Ethereum signer (secp256k1) should have a 33-byte compressed public key
+        let eth_signer = wallet.get_signer("ethereum").unwrap();
+        let eth_pk = eth_signer.public_key();
+        assert_eq!(eth_pk.len(), 33, "secp256k1 compressed public key should be 33 bytes");
+        assert!(eth_pk[0] == 0x02 || eth_pk[0] == 0x03, "secp256k1 compressed key should start with 0x02 or 0x03");
+
+        // Solana signer (ed25519) should have a 32-byte public key
+        let sol_signer = wallet.get_signer("solana").unwrap();
+        let sol_pk = sol_signer.public_key();
+        assert_eq!(sol_pk.len(), 32, "Ed25519 public key should be 32 bytes");
+    }
+
+    #[tokio::test]
+    async fn test_sign_and_verify_roundtrip() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        // secp256k1 requires a 32-byte hash; Ed25519 accepts arbitrary length
+        let message_32 = [0xABu8; 32];
+        let message_ed = b"test message for ed25519 signing";
+
+        // Sign with ethereum (secp256k1) - requires 32-byte hash
+        let eth_sig = wallet.sign("ethereum", &message_32).await.unwrap();
+        assert!(!eth_sig.bytes.is_empty(), "secp256k1 signature should not be empty");
+        assert_eq!(eth_sig.scheme, SignatureScheme::Secp256k1);
+
+        // Sign with solana (ed25519) - accepts arbitrary length
+        let sol_sig = wallet.sign("solana", message_ed).await.unwrap();
+        assert!(!sol_sig.bytes.is_empty(), "Ed25519 signature should not be empty");
+        assert_eq!(sol_sig.scheme, SignatureScheme::Ed25519);
+    }
+
+    #[tokio::test]
+    async fn test_sign_unsupported_chain_fails() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        let message = b"test message";
+        let result = wallet.sign("bitcoin", message).await;
+        assert!(result.is_err(), "Signing for unsupported chain should fail");
+        match result.unwrap_err() {
+            WalletError::UnsupportedChain(c) => assert_eq!(c, "bitcoin"),
+            other => panic!("Expected UnsupportedChain error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_get_signer_ref() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        let ref_ = wallet.get_signer_ref("ethereum");
+        assert!(ref_.is_some());
+        let ref_ = ref_.unwrap();
+        assert_eq!(ref_.chain, "ethereum");
+        assert!(!ref_.public_key.is_empty());
+    }
+
+    #[test]
+    fn test_wallet_public_key() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        let pk = wallet.public_key("ethereum").unwrap();
+        assert!(!pk.is_empty());
+        assert!(pk.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn test_wallet_public_key_unsupported() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        let result = wallet.public_key("bitcoin");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_signer() {
+        let config = test_wallet_config();
+        let wallet = WalletManager::new(config);
+
+        // Add a signer for bitcoin (not in original config)
+        let scheme = SignatureScheme::Secp256k1;
+        let secret_key = vec![2u8; 32];
+        let public_key = WalletManager::derive_public_key(&secret_key, scheme).unwrap();
+        let signer = Arc::new(MemorySigner::new(
+            "bitcoin:0:0".to_string(),
+            "bitcoin".to_string(),
+            secret_key,
+            public_key,
+            scheme,
+        ));
+        wallet.add_signer("bitcoin".to_string(), signer);
+
+        // Verify we can retrieve it
+        let retrieved = wallet.get_signer("bitcoin");
+        assert!(retrieved.is_some());
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.chain(), "bitcoin");
+    }
+
+    #[test]
+    fn test_signer_arc_cloning() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        // Get two references to the same signer
+        let signer1 = wallet.get_signer("ethereum").unwrap();
+        let signer2 = wallet.get_signer("ethereum").unwrap();
+
+        // They should be the same Arc (same strong count)
+        assert!(Arc::ptr_eq(&signer1, &signer2), "get_signer should return cloned Arc pointing to same signer");
     }
 }

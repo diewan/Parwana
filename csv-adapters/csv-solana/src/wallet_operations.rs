@@ -9,6 +9,14 @@ use csv_keys::bip44::{derive_address_from_key, derive_all_chain_keys};
 use csv_wallet::error::WalletError;
 use csv_wallet::wallet_traits::WalletOperations;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+#[cfg(feature = "rpc")]
+use reqwest::Client as ReqwestClient;
+#[cfg(feature = "rpc")]
+use serde_json::Value;
+#[cfg(feature = "rpc")]
+use ed25519_dalek::{SigningKey, Signature, Signer};
 
 /// Network type for wallet operations
 #[derive(Debug, Clone, Copy)]
@@ -18,15 +26,49 @@ pub enum Network {
     Dev,
 }
 
+impl Network {
+    fn to_rpc_url(&self) -> &'static str {
+        match self {
+            Network::Main => "https://api.mainnet-beta.solana.com",
+            Network::Test => "https://api.devnet.solana.com",
+            Network::Dev => "http://localhost:8899",
+        }
+    }
+}
+
 /// Solana wallet operations implementation
 pub struct SolanaWalletOperations {
     network: Network,
+    #[cfg(feature = "rpc")]
+    rpc_client: Option<Arc<ReqwestClient>>,
 }
 
 impl SolanaWalletOperations {
     /// Create new Solana wallet operations
     pub fn new(network: Network) -> Self {
-        Self { network }
+        Self {
+            network,
+            #[cfg(feature = "rpc")]
+            rpc_client: None,
+        }
+    }
+
+    /// Create new Solana wallet operations with RPC client
+    #[cfg(feature = "rpc")]
+    pub fn with_rpc(network: Network, rpc_url: Option<String>) -> Self {
+        let client = ReqwestClient::new();
+        Self {
+            network,
+            rpc_client: Some(Arc::new(client)),
+        }
+    }
+
+    /// Get the RPC client if configured
+    #[cfg(feature = "rpc")]
+    fn rpc_client(&self) -> Result<&Arc<ReqwestClient>, WalletError> {
+        self.rpc_client.as_ref().ok_or_else(|| {
+            WalletError::RpcNotConfigured("Solana".to_string())
+        })
     }
 }
 
@@ -70,13 +112,44 @@ impl WalletOperations for SolanaWalletOperations {
     }
 
     async fn get_balance(&self, address: &str) -> Result<String, WalletError> {
-        // This would require RPC client - for now return placeholder
-        // In production, this would query the blockchain for address balance
-        Ok("0".to_string())
+        #[cfg(feature = "rpc")]
+        {
+            let client = self.rpc_client()?;
+            let url = self.network.to_rpc_url();
+            
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getBalance",
+                "params": [address]
+            });
+            
+            let response = client
+                .post(url)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to get balance: {}", e)))?;
+            
+            let data: Value = response
+                .json()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
+            
+            let balance = data["result"]
+                .as_u64()
+                .ok_or_else(|| WalletError::RpcError("No balance in response".to_string()))?;
+            
+            Ok(balance.to_string())
+        }
+        
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(WalletError::RpcNotConfigured("Solana".to_string()))
+        }
     }
 
     async fn sign_transaction(&self, seed: &[u8], tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
-        // Convert seed slice to array
         let mut seed_array = [0u8; 64];
         if seed.len() >= 64 {
             seed_array.copy_from_slice(&seed[..64]);
@@ -87,28 +160,106 @@ impl WalletOperations for SolanaWalletOperations {
             )));
         }
 
-        // For Solana, tx_data would need to be parsed as Solana transaction
-        // This is a placeholder - real implementation would use Solana SDK
-        Err(WalletError::SigningFailed(
-            "Solana transaction signing not yet implemented".to_string(),
-        ))
+        // Derive Ed25519 signing key from seed
+        let signing_key: SigningKey = seed_array[..32]
+            .try_into()
+            .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive signing key: {:?}", e)))?;
+        
+        // Sign the transaction data
+        let signature: Signature = signing_key.sign(tx_data);
+        
+        Ok(signature.to_bytes().to_vec())
     }
 
     async fn broadcast_transaction(&self, signed_tx: &[u8]) -> Result<String, WalletError> {
-        // This would require RPC client - for now return placeholder
-        // In production, this would broadcast the transaction to the network
-        Err(WalletError::SigningFailed(
-            "Transaction broadcasting not yet implemented".to_string(),
-        ))
+        #[cfg(feature = "rpc")]
+        {
+            let client = self.rpc_client()?;
+            let url = self.network.to_rpc_url();
+            
+            let tx_base64 = base64::encode(signed_tx);
+            
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendTransaction",
+                "params": [tx_base64]
+            });
+            
+            let response = client
+                .post(url)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
+            
+            let data: Value = response
+                .json()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
+            
+            let tx_hash = data["result"]
+                .as_str()
+                .ok_or_else(|| WalletError::RpcError("No transaction hash in response".to_string()))?;
+            
+            Ok(tx_hash.to_string())
+        }
+        
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(WalletError::RpcNotConfigured("Solana".to_string()))
+        }
     }
 
     async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
-        // This would require RPC client - for now return placeholder
-        // In production, this would query transaction status from blockchain
-        let mut status = HashMap::new();
-        status.insert("txid".to_string(), tx_hash.to_string());
-        status.insert("status".to_string(), "unknown".to_string());
-        Ok(status)
+        #[cfg(feature = "rpc")]
+        {
+            let client = self.rpc_client()?;
+            let url = self.network.to_rpc_url();
+            
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignatureStatuses",
+                "params": [[tx_hash]]
+            });
+            
+            let response = client
+                .post(url)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to get transaction: {}", e)))?;
+            
+            let data: Value = response
+                .json()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
+            
+            let mut status = HashMap::new();
+            status.insert("txid".to_string(), tx_hash.to_string());
+            
+            if let Some(result) = data["result"].get("value") {
+                if let Some(status_obj) = result.get(0) {
+                    let confirmation_status = status_obj
+                        .get("confirmationStatus")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    status.insert("status".to_string(), confirmation_status.to_string());
+                } else {
+                    status.insert("status".to_string(), "not_found".to_string());
+                }
+            } else {
+                status.insert("status".to_string(), "not_found".to_string());
+            }
+            
+            Ok(status)
+        }
+        
+        #[cfg(not(feature = "rpc"))]
+        {
+            Err(WalletError::RpcNotConfigured("Solana".to_string()))
+        }
     }
 }
 

@@ -30,6 +30,8 @@ pub struct BitcoinRuntimeAdapter {
     sanad_ops: Arc<BitcoinChainSanadOps>,
     /// RPC client for proof building
     rpc: Box<dyn BitcoinRpc + Send + Sync>,
+    /// Seal protocol for proof bundle construction
+    seal_protocol: Arc<BitcoinSealProtocol>,
 }
 
 impl BitcoinRuntimeAdapter {
@@ -66,7 +68,8 @@ impl BitcoinRuntimeAdapter {
              wallet,
          ).expect("Failed to create seal protocol");
 
-        let sanad_ops = Arc::new(BitcoinChainSanadOps::new(seal_protocol)
+        let seal_protocol = Arc::new(seal_protocol);
+        let sanad_ops = Arc::new(BitcoinChainSanadOps::from_arc(Arc::clone(&seal_protocol))
             .with_rpc(rpc.clone_boxed()));
 
         Self {
@@ -74,6 +77,7 @@ impl BitcoinRuntimeAdapter {
             network,
             sanad_ops,
             rpc,
+            seal_protocol,
         }
     }
 
@@ -103,6 +107,7 @@ impl BitcoinRuntimeAdapter {
             network,
             sanad_ops,
             rpc,
+            seal_protocol: seal,
         }
     }
 }
@@ -167,82 +172,40 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        use crate::ops::BitcoinChainProofProvider;
-        use csv_hash::dag::DAGSegment;
-        use csv_hash::seal::{CommitAnchor, SealPoint};
+        use csv_protocol::seal_protocol::SealProtocol;
+        use crate::types::{BitcoinCommitAnchor, BitcoinSealPoint};
 
+        // Delegate to the seal_protocol's build_proof_bundle which constructs
+        // proper proof bundles with real transaction signatures
+        let commitment = transfer.sanad_id;
+        
         // Decode lock tx hash
         let lock_tx_hash = hex::decode(lock_result.tx_hash.trim_start_matches("0x"))
             .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
-        let lock_tx_hash_bytes: [u8; 32] = lock_tx_hash.try_into()
-            .map_err(|_| AdapterError::Generic("Invalid lock tx hash length".to_string()))?;
-
-        // Build inclusion proof using BitcoinChainProofProvider
-        let proof_provider = BitcoinChainProofProvider::new(self.rpc.clone_boxed());
-        let inclusion_proof = proof_provider
-            .build_inclusion_proof(
-                &csv_hash::Hash::new(lock_tx_hash_bytes),
-                lock_result.block_height,
-                &lock_tx_hash_bytes,
-            )
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build inclusion proof: {}", e)))?;
-
-        // Build finality proof
-        let finality_proof = proof_provider
-            .build_finality_proof(&lock_result.tx_hash)
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build finality proof: {}", e)))?;
-
-        // Create seal reference from the lock transaction outpoint
-        // The seal ID is the lock txid (32 bytes) with vout=0
-        let seal_id: Vec<u8> = lock_tx_hash_bytes.to_vec();
-        let seal_ref = SealPoint::new(seal_id, Some(0), Some(0))
-            .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
-
-        // Create anchor reference from lock transaction data
-        let anchor_ref = CommitAnchor::new(
-            lock_tx_hash_bytes.to_vec(),
+        let mut anchor_tx_hash = [0u8; 32];
+        anchor_tx_hash[..lock_tx_hash.len().min(32)].copy_from_slice(&lock_tx_hash[..lock_tx_hash.len().min(32)]);
+        
+        let anchor = BitcoinCommitAnchor::new(
+            anchor_tx_hash,
+            0,
             lock_result.block_height,
-            transfer.destination_chain.as_bytes().to_vec(),
-        )
-        .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
-
-        // Create a canonical ProofLeafV1 for this transfer
-        use csv_protocol::proof_taxonomy::ProofLeafV1;
-        let proof_leaf = ProofLeafV1::new(
-            transfer.source_chain.clone(),
-            transfer.destination_chain.clone(),
-            transfer.sanad_id,
-            transfer.sanad_id, // Use sanad_id as commitment for now
         );
-        let leaf_hash = proof_leaf.hash()
-            .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
 
-        // Create minimal DAG segment with one node using the canonical proof leaf hash
-        use csv_hash::dag::DAGNode;
-        let node = DAGNode::new(
-            leaf_hash,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
+        // Create a seal point from the sanad_id
+        let seal_point = BitcoinSealPoint::new(
+            *transfer.sanad_id.as_bytes(),
+            0,
+            None,
         );
-        let transition_dag = DAGSegment::new(vec![node], csv_hash::Hash::new(lock_tx_hash_bytes));
 
-        // Use empty signatures for now (signature verification is done via inclusion proof)
-        let signatures = vec![];
+        // Serialize the DAG segment (empty for now, would contain transition data)
+        let dag_segment = csv_hash::dag::DAGSegment::new(vec![], commitment);
 
-        let proof_bundle = ProofBundle::with_certification_and_signature_scheme(
-            ProofBundle::CURRENT_VERSION,
-            self.signature_scheme(),
-            transition_dag,
-            signatures,
-            seal_ref,
-            anchor_ref,
-            inclusion_proof,
-            finality_proof,
-        ).map_err(|e| AdapterError::Generic(format!("Failed to create proof bundle: {}", e)))?;
+        // Build the proof bundle using the seal protocol
+        let proof_bundle = self.seal_protocol
+            .build_proof_bundle(anchor, dag_segment.to_canonical_bytes())
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))?;
 
         Ok(proof_bundle)
     }

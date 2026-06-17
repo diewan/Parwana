@@ -36,6 +36,19 @@ pub struct UtxoDetails {
     pub script_pubkey: String,
 }
 
+/// Block header information
+#[derive(Debug, Clone)]
+pub struct BlockHeader {
+    /// Block hash
+    pub block_hash: [u8; 32],
+    /// Block height
+    pub height: u64,
+    /// Block timestamp (Unix timestamp)
+    pub timestamp: u32,
+    /// Block version
+    pub version: i32,
+}
+
 /// Trait-based RPC interface for real implementations
 #[async_trait]
 pub trait BitcoinRpc: Send + Sync {
@@ -98,6 +111,26 @@ pub trait BitcoinRpc: Send + Sync {
     ) -> Result<Option<UtxoDetails>, Box<dyn std::error::Error + Send + Sync>> {
         let _ = (txid, vout);
         Err("Bitcoin RPC implementation does not support UTXO details fetching".into())
+    }
+
+    /// Get block header including timestamp
+    async fn get_block_header(
+        &self,
+        block_hash: [u8; 32],
+    ) -> Result<BlockHeader, Box<dyn std::error::Error + Send + Sync>> {
+        let _ = block_hash;
+        Err("Bitcoin RPC implementation does not support block header fetching".into())
+    }
+
+    /// Create and broadcast an OP_RETURN transaction with the given data
+    /// This is used for minting/committing data to the Bitcoin blockchain
+    async fn create_op_return_transaction(
+        &self,
+        data: Vec<u8>,
+        _fee_rate: u64, // sat/vbyte
+    ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        let _ = data;
+        Err("Bitcoin RPC implementation does not support OP_RETURN transaction creation".into())
     }
 
     /// Clone the RPC client into a new boxed trait object.
@@ -201,6 +234,28 @@ impl BitcoinRpc for TestBitcoinRpc {
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
         // For testing, return a dummy scriptPubKey
         Ok(Some("5120ec0eaaefbcc12b0b0f13ae06f3c4190b047c469fa4ffa60df3a0319fd28f02fe".to_string()))
+    }
+
+    async fn get_block_header(
+        &self,
+        block_hash: [u8; 32],
+    ) -> Result<BlockHeader, Box<dyn std::error::Error + Send + Sync>> {
+        // For testing, return a dummy block header
+        Ok(BlockHeader {
+            block_hash,
+            height: 100,
+            timestamp: 1234567890,
+            version: 1,
+        })
+    }
+
+    async fn create_op_return_transaction(
+        &self,
+        _data: Vec<u8>,
+        _fee_rate: u64,
+    ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        // Test RPC refuses to broadcast transactions
+        Err("TestBitcoinRpc cannot broadcast transactions — use real RPC for that".into())
     }
 
     fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync> {

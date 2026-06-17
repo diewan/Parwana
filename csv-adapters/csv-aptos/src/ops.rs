@@ -27,6 +27,7 @@ use std::sync::Arc;
 use crate::address_utils::format_address;
 use crate::config::AptosNetwork;
 use crate::proofs::CommitmentEventBuilder;
+use crate::proofs::ParsedLockProof;
 use crate::rpc::{AptosRpc, AptosTransaction};
 use crate::seal_protocol::AptosSealProtocol;
 
@@ -41,7 +42,7 @@ pub struct AptosBackend {
     /// Commitment event builder
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
-    seal_protocol: Arc<AptosSealProtocol>,
+    pub(crate) seal_protocol: Arc<AptosSealProtocol>,
 }
 
 impl AptosBackend {
@@ -146,7 +147,7 @@ impl AptosBackend {
     }
 
     /// Get RPC client reference
-    fn rpc(&self) -> &dyn AptosRpc {
+    pub fn rpc(&self) -> &dyn AptosRpc {
         self.rpc.as_ref()
     }
 }
@@ -1074,37 +1075,24 @@ impl ChainSanadOps for AptosBackend {
 
             let proof_root_array = *lock_proof.block_hash.as_bytes();
 
-            // Extract state_root from lock proof if available
-            // The state_root is typically the first 32 bytes of the proof bytes after any header
-            let state_root: [u8; 32] = if lock_proof.proof_bytes.len() >= 64 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&lock_proof.proof_bytes[32..64]);
-                arr
-            } else {
-                [0u8; 32] // Fallback to zero hash if proof too short
-            };
+            // Parse lock proof into explicit fields required by Move entry function
+            // This rejects short proofs and extracts state_root and leaf_position properly
+            let parsed_proof = ParsedLockProof::parse(&lock_proof.proof_bytes)
+                .map_err(|e| ChainOpError::InvalidInput(format!("Failed to parse lock proof: {}", e)))?;
 
-            // Calculate leaf position from proof structure
-            // For Merkle proofs, the leaf position is derived from the path indices
-            let leaf_position = if lock_proof.proof_bytes.len() > 64 {
-                // Extract position from proof bytes (implementation depends on proof format)
-                // For now, use a simple hash-based derivation
-                let pos_hash = sha2::Sha256::digest(&lock_proof.proof_bytes[..32]);
-                u32::from_le_bytes(pos_hash[0..4].try_into().unwrap_or([0u8; 4]))
-            } else {
-                0 // Default position
-            };
+            let state_root = parsed_proof.state_root;
+            let leaf_position = parsed_proof.leaf_position;
 
             // Build the payload with all required parameters
             let payload = builder.mint_sanad(
                 *source_sanad_id.as_bytes(),  // sanad_id
                 commitment,                   // commitment
-                state_root,                  // state_root extracted from lock proof
+                state_root,                  // state_root parsed from lock proof
                 source_chain_u8,             // source_chain
                 source_seal_ref_array,       // source_seal_ref
-                lock_proof.proof_bytes.clone(), // proof
+                parsed_proof.proof_data,     // proof_data (without prefix)
                 proof_root_array,            // proof_root
-                leaf_position,               // leaf_position calculated from proof
+                leaf_position,               // leaf_position parsed from lock proof
             );
 
             let signed_tx = self
@@ -1248,17 +1236,11 @@ impl ChainSanadOps for AptosBackend {
         // The sanad resource contains state information that we need to parse
         let actual_state = if account_exists {
             // Try to query the sanad resource from the account
-            match self.rpc().get_account_resources(address_bytes).await {
-                Ok(resources) => {
-                    // Check if the sanad resource exists and parse its state
-                    // The resource type would be something like 0x...::sanad::Sanad
-                    let resource_type = format!("{}::sanad::Sanad", self.seal_protocol.event_builder_config().0);
-                    if resources.iter().any(|r| r.type_ == resource_type) {
-                        "active"
-                    } else {
-                        "consumed"
-                    }
-                }
+            let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
+            let resource_type = format!("0x{}::sanad::Sanad", hex::encode(module_addr));
+            match self.rpc().get_resource(address_bytes, &resource_type, None).await {
+                Ok(Some(_)) => "active",
+                Ok(None) => "consumed",
                 Err(_) => "unknown"
             }
         } else {
@@ -1344,45 +1326,28 @@ impl SanadStateReader for AptosBackend {
         }
 
         // Query the account resources to get the sanad state
-        match self.rpc().get_account_resources(address_bytes).await {
-            Ok(resources) => {
-                // Check if the sanad resource exists and parse its state
-                let resource_type = format!("{}::sanad::Sanad", self.seal_protocol.event_builder_config().0);
-                if let Some(resource) = resources.iter().find(|r| r.type_ == resource_type) {
-                    // Parse the resource data to extract state information
-                    // For now, return a basic state with the commitment from the resource
-                    Ok(CanonicalSanadState {
-                        state: 1, // Created (resource exists)
-                        owner: "derived_from_resource".to_string(),
-                        commitment: *sanad_id,
-                        nullifier: None,
-                        created_at: 0,
-                        locked_at: None,
-                        consumed_at: None,
-                        minted_at: None,
-                        refunded_at: None,
-                    })
-                } else {
-                    // Resource doesn't exist - sanad not created
-                    Ok(CanonicalSanadState {
-                        state: 0, // Not created
-                        owner: "unknown".to_string(),
-                        commitment: *sanad_id,
-                        nullifier: None,
-                        created_at: 0,
-                        locked_at: None,
-                        consumed_at: None,
-                        minted_at: None,
-                        refunded_at: None,
-                    })
-                }
+        // Note: Aptos RPC doesn't have get_account_resources, use get_resource for specific types
+        let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
+        let resource_type = format!("0x{}::sanad::Sanad", hex::encode(module_addr));
+        
+        match self.rpc().get_resource(address_bytes, &resource_type, None).await {
+            Ok(Some(_resource)) => {
+                // Parse the resource data to extract state information
+                // The resource data is BCS-encoded; we need to parse it properly
+                // For now, return an error indicating that resource parsing is not yet implemented
+                // This is fail-closed: we don't fabricate state from commitment alone
+                return Err(ChainOpError::CapabilityUnavailable(
+                    "Sanad resource parsing is not yet implemented for Aptos. \
+                     The resource exists but cannot be parsed into canonical state. \
+                     This requires BCS decoding of the Move resource structure.".to_string()
+                ));
             }
-            Err(_) => {
-                // Failed to query resources - return unknown state
+            Ok(None) => {
+                // Resource doesn't exist - sanad not created
                 Ok(CanonicalSanadState {
-                    state: 0, // Unknown
+                    state: 0, // Not created
                     owner: "unknown".to_string(),
-                    commitment: *sanad_id,
+                    commitment: sanad_id.0,
                     nullifier: None,
                     created_at: 0,
                     locked_at: None,
@@ -1390,6 +1355,10 @@ impl SanadStateReader for AptosBackend {
                     minted_at: None,
                     refunded_at: None,
                 })
+            }
+            Err(e) => {
+                // Failed to query resources - propagate the error instead of returning fabricated state
+                return Err(ChainOpError::RpcError(format!("Failed to query account resources: {}", e)));
             }
         }
     }
@@ -1405,40 +1374,33 @@ impl SanadStateReader for AptosBackend {
             address_bytes[..seal_bytes.len()].copy_from_slice(seal_bytes);
         }
 
-        // Query the account resources to check seal state
-        match self.rpc().get_account_resources(address_bytes).await {
-            Ok(resources) => {
-                // Check if the seal resource exists
-                let resource_type = format!("{}::seal::Seal", self.seal_protocol.event_builder_config().0);
-                if resources.iter().any(|r| r.type_ == resource_type) {
-                    // Seal resource exists - check if consumed
-                    Ok(CanonicalSealState {
-                        state: 1, // Active
-                        owner: "derived_from_resource".to_string(),
-                        commitment: *seal_id,
-                        created_at: 0,
-                        consumed_at: None,
-                    })
-                } else {
-                    // Seal resource doesn't exist
-                    Ok(CanonicalSealState {
-                        state: 0, // Not created
-                        owner: "unknown".to_string(),
-                        commitment: *seal_id,
-                        created_at: 0,
-                        consumed_at: None,
-                    })
-                }
+        // Query the seal resource to check seal state
+        let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
+        let resource_type = format!("0x{}::seal::Seal", hex::encode(module_addr));
+        
+        match self.rpc().get_resource(address_bytes, &resource_type, None).await {
+            Ok(Some(_resource)) => {
+                // Seal resource exists - check if consumed
+                // For now, return an error indicating that resource parsing is not yet implemented
+                return Err(ChainOpError::CapabilityUnavailable(
+                    "Seal resource parsing is not yet implemented for Aptos. \
+                     The resource exists but cannot be parsed into canonical state. \
+                     This requires BCS decoding of the Move resource structure.".to_string()
+                ));
             }
-            Err(_) => {
-                // Failed to query resources
+            Ok(None) => {
+                // Seal resource doesn't exist
                 Ok(CanonicalSealState {
-                    state: 0, // Unknown
+                    state: 0, // Not created
                     owner: "unknown".to_string(),
                     commitment: *seal_id,
                     created_at: 0,
                     consumed_at: None,
                 })
+            }
+            Err(e) => {
+                // Failed to query resources
+                return Err(ChainOpError::RpcError(format!("Failed to query seal resource: {}", e)));
             }
         }
     }

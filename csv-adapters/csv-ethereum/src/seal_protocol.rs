@@ -428,17 +428,18 @@ impl SealProtocol for EthereumSealProtocol {
         // by checking both local registry and on-chain state via CSVLock contract
 
         // Step 1: Check local registry (fast path)
-        let registry = self.seal_registry.lock().map_err(|e| {
-            Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
-                as Box<dyn std::error::Error>
-        })?;
-        if registry.is_seal_used(&seal) {
-            return Err(Box::new(ProtocolError::SealReplay(format!(
-                "Seal {:?} already used in local registry",
-                seal
-            ))) as Box<dyn std::error::Error>);
-        }
-        drop(registry);
+        {
+            let registry = self.seal_registry.lock().map_err(|e| {
+                Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
+                    as Box<dyn std::error::Error>
+            })?;
+            if registry.is_seal_used(&seal) {
+                return Err(Box::new(ProtocolError::SealReplay(format!(
+                    "Seal {:?} already used in local registry",
+                    seal
+                ))) as Box<dyn std::error::Error>);
+            }
+        } // Guard dropped here before await
 
         // Step 2: Check on-chain state via CSVLock contract (authoritative check)
         // This ensures that even if local state is corrupted or lost,
@@ -458,10 +459,10 @@ impl SealProtocol for EthereumSealProtocol {
 
             if !verification_result.valid {
                 return Err(Box::new(ProtocolError::SealReplay(
-                    verification_result.error.unwrap_or_else(|| {
+                    verification_result.error.map(|e| e.to_string()).unwrap_or_else(|| {
                         "Seal already consumed on-chain".to_string()
                     })
-                ))) as Box<dyn std::error::Error>;
+                )));
             }
         }
 

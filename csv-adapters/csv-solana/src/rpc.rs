@@ -6,6 +6,7 @@
 use solana_sdk::{
     account::Account, pubkey::Pubkey, signature::Signature, transaction::Transaction,
 };
+use solana_transaction_status::{EncodedConfirmedBlock, UiTransaction, EncodedTransaction};
 
 use crate::error::SolanaError;
 use crate::error::SolanaResult;
@@ -46,6 +47,12 @@ pub trait SolanaRpc: Send + Sync {
 
     /// Get balance for account
     fn get_balance(&self, pubkey: &Pubkey) -> SolanaResult<u64>;
+
+    /// Get block at given slot
+    fn get_block(&self, slot: u64) -> SolanaResult<Option<EncodedConfirmedBlock>>;
+
+    /// Get block hash at given slot
+    fn get_block_hash(&self, slot: u64) -> SolanaResult<solana_sdk::hash::Hash>;
 
     /// Clone the RPC client for creating new boxed instances
     fn clone_boxed(&self) -> Box<dyn SolanaRpc>;
@@ -137,6 +144,19 @@ impl SolanaRpc for MockSolanaRpc {
             .get(pubkey)
             .map(|a| a.lamports)
             .unwrap_or(1_000_000_000))
+    }
+
+    fn get_block(&self, _slot: u64) -> SolanaResult<Option<EncodedConfirmedBlock>> {
+        // Mock implementation - return None for simplicity
+        // In a real implementation, this would return actual block data
+        Ok(None)
+    }
+
+    fn get_block_hash(&self, slot: u64) -> SolanaResult<solana_sdk::hash::Hash> {
+        // Mock implementation - return a deterministic hash based on slot
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes[0..8].copy_from_slice(&slot.to_le_bytes());
+        Ok(solana_sdk::hash::Hash::new_from_array(hash_bytes))
     }
 
     fn clone_boxed(&self) -> Box<dyn SolanaRpc> {

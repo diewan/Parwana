@@ -49,6 +49,33 @@ fn test_sanads_commands_use_runtime() {
     }
 }
 
+/// Test that UTXO validation uses runtime-mediated validation (C-CLI-UTXO-001)
+#[test]
+fn test_utxo_validation_uses_runtime() {
+    let sanads_rs = Path::new("src/commands/sanads.rs");
+    if let Ok(content) = std::fs::read_to_string(sanads_rs) {
+        // Should NOT have skip comments for UTXO validation
+        assert!(
+            !content.contains("For now, skip on-chain validation to avoid RPC dependency"),
+            "sanads.rs should not skip on-chain validation - must use runtime-mediated validation"
+        );
+        assert!(
+            !content.contains("TODO: Implement proper UTXO validation using Bitcoin adapter"),
+            "sanads.rs should not have TODO for UTXO validation - must be implemented"
+        );
+        // Should use runtime for validation
+        assert!(
+            content.contains("validate_bitcoin_utxo_via_runtime") || content.contains("runtime.get_transaction"),
+            "sanads.rs should use runtime-mediated UTXO validation"
+        );
+        // Should fail closed when RPC unavailable
+        assert!(
+            content.contains("RPC or validation support unavailable") || content.contains("Fail closed"),
+            "sanads.rs should fail closed when RPC or validation support is unavailable"
+        );
+    }
+}
+
 /// Test that seals commands use runtime APIs
 #[test]
 fn test_seals_commands_use_runtime() {

@@ -295,6 +295,67 @@ def add_target_section(
     sections.append("\n".join(text_parts))
 
 
+def _scan_pre_existing_errors(repo_root: Path, crate: str, verify_cmds: List[str]) -> List[str]:
+    """Run cargo check/test on the target crate and capture pre-existing errors.
+
+    Returns a list of error lines that exist before the agent starts working.
+    """
+    if not crate:
+        return []
+
+    errors: List[str] = []
+
+    # Run cargo check on the target crate
+    try:
+        result = subprocess.run(
+            ["cargo", "check", "-p", crate, "--all-features"],
+            cwd=str(repo_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            # Extract error lines (filter out warnings and info)
+            for line in result.stderr.splitlines():
+                if "error[" in line or "error:" in line or "E0" in line:
+                    errors.append(line.strip())
+    except subprocess.TimeoutExpired:
+        errors.append("[cargo check timed out — agent should run it manually]")
+    except Exception as e:
+        errors.append(f"[cargo check failed: {e}]")
+
+    # Also run cargo clippy if verify_commands includes it
+    has_clippy = any("clippy" in cmd for cmd in verify_cmds)
+    if has_clippy:
+        try:
+            result = subprocess.run(
+                ["cargo", "clippy", "-p", crate, "--all-features", "--", "-D", "warnings"],
+                cwd=str(repo_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                for line in result.stderr.splitlines():
+                    if "error[" in line or "error:" in line or "E0" in line or "clippy::" in line:
+                        errors.append(line.strip())
+        except Exception:
+            pass
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for e in errors:
+        if e not in seen:
+            seen.add(e)
+            unique.append(e)
+    return unique[:50]  # Cap at 50 lines to avoid context bloat
+
+
 def build_context_pack(ticket_path: Path, repo_root: Path, radius_override: Optional[int], occurrence: bool) -> str:
     raw = read_text(ticket_path)
     meta, body = parse_frontmatter(raw)
@@ -385,10 +446,103 @@ def build_context_pack(ticket_path: Path, repo_root: Path, radius_override: Opti
     if commands:
         sections.append("## Verify commands\n\n```bash\n" + "\n".join(commands) + "\n```")
 
+    # Pre-scan: capture known pre-existing errors so agents don't try to fix them
+    pre_errors = _scan_pre_existing_errors(repo_root, crate, meta_list(meta, "verify_commands"))
+    if pre_errors:
+        sections.append(
+            "## Known pre-existing errors\n\n"
+            "These errors exist BEFORE you start. Do NOT create new placeholders/stubs to fix them. "
+            "They are tracked in separate tickets. Only fix errors introduced by your own changes.\n\n"
+            "```bash\n" + "\n".join(pre_errors) + "\n```\n\n"
+            "Rule: If a compiler error is unrelated to the ticket's target file(s), DO NOT fix it. "
+            "Document it and move on. Creating a new stub to silence an unrelated error is a violation."
+        )
+
+    # Forbidden patterns: new stubs/placeholders the agent must not introduce
+    forbidden = meta_list(meta, "forbidden_patterns")
+    if forbidden:
+        sections.append(
+            "## Forbidden patterns\n\n"
+            "DO NOT introduce any of these patterns. If you need them, the ticket scope is wrong.\n\n"
+            + "\n".join(f"- `{p}`" for p in forbidden)
+        )
+
+    # Cross-boundary check: include contract analysis when offchain code references contract features
+    contract_files = meta_list(meta, "contract_files")
+    cross_boundary = meta_bool(meta, "cross_boundary_check", False)
+    if cross_boundary or contract_files:
+        contract_sections = ["## Contract compatibility check\n\n"]
+        if contract_files:
+            contract_sections.append("The following contract files are relevant to this ticket. "
+                                   "Before implementing any offchain feature, verify the contract supports it.\n\n")
+            for cf in contract_files:
+                if cf and (repo_root / cf).exists():
+                    contract_sections.append(f"### `{cf}`\n\n```solidity\n{load_file_limited(repo_root / cf, repo_root)}\n```\n")
+                elif cf:
+                    contract_sections.append(f"### `{cf}`\n\n[missing contract file — verify path]\n")
+        else:
+            contract_sections.append("No contract files specified. If this ticket touches offchain code that "
+                                   "calls contract functions, you MUST verify the contract supports the feature.\n\n"
+                                   "Contract locations:\n"
+                                   "- Ethereum: `csv-contracts/ethereum/contracts/src/CSVSeal.sol`\n"
+                                   "- Solana: `csv-contracts/solana/contracts/programs/csv-seal/src/`\n"
+                                   "- Sui: `csv-contracts/sui/sources/csv_seal.move`\n"
+                                   "- Aptos: `csv-contracts/aptos/contracts/sources/csv_seal.move`\n")
+
+        contract_sections.append(
+            "\n### Cross-boundary rule (STRICT)\n\n"
+            "When replacing a stub that says \"not implemented\" or \"unavailable\":\n"
+            "1. **Check the contract FIRST**: Does the contract already have a function for this feature?\n"
+            "2. **If yes**: Wire the offchain code to call the contract function. Do NOT return an error.\n"
+            "3. **If no**: Check if the contract CAN be extended (it usually can). If so, add the function to the contract AND wire the offchain code.\n"
+            "4. **If the contract is intentionally minimal**: Return a typed error with a clear message like "
+            "\"Feature X requires contract update — see ticket Y\".\n\n"
+            "NEVER return \"not implemented\" in offchain code when the contract already supports the feature. "
+            "This makes the CLI useless and bugs impossible to trace.\n\n"
+            "Examples of features the Ethereum contract CSVSeal.sol ALREADY supports:\n"
+            "- `create_seal` — anchor commitment on-chain\n"
+            "- `consume_seal` — mark seal as used with nullifier\n"
+            "- `lock_sanad` / `lock_sanad_with_metadata` — cross-chain lock\n"
+            "- `mint_sanad` / `mint_sanad_with_proof_leaf` — cross-chain mint\n"
+            "- `refund_sanad` — refund after timeout\n"
+            "- `transfer_sanad` — same-chain ownership transfer\n"
+            "- `get_sanad_state` / `get_seal_state` — view functions\n"
+            "- `is_seal_available` / `is_seal_consumed` — availability checks\n"
+            "- `register_nullifier` — replay protection\n"
+            "- `anchor_commitment` — commitment anchoring\n"
+            "- `record_sanad_metadata` — metadata recording\n\n"
+            "If your stub references any of these, wire it to the contract. Do NOT stub it out."
+        )
+        sections.append("\n".join(contract_sections))
+
     sections.append(
         "## Agent instruction\n\n"
         "Work only this ticket. Do not broaden scope unless the occurrence scan proves an equivalent production bypass must be patched in the same commit. "
-        "Preserve protocol invariants. Add/adjust tests. Run the verify commands. Finish with a short adversarial review: what could still fail, and which tests prevent it?"
+        "Preserve protocol invariants. Add/adjust tests. Run the verify commands. Finish with a short adversarial review: what could still fail, and which tests prevent it?\n\n"
+        "## Agent rules (strict)\n\n"
+        "1. **Scope lock**: Only edit files/patterns listed in `target_file`, `target_file_2`, etc. "
+        "Do NOT edit other files even if they have compiler errors.\n"
+        "2. **No new stubs**: Never introduce `todo!()`, `unimplemented!()`, `panic!()`, `unreachable!()`, "
+        "`#[allow(dead_code)]`, `#[allow(unused)]`, `#[allow(clippy::)]` to silence warnings. "
+        "If the code cannot compile without a stub, return a typed error instead.\n"
+        "3. **No simplifying working code**: If a function already works correctly, do NOT simplify it "
+        "to make compilation easier. Only modify the specific stubs/placeholders listed in target_patterns.\n"
+        "4. **No ignoring errors**: If `cargo check` or `cargo test` fails, analyze whether the error "
+        "is caused by your changes. If yes, fix it. If no (pre-existing), DO NOT fix it — document it "
+        "and move on. Creating a placeholder to silence a pre-existing error is a violation.\n"
+        "5. **No adding attributes**: Do NOT add `#[allow(...)]` attributes to silence linter warnings. "
+        "Fix the warning or add a test. If the warning is unavoidable, document why in a code comment "
+        "and create a follow-up ticket.\n"
+        "6. **Fail closed, not closed-minded**: When replacing a stub, prefer returning a typed error "
+        "over returning fake data. `Err(Error::NotImplemented)` is better than `Ok(fake_value)`.\n"
+        "7. **Post-check**: After your changes, run `cargo check` on the target crate. "
+        "If it introduces NEW errors in files you didn't edit, you broke something — revert.\n"
+        "8. **Scan for new placeholders**: After your changes, run a repo-wide search for "
+        "`placeholder`, `stub`, `for now`, `TODO` in files you edited. If you introduced any, fix them.\n"
+        "9. **Cross-boundary verification**: If your ticket touches offchain code that references contract features, "
+        "read the contract files listed in `contract_files` (or the default contract locations). "
+        "Verify the contract supports the feature before implementing. If the contract doesn't support it, "
+        "either extend the contract or return a typed error with a clear message."
     )
 
     return "\n\n---\n\n".join(sections).rstrip() + "\n"

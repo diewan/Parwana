@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-use crate::rpc::{BitcoinRpc, UtxoInfo};
+use crate::rpc::{BitcoinRpc, BlockHeader, UtxoInfo};
 
 /// Maximum number of retries for transient failures
 const MAX_RETRIES: u32 = 3;
@@ -280,6 +280,56 @@ impl BitcoinRpc for BitcoinJsonRpc {
         }
         
         Ok(None)
+    }
+
+    async fn get_block_header(
+        &self,
+        block_hash: [u8; 32],
+    ) -> Result<BlockHeader, Box<dyn std::error::Error + Send + Sync>> {
+        // RPC expects display format (reversed bytes)
+        let mut display_hash = block_hash;
+        display_hash.reverse();
+        let block_hash_hex = hex::encode(display_hash);
+        
+        // Use getblockheader RPC call with verbose=true to get full header info
+        let header: Value = self.call("getblockheader", vec![
+            Value::from(block_hash_hex),
+            Value::from(true), // verbose=true
+        ]).await?;
+
+        let height = header.get("height")
+            .and_then(|h| h.as_u64())
+            .ok_or("Missing height in block header")?;
+        
+        let timestamp = header.get("time")
+            .and_then(|t| t.as_u64())
+            .ok_or("Missing time in block header")? as u32;
+        
+        let version = header.get("version")
+            .and_then(|v| v.as_i64())
+            .ok_or("Missing version in block header")? as i32;
+
+        Ok(BlockHeader {
+            block_hash,
+            height,
+            timestamp,
+            version,
+        })
+    }
+
+    async fn create_op_return_transaction(
+        &self,
+        _data: Vec<u8>,
+        _fee_rate: u64,
+    ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        // OP_RETURN transaction creation requires wallet integration:
+        // - UTXO selection (need access to wallet UTXOs)
+        // - Transaction building (need to construct proper Bitcoin transaction)
+        // - Signing (need access to private keys)
+        // 
+        // BitcoinJsonRpc is a pure RPC client without wallet capabilities.
+        // Use BitcoinSealProtocol with SealWallet for transaction creation.
+        Err("OP_RETURN transaction creation requires wallet integration. Use BitcoinSealProtocol with SealWallet or tx_builder::CommitmentTxBuilder for transaction creation.".into())
     }
 
     fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync> {

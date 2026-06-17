@@ -48,6 +48,14 @@ pub enum WalletError {
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// RPC client not configured
+    #[error("RPC client not configured for {0}")]
+    RpcNotConfigured(String),
+
+    /// RPC error
+    #[error("RPC error: {0}")]
+    RpcError(String),
 }
 
 /// Result type for wallet operations

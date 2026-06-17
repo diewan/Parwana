@@ -1,7 +1,10 @@
 //! Ethereum chain-specific verification helpers (MPT, seal registry).
 
 use csv_hash::Hash;
-use csv_protocol::verification_results::VerificationResult;
+use csv_protocol::verification_results::{
+    InclusionStrength, FinalityStrength, VerificationAssurance, VerifiedComponents,
+    VerificationFailure, VerificationResult
+};
 
 use crate::config::EthereumConfig;
 use crate::error::EthereumError;

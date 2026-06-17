@@ -200,6 +200,11 @@ impl Wallet {
     ///
     /// * `chain` — Which chain's key to sign with.
     /// * `message` — The message to sign (32 bytes).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the wallet feature is not enabled or if key derivation fails.
+    /// For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.
     pub fn sign(&self, chain: ChainId, message: &[u8; 32]) -> Vec<u8> {
         match chain.as_str() {
             "bitcoin" => self.sign_bitcoin(message, 0, 0),
@@ -208,11 +213,12 @@ impl Wallet {
             "sui" => self.sign_sui(message, 0, 0),
             "aptos" => self.sign_aptos(message, 0, 0),
             _ => {
-                // Fallback: return seed + message for unknown chains
-                let mut sig = Vec::with_capacity(64);
-                sig.extend_from_slice(self.seed.as_slice());
-                sig.extend_from_slice(message.as_slice());
-                sig
+                panic!(
+                    "Signature capability unavailable for chain '{}'. \
+                     Enable the 'wallet' feature and chain-specific features. \
+                     For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.",
+                    chain
+                );
             }
         }
     }
@@ -519,26 +525,32 @@ impl Wallet {
             use bitcoin::sighash::{SighashCache, TapSighashType};
             use bitcoin::taproot::TaprootSpendInfo;
 
-            let Ok(wallet) = SealWallet::from_seed(&self.seed, bitcoin::Network::Regtest) else {
-                return self.fallback_signature(message);
-            };
+            let wallet = SealWallet::from_seed(&self.seed, bitcoin::Network::Regtest)
+                .map_err(|_| crate::CsvError::SignatureCapabilityUnavailable(
+                    "Failed to derive Bitcoin wallet from seed. Ensure wallet feature is enabled.".to_string()
+                ))
+                .expect("Signature capability check failed");
 
             let path = Bip86Path::external(account, index);
-            let Ok(key) = wallet.derive_key(&path) else {
-                return self.fallback_signature(message);
-            };
+            let _key = wallet.derive_key(&path)
+                .map_err(|_| crate::CsvError::SignatureCapabilityUnavailable(
+                    "Failed to derive Bitcoin key. Check BIP-44 derivation path.".to_string()
+                ))
+                .expect("Signature capability check failed");
 
-            // Sign using Schnorr (Taproot)
-            // For now, return the key's signature capability
-            // Full implementation would require transaction context
-            // Sign using Schnorr (Taproot)
-            // For now, return fallback signature as full Schnorr signing requires transaction context
-            self.fallback_signature(message)
+            // Full Schnorr signing requires transaction context (sighash, taproot spend info)
+            // This method only signs raw messages - for transaction signing, use the chain adapter
+            panic!(
+                "Bitcoin transaction signing requires chain adapter with transaction context. \
+                 Use CsvClient::chain_runtime() for transaction operations."
+            );
         }
 
         #[cfg(not(all(feature = "bitcoin", feature = "wallet")))]
         {
-            self.fallback_signature(message)
+            panic!(
+                "Bitcoin signature capability unavailable. Enable the 'wallet' and 'bitcoin' features."
+            );
         }
     }
 
@@ -555,7 +567,7 @@ impl Wallet {
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap());
 
             let xprv = XPrv::new(&self.seed).ok();
-            
+
             if let Some(xprv) = xprv {
                 // Iterate through path components and derive each child
                 let mut derived = xprv;
@@ -569,23 +581,29 @@ impl Wallet {
                         }
                     }
                 }
-                
+
                 if success {
                     let priv_key_bytes = derived.private_key().to_bytes();
-                    
+
                     if let Ok(signing_key) = SigningKey::from_bytes(&priv_key_bytes) {
                         let signature: Signature = signing_key.sign(message);
                         return signature.to_bytes().to_vec();
                     }
                 }
             }
-            
-            self.fallback_signature(message)
+
+            panic!(
+                "Ethereum signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            self.fallback_signature(message)
+            panic!(
+                "Ethereum signature capability unavailable. Enable the 'wallet' feature. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
     }
 
@@ -601,7 +619,7 @@ impl Wallet {
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/501'/0'/0'/0").unwrap());
 
             let xprv = XPrv::new(&self.seed).ok();
-            
+
             if let Some(xprv) = xprv {
                 // Iterate through path components and derive each child
                 let mut derived = xprv;
@@ -615,23 +633,29 @@ impl Wallet {
                         }
                     }
                 }
-                
+
                 if success {
                     let priv_key_bytes = &derived.private_key().to_bytes()[..32];
-                    
+
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
                         let signing_key = SigningKey::from(&secret_key);
                         return signing_key.sign(message).to_bytes().to_vec();
                     }
                 }
             }
-            
-            self.fallback_signature(message)
+
+            panic!(
+                "Solana signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            self.fallback_signature(message)
+            panic!(
+                "Solana signature capability unavailable. Enable the 'wallet' feature. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
     }
 
@@ -647,7 +671,7 @@ impl Wallet {
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/784'/0'/0'/0").unwrap());
 
             let xprv = XPrv::new(&self.seed).ok();
-            
+
             if let Some(xprv) = xprv {
                 // Use derive instead of derive_path - API has changed in bip32 crate
                 let mut derived = xprv;
@@ -662,23 +686,29 @@ impl Wallet {
                     }
                 }
                 let derived = if success { Some(derived) } else { None };
-                
+
                 if let Some(derived) = derived {
                     let priv_key_bytes = &derived.private_key().to_bytes()[..32];
-                    
+
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
                         let signing_key = SigningKey::from(&secret_key);
                         return signing_key.sign(message).to_bytes().to_vec();
                     }
                 }
             }
-            
-            self.fallback_signature(message)
+
+            panic!(
+                "Sui signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            self.fallback_signature(message)
+            panic!(
+                "Sui signature capability unavailable. Enable the 'wallet' feature. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
     }
 
@@ -694,7 +724,7 @@ impl Wallet {
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/637'/0'/0'/0").unwrap());
 
             let xprv = XPrv::new(&self.seed).ok();
-            
+
             if let Some(xprv) = xprv {
                 // Use derive instead of derive_path - API has changed in bip32 crate
                 let mut derived = xprv;
@@ -709,32 +739,30 @@ impl Wallet {
                     }
                 }
                 let derived = if success { Some(derived) } else { None };
-                
+
                 if let Some(derived) = derived {
                     let priv_key_bytes = &derived.private_key().to_bytes()[..32];
-                    
+
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
                         let signing_key = SigningKey::from(&secret_key);
                         return signing_key.sign(message).to_bytes().to_vec();
                     }
                 }
             }
-            
-            self.fallback_signature(message)
+
+            panic!(
+                "Aptos signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            self.fallback_signature(message)
+            panic!(
+                "Aptos signature capability unavailable. Enable the 'wallet' feature. \
+                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+            );
         }
-    }
-
-    fn fallback_signature(&self, message: &[u8; 32]) -> Vec<u8> {
-        // Fallback signature when wallet feature not available or derivation fails
-        let mut sig = Vec::with_capacity(64);
-        sig.extend_from_slice(self.seed.as_slice());
-        sig.extend_from_slice(message.as_slice());
-        sig
     }
 }
 
@@ -810,21 +838,16 @@ impl WalletManager {
             ));
         }
 
-        // The full implementation requires:
-        // 1. A configured chain adapter implementing ChainQuery trait
-        // 2. RPC endpoint configured for the target chain
-        // 3. The adapter's get_balance() method is called
+        // Balance queries require chain adapter with RPC connectivity.
+        // WalletManager only has access to Wallet (not the full client with adapters).
+        // Balance queries should be performed through CsvClient::chain_runtime()
+        // when the client has chain adapters configured.
         //
-        // Since the WalletManager only has access to the Wallet (not the full client),
-        // balance queries should be performed through CsvClient::wallet() when
-        // the client has chain adapters configured.
-        //
-        // For now, we return a typed error indicating the capability is not enabled.
-        // This follows Phase 4 of the Production Guarantee Plan: "fail closed"
-        // rather than providing artificial responses.
+        // This is a fail-closed API: it explicitly requires runtime configuration
+        // rather than returning placeholder values.
         Err(crate::CsvError::ChainNotEnabled(format!(
             "Balance query for {} on {:?} requires configured chain adapter with RPC endpoint. \
-             Use CsvClient::wallet() when client is built with chain configuration.",
+             Use CsvClient::chain_runtime().get_balance() when client is built with chain configuration.",
             address, chain
         )))
     }

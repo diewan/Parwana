@@ -229,6 +229,12 @@ impl SanadsManager {
     }
 
     /// List Sanads matching the given filters.
+    ///
+    /// # Note
+    ///
+    /// This method queries the local store and filters results in memory.
+    /// This is acceptable for client-side local stores. For large-scale deployments
+    /// with persistent backends, consider implementing store-side filtering.
     pub fn list(&self, filters: SanadFilters) -> Result<Vec<Sanad>, CsvError> {
         let store = self
             .client
@@ -236,7 +242,7 @@ impl SanadsManager {
             .lock()
             .map_err(|_| CsvError::StoreError("Failed to acquire store lock".to_string()))?;
 
-        // Get all sanads (we'll filter in memory for now - can optimize later)
+        // Query local store for all active sanads
         let records = store.list_active_sanads()?;
 
         // Apply filters and deserialize
@@ -284,20 +290,18 @@ impl SanadsManager {
 
     /// Transfer a Sanad to a new owner on a different chain.
     ///
-    /// This initiates a cross-chain transfer:
-    /// 1. The source chain seal is consumed (locking the Sanad)
-    /// 2. A proof of consumption is generated
-    /// 3. The Sanad can be verified and claimed on the destination chain
+    /// # Deprecated
     ///
-    /// # Arguments
+    /// Cross-chain transfers should be performed through [`TransferManager`],
+    /// which provides runtime-backed execution with replay protection,
+    /// durable recovery, and canonical verification.
     ///
-    /// * `sanad_id` — The Sanad to transfer.
-    /// * `to_chain` — The destination chain.
-    /// * `to_address` — The destination owner's address.
+    /// Use `CsvClient::transfers().cross_chain(sanad_id, to_chain)` instead.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A transfer identifier for tracking progress.
+    /// Always returns [`CsvError::ChainNotEnabled`] directing users to TransferManager.
+    #[deprecated(since = "0.5.0", note = "Use CsvClient::transfers().cross_chain() instead")]
     pub fn transfer(
         &self,
         sanad_id: &SanadId,
@@ -308,17 +312,13 @@ impl SanadsManager {
             return Err(CsvError::ChainNotSupported(to_chain));
         }
 
-        // Cross-chain transfer requires:
-        // 1. Look up the Sanad by ID from store
-        // 2. Verify the Sanad is not already consumed
-        // 3. Consume the seal on the source chain (lock)
-        // 4. Generate the inclusion proof
-        // 5. Return a transfer ID for tracking
-        //
-        // Full implementation requires store and chain adapter integration
+        // Cross-chain transfers require runtime coordination through TransferCoordinator.
+        // This method is deprecated - use TransferManager for production-grade transfers.
         Err(CsvError::ChainNotEnabled(format!(
-            "Cross-chain transfer not available. Sanad: {:?}, To: {} on {:?}",
-            sanad_id, to_address, to_chain
+            "Cross-chain transfer requires runtime coordination. \
+             Use CsvClient::transfers().cross_chain({:?}, {:?}).to_address(\"{}\") instead. \
+             Sanad: {:?}, To: {} on {:?}",
+            sanad_id, to_chain, to_address, sanad_id, to_address, to_chain
         )))
     }
 
@@ -327,15 +327,32 @@ impl SanadsManager {
     /// This is an irreversible operation that destroys the Sanad by
     /// consuming its seal without creating a new one.
     ///
+    /// # Note
+    ///
+    /// Burn operations require chain adapter integration with RPC connectivity.
+    /// This method requires the client to be built with chain configuration
+    /// and adapters initialized via `init_adapters()`.
+    ///
     /// # Arguments
     ///
     /// * `sanad_id` — The Sanad to burn.
+    ///
+    /// # Errors
+    ///
+    /// - [`CsvError::ChainNotEnabled`] if chain adapter is not configured.
+    /// - [`CsvError::SanadNotFound`] if the Sanad does not exist.
     pub fn burn(&self, sanad_id: &SanadId) -> Result<(), CsvError> {
-        // Consume the seal on-chain without a destination owner
-        // Full implementation requires chain adapter integration
-        // For now, return FeatureNotEnabled error with context
+        // Burn operations require chain adapter with RPC connectivity.
+        // SanadsManager only has access to local store (not chain adapters).
+        // Burn operations should be performed through CsvClient::chain_runtime()
+        // when the client has chain adapters configured.
+        //
+        // This is a fail-closed API: it explicitly requires runtime configuration
+        // rather than returning placeholder values or silently failing.
         Err(CsvError::ChainNotEnabled(format!(
-            "Sanad burn operation not available. Sanad ID: {:?}",
+            "Burn operation requires configured chain adapter with RPC endpoint. \
+             Use CsvClient::chain_runtime() when client is built with chain configuration. \
+             Sanad ID: {:?}",
             sanad_id
         )))
     }

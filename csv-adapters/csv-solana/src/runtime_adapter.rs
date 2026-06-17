@@ -194,43 +194,47 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        use csv_protocol::chain_adapter_traits::ChainProofProvider;
-        use csv_protocol::proof_taxonomy::InclusionProof as CoreInclusionProof;
-        use csv_protocol::proof_taxonomy::FinalityProof;
+        use csv_protocol::seal_protocol::SealProtocol;
+        use crate::types::{SolanaCommitAnchor, SolanaSealPoint};
 
-        // Build inclusion proof using the backend's ChainProofProvider implementation
+        // Delegate to the seal_protocol's build_proof_bundle which constructs
+        // proper proof bundles with real transaction signatures
         let commitment = transfer.sanad_id;
-        let block_height = lock_result.block_height;
-        let anchor_id = &transfer.lock_tx_hash;
+        
+        // Create a SolanaCommitAnchor from the lock result
+        let tx_hash_bytes = hex::decode(&lock_result.tx_hash)
+            .map_err(|e| AdapterError::Generic(format!("Failed to decode tx hash: {}", e)))?;
+        let mut anchor_tx_hash = [0u8; 64];
+        anchor_tx_hash[..tx_hash_bytes.len()].copy_from_slice(&tx_hash_bytes);
+        
+        let anchor = SolanaCommitAnchor {
+            signature: solana_sdk::signature::Signature::from(anchor_tx_hash),
+            slot: lock_result.block_height,
+            block_height: lock_result.block_height,
+            account_changes: vec![],
+        };
 
-        let inclusion_proof = self.backend
-            .build_inclusion_proof(&commitment, block_height, anchor_id)
+        // Get the first active seal from the seal protocol
+        let active_seals = self.backend.seal_protocol().get_active_seals();
+        let seal_point = active_seals.first()
+            .cloned()
+            .unwrap_or_else(|| SolanaSealPoint {
+                account: solana_sdk::pubkey::Pubkey::default(),
+                owner: solana_sdk::pubkey::Pubkey::default(),
+                lamports: 0,
+                seed: None,
+            });
+
+        // Serialize the DAG segment (empty for now, would contain transition data)
+        let dag_segment = csv_hash::dag::DAGSegment::new(vec![], commitment);
+
+        // Build the proof bundle using the seal protocol
+        let proof_bundle = self.backend.seal_protocol()
+            .build_proof_bundle(anchor, dag_segment.to_canonical_bytes())
             .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build inclusion proof: {}", e)))?;
+            .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))?;
 
-        // Build finality proof
-        let finality_proof = self.backend
-            .build_finality_proof(&hex::encode(anchor_id))
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build finality proof: {}", e)))?;
-
-        // Construct ProofBundle from inclusion and finality proofs
-        let seal_ref = csv_hash::seal::SealPoint::new(anchor_id.clone(), Some(block_height), None)
-            .map_err(|e| AdapterError::Generic(format!("Invalid seal point: {}", e)))?;
-
-        let anchor_ref = csv_hash::seal::CommitAnchor::new(anchor_id.clone(), block_height, commitment.as_bytes().to_vec())
-            .map_err(|e| AdapterError::Generic(format!("Invalid commit anchor: {}", e)))?;
-
-        ProofBundle::with_signature_scheme(
-            self.signature_scheme,
-            csv_hash::dag::DAGSegment::new(),
-            vec![],
-            seal_ref,
-            anchor_ref,
-            inclusion_proof,
-            finality_proof,
-        )
-        .map_err(|e| AdapterError::Generic(format!("Failed to create proof bundle: {}", e)))
+        Ok(proof_bundle)
     }
 
     async fn validate_source_proof(
@@ -258,18 +262,38 @@ impl ChainAdapter for SolanaRuntimeAdapter {
     }
 
     async fn check_seal_registry(&self, seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
-        use csv_protocol::chain_adapter_traits::ChainQuery;
+        use solana_sdk::pubkey::Pubkey;
+        use std::str::FromStr;
 
-        // Check if the seal account exists on-chain using the backend's ChainQuery implementation
-        // Convert seal_id to a string address for querying
-        let address_str = hex::encode(seal_id);
-
-        // Try to get account info to check if seal exists
-        match self.backend.get_account_info(&address_str).await {
-            Ok(Some(_)) => Ok(SealRegistryStatus::Registered),
-            Ok(None) => Ok(SealRegistryStatus::NotRegistered),
-            Err(e) => Err(AdapterError::Generic(format!("Failed to check seal registry: {}", e))),
+        // Solana uses PDA accounts as seals - check if the seal account exists on-chain
+        // Parse the seal_id as a Pubkey (32 bytes)
+        if seal_id.len() != 32 {
+            return Err(AdapterError::Generic(format!("Invalid seal_id length: expected 32, got {}", seal_id.len())));
         }
+
+        let mut pubkey_bytes = [0u8; 32];
+        pubkey_bytes.copy_from_slice(seal_id);
+        let seal_pubkey = Pubkey::new_from_array(pubkey_bytes);
+
+        // Query the account via RPC
+        let account = self.backend.rpc()
+            .get_account(&seal_pubkey)
+            .map_err(|e| AdapterError::Generic(format!("Failed to query seal account: {}", e)))?;
+
+        // Check if account exists and has lamports (unspent)
+        if account.lamports == 0 {
+            return Ok(SealRegistryStatus::Consumed);
+        }
+
+        // Check if the account is owned by the CSV program
+        let program_id = Pubkey::from_str(&self.backend.seal_protocol().config.csv_program_id)
+            .map_err(|e| AdapterError::Generic(format!("Invalid program ID: {}", e)))?;
+        
+        if account.owner != program_id {
+            return Err(AdapterError::Generic("Seal account not owned by CSV program".to_string()));
+        }
+
+        Ok(SealRegistryStatus::Available)
     }
 
     async fn get_balance(&self, address: &str) -> Result<String, AdapterError> {

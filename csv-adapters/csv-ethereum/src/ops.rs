@@ -62,7 +62,7 @@ pub struct EthereumBackend {
     /// Commitment event builder
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
-    seal_protocol: Arc<EthereumSealProtocol>,
+    pub(crate) seal_protocol: Arc<EthereumSealProtocol>,
 }
 
 /// Unsigned deployment transaction for contract deployment

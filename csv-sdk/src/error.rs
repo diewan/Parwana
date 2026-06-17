@@ -133,6 +133,10 @@ pub enum CsvError {
     /// Runtime execution error (from TransferCoordinator).
     #[error("Runtime execution error: {0}")]
     RuntimeError(String),
+
+    /// Signature capability is not available (wallet feature not enabled or derivation failed).
+    #[error("Signature capability unavailable: {0}")]
+    SignatureCapabilityUnavailable(String),
 }
 
 impl CsvError {
@@ -177,6 +181,7 @@ impl HasErrorSuggestion for CsvError {
             Self::P2PError(_) => "CSV_P2P_ERROR",
             Self::RuntimeError(_) => "CSV_RUNTIME_ERROR",
             Self::InvalidInput(_) => "CSV_INVALID_INPUT",
+            Self::SignatureCapabilityUnavailable(_) => "CSV_SIGNATURE_CAPABILITY_UNAVAILABLE",
         }
     }
 
@@ -321,6 +326,13 @@ impl HasErrorSuggestion for CsvError {
             Self::InvalidInput(msg) => {
                 format!(
                     "Invalid input: {}. Verify the input format and constraints.",
+                    msg
+                )
+            }
+            Self::SignatureCapabilityUnavailable(msg) => {
+                format!(
+                    "Signature capability unavailable: {}. This operation requires the 'wallet' feature \
+                     enabled and proper key derivation. Enable the wallet feature or use a configured runtime.",
                     msg
                 )
             }

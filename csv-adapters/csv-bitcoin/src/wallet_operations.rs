@@ -6,10 +6,21 @@
 use crate::wallet::{Bip86Path, SealWallet};
 use async_trait::async_trait;
 use bitcoin::{hashes::Hash, Network as BtcNetwork, OutPoint, Txid};
+use bitcoin::secp256k1::{Secp256k1, SecretKey, PublicKey as SecpPublicKey};
 use csv_hash::chain_id::ChainId;
 use csv_wallet::error::WalletError;
 use csv_wallet::wallet_traits::WalletOperations;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+#[cfg(feature = "rpc")]
+use reqwest::Client as ReqwestClient;
+#[cfg(feature = "signet-rest")]
+use reqwest::Client as ReqwestClient;
+#[cfg(feature = "rpc")]
+use serde_json::Value;
+#[cfg(feature = "rpc")]
+use ed25519_dalek::{SigningKey, Signature, Signer};
 
 /// Network type for wallet operations
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +36,14 @@ impl Network {
             Network::Main => BtcNetwork::Bitcoin,
             Network::Test => BtcNetwork::Signet,
             Network::Dev => BtcNetwork::Regtest,
+        }
+    }
+
+    fn to_esplora_url(&self) -> &'static str {
+        match self {
+            Network::Main => "https://mempool.space/api",
+            Network::Test => "https://mempool.space/signet/api",
+            Network::Dev => "http://localhost:3000/api",
         }
     }
 }
@@ -43,17 +62,40 @@ pub struct WalletUtxo {
 /// Bitcoin wallet operations implementation
 pub struct BitcoinWalletOperations {
     network: Network,
+    #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+    http_client: Option<Arc<ReqwestClient>>,
 }
 
 impl BitcoinWalletOperations {
     /// Create new Bitcoin wallet operations
     pub fn new(network: Network) -> Self {
-        Self { network }
+        Self {
+            network,
+            #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+            http_client: None,
+        }
+    }
+
+    /// Create new Bitcoin wallet operations with HTTP client
+    #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+    pub fn with_http(network: Network) -> Self {
+        Self {
+            network,
+            http_client: Some(Arc::new(ReqwestClient::new())),
+        }
     }
 
     /// Convert network to Bitcoin network type
     fn btc_network(&self) -> BtcNetwork {
         self.network.to_bitcoin_network()
+    }
+
+    /// Get the HTTP client if configured
+    #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+    fn http_client(&self) -> Result<&Arc<ReqwestClient>, WalletError> {
+        self.http_client.as_ref().ok_or_else(|| {
+            WalletError::RpcNotConfigured("Bitcoin".to_string())
+        })
     }
 }
 
@@ -91,13 +133,36 @@ impl WalletOperations for BitcoinWalletOperations {
     }
 
     async fn get_balance(&self, address: &str) -> Result<String, WalletError> {
-        // This would require RPC client - for now return placeholder
-        // In production, this would query the blockchain for address balance
-        Ok("0".to_string())
+        #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+        {
+            let client = self.http_client()?;
+            let url = format!("{}/address/{}", self.network.to_esplora_url(), address);
+            
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to get balance: {}", e)))?;
+            
+            let data: Value = response
+                .json()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
+            
+            let balance = data["chain_stats"].get("funded_txo_sum")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            
+            Ok(balance.to_string())
+        }
+        
+        #[cfg(not(any(feature = "rpc", feature = "signet-rest")))]
+        {
+            Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
+        }
     }
 
     async fn sign_transaction(&self, seed: &[u8], tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
-        // Convert seed slice to array
         let mut seed_array = [0u8; 64];
         if seed.len() >= 64 {
             seed_array.copy_from_slice(&seed[..64]);
@@ -108,31 +173,86 @@ impl WalletOperations for BitcoinWalletOperations {
             )));
         }
 
-        let wallet = SealWallet::from_seed(&seed_array, self.btc_network())
-            .map_err(|e| WalletError::KeyDerivation(format!("Failed to create wallet: {}", e)))?;
-
-        // For Bitcoin, tx_data would need to be parsed as PSBT or similar
-        // This is a placeholder - real implementation would use PSBT signing
-        Err(WalletError::SigningFailed(
-            "PSBT signing not yet implemented".to_string(),
-        ))
+        // Derive secp256k1 private key from seed
+        let secret_key = SecretKey::from_slice(&seed_array[..32])
+            .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive private key: {}", e)))?;
+        
+        let secp = Secp256k1::new();
+        let public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
+        
+        // Sign the transaction data (simplified - in production would use proper Bitcoin transaction signing)
+        let message = secp256k1::Message::from_digest_slice(tx_data)
+            .map_err(|e| WalletError::Signing(format!("Failed to create message: {}", e)))?;
+        let signature = secp.sign_ecdsa(&message, &secret_key);
+        
+        Ok(signature.serialize_compact().to_vec())
     }
 
     async fn broadcast_transaction(&self, signed_tx: &[u8]) -> Result<String, WalletError> {
-        // This would require RPC client - for now return placeholder
-        // In production, this would broadcast the transaction to the network
-        Err(WalletError::SigningFailed(
-            "Transaction broadcasting not yet implemented".to_string(),
-        ))
+        #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+        {
+            let client = self.http_client()?;
+            let url = format!("{}/tx", self.network.to_esplora_url());
+            
+            let tx_hex = hex::encode(signed_tx);
+            
+            let response = client
+                .post(&url)
+                .body(tx_hex)
+                .send()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
+            
+            let txid: String = response
+                .text()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
+            
+            Ok(txid)
+        }
+        
+        #[cfg(not(any(feature = "rpc", feature = "signet-rest")))]
+        {
+            Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
+        }
     }
 
+
     async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
-        // This would require RPC client - for now return placeholder
-        // In production, this would query transaction status from blockchain
-        let mut status = HashMap::new();
-        status.insert("txid".to_string(), tx_hash.to_string());
-        status.insert("status".to_string(), "unknown".to_string());
-        Ok(status)
+        #[cfg(any(feature = "rpc", feature = "signet-rest"))]
+        {
+            let client = self.http_client()?;
+            let url = format!("{}/tx/{}", self.network.to_esplora_url(), tx_hash);
+            
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to get transaction: {}", e)))?;
+            
+            let data: Value = response
+                .json()
+                .await
+                .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
+            
+            let mut status = HashMap::new();
+            status.insert("txid".to_string(), tx_hash.to_string());
+            status.insert("status".to_string(), data["status"].get("confirmed")
+                .and_then(|v| v.as_bool())
+                .map(|c| if c { "confirmed".to_string() } else { "pending".to_string() })
+                .unwrap_or("unknown".to_string()));
+            status.insert("block_height".to_string(), data["status"].get("block_height")
+                .and_then(|v| v.as_u64())
+                .map(|h| h.to_string())
+                .unwrap_or_default());
+            
+            Ok(status)
+        }
+        
+        #[cfg(not(any(feature = "rpc", feature = "signet-rest")))]
+        {
+            Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
+        }
     }
 }
 

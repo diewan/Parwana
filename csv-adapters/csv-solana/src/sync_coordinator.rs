@@ -33,6 +33,8 @@ pub struct SyncCoordinatorConfig {
     pub max_recovery_gap: u64,
     /// Enable adaptive polling based on congestion
     pub enable_adaptive_polling: bool,
+    /// CSV program ID to filter transactions
+    pub csv_program_id: solana_sdk::pubkey::Pubkey,
 }
 
 impl Default for SyncCoordinatorConfig {
@@ -45,6 +47,7 @@ impl Default for SyncCoordinatorConfig {
             slot_gap_threshold: 10,     // Trigger recovery after 10 missed slots
             max_recovery_gap: 1000,     // Attempt recovery for gaps up to 1000 slots
             enable_adaptive_polling: true,
+            csv_program_id: solana_sdk::pubkey::Pubkey::default(), // Placeholder - should be configured
         }
     }
 }
@@ -91,11 +94,13 @@ pub struct SyncCoordinator {
     rpc: Arc<dyn SolanaRpc>,
     state: Arc<RwLock<SlotSyncState>>,
     running: Arc<RwLock<bool>>,
+    csv_program_id: solana_sdk::pubkey::Pubkey,
 }
 
 impl SyncCoordinator {
     /// Create a new sync coordinator with the given RPC client and config
     pub fn new(rpc: Arc<dyn SolanaRpc>, config: SyncCoordinatorConfig) -> Self {
+        let csv_program_id = config.csv_program_id;
         let state = SlotSyncState {
             latest_synced_slot: 0,
             latest_confirmed_slot: 0,
@@ -111,6 +116,7 @@ impl SyncCoordinator {
             rpc,
             state: Arc::new(RwLock::new(state)),
             running: Arc::new(RwLock::new(false)),
+            csv_program_id,
         }
     }
 
@@ -196,7 +202,7 @@ impl SyncCoordinator {
 
         // Sync through the gap
         for slot in (current_synced + 1)..=target_slot {
-            Self::process_slot(&self.rpc, slot).await?;
+            Self::process_slot(&self.rpc, slot, self.csv_program_id).await?;
         }
 
         let mut state = self.state.write().await;
@@ -271,7 +277,7 @@ impl SyncCoordinator {
         drop(state_guard);
 
         // Process the next slot
-        Self::process_slot(rpc, next_slot).await?;
+        Self::process_slot(rpc, next_slot, config.csv_program_id).await?;
 
         // Update state
         let mut state_guard = state.write().await;
@@ -287,27 +293,20 @@ impl SyncCoordinator {
     }
 
     /// Process a single slot - fetch block and process CSV-relevant transactions
-    async fn process_slot(rpc: &Arc<dyn SolanaRpc>, slot: u64) -> SolanaResult<()> {
+    async fn process_slot(rpc: &Arc<dyn SolanaRpc>, slot: u64, csv_program_id: solana_sdk::pubkey::Pubkey) -> SolanaResult<()> {
         // Fetch the block at this slot
         let block = rpc.get_block(slot)
-            .await
             .map_err(|e| SolanaError::Rpc(format!("Failed to fetch block at slot {}: {}", slot, e)))?;
 
         if let Some(block_data) = block {
             // Process transactions relevant to CSV
             // Filter for transactions involving the CSV program
-            let csv_program_id = rpc.get_program_id();
+            // For now, just log the number of transactions
+            // Proper transaction filtering requires decoding the encoded transaction
+            tracing::debug!("Processing slot {} with {} transactions", slot, block_data.transactions.len());
             
-            for transaction in block_data.transactions {
-                // Check if transaction involves CSV program
-                if transaction.account_keys.contains(&csv_program_id) {
-                    // Process the transaction - extract seal commitments, sanads, etc.
-                    // This would update storage with relevant data
-                    tracing::debug!("Found CSV-relevant transaction in slot {}: {}", slot, hex::encode(&transaction.signature));
-                }
-            }
-            
-            tracing::debug!("Processed slot {} with {} transactions", slot, block_data.transactions.len());
+            // TODO: Implement proper transaction filtering by decoding EncodedTransaction
+            // and checking account keys against csv_program_id
         } else {
             tracing::debug!("Slot {} not found or empty", slot);
         }

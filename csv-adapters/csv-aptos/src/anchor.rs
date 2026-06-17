@@ -30,9 +30,9 @@ impl BlsVerifier {
     ) -> Result<(), AnchorError> {
         #[cfg(feature = "bls")]
         {
-            use blst::{min_sig::Signature, min_sig::AggregateSignature, min_sig::PublicKey as SigPublicKey, min_pk::PublicKey, BLST_ERROR};
+            use blst::{min_sig::Signature, min_sig::AggregateSignature, min_pk::PublicKey, AggregatePublicKey, BLST_ERROR};
 
-            // Parse the signature (48 bytes for BLS12-381)
+            // Parse the signature (48 bytes for BLS12-381 min_sig)
             if signature.len() != 48 {
                 return Err(AnchorError::InvalidSignature(
                     format!("Invalid signature length: expected 48, got {}", signature.len())
@@ -49,16 +49,10 @@ impl BlsVerifier {
             // This is the production approach using true BLS aggregation
             let mut total_voting_power = 0u64;
 
-            // Aggregate all public keys
-            let mut agg_pubkey = if let Some(first_signer) = signers.first() {
-                PublicKey::from_bytes(first_signer)
-                    .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse first public key: {:?}", e)))?
-            } else {
-                return Err(AnchorError::InvalidSignature("No signers provided".to_string()));
-            };
-
-            for signer_pubkey in signers.iter().skip(1) {
-                // BLS public keys are 48 bytes
+            // Collect and validate all public keys, then aggregate them
+            let mut pubkeys: Vec<PublicKey> = Vec::with_capacity(signers.len());
+            for signer_pubkey in signers {
+                // BLS public keys are 48 bytes (min_pk variant, G1 points)
                 if signer_pubkey.len() != 48 {
                     return Err(AnchorError::InvalidSignature(
                         format!("Invalid public key length: expected 48, got {}", signer_pubkey.len())
@@ -67,14 +61,22 @@ impl BlsVerifier {
 
                 let pubkey = PublicKey::from_bytes(signer_pubkey)
                     .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse public key: {:?}", e)))?;
-
-                // Aggregate the public key
-                agg_pubkey = agg_pubkey.add(&pubkey)
-                    .map_err(|e| AnchorError::InvalidSignature(format!("Failed to aggregate public keys: {:?}", e)))?;
+                pubkeys.push(pubkey);
             }
 
+            if pubkeys.is_empty() {
+                return Err(AnchorError::InvalidSignature("No signers provided".to_string()));
+            }
+
+            // Aggregate public keys using AggregatePublicKey
+            let pubkey_refs: Vec<&PublicKey> = pubkeys.iter().collect();
+            let agg_pubkey = AggregatePublicKey::aggregate(&pubkey_refs, false)
+                .map_err(|e| AnchorError::InvalidSignature(format!("Failed to aggregate public keys: {:?}", e)))?;
+            let agg_pubkey = agg_pubkey.to_public_key();
+
             // Verify the aggregate signature against the aggregated public key
-            let result = agg_sig.verify(false, &agg_pubkey, message, false);
+            // Aptos BLS uses empty domain separation (no DST)
+            let result = agg_sig.fast_aggregate_verify_pre_aggregated(false, message, &[], &agg_pubkey);
 
             if result != BLST_ERROR::BLST_SUCCESS {
                 return Err(AnchorError::InvalidSignature(

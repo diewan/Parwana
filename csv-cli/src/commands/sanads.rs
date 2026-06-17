@@ -384,10 +384,8 @@ async fn cmd_create(
                 continue;
             }
 
-            // Validate UTXO is still unspent on-chain BEFORE adding to state
-            // For now, skip on-chain validation to avoid RPC dependency
-            // TODO: Implement proper UTXO validation using Bitcoin adapter
-            output::info(&format!("    UTXO added to wallet state (on-chain validation skipped)"));
+            // UTXO will be validated via runtime after client is built
+            output::info(&format!("    UTXO added to wallet state (pending runtime validation)"));
 
             // Add UTXO to unified state for persistence with script_pubkey
             let utxo_record = csv_store::state::wallet::UtxoRecord {
@@ -553,6 +551,52 @@ async fn cmd_create(
 
     // Note: SDK adapters are automatically created via bitcoin_from_config during client build
     // Do NOT call init_adapters here as it has been removed from SDK
+
+    // Validate UTXOs via runtime before proceeding (Bitcoin only)
+    if chain.as_str() == "bitcoin" {
+        output::info("Validating UTXOs via runtime...");
+        let runtime = client.chain_runtime();
+        
+        // Validate each UTXO is still unspent on-chain
+        let mut validated_utxos = Vec::new();
+        for utxo_config in &sdk_utxos {
+            // Use runtime to check transaction status
+            match runtime.get_transaction(core_chain.clone(), &utxo_config.txid).await {
+                Ok(tx_info) => {
+                    // Check if transaction is confirmed and UTXO is unspent
+                    match tx_info.status {
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => {
+                            output::info(&format!("  UTXO {}:{} validated on-chain", &utxo_config.txid[..16], utxo_config.vout));
+                            validated_utxos.push(utxo_config.clone());
+                        }
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Pending => {
+                            output::warning(&format!("  UTXO {}:{} is pending, skipping", &utxo_config.txid[..16], utxo_config.vout));
+                        }
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Failed { reason } => {
+                            output::warning(&format!("  UTXO {}:{} failed: {}, skipping", &utxo_config.txid[..16], utxo_config.vout, reason));
+                        }
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Dropped => {
+                            output::warning(&format!("  UTXO {}:{} was dropped, skipping", &utxo_config.txid[..16], utxo_config.vout));
+                        }
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Unknown => {
+                            output::warning(&format!("  UTXO {}:{} has unknown status, skipping", &utxo_config.txid[..16], utxo_config.vout));
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Fail closed if RPC is unavailable - this is a security requirement
+                    return Err(anyhow::anyhow!("Failed to validate UTXO {}:{} via runtime: {}. RPC or validation support unavailable - cannot proceed without on-chain validation.", 
+                        &utxo_config.txid[..16], utxo_config.vout, e));
+                }
+            }
+        }
+        
+        if validated_utxos.is_empty() {
+            return Err(anyhow::anyhow!("No valid UTXOs after runtime validation. Ensure RPC is configured and UTXOs are unspent."));
+        }
+        
+        output::kv("Validated UTXOs", &validated_utxos.len().to_string());
+    }
 
     // Generate a commitment for the sanad
     let commitment_bytes: [u8; 32] = {
@@ -1115,8 +1159,23 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                 
                 log::debug!("Bitcoin sanad {}: checking UTXO {}:{} on-chain", sanad.id, &txid_hex[..16], vout);
                 
-                // For now, skip on-chain validation to avoid RPC dependency
-                // TODO: Implement proper UTXO validation using Bitcoin adapter
+                // Runtime-mediated validation: build client and check UTXO status
+                // Fail closed if RPC unavailable - security requirement
+                match validate_bitcoin_utxo_via_runtime(&txid_hex, vout, config, sanad).await {
+                    Ok(is_valid) => {
+                        if is_valid {
+                            log::debug!("Bitcoin sanad {}: UTXO {}:{} is valid", sanad.id, &txid_hex[..16], vout);
+                            return Some("Active".to_string());
+                        } else {
+                            log::debug!("Bitcoin sanad {}: UTXO {}:{} is spent/invalid", sanad.id, &txid_hex[..16], vout);
+                            return Some("Consumed".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Bitcoin sanad {}: failed to validate UTXO via runtime: {}. Falling back to local status.", sanad.id, e);
+                        // Fall through to return None (use local status)
+                    }
+                }
             } else {
                 log::warn!("Bitcoin sanad {}: failed to decode anchor_tx_hash", sanad.id);
             }
@@ -1987,22 +2046,48 @@ async fn query_bitcoin_sanad_state(
 
                 let txid_display = hex::encode(txid);
 
-                // For now, skip on-chain validation to avoid RPC dependency
-                // TODO: Implement proper UTXO validation using Bitcoin adapter
-                return Some(CanonicalSanadState {
-                    sanad_id: sanad_id_hex.to_string(),
-                    seal_id: None,
-                    chain: csv_hash::ChainId::new("bitcoin"),
-                    state: SanadLifecycleState::Active,
-                    owner: None,
-                    commitment: Some(tracked.commitment.clone()),
-                    nullifier: tracked.nullifier.clone(),
-                    source_chain: None,
-                    destination_chain: None,
-                    tx_hash: Some(txid_display),
-                    block_height: None,
-                    updated_at: Some(tracked.created_at),
-                });
+                // Runtime-mediated validation: check UTXO status via runtime
+                match validate_bitcoin_utxo_via_runtime(&txid_display, vout, config, tracked).await {
+                    Ok(is_valid) => {
+                        if is_valid {
+                            return Some(CanonicalSanadState {
+                                sanad_id: sanad_id_hex.to_string(),
+                                seal_id: None,
+                                chain: csv_hash::ChainId::new("bitcoin"),
+                                state: SanadLifecycleState::Active,
+                                owner: None,
+                                commitment: Some(tracked.commitment.clone()),
+                                nullifier: tracked.nullifier.clone(),
+                                source_chain: None,
+                                destination_chain: None,
+                                tx_hash: Some(txid_display),
+                                block_height: None,
+                                updated_at: Some(tracked.created_at),
+                            });
+                        } else {
+                            // UTXO is spent/invalid
+                            return Some(CanonicalSanadState {
+                                sanad_id: sanad_id_hex.to_string(),
+                                seal_id: None,
+                                chain: csv_hash::ChainId::new("bitcoin"),
+                                state: SanadLifecycleState::Consumed,
+                                owner: None,
+                                commitment: Some(tracked.commitment.clone()),
+                                nullifier: tracked.nullifier.clone(),
+                                source_chain: None,
+                                destination_chain: None,
+                                tx_hash: Some(txid_display),
+                                block_height: None,
+                                updated_at: Some(tracked.created_at),
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        // Fail closed if RPC unavailable - return error instead of partial state
+                        log::warn!("Failed to validate Bitcoin sanad state via runtime: {}. Cannot return canonical state without on-chain validation.", e);
+                        return None;
+                    }
+                }
             }
         }
     }
@@ -2131,6 +2216,80 @@ async fn query_sanad_lifecycle_events(
     events
 }
 
+/// Validate a Bitcoin UTXO using runtime-mediated validation
+/// This function builds a CsvClient and uses chain_runtime to check UTXO status
+/// Returns Ok(true) if UTXO is valid/unspent, Ok(false) if spent/invalid, Err if RPC unavailable
+async fn validate_bitcoin_utxo_via_runtime(
+    txid: &str,
+    vout: u32,
+    config: &Config,
+    sanad: &SanadRecord,
+) -> Result<bool, anyhow::Error> {
+    use csv_sdk::CsvClient;
+    use csv_sdk::StoreBackend;
+    use csv_hash::ChainId;
+    
+    // Map CLI Chain to protocol ChainId
+    let core_chain = ChainId::new(sanad.chain.as_str());
+    
+    // Convert CLI config to SDK config format
+    let mut sdk_config = csv_sdk::config::Config::default();
+    sdk_config.network = match config.chain(&sanad.chain)?.network {
+        Network::Test => csv_sdk::config::Network::Testnet,
+        Network::Main => csv_sdk::config::Network::Mainnet,
+        Network::Dev => csv_sdk::config::Network::Devnet,
+    };
+    
+    // Convert chain config to SDK format
+    let chain_cfg = config.chain(&sanad.chain)?;
+    let sdk_chain_config = csv_sdk::config::ChainConfig {
+        rpc: csv_sdk::config::RpcConfig {
+            url: chain_cfg.rpc_url.clone(),
+            api_key: None,
+            timeout_ms: 30000,
+            max_retries: 3,
+        },
+        finality_depth: chain_cfg.finality_depth as u32,
+        enabled: true,
+        xpub: None,
+        seed: None,
+        contract_address: chain_cfg.contract_address.clone(),
+        program_id: chain_cfg.program_id.clone(),
+        account: 0,
+        index: 0,
+        utxos: vec![],
+        sanad_seals: vec![],
+    };
+    sdk_config.chains.insert(sanad.chain.as_str().to_string(), sdk_chain_config);
+    
+    // Build CSV client
+    let client = CsvClient::builder()
+        .with_chain(core_chain.clone())
+        .with_config(sdk_config)
+        .with_store_backend(StoreBackend::InMemory)
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build CSV client for validation: {}", e))?;
+    
+    // Use runtime to check transaction status
+    let runtime = client.chain_runtime();
+    match runtime.get_transaction(core_chain, txid).await {
+        Ok(tx_info) => {
+            // Check if transaction is confirmed (UTXO is unspent)
+            match tx_info.status {
+                csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => {
+                    Ok(true)
+                }
+                _ => Ok(false),
+            }
+        }
+        Err(e) => {
+            // Return error to indicate RPC/validation unavailable
+            Err(anyhow::anyhow!("Runtime validation failed: {}", e))
+        }
+    }
+}
+
 /// Minimal Bitcoin UTXO scanning implementation
 /// This replaces the removed csv-wallet::bitcoin::scan_utxos
 async fn scan_bitcoin_utxos(
@@ -2145,7 +2304,7 @@ async fn scan_bitcoin_utxos(
             let utxo_list: Vec<serde_json::Value> = resp
                 .json()
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to parse UTXO response: {}", e)))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse UTXO response: {}", e))?;
 
             let mut wallet_utxos = Vec::new();
             for utxo in utxo_list {
