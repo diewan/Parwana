@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     println!("Transferring sword to Ethereum (Ethereum Warriors game)...");
     let transfer_id = client
         .transfers()
-        .cross_chain(sword.id.clone(), ChainId::new("ethereum"))
+        .cross_chain(csv_protocol::wire::SanadIdWire::try_into(sword.id.clone()).unwrap(), ChainId::new("ethereum"))
         .to_address("0xwarrior123".to_string())
         .execute()
         .await?;

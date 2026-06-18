@@ -2794,7 +2794,7 @@ mod tests {
             .execution_journal()
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
-                replay_id: transfer.sanad_id,
+                replay_id: csv_wire::HashWire::from(transfer.sanad_id.clone()),
                 proof_hash: [0xFF; 32],
                 proof_payload: Some(payload),
                 phase: TransferStage::ProofValidated,
@@ -3792,7 +3792,7 @@ mod tests {
         };
 
         let replay_lease = crate::user_runtime_lease::TransferLease {
-            transfer_id: csv_hash::SanadId::new(*replay_transfer.sanad_id.as_bytes()),
+            transfer_id: csv_hash::SanadId::new(*replay_transfer.sanad_id.as_bytes()).into(),
             epoch: 2,
             owner_runtime_id: lease.owner_runtime_id,
             acquired_at: std::time::SystemTime::now(),

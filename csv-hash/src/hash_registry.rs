@@ -25,6 +25,7 @@
 //! For protocol-critical hashing paths, use `to_canonical_bytes()` / `from_canonical_bytes()`
 //! via `csv_codec::canonical` for deterministic serialization.
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::str::FromStr;
@@ -43,7 +44,7 @@ use std::str::FromStr;
 /// For protocol-critical hashing (computing commitments, replay IDs, etc.),
 /// use `to_canonical_bytes()` to ensure deterministic encoding. For wire format,
 /// use `csv-wire` which owns all serialization.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {

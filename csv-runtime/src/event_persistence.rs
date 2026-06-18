@@ -145,7 +145,8 @@ impl InMemoryEventStore {
         let Ok(guard) = self.events.lock() else {
             return Vec::new();
         };
-        let events = guard.get(aggregate_id).cloned().unwrap_or_default();
+        let wire_id: SanadIdWire = aggregate_id.clone().into();
+        let events = guard.get(&wire_id).cloned().unwrap_or_default();
 
         let mut result = events;
 
@@ -355,7 +356,13 @@ impl EventStore for InMemoryEventStore {
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        Ok(guard.keys().cloned().collect())
+        Ok(guard.keys()
+            .map(|w| {
+                let wire = w.clone();
+                csv_protocol::sanad::SanadId::try_from(wire)
+                    .map_err(|e| EventStoreError::Serialization(e))
+            })
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     fn event_count(&self) -> Result<usize, EventStoreError> {
@@ -370,23 +377,25 @@ impl EventStore for InMemoryEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<(), EventStoreError> {
+        let wire_id: SanadIdWire = aggregate_id.clone().into();
+        
         let mut events_guard = self
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        events_guard.remove(aggregate_id);
+        events_guard.remove(&wire_id);
 
         let mut snapshots_guard = self
             .snapshots
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        snapshots_guard.remove(aggregate_id);
+        snapshots_guard.remove(&wire_id);
 
         let mut positions_guard = self
             .positions
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        positions_guard.remove(aggregate_id);
+        positions_guard.remove(&wire_id);
 
         Ok(())
     }

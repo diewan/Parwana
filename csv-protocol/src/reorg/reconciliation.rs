@@ -125,12 +125,12 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
     ///
     /// # Arguments
     /// * `event` - The reorg event that triggered reconciliation
-    /// * `affected_transfers` - List of (transfer_id, state, source_block_height)
+    /// * `affected_transfers` - List of (transfer_id, state, source_block_height, commitment)
     /// * `revalidate_proofs` - Whether to re-validate proofs for affected transfers
     pub async fn reconcile(
         &mut self,
         event: &ReorgEvent,
-        affected_transfers: &[(String, String, u64)],
+        affected_transfers: &[(String, String, u64, Hash)],
         revalidate_proofs: bool,
     ) -> ReconciliationResult {
         let mut result = ReconciliationResult {
@@ -140,7 +140,7 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
             actions: Vec::new(),
         };
 
-        for (transfer_id, state, block_height) in affected_transfers {
+        for (transfer_id, state, block_height, commitment) in affected_transfers {
             // Step 1: Check if source lock is still valid on the canonical chain
             // by comparing the block hash at the source height with the known hash
             let lock_valid = self
@@ -162,7 +162,7 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
             // Step 2: Re-validate proofs if needed
             if revalidate_proofs {
                 let revalidation = self
-                    .revalidate_proof_for_transfer(&transfer_id, *block_height, &state)
+                    .revalidate_proof_for_transfer(&transfer_id, *block_height, &state, commitment)
                     .await;
 
                 match revalidation {
@@ -266,19 +266,14 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
     /// Re-validate the proof for a specific transfer.
     ///
     /// Queries the canonical chain to rebuild and verify the inclusion proof.
+    /// Verifies that the commitment still exists in the block after a reorg.
     async fn revalidate_proof_for_transfer(
         &self,
         transfer_id: &str,
         block_height: u64,
-        state: &str,
+        _state: &str,
+        commitment: &Hash,
     ) -> Result<ProofRevalidationResult, String> {
-        // Revalidate proof after reorg:
-        // 1. Look up the commitment associated with this transfer
-        // 2. Query the canonical chain for the block at block_height
-        // 3. Verify the commitment exists in that block
-        // 4. Rebuild the inclusion proof
-        // 5. Verify the rebuilt proof
-
         // Step 1: Query the canonical chain for the block
         let block_hash = match self.chain_backend.get_block_hash(block_height).await {
             Ok(hash) => hash,
@@ -298,9 +293,6 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
             }
         };
 
-        // Step 2: Verify the block is on the canonical chain (not on a fork)
-        // This requires checking that the block hash matches the expected canonical chain
-        // For now, we verify block existence and log the result
         log::debug!(
             "Transfer {} block {} exists on canonical chain (hash: {:?})",
             transfer_id,
@@ -308,12 +300,135 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
             block_hash
         );
 
-        // Step 3: In production, we would:
-        // - Look up the commitment from the transfer state
-        // - Verify the commitment exists in the block (via inclusion proof)
-        // - Rebuild and verify the Merkle proof
-        // For now, we return success if the block exists
-        // Full implementation requires access to the transfer's commitment and proof data
+        // Step 2: Verify the commitment exists in the block
+        let commitment_exists = match self
+            .chain_backend
+            .verify_commitment_in_block(commitment, block_height)
+            .await
+        {
+            Ok(exists) => exists,
+            Err(e) => {
+                log::error!(
+                    "Transfer {} failed to verify commitment in block {}: {}",
+                    transfer_id,
+                    block_height,
+                    e
+                );
+                return Ok(ProofRevalidationResult {
+                    transfer_id: transfer_id.to_string(),
+                    valid: false,
+                    canonical_block_height: Some(block_height),
+                    error: Some(format!(
+                        "Failed to verify commitment in block {}: {}",
+                        block_height, e
+                    )),
+                });
+            }
+        };
+
+        if !commitment_exists {
+            log::error!(
+                "Transfer {} commitment not found in block {} - proof invalid after reorg",
+                transfer_id,
+                block_height
+            );
+            return Ok(ProofRevalidationResult {
+                transfer_id: transfer_id.to_string(),
+                valid: false,
+                canonical_block_height: Some(block_height),
+                error: Some(format!(
+                    "Commitment not found in block {} after reorg",
+                    block_height
+                )),
+            });
+        }
+
+        log::debug!(
+            "Transfer {} commitment verified in block {}",
+            transfer_id,
+            block_height
+        );
+
+        // Step 3: Rebuild the inclusion proof against the canonical chain
+        let rebuilt_proof = match self
+            .chain_backend
+            .rebuild_inclusion_proof(commitment, block_height)
+            .await
+        {
+            Ok(proof) => proof,
+            Err(e) => {
+                log::error!(
+                    "Transfer {} failed to rebuild inclusion proof for block {}: {}",
+                    transfer_id,
+                    block_height,
+                    e
+                );
+                return Ok(ProofRevalidationResult {
+                    transfer_id: transfer_id.to_string(),
+                    valid: false,
+                    canonical_block_height: Some(block_height),
+                    error: Some(format!(
+                        "Failed to rebuild inclusion proof for block {}: {}",
+                        block_height, e
+                    )),
+                });
+            }
+        };
+
+        log::debug!(
+            "Transfer {} rebuilt inclusion proof for block {}",
+            transfer_id,
+            block_height
+        );
+
+        // Step 4: Verify the rebuilt proof against the commitment
+        let proof_valid = match self
+            .chain_backend
+            .verify_proof_bundle(&rebuilt_proof, commitment)
+            .await
+        {
+            Ok(valid) => valid,
+            Err(e) => {
+                log::error!(
+                    "Transfer {} failed to verify rebuilt proof for block {}: {}",
+                    transfer_id,
+                    block_height,
+                    e
+                );
+                return Ok(ProofRevalidationResult {
+                    transfer_id: transfer_id.to_string(),
+                    valid: false,
+                    canonical_block_height: Some(block_height),
+                    error: Some(format!(
+                        "Failed to verify rebuilt proof for block {}: {}",
+                        block_height, e
+                    )),
+                });
+            }
+        };
+
+        if !proof_valid {
+            log::error!(
+                "Transfer {} rebuilt proof verification failed for block {} - proof is invalid",
+                transfer_id,
+                block_height
+            );
+            return Ok(ProofRevalidationResult {
+                transfer_id: transfer_id.to_string(),
+                valid: false,
+                canonical_block_height: Some(block_height),
+                error: Some(format!(
+                    "Rebuilt proof verification failed for block {}",
+                    block_height
+                )),
+            });
+        }
+
+        log::info!(
+            "Transfer {} proof re-validated successfully at canonical height {}",
+            transfer_id,
+            block_height
+        );
 
         Ok(ProofRevalidationResult {
             transfer_id: transfer_id.to_string(),
@@ -425,6 +540,9 @@ impl<B: ChainBackendForReconciliation + Default> Default for ReconciliationEngin
 #[allow(missing_docs)]
 pub struct MockChainBackend {
     block_hashes: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, Hash>>>,
+    commitments: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, std::collections::HashSet<[u8; 32]>>>>,
+    valid_proofs: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, crate::proof_taxonomy::InclusionProof>>>,
+    proof_verification: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, bool>>>,
 }
 
 #[allow(missing_docs)]
@@ -434,6 +552,15 @@ impl MockChainBackend {
             block_hashes: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::BTreeMap::new(),
             )),
+            commitments: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeMap::new(),
+            )),
+            valid_proofs: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            proof_verification: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -441,6 +568,45 @@ impl MockChainBackend {
     pub fn set_block_hash(&self, height: u64, hash: Hash) {
         if let Ok(mut map) = self.block_hashes.lock() {
             map.insert(height, hash);
+        }
+    }
+
+    /// Register a commitment as existing in a block (for testing).
+    pub fn set_commitment_in_block(&self, block_height: u64, commitment: [u8; 32]) {
+        if let Ok(mut map) = self.commitments.lock() {
+            map.entry(block_height)
+                .or_insert_with(std::collections::HashSet::new)
+                .insert(commitment);
+        }
+    }
+
+    /// Register a valid inclusion proof for a block height (for testing).
+    pub fn set_valid_proof(&self, block_height: u64, proof: crate::proof_taxonomy::InclusionProof) {
+        if let Ok(mut map) = self.valid_proofs.lock() {
+            map.insert(block_height, proof);
+        }
+    }
+
+    /// Set whether proof verification should succeed for a block height (for testing).
+    pub fn set_proof_verification_result(&self, block_height: u64, result: bool) {
+        if let Ok(mut map) = self.proof_verification.lock() {
+            map.insert(block_height, result);
+        }
+    }
+
+    /// Clear all registered data (for testing).
+    pub fn clear(&self) {
+        if let Ok(mut map) = self.block_hashes.lock() {
+            map.clear();
+        }
+        if let Ok(mut map) = self.commitments.lock() {
+            map.clear();
+        }
+        if let Ok(mut map) = self.valid_proofs.lock() {
+            map.clear();
+        }
+        if let Ok(mut map) = self.proof_verification.lock() {
+            map.clear();
         }
     }
 }
@@ -461,27 +627,263 @@ impl ChainBackendForReconciliation for MockChainBackend {
 
     async fn verify_commitment_in_block(
         &self,
-        _commitment: &Hash,
-        _block_height: u64,
+        commitment: &Hash,
+        block_height: u64,
     ) -> Result<bool, String> {
-        // In production, this would query the chain's state trie
-        Ok(true)
+        let map = self.commitments.lock().map_err(|e| e.to_string())?;
+        Ok(map
+            .get(&block_height)
+            .map(|commitments| commitments.contains(&commitment.0))
+            .unwrap_or(false))
     }
 
     async fn rebuild_inclusion_proof(
         &self,
-        _commitment: &Hash,
-        _block_height: u64,
+        commitment: &Hash,
+        block_height: u64,
     ) -> Result<crate::proof_taxonomy::InclusionProof, String> {
-        // In production, this would rebuild the proof from chain state
-        Err("Not implemented in mock backend".to_string())
+        let map = self.valid_proofs.lock().map_err(|e| e.to_string())?;
+        map.get(&block_height)
+            .cloned()
+            .ok_or_else(|| format!("No proof available for block {}", block_height))
     }
 
     async fn verify_proof_bundle(
         &self,
-        _inclusion_proof: &crate::proof_taxonomy::InclusionProof,
-        _commitment: &Hash,
+        inclusion_proof: &crate::proof_taxonomy::InclusionProof,
+        commitment: &Hash,
     ) -> Result<bool, String> {
+        let _ = (inclusion_proof, commitment);
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reorg::detector::ReorgEvent;
+    use csv_hash::chain_id::ChainId;
+
+    fn make_reorg_event(old_height: u64, new_height: u64) -> ReorgEvent {
+        ReorgEvent {
+            chain: ChainId::new("ethereum"),
+            old_height,
+            new_height,
+            old_hash: Hash([1u8; 32]),
+            new_hash: Hash([2u8; 32]),
+            depth: old_height - new_height,
+        }
+    }
+
+    fn make_commitment(bytes: [u8; 32]) -> Hash {
+        Hash(bytes)
+    }
+
+    fn make_valid_proof(block_height: u64, commitment: &Hash) -> crate::proof_taxonomy::InclusionProof {
+        crate::proof_taxonomy::InclusionProof {
+            proof_bytes: vec![1u8, 2, 3, 4],
+            block_hash: Hash([block_height as u8; 32]),
+            position: 0,
+            block_number: block_height,
+            leaf: *commitment,
+            root: Hash([5u8; 32]),
+            siblings: vec![Hash([6u8; 32])],
+            leaf_index: 0,
+            source: "ethereum".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_revalidate_proof_valid_commitment() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        let commitment = make_commitment([3u8; 32]);
+        backend.set_commitment_in_block(101, commitment.0);
+        backend.set_valid_proof(101, make_valid_proof(101, &commitment));
+
+        let engine = ReconciliationEngine::new(backend);
+        let result = engine
+            .revalidate_proof_for_transfer("transfer-1", 101, "proof_building", &commitment)
+            .await
+            .unwrap();
+
+        assert!(result.valid);
+        assert_eq!(result.canonical_block_height, Some(101));
+        assert!(result.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_revalidate_proof_missing_block() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+
+        let engine = ReconciliationEngine::new(backend);
+        let result = engine
+            .revalidate_proof_for_transfer("transfer-1", 101, "proof_building", &make_commitment([3u8; 32]))
+            .await
+            .unwrap();
+
+        assert!(!result.valid);
+        assert_eq!(result.canonical_block_height, None);
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_revalidate_proof_missing_commitment() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        let commitment = make_commitment([3u8; 32]);
+        backend.set_valid_proof(101, make_valid_proof(101, &commitment));
+
+        let engine = ReconciliationEngine::new(backend);
+        let result = engine
+            .revalidate_proof_for_transfer("transfer-1", 101, "proof_building", &commitment)
+            .await
+            .unwrap();
+
+        assert!(!result.valid);
+        assert_eq!(result.canonical_block_height, Some(101));
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_revalidate_proof_missing_proof() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        let commitment = make_commitment([3u8; 32]);
+        backend.set_commitment_in_block(101, commitment.0);
+
+        let engine = ReconciliationEngine::new(backend);
+        let result = engine
+            .revalidate_proof_for_transfer("transfer-1", 101, "proof_building", &commitment)
+            .await
+            .unwrap();
+
+        assert!(!result.valid);
+        assert_eq!(result.canonical_block_height, Some(101));
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("No proof available"));
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_with_valid_proofs() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        let commitment = make_commitment([3u8; 32]);
+        backend.set_commitment_in_block(101, commitment.0);
+        backend.set_valid_proof(101, make_valid_proof(101, &commitment));
+
+        let mut engine = ReconciliationEngine::new(backend);
+        let event = make_reorg_event(105, 101);
+        let affected = vec![
+            ("transfer-1".to_string(), "proof_building".to_string(), 101, commitment),
+        ];
+
+        let result = engine.reconcile(&event, &affected, true).await;
+
+        assert_eq!(result.transfers_reconciled, 1);
+        assert_eq!(result.transfers_failed, 0);
+        assert_eq!(result.proofs_revalidated, 1);
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_with_invalid_proof() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        let commitment = make_commitment([3u8; 32]);
+        backend.set_commitment_in_block(101, commitment.0);
+        backend.set_valid_proof(101, make_valid_proof(101, &commitment));
+
+        let mut engine = ReconciliationEngine::new(backend);
+        let event = make_reorg_event(105, 101);
+
+        // Use a different commitment that doesn't exist in the block
+        let bad_commitment = make_commitment([4u8; 32]);
+        let affected = vec![
+            ("transfer-1".to_string(), "proof_building".to_string(), 101, bad_commitment),
+        ];
+
+        let result = engine.reconcile(&event, &affected, true).await;
+
+        assert_eq!(result.transfers_reconciled, 0);
+        assert_eq!(result.transfers_failed, 1);
+        assert_eq!(result.proofs_revalidated, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_skips_proof_validation_when_disabled() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        let commitment = make_commitment([3u8; 32]);
+
+        let mut engine = ReconciliationEngine::new(backend);
+        let event = make_reorg_event(105, 101);
+        let affected = vec![
+            ("transfer-1".to_string(), "proof_building".to_string(), 101, commitment),
+        ];
+
+        let result = engine.reconcile(&event, &affected, false).await;
+
+        assert_eq!(result.transfers_reconciled, 1);
+        assert_eq!(result.transfers_failed, 0);
+        assert_eq!(result.proofs_revalidated, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_compromised_transfer() {
+        let backend = MockChainBackend::new();
+        // Set block hash at height 100 to a value that doesn't match the reorg event's old_hash
+        // This simulates a scenario where the block was also reorged out
+        backend.set_block_hash(100, Hash([9u8; 32]));
+
+        let mut engine = ReconciliationEngine::new(backend);
+        let event = make_reorg_event(105, 101);
+
+        // Transfer at height 100 has a block hash that doesn't match the canonical chain
+        // so it should be compromised
+        let commitment = make_commitment([3u8; 32]);
+        let affected = vec![
+            ("transfer-1".to_string(), "proof_building".to_string(), 100, commitment),
+        ];
+
+        let result = engine.reconcile(&event, &affected, false).await;
+
+        assert_eq!(result.transfers_reconciled, 0);
+        assert_eq!(result.transfers_failed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_revalidate_proof_validates_commitment_not_just_block() {
+        let backend = MockChainBackend::new();
+        backend.set_block_hash(100, Hash([1u8; 32]));
+        backend.set_block_hash(101, Hash([2u8; 32]));
+
+        // Register a proof but NOT the commitment - this should fail
+        let commitment = make_commitment([3u8; 32]);
+        backend.set_valid_proof(101, make_valid_proof(101, &commitment));
+
+        let engine = ReconciliationEngine::new(backend);
+        let result = engine
+            .revalidate_proof_for_transfer("transfer-1", 101, "proof_building", &commitment)
+            .await
+            .unwrap();
+
+        assert!(!result.valid, "Proof revalidation should fail when commitment is not in block");
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("not found"));
     }
 }

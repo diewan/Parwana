@@ -80,11 +80,16 @@ impl LegacyWalletConfig {
     pub fn to_secret_handle(&self, chain: &str) -> Option<csv_wallet::SecretHandle> {
         self.private_key.as_ref().map(|pk| {
             let bytes = hex::decode(pk).unwrap_or_else(|_| pk.as_bytes().to_vec());
-            csv_wallet::SecretHandle::new(
-                bytes,
-                csv_wallet::KeyPurpose::Signing,
-                chain.to_string(),
-            )
+            let key_array: [u8; 32] = if bytes.len() >= 32 {
+                bytes[..32].try_into().unwrap_or([0u8; 32])
+            } else {
+                let mut arr = [0u8; 32];
+                let len = bytes.len().min(32);
+                arr[..len].copy_from_slice(&bytes[..len]);
+                arr
+            };
+            let secret_key = csv_keys::memory::SecretKey::new(key_array);
+            csv_wallet::SecretHandle::from_key(secret_key)
         })
     }
 }

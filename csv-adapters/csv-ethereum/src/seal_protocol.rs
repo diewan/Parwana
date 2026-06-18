@@ -464,28 +464,28 @@ impl SealProtocol for EthereumSealProtocol {
                     })
                 )));
             }
+
+            // Step 3: Mark seal as used in local registry
+            // This is done after the on-chain check to ensure consistency
+            let registry = self.seal_registry.lock().map_err(|e| {
+                Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
+                    as Box<dyn std::error::Error>
+            })?;
+            registry
+                .mark_seal_used(&seal)
+                .map_err(|e| Box::new(ProtocolError::from(e)) as Box<dyn std::error::Error>)?;
+
+            Ok(())
         }
 
         #[cfg(not(feature = "rpc"))]
         {
             // Without RPC feature, on-chain verification is unavailable
             // Fail closed: security-critical checks must not be silently bypassed
-            return Err(Box::new(ProtocolError::NetworkError(
+            Err(Box::new(ProtocolError::NetworkError(
                 "On-chain seal registry verification requires RPC feature".to_string()
-            )));
+            )) as Box<dyn std::error::Error>)
         }
-
-        // Step 3: Mark seal as used in local registry
-        // This is done after the on-chain check to ensure consistency
-        let registry = self.seal_registry.lock().map_err(|e| {
-            Box::new(ProtocolError::Generic(format!("Poison error: {}", e)))
-                as Box<dyn std::error::Error>
-        })?;
-        registry
-            .mark_seal_used(&seal)
-            .map_err(|e| Box::new(ProtocolError::from(e)) as Box<dyn std::error::Error>)?;
-
-        Ok(())
     }
 
     async fn create_seal(

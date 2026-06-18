@@ -60,6 +60,7 @@ alloy-sol-types = { version = "1.5", optional = true }
 alloy-contract = { version = "1.0", optional = true }
 reqwest = { version = "0.12", features = ["json"], optional = true }
 url = { version = "2.5", optional = true }
+k256 = { version = "0.13", optional = true }
 
 # Async runtime — non-optional for polling (PF-03)
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
@@ -69,7 +70,7 @@ serde_json = "1.0"
 default = []
 # Real Groth16 pairing verification — feature-gated so the mock path is unreachable in production
 real-groth16 = ["dep:ark-bn254", "dep:ark-groth16", "dep:ark-serialize", "dep:ark-ec", "dep:ark-ff", "dep:ark-snark"]
-rpc = ["alloy", "alloy-sol-types", "alloy-contract", "csv-store", "reqwest", "url"]
+rpc = ["alloy", "alloy-sol-types", "alloy-contract", "csv-store", "reqwest", "url", "k256"]
 # quorum = ["reqwest", "url"]  # REMOVED: quorum support is not active in this adapter
 production = ["rpc"]
 test-utils = []

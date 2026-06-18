@@ -85,7 +85,7 @@ impl StoreHandle {
     /// Get a Sanad by its ID.
     pub fn get_sanad(
         &self,
-        sanad_id: &csv_hash::sanad::SanadId,
+        sanad_id: &str,
     ) -> Result<Option<SanadRecord>, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
@@ -106,7 +106,7 @@ impl StoreHandle {
     /// Mark a Sanad as consumed.
     pub fn consume_sanad(
         &mut self,
-        sanad_id: &csv_hash::sanad::SanadId,
+        sanad_id: &str,
         consumed_at: u64,
     ) -> Result<(), CsvError> {
         match self {
@@ -126,7 +126,7 @@ impl StoreHandle {
     }
 
     /// Check if a Sanad exists.
-    pub fn has_sanad(&self, sanad_id: &csv_hash::sanad::SanadId) -> Result<bool, CsvError> {
+    pub fn has_sanad(&self, sanad_id: &str) -> Result<bool, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
                 .has_sanad(sanad_id)

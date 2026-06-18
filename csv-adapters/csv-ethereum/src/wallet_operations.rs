@@ -178,7 +178,7 @@ impl WalletOperations for EthereumWalletOperations {
                 .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive signing key: {}", e)))?;
             
             use k256::ecdsa::signature::Signer;
-            let signature = signing_key.sign(tx_data);
+            let signature: k256::ecdsa::Signature = signing_key.sign(tx_data);
             
             Ok(signature.to_bytes().to_vec())
         }

@@ -51,6 +51,7 @@ use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
+use serde::{Deserialize, Serialize};
 
 /// Hash function types supported by different chains
 ///
@@ -507,7 +508,7 @@ impl ProofCategory {
 /// **Layer:** L1
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
 /// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InclusionProof {
     /// Raw proof bytes
     pub proof_bytes: Vec<u8>,
@@ -588,7 +589,104 @@ impl InclusionProof {
 
     /// Deserialize from canonical bytes (manual implementation for L1 type)
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Err("InclusionProof deserialization not yet implemented".to_string())
+        let mut pos = 0;
+        
+        let proof_bytes_len = if bytes.len() >= pos + 4 {
+            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+        } else {
+            return Err("Insufficient bytes for proof_bytes length".to_string());
+        };
+        pos += 4;
+        
+        if bytes.len() < pos + proof_bytes_len {
+            return Err("Insufficient bytes for proof_bytes".to_string());
+        }
+        let proof_bytes = bytes[pos..pos + proof_bytes_len].to_vec();
+        pos += proof_bytes_len;
+        
+        if bytes.len() < pos + 32 {
+            return Err("Insufficient bytes for block_hash".to_string());
+        }
+        let mut block_hash_bytes = [0u8; 32];
+        block_hash_bytes.copy_from_slice(&bytes[pos..pos + 32]);
+        let block_hash = Hash(block_hash_bytes);
+        pos += 32;
+        
+        if bytes.len() < pos + 8 {
+            return Err("Insufficient bytes for position".to_string());
+        }
+        let position = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]);
+        pos += 8;
+        
+        if bytes.len() < pos + 8 {
+            return Err("Insufficient bytes for block_number".to_string());
+        }
+        let block_number = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]);
+        pos += 8;
+        
+        if bytes.len() < pos + 32 {
+            return Err("Insufficient bytes for leaf".to_string());
+        }
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes.copy_from_slice(&bytes[pos..pos + 32]);
+        let leaf = Hash(leaf_bytes);
+        pos += 32;
+        
+        if bytes.len() < pos + 32 {
+            return Err("Insufficient bytes for root".to_string());
+        }
+        let mut root_bytes = [0u8; 32];
+        root_bytes.copy_from_slice(&bytes[pos..pos + 32]);
+        let root = Hash(root_bytes);
+        pos += 32;
+        
+        let siblings_len = if bytes.len() >= pos + 4 {
+            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+        } else {
+            return Err("Insufficient bytes for siblings length".to_string());
+        };
+        pos += 4;
+        
+        let mut siblings = Vec::with_capacity(siblings_len);
+        for _ in 0..siblings_len {
+            if bytes.len() < pos + 32 {
+                return Err("Insufficient bytes for sibling".to_string());
+            }
+            let mut sibling_bytes = [0u8; 32];
+            sibling_bytes.copy_from_slice(&bytes[pos..pos + 32]);
+            siblings.push(Hash(sibling_bytes));
+            pos += 32;
+        }
+        
+        if bytes.len() < pos + 8 {
+            return Err("Insufficient bytes for leaf_index".to_string());
+        }
+        let leaf_index = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]) as usize;
+        pos += 8;
+        
+        let source_len = if bytes.len() >= pos + 4 {
+            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+        } else {
+            return Err("Insufficient bytes for source length".to_string());
+        };
+        pos += 4;
+        
+        if bytes.len() < pos + source_len {
+            return Err("Insufficient bytes for source".to_string());
+        }
+        let source = String::from_utf8(bytes[pos..pos + source_len].to_vec()).map_err(|e| format!("Invalid source string: {}", e))?;
+        
+        Ok(Self {
+            proof_bytes,
+            block_hash,
+            position,
+            block_number,
+            leaf,
+            root,
+            siblings,
+            leaf_index,
+            source,
+        })
     }
 
     /// Create a new inclusion proof.
@@ -665,7 +763,7 @@ impl InclusionProof {
 /// **Layer:** L1
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
 /// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FinalityProof {
     /// Finality data bytes
     pub finality_data: Vec<u8>,
@@ -732,7 +830,81 @@ impl FinalityProof {
 
     /// Deserialize from canonical bytes (manual implementation for L1 type)
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Err("FinalityProof deserialization not yet implemented".to_string())
+        let mut pos = 0;
+        
+        let finality_data_len = if bytes.len() >= pos + 4 {
+            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+        } else {
+            return Err("Insufficient bytes for finality_data length".to_string());
+        };
+        pos += 4;
+        
+        if bytes.len() < pos + finality_data_len {
+            return Err("Insufficient bytes for finality_data".to_string());
+        }
+        let finality_data = bytes[pos..pos + finality_data_len].to_vec();
+        pos += finality_data_len;
+        
+        if bytes.len() < pos + 32 {
+            return Err("Insufficient bytes for block_hash".to_string());
+        }
+        let mut block_hash_bytes = [0u8; 32];
+        block_hash_bytes.copy_from_slice(&bytes[pos..pos + 32]);
+        let block_hash = Hash(block_hash_bytes);
+        pos += 32;
+        
+        if bytes.len() < pos + 4 {
+            return Err("Insufficient bytes for threshold".to_string());
+        }
+        let threshold = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]);
+        pos += 4;
+        
+        if bytes.len() < pos + 8 {
+            return Err("Insufficient bytes for confirmations".to_string());
+        }
+        let confirmations = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]);
+        pos += 8;
+        
+        let data_len = if bytes.len() >= pos + 4 {
+            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+        } else {
+            return Err("Insufficient bytes for data length".to_string());
+        };
+        pos += 4;
+        
+        if bytes.len() < pos + data_len {
+            return Err("Insufficient bytes for data".to_string());
+        }
+        let data = bytes[pos..pos + data_len].to_vec();
+        pos += data_len;
+        
+        let source_len = if bytes.len() >= pos + 4 {
+            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+        } else {
+            return Err("Insufficient bytes for source length".to_string());
+        };
+        pos += 4;
+        
+        if bytes.len() < pos + source_len {
+            return Err("Insufficient bytes for source".to_string());
+        }
+        let source = String::from_utf8(bytes[pos..pos + source_len].to_vec()).map_err(|e| format!("Invalid source string: {}", e))?;
+        pos += source_len;
+        
+        if bytes.len() < pos + 1 {
+            return Err("Insufficient bytes for is_deterministic".to_string());
+        }
+        let is_deterministic = bytes[pos] == 1;
+        
+        Ok(Self {
+            finality_data,
+            block_hash,
+            threshold,
+            confirmations,
+            data,
+            source,
+            is_deterministic,
+        })
     }
 
     /// Create a new finality proof.
@@ -1095,7 +1267,7 @@ impl ReplayId {
 /// **Layer:** L1
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
 /// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofBundle {
     /// Protocol version this bundle conforms to
     pub version: u32,

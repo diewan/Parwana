@@ -375,7 +375,7 @@ impl TransferBuilder {
                     let now = std::time::SystemTime::now();
                     let duration = std::time::Duration::from_secs(300); // 5 minutes
                     let lease = TransferLease::acquire(
-                        self.sanad_id,
+                        self.sanad_id.clone().into(),
                         runtime_id,
                         1,
                         now,
@@ -415,15 +415,14 @@ impl TransferBuilder {
         }
 
         #[cfg(feature = "runtime-coordinator")]
-        log::error!("TransferBuilder: Falling back to placeholder transfer ID - runtime-coordinator feature enabled but coordinator not available");
+        return Err(CsvError::CoordinatorNotAvailable(
+            "runtime-coordinator feature enabled but coordinator not available - ensure TransferManager is initialized with a valid TransferCoordinator".to_string()
+        ));
 
         #[cfg(not(feature = "runtime-coordinator"))]
-        log::error!("TransferBuilder: Falling back to placeholder transfer ID - runtime-coordinator feature not enabled");
-
-        // Fallback: return a placeholder transfer ID
-        // This path is taken when runtime-coordinator is not enabled or not available
-        let transfer_id = format!("0x{}", hex::encode(&csv_hash::Hash::new([0u8; 32])));
-        Ok(transfer_id)
+        return Err(CsvError::CoordinatorNotAvailable(
+            "runtime-coordinator feature not enabled - transfers require the runtime-coordinator feature flag".to_string()
+        ));
     }
 }
 

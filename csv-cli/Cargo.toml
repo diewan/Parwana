@@ -35,6 +35,7 @@ csv-admission = { path = "../csv-admission" }
 csv-observability = { path = "../csv-observability" }
 csv-content = { path = "../csv-content" }
 csv-wallet = { path = "../csv-wallet" }
+csv-bitcoin = { path = "../csv-adapters/csv-bitcoin" }
 
 # CLI framework and utilities (no chain-specific crypto)
 clap = { version = "4", features = ["derive"] }

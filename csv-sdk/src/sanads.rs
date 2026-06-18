@@ -170,8 +170,9 @@ impl SanadsManager {
         let sanad = Sanad::new(descriptor, commitment, owner, salt);
 
         // Persist the Sanad to the store
+        let sanad_id_hex = sanad.id.bytes.clone();
         let record = SanadRecord {
-            sanad_id: sanad.id.clone(),
+            sanad_id: sanad_id_hex.clone(),
             chain: chain.to_string(),
             owner: sanad.owner.owner.clone(),
             sanad_data: sanad.to_canonical_bytes().map_err(|e| {
@@ -194,8 +195,11 @@ impl SanadsManager {
         store.save_sanad(&record)?;
         drop(store); // Release lock before emitting event
 
+        let sanad_id = csv_hash::sanad::SanadId::from_bytes(
+            &hex::decode(&sanad_id_hex).unwrap_or_default()
+        );
         self.client.emit_event(crate::events::Event::SanadCreated {
-            sanad_id: sanad.id.clone(),
+            sanad_id,
             chain,
         });
 
@@ -216,7 +220,8 @@ impl SanadsManager {
             .lock()
             .map_err(|_| CsvError::StoreError("Failed to acquire store lock".to_string()))?;
 
-        match store.get_sanad(sanad_id)? {
+        let sanad_id_hex = hex::encode(sanad_id.as_bytes());
+        match store.get_sanad(&sanad_id_hex)? {
             Some(record) => {
                 // Deserialize the Sanad from stored data
                 let sanad = Sanad::from_canonical_bytes(&record.sanad_data).map_err(|e| {

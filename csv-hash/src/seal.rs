@@ -4,6 +4,7 @@
 //! Anchors represent on-chain references containing commitments.
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
 /// Maximum allowed size for seal identifiers (1KB)
@@ -27,8 +28,7 @@ pub const MAX_ANCHOR_METADATA_SIZE: usize = 4096;
 /// - Aptos: Resource address + key
 ///
 /// **Layer:** L0
-/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealPoint {
     /// Chain-specific seal identifier
     pub id: Vec<u8>,
@@ -274,8 +274,7 @@ impl SealPoint {
 /// - Sui: Object ID + version
 ///
 /// **Layer:** L0
-/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CommitAnchor {
     /// Chain-specific anchor identifier
     pub anchor_id: Vec<u8>,

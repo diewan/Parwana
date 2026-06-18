@@ -10,6 +10,7 @@
 //! between clients. All commitments must use the V2 format. This format
 //! will not change without a version bump and backward-compatible migration.
 
+use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
 use crate::Hash;
@@ -49,7 +50,7 @@ pub const COMMITMENT_VERSION: u8 = 2;
 /// `"commitment-protocol-id"`) using [`csv_tagged_hash`]. This prevents
 /// cross-field collisions and ensures that different commitment versions
 /// produce different hashes even if their fields are otherwise identical.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Commitment {
     /// Commitment format version (MUST be `COMMITMENT_VERSION`)
     pub version: u8,

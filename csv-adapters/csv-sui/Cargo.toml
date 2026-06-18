@@ -43,6 +43,7 @@ blake2 = "0.10"
 prost-types = "0.14"
 base64 = "0.22"
 secrecy = "0.8"
+reqwest = { version = "0.12", features = ["json"], optional = true }
 
 # Sui Rust SDK for gRPC-based RPC client
 # Updated to use latest API structure
@@ -58,7 +59,7 @@ futures = "0.3"
 [features]
 default = ["rpc"]
 # Enables real RPC client (gRPC via sui-rust-sdk)
-rpc = ["sui-rpc", "sui-sdk-types", "sui-transaction-builder"]
+rpc = ["sui-rpc", "sui-sdk-types", "sui-transaction-builder", "reqwest"]
 
 # Test configuration - enables rpc for tests
 test = ["rpc"]
@@ -66,4 +67,3 @@ test = ["rpc"]
 [dev-dependencies]
 rand = "0.8"
 tempfile = "3"
-reqwest = { version = "0.12", features = ["json"] }

@@ -1,7 +1,7 @@
 //! Test chain discovery with all 6 chain TOML configs
 
 use csv_runtime::chain_discovery::{ChainDiscovery, ChainConfig};
-use csv_adapter_core::AdapterRegistryImpl;
+use csv_runtime::adapter_registry::AdapterRegistryImpl;
 use std::sync::{Arc, RwLock};
 use std::path::Path;
 

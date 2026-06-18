@@ -103,13 +103,13 @@ async fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateMa
     // Create the sanad (which internally creates a seal via the runtime)
     match sanads.create(&descriptor, commitment, ownership_proof, &salt, core_chain) {
         Ok(sanad) => {
-            let seal_id = hex::encode(sanad.id.as_bytes());
+            let seal_id = sanad.id.bytes.clone();
             let value_sat = value.unwrap_or(100_000);
 
             output::kv("Chain", chain.as_ref());
             output::kv("Seal ID", &seal_id[..16.min(seal_id.len())]);
             output::kv("Value", &format!("{} satoshis", value_sat));
-            output::kv("Sanad ID", &hex::encode(sanad.id.as_bytes())[..16]);
+            output::kv("Sanad ID", &sanad.id.bytes[..16.min(sanad.id.bytes.len())]);
             output::success("Seal created successfully via runtime");
 
             // Record in state
@@ -231,7 +231,7 @@ async fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager)
             output::kv("Chain", chain.as_ref());
             output::kv_hash("Seal", &seal_bytes);
             output::kv("Status", status);
-            output::kv("Sanad ID", &hex::encode(sanad.id.as_bytes())[..16]);
+            output::kv("Sanad ID", &sanad.id.bytes[..16.min(sanad.id.bytes.len())]);
 
             if !local_consumed && sanad.nullifier.is_none() {
                 output::info("Seal is available for use");

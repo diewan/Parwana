@@ -740,13 +740,13 @@ impl ChainRuntime {
     async fn pre_fetch_seal_data(&self, sanad_id: &SanadId) -> Result<SealCheckData, CsvError> {
         // Clone the Arc to avoid capturing self in the spawned task
         let store_arc = Arc::clone(&self.client.store);
-        let sanad_id_clone: csv_hash::sanad::SanadId = sanad_id.clone();
+        let sanad_id_hex = hex::encode(sanad_id.as_bytes());
 
         // Run the store access in a blocking task since it uses std::sync::Mutex
         #[cfg(feature = "tokio")]
         let is_consumed = tokio::task::spawn_blocking(move || {
             let store = store_arc.lock().map_err(|e| e.to_string())?;
-            match store.get_sanad(&sanad_id_clone) {
+            match store.get_sanad(&sanad_id_hex) {
                 Ok(Some(record)) => Ok(record.consumed_at.is_some()),
                 Ok(None) => Ok(false), // Sanad not found = not consumed
                 Err(e) => Err(format!("Store error: {}", e)),
@@ -761,7 +761,7 @@ impl ChainRuntime {
             let store = store_arc
                 .lock()
                 .map_err(|e| CsvError::StoreError(e.to_string()))?;
-            match store.get_sanad(&sanad_id_clone) {
+            match store.get_sanad(&sanad_id_hex) {
                 Ok(Some(record)) => Ok(record.consumed_at.is_some()),
                 Ok(None) => Ok(false), // Sanad not found = not consumed
                 Err(e) => Err(CsvError::StoreError(e.to_string())),

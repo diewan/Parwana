@@ -13,7 +13,8 @@ use crate::config::Config;
 use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
-use csv_wallet::{address, bitcoin};
+use csv_wallet::address;
+use csv_bitcoin::{wallet_operations, WalletNetwork, BitcoinWalletOperations};
 
 /// Execute wallet command.
 pub async fn execute(
@@ -124,13 +125,13 @@ async fn cmd_scan(
         // Get RPC URL
         let rpc_url = config.chain(&chain)?.rpc_url.clone();
 
-        // Use csv-wallet for Bitcoin UTXO scanning (unified wallet abstraction)
+        // Use csv-bitcoin for Bitcoin UTXO scanning
         let network = match config.chain(&chain)?.network {
-            crate::config::Network::Main => bitcoin::Network::Main,
-            crate::config::Network::Test => bitcoin::Network::Test,
-            crate::config::Network::Dev => bitcoin::Network::Dev,
+            crate::config::Network::Main => WalletNetwork::Main,
+            crate::config::Network::Test => WalletNetwork::Test,
+            crate::config::Network::Dev => WalletNetwork::Dev,
         };
-        let wallet_utxos = bitcoin::scan_utxos(
+        let wallet_utxos = BitcoinWalletOperations::scan_utxos(
             &seed_array,
             network,
             account,
@@ -145,22 +146,29 @@ async fn cmd_scan(
         let mut total_value = 0u64;
 
         for utxo in wallet_utxos {
-            output::kv(&format!("  UTXO {}:{} ({} sats)", &utxo.txid[..16], utxo.vout, utxo.value), "");
+            let (txid, vout, value, script_pubkey) = utxo;
+            output::kv(&format!("  UTXO {}:{} ({} sats)", &txid[..16], vout, value), "");
 
             // Add UTXO to unified state for persistence with script_pubkey
+            let derivation_path = format!("m/86'/1'/{}'/0/0", account);
+            let address_index = derivation_path
+                .split('/')
+                .last()
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .unwrap_or(0);
             let utxo_record = csv_store::state::wallet::UtxoRecord {
-                txid: utxo.txid.clone(),
-                vout: utxo.vout,
-                value: utxo.value,
+                txid: txid.clone(),
+                vout,
+                value,
                 account,
-                index: 0, // TODO: track actual index from derivation_path
-                derivation_path: format!("m/86'/1'/{}'/0/0", account),
-                script_pubkey: utxo.scriptpubkey_hex,
+                index: address_index,
+                derivation_path,
+                script_pubkey,
             };
             state.storage.wallet.utxos.push(utxo_record);
 
             total_utxos += 1;
-            total_value += utxo.value;
+            total_value += value;
         }
 
         state.save()?;

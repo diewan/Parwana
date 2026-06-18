@@ -322,7 +322,7 @@ mod tests {
         journal
             .record(TransferPhaseEntry {
                 transfer_id: "test-1".to_string(),
-                replay_id: replay_id.clone(),
+                replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                 proof_hash,
                 proof_payload: None,
                 phase: TransferStage::Initialized,
@@ -336,7 +336,7 @@ mod tests {
         journal
             .record(TransferPhaseEntry {
                 transfer_id: "test-1".to_string(),
-                replay_id,
+                replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                 proof_hash,
                 proof_payload: None,
                 phase: TransferStage::Initialized,
@@ -361,7 +361,7 @@ mod tests {
         journal
             .record(TransferPhaseEntry {
                 transfer_id: "complete-1".to_string(),
-                replay_id: replay_id.clone(),
+                replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                 proof_hash,
                 proof_payload: None,
                 phase: TransferStage::Completed,
@@ -376,7 +376,7 @@ mod tests {
         journal
             .record(TransferPhaseEntry {
                 transfer_id: "incomplete-1".to_string(),
-                replay_id,
+                replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                 proof_hash,
                 proof_payload: None,
                 phase: TransferStage::LockConfirmed,
@@ -402,7 +402,7 @@ mod tests {
             journal
                 .record(TransferPhaseEntry {
                     transfer_id: format!("transfer-{}", i),
-                    replay_id: replay_id.clone(),
+                    replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                     proof_hash,
                     proof_payload: None,
                     phase: TransferStage::Initialized,
@@ -416,7 +416,7 @@ mod tests {
 
         let result = journal.record(TransferPhaseEntry {
             transfer_id: "transfer-over-capacity".to_string(),
-            replay_id,
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash,
             proof_payload: None,
             phase: TransferStage::Initialized,
@@ -442,7 +442,7 @@ mod tests {
             journal
                 .record(TransferPhaseEntry {
                     transfer_id: "recover-me".to_string(),
-                    replay_id,
+                    replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                     proof_hash: [8u8; 32],
                     proof_payload: Some(vec![1, 2, 3]),
                     phase: TransferStage::ProofValidated,

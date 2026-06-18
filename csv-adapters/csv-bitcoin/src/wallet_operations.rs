@@ -13,13 +13,11 @@ use csv_wallet::wallet_traits::WalletOperations;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[cfg(feature = "rpc")]
-use reqwest::Client as ReqwestClient;
-#[cfg(feature = "signet-rest")]
+#[cfg(any(feature = "rpc", feature = "signet-rest"))]
 use reqwest::Client as ReqwestClient;
 #[cfg(feature = "rpc")]
 use serde_json::Value;
-#[cfg(feature = "rpc")]
+#[cfg(any(feature = "rpc", feature = "signet-rest"))]
 use ed25519_dalek::{SigningKey, Signature, Signer};
 
 /// Network type for wallet operations

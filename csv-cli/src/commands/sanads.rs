@@ -6,6 +6,7 @@ use clap::Subcommand;
 use sha2::Digest;
 use std::str::FromStr;
 
+use csv_content::ContentTree;
 use csv_hash::ChainId;
 use csv_hash::Hash;
 
@@ -263,19 +264,14 @@ async fn cmd_create(
                     output::kv(&format!("Attachment {} hash", i + 1), &hex::encode(&hash_bytes));
                 }
                 
-                // Compute simple Merkle root (for now, just hash all hashes concatenated)
-                // In production, this should use the csv-content Merkle tree implementation
-                let mut hasher = sha2::Sha256::new();
-                for hash in &attachment_hashes {
-                    hasher.update(hash);
-                }
-                let root_bytes = hasher.finalize();
+                // Compute Merkle root using csv-content ContentTree
+                let leaf_data: Vec<Vec<u8>> = attachment_hashes.iter().map(|h| h.to_vec()).collect();
+                let tree = ContentTree::from_leaves(leaf_data);
+                let root = tree.root_hash;
                 
-                let root_hex = hex::encode(&root_bytes);
+                let root_hex = hex::encode(&root);
                 output::kv("Attachment root", &root_hex);
-                let mut root_array = [0u8; 32];
-                root_array.copy_from_slice(&root_bytes);
-                Some(Hash::new(root_array))
+                Some(root)
             } else {
                 None
             }
@@ -286,13 +282,21 @@ async fn cmd_create(
         // Parse disclosure policy if provided
         if let Some(ref disclosure_policy_path) = disclosure_policy {
             output::kv("Disclosure policy", disclosure_policy_path);
-            // For now, just log - full implementation would parse policy file
+            return Err(anyhow::anyhow!(
+                "Disclosure policy parsing is not yet implemented. Policy file: {}. \
+                 This feature requires Phase 5 policy engine integration.",
+                disclosure_policy_path
+            ));
         }
         
         // Parse proof policy if provided
         if let Some(ref proof_policy_path) = proof_policy {
             output::kv("Proof policy", proof_policy_path);
-            // For now, just log - full implementation would parse policy file
+            return Err(anyhow::anyhow!(
+                "Proof policy parsing is not yet implemented. Policy file: {}. \
+                 This feature requires Phase 5 policy engine integration.",
+                proof_policy_path
+            ));
         }
         
         (schema_hash_val, payload_hash_val, attachment_root_val)
@@ -843,9 +847,9 @@ async fn cmd_create(
     let salt: [u8; 16] = rand::random();
 
     // Create the sanad through the runtime
-    match client.sanads().create(&descriptor, commitment, ownership_proof, &salt, core_chain.clone()) {
+      match client.sanads().create(&descriptor, commitment, ownership_proof, &salt, core_chain.clone()) {
         Ok(sanad) => {
-            let sanad_id_hex = hex::encode(sanad.id.as_bytes());
+            let sanad_id_hex = sanad.id.bytes.clone();
 
             // Convert seal to base64 for storage
             let seal_ref_encoded = STANDARD.encode(seal.to_vec());
@@ -892,7 +896,7 @@ async fn cmd_create(
             // Register the sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups
             if chain.as_str() == "bitcoin" {
                 if let Some(ref anchor) = anchor {
-                    let _sanad_id_bytes = *sanad.id.as_bytes();
+                    let _sanad_id_bytes = hex::decode(&sanad.id.bytes).unwrap_or_default();
                     let anchor_txid_hex = hex::encode(&anchor.anchor_id);
                     let output_index = u32::from_le_bytes(
                         anchor.metadata[..4.min(anchor.metadata.len())].try_into().unwrap_or([0, 0, 0, 0])
@@ -913,7 +917,7 @@ async fn cmd_create(
             }
 
             output::kv("Chain", chain.as_ref());
-            output::kv_hash("Sanad ID", sanad.id.as_bytes());
+            output::kv("Sanad ID", &sanad.id.bytes);
             output::kv_hash("Commitment", commitment.as_bytes());
             output::kv(
                 "Value",
@@ -2189,7 +2193,10 @@ async fn query_aptos_sanad_state(
         updated_at: Some(tracked.created_at),
     });
 }
-/// Query lifecycle events for a Sanad (placeholder — full implementation requires chain adapter event indexing)
+/// Query lifecycle events for a Sanad
+///
+/// Returns creation event from local state. Chain-specific event queries
+/// require Phase 5: SanadStateReader trait with chain adapter event indexing.
 async fn query_sanad_lifecycle_events(
     _chain: &Chain,
     sanad_id_hex: &str,
@@ -2209,9 +2216,6 @@ async fn query_sanad_lifecycle_events(
             state_after: SanadLifecycleState::from_local_status(tracked.status),
         });
     }
-
-    // Chain-specific event queries would go here (Phase 5: SanadStateReader trait)
-    // For now, return the creation event from local state
 
     events
 }

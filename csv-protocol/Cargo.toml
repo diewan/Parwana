@@ -46,6 +46,7 @@ hex = "0.4"
 rand = "0.8"
 pqcrypto-dilithium = "0.5"
 pqcrypto-traits = "0.3"
+tokio = { version = "1", features = ["full"] }
 
 [[test]]
 name = "golden_vectors"

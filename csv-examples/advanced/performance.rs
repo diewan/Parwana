@@ -51,7 +51,8 @@ async fn main() -> Result<()> {
     let start = Instant::now();
 
     for _ in 0..iterations {
-        let _ = client.sanads().get(&test_sanad.id);
+        let sanad_id: csv_hash::SanadId = csv_protocol::wire::SanadIdWire::try_into(test_sanad.id.clone()).unwrap();
+        let _ = client.sanads().get(&sanad_id);
     }
 
     let duration = start.elapsed();
@@ -73,7 +74,7 @@ async fn main() -> Result<()> {
 
     let transfer_id = client
         .transfers()
-        .cross_chain(sanad.id.clone(), ChainId::new("ethereum"))
+        .cross_chain(csv_protocol::wire::SanadIdWire::try_into(sanad.id.clone()).unwrap(), ChainId::new("ethereum"))
         .to_address("0x1234567890abcdef".to_string())
         .execute()
         .await?;

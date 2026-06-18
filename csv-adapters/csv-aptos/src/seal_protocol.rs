@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use std::sync::Mutex;
 use tokio::runtime::Handle;
 
-#[cfg(all(feature = "rpc", not(test)))]
+#[cfg(feature = "rpc")]
 use crate::proofs::StateProofVerifier;
 
 use csv_hash::Hash;

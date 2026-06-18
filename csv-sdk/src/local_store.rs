@@ -1,13 +1,12 @@
 //! Client-local Sanad storage used by the lightweight SDK client.
 #![allow(missing_docs)]
 
-use csv_hash::sanad::SanadId;
 use serde::{Deserialize, Serialize};
 
 /// A persisted Sanad record owned by the SDK client.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SanadRecord {
-    pub sanad_id: SanadId,
+    pub sanad_id: String,
     pub chain: String,
     pub owner: Vec<u8>,
     pub sanad_data: Vec<u8>,
@@ -45,7 +44,7 @@ impl InMemorySealStore {
     pub fn save_sanad(&mut self, record: &SanadRecord) -> Result<(), StoreError> {
         if self.has_sanad(&record.sanad_id)? {
             return Err(StoreError::DuplicateRecord(format!(
-                "Sanad with ID {:?} already exists",
+                "Sanad with ID {} already exists",
                 record.sanad_id
             )));
         }
@@ -53,11 +52,11 @@ impl InMemorySealStore {
         Ok(())
     }
 
-    pub fn get_sanad(&self, sanad_id: &SanadId) -> Result<Option<SanadRecord>, StoreError> {
+    pub fn get_sanad(&self, sanad_id: &str) -> Result<Option<SanadRecord>, StoreError> {
         Ok(self
             .sanads
             .iter()
-            .find(|record| record.sanad_id.0.as_bytes() == sanad_id.0.as_bytes())
+            .find(|record| record.sanad_id == sanad_id)
             .cloned())
     }
 
@@ -72,17 +71,17 @@ impl InMemorySealStore {
 
     pub fn consume_sanad(
         &mut self,
-        sanad_id: &SanadId,
+        sanad_id: &str,
         consumed_at: u64,
     ) -> Result<(), StoreError> {
         let record = self
             .sanads
             .iter_mut()
-            .find(|record| record.sanad_id.0.as_bytes() == sanad_id.0.as_bytes())
-            .ok_or_else(|| StoreError::NotFound(format!("Sanad {:?} not found", sanad_id)))?;
+            .find(|record| record.sanad_id == sanad_id)
+            .ok_or_else(|| StoreError::NotFound(format!("Sanad {} not found", sanad_id)))?;
         if record.consumed {
             return Err(StoreError::DuplicateRecord(format!(
-                "Sanad {:?} already consumed",
+                "Sanad {} already consumed",
                 sanad_id
             )));
         }
@@ -100,11 +99,11 @@ impl InMemorySealStore {
             .collect())
     }
 
-    pub fn has_sanad(&self, sanad_id: &SanadId) -> Result<bool, StoreError> {
+    pub fn has_sanad(&self, sanad_id: &str) -> Result<bool, StoreError> {
         Ok(self
             .sanads
             .iter()
-            .any(|record| record.sanad_id.0.as_bytes() == sanad_id.0.as_bytes()))
+            .any(|record| record.sanad_id == sanad_id))
     }
 }
 

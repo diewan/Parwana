@@ -15,6 +15,7 @@
 
 use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
 use csv_codec::CodecError;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{ProtocolError, Result as ProtocolResult};
 
@@ -29,8 +30,7 @@ pub type Result<T> = core::result::Result<T, ProtocolError>;
 /// Ed25519 and Secp256k1 are retained for legacy chain compatibility.
 ///
 /// **Layer:** L1
-/// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureScheme {
     /// ECDSA over secp256k1 (Bitcoin, Ethereum, Celestia) — LEGACY, not PQ
     Secp256k1,

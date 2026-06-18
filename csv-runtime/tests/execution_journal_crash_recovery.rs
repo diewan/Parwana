@@ -26,7 +26,7 @@ async fn test_journal_records_all_phase_transitions() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::Initialized,
@@ -41,7 +41,7 @@ async fn test_journal_records_all_phase_transitions() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::Initialized,
@@ -56,7 +56,7 @@ async fn test_journal_records_all_phase_transitions() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::LockConfirmed,
@@ -71,7 +71,7 @@ async fn test_journal_records_all_phase_transitions() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::LockConfirmed,
@@ -103,7 +103,7 @@ async fn test_journal_identifies_incomplete_transfers() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::Initialized,
@@ -132,7 +132,7 @@ async fn test_journal_records_failed_phase() {
          journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::LockConfirmed,
@@ -168,7 +168,7 @@ async fn test_journal_latest_phase_for_completed_transfer() {
         journal
             .record(TransferPhaseEntry {
                 transfer_id: transfer_id.clone(),
-                replay_id: replay_id.clone(),
+                replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase,
@@ -199,7 +199,7 @@ async fn test_journal_multiple_transfers() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id_1.clone(),
-            replay_id: replay_id_1,
+            replay_id: csv_wire::HashWire::from(replay_id_1.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::Completed,
@@ -216,7 +216,7 @@ async fn test_journal_multiple_transfers() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id_2.clone(),
-            replay_id: replay_id_2,
+            replay_id: csv_wire::HashWire::from(replay_id_2.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::LockConfirmed,
@@ -233,7 +233,7 @@ async fn test_journal_multiple_transfers() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id_3.clone(),
-            replay_id: replay_id_3,
+            replay_id: csv_wire::HashWire::from(replay_id_3.0.clone()),
             proof_hash: [0u8; 32],
             proof_payload: None,
             phase: TransferStage::ProofBuilding,
@@ -263,7 +263,7 @@ async fn test_journal_capacity_enforcement() {
         journal
             .record(TransferPhaseEntry {
                 transfer_id: format!("transfer-{}", i),
-                replay_id: replay_id(i as u8),
+                replay_id: csv_wire::HashWire::from(replay_id(i as u8).0.clone()),
                 proof_hash: [0u8; 32],
                 proof_payload: None,
                 phase: TransferStage::Initialized,
@@ -278,7 +278,7 @@ async fn test_journal_capacity_enforcement() {
     // Try to add 11th entry - audit history must never be evicted.
     let result = journal.record(TransferPhaseEntry {
         transfer_id: "transfer-10".to_string(),
-        replay_id: replay_id(10),
+        replay_id: csv_wire::HashWire::from(replay_id(10).0.clone()),
         proof_hash: [0u8; 32],
         proof_payload: None,
         phase: TransferStage::Initialized,
@@ -310,7 +310,7 @@ async fn test_recovery_with_deterministic_proof_fixture() {
     journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
-            replay_id: replay_id.clone(),
+            replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
             proof_hash,
             proof_payload: Some(proof_payload.clone()),
             phase: TransferStage::ProofBuilding,

@@ -89,7 +89,8 @@ async fn main() -> Result<()> {
     let start = Instant::now();
 
     for _ in 0..num_queries {
-        let _ = client_arc.sanads().get(&test_sanad.id);
+        let sanad_id: csv_hash::SanadId = csv_protocol::wire::SanadIdWire::try_into(test_sanad.id.clone()).unwrap();
+        let _ = client_arc.sanads().get(&sanad_id);
     }
 
     let query_duration = start.elapsed();

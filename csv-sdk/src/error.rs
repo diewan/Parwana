@@ -137,6 +137,10 @@ pub enum CsvError {
     /// Signature capability is not available (wallet feature not enabled or derivation failed).
     #[error("Signature capability unavailable: {0}")]
     SignatureCapabilityUnavailable(String),
+
+    /// The runtime coordinator is not available (feature not enabled or not configured).
+    #[error("Runtime coordinator not available: {0}")]
+    CoordinatorNotAvailable(String),
 }
 
 impl CsvError {
@@ -182,6 +186,7 @@ impl HasErrorSuggestion for CsvError {
             Self::RuntimeError(_) => "CSV_RUNTIME_ERROR",
             Self::InvalidInput(_) => "CSV_INVALID_INPUT",
             Self::SignatureCapabilityUnavailable(_) => "CSV_SIGNATURE_CAPABILITY_UNAVAILABLE",
+            Self::CoordinatorNotAvailable(_) => "CSV_COORDINATOR_NOT_AVAILABLE",
         }
     }
 
@@ -336,6 +341,14 @@ impl HasErrorSuggestion for CsvError {
                     msg
                 )
             }
+            Self::CoordinatorNotAvailable(msg) => {
+                format!(
+                    "Runtime coordinator not available: {}. Transfer operations require the runtime-coordinator \
+                     feature enabled and a configured TransferCoordinator. Enable the feature and provide a \
+                     runtime instance, or use csv-runtime for production transfers.",
+                    msg
+                )
+            }
         }
     }
 
@@ -359,6 +372,10 @@ impl HasErrorSuggestion for CsvError {
             Self::CapabilityUnavailable { .. } => Some(FixAction::CheckState {
                 url: "https://docs.csv.dev/capabilities".to_string(),
                 what: "Check chain capability documentation".to_string(),
+            }),
+            Self::CoordinatorNotAvailable(_) => Some(FixAction::CheckState {
+                url: "https://docs.csv.dev/runtime-coordinator".to_string(),
+                what: "Enable runtime-coordinator feature and configure TransferCoordinator".to_string(),
             }),
             _ => None,
         }
