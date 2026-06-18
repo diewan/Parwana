@@ -1040,14 +1040,70 @@ impl SanadStateReader for SolanaBackend {
     }
     
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
-        // For Solana, seal state is derived from the SanadAccount state
-        // This is a simplified implementation
+        // Derive the SealAccount PDA from the seal_id
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid program ID: {}", e)))?;
+        
+        // Derive PDA using the seal_id as the seed
+        let seal_id_bytes = seal_id.as_bytes();
+        let (seal_pda, _) = Pubkey::find_program_address(&[b"seal", seal_id_bytes], &program_id);
+        
+        // Query the SealAccount PDA on Solana
+        let account = self.rpc()
+            .get_account(&seal_pda)
+            .map_err(|e| match e {
+                crate::error::SolanaError::AccountNotFound(_) => {
+                    ChainOpError::RpcError("Seal account not found".to_string())
+                }
+                _ => ChainOpError::RpcError(format!("Failed to get seal account: {}", e)),
+            })?;
+        
+        // Decode the seal account data
+        if account.data.len() < 8 {
+            return Err(ChainOpError::RpcError("Seal account data too short".to_string()));
+        }
+        
+        let data = &account.data[8..];
+        
+        // Parse owner (32 bytes)
+        if data.len() < 32 {
+            return Err(ChainOpError::RpcError("Seal account data too short for owner".to_string()));
+        }
+        let owner = Pubkey::new_from_array(data[..32].try_into().expect("slice length matches"));
+        
+        // Parse status (1 byte)
+        let state = if data.len() > 32 {
+            match data[32] {
+                0 => 0, // Created/Active
+                1 => 1, // Consumed
+                _ => 0,
+            }
+        } else {
+            0
+        };
+        
+        // Parse created_slot (8 bytes at offset 33)
+        let created_at = if data.len() > 40 {
+            i64::from_le_bytes(data[33..41].try_into().expect("slice length matches"))
+        } else {
+            0
+        };
+        
+        // Parse consumed_slot (8 bytes at offset 41)
+        let consumed_at = if data.len() > 48 {
+            let slot_bytes = data[41..49].try_into().expect("slice length matches");
+            let slot = u64::from_le_bytes(slot_bytes);
+            if slot > 0 { Some(slot as i64) } else { None }
+        } else {
+            None
+        };
+        
         Ok(CanonicalSealState {
-            state: 0, // Created
-            owner: "unknown".to_string(),
+            state,
+            owner: owner.to_string(),
             commitment: *seal_id,
-            created_at: 0,
-            consumed_at: None,
+            created_at,
+            consumed_at,
         })
     }
     

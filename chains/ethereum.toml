@@ -33,4 +33,4 @@ chain_role = "Settlement"
 
 [custom_settings]
 chain_id_numeric = 11155111
-contract_address = "0xaa724b64984cc1776eb37f1c4d4d7130a2660ac1"
+contract_address = "0x542c4c4ee03ec3fcb21f54613c038fab7e965216"

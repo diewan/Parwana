@@ -6,7 +6,7 @@ pragma solidity ^0.8.20;
 /// @dev Canonical naming: all functions use snake_case, matching Solana/Sui/Aptos
 contract CSVSeal {
     /// @notice Protocol version
-    uint256 public constant VERSION = 4; // Canonical naming version
+    uint256 public constant VERSION = 5; // Canonical naming version
 
     /// @notice Pinned ABI hash for contract freeze verification
     /// @dev This hash must match the deployed contract's ABI. Computed as keccak256(abi.encode(contractABI))
@@ -1099,12 +1099,14 @@ contract CSVSeal {
     function blake2b256(bytes memory data) internal view returns (bytes32) {
         (bool success, bytes memory result) = address(0x09).staticcall(data);
         require(success, "BLAKE2b256 precompile failed");
+        require(result.length == 32, "Invalid Blake2b256 result length");
         return bytes32(result);
     }
 
     function sha3_256(bytes memory data) internal view returns (bytes32) {
         (bool success, bytes memory result) = address(0x05).staticcall(data);
         require(success, "SHA3-256 precompile failed");
+        require(result.length == 32, "Invalid SHA3-256 result length");
         return bytes32(result);
     }
 

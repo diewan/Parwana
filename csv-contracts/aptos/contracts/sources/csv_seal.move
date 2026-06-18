@@ -280,7 +280,7 @@ module csv_seal::CSVSeal {
     /// Compute the canonical hash of a ProofLeafV1 using sha3_256 (Aptos's native hash)
     /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
     public fun hash_proof_leaf_v1(leaf: &ProofLeafV1): vector<u8> {
-        let mut data = vector::empty();
+        let data = vector::empty();
         // Domain separator for tagged hashing
         let domain = b"csv.proof.leaf.v1";
         vector::append(&mut data, domain);
@@ -560,7 +560,7 @@ module csv_seal::CSVSeal {
         if (!smart_table::contains(&collection.seals, nonce)) {
             return false
         };
-        !smart_table::borrow(&collection.seals, nonce).consumed
+        smart_table::borrow(&collection.seals, nonce).state != SANAD_STATE_CONSUMED
     }
 
     /// Check if a seal has been consumed.
@@ -573,7 +573,7 @@ module csv_seal::CSVSeal {
         if (!smart_table::contains(&collection.seals, nonce)) {
             return false
         };
-        smart_table::borrow(&collection.seals, nonce).consumed
+        smart_table::borrow(&collection.seals, nonce).state == SANAD_STATE_CONSUMED
     }
 
     /// Get the nonce of a seal at the given address.

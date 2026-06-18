@@ -1,0 +1,7 @@
+[NOTE] Dependencies on Sui, MoveStdlib, Bridge, DeepBook, and SuiSystem are automatically added, but this feature is disabled for your package because you have explicitly included dependencies on Sui. Consider removing these dependencies from `Move.toml`.
+INCLUDING DEPENDENCY MoveStdlib
+INCLUDING DEPENDENCY Sui
+BUILDING csv-seal
+Failed to publish the Move module(s), reason: Your package is already published. You have to manually remove the publication entry to publish again.
+ - If you are doing a regular publish, you can remove the entry for your environment from `Published.toml`.
+ - If you are doing a test publish, you can either specify a new file with `--pubfile-path`, or remove the entry from your existing ephemeral publication file.

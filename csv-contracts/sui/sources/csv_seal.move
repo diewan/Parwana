@@ -563,7 +563,7 @@ module csv_seal::csv_seal {
     /// Refund a locked Sanad after timeout (canonical name)
     public fun refund_sanad(
         seal: &mut Seal,
-        destination_owner_hash: vector<u8>,
+        _destination_owner_hash: vector<u8>,
         ctx: &mut tx_context::TxContext,
     ) {
         assert!(seal.state == SANAD_STATE_LOCKED, ESANAD_NOT_FOUND);
@@ -581,7 +581,7 @@ module csv_seal::csv_seal {
             sanad_id: seal.sanad_id,
             commitment: seal.commitment,
             claimant,
-            reason: bcs::to_bytes(&"timeout"),
+            reason: bcs::to_bytes(&b"timeout"),
             timestamp_ms,
         });
 

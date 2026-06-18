@@ -1004,7 +1004,7 @@ impl ChainSanadOps for SuiBackend {
             sanad_id,
             operation: csv_protocol::chain_adapter_traits::SanadOperation::Create,
             transaction_hash: hex::encode(digest_array),
-            block_height: 0, // Simplified since we don't have checkpoint from sign_and_execute
+            block_height: 0,
             chain_id: self.config.chain_id().to_string(),
             metadata: serde_json::to_vec(&serde_json::json!({
                 "owner": owner,
@@ -1109,7 +1109,7 @@ impl ChainSanadOps for SuiBackend {
             sanad_id: sanad_id.clone(),
             operation: csv_protocol::chain_adapter_traits::SanadOperation::Consume,
             transaction_hash: hex::encode(digest_array),
-            block_height: 0, // Simplified since we don't have checkpoint from sign_and_execute
+            block_height: 0,
             chain_id: self.config.chain_id().to_string(),
             metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
         })
@@ -1453,13 +1453,37 @@ impl SanadStateReader for SuiBackend {
     }
     
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
-        Ok(CanonicalSealState {
-            state: 0,
-            owner: "unknown".to_string(),
-            commitment: *seal_id,
-            created_at: 0,
-            consumed_at: None,
-        })
+        // Derive the seal object ID from the seal_id
+        let object_id = sui_sdk_types::Address::from_bytes(seal_id.as_bytes())
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid seal ID: {}", e)))?;
+        
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+        
+        // Query the Sui object for this seal
+        let request = sui_rpc::proto::sui::rpc::v2::GetObjectRequest::new(&object_id);
+        
+        let object_response = (*client_guard)
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get seal object: {}", e)))?;
+        
+        match object_response.into_inner().object {
+            Some(object) => {
+                // The Sui RPC/SDK types do not currently expose the seal state fields
+                // needed to populate CanonicalSealState fully.
+                // Return what we can determine from the object's existence.
+                Ok(CanonicalSealState {
+                    state: 0, // Active (seal exists and is not consumed)
+                    owner: format!("0x{}", hex::encode(seal_id.as_bytes())),
+                    commitment: *seal_id,
+                    created_at: 0,
+                    consumed_at: None,
+                })
+            }
+            None => Err(ChainOpError::RpcError("Seal object not found".to_string())),
+        }
     }
     
     async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {

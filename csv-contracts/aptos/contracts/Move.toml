@@ -1,11 +1,11 @@
 [package]
 name = "csv-seal"
-version = "0.1.2"
+version = "0.2.0"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "testnet" }
 
 [addresses]
-csv_seal = "9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50"
+csv_seal = "_"
 aptos_framework = "0x1"
-CSV = "9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50"
+CSV = "_"

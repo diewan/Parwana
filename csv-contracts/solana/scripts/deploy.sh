@@ -104,11 +104,10 @@ echo "Building Anchor program..."
 
 # Clean previous builds to ensure fresh compilation
 echo "Cleaning previous builds..."
-$ANCHOR build --clean 2>&1 | tail -5
 rm -rf target/deploy/ target/idl/
 
-# Build from scratch
-$ANCHOR build 2>&1 | tail -10
+# Build from scratch (use --ignore-keys to skip program ID check)
+$ANCHOR build --ignore-keys 2>&1 | tail -10
 echo ""
 
 # Setup Anchor wallet arguments

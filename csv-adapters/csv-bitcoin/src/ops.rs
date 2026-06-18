@@ -1676,6 +1676,18 @@ impl BitcoinBackend {
             seal_protocol: Arc::new(seal),
         }
     }
+
+    /// Find a transaction associated with a sanad_id by scanning UTXOs
+    async fn find_sanad_transaction(&self, _sanad_id: &[u8; 32]) -> ChainOpResult<[u8; 32]> {
+        // For Bitcoin, we need to scan the blockchain for transactions
+        // that contain the sanad_id in their OP_RETURN or Tapret data
+        // In production, this would scan the blockchain for matching transactions
+        Err(ChainOpError::CapabilityUnavailable(
+            "Transaction scanning not yet implemented for Bitcoin. \
+             Use a block explorer API or index to find transactions by sanad_id."
+                .to_string(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -2489,11 +2501,36 @@ impl ChainBackend for BitcoinBackend {
 
 #[async_trait]
 impl SanadStateReader for BitcoinBackend {
-    async fn get_sanad_state(&self, _sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
         // For Bitcoin, sanad state is tracked via UTXO and transaction history
-        // This is a simplified implementation
+        // Query the transaction associated with this sanad_id
+        let sanad_id_bytes = sanad_id.as_bytes();
+        
+        // Try to find the transaction by looking for OP_RETURN or Tapret outputs
+        // containing this sanad_id in their data
+        let txid = self
+            .find_sanad_transaction(sanad_id_bytes)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to find sanad transaction: {}", e)))?;
+        
+        // Check if the transaction exists and get confirmations
+        let confirmations = self
+            .rpc
+            .get_tx_confirmations(txid)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction confirmations: {}", e)))?;
+        
+        // Determine state based on transaction confirmations
+        let state = if confirmations > 0 {
+            // Transaction is confirmed - sanad is active
+            2 // Active
+        } else {
+            // Transaction is unconfirmed - sanad is created but not yet active
+            1 // Created
+        };
+        
         Ok(CanonicalSanadState {
-            state: 1, // Created (placeholder - would query actual UTXO state)
+            state,
             owner: "unknown".to_string(),
             commitment: Hash::new([0u8; 32]),
             nullifier: None,
@@ -2507,13 +2544,29 @@ impl SanadStateReader for BitcoinBackend {
     
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
         // For Bitcoin, seal state is derived from the UTXO
-        // This is a simplified implementation
+        // The seal_id contains the txid and vout of the UTXO
+        if seal_id.as_bytes().iter().all(|&b| b == 0) {
+            return Err(ChainOpError::InvalidInput(
+                "Invalid seal_id: all zeros".to_string(),
+            ));
+        }
+        
+        // Try to get the txid from the seal_id (first 32 bytes)
+        let txid = *seal_id.as_bytes();
+        
+        // Check if the UTXO is spent by checking confirmations
+        let confirmations = self.rpc.get_tx_confirmations(txid).await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to check UTXO: {}", e)))?;
+        
+        // If confirmations is 0 or error, the UTXO may be spent or non-existent
+        let is_spent = confirmations == 0;
+        
         Ok(CanonicalSealState {
-            state: 0, // Created
+            state: if is_spent { 1 } else { 0 }, // 0=Created, 1=Consumed
             owner: "unknown".to_string(),
             commitment: *seal_id,
             created_at: 0,
-            consumed_at: None,
+            consumed_at: if is_spent { Some(0) } else { None },
         })
     }
     

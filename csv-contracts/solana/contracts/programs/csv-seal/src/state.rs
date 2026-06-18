@@ -1,8 +1,6 @@
 //! State definitions for CSV Seal program
 
 use anchor_lang::prelude::*;
-use solana_program::keccak::hashv;
-use std::io::Cursor;
 
 /// Canonical ProofLeafV1 schema for cross-chain proof verification
 /// This struct matches the canonical schema defined in csv-protocol

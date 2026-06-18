@@ -101,8 +101,8 @@ MOVE_TOML_BACKUP="${TEMP_DIR}/Move.toml.backup"
 cp "${MOVE_TOML}" "${MOVE_TOML_BACKUP}"
 
 # Replace hardcoded addresses with placeholders that can be overridden
-sed -i "s/^csv_seal = \"0x[0-9a-f]*\"/csv_seal = \"_\"/" "${MOVE_TOML}"
-sed -i "s/^CSV = \"0x[0-9a-f]*\"/CSV = \"_\"/" "${MOVE_TOML}"
+sed -i "s/^csv_seal = \"[0-9a-f]*\"/csv_seal = \"_\"/" "${MOVE_TOML}"
+sed -i "s/^CSV = \"[0-9a-f]*\"/CSV = \"_\"/" "${MOVE_TOML}"
 
 # Build the package with the correct address
 echo "Building Move package..."

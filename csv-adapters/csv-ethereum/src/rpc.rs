@@ -110,6 +110,12 @@ pub trait EthereumRpc: Send + Sync {
         &self,
         tx_hash: [u8; 32],
     ) -> Result<Option<RpcTransaction>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get logs matching filter (eth_getLogs)
+    async fn eth_get_logs(
+        &self,
+        filter: serde_json::Value,
+    ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// Storage proof response (matches eth_getProof format)
@@ -497,6 +503,14 @@ impl EthereumRpc for MockEthereumRpc {
             .expect("transactions mutex poisoned")
             .get(&tx_hash)
             .cloned())
+    }
+
+    async fn eth_get_logs(
+        &self,
+        _filter: serde_json::Value,
+    ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
+        // Mock implementation returns empty logs
+        Ok(vec![])
     }
 }
 
@@ -1072,6 +1086,17 @@ impl EthereumRpc for QuorumEthereumRpc {
                 block_number,
             }
         }))
+    }
+
+    async fn eth_get_logs(
+        &self,
+        filter: serde_json::Value,
+    ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
+        let result = self
+            .client
+            .query_json::<Vec<serde_json::Value>>("eth_getLogs", &[filter])
+            .await?;
+        Ok(result)
     }
 }
 

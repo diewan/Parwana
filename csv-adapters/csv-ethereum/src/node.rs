@@ -645,6 +645,19 @@ mod real_rpc_impl {
             Ok(parse_hex_bytes(hex_str))
         }
 
+        async fn eth_get_logs(
+            &self,
+            filter: serde_json::Value,
+        ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
+            let result = self
+                .rpc_call("eth_getLogs", json!([filter]))
+                .await?;
+            result
+                .as_array()
+                .cloned()
+                .ok_or("Invalid eth_getLogs response".into())
+        }
+
         fn as_any(&self) -> Option<&dyn std::any::Any> {
             Some(self)
         }

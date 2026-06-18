@@ -6,7 +6,7 @@ resolution = false
 skip-lint = false
 
 [programs.devnet]
-csv_seal = "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj"
+csv_seal = "2f1J571bNoVDCnpojCtXUtrD8GAuz1h92UWkk9J5fJ82"
 
 [programs.localnet]
 csv_seal = "HzZ12WPJjDvZ8nCA9yjXgKAoJ8XV1386976Jwrm63RcD"
@@ -25,3 +25,5 @@ wallet = "~/.config/solana/id.json"
 initialize = "bash ../scripts/initialize.sh"
 lint = "cargo clippy"
 test = "cargo test"
+
+[hooks]

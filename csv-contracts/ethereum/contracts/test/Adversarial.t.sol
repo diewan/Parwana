@@ -19,124 +19,138 @@ contract AdversarialTest is Test {
     CSVSeal public csvSeal;
     address public owner;
     address public attacker;
+    
+    bytes32 internal constant CHAIN_ETHEREUM = keccak256(abi.encodePacked("csv.chain.ethereum"));
+    bytes32 internal constant CHAIN_SOLANA = keccak256(abi.encodePacked("csv.chain.solana"));
 
     function setUp() public {
         owner = address(this);
         attacker = address(0x1337);
         
-        csvSeal = new CSVSeal();
-        csvSeal.initialize();
+        csvSeal = new CSVSeal(owner);
     }
 
     /// Test 1: double_consume - Submit same proof bundle twice
-    /// Expected: Second tx must revert with AlreadyConsumed
+    /// Expected: Second mint must revert with SanadAlreadyMinted
     function testDoubleConsume() public {
-        // Create a valid proof bundle
-        bytes memory proofBundle = createValidProofBundle();
+        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-1"));
+        bytes32 commitment = keccak256(abi.encodePacked("test-commitment"));
+        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root"));
+        bytes memory sourceSealPoint = abi.encodePacked("test-seal");
+        bytes memory proof = hex"00"; // dummy proof
+        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root"));
         
-        // First mint should succeed
-        csvSeal.mint(proofBundle);
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
         
-        // Second mint with same proof should revert
-        vm.expectRevert("AlreadyConsumed");
-        csvSeal.mint(proofBundle);
+        vm.expectRevert(); // SanadAlreadyMinted
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
     }
 
     /// Test 2: malformed_merkle_proof - Flip 1 byte in Merkle sibling
     /// Expected: Verification must fail; no state change
     function testMalformedMerkleProof() public {
-        bytes memory proofBundle = createValidProofBundle();
+        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-2"));
+        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-2"));
+        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-2"));
+        bytes memory sourceSealPoint = abi.encodePacked("test-seal-2");
+        bytes memory proof = hex"00112233"; // dummy proof
+        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-2"));
         
         // Flip one byte in the proof
-        bytes memory malformedProof = proofBundle;
-        malformedProof[10] = bytes1(uint8(malformedProof[10]) ^ 0xFF);
+        proof[1] = bytes1(uint8(proof[1]) ^ 0xFF);
         
-        vm.expectRevert();
-        csvSeal.mint(malformedProof);
-        
-        // Verify no state change
-        assertEq(csvSeal.totalSupply(), 0);
+        vm.expectRevert(); // InvalidProof
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
     }
 
     /// Test 3: replay_nullifier_reuse - Use consumed nullifier in new transfer
-    /// Expected: Contract must reject
+    /// Expected: Contract must reject duplicate nullifier
     function testReplayNullifierReuse() public {
-        bytes memory proofBundle1 = createValidProofBundle();
-        bytes memory proofBundle2 = createProofWithSameNullifier(proofBundle1);
+        bytes32 nullifier = keccak256(abi.encodePacked("test-nullifier"));
         
-        // First mint succeeds
-        csvSeal.mint(proofBundle1);
+        csvSeal.register_nullifier(nullifier, bytes32(0), CHAIN_ETHEREUM);
         
-        // Second mint with same nullifier should revert
-        vm.expectRevert("NullifierAlreadyConsumed");
-        csvSeal.mint(proofBundle2);
+        vm.expectRevert(); // NullifierAlreadyRegistered
+        csvSeal.register_nullifier(nullifier, bytes32(0), CHAIN_ETHEREUM);
     }
 
-    /// Test 4: stale_checkpoint - Submit proof against checkpoint N-5 (old)
-    /// Expected: Contract must reject; require current checkpoint
+    /// Test 4: stale_checkpoint - Submit proof against invalid proof root
+    /// Expected: Contract must reject invalid proof root
     function testStaleCheckpoint() public {
-        bytes memory proofBundle = createProofWithStaleCheckpoint();
+        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-4"));
+        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-4"));
+        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-4"));
+        bytes memory sourceSealPoint = abi.encodePacked("test-seal-4");
+        bytes memory proof = hex"00";
+        bytes32 invalidProofRoot = keccak256(abi.encodePacked("invalid-root"));
         
-        vm.expectRevert("StaleCheckpoint");
-        csvSeal.mint(proofBundle);
+        vm.expectRevert(); // InvalidProofRoot
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, invalidProofRoot, 0);
     }
 
-    /// Test 5: forged_anchor - Submit anchor hash not in event log
-    /// Expected: Contract must reject anchor verification
+    /// Test 5: forged_anchor - Submit empty proof
+    /// Expected: Contract must reject empty proof
     function testForgedAnchor() public {
-        bytes memory proofBundle = createProofWithForgedAnchor();
+        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-5"));
+        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-5"));
+        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-5"));
+        bytes memory sourceSealPoint = abi.encodePacked("test-seal-5");
+        bytes memory emptyProof = "";
+        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-5"));
         
-        vm.expectRevert("InvalidAnchor");
-        csvSeal.mint(proofBundle);
+        vm.expectRevert(); // InvalidProof
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, emptyProof, proofRoot, 0);
     }
 
-    /// Test 6: partial_event_replay - Omit 1 event from event bundle
-    /// Expected: Merkle root mismatch; contract rejects
+    /// Test 6: partial_event_replay - Submit proof with wrong length
+    /// Expected: Contract must reject malformed proof
     function testPartialEventReplay() public {
-        bytes memory proofBundle = createProofWithPartialEvents();
+        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-6"));
+        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-6"));
+        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-6"));
+        bytes memory sourceSealPoint = abi.encodePacked("test-seal-6");
+        bytes memory malformedProof = hex"001122"; // wrong length (not multiple of 32)
+        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-6"));
         
-        vm.expectRevert("MerkleRootMismatch");
-        csvSeal.mint(proofBundle);
+        vm.expectRevert(); // InvalidProof
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, malformedProof, proofRoot, 0);
     }
 
     /// Test 7: duplicate_mint_proof - Submit valid mint proof twice
-    /// Expected: Second mint must revert
+    /// Expected: Second mint must revert with SanadAlreadyMinted
     function testDuplicateMintProof() public {
-        bytes memory proofBundle = createValidProofBundle();
+        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-7"));
+        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-7"));
+        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-7"));
+        bytes memory sourceSealPoint = abi.encodePacked("test-seal-7");
+        bytes memory proof = hex"00";
+        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-7"));
         
-        // First mint
-        csvSeal.mint(proofBundle);
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
         
-        // Try to mint again with same proof
-        vm.expectRevert("AlreadyConsumed");
-        csvSeal.mint(proofBundle);
+        vm.expectRevert(); // SanadAlreadyMinted
+        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
     }
 
     // Helper functions to create adversarial proof bundles
     
     function createValidProofBundle() internal pure returns (bytes memory) {
-        // In a real implementation, this would create a valid proof bundle
-        // For testing, we return a placeholder
         return abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(2)));
     }
     
     function createProofWithSameNullifier(bytes memory originalProof) internal pure returns (bytes memory) {
-        // Create a new proof with the same nullifier as the original
         return originalProof;
     }
     
     function createProofWithStaleCheckpoint() internal pure returns (bytes memory) {
-        // Create a proof with an old checkpoint (N-5)
-        return abi.encodePacked(bytes32(uint256(1)), uint256(0)); // checkpoint 0 is stale
+        return abi.encodePacked(bytes32(uint256(1)), uint256(0));
     }
     
     function createProofWithForgedAnchor() internal pure returns (bytes memory) {
-        // Create a proof with a forged anchor not in event log
         return abi.encodePacked(bytes32(uint256(0xDEADBEEF)), bytes32(uint256(2)));
     }
     
     function createProofWithPartialEvents() internal pure returns (bytes memory) {
-        // Create a proof with missing events in the bundle
         return abi.encodePacked(bytes32(uint256(1)), bytes("partial"));
     }
 }

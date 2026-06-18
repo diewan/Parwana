@@ -26,6 +26,7 @@ use csv_protocol::sanad::SanadId;
 use csv_protocol::seal::{CommitAnchor, SealPoint};
 use csv_protocol::seal_protocol::SealProtocol;
 use csv_protocol::signature::SignatureScheme;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::EthereumConfig;
@@ -179,6 +180,67 @@ impl EthereumBackend {
     #[allow(dead_code)]
     fn format_address(&self, addr: [u8; 20]) -> String {
         format!("0x{}", hex::encode(addr))
+    }
+
+    /// Encode a view function call with a bytes32 argument
+    fn _encode_view_call(&self, function_sig: &str, arg: &[u8; 32]) -> Vec<u8> {
+        // Compute function selector: first 4 bytes of keccak256(function_sig)
+        let selector = self._keccak256(function_sig.as_bytes());
+        let mut calldata = Vec::with_capacity(4 + 32);
+        calldata.extend_from_slice(&selector[..4]);
+        // Pad argument to 32 bytes
+        calldata.extend_from_slice(arg);
+        calldata
+    }
+
+    /// Query a uint256 storage slot via eth_call
+    async fn _query_uint256_slot(
+        &self,
+        contract_address: &[u8; 20],
+        function_sig: &str,
+        arg: &[u8; 32],
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        let call_data = self._encode_view_call(function_sig, arg);
+        let result = self
+            .rpc
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract_address)),
+                    "data": format!("0x{}", hex::encode(&call_data))
+                }),
+                "latest",
+            )
+            .await?;
+        // Parse uint256 result (32 bytes, big-endian) - take last 8 bytes for u64
+        if result.len() >= 32 {
+            let mut buf = [0u8; 8];
+            buf.copy_from_slice(&result[24..32]);
+            Ok(u64::from_be_bytes(buf))
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Decode event type from topic hash
+    fn _decode_event_type(&self, topic: &str) -> String {
+        // Map common event signatures to human-readable names
+        match topic {
+            t if t.contains("SanadCreated") || t.contains("sanadcreated") => "SanadCreated".to_string(),
+            t if t.contains("SanadConsumed") || t.contains("sanadconsumed") => "SanadConsumed".to_string(),
+            t if t.contains("SanadLocked") || t.contains("sanadlocked") => "SanadLocked".to_string(),
+            t if t.contains("SanadMinted") || t.contains("sanadminted") => "SanadMinted".to_string(),
+            t if t.contains("SanadRefunded") || t.contains("sanadrefunded") => "SanadRefunded".to_string(),
+            t if t.contains("SanadTransferred") || t.contains("sanadtransferred") => "SanadTransferred".to_string(),
+            _ => "Unknown".to_string(),
+        }
+    }
+
+    /// Simple keccak256 hash (for function selectors)
+    fn _keccak256(&self, data: &[u8]) -> [u8; 32] {
+        use sha3::Digest;
+        let mut hasher = sha3::Keccak256::new();
+        hasher.update(data);
+        hasher.finalize().into()
     }
 
     /// Parse transaction hash
@@ -1509,37 +1571,240 @@ impl ChainBackend for EthereumBackend {
 #[async_trait]
 impl SanadStateReader for EthereumBackend {
     async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
-        // For Ethereum, sanad state would be queried via contract view functions
-        // This is a simplified implementation - in production, call getSanadState on the contract
+        let contract_address = self.contract_address.ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Contract address not configured. Set contract_address in EthereumConfig."
+                    .to_string(),
+            )
+        })?;
+
+        let sanad_id_bytes = sanad_id.as_bytes();
+
+        // Query sanadStates[sanadId] - returns SanadState enum (uint8)
+        let state_result = self
+            .rpc
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract_address)),
+                    "data": format!("0x{}", hex::encode(self._encode_view_call("sanadStates(bytes32)", sanad_id_bytes)))
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadStates: {}", e)))?;
+
+        let state = if state_result.len() >= 32 {
+            state_result[31]
+        } else {
+            return Err(ChainOpError::RpcError(format!(
+                "Invalid sanadStates response length: {}",
+                state_result.len()
+            )));
+        };
+
+        // Query locks[sanadId] - returns (bytes32 commitment, uint256 timestamp, uint8 destinationChain, bool refunded)
+        let lock_result = self
+            .rpc
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract_address)),
+                    "data": format!("0x{}", hex::encode(self._encode_view_call("locks(bytes32)", sanad_id_bytes)))
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query locks: {}", e)))?;
+
+        let (commitment, owner, refunded) = if lock_result.len() >= 96 {
+            // commitment: bytes32 at offset 0 (bytes 0-31)
+            let mut commitment_bytes = [0u8; 32];
+            commitment_bytes.copy_from_slice(&lock_result[0..32]);
+            let commitment = Hash::new(commitment_bytes);
+
+            // owner: address at offset 32 (bytes 32-51, stored right-aligned in 32 bytes)
+            let owner_bytes = &lock_result[52..68]; // address is 20 bytes, right-aligned in 32-byte slot starting at byte 32
+            let mut owner_full = [0u8; 20];
+            owner_full.copy_from_slice(owner_bytes);
+            let owner = format!("0x{}", hex::encode(owner_full));
+
+            // destinationChain: uint8 at offset 64 (byte 95)
+            // refunded: bool at offset 96 (byte 127)
+            let refunded = lock_result[127] == 1;
+
+            (commitment, owner, refunded)
+        } else {
+            return Err(ChainOpError::RpcError(format!(
+                "Invalid locks response length: {}",
+                lock_result.len()
+            )));
+        };
+
+        // Query timestamps
+        let created_at = self
+            ._query_uint256_slot(&contract_address, "sanadCreatedAt(bytes32)", sanad_id_bytes)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadCreatedAt: {}", e)))?;
+
+        let locked_at = self
+            ._query_uint256_slot(&contract_address, "sanadLockedAt(bytes32)", sanad_id_bytes)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadLockedAt: {}", e)))?;
+
+        let consumed_at = self
+            ._query_uint256_slot(&contract_address, "sanadConsumedAt(bytes32)", sanad_id_bytes)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadConsumedAt: {}", e)))?;
+
+        let minted_at = self
+            ._query_uint256_slot(&contract_address, "sanadMintedAt(bytes32)", sanad_id_bytes)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadMintedAt: {}", e)))?;
+
+        let refunded_at = self
+            ._query_uint256_slot(&contract_address, "sanadRefundedAt(bytes32)", sanad_id_bytes)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadRefundedAt: {}", e)))?;
+
+        // Check if nullifier is registered
+        let nullifier = if state == 4 || state == 5 {
+            // Sanad is Consumed or Minted - check for nullifier
+            // The nullifier would have been registered during minting
+            // For now, we query the nullifiers mapping - but we need the nullifier hash
+            // Since we don't have it stored, we return None and rely on the state
+            None
+        } else {
+            None
+        };
+
         Ok(CanonicalSanadState {
-            state: 1, // Created (placeholder - would query actual contract state)
-            owner: "unknown".to_string(),
-            commitment: Hash::new([0u8; 32]),
-            nullifier: None,
-            created_at: 0,
-            locked_at: None,
-            consumed_at: None,
-            minted_at: None,
-            refunded_at: None,
+            state,
+            owner,
+            commitment,
+            nullifier,
+            created_at: created_at as i64,
+            locked_at: if locked_at > 0 { Some(locked_at as i64) } else { None },
+            consumed_at: if consumed_at > 0 { Some(consumed_at as i64) } else { None },
+            minted_at: if minted_at > 0 { Some(minted_at as i64) } else { None },
+            refunded_at: if refunded_at > 0 { Some(refunded_at as i64) } else { None },
         })
     }
-    
+
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
-        // For Ethereum, seal state is derived from the contract state
-        // This is a simplified implementation
+        let contract_address = self.contract_address.ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Contract address not configured. Set contract_address in EthereumConfig."
+                    .to_string(),
+            )
+        })?;
+
+        let seal_id_bytes = seal_id.as_bytes();
+
+        // Query usedSeals[sealId] - returns bool
+        let is_used = self
+            .rpc
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract_address)),
+                    "data": format!("0x{}", hex::encode(self._encode_view_call("usedSeals(bytes32)", seal_id_bytes)))
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query usedSeals: {}", e)))?;
+
+        let seal_used = if is_used.len() >= 32 {
+            is_used[31] == 1
+        } else {
+            return Err(ChainOpError::RpcError(format!(
+                "Invalid usedSeals response length: {}",
+                is_used.len()
+            )));
+        };
+
+        // Query sealOwners[sealId] - returns address
+        let owner_result = self
+            .rpc
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract_address)),
+                    "data": format!("0x{}", hex::encode(self._encode_view_call("sealOwners(bytes32)", seal_id_bytes)))
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sealOwners: {}", e)))?;
+
+        let owner = if owner_result.len() >= 52 {
+            // address is right-aligned in 32-byte slot
+            let owner_bytes = &owner_result[52..68];
+            let mut owner_full = [0u8; 20];
+            owner_full.copy_from_slice(owner_bytes);
+            format!("0x{}", hex::encode(owner_full))
+        } else {
+            "0x0000000000000000000000000000000000000000".to_string()
+        };
+
+        // Determine seal state: 0=Created, 1=Consumed, 2=Locked, 3=Minted, 4=Refunded
+        let state = if seal_used { 1 } else { 0 };
+
         Ok(CanonicalSealState {
-            state: 0, // Created
-            owner: "unknown".to_string(),
+            state,
+            owner,
             commitment: *seal_id,
             created_at: 0,
-            consumed_at: None,
+            consumed_at: if seal_used { Some(0) } else { None },
         })
     }
-    
-    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
-        // Query contract events for this sanad_id
-        // This would require querying the event logs from the contract
-        Ok(vec![])
+
+    async fn trace_sanad(&self, sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+        let contract_address = self.contract_address.ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Contract address not configured. Set contract_address in EthereumConfig."
+                    .to_string(),
+            )
+        })?;
+
+        let sanad_id_hex = hex::encode(sanad_id.as_bytes());
+
+        // Query contract events for this sanad_id using eth_getLogs
+        let logs = self
+            .rpc
+            .eth_get_logs(
+                serde_json::json!({
+                    "fromBlock": "0x0",
+                    "toBlock": "latest",
+                    "address": format!("0x{}", hex::encode(contract_address)),
+                    "topics": [
+                        null,
+                        format!("0x{}", sanad_id_hex)
+                    ]
+                }),
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query event logs: {}", e)))?;
+
+        let events: Vec<CanonicalLifecycleEvent> = logs
+            .iter()
+            .filter_map(|log| {
+                let topics = log.get("topics")?.as_array()?;
+                let event_type = if topics.len() > 0 {
+                    self._decode_event_type(topics[0].as_str()?)
+                } else {
+                    "Unknown".to_string()
+                };
+                let timestamp = log.get("timeStamp")?.as_str()?.parse::<i64>().ok()?;
+                let tx_hash = log.get("transactionHash")?.as_str()?.to_string();
+
+                Some(CanonicalLifecycleEvent {
+                    event_type,
+                    timestamp,
+                    tx_hash,
+                    data: HashMap::new(),
+                })
+            })
+            .collect();
+
+        Ok(events)
     }
 }
 

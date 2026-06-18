@@ -23,10 +23,11 @@ pub mod state;
 pub use constants::*;
 pub use errors::*;
 pub use events::*;
+#[allow(unused_imports)]
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj");
+declare_id!("2f1J571bNoVDCnpojCtXUtrD8GAuz1h92UWkk9J5fJ82");
 
 #[program]
 pub mod csv_seal {
@@ -567,7 +568,6 @@ pub fn verify_cross_chain_proof(
     proof_root: &[u8; 32],
     leaf_position: u64,
 ) -> Result<()> {
-    use solana_program::hash::hashv;
     use solana_program::keccak::hashv as keccak_hashv;
     use blake2::{Blake2b512, Digest as Blake2Digest};
     use sha3::{Sha3_256, Digest as Sha3Digest};
