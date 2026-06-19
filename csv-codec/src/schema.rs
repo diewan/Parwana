@@ -224,6 +224,29 @@ pub fn validate_payload_hash(hash: &[u8; 32]) -> Result<(), SchemaError> {
     Ok(())
 }
 
+/// Schema validation parameters
+#[derive(Debug, Clone)]
+pub struct SchemaValidationParams<'a> {
+    /// The schema identifier string
+    pub schema_id: &'a str,
+    /// The schema version (1-255)
+    pub version: u8,
+    /// The payload codec identifier
+    pub codec: u8,
+    /// The descriptor hash (must be non-zero)
+    pub descriptor_hash: &'a [u8; 32],
+    /// The payload hash (must be non-zero)
+    pub payload_hash: &'a [u8; 32],
+    /// Size of the payload in bytes
+    pub payload_size: u64,
+    /// Depth of the Merkle tree
+    pub merkle_depth: u64,
+    /// Number of leaves in the content tree
+    pub leaf_count: u64,
+    /// Number of attachments
+    pub attachment_count: u64,
+}
+
 /// Validate a complete schema configuration.
 ///
 /// This is the main entry point for schema validation. It checks:
@@ -232,44 +255,27 @@ pub fn validate_payload_hash(hash: &[u8; 32]) -> Result<(), SchemaError> {
 /// 3. Payload codec
 /// 4. Resource limits
 /// 5. Descriptor and payload hashes
-///
-/// ## Arguments
-///
-/// * `schema_id` — The schema identifier string
-/// * `version` — The schema version (1-255)
-/// * `codec` — The payload codec identifier
-/// * `descriptor_hash` — The descriptor hash (must be non-zero)
-/// * `payload_hash` — The payload hash (must be non-zero)
-/// * `payload_size` — Size of the payload in bytes
-/// * `merkle_depth` — Depth of the Merkle tree
-/// * `leaf_count` — Number of leaves in the content tree
-/// * `attachment_count` — Number of attachments
-pub fn validate_schema(
-    schema_id: &str,
-    version: u8,
-    codec: u8,
-    descriptor_hash: &[u8; 32],
-    payload_hash: &[u8; 32],
-    payload_size: u64,
-    merkle_depth: u64,
-    leaf_count: u64,
-    attachment_count: u64,
-) -> Result<(), SchemaError> {
+pub fn validate_schema(params: SchemaValidationParams) -> Result<(), SchemaError> {
     // Validate schema ID
-    validate_schema_id(schema_id)?;
+    validate_schema_id(params.schema_id)?;
 
     // Validate version
-    validate_schema_version(version)?;
+    validate_schema_version(params.version)?;
 
     // Validate codec
-    validate_payload_codec(codec)?;
+    validate_payload_codec(params.codec)?;
 
     // Validate hashes
-    validate_descriptor_hash(descriptor_hash)?;
-    validate_payload_hash(payload_hash)?;
+    validate_descriptor_hash(params.descriptor_hash)?;
+    validate_payload_hash(params.payload_hash)?;
 
     // Validate resource limits
-    validate_resource_limits(payload_size, merkle_depth, leaf_count, attachment_count)?;
+    validate_resource_limits(
+        params.payload_size,
+        params.merkle_depth,
+        params.leaf_count,
+        params.attachment_count,
+    )?;
 
     Ok(())
 }
@@ -388,17 +394,17 @@ mod tests {
         let descriptor_hash = [1u8; 32];
         let payload_hash = [2u8; 32];
 
-        assert!(validate_schema(
-            "csv.sanad.content.v1",
-            1,
-            1, // CBOR
-            &descriptor_hash,
-            &payload_hash,
-            1024,
-            10,
-            100,
-            5,
-        ).is_ok());
+        assert!(validate_schema(SchemaValidationParams {
+            schema_id: "csv.sanad.content.v1",
+            version: 1,
+            codec: 1, // CBOR
+            descriptor_hash: &descriptor_hash,
+            payload_hash: &payload_hash,
+            payload_size: 1024,
+            merkle_depth: 10,
+            leaf_count: 100,
+            attachment_count: 5,
+        }).is_ok());
     }
 
     #[test]
@@ -406,33 +412,33 @@ mod tests {
         let descriptor_hash = [1u8; 32];
         let payload_hash = [2u8; 32];
 
-        assert!(validate_schema(
-            "invalid",
-            1,
-            1,
-            &descriptor_hash,
-            &payload_hash,
-            1024,
-            10,
-            100,
-            5,
-        ).is_err());
+        assert!(validate_schema(SchemaValidationParams {
+            schema_id: "invalid",
+            version: 1,
+            codec: 1,
+            descriptor_hash: &descriptor_hash,
+            payload_hash: &payload_hash,
+            payload_size: 1024,
+            merkle_depth: 10,
+            leaf_count: 100,
+            attachment_count: 5,
+        }).is_err());
     }
 
     #[test]
     fn test_validate_schema_full_zero_hash() {
         let zero_hash = [0u8; 32];
 
-        assert!(validate_schema(
-            "csv.sanad.v1",
-            1,
-            1,
-            &zero_hash,
-            &zero_hash,
-            1024,
-            10,
-            100,
-            5,
-        ).is_err());
+        assert!(validate_schema(SchemaValidationParams {
+            schema_id: "csv.sanad.v1",
+            version: 1,
+            codec: 1,
+            descriptor_hash: &zero_hash,
+            payload_hash: &zero_hash,
+            payload_size: 1024,
+            merkle_depth: 10,
+            leaf_count: 100,
+            attachment_count: 5,
+        }).is_err());
     }
 }

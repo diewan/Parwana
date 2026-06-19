@@ -97,7 +97,9 @@ impl ManualEncoder {
         if bytes.len() < *pos + 4 {
             return Err(CodecError::DeserializationError("Insufficient bytes for u32".to_string()));
         }
-        let value = u32::from_le_bytes(bytes[*pos..*pos + 4].try_into().unwrap());
+        let mut arr = [0u8; 4];
+        arr.copy_from_slice(&bytes[*pos..*pos + 4]);
+        let value = u32::from_le_bytes(arr);
         *pos += 4;
         Ok(value)
     }
@@ -107,7 +109,9 @@ impl ManualEncoder {
         if bytes.len() < *pos + 8 {
             return Err(CodecError::DeserializationError("Insufficient bytes for u64".to_string()));
         }
-        let value = u64::from_le_bytes(bytes[*pos..*pos + 8].try_into().unwrap());
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[*pos..*pos + 8]);
+        let value = u64::from_le_bytes(arr);
         *pos += 8;
         Ok(value)
     }
@@ -183,7 +187,9 @@ impl MCEEncoder {
         if bytes.len() < *pos + 4 {
             return Err(CodecError::DeserializationError("Insufficient bytes for u32".to_string()));
         }
-        let value = u32::from_le_bytes(bytes[*pos..*pos + 4].try_into().unwrap());
+        let mut arr = [0u8; 4];
+        arr.copy_from_slice(&bytes[*pos..*pos + 4]);
+        let value = u32::from_le_bytes(arr);
         *pos += 4;
         Ok(value)
     }
@@ -193,7 +199,9 @@ impl MCEEncoder {
         if bytes.len() < *pos + 8 {
             return Err(CodecError::DeserializationError("Insufficient bytes for u64".to_string()));
         }
-        let value = u64::from_le_bytes(bytes[*pos..*pos + 8].try_into().unwrap());
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[*pos..*pos + 8]);
+        let value = u64::from_le_bytes(arr);
         *pos += 8;
         Ok(value)
     }

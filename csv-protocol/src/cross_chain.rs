@@ -254,14 +254,14 @@ impl CanonicalEncoding for TransferState {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
         }
     }
     
     fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -270,13 +270,13 @@ impl TransferState {
     /// Encode using MCE format (fixed-width byte concatenation)
     fn encode_mce(&self) -> csv_codec::CodecResult<Vec<u8>> {
         // MCE format for TransferState - same as manual binary for now
-        self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e))
+        self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError)
     }
     
     /// Decode using MCE format
     fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
         // MCE format for TransferState - same as manual binary for now
-        Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e))
+        Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError)
     }
 
     /// Serialize to canonical bytes (manual implementation for L1/L2 type)
@@ -435,7 +435,6 @@ impl TransferState {
                         return Err("Insufficient bytes for bundle_bytes".to_string());
                     }
                     let bundle = bytes[pos..pos + bundle_len].to_vec();
-                    pos += bundle_len;
                     Some(bundle)
                 } else {
                     None
@@ -463,7 +462,6 @@ impl TransferState {
                     }
                     let tx = String::from_utf8(bytes[pos..pos + dest_tx_len].to_vec())
                         .map_err(|e| format!("Invalid dest_tx string: {}", e))?;
-                    pos += dest_tx_len;
                     Some(tx)
                 } else {
                     None
@@ -532,7 +530,6 @@ impl TransferState {
                         bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3],
                         bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]
                     ]);
-                    pos += 8;
                     Some(v)
                 } else {
                     None
@@ -911,7 +908,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for transfer_id length".to_string());
         }
-        let transfer_id_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let transfer_id_len = u64::from_be_bytes(arr) as usize;
         pos += 8;
         if pos + transfer_id_len > bytes.len() {
             return Err("Insufficient bytes for transfer_id".to_string());
@@ -933,7 +932,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for source_chain length".to_string());
         }
-        let source_chain_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let source_chain_len = u64::from_be_bytes(arr) as usize;
         pos += 8;
         if pos + source_chain_len > bytes.len() {
             return Err("Insufficient bytes for source_chain".to_string());
@@ -947,7 +948,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for source_seal length".to_string());
         }
-        let source_seal_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let source_seal_len = u64::from_be_bytes(arr) as usize;
         pos += 8;
         if pos + source_seal_len > bytes.len() {
             return Err("Insufficient bytes for source_seal".to_string());
@@ -960,7 +963,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for destination_chain length".to_string());
         }
-        let destination_chain_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let destination_chain_len = u64::from_be_bytes(arr) as usize;
         pos += 8;
         if pos + destination_chain_len > bytes.len() {
             return Err("Insufficient bytes for destination_chain".to_string());
@@ -974,7 +979,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for destination_seal length".to_string());
         }
-        let destination_seal_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let destination_seal_len = u64::from_be_bytes(arr) as usize;
         pos += 8;
         if pos + destination_seal_len > bytes.len() {
             return Err("Insufficient bytes for destination_seal".to_string());
@@ -996,7 +1003,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for transition_id length".to_string());
         }
-        let transition_id_len = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let transition_id_len = u64::from_be_bytes(arr) as usize;
         pos += 8;
         if pos + transition_id_len > bytes.len() {
             return Err("Insufficient bytes for transition_id".to_string());
@@ -1017,7 +1026,9 @@ impl HashEntry {
         if pos + 8 > bytes.len() {
             return Err("Insufficient bytes for timestamp".to_string());
         }
-        let timestamp = u64::from_be_bytes(bytes[pos..pos+8].try_into().unwrap());
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes[pos..pos+8]);
+        let timestamp = u64::from_be_bytes(arr);
         
         Ok(HashEntry {
             transfer_id,

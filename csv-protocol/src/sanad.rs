@@ -399,7 +399,6 @@ impl CanonicalEncoding for OwnershipProof {
                 return Err(CodecError::DeserializationError("Insufficient bytes for scheme tag".to_string()));
             }
             let scheme_bytes = &bytes[pos..pos + 1];
-            pos += 1;
             Some(SignatureScheme::decode_mce(scheme_bytes)?)
         } else {
             None

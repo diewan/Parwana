@@ -120,7 +120,9 @@ impl DAGNode {
         };
 
         let bytecode_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -136,7 +138,9 @@ impl DAGNode {
         };
 
         let signatures_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -146,7 +150,9 @@ impl DAGNode {
         let mut signatures = Vec::with_capacity(signatures_len);
         for _ in 0..signatures_len {
             let sig_len = if bytes.len() >= pos + 4 {
-                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&bytes[pos..pos + 4]);
+                let len = u32::from_le_bytes(arr) as usize;
                 pos += 4;
                 len
             } else {
@@ -163,7 +169,9 @@ impl DAGNode {
         }
 
         let witnesses_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -173,7 +181,9 @@ impl DAGNode {
         let mut witnesses = Vec::with_capacity(witnesses_len);
         for _ in 0..witnesses_len {
             let witness_len = if bytes.len() >= pos + 4 {
-                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&bytes[pos..pos + 4]);
+                let len = u32::from_le_bytes(arr) as usize;
                 pos += 4;
                 len
             } else {
@@ -190,7 +200,9 @@ impl DAGNode {
         }
 
         let parents_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -264,7 +276,9 @@ impl DAGSegment {
         let mut pos = 0;
         
         let nodes_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -274,7 +288,9 @@ impl DAGSegment {
         let mut nodes = Vec::with_capacity(nodes_len);
         for _ in 0..nodes_len {
             let node_len = if bytes.len() >= pos + 4 {
-                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&bytes[pos..pos + 4]);
+                let len = u32::from_le_bytes(arr) as usize;
                 pos += 4;
                 len
             } else {
@@ -331,7 +347,9 @@ impl DAGSegment {
         let mut pos = 0;
 
         let nodes_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -341,7 +359,9 @@ impl DAGSegment {
         let mut nodes = Vec::with_capacity(nodes_len);
         for _ in 0..nodes_len {
             let node_len = if bytes.len() >= pos + 4 {
-                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&bytes[pos..pos + 4]);
+                let len = u32::from_le_bytes(arr) as usize;
                 pos += 4;
                 len
             } else {

@@ -79,7 +79,7 @@ impl CanonicalEncoding for DagSegment {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
             EncodingFormat::ManualBinary => {
-                Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e))
+                Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError)
             }
         }
     }
@@ -135,7 +135,9 @@ impl DagSegment {
         };
 
         let transition_data_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -155,7 +157,9 @@ impl DagSegment {
         };
 
         let proof_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -165,9 +169,7 @@ impl DagSegment {
         };
 
         let proof = if bytes.len() >= pos + proof_len {
-            let data = bytes[pos..pos + proof_len].to_vec();
-            pos += proof_len;
-            data
+            bytes[pos..pos + proof_len].to_vec()
         } else {
             return Err(csv_codec::CodecError::DeserializationError(
                 "Insufficient bytes for proof".to_string(),
@@ -217,7 +219,9 @@ impl DagSegment {
         };
 
         let transition_data_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -233,7 +237,9 @@ impl DagSegment {
         };
 
         let proof_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -241,9 +247,7 @@ impl DagSegment {
         };
 
         let proof = if bytes.len() >= pos + proof_len {
-            let data = bytes[pos..pos + proof_len].to_vec();
-            pos += proof_len;
-            data
+            bytes[pos..pos + proof_len].to_vec()
         } else {
             return Err("Insufficient bytes for proof".to_string());
         };

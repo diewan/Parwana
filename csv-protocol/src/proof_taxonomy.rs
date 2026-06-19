@@ -126,7 +126,7 @@ impl HashFunction {
                 hasher.update(bytes);
                 let first = hasher.finalize();
                 let mut hasher2 = Sha256::new();
-                hasher2.update(&first);
+                hasher2.update(first);
                 Hash(hasher2.finalize().into())
             }
             HashFunction::Sha3_256 => {
@@ -354,6 +354,7 @@ pub const MAX_SIGNATURES_TOTAL_SIZE: usize = 1024 * 1024;
 /// - Unified verification through the canonical verifier
 /// - Composable proof DAGs with typed nodes
 /// - Clear proof lifecycle management
+///
 /// **Layer:** L1
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
 /// **Serde:** Has derives for canonical_cbor compatibility, but MUST NOT use serde_json
@@ -536,9 +537,6 @@ pub struct InclusionProof {
     pub source: String,
 }
 
-fn default_hash() -> Hash {
-    Hash::zero()
-}
 
 impl Default for InclusionProof {
     fn default() -> Self {
@@ -560,14 +558,14 @@ impl CanonicalEncoding for InclusionProof {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
         }
     }
     
     fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -805,14 +803,14 @@ impl CanonicalEncoding for FinalityProof {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
         }
     }
     
     fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -1297,14 +1295,14 @@ impl CanonicalEncoding for ProofBundle {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
         }
     }
     
     fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -1371,7 +1369,9 @@ impl ProofBundle {
         let mut pos = 0;
         
         let version = if bytes.len() >= pos + 4 {
-            let v = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let v = u32::from_le_bytes(arr);
             pos += 4;
             v
         } else {
@@ -1379,7 +1379,9 @@ impl ProofBundle {
         };
         
         let dag_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1395,7 +1397,9 @@ impl ProofBundle {
         };
         
         let sigs_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1405,7 +1409,9 @@ impl ProofBundle {
         let mut signatures = Vec::with_capacity(sigs_len);
         for _ in 0..sigs_len {
             let sig_len = if bytes.len() >= pos + 4 {
-                let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&bytes[pos..pos + 4]);
+                let len = u32::from_le_bytes(arr) as usize;
                 pos += 4;
                 len
             } else {
@@ -1421,7 +1427,7 @@ impl ProofBundle {
             signatures.push(sig);
         }
         
-        let signature_scheme = if bytes.len() >= pos + 1 {
+        let signature_scheme = if bytes.len() > pos {
             let scheme = bytes[pos];
             pos += 1;
             match scheme {
@@ -1434,7 +1440,9 @@ impl ProofBundle {
         };
         
         let seal_id_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1449,12 +1457,14 @@ impl ProofBundle {
             return Err("Insufficient bytes for seal id data".to_string());
         };
         
-        let seal_nonce = if bytes.len() >= pos + 1 {
+        let seal_nonce = if bytes.len() > pos {
             let has_nonce = bytes[pos] == 1;
             pos += 1;
             if has_nonce {
                 if bytes.len() >= pos + 8 {
-                    let nonce = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+                    let mut arr = [0u8; 8];
+                    arr.copy_from_slice(&bytes[pos..pos + 8]);
+                    let nonce = u64::from_le_bytes(arr);
                     pos += 8;
                     Some(nonce)
                 } else {
@@ -1467,12 +1477,14 @@ impl ProofBundle {
             return Err("Insufficient bytes for seal nonce flag".to_string());
         };
         
-        let seal_version = if bytes.len() >= pos + 1 {
+        let seal_version = if bytes.len() > pos {
             let has_version = bytes[pos] == 1;
             pos += 1;
             if has_version {
                 if bytes.len() >= pos + 8 {
-                    let version = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+                    let mut arr = [0u8; 8];
+                    arr.copy_from_slice(&bytes[pos..pos + 8]);
+                    let version = u64::from_le_bytes(arr);
                     pos += 8;
                     Some(version)
                 } else {
@@ -1486,7 +1498,9 @@ impl ProofBundle {
         };
         
         let anchor_id_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1502,7 +1516,9 @@ impl ProofBundle {
         };
         
         let block_height = if bytes.len() >= pos + 8 {
-            let height = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&bytes[pos..pos + 8]);
+            let height = u64::from_le_bytes(arr);
             pos += 8;
             height
         } else {
@@ -1510,7 +1526,9 @@ impl ProofBundle {
         };
         
         let metadata_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1526,7 +1544,9 @@ impl ProofBundle {
         };
         
         let inc_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1542,7 +1562,9 @@ impl ProofBundle {
         };
         
         let fin_len = if bytes.len() >= pos + 4 {
-            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&bytes[pos..pos + 4]);
+            let len = u32::from_le_bytes(arr) as usize;
             pos += 4;
             len
         } else {
@@ -1551,7 +1573,6 @@ impl ProofBundle {
         
         let finality_proof = if bytes.len() >= pos + fin_len {
             let fin_bytes = &bytes[pos..pos + fin_len];
-            pos += fin_len;
             FinalityProof::from_canonical_bytes(fin_bytes).map_err(|e| format!("Failed to deserialize FinalityProof: {}", e))?
         } else {
             return Err("Insufficient bytes for finality proof data".to_string());

@@ -177,7 +177,7 @@ impl LeaseManager {
         }
 
         let mut lease = Lease::new(sanad_id.clone(), owner.clone(), ttl_secs);
-        let id_bytes = lease.id.0.as_bytes().map_err(|e| LeaseError::InvalidLeaseId(e))?;
+        let id_bytes = lease.id.0.as_bytes().map_err(LeaseError::InvalidLeaseId)?;
         lease.id = LeaseId(HashWire {
             bytes: hex::encode(Hash::new(csv_tagged_hash(
                 "csv.lease.id.v1",
