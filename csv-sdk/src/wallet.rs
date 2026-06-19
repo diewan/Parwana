@@ -17,6 +17,32 @@ use csv_hash::chain_id::ChainId;
 #[cfg(feature = "wallet")]
 use csv_keys::{Mnemonic, MnemonicType, restore_from_mnemonic as csv_restore_from_mnemonic};
 
+/// Error type for wallet operations
+#[derive(Debug, thiserror::Error)]
+pub enum WalletError {
+    /// Signature capability unavailable for the specified chain
+    #[error("Signature capability unavailable for chain '{0}'. Enable the 'wallet' feature and chain-specific features. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    UnsupportedChain(String),
+    /// Bitcoin signature capability unavailable
+    #[error("Bitcoin signature capability unavailable. Enable the 'wallet' and 'bitcoin' features.")]
+    BitcoinUnavailable,
+    /// Ethereum signature capability unavailable
+    #[error("Ethereum signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    EthereumUnavailable,
+    /// Solana signature capability unavailable
+    #[error("Solana signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    SolanaUnavailable,
+    /// Sui signature capability unavailable
+    #[error("Sui signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    SuiUnavailable,
+    /// Aptos signature capability unavailable
+    #[error("Aptos signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    AptosUnavailable,
+    /// Signature derivation failed
+    #[error("Signature derivation failed for chain '{0}'. Enable the 'wallet' feature and ensure valid BIP-44 seed. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    DerivationFailed(String),
+}
+
 /// A unified wallet supporting multi-chain HD derivation (BIP-44).
 ///
 /// The wallet manages cryptographic keys for all supported chains
@@ -201,25 +227,18 @@ impl Wallet {
     /// * `chain` — Which chain's key to sign with.
     /// * `message` — The message to sign (32 bytes).
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the wallet feature is not enabled or if key derivation fails.
+    /// Returns an error if the wallet feature is not enabled or if key derivation fails.
     /// For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.
-    pub fn sign(&self, chain: ChainId, message: &[u8; 32]) -> Vec<u8> {
+    pub fn sign(&self, chain: ChainId, message: &[u8; 32]) -> Result<Vec<u8>, WalletError> {
         match chain.as_str() {
             "bitcoin" => self.sign_bitcoin(message, 0, 0),
             "ethereum" => self.sign_ethereum(message, 0, 0),
             "solana" => self.sign_solana(message, 0, 0),
             "sui" => self.sign_sui(message, 0, 0),
             "aptos" => self.sign_aptos(message, 0, 0),
-            _ => {
-                panic!(
-                    "Signature capability unavailable for chain '{}'. \
-                     Enable the 'wallet' feature and chain-specific features. \
-                     For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.",
-                    chain
-                );
-            }
+            _ => Err(WalletError::UnsupportedChain(chain.as_str().to_string())),
         }
     }
 
@@ -517,44 +536,22 @@ impl Wallet {
 
     // -- Signing methods --
 
-    fn sign_bitcoin(&self, message: &[u8; 32], account: u32, index: u32) -> Vec<u8> {
+    fn sign_bitcoin(&self, _message: &[u8; 32], _account: u32, _index: u32) -> Result<Vec<u8>, WalletError> {
         // Bitcoin Taproot signing (Schnorr)
         #[cfg(all(feature = "bitcoin", feature = "wallet"))]
         {
-            use csv_bitcoin::wallet::{Bip86Path, SealWallet};
-            use bitcoin::sighash::{SighashCache, TapSighashType};
-            use bitcoin::taproot::TaprootSpendInfo;
-
-            let wallet = SealWallet::from_seed(&self.seed, bitcoin::Network::Regtest)
-                .map_err(|_| crate::CsvError::SignatureCapabilityUnavailable(
-                    "Failed to derive Bitcoin wallet from seed. Ensure wallet feature is enabled.".to_string()
-                ))
-                .expect("Signature capability check failed");
-
-            let path = Bip86Path::external(account, index);
-            let _key = wallet.derive_key(&path)
-                .map_err(|_| crate::CsvError::SignatureCapabilityUnavailable(
-                    "Failed to derive Bitcoin key. Check BIP-44 derivation path.".to_string()
-                ))
-                .expect("Signature capability check failed");
-
             // Full Schnorr signing requires transaction context (sighash, taproot spend info)
             // This method only signs raw messages - for transaction signing, use the chain adapter
-            panic!(
-                "Bitcoin transaction signing requires chain adapter with transaction context. \
-                 Use CsvClient::chain_runtime() for transaction operations."
-            );
+            Err(WalletError::DerivationFailed("bitcoin".to_string()))
         }
 
         #[cfg(not(all(feature = "bitcoin", feature = "wallet")))]
         {
-            panic!(
-                "Bitcoin signature capability unavailable. Enable the 'wallet' and 'bitcoin' features."
-            );
+            Err(WalletError::BitcoinUnavailable)
         }
     }
 
-    fn sign_ethereum(&self, message: &[u8; 32], account: u32, index: u32) -> Vec<u8> {
+    fn sign_ethereum(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Ethereum ECDSA signing
         #[cfg(feature = "wallet")]
         {
@@ -587,27 +584,21 @@ impl Wallet {
 
                     if let Ok(signing_key) = SigningKey::from_bytes(&priv_key_bytes) {
                         let signature: Signature = signing_key.sign(message);
-                        return signature.to_bytes().to_vec();
+                        return Ok(signature.to_bytes().to_vec());
                     }
                 }
             }
 
-            panic!(
-                "Ethereum signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::DerivationFailed("ethereum".to_string()))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            panic!(
-                "Ethereum signature capability unavailable. Enable the 'wallet' feature. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::EthereumUnavailable)
         }
     }
 
-    fn sign_solana(&self, message: &[u8; 32], account: u32, index: u32) -> Vec<u8> {
+    fn sign_solana(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Solana Ed25519 signing
         #[cfg(feature = "wallet")]
         {
@@ -639,27 +630,21 @@ impl Wallet {
 
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
                         let signing_key = SigningKey::from(&secret_key);
-                        return signing_key.sign(message).to_bytes().to_vec();
+                        return Ok(signing_key.sign(message).to_bytes().to_vec());
                     }
                 }
             }
 
-            panic!(
-                "Solana signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::DerivationFailed("solana".to_string()))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            panic!(
-                "Solana signature capability unavailable. Enable the 'wallet' feature. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::SolanaUnavailable)
         }
     }
 
-    fn sign_sui(&self, message: &[u8; 32], account: u32, index: u32) -> Vec<u8> {
+    fn sign_sui(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Sui Ed25519 signing
         #[cfg(feature = "wallet")]
         {
@@ -692,27 +677,21 @@ impl Wallet {
 
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
                         let signing_key = SigningKey::from(&secret_key);
-                        return signing_key.sign(message).to_bytes().to_vec();
+                        return Ok(signing_key.sign(message).to_bytes().to_vec());
                     }
                 }
             }
 
-            panic!(
-                "Sui signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::DerivationFailed("sui".to_string()))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            panic!(
-                "Sui signature capability unavailable. Enable the 'wallet' feature. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::SuiUnavailable)
         }
     }
 
-    fn sign_aptos(&self, message: &[u8; 32], account: u32, index: u32) -> Vec<u8> {
+    fn sign_aptos(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Aptos Ed25519 signing
         #[cfg(feature = "wallet")]
         {
@@ -745,23 +724,17 @@ impl Wallet {
 
                     if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
                         let signing_key = SigningKey::from(&secret_key);
-                        return signing_key.sign(message).to_bytes().to_vec();
+                        return Ok(signing_key.sign(message).to_bytes().to_vec());
                     }
                 }
             }
 
-            panic!(
-                "Aptos signature derivation failed. Enable the 'wallet' feature and ensure valid BIP-44 seed. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::DerivationFailed("aptos".to_string()))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            panic!(
-                "Aptos signature capability unavailable. Enable the 'wallet' feature. \
-                 For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
-            );
+            Err(WalletError::AptosUnavailable)
         }
     }
 }
@@ -809,7 +782,7 @@ impl WalletManager {
     }
 
     /// Sign a message with the appropriate key for the given chain.
-    pub fn sign(&self, chain: ChainId, message: &[u8; 32]) -> Vec<u8> {
+    pub fn sign(&self, chain: ChainId, message: &[u8; 32]) -> Result<Vec<u8>, WalletError> {
         self.wallet.sign(chain, message)
     }
 

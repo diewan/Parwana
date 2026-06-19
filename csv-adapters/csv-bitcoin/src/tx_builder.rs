@@ -19,9 +19,15 @@ use crate::wallet::{Bip86Path, SealWallet, WalletUtxo};
 /// Dust threshold for P2TR outputs (BIP-0448: 330 sat for P2TR)
 const P2TR_DUST_SAT: u64 = 330;
 
-/// Minimum UTXO value in satoshis (10,000 sats = 0.0001 BTC)
-/// Prevents using dust/tiny UTXOs that are economically unviable
-const MINIMUM_UTXO_SAT: u64 = 10_000;
+/// Minimum UTXO value in satoshis
+/// For mainnet: 10,000 sats (0.0001 BTC) - prevents using dust/tiny UTXOs
+/// For testnet/signet: 1,000 sats - lower threshold for testing
+fn minimum_utxo_sat(network: bitcoin::Network) -> u64 {
+    match network {
+        bitcoin::Network::Bitcoin => 10_000,
+        _ => 1_000, // Testnet, Signet, Regtest
+    }
+}
 
 /// RBF sequence number (BIP-0125)
 const RBF_SEQUENCE: Sequence = Sequence::ENABLE_RBF_NO_LOCKTIME;
@@ -100,11 +106,12 @@ impl CommitmentTxBuilder {
         commitment_hash: [u8; 32],
         change_path: Option<&Bip86Path>,
     ) -> Result<CommitmentTxResult, TxBuilderError> {
-        // Validate minimum UTXO size
-        if seal_utxo.amount_sat < MINIMUM_UTXO_SAT {
+        // Validate minimum UTXO size (network-specific)
+        let min_sat = minimum_utxo_sat(wallet.network());
+        if seal_utxo.amount_sat < min_sat {
             return Err(TxBuilderError::InsufficientFunds {
                 available: seal_utxo.amount_sat,
-                required: MINIMUM_UTXO_SAT,
+                required: min_sat,
             });
         }
 
@@ -115,20 +122,55 @@ impl CommitmentTxBuilder {
         // The commitment hash is what matters, not the monetary value
         let commitment_value_sat = self.dust_threshold_sat + 1000; // 1330 sats minimum
 
-        // Calculate fee (1 input, 1-2 outputs depending on change)
+        // Select UTXOs: start with seal_utxo, add more if needed
+        let mut input_utxos = vec![seal_utxo.clone()];
+        let mut total_input = seal_utxo.amount_sat;
+
+        // Calculate initial fee estimate (will be recalculated after selecting inputs)
         let output_count = if change_path.is_some() { 2 } else { 1 };
-        let fee = self.calculate_fee(1, output_count);
+        let mut fee = self.calculate_fee(input_utxos.len(), output_count);
 
-        // Calculate change amount
-        let change_amount = seal_utxo.amount_sat.saturating_sub(fee).saturating_sub(commitment_value_sat);
+        // Add more UTXOs if insufficient for commitment + fees
+        while total_input < fee + commitment_value_sat {
+            // Try to select additional UTXOs from wallet
+            let target_sat = (fee + commitment_value_sat).saturating_sub(total_input);
+            match wallet.select_utxos(target_sat) {
+                Ok(additional_utxos) => {
+                    for utxo in additional_utxos {
+                        // Skip if already selected
+                        if input_utxos.iter().any(|u| u.outpoint == utxo.outpoint) {
+                            continue;
+                        }
+                        input_utxos.push(utxo.clone());
+                        total_input += utxo.amount_sat;
+                    }
+                    // Recalculate fee with new input count
+                    fee = self.calculate_fee(input_utxos.len(), output_count);
+                }
+                Err(_) => {
+                    return Err(TxBuilderError::InsufficientFunds {
+                        available: total_input,
+                        required: fee + commitment_value_sat,
+                    });
+                }
+            }
 
-        // Validate we have enough for the commitment output
-        if seal_utxo.amount_sat < fee + commitment_value_sat {
+            // Break if we have enough or can't find more UTXOs
+            if total_input >= fee + commitment_value_sat || input_utxos.len() > 20 {
+                break;
+            }
+        }
+
+        // Final validation
+        if total_input < fee + commitment_value_sat {
             return Err(TxBuilderError::InsufficientFunds {
-                available: seal_utxo.amount_sat,
+                available: total_input,
                 required: fee + commitment_value_sat,
             });
         }
+
+        // Calculate change amount (from all inputs)
+        let change_amount = total_input.saturating_sub(fee).saturating_sub(commitment_value_sat);
 
         if !self.is_above_dust(commitment_value_sat) {
             return Err(TxBuilderError::OutputBelowDust {
@@ -161,13 +203,16 @@ impl CommitmentTxBuilder {
         // The UTXO was funded to seal_key.address (simple P2TR), so that's what we use for sighash.
         // The output goes to the tapret address, but the sighash commits to the INPUT prevout.
 
-        // Build unsigned transaction
-        let input = TxIn {
-            previous_output: seal_utxo.outpoint,
-            script_sig: ScriptBuf::new(),
-            sequence: RBF_SEQUENCE,
-            witness: bitcoin::Witness::new(),
-        };
+        // Build unsigned transaction with multiple inputs
+        let inputs: Vec<TxIn> = input_utxos
+            .iter()
+            .map(|utxo| TxIn {
+                previous_output: utxo.outpoint,
+                script_sig: ScriptBuf::new(),
+                sequence: RBF_SEQUENCE,
+                witness: bitcoin::Witness::new(),
+            })
+            .collect();
 
         // Build outputs: commitment output + optional change output
         let mut outputs = vec![TxOut {
@@ -198,43 +243,63 @@ impl CommitmentTxBuilder {
         let unsigned_tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version(2),
             lock_time: LockTime::ZERO,
-            input: vec![input],
+            input: inputs,
             output: outputs,
         };
 
-        // Sign via key-path spending: the input UTXO was sent to seal_key.address
-        // which is a simple P2TR with no script tree.
-        // Use the actual scriptPubKey from the UTXO if available, otherwise use derived address
-        let derived_script_pubkey = seal_key.address.script_pubkey();
-        let input_script_pubkey = seal_utxo.script_pubkey
-            .as_ref()
-            .unwrap_or(&derived_script_pubkey);
-
-        let sighash = bitcoin::sighash::SighashCache::new(&unsigned_tx)
-            .taproot_key_spend_signature_hash(
-                0,
-                &bitcoin::sighash::Prevouts::All(&[&bitcoin::TxOut {
-                    value: Amount::from_sat(seal_utxo.amount_sat),
-                    script_pubkey: input_script_pubkey.clone(),
-                }]),
-                bitcoin::sighash::TapSighashType::Default,
-            )
-            .map_err(|e| TxBuilderError::SighashFailed(format!("{}", e)))?;
-
-        let mut sighash_bytes = [0u8; 32];
-        sighash_bytes.copy_from_slice(sighash.as_ref());
-
-        // Sign with the tweaked keypair for key-path spending
-        let schnorr_sig = wallet
-            .sign_taproot_keypath(&seal_utxo.path, &sighash_bytes)
-            .map_err(|e| TxBuilderError::WalletError(e.to_string()))?;
-
-        // Build the witness: [64-byte Schnorr signature]
-        let witness = bitcoin::Witness::from_slice(&[schnorr_sig.as_slice()]);
-
-        // Create signed transaction
+        // Sign all inputs via key-path spending
+        // Each input UTXO was sent to its corresponding address (simple P2TR with no script tree)
         let mut signed_tx = unsigned_tx.clone();
-        signed_tx.input[0].witness = witness;
+
+        // Build prevouts array for sighash
+        let prevouts: Vec<bitcoin::TxOut> = input_utxos
+            .iter()
+            .map(|utxo| {
+                let key = wallet.derive_key(&utxo.path).unwrap_or_else(|_| seal_key.clone());
+                let derived_script_pubkey = key.address.script_pubkey();
+                let input_script_pubkey = utxo.script_pubkey
+                    .as_ref()
+                    .unwrap_or(&derived_script_pubkey);
+                bitcoin::TxOut {
+                    value: Amount::from_sat(utxo.amount_sat),
+                    script_pubkey: input_script_pubkey.clone(),
+                }
+            })
+            .collect();
+
+        let prevouts_ref: Vec<&bitcoin::TxOut> = prevouts.iter().collect();
+
+        for (i, utxo) in input_utxos.iter().enumerate() {
+            // Derive key for this input
+            let input_key = wallet.derive_key(&utxo.path)
+                .map_err(|e| TxBuilderError::WalletError(format!("Failed to derive key for input {}: {}", i, e)))?;
+
+            // Get scriptPubKey for this input
+            let derived_script_pubkey = input_key.address.script_pubkey();
+            let input_script_pubkey = utxo.script_pubkey
+                .as_ref()
+                .unwrap_or(&derived_script_pubkey);
+
+            let sighash = bitcoin::sighash::SighashCache::new(&signed_tx)
+                .taproot_key_spend_signature_hash(
+                    i,
+                    &bitcoin::sighash::Prevouts::All(&prevouts_ref[..]),
+                    bitcoin::sighash::TapSighashType::Default,
+                )
+                .map_err(|e| TxBuilderError::SighashFailed(format!("Failed to create sighash for input {}: {}", i, e)))?;
+
+            let mut sighash_bytes = [0u8; 32];
+            sighash_bytes.copy_from_slice(sighash.as_ref());
+
+            // Sign with the tweaked keypair for key-path spending
+            let schnorr_sig = wallet
+                .sign_taproot_keypath(&utxo.path, &sighash_bytes)
+                .map_err(|e| TxBuilderError::WalletError(format!("Failed to sign input {}: {}", i, e)))?;
+
+            // Build the witness: [64-byte Schnorr signature]
+            let witness = bitcoin::Witness::from_slice(&[schnorr_sig.as_slice()]);
+            signed_tx.input[i].witness = witness;
+        }
 
         let raw_tx = tx_serialize(&signed_tx);
         let txid = signed_tx.compute_txid();

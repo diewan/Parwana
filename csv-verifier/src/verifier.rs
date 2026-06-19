@@ -44,7 +44,7 @@
 
 use csv_protocol::error::ProtocolError;
 use csv_protocol::proof_taxonomy::ProofBundle;
-use csv_protocol::proof_taxonomy::{HashFunction, ProofLeafV1};
+use csv_protocol::proof_taxonomy::ProofLeafV1;
 use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};
 use csv_protocol::verification_levels::VerificationLevel;
 use serde::Serialize;

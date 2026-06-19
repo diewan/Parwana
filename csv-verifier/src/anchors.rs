@@ -181,12 +181,12 @@ impl EthereumAnchor {
         // For Ethereum PoS, verify quorum certificate is present
         match &finality.proof_system {
             ProofSystem::EthereumPos { finality_epochs } => {
-                if header.quorum_cert.is_none() {
-                    return Err(AnchorError::MissingQuorumCert);
-                }
+                let qc = match &header.quorum_cert {
+                    Some(qc) => qc,
+                    None => return Err(AnchorError::MissingQuorumCert),
+                };
 
                 // Verify quorum certificate has signature data
-                let qc = header.quorum_cert.as_ref().unwrap();
                 if qc.signature.is_empty() {
                     return Err(AnchorError::InvalidSignature(
                         "Quorum certificate signature is empty".to_string(),

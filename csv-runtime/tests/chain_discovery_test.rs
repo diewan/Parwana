@@ -22,7 +22,8 @@ fn test_load_all_chains_from_toml() {
     assert!(count >= 6, "Should load at least 6 chain configs, got {}", count);
 
     // Verify we can get configs for known chains
-    let configs = discovery.all_configs();
+    let configs = discovery.all_configs()
+        .expect("Should get all configs");
     println!("Loaded configs for chains:");
     for config in &configs {
         println!("  - {} ({})", config.id, config.name);

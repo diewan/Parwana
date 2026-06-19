@@ -72,6 +72,27 @@ pub trait WalletOperations: Send + Sync {
     /// # Returns
     /// Transaction status information as a key-value map
     async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>>;
+
+    /// Scan for UTXOs (chain-specific, returns empty vector if not supported)
+    ///
+    /// # Arguments
+    /// * `seed` - BIP-39 seed bytes
+    /// * `account` - BIP-44 account index
+    /// * `index` - Address index within the account
+    /// * `rpc_url` - RPC endpoint URL for chain queries
+    ///
+    /// # Returns
+    /// Vector of UTXOs as (txid, vout, value, scriptpubkey_hex) tuples
+    async fn scan_utxos(
+        &self,
+        seed: &[u8],
+        account: u32,
+        index: u32,
+        rpc_url: &str,
+    ) -> Result<Vec<(String, u32, u64, Option<String>)>> {
+        // Default implementation for chains that don't support UTXO scanning
+        Ok(Vec::new())
+    }
 }
 
 /// Wallet factory for dynamic chain discovery

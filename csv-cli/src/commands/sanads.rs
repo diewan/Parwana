@@ -12,7 +12,7 @@ use csv_hash::Hash;
 
 use crate::config::{Chain, Config, Network};
 use crate::output;
-use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager};
+use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager, UtxoRecord};
 
 use csv_store::state::{
     CanonicalLifecycleEvent, CanonicalSanadState, LifecycleEventType, SanadLifecycleState,
@@ -350,7 +350,7 @@ async fn cmd_create(
         // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
         let chain_id = csv_hash::ChainId::new("bitcoin");
         let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
-        let expected_address = if let Some(ops) = wallet_ops {
+        let expected_address = if let Some(ref ops) = wallet_ops {
             ops.derive_address(&seed_array, account, index)
                 .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
         } else {
@@ -362,20 +362,49 @@ async fn cmd_create(
         };
 
         output::kv("Expected Address", &expected_address);
-        output::error("Chain-specific UTXO scanning is not available in csv-cli.");
-        output::info("Use csv-sdk for chain-specific wallet operations:");
-        output::info("  ```rust");
-        output::info("  use csv_sdk::prelude::*;");
-        output::info("  ");
-        output::info("  let client = CsvClient::builder().with_chain(\"bitcoin\").build()?;");
-        output::info("  // Use client.wallet() for chain-specific operations");
-        output::info("  ```");
 
-        // Clear old UTXOs for this account
+        // Get RPC URL from config
+        let chain_cfg = config.chain(&chain)?;
+        let rpc_url = chain_cfg.rpc_url.clone();
+
+        // Scan for UTXOs using wallet operations
+        output::info("Scanning for UTXOs...");
+        let scanned_utxos = if let Some(ops) = wallet_ops {
+            ops.scan_utxos(&seed_array, account, index, &rpc_url)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
+        } else {
+            output::warning("Wallet operations not available, skipping UTXO scan");
+            Vec::new()
+        };
+
+        if scanned_utxos.is_empty() {
+            output::warning("No UTXOs found for this address. Make sure the address has been funded.");
+            output::info("You can fund the address using: ");
+            output::info(&format!("  {}", expected_address));
+        } else {
+            output::kv("Found UTXOs", &scanned_utxos.len().to_string());
+            for (i, utxo) in scanned_utxos.iter().enumerate() {
+                output::info(&format!("  UTXO {}: {}:{} ({} sats)", i + 1, &utxo.0[..16], utxo.1, utxo.2));
+            }
+        }
+
+        // Clear old UTXOs for this account and add new ones
         state.storage.wallet.utxos.retain(|u| u.account != account);
+        for utxo in &scanned_utxos {
+            state.storage.wallet.utxos.push(UtxoRecord {
+                txid: utxo.0.clone(),
+                vout: utxo.1,
+                value: utxo.2,
+                account,
+                index,
+                derivation_path: format!("m/86'/1'/{}'/0/{}", account, index),
+                script_pubkey: utxo.3.clone(),
+            });
+        }
         state.save()?;
 
-        return Ok(());
+        Some(scanned_utxos)
     } else {
         None
     };
@@ -399,7 +428,18 @@ async fn cmd_create(
     let chain_cfg = config.chain(&chain)?;
     eprintln!("CLI LAYER: RPC URL from config: {}", chain_cfg.rpc_url);
     eprintln!("CLI LAYER: Account: {}, Index: {}", account, index);
-      let sdk_chain_config = csv_sdk::config::ChainConfig {
+
+    // Derive seed for SDK config (Bitcoin needs 64-byte BIP-39 seed in config)
+    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
+    })?;
+    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+    let seed = mnemonic.to_seed(None);
+    let seed_array: [u8; 64] = *seed.as_bytes();
+    let seed_hex = hex::encode(seed_array);
+
+    let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_cfg.rpc_url.clone(),
             api_key: None,
@@ -409,7 +449,7 @@ async fn cmd_create(
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
-        seed: None,
+        seed: if chain.as_str() == "bitcoin" { Some(seed_hex.clone()) } else { None },
         contract_address: chain_cfg.contract_address.clone(),
         program_id: chain_cfg.program_id.clone(),
         account,
@@ -439,21 +479,11 @@ async fn cmd_create(
         .and_then(|c| Some(c.utxos.clone()))
         .unwrap_or_default();
 
-    // Derive private key from wallet mnemonic for chains that require signing
-    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-    })?;
-
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array = *seed.as_bytes();
-
     // For Bitcoin, use the raw 64-byte BIP-39 seed instead of the derived 32-byte private key
     // BitcoinSealProtocol::from_config requires 64-byte seed for HD wallet derivation
     let key_hex = if chain.as_str() == "bitcoin" {
         log::info!("BITCOIN: Using 64-byte BIP-39 seed for HD wallet derivation");
-        hex::encode(seed_array)
+        seed_hex.clone()
     } else {
         let (secret_key, key_source) =
             signing_key_for_chain(&chain, account, &seed_array, state)?;
@@ -509,7 +539,8 @@ async fn cmd_create(
     // Do NOT call init_adapters here as it has been removed from SDK
 
     // Validate UTXOs via runtime before proceeding (Bitcoin only)
-    if chain.as_str() == "bitcoin" {
+    // Skip validation if wallet operations weren't available during scan (adapter will fetch from RPC)
+    if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty() {
         output::info("Validating UTXOs via runtime...");
         let runtime = client.chain_runtime();
         
@@ -552,6 +583,8 @@ async fn cmd_create(
         }
         
         output::kv("Validated UTXOs", &validated_utxos.len().to_string());
+    } else if chain.as_str() == "bitcoin" {
+        output::info("Skipping CLI-level UTXO validation (Bitcoin adapter will fetch from RPC)");
     }
 
     // Generate a commitment for the sanad
@@ -576,7 +609,7 @@ async fn cmd_create(
 
     // For Bitcoin, use existing UTXOs instead of creating new seals
     // We need to track both the seal and the anchor since we publish during UTXO selection
-    let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" {
+    let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty() {
         output::info("BITCOIN: Selecting UTXO for seal creation");
 
         // Use pre-extracted SDK config utxos (display format from blockchain scan)
@@ -660,7 +693,11 @@ async fn cmd_create(
 
         (seal, successful_utxo_ref, Some(anchor))
     } else {
-        // For other chains, use the normal create_seal flow
+        // For other chains, or when Bitcoin UTXOs weren't scanned (adapter will fetch from RPC),
+        // use the normal create_seal flow
+        if chain.as_str() == "bitcoin" {
+            output::info("BITCOIN: Using adapter to create seal (will fetch UTXOs from RPC)");
+        }
         log::info!("{}: Creating seal via chain adapter", chain.as_str().to_uppercase());
         let seal = runtime
             .create_seal(core_chain.clone(), value)
@@ -676,12 +713,12 @@ async fn cmd_create(
         log::info!("{}: Skipping commitment publishing (--skip-publish flag set)", chain.as_str().to_uppercase());
         output::info(&format!("Skipping commitment publishing (--skip-publish flag set)"));
         None
-    } else if anchor.is_some() {
+    } else if let Some(ref anchor) = anchor {
         // Bitcoin: already published during UTXO selection
         log::info!("{}: Commitment already published during UTXO selection (anchor_id: 0x{})", 
-            chain.as_str().to_uppercase(), hex::encode(&anchor.as_ref().unwrap().anchor_id[..8]));
+            chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
         output::info(&format!("Commitment published to {}", chain.as_str()));
-        anchor
+        Some(anchor.clone())
     } else {
         // Other chains: publish now
         log::info!("{}: Publishing commitment under seal", chain.as_str().to_uppercase());

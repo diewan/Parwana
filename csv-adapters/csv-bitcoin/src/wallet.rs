@@ -29,9 +29,15 @@ const HARDENED: u32 = 0x8000_0000;
 /// BIP-86 purpose for single-key P2TR
 const BIP86_PURPOSE: u32 = 86;
 
-/// Minimum UTXO value in satoshis (10,000 sats = 0.0001 BTC)
-/// Prevents using dust/tiny UTXOs that are economically unviable
-const MINIMUM_UTXO_SAT: u64 = 10_000;
+/// Minimum UTXO value in satoshis
+/// For mainnet: 10,000 sats (0.0001 BTC) - prevents using dust/tiny UTXOs
+/// For testnet/signet: 1,000 sats - lower threshold for testing
+fn minimum_utxo_sat(network: Network) -> u64 {
+    match network {
+        Network::Bitcoin => 10_000,
+        _ => 1_000, // Testnet, Signet, Regtest
+    }
+}
 
 /// Coin type: 0 for mainnet, 1 for testnet/signet/regtest
 fn coin_type(network: &Network) -> u32 {
@@ -310,12 +316,13 @@ impl SealWallet {
     }
 
     pub fn select_utxos(&self, target_sat: u64) -> Result<Vec<WalletUtxo>, WalletError> {
+        let min_sat = minimum_utxo_sat(self.network);
         let mut available: Vec<_> = self
             .utxos
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .values()
-            .filter(|u| !u.reserved && u.amount_sat >= MINIMUM_UTXO_SAT)
+            .filter(|u| !u.reserved && u.amount_sat >= min_sat)
             .cloned()
             .collect();
         available.sort_by_key(|utxo| std::cmp::Reverse(utxo.amount_sat));

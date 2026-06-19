@@ -252,6 +252,16 @@ impl WalletOperations for BitcoinWalletOperations {
             Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
         }
     }
+
+    async fn scan_utxos(
+        &self,
+        seed: &[u8],
+        account: u32,
+        index: u32,
+        rpc_url: &str,
+    ) -> Result<Vec<(String, u32, u64, Option<String>)>, WalletError> {
+        Self::scan_utxos(seed, self.network, account, 20, rpc_url).await
+    }
 }
 
 /// Additional Bitcoin-specific wallet operations

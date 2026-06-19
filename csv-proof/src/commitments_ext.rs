@@ -287,7 +287,7 @@ impl CanonicalEncoding for ProofMetadata {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e)),
+            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
         }
     }
     
@@ -295,7 +295,7 @@ impl CanonicalEncoding for ProofMetadata {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
             EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
-                .map_err(|e| csv_codec::CodecError::DeserializationError(e)),
+                .map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -311,7 +311,7 @@ impl ProofMetadata {
     fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
         // MCE format for ProofMetadata - same as manual binary for now
         Self::from_canonical_bytes(bytes)
-            .map_err(|e| csv_codec::CodecError::DeserializationError(e))
+            .map_err(csv_codec::CodecError::DeserializationError)
     }
 
     /// Serialize to canonical bytes (manual implementation for L2 type)
@@ -429,7 +429,9 @@ impl ProofMetadata {
             if cursor + 8 > bytes.len() {
                 return Err("Insufficient bytes for proof_size_bytes value".to_string());
             }
-            let val = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&bytes[cursor..cursor + 8]);
+            let val = u64::from_le_bytes(arr);
             cursor += 8;
             Some(val)
         } else {
@@ -446,7 +448,9 @@ impl ProofMetadata {
             if cursor + 8 > bytes.len() {
                 return Err("Insufficient bytes for confirmations value".to_string());
             }
-            let val = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&bytes[cursor..cursor + 8]);
+            let val = u64::from_le_bytes(arr);
             cursor += 8;
             Some(val)
         } else {
@@ -457,7 +461,9 @@ impl ProofMetadata {
         if cursor + 4 > bytes.len() {
             return Err("Insufficient bytes for extra length".to_string());
         }
-        let extra_len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 4];
+        arr.copy_from_slice(&bytes[cursor..cursor + 4]);
+        let extra_len = u32::from_le_bytes(arr) as usize;
         cursor += 4;
         if cursor + extra_len > bytes.len() {
             return Err("Insufficient bytes for extra data".to_string());
@@ -750,7 +756,9 @@ impl EnhancedCommitment {
         if cursor + 4 > bytes.len() {
             return Err("Insufficient bytes for proof_metadata length".into());
         }
-        let metadata_len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        let mut arr = [0u8; 4];
+        arr.copy_from_slice(&bytes[cursor..cursor + 4]);
+        let metadata_len = u32::from_le_bytes(arr) as usize;
         cursor += 4;
 
         // proof_metadata: variable length
@@ -759,7 +767,6 @@ impl EnhancedCommitment {
         }
         let proof_metadata = ProofMetadata::from_canonical_bytes(&bytes[cursor..cursor + metadata_len])
             .map_err(|e| format!("Failed to deserialize proof_metadata: {}", e))?;
-        cursor += metadata_len;
 
         Ok(Self {
             version,

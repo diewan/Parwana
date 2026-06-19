@@ -67,7 +67,8 @@ impl ChainCommands {
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let discovery = ChainDiscovery::new(adapter_registry);
         
-        let chains = discovery.all_configs();
+        let chains = discovery.all_configs()
+            .map_err(|e| format!("Failed to get chain configs: {}", e))?;
         
         if chains.is_empty() {
             println!("No chains registered. Use 'csv chain-management discover' to load chains from configuration.");
@@ -89,7 +90,8 @@ impl ChainCommands {
         let discovery = ChainDiscovery::new(adapter_registry);
         
         let chain_id = ChainId::new(chain_id);
-        let config = discovery.get_config(&chain_id);
+        let config = discovery.get_config(&chain_id)
+            .map_err(|e| format!("Failed to get chain config: {}", e))?;
         
         if let Some(cfg) = config {
             println!("Chain Details:");

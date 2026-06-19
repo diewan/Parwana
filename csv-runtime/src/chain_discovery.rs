@@ -10,6 +10,20 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
+/// Error type for chain discovery operations
+#[derive(Debug, thiserror::Error)]
+pub enum ChainDiscoveryError {
+    /// RwLock was poisoned due to a panic while holding the lock
+    #[error("RwLock poisoned: {0}")]
+    LockPoisoned(String),
+    /// IO error during file operations
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// TOML parsing error
+    #[error("TOML parsing error: {0}")]
+    TomlParse(String),
+}
+
 /// Chain discovery service
 ///
 /// Discovers available chains from configuration and provides
@@ -66,9 +80,12 @@ impl ChainDiscovery {
     ///
     /// # Arguments
     /// * `config` - The chain configuration
-    pub fn register_chain(&self, config: ChainConfig) {
+    pub fn register_chain(&self, config: ChainConfig) -> Result<(), ChainDiscoveryError> {
         let chain_id = ChainId::new(&config.id);
-        self.chain_configs.write().unwrap().insert(chain_id, config);
+        let mut configs = self.chain_configs.write()
+            .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
+        configs.insert(chain_id, config);
+        Ok(())
     }
 
     /// Get configuration for a chain
@@ -78,8 +95,10 @@ impl ChainDiscovery {
     ///
     /// # Returns
     /// The chain configuration if found
-    pub fn get_config(&self, chain_id: &ChainId) -> Option<ChainConfig> {
-        self.chain_configs.read().unwrap().get(chain_id).cloned()
+    pub fn get_config(&self, chain_id: &ChainId) -> Result<Option<ChainConfig>, ChainDiscoveryError> {
+        let configs = self.chain_configs.read()
+            .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
+        Ok(configs.get(chain_id).cloned())
     }
 
     /// Get the primary RPC URL for a chain
@@ -89,34 +108,34 @@ impl ChainDiscovery {
     ///
     /// # Returns
     /// The first RPC URL if available
-    pub fn get_rpc_url(&self, chain_id: &ChainId) -> Option<String> {
-        self.chain_configs
-            .read()
-            .unwrap()
-            .get(chain_id)
-            .and_then(|config| config.rpc_urls.first().cloned())
+    pub fn get_rpc_url(&self, chain_id: &ChainId) -> Result<Option<String>, ChainDiscoveryError> {
+        let configs = self.chain_configs.read()
+            .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
+        Ok(configs.get(chain_id)
+            .and_then(|config| config.rpc_urls.first().cloned()))
     }
 
     /// Get all available chain configurations
     ///
     /// # Returns
     /// Iterator over all chain configurations
-    pub fn all_configs(&self) -> Vec<ChainConfig> {
-        self.chain_configs.read().unwrap().values().cloned().collect()
+    pub fn all_configs(&self) -> Result<Vec<ChainConfig>, ChainDiscoveryError> {
+        let configs = self.chain_configs.read()
+            .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
+        Ok(configs.values().cloned().collect())
     }
 
     /// Get all enabled chain IDs
     ///
     /// # Returns
     /// Iterator over enabled chain IDs
-    pub fn enabled_chains(&self) -> Vec<ChainId> {
-        self.chain_configs
-            .read()
-            .unwrap()
-            .iter()
+    pub fn enabled_chains(&self) -> Result<Vec<ChainId>, ChainDiscoveryError> {
+        let configs = self.chain_configs.read()
+            .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
+        Ok(configs.iter()
             .filter(|(_, config)| config.enabled)
             .map(|(chain_id, _)| chain_id.clone())
-            .collect()
+            .collect())
     }
 
     /// Check if a chain is available and enabled
@@ -126,13 +145,12 @@ impl ChainDiscovery {
     ///
     /// # Returns
     /// True if the chain is available and enabled
-    pub fn is_chain_enabled(&self, chain_id: &ChainId) -> bool {
-        self.chain_configs
-            .read()
-            .unwrap()
-            .get(chain_id)
+    pub fn is_chain_enabled(&self, chain_id: &ChainId) -> Result<bool, ChainDiscoveryError> {
+        let configs = self.chain_configs.read()
+            .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
+        Ok(configs.get(chain_id)
             .map(|config| config.enabled)
-            .unwrap_or(false)
+            .unwrap_or(false))
     }
 
     /// Load chain configurations from a directory of TOML files
@@ -142,14 +160,14 @@ impl ChainDiscovery {
     ///
     /// # Returns
     /// Number of chains loaded
-    pub fn load_from_directory(&self, directory: &Path) -> Result<usize, std::io::Error> {
+    pub fn load_from_directory(&self, directory: &Path) -> Result<usize, ChainDiscoveryError> {
         let chains_dir = directory;
         
         if !chains_dir.exists() {
-            return Err(std::io::Error::new(
+            return Err(ChainDiscoveryError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("Chains directory '{}' does not exist", chains_dir.display()),
-            ));
+            )));
         }
 
         let entries = std::fs::read_dir(chains_dir)?;
@@ -163,7 +181,7 @@ impl ChainDiscovery {
                 // Parse TOML file and register chain
                 match self.load_from_toml(&path) {
                     Ok(config) => {
-                        self.register_chain(config);
+                        self.register_chain(config)?;
                         count += 1;
                     }
                     Err(e) => {
@@ -183,14 +201,15 @@ impl ChainDiscovery {
     ///
     /// # Returns
     /// Parsed chain configuration
-    pub fn load_from_toml(&self, path: &Path) -> Result<ChainConfig, Box<dyn std::error::Error>> {
+    pub fn load_from_toml(&self, path: &Path) -> Result<ChainConfig, ChainDiscoveryError> {
         let content = std::fs::read_to_string(path)?;
-        let value: toml::Value = toml::from_str(&content)?;
+        let value: toml::Value = toml::from_str(&content)
+            .map_err(|e| ChainDiscoveryError::TomlParse(e.to_string()))?;
 
         // Extract fields manually to avoid complex nested structure deserialization
         let id = value.get("chain_id")
             .and_then(|v| v.as_str())
-            .ok_or("Missing chain_id")?
+            .ok_or_else(|| ChainDiscoveryError::TomlParse("Missing chain_id".to_string()))?
             .to_string();
 
         let name = value.get("chain_name")

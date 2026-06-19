@@ -869,9 +869,42 @@ impl SealProtocol for BitcoinSealProtocol {
         &self,
         value: Option<u64>,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
-        let value_sat = value.unwrap_or(100_000);
-        let (seal_ref, _path) = self.derive_next_seal(value_sat)?;
-        Ok(seal_ref)
+        // Try to use an existing UTXO from the wallet if available
+        // First try to select UTXOs with sufficient value for transaction fees (minimum 10000 sat)
+        let target_sat = value.unwrap_or(10_000).max(10_000);
+        match self.wallet.select_utxos(target_sat) {
+            Ok(selected_utxos) => {
+                // Pick the largest UTXO from the selected set to use as the seal
+                let utxo = selected_utxos
+                    .into_iter()
+                    .max_by_key(|u| u.amount_sat)
+                    .ok_or_else(|| ProtocolError::Generic("No UTXOs selected".to_string()))?;
+                let outpoint = bitcoin::OutPoint {
+                    txid: utxo.outpoint.txid,
+                    vout: utxo.outpoint.vout,
+                };
+                let (seal_ref, _path) = self.fund_seal(outpoint)?;
+                Ok(seal_ref)
+            }
+            Err(_) => {
+                // If filtered selection fails (e.g., UTXOs below minimum threshold),
+                // try to use any available UTXO from the wallet
+                let utxos = self.wallet.list_utxos();
+                if let Some(utxo) = utxos.first() {
+                    let outpoint = bitcoin::OutPoint {
+                        txid: utxo.outpoint.txid,
+                        vout: utxo.outpoint.vout,
+                    };
+                    let (seal_ref, _path) = self.fund_seal(outpoint)?;
+                    return Ok(seal_ref);
+                }
+
+                // Fall back to deriving a new seal if no UTXOs available at all
+                let value_sat = value.unwrap_or(100_000);
+                let (seal_ref, _path) = self.derive_next_seal(value_sat)?;
+                Ok(seal_ref)
+            }
+        }
     }
 
     fn hash_commitment(
