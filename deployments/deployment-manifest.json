@@ -2,20 +2,20 @@
   "manifest_version": "2.0.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-06-06T07:18:00.000000Z",
+  "updated_at": "2026-06-19T19:09:03.152191+00:00Z",
   "deployments": {
     "ethereum": {
       "network": "sepolia",
       "chain_id": 11155111,
-      "deployment_block": "0",
-      "deployment_timestamp": "2026-06-08T18:00:00Z",
+      "deployment_block": "11084747",
+      "deployment_timestamp": "2026-06-18T17:21:00Z",
       "verified": false,
       "contracts": [
         {
           "name": "CSVSeal",
-          "address": "0xaa724b64984cc1776eb37f1c4d4d7130a2660ac1",
-          "deployment_tx": "0x75ba9d7ff8593158cb7a7e43600c15505fb570f5ca21af771b58bdcdfd14b142",
-          "block_number": "11018494",
+          "address": "0x542c4c4ee03ec3fcb21f54613c038fab7e965216",
+          "deployment_tx": "0x598a6b12aa7cfbbc81e3d6cb9a5fc0d3548c349772ab4c07fd76eed6c4681ae2",
+          "block_number": "11084747",
           "bytecode_hash": "7227e552d193c02a3ca5f1c57bbd4e7fc5fb77fdddd3e054efd9c1ad54efa0ab",
           "abi_hash": "74bac11175cda72653bd80bce55b616c2d81c9fc8e9da52668235235d3f80f41",
           "verified": true,
@@ -27,19 +27,19 @@
       ]
     },
     "solana": {
-      "network": "devnet",
-      "program_id": "HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m",
+      "network": "localnet",
+      "program_id": "2nVbT9d33j1ySDdHHmNKUgthfV7RbyQDTqRua8192Tn6",
       "verified": true
     },
     "sui": {
       "network": "testnet",
-      "package_id": "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21",
+      "package_id": "0x8b07f8ec1cfb18f52a69328b64d8dd0e781b46ca87dea9d8e44c858fb2d8adfb",
       "verified": true
     },
     "aptos": {
       "network": "testnet",
-      "module_address": "9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50",
-      "deployment_tx": "0xba9497bb109f0327b27f5130eaa08b3d72390cc29f908f6d48d9766e5413fd55",
+      "module_address": "ca17b1a481a0cdeaa4d9d252027ac805cfedcf0c4d0f48912378ebc833e7472b",
+      "deployment_tx": "0x13fa44cb912109fc2209b729abc57f29cdd98f436899f38eecddb99d563e0d36",
       "verified": true
     }
   },

@@ -26,10 +26,6 @@ pub mod browser_storage;
 #[cfg(feature = "encrypted-storage")]
 pub mod encrypted_storage;
 
-// TODO: Rewrite operations/*.rs to use rusqlite (currently uses sqlx which is not a dependency)
-// #[cfg(feature = "sqlite")]
-// pub mod operations;
-
 // Re-exports from state module
 #[allow(deprecated)]
 pub use state::Chain;

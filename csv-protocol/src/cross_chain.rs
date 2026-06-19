@@ -362,8 +362,211 @@ impl TransferState {
 
     /// Deserialize from canonical bytes (manual implementation for L1/L2 type)
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
-        // Note: Deserialization not yet implemented
-        Err("TransferState deserialization not yet implemented".to_string())
+        let mut pos = 0;
+
+        if bytes.is_empty() {
+            return Err("Empty bytes for TransferState".to_string());
+        }
+
+        let variant = bytes[pos];
+        pos += 1;
+
+        match variant {
+            0 => {
+                // Locked
+                if bytes.len() < pos + 4 {
+                    return Err("Insufficient bytes for source_tx length".to_string());
+                }
+                let source_tx_len = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize;
+                pos += 4;
+
+                if bytes.len() < pos + source_tx_len {
+                    return Err("Insufficient bytes for source_tx".to_string());
+                }
+                let source_tx = String::from_utf8(bytes[pos..pos + source_tx_len].to_vec())
+                    .map_err(|e| format!("Invalid source_tx string: {}", e))?;
+                pos += source_tx_len;
+
+                if bytes.len() < pos + 8 {
+                    return Err("Insufficient bytes for lock_height".to_string());
+                }
+                let lock_height = u64::from_le_bytes([
+                    bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3],
+                    bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]
+                ]);
+
+                Ok(TransferState::Locked { source_tx, lock_height })
+            }
+            1 => {
+                // AwaitingFinality
+                if bytes.len() < pos + 4 {
+                    return Err("Insufficient bytes for confirmations_needed".to_string());
+                }
+                let confirmations_needed = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]);
+                pos += 4;
+
+                if bytes.len() < pos + 4 {
+                    return Err("Insufficient bytes for confirmations_have".to_string());
+                }
+                let confirmations_have = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]);
+
+                Ok(TransferState::AwaitingFinality { confirmations_needed, confirmations_have })
+            }
+            2 => {
+                // BuildingProof
+                Ok(TransferState::BuildingProof)
+            }
+            3 => {
+                // ProofReady
+                if bytes.len() < pos + 1 {
+                    return Err("Insufficient bytes for has_bundle flag".to_string());
+                }
+                let has_bundle = bytes[pos] != 0;
+                pos += 1;
+
+                let bundle_bytes = if has_bundle {
+                    if bytes.len() < pos + 4 {
+                        return Err("Insufficient bytes for bundle_bytes length".to_string());
+                    }
+                    let bundle_len = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize;
+                    pos += 4;
+
+                    if bytes.len() < pos + bundle_len {
+                        return Err("Insufficient bytes for bundle_bytes".to_string());
+                    }
+                    let bundle = bytes[pos..pos + bundle_len].to_vec();
+                    pos += bundle_len;
+                    Some(bundle)
+                } else {
+                    None
+                };
+
+                Ok(TransferState::ProofReady { bundle_bytes })
+            }
+            4 => {
+                // Minting
+                if bytes.len() < pos + 1 {
+                    return Err("Insufficient bytes for has_dest_tx flag".to_string());
+                }
+                let has_dest_tx = bytes[pos] != 0;
+                pos += 1;
+
+                let dest_tx = if has_dest_tx {
+                    if bytes.len() < pos + 4 {
+                        return Err("Insufficient bytes for dest_tx length".to_string());
+                    }
+                    let dest_tx_len = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize;
+                    pos += 4;
+
+                    if bytes.len() < pos + dest_tx_len {
+                        return Err("Insufficient bytes for dest_tx".to_string());
+                    }
+                    let tx = String::from_utf8(bytes[pos..pos + dest_tx_len].to_vec())
+                        .map_err(|e| format!("Invalid dest_tx string: {}", e))?;
+                    pos += dest_tx_len;
+                    Some(tx)
+                } else {
+                    None
+                };
+
+                Ok(TransferState::Minting { dest_tx })
+            }
+            5 => {
+                // Complete
+                if bytes.len() < pos + 4 {
+                    return Err("Insufficient bytes for dest_tx length".to_string());
+                }
+                let dest_tx_len = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize;
+                pos += 4;
+
+                if bytes.len() < pos + dest_tx_len {
+                    return Err("Insufficient bytes for dest_tx".to_string());
+                }
+                let dest_tx = String::from_utf8(bytes[pos..pos + dest_tx_len].to_vec())
+                    .map_err(|e| format!("Invalid dest_tx string: {}", e))?;
+                pos += dest_tx_len;
+
+                if bytes.len() < pos + 4 {
+                    return Err("Insufficient bytes for dest_seal.id length".to_string());
+                }
+                let seal_id_len = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize;
+                pos += 4;
+
+                if bytes.len() < pos + seal_id_len {
+                    return Err("Insufficient bytes for dest_seal.id".to_string());
+                }
+                let seal_id = bytes[pos..pos + seal_id_len].to_vec();
+                pos += seal_id_len;
+
+                if bytes.len() < pos + 1 {
+                    return Err("Insufficient bytes for has_nonce flag".to_string());
+                }
+                let has_nonce = bytes[pos] != 0;
+                pos += 1;
+
+                let nonce = if has_nonce {
+                    if bytes.len() < pos + 8 {
+                        return Err("Insufficient bytes for nonce".to_string());
+                    }
+                    let n = u64::from_le_bytes([
+                        bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3],
+                        bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]
+                    ]);
+                    pos += 8;
+                    Some(n)
+                } else {
+                    None
+                };
+
+                if bytes.len() < pos + 1 {
+                    return Err("Insufficient bytes for has_version flag".to_string());
+                }
+                let has_version = bytes[pos] != 0;
+                pos += 1;
+
+                let version = if has_version {
+                    if bytes.len() < pos + 8 {
+                        return Err("Insufficient bytes for version".to_string());
+                    }
+                    let v = u64::from_le_bytes([
+                        bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3],
+                        bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]
+                    ]);
+                    pos += 8;
+                    Some(v)
+                } else {
+                    None
+                };
+
+                let dest_seal = SealPoint::new(seal_id, nonce, version)
+                    .map_err(|e| format!("Invalid dest_seal: {}", e))?;
+
+                Ok(TransferState::Complete { dest_tx, dest_seal })
+            }
+            6 => {
+                // Failed
+                if bytes.len() < pos + 4 {
+                    return Err("Insufficient bytes for reason length".to_string());
+                }
+                let reason_len = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize;
+                pos += 4;
+
+                if bytes.len() < pos + reason_len {
+                    return Err("Insufficient bytes for reason".to_string());
+                }
+                let reason = String::from_utf8(bytes[pos..pos + reason_len].to_vec())
+                    .map_err(|e| format!("Invalid reason string: {}", e))?;
+                pos += reason_len;
+
+                if bytes.len() < pos + 1 {
+                    return Err("Insufficient bytes for recoverable flag".to_string());
+                }
+                let recoverable = bytes[pos] != 0;
+
+                Ok(TransferState::Failed { reason, recoverable })
+            }
+            _ => Err(format!("Invalid TransferState variant: {}", variant)),
+        }
     }
 }
 

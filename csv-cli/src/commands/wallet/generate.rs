@@ -23,6 +23,7 @@ use csv_keys::{
     file_keystore::FileKeystore,
     memory::Passphrase,
 };
+use csv_wallet::{address, WalletError};
 
 /// Initialize wallet with one-command setup.
 pub fn cmd_init(
@@ -168,8 +169,14 @@ fn generate_wallet_for_chain(
         ops.derive_address(&seed_array, account, 0)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
     } else {
-        // Fallback to csv-wallet if factory not available
-        return Err(anyhow::anyhow!("Wallet operations not available for {}", chain));
+        // Fallback to csv-wallet address derivation
+        address::derive_funding_address(&seed_array, chain.as_str(), account, 0)
+            .map_err(|e| match e {
+                csv_wallet::WalletError::UnsupportedChain(chain) => {
+                    anyhow::anyhow!("{}", WalletError::UnsupportedChain(chain))
+                }
+                other => anyhow::anyhow!("Failed to derive address: {}", other),
+            })?
     };
 
     // Derive keys for keystore storage
@@ -237,7 +244,14 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
         ops.derive_address(&seed_array, 0, 0)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
     } else {
-        return Err(anyhow::anyhow!("Wallet operations not available for bitcoin"));
+        // Fallback to csv-wallet address derivation
+        address::derive_funding_address(&seed_array, "bitcoin", 0, 0)
+            .map_err(|e| match e {
+                csv_wallet::WalletError::UnsupportedChain(chain) => {
+                    anyhow::anyhow!("{}", WalletError::UnsupportedChain(chain))
+                }
+                other => anyhow::anyhow!("Failed to derive address: {}", other),
+            })?
     };
 
     // Store address in state
@@ -281,7 +295,14 @@ fn generate_from_mnemonic(
         ops.derive_address(&seed_array, 0, 0)
             .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
     } else {
-        return Err(anyhow::anyhow!("Wallet operations not available for {}", chain));
+        // Fallback to csv-wallet address derivation
+        address::derive_funding_address(&seed_array, chain.as_str(), 0, 0)
+            .map_err(|e| match e {
+                csv_wallet::WalletError::UnsupportedChain(chain) => {
+                    anyhow::anyhow!("{}", WalletError::UnsupportedChain(chain))
+                }
+                other => anyhow::anyhow!("Failed to derive address: {}", other),
+            })?
     };
 
     // Derive key for keystore storage

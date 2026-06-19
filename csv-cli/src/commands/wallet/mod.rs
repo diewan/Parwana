@@ -14,7 +14,6 @@ use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 use csv_wallet::address;
-use csv_bitcoin::{wallet_operations, WalletNetwork, BitcoinWalletOperations};
 
 /// Execute wallet command.
 pub async fn execute(
@@ -100,90 +99,23 @@ async fn cmd_address(
 
 async fn cmd_scan(
     chain: crate::config::Chain,
-    account: u32,
-    gap_limit: usize,
-    config: &Config,
-    state: &mut UnifiedStateManager,
+    _account: u32,
+    _gap_limit: usize,
+    _config: &Config,
+    _state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header(&format!("Scanning Wallet for UTXOs on {}", chain));
 
-    if chain.as_str() == "bitcoin" {
-        output::info("Scanning Bitcoin wallet for UTXOs...");
-        output::kv("Account", &account.to_string());
-        output::kv("Gap limit", &gap_limit.to_string());
-
-        // Derive seed from wallet mnemonic
-        let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-        })?;
-
-        let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-        let seed = mnemonic.to_seed(None);
-        let seed_array = *seed.as_bytes();
-
-        // Get RPC URL
-        let rpc_url = config.chain(&chain)?.rpc_url.clone();
-
-        // Use csv-bitcoin for Bitcoin UTXO scanning
-        let network = match config.chain(&chain)?.network {
-            crate::config::Network::Main => WalletNetwork::Main,
-            crate::config::Network::Test => WalletNetwork::Test,
-            crate::config::Network::Dev => WalletNetwork::Dev,
-        };
-        let wallet_utxos = BitcoinWalletOperations::scan_utxos(
-            &seed_array,
-            network,
-            account,
-            gap_limit,
-            &rpc_url,
-        ).await.map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
-
-        // Clear old UTXOs for this account before adding new ones
-        state.storage.wallet.utxos.retain(|u| u.account != account);
-
-        let mut total_utxos = 0;
-        let mut total_value = 0u64;
-
-        for utxo in wallet_utxos {
-            let (txid, vout, value, script_pubkey) = utxo;
-            output::kv(&format!("  UTXO {}:{} ({} sats)", &txid[..16], vout, value), "");
-
-            // Add UTXO to unified state for persistence with script_pubkey
-            let derivation_path = format!("m/86'/1'/{}'/0/0", account);
-            let address_index = derivation_path
-                .split('/')
-                .last()
-                .and_then(|s| s.trim().parse::<u32>().ok())
-                .unwrap_or(0);
-            let utxo_record = csv_store::state::wallet::UtxoRecord {
-                txid: txid.clone(),
-                vout,
-                value,
-                account,
-                index: address_index,
-                derivation_path,
-                script_pubkey,
-            };
-            state.storage.wallet.utxos.push(utxo_record);
-
-            total_utxos += 1;
-            total_value += value;
-        }
-
-        state.save()?;
-
-        output::kv("Total UTXOs found", &total_utxos.to_string());
-        output::kv("Total value", &format!("{} sats", total_value));
-
-        if total_utxos > 0 {
-            output::success("Wallet has UTXOs. You can now create a Sanad using 'csv sanad create --chain bitcoin'.");
-        } else {
-            output::info("No UTXOs found. Send Bitcoin to a wallet address first.");
-        }
-    } else {
-        output::info(&format!("Wallet scanning for {} is not yet implemented.", chain));
-    }
+    // Chain-specific wallet operations should use csv-sdk, not direct adapter access
+    output::error("Chain-specific wallet scanning is not available in csv-cli.");
+    output::info("Use csv-sdk for chain-specific wallet operations:");
+    output::info("  ```rust");
+    output::info("  use csv_sdk::prelude::*;");
+    output::info("  ");
+    output::info(&format!("  let client = CsvClient::builder().with_chain(\"{}\").build()?;", chain));
+    output::info("  ");
+    output::info("  // Use client.wallet() for chain-specific operations");
+    output::info("  ```");
 
     Ok(())
 }

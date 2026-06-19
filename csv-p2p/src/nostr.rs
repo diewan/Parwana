@@ -594,17 +594,7 @@ impl ProofTransport for NostrTransport {
 
         #[cfg(not(feature = "nostr"))]
         {
-            // Fallback stub implementation
-            let event_id = EventId::new(hex::encode(rand::random::<[u8; 32]>()));
-            debug!(
-                %event_id,
-                event_kind = self.event_kind(),
-                relay_count = self.relays.len(),
-                encrypted = self.use_encrypted_dms,
-                proof_size = proof_bytes.len(),
-                "Proof broadcast (stub - nostr feature disabled)"
-            );
-            Ok(event_id)
+            Err(TransportError::NostrNotConfigured)
         }
     }
 
@@ -734,15 +724,7 @@ impl ProofTransport for NostrTransport {
 
         #[cfg(not(feature = "nostr"))]
         {
-            info!(
-                chains = ?filter.chain_ids,
-                authors = ?filter.authors,
-                "Proof subscription channel created (stub - nostr feature disabled)"
-            );
-
-            let (_tx, rx) = tokio::sync::mpsc::channel(256);
-            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-            Ok(stream)
+            Err(TransportError::NostrNotConfigured)
         }
     }
 

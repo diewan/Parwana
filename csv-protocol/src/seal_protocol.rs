@@ -38,7 +38,224 @@
 use crate::proof_taxonomy::ProofBundle;
 use crate::signature::SignatureScheme;
 use async_trait::async_trait;
+use csv_codec::{CanonicalEncoding, EncodingFormat};
 use csv_hash::Hash;
+
+/// A typed DAG segment representing state transitions between anchors.
+///
+/// This replaces the untyped `Vec<u8>` representation with a structured type
+/// that enables compile-time validation, canonical encoding, and type-level reasoning
+/// about state transitions in the proof bundle construction process.
+///
+/// # Fields
+/// - `anchor_from`: Hash reference to the source anchor being consumed
+/// - `anchor_to`: Hash reference to the destination anchor being created
+/// - `transition_data`: Canonical transition payload (chain-specific encoding)
+/// - `proof`: Inclusion proof bytes for the transition
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DagSegment {
+    /// Source anchor reference (the seal being consumed)
+    pub anchor_from: Hash,
+    /// Destination anchor reference (the new anchor being created)
+    pub anchor_to: Hash,
+    /// Canonical transition payload (chain-specific data)
+    pub transition_data: Vec<u8>,
+    /// Inclusion proof bytes for this transition
+    pub proof: Vec<u8>,
+}
+
+impl CanonicalEncoding for DagSegment {
+    fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
+        match format {
+            EncodingFormat::MCE => self.encode_mce(),
+            EncodingFormat::ManualBinary => Ok(self.to_canonical_bytes()),
+        }
+    }
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
+        match format {
+            EncodingFormat::MCE => Self::decode_mce(bytes),
+            EncodingFormat::ManualBinary => {
+                Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e))
+            }
+        }
+    }
+}
+
+impl DagSegment {
+    /// Create a new DAG segment
+    pub fn new(anchor_from: Hash, anchor_to: Hash, transition_data: Vec<u8>, proof: Vec<u8>) -> Self {
+        Self {
+            anchor_from,
+            anchor_to,
+            transition_data,
+            proof,
+        }
+    }
+
+    /// Encode using MCE format (fixed-width byte concatenation)
+    fn encode_mce(&self) -> csv_codec::CodecResult<Vec<u8>> {
+        let mut data = Vec::new();
+        data.extend_from_slice(self.anchor_from.as_bytes());
+        data.extend_from_slice(self.anchor_to.as_bytes());
+        data.extend_from_slice(&(self.transition_data.len() as u32).to_le_bytes());
+        data.extend_from_slice(&self.transition_data);
+        data.extend_from_slice(&(self.proof.len() as u32).to_le_bytes());
+        data.extend_from_slice(&self.proof);
+        Ok(data)
+    }
+
+    /// Decode using MCE format
+    fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
+        let mut pos = 0;
+
+        let anchor_from = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash(hash)
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for anchor_from".to_string(),
+            ));
+        };
+
+        let anchor_to = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash(hash)
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for anchor_to".to_string(),
+            ));
+        };
+
+        let transition_data_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for transition_data length".to_string(),
+            ));
+        };
+
+        let transition_data = if bytes.len() >= pos + transition_data_len {
+            let data = bytes[pos..pos + transition_data_len].to_vec();
+            pos += transition_data_len;
+            data
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for transition_data".to_string(),
+            ));
+        };
+
+        let proof_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for proof length".to_string(),
+            ));
+        };
+
+        let proof = if bytes.len() >= pos + proof_len {
+            let data = bytes[pos..pos + proof_len].to_vec();
+            pos += proof_len;
+            data
+        } else {
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for proof".to_string(),
+            ));
+        };
+
+        Ok(Self {
+            anchor_from,
+            anchor_to,
+            transition_data,
+            proof,
+        })
+    }
+
+    /// Serialize to canonical bytes (manual implementation for deterministic encoding)
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(self.anchor_from.as_bytes());
+        data.extend_from_slice(self.anchor_to.as_bytes());
+        data.extend_from_slice(&(self.transition_data.len() as u32).to_le_bytes());
+        data.extend_from_slice(&self.transition_data);
+        data.extend_from_slice(&(self.proof.len() as u32).to_le_bytes());
+        data.extend_from_slice(&self.proof);
+        data
+    }
+
+    /// Deserialize from canonical bytes (manual implementation for deterministic encoding)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let mut pos = 0;
+
+        let anchor_from = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash(hash)
+        } else {
+            return Err("Insufficient bytes for anchor_from".to_string());
+        };
+
+        let anchor_to = if bytes.len() >= pos + 32 {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&bytes[pos..pos + 32]);
+            pos += 32;
+            Hash(hash)
+        } else {
+            return Err("Insufficient bytes for anchor_to".to_string());
+        };
+
+        let transition_data_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for transition_data length".to_string());
+        };
+
+        let transition_data = if bytes.len() >= pos + transition_data_len {
+            let data = bytes[pos..pos + transition_data_len].to_vec();
+            pos += transition_data_len;
+            data
+        } else {
+            return Err("Insufficient bytes for transition_data".to_string());
+        };
+
+        let proof_len = if bytes.len() >= pos + 4 {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            len
+        } else {
+            return Err("Insufficient bytes for proof length".to_string());
+        };
+
+        let proof = if bytes.len() >= pos + proof_len {
+            let data = bytes[pos..pos + proof_len].to_vec();
+            pos += proof_len;
+            data
+        } else {
+            return Err("Insufficient bytes for proof".to_string());
+        };
+
+        Ok(Self {
+            anchor_from,
+            anchor_to,
+            transition_data,
+            proof,
+        })
+    }
+}
 
 /// The SealProtocol trait defines the security-critical interface for chain-specific adapters.
 ///
@@ -271,14 +488,14 @@ pub trait SealProtocol {
     ///
     /// # Arguments
     /// * `anchor` - The anchor reference with inclusion/finality data
-    /// * `transition_dag` - The state transition DAG segment
+    /// * `transition_dag` - The typed state transition DAG segment
     ///
     /// # Returns
     /// Complete `ProofBundle` ready for cross-chain transport and verification
     async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        transition_dag: Vec<u8>, // Simplified DAG representation
+        transition_dag: DagSegment,
     ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>>;
 
     /// Handle rollback of an anchor due to chain reorganization.

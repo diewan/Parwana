@@ -69,6 +69,8 @@ enum SecretSource {
         /// Passphrase for decrypting the keystore
         passphrase: csv_keys::memory::Passphrase,
     },
+    /// No key material (read-only mode)
+    None,
 }
 
 impl SecretHandle {
@@ -130,6 +132,7 @@ impl SecretHandle {
                 // key from the keystore when needed.
                 None
             }
+            SecretSource::None => None, // Read-only mode has no key material
         }
     }
 
@@ -157,6 +160,11 @@ impl SecretHandle {
             SecretSource::Keystore { path, .. } => Some(path),
             _ => None,
         }
+    }
+
+    /// Check if this handle is in read-only mode (no key material).
+    pub fn is_read_only(&self) -> bool {
+        matches!(&self.source, SecretSource::None)
     }
 }
 
@@ -192,9 +200,9 @@ impl SharedSecretHandle {
 
     /// Create a shared secret handle with no key (read-only mode).
     pub fn none() -> Self {
-        // Create a handle with zero bytes as placeholder
-        let key = SecretKey::new([0u8; 32]);
-        Self::new(SecretHandle::from_key(key))
+        Self::new(SecretHandle {
+            source: SecretSource::None,
+        })
     }
 
     /// Get a reference to the underlying secret handle.
@@ -205,6 +213,11 @@ impl SharedSecretHandle {
     /// Get the secret key bytes, if available.
     pub fn as_bytes(&self) -> Option<&[u8; 32]> {
         self.0.as_bytes()
+    }
+
+    /// Check if this handle is in read-only mode (no key material).
+    pub fn is_read_only(&self) -> bool {
+        self.0.is_read_only()
     }
 }
 
@@ -280,5 +293,48 @@ mod tests {
         let key = SecretKey::random();
         let handle = SecretHandle::from_key(key);
         assert_eq!(format!("{}", handle), "[REDACTED]");
+    }
+
+    #[test]
+    fn test_shared_secret_handle_none_is_read_only() {
+        let handle = SharedSecretHandle::none();
+        assert!(handle.is_read_only());
+        assert!(handle.as_bytes().is_none());
+    }
+
+    #[test]
+    fn test_shared_secret_handle_none_no_key_material() {
+        let handle = SharedSecretHandle::none();
+        // Verify that as_bytes() returns None for read-only handles
+        assert!(handle.as_bytes().is_none());
+        // Verify that inner() also reflects read-only state
+        assert!(handle.inner().is_read_only());
+    }
+
+    #[test]
+    fn test_shared_secret_handle_from_bytes_is_not_read_only() {
+        let bytes = [1u8; 32];
+        let handle = SharedSecretHandle::from_bytes(bytes);
+        assert!(!handle.is_read_only());
+        assert!(handle.as_bytes().is_some());
+    }
+
+    #[test]
+    fn test_shared_secret_handle_default_is_read_only() {
+        let handle = SharedSecretHandle::default();
+        assert!(handle.is_read_only());
+        assert!(handle.as_bytes().is_none());
+    }
+
+    #[test]
+    fn test_secret_handle_is_read_only() {
+        let key = SecretKey::random();
+        let handle_with_key = SecretHandle::from_key(key);
+        assert!(!handle_with_key.is_read_only());
+
+        let handle_read_only = SecretHandle {
+            source: SecretSource::None,
+        };
+        assert!(handle_read_only.is_read_only());
     }
 }

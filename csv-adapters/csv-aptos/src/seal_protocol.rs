@@ -1263,7 +1263,7 @@ impl SealProtocol for AptosSealProtocol {
     async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        transition_dag: Vec<u8>,
+        transition_dag: csv_protocol::seal_protocol::DagSegment,
     ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let inclusion = self.verify_inclusion(anchor.clone()).await?;
         let finality = self.verify_finality(anchor.clone()).await?;
@@ -1293,20 +1293,34 @@ impl SealProtocol for AptosSealProtocol {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;
 
-        // SECURITY CRITICAL: Deserialize transition_dag and extract actual signatures
-        // instead of using placeholder empty vector
-        let dag_segment: csv_hash::dag::DAGSegment =
-            csv_hash::dag::DAGSegment::from_canonical_bytes(&transition_dag)
-                .map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))?;
+        // Convert DagSegment to DAGSegment for state transition DAG
+        // Compute node_id from anchor hashes to ensure uniqueness
+        let mut node_id_data = Vec::new();
+        node_id_data.extend_from_slice(transition_dag.anchor_from.as_bytes());
+        node_id_data.extend_from_slice(transition_dag.anchor_to.as_bytes());
+        let node_id = csv_hash::Hash::new(csv_hash::csv_tagged_hash("dag-node-id", &node_id_data));
 
-        // Extract signatures from all nodes in the DAGSegment
+        // Create a single DAGNode from the transition data
+        let dag_node = csv_hash::dag::DAGNode::new(
+            node_id,
+            transition_dag.transition_data.clone(),
+            vec![transition_dag.proof.clone()], // Use proof as signature
+            vec![], // No witnesses for single transition
+            vec![transition_dag.anchor_from], // Parent is the source anchor
+        );
+
+        // Compute root_commitment from the node
+        let root_commitment = dag_node.hash();
+        let dag_segment = csv_hash::dag::DAGSegment::new(vec![dag_node], root_commitment);
+
+        // Extract signatures from DAG node
         let signatures: Vec<Vec<u8>> = dag_segment.nodes
             .iter()
             .flat_map(|node| node.signatures.clone())
             .collect();
 
         if signatures.is_empty() {
-            log::warn!("APTOS: No signatures found in DAGSegment - proof bundle may not be verifiable");
+            log::warn!("APTOS: No signatures found in transition_dag - proof bundle may not be verifiable");
         } else {
             log::info!("APTOS: Extracted {} signatures from DAGSegment", signatures.len());
         }

@@ -44,9 +44,29 @@ else
         # The JSON structure is an array of accounts; we look for chain == "solana"
         SOLANA_PRIV_KEY=$(jq -r '.accounts[] | select(.chain|ascii_downcase=="solana") | .private_key' "$CSV_WALLET_JSON" | head -n1)
         if [ -n "$SOLANA_PRIV_KEY" ] && [ "$SOLANA_PRIV_KEY" != "null" ]; then
-            # Write the private key to a temporary keypair file in the expected format
+            # Convert base58 private key to Solana JSON keypair format [int, int, ...]
             TMP_KEYPAIR=$(mktemp)
-            echo "$SOLANA_PRIV_KEY" > "$TMP_KEYPAIR"
+            python3 -c "
+import json, sys
+B58_ALPHABET = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+def b58decode(v):
+    out = 0
+    for c in v:
+        out = out * 123 + B58_ALPHABET.index(c)
+    result = []
+    while out > 0:
+        out, mod = divmod(out, 256)
+        result.append(mod)
+    for c in v:
+        if c == B58_ALPHABET[0]:
+            result.append(0)
+        else:
+            break
+    result.reverse()
+    return bytes(result)
+key = b58decode(sys.argv[1].encode())
+print(json.dumps(list(key)))
+" "${SOLANA_PRIV_KEY}" > "$TMP_KEYPAIR"
             chmod 600 "$TMP_KEYPAIR"
             KEYPAIR_FILE="$TMP_KEYPAIR"
             echo "Using Solana keypair extracted from csv-wallet.json"
@@ -106,17 +126,22 @@ echo "Building Anchor program..."
 echo "Cleaning previous builds..."
 rm -rf target/deploy/ target/idl/
 
-# Build from scratch (use --ignore-keys to skip program ID check)
-$ANCHOR build --ignore-keys 2>&1 | tail -10
+# Synching keys
+echo "Synching keys..."
+anchor keys sync
+
+# Build from scratch (use --verifiable for Anchor 1.0+ and --ignore-keys to skip program ID check)
+echo "Building with verifiable output..."
+$ANCHOR build --verifiable --ignore-keys 2>&1 | tail -10
 echo ""
 
-# Setup Anchor wallet arguments
+# Setup Anchor wallet arguments (Anchor 1.0.2+ syntax - use program deploy with verifiable path)
 declare -a ANCHOR_ARGS
-ANCHOR_ARGS=("deploy" "--provider.cluster" "$NETWORK")
+ANCHOR_ARGS=("program" "deploy" "target/verifiable/csv_seal.so" "--provider.cluster" "$NETWORK")
 
-# Export ANCHOR_WALLET environment variable if using custom keypair
+# Add wallet argument if using custom keypair (Anchor 1.0.2 syntax)
 if [ -n "$KEYPAIR_ARG" ]; then
-    export ANCHOR_WALLET="$KEYPAIR_FILE"
+    ANCHOR_ARGS+=("--provider.wallet" "$KEYPAIR_FILE")
 fi
 
 # Deploy
@@ -140,18 +165,15 @@ if [ -n "$KEYPAIR_ARG" ]; then
     echo "DEBUG: Running Anchor deploy with:"
     echo "  Command: $ANCHOR ${ANCHOR_ARGS[@]}"
     
-    deploy_output=$($ANCHOR "${ANCHOR_ARGS[@]}" 2>&1)
+    $ANCHOR "${ANCHOR_ARGS[@]}"
     deploy_exit_code=$?
     
     echo "DEBUG: Deploy command exit code: $deploy_exit_code"
 else
     echo "Deploying with default wallet..."
-    deploy_output=$($ANCHOR "${ANCHOR_ARGS[@]}" 2>&1)
+    $ANCHOR "${ANCHOR_ARGS[@]}"
     deploy_exit_code=$?
 fi
-
-echo "$deploy_output"
-echo ""
 
 # Check if deploy failed
 if [ $deploy_exit_code -ne 0 ]; then
@@ -163,10 +185,8 @@ if [ $deploy_exit_code -ne 0 ]; then
         echo "Attempting fallback: using solana program deploy directly..."
         
         # Try direct deployment
-        deploy_output=$(solana program deploy --keypair "$KEYPAIR_FILE" --url "$RPC_URL" "target/deploy/csv_seal.so" 2>&1)
+        solana program deploy --keypair "$KEYPAIR_FILE" --url "$RPC_URL" "target/deploy/csv_seal.so"
         deploy_exit_code=$?
-        
-        echo "$deploy_output"
         
         if [ $deploy_exit_code -ne 0 ]; then
             echo "ERROR: Direct deploy also failed"
@@ -177,16 +197,11 @@ if [ $deploy_exit_code -ne 0 ]; then
     fi
 fi
 
-# Extract program ID from the output (handle both "Program Id:" and "Program ID:")
-program_id=$(echo "$deploy_output" | grep -oP 'Program ID?: \K[0-9A-Za-z]{32,44}' || echo "")
-
-if [ -z "$program_id" ]; then
-    # Try to get from Anchor.toml or keypair (use explicit keypair and url)
-    if [ -n "$KEYPAIR_ARG" ]; then
-        program_id=$(solana-keygen pubkey target/deploy/csv_seal-keypair.json --keypair "$KEYPAIR_FILE" --url "$RPC_URL" 2>/dev/null || echo "")
-    else
-        program_id=$(solana-keygen pubkey target/deploy/csv_seal-keypair.json --url "$RPC_URL" 2>/dev/null || echo "")
-    fi
+# Extract program ID from the keypair file
+if [ -n "$KEYPAIR_ARG" ]; then
+    program_id=$(solana-keygen pubkey target/deploy/csv_seal-keypair.json --keypair "$KEYPAIR_FILE" --url "$RPC_URL" 2>/dev/null || echo "")
+else
+    program_id=$(solana-keygen pubkey target/deploy/csv_seal-keypair.json --url "$RPC_URL" 2>/dev/null || echo "")
 fi
 
 if [ -z "$program_id" ]; then
@@ -214,7 +229,7 @@ EOF
     echo ""
 fi
 
-# Initialize the LockRegistry
+# Initialize the LockRegistry (Anchor 1.0.2 syntax)
 echo "Initializing LockRegistry..."
 if [ -n "$KEYPAIR_ARG" ]; then
     $ANCHOR run initialize --provider.cluster "$NETWORK" --provider.wallet "$KEYPAIR_FILE" 2>&1 || {
@@ -226,6 +241,39 @@ else
         echo "Note: Registry initialization may require manual execution:"
         echo "  anchor run initialize --provider.cluster ${NETWORK}"
     }
+fi
+
+# Update ~/.csv/config.toml
+CONFIG_FILE="$HOME/.csv/config.toml"
+if [ -f "$CONFIG_FILE" ]; then
+    echo "Updating $CONFIG_FILE..."
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import sys
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        content = f.read()
+    # Update program_id for solana chain
+    import re
+    content = re.sub(
+        r'program_id = \"[^\"]+\"',
+        'program_id = \"$program_id\"',
+        content
+    )
+    with open('$CONFIG_FILE', 'w') as f:
+        f.write(content)
+    print('Config updated: solana.program_id = $program_id')
+except Exception as e:
+    print(f'ERROR updating config: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+    else
+        echo "WARNING: python3 not found, cannot auto-update config"
+        echo "Please manually update $CONFIG_FILE"
+        echo "Set chains.solana.program_id = ${program_id}"
+    fi
+else
+    echo "WARNING: $CONFIG_FILE not found, skipping config update"
 fi
 
 # Update deployment manifest

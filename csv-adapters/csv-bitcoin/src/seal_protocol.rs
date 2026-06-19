@@ -896,7 +896,7 @@ impl SealProtocol for BitcoinSealProtocol {
     async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        _transition_dag: Vec<u8>,
+        transition_dag: csv_protocol::seal_protocol::DagSegment,
     ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let inclusion = self.verify_inclusion(anchor.clone()).await?;
         let finality = self.verify_finality(anchor.clone()).await?;

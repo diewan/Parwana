@@ -508,7 +508,7 @@ impl SealProtocol for SolanaSealProtocol {
     async fn build_proof_bundle(
         &self,
         anchor_ref: Self::CommitAnchor,
-        segment: Vec<u8>,
+        segment: csv_protocol::seal_protocol::DagSegment,
     ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let solana_inclusion = self.verify_inclusion(anchor_ref.clone()).await?;
         let solana_finality = self.verify_finality(anchor_ref.clone()).await?;
@@ -571,9 +571,25 @@ impl SealProtocol for SolanaSealProtocol {
             )
         };
 
-        // Create a complete proof bundle
-        let dag_segment: csv_hash::dag::DAGSegment = DAGSegment::from_canonical_bytes(&segment).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))
-            .map_err(|e| Box::new(ProtocolError::Generic(e)) as Box<dyn std::error::Error>)?;
+        // Convert DagSegment to DAGSegment for state transition DAG
+        // Compute node_id from anchor hashes to ensure uniqueness
+        let mut node_id_data = Vec::new();
+        node_id_data.extend_from_slice(segment.anchor_from.as_bytes());
+        node_id_data.extend_from_slice(segment.anchor_to.as_bytes());
+        let node_id = csv_hash::Hash::new(csv_hash::csv_tagged_hash("dag-node-id", &node_id_data));
+
+        // Create a single DAGNode from the transition data
+        let dag_node = csv_hash::dag::DAGNode::new(
+            node_id,
+            segment.transition_data.clone(),
+            vec![segment.proof.clone()], // Use proof as signature
+            vec![], // No witnesses for single transition
+            vec![segment.anchor_from], // Parent is the source anchor
+        );
+
+        // Compute root_commitment from the node
+        let root_commitment = dag_node.hash();
+        let dag_segment = csv_hash::dag::DAGSegment::new(vec![dag_node], root_commitment);
         let bundle = csv_protocol::proof_taxonomy::ProofBundle::with_signature_scheme(
             csv_protocol::SignatureScheme::Ed25519,
             dag_segment,

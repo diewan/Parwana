@@ -154,12 +154,17 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             0,        // nonce
         );
 
-        // Serialize the DAG segment (empty for now, would contain transition data)
-        let dag_segment = csv_hash::dag::DAGSegment::new(vec![], commitment);
+        // Create a DAG segment with anchor transition data
+        let dag_segment = csv_protocol::seal_protocol::DagSegment::new(
+            commitment, // anchor_from (source commitment)
+            commitment, // anchor_to (destination commitment, same for now)
+            vec![], // transition_data (empty for now)
+            vec![], // proof (empty for now)
+        );
 
         // Build the proof bundle using the seal protocol
         let proof_bundle = self.backend.seal_protocol
-            .build_proof_bundle(anchor, dag_segment.to_canonical_bytes())
+            .build_proof_bundle(anchor, dag_segment)
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))?;
 

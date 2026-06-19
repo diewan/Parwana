@@ -1,0 +1,24 @@
+Compiling, may take a little while to download git dependencies...
+UPDATING GIT DEPENDENCY https://github.com/aptos-labs/aptos-core.git
+INCLUDING DEPENDENCY AptosFramework
+INCLUDING DEPENDENCY AptosStdlib
+INCLUDING DEPENDENCY MoveStdlib
+BUILDING csv-seal
+package size 17994 bytes
+Transaction submitted: https://explorer.aptoslabs.com/txn/0x13fa44cb912109fc2209b729abc57f29cdd98f436899f38eecddb99d563e0d36?network=testnet
+{
+  "Result": {
+    "transaction_hash": "0x13fa44cb912109fc2209b729abc57f29cdd98f436899f38eecddb99d563e0d36",
+    "gas_used": 86412,
+    "gas_unit_price": 100,
+    "sender": "ca17b1a481a0cdeaa4d9d252027ac805cfedcf0c4d0f48912378ebc833e7472b",
+    "sequence_number": 0,
+    "replay_protector": {
+      "SequenceNumber": 0
+    },
+    "success": true,
+    "timestamp_us": 1781802108773161,
+    "version": 9348106574,
+    "vm_status": "Executed successfully"
+  }
+}

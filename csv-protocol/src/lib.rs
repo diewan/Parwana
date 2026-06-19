@@ -116,6 +116,9 @@ pub use sanad::{OwnershipProof, SCHEMA_VERSION, Sanad, SanadEnvelope, SanadId, S
 // Re-export seal types
 pub use seal::{CommitAnchor, SealPoint};
 
+// Re-export DAG segment type
+pub use seal_protocol::DagSegment;
+
 // Re-export commitment types
 pub use commitment::Commitment;
 

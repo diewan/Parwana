@@ -64,7 +64,18 @@ impl ProofFilter {
     /// Check if this filter matches the given proof bundle.
     ///
     /// Matches if the proof's anchor chain matches and/or the author pubkey matches.
-    pub fn matches_proof(&self, proof: &ProofBundle) -> bool {
+    ///
+    /// Returns an error if author filtering is requested, since author attribution
+    /// is not available at the proof bundle level. Author filtering must be performed
+    /// at the transport layer (e.g., Nostr event level).
+    pub fn matches_proof(&self, proof: &ProofBundle) -> Result<bool, TransportError> {
+        // Author filtering is not supported at the proof bundle level
+        if !self.authors.is_empty() {
+            return Err(TransportError::InvalidEvent(
+                "Author filtering is not supported at the proof bundle level. Use transport-level filtering (e.g., Nostr event filtering) instead.".to_string()
+            ));
+        }
+
         let chain_matches = self.chain_ids.is_empty()
             || self.chain_ids.iter().any(|chain| {
                 // Try to match chain ID from anchor metadata
@@ -73,9 +84,7 @@ impl ProofFilter {
                     .unwrap_or(false)
             });
 
-        // For now, we don't have author info in the proof bundle itself,
-        // so we only filter by chain. Author filtering is done at the Nostr event level.
-        chain_matches
+        Ok(chain_matches)
     }
 }
 

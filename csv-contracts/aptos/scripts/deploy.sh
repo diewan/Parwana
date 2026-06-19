@@ -66,7 +66,7 @@ if [ -n "${CSV_APTOS_ADDRESS:-}" ] && [ -n "${CSV_APTOS_PRIVATE_KEY:-}" ]; then
     ACCOUNT="${CSV_APTOS_ADDRESS}"
     
     # Export config location for all subsequent aptos commands
-    export APTOS_CONFIG="${PWD}/.aptos/config.yaml"
+    export APTOS_CONFIG_FILE="${PWD}/.aptos/config.yaml"
     
     # Debug: show config content
     echo "  Config file (.aptos/config.yaml):"
@@ -87,10 +87,10 @@ else
     fi
     
     APTOS_PROFILE="default"
-    ACCOUNT=$("$APTOS" config show-profiles --profile default 2>/dev/null | grep "account" | head -1 | awk '{print $2}' || echo "")
+    ACCOUNT=$("$APTOS" config show-profiles --profile default 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Result']['default']['account'])" 2>/dev/null || echo "")
     
     # For default profile, don't override config location
-    export APTOS_CONFIG=""
+    export APTOS_CONFIG_FILE=""
 fi
 
 echo ""
@@ -119,12 +119,13 @@ echo ""
 
 # Publish to testnet with the correct address
 echo "Publishing to ${NETWORK}..."
-if [ -n "${APTOS_CONFIG:-}" ]; then
+if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
     # Use explicit config file for csv_deploy profile
     PUBLISH_OUTPUT=$("$APTOS" move publish \
         --package-dir contracts \
         --profile "${APTOS_PROFILE}" \
         --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" \
+        --config-file "${APTOS_CONFIG_FILE}" \
         --assume-yes 2>&1) || {
         echo "ERROR: Publish failed"
         echo "$PUBLISH_OUTPUT"
@@ -171,7 +172,7 @@ echo ""
 echo "Next steps:"
 echo "1. The package is published under your account address: ${ACCOUNT}"
 echo "2. Initialize LockRegistry:"
-echo "   aptos move run --function-id ${ACCOUNT}::csv_seal::init_registry --profile ${APTOS_PROFILE}"
+echo "   aptos move run --function-id ${ACCOUNT}::CSVSeal::init_registry --profile ${APTOS_PROFILE}"
 echo ""
 
 # Initialize the LockRegistry
@@ -180,7 +181,7 @@ echo "  Waiting for publish transaction to be committed..."
 sleep 5
 
 # Verify config file exists
-if [ -n "${APTOS_CONFIG:-}" ] && [ ! -f ".aptos/config.yaml" ]; then
+if [ -n "${APTOS_CONFIG_FILE:-}" ] && [ ! -f ".aptos/config.yaml" ]; then
     echo "  ERROR: Config file .aptos/config.yaml not found!"
     echo "  Current directory: ${PWD}"
     ls -la .aptos/ 2>/dev/null || echo "  .aptos directory does not exist"
@@ -191,11 +192,12 @@ fi
 INIT_SUCCESS=false
 for i in 1 2 3; do
     echo "  Attempt $i/3..."
-    if [ -n "${APTOS_CONFIG:-}" ]; then
+    if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
         # Use explicit config for csv_deploy profile
         if "$APTOS" move run \
-            --function-id "${ACCOUNT}::csv_seal::init_registry" \
+            --function-id "${ACCOUNT}::CSVSeal::init_registry" \
             --profile "${APTOS_PROFILE}" \
+            --config-file "${APTOS_CONFIG_FILE}" \
             --assume-yes 2>&1 | tee "scripts/registry-init-${NETWORK}.txt" | tail -5; then
             INIT_SUCCESS=true
             break
@@ -203,7 +205,7 @@ for i in 1 2 3; do
     else
         # Use default profile from global config
         if "$APTOS" move run \
-            --function-id "${ACCOUNT}::csv_seal::init_registry" \
+            --function-id "${ACCOUNT}::CSVSeal::init_registry" \
             --profile "${APTOS_PROFILE}" \
             --assume-yes 2>&1 | tee "scripts/registry-init-${NETWORK}.txt" | tail -5; then
             INIT_SUCCESS=true
@@ -218,11 +220,11 @@ done
 
 if [ "$INIT_SUCCESS" = false ]; then
     echo "WARNING: Failed to initialize LockRegistry. You may need to run it manually:"
-    if [ -n "${APTOS_CONFIG:-}" ]; then
-        echo "  aptos move run --function-id ${ACCOUNT}::csv_seal::init_registry --profile ${APTOS_PROFILE}"
+    if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
+        echo "  aptos move run --function-id ${ACCOUNT}::CSVSeal::init_registry --profile ${APTOS_PROFILE} --config-file ${APTOS_CONFIG_FILE}"
         echo "  (from directory: ${PWD})"
     else
-        echo "  aptos move run --function-id ${ACCOUNT}::csv_seal::init_registry --profile ${APTOS_PROFILE}"
+        echo "  aptos move run --function-id ${ACCOUNT}::CSVSeal::init_registry --profile ${APTOS_PROFILE}"
     fi
 fi
 

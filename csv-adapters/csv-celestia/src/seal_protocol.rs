@@ -277,7 +277,7 @@ where
     async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        transition_dag: Vec<u8>,
+        transition_dag: csv_protocol::seal_protocol::DagSegment,
     ) -> std::result::Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let inclusion = self.verify_inclusion(anchor.clone()).await?;
         let finality = self.verify_finality(anchor.clone()).await?;
@@ -337,16 +337,27 @@ where
             )) as Box<dyn std::error::Error>
         })?;
 
-        // Deserialize transition_dag from Vec<u8> to DAGSegment
-        let dag_segment: csv_hash::dag::DAGSegment =
-            DAGSegment::from_canonical_bytes(&transition_dag).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e)).map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("Failed to deserialize DAG: {}", e),
-                )) as Box<dyn std::error::Error>
-            })?;
+        // Convert DagSegment to DAGSegment for state transition DAG
+        // Compute node_id from anchor hashes to ensure uniqueness
+        let mut node_id_data = Vec::new();
+        node_id_data.extend_from_slice(transition_dag.anchor_from.as_bytes());
+        node_id_data.extend_from_slice(transition_dag.anchor_to.as_bytes());
+        let node_id = csv_hash::Hash::new(csv_hash::csv_tagged_hash("dag-node-id", &node_id_data));
 
-        // SECURITY CRITICAL: Extract actual signatures from DAGSegment instead of using placeholder
+        // Create a single DAGNode from the transition data
+        let dag_node = csv_hash::dag::DAGNode::new(
+            node_id,
+            transition_dag.transition_data.clone(),
+            vec![transition_dag.proof.clone()], // Use proof as signature
+            vec![], // No witnesses for single transition
+            vec![transition_dag.anchor_from], // Parent is the source anchor
+        );
+
+        // Compute root_commitment from the node
+        let root_commitment = dag_node.hash();
+        let dag_segment = DAGSegment::new(vec![dag_node], root_commitment);
+
+        // Extract signatures from DAG node
         let signatures: Vec<Vec<u8>> = dag_segment.nodes
             .iter()
             .flat_map(|node| node.signatures.clone())

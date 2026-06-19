@@ -86,6 +86,23 @@ impl CommitmentScheme {
     }
 }
 
+impl TryFrom<u8> for CommitmentScheme {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(CommitmentScheme::HashBased),
+            1 => Ok(CommitmentScheme::Pedersen),
+            2 => Ok(CommitmentScheme::KZG),
+            3 => Ok(CommitmentScheme::Bulletproofs),
+            4 => Ok(CommitmentScheme::Multilinear),
+            5 => Ok(CommitmentScheme::FRI),
+            6 => Ok(CommitmentScheme::Custom),
+            _ => Err(()),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Inclusion Proof Types
 // ---------------------------------------------------------------------------
@@ -152,6 +169,22 @@ impl InclusionProofType {
     }
 }
 
+impl TryFrom<u8> for InclusionProofType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(InclusionProofType::Merkle),
+            1 => Ok(InclusionProofType::MerklePatricia),
+            2 => Ok(InclusionProofType::ObjectProof),
+            3 => Ok(InclusionProofType::Accumulator),
+            4 => Ok(InclusionProofType::AccountState),
+            5 => Ok(InclusionProofType::Custom),
+            _ => Err(()),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Finality Proof Types
 // ---------------------------------------------------------------------------
@@ -213,6 +246,21 @@ impl FinalityProofType {
     }
 }
 
+impl TryFrom<u8> for FinalityProofType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(FinalityProofType::ConfirmationDepth),
+            1 => Ok(FinalityProofType::Checkpoint),
+            2 => Ok(FinalityProofType::FinalizedBlock),
+            3 => Ok(FinalityProofType::SlotBased),
+            4 => Ok(FinalityProofType::Custom),
+            _ => Err(()),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Proof Metadata
 // ---------------------------------------------------------------------------
@@ -246,7 +294,8 @@ impl CanonicalEncoding for ProofMetadata {
     fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Err(csv_codec::CodecError::DeserializationError("ProofMetadata deserialization not yet implemented".to_string())),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(|e| csv_codec::CodecError::DeserializationError(e)),
         }
     }
 }
@@ -261,7 +310,8 @@ impl ProofMetadata {
     /// Decode using MCE format
     fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
         // MCE format for ProofMetadata - same as manual binary for now
-        Err(csv_codec::CodecError::DeserializationError("ProofMetadata deserialization not yet implemented".to_string()))
+        Self::from_canonical_bytes(bytes)
+            .map_err(|e| csv_codec::CodecError::DeserializationError(e))
     }
 
     /// Serialize to canonical bytes (manual implementation for L2 type)
@@ -312,6 +362,116 @@ impl ProofMetadata {
         bytes.extend_from_slice(&self.extra);
         
         Ok(bytes)
+    }
+
+    /// Deserialize from canonical bytes (reverse of to_canonical_bytes)
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let mut cursor = 0;
+
+        // inclusion_proof_type
+        if cursor >= bytes.len() {
+            return Err("Insufficient bytes for inclusion_proof_type flag".to_string());
+        }
+        let has_inclusion = bytes[cursor] != 0;
+        cursor += 1;
+        let inclusion_proof_type = if has_inclusion {
+            if cursor >= bytes.len() {
+                return Err("Insufficient bytes for inclusion_proof_type value".to_string());
+            }
+            let val = bytes[cursor];
+            cursor += 1;
+            Some(val.try_into().map_err(|_| "Invalid inclusion_proof_type value".to_string())?)
+        } else {
+            None
+        };
+
+        // finality_proof_type
+        if cursor >= bytes.len() {
+            return Err("Insufficient bytes for finality_proof_type flag".to_string());
+        }
+        let has_finality = bytes[cursor] != 0;
+        cursor += 1;
+        let finality_proof_type = if has_finality {
+            if cursor >= bytes.len() {
+                return Err("Insufficient bytes for finality_proof_type value".to_string());
+            }
+            let val = bytes[cursor];
+            cursor += 1;
+            Some(val.try_into().map_err(|_| "Invalid finality_proof_type value".to_string())?)
+        } else {
+            None
+        };
+
+        // commitment_scheme
+        if cursor >= bytes.len() {
+            return Err("Insufficient bytes for commitment_scheme flag".to_string());
+        }
+        let has_scheme = bytes[cursor] != 0;
+        cursor += 1;
+        let commitment_scheme = if has_scheme {
+            if cursor >= bytes.len() {
+                return Err("Insufficient bytes for commitment_scheme value".to_string());
+            }
+            let val = bytes[cursor];
+            cursor += 1;
+            Some(val.try_into().map_err(|_| "Invalid commitment_scheme value".to_string())?)
+        } else {
+            None
+        };
+
+        // proof_size_bytes
+        if cursor >= bytes.len() {
+            return Err("Insufficient bytes for proof_size_bytes flag".to_string());
+        }
+        let has_size = bytes[cursor] != 0;
+        cursor += 1;
+        let proof_size_bytes = if has_size {
+            if cursor + 8 > bytes.len() {
+                return Err("Insufficient bytes for proof_size_bytes value".to_string());
+            }
+            let val = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            cursor += 8;
+            Some(val)
+        } else {
+            None
+        };
+
+        // confirmations
+        if cursor >= bytes.len() {
+            return Err("Insufficient bytes for confirmations flag".to_string());
+        }
+        let has_confirmations = bytes[cursor] != 0;
+        cursor += 1;
+        let confirmations = if has_confirmations {
+            if cursor + 8 > bytes.len() {
+                return Err("Insufficient bytes for confirmations value".to_string());
+            }
+            let val = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            cursor += 8;
+            Some(val)
+        } else {
+            None
+        };
+
+        // extra
+        if cursor + 4 > bytes.len() {
+            return Err("Insufficient bytes for extra length".to_string());
+        }
+        let extra_len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        cursor += 4;
+        if cursor + extra_len > bytes.len() {
+            return Err("Insufficient bytes for extra data".to_string());
+        }
+        let extra = bytes[cursor..cursor + extra_len].to_vec();
+
+        Ok(Self {
+            inclusion_proof_type,
+            finality_proof_type,
+            commitment_scheme,
+            proof_size_bytes,
+            confirmations,
+            extra,
+        })
     }
 }
 
@@ -494,7 +654,127 @@ impl EnhancedCommitment {
 
     /// Deserialize an enhanced commitment from canonical bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        Err("EnhancedCommitment deserialization not yet implemented".into())
+        let mut cursor = 0;
+
+        // version: 1 byte
+        if cursor + 1 > bytes.len() {
+            return Err("Insufficient bytes for version".into());
+        }
+        let version = bytes[cursor];
+        cursor += 1;
+
+        // protocol_id: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for protocol_id".into());
+        }
+        let mut protocol_id = [0u8; 32];
+        protocol_id.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // mpc_root: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for mpc_root".into());
+        }
+        let mut mpc_root = [0u8; 32];
+        mpc_root.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // contract_id: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for contract_id".into());
+        }
+        let mut contract_id = [0u8; 32];
+        contract_id.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // previous_commitment: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for previous_commitment".into());
+        }
+        let mut previous_commitment = [0u8; 32];
+        previous_commitment.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // transition_payload_hash: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for transition_payload_hash".into());
+        }
+        let mut transition_payload_hash = [0u8; 32];
+        transition_payload_hash.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // seal_id: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for seal_id".into());
+        }
+        let mut seal_id = [0u8; 32];
+        seal_id.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // domain_separator: 32 bytes
+        if cursor + 32 > bytes.len() {
+            return Err("Insufficient bytes for domain_separator".into());
+        }
+        let mut domain_separator = [0u8; 32];
+        domain_separator.copy_from_slice(&bytes[cursor..cursor + 32]);
+        cursor += 32;
+
+        // commitment_scheme: 1 byte (as u8)
+        if cursor + 1 > bytes.len() {
+            return Err("Insufficient bytes for commitment_scheme".into());
+        }
+        let commitment_scheme_val = bytes[cursor];
+        let commitment_scheme = commitment_scheme_val.try_into()
+            .map_err(|_| "Invalid commitment_scheme value".to_string())?;
+        cursor += 1;
+
+        // inclusion_proof_type: 1 byte (as u8)
+        if cursor + 1 > bytes.len() {
+            return Err("Insufficient bytes for inclusion_proof_type".into());
+        }
+        let inclusion_proof_type_val = bytes[cursor];
+        let inclusion_proof_type = inclusion_proof_type_val.try_into()
+            .map_err(|_| "Invalid inclusion_proof_type value".to_string())?;
+        cursor += 1;
+
+        // finality_proof_type: 1 byte (as u8)
+        if cursor + 1 > bytes.len() {
+            return Err("Insufficient bytes for finality_proof_type".into());
+        }
+        let finality_proof_type_val = bytes[cursor];
+        let finality_proof_type = finality_proof_type_val.try_into()
+            .map_err(|_| "Invalid finality_proof_type value".to_string())?;
+        cursor += 1;
+
+        // proof_metadata length: 4 bytes (u32)
+        if cursor + 4 > bytes.len() {
+            return Err("Insufficient bytes for proof_metadata length".into());
+        }
+        let metadata_len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        cursor += 4;
+
+        // proof_metadata: variable length
+        if cursor + metadata_len > bytes.len() {
+            return Err("Insufficient bytes for proof_metadata".into());
+        }
+        let proof_metadata = ProofMetadata::from_canonical_bytes(&bytes[cursor..cursor + metadata_len])
+            .map_err(|e| format!("Failed to deserialize proof_metadata: {}", e))?;
+        cursor += metadata_len;
+
+        Ok(Self {
+            version,
+            protocol_id,
+            mpc_root,
+            contract_id,
+            previous_commitment,
+            transition_payload_hash,
+            seal_id,
+            domain_separator,
+            commitment_scheme,
+            inclusion_proof_type,
+            finality_proof_type,
+            proof_metadata,
+        })
     }
 }
 

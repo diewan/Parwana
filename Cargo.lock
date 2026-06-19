@@ -2911,7 +2911,6 @@ dependencies = [
  "clap",
  "colored",
  "csv-admission",
- "csv-bitcoin",
  "csv-content",
  "csv-coordinator",
  "csv-hash",

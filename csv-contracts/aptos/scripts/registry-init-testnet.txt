@@ -1,3 +1,17 @@
+Transaction submitted: https://explorer.aptoslabs.com/txn/0x8e59c4ffa39e4e5fbd7cb43da5fe80e20e78ce9f4c3d6fa5161cf2a3825e4783?network=testnet
 {
-  "Error": "Simulation failed with status: LINKER_ERROR\nExecution failed with message: Linker Error: Module d9add20ef2b9a53affba7c2661ed61b2832b0ac8397c680b2ec0aa9919ef703e::csv_seal doesn't exist"
+  "Result": {
+    "transaction_hash": "0x8e59c4ffa39e4e5fbd7cb43da5fe80e20e78ce9f4c3d6fa5161cf2a3825e4783",
+    "gas_used": 21625,
+    "gas_unit_price": 100,
+    "sender": "ca17b1a481a0cdeaa4d9d252027ac805cfedcf0c4d0f48912378ebc833e7472b",
+    "sequence_number": 1,
+    "replay_protector": {
+      "SequenceNumber": 1
+    },
+    "success": true,
+    "timestamp_us": 1781802116558330,
+    "version": 9348108338,
+    "vm_status": "Executed successfully"
+  }
 }

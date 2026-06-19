@@ -26,13 +26,19 @@
 //!
 //! ```no_run
 //! use csv_protocol::proof_taxonomy::ProofBundle;
+//! use csv_protocol::proof_taxonomy::InclusionProof;
+//! use csv_protocol::proof_taxonomy::FinalityProof;
+//! use csv_hash::Hash;
 //!
-//! // Create a proof bundle
-//! let proof = ProofBundle { ... };
-//!
-//! // Use canonical encoding for verification
-//! let bytes = proof.to_canonical_bytes()?;
-//! let hash = sha256(&bytes);
+//! // Create a proof bundle (example - actual construction requires chain-specific data)
+//! let inclusion_proof = InclusionProof::new(
+//!     vec![0u8; 32],
+//!     Hash::zero(),
+//!     0,
+//!     0,
+//! ).unwrap();
+//! let finality_proof = FinalityProof::default();
+//! // ProofBundle construction requires more fields - see adapter implementations
 //! ```
 //!
 //! # Migration Guide

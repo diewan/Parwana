@@ -8,10 +8,20 @@ Persistence layer for the CSV Protocol — seal storage, anchor storage, and rep
 
 ## Features
 
-- **sqlite** — SQLite backend (enabled by default)
-- **file-storage** — Filesystem-based storage
+- **sqlite** — SQLite backend using rusqlite (enabled by default)
+- **file-storage** — Filesystem-based storage via the unified state module
 - **browser-storage** — IndexedDB browser storage (WASM)
 - **encrypted-storage** — AES-GCM encrypted storage
+
+## Storage Architecture
+
+`csv-store` uses a unified state module (`src/state/`) that provides:
+
+- **Domain types**: Sanads, transfers, contracts, seals, proofs, transactions (see `state/domain.rs`)
+- **Storage backends**: Pluggable storage implementations (see `state/backend.rs`)
+- **State management**: Unified storage interface for all CSV protocol state (see `state/storage.rs`)
+
+The legacy `SqliteSealStore` implementation has been retired in favor of the unified state module architecture. The state module provides a cleaner abstraction that supports multiple backends (SQLite, filesystem, browser IndexedDB) through a common interface.
 
 ## Storage Types
 
@@ -33,12 +43,16 @@ Persistence layer for the CSV Protocol — seal storage, anchor storage, and rep
 - Multiple storage backends (SQLite, filesystem, IndexedDB)
 - Encrypted storage support
 - Migration support for key parameters
+- Unified state module for protocol data management
 
 ## Dependencies
 
-- `sqlx`: SQLite database access
+- `rusqlite`: SQLite database access (bundled, enabled via `sqlite` feature)
 - `thiserror`: Error handling
-- `aes-gcm`: AES-GCM encryption
+- `aes-gcm`: AES-GCM encryption (for encrypted-storage feature)
+- `csv-protocol`: Protocol types and traits
+- `csv-hash`: Hash types and replay ID types
+- `csv-proof`: Proof bundle types
 
 ## License
 

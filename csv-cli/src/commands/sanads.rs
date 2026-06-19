@@ -362,68 +362,20 @@ async fn cmd_create(
         };
 
         output::kv("Expected Address", &expected_address);
-        output::info("Refreshing UTXOs from blockchain...");
+        output::error("Chain-specific UTXO scanning is not available in csv-cli.");
+        output::info("Use csv-sdk for chain-specific wallet operations:");
+        output::info("  ```rust");
+        output::info("  use csv_sdk::prelude::*;");
+        output::info("  ");
+        output::info("  let client = CsvClient::builder().with_chain(\"bitcoin\").build()?;");
+        output::info("  // Use client.wallet() for chain-specific operations");
+        output::info("  ```");
 
-        // Clear old UTXOs for this account before scanning
+        // Clear old UTXOs for this account
         state.storage.wallet.utxos.retain(|u| u.account != account);
-
-        // Perform the scan using minimal implementation
-        let wallet_utxos = scan_bitcoin_utxos(
-            &expected_address,
-            &config.chain(&chain)?.rpc_url,
-        ).await.map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
-
-        // Filter UTXOs: skip dust and validate they're still unspent BEFORE adding to state
-        let rpc_url = config.chain(&chain)?.rpc_url.clone();
-        let mut utxos_to_add = Vec::new();
-        let mut total_utxos = 0;
-        let mut total_value = 0u64;
-
-        for utxo in wallet_utxos {
-            output::info(&format!("  Discovered UTXO {}:{} ({} sats)", &utxo.txid[..16], utxo.vout, utxo.value));
-
-            // Skip UTXOs below minimum threshold (10,000 sats)
-            if utxo.value < 10_000 {
-                output::info(&format!("    Skipping dust UTXO ({} sats < 10,000)", utxo.value));
-                continue;
-            }
-
-            // UTXO will be validated via runtime after client is built
-            output::info(&format!("    UTXO added to wallet state (pending runtime validation)"));
-
-            // Add UTXO to unified state for persistence with script_pubkey
-            let utxo_record = csv_store::state::wallet::UtxoRecord {
-                txid: utxo.txid.clone(),
-                vout: utxo.vout,
-                value: utxo.value,
-                account,
-                index: 0,
-                derivation_path: format!("m/86'/1'/{}'/0/0", account),
-                script_pubkey: utxo.scriptpubkey_hex.clone(),
-            };
-            state.storage.wallet.utxos.push(utxo_record);
-
-            utxos_to_add.push((utxo.txid.clone(), utxo.vout, utxo.value, utxo.scriptpubkey_hex));
-
-            total_utxos += 1;
-            total_value += utxo.value;
-        }
-
         state.save()?;
 
-        output::kv("Total validated UTXOs", &total_utxos.to_string());
-        output::kv("Total value", &format!("{} sats", total_value));
-
-        if total_utxos == 0 {
-            return Err(anyhow::anyhow!("No valid UTXOs found on-chain. Send Bitcoin to the funding address first."));
-        }
-
-        if utxos_to_add.is_empty() {
-            output::warning(&format!("No valid unspent UTXOs found after refresh. Send Bitcoin to {} first.", expected_address));
-            None
-        } else {
-            Some(utxos_to_add)
-        }
+        return Ok(());
     } else {
         None
     };
@@ -2293,66 +2245,3 @@ async fn validate_bitcoin_utxo_via_runtime(
         }
     }
 }
-
-/// Minimal Bitcoin UTXO scanning implementation
-/// This replaces the removed csv-wallet::bitcoin::scan_utxos
-async fn scan_bitcoin_utxos(
-    address: &str,
-    rpc_url: &str,
-) -> Result<Vec<WalletUtxo>> {
-    let url = format!("{}/address/{}/utxo", rpc_url, address);
-    let response = reqwest::get(&url).await;
-
-    match response {
-        Ok(resp) if resp.status().is_success() => {
-            let utxo_list: Vec<serde_json::Value> = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to parse UTXO response: {}", e))?;
-
-            let mut wallet_utxos = Vec::new();
-            for utxo in utxo_list {
-                let txid = utxo
-                    .get("txid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("Missing txid"))?
-                    .to_string();
-                let vout = utxo
-                    .get("vout")
-                    .and_then(|v| v.as_u64())
-                    .ok_or_else(|| anyhow::anyhow!("Missing vout"))? as u32;
-                let value = utxo
-                    .get("value")
-                    .and_then(|v| v.as_u64())
-                    .ok_or_else(|| anyhow::anyhow!("Missing value"))?;
-                let scriptpubkey_hex = utxo.get("scriptpubkey").and_then(|v| v.as_str()).map(|s| s.to_string());
-
-                wallet_utxos.push(WalletUtxo {
-                    txid,
-                    vout,
-                    value,
-                    scriptpubkey_hex,
-                });
-            }
-            Ok(wallet_utxos)
-        }
-        Ok(resp) => {
-            log::warn!("Failed to fetch UTXOs for address {}: HTTP {}", address, resp.status());
-            Ok(Vec::new())
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch UTXOs for address {}: {}", address, e);
-            Ok(Vec::new())
-        }
-    }
-}
-
-/// Minimal UTXO structure for CLI use
-#[derive(Debug, Clone)]
-struct WalletUtxo {
-    txid: String,
-    vout: u32,
-    value: u64,
-    scriptpubkey_hex: Option<String>,
-}
-

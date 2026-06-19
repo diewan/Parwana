@@ -1114,7 +1114,7 @@ impl SealProtocol for SuiSealProtocol {
     }
 
     #[cfg(feature = "rpc")]
-    async fn build_proof_bundle(&self, anchor: Self::CommitAnchor, _extra_data: Vec<u8>) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
+    async fn build_proof_bundle(&self, anchor: Self::CommitAnchor, _extra_data: csv_protocol::seal_protocol::DagSegment) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
         use csv_protocol::proof_taxonomy::{ProofBundle, InclusionProof, FinalityProof};
         use csv_hash::dag::DAGSegment;
         use csv_hash::seal::{SealPoint, CommitAnchor};
@@ -1195,7 +1195,7 @@ impl SealProtocol for SuiSealProtocol {
     }
 
     #[cfg(not(feature = "rpc"))]
-    async fn build_proof_bundle(&self, _anchor: Self::CommitAnchor, _extra_data: Vec<u8>) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
+    async fn build_proof_bundle(&self, _anchor: Self::CommitAnchor, _extra_data: csv_protocol::seal_protocol::DagSegment) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
         Err("RPC feature not enabled".into())
     }
 }

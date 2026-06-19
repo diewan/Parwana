@@ -1,15 +1,15 @@
 [toolchain]
-anchor_version = "1.0.0"
+anchor_version = "1.0.2"
 
 [features]
 resolution = false
 skip-lint = false
 
 [programs.devnet]
-csv_seal = "2f1J571bNoVDCnpojCtXUtrD8GAuz1h92UWkk9J5fJ82"
+csv_seal = "DDDqYtmUAyVFnt3wqzbVzpDFSTstZXieAhdx4XyayJVn"
 
 [programs.localnet]
-csv_seal = "HzZ12WPJjDvZ8nCA9yjXgKAoJ8XV1386976Jwrm63RcD"
+csv_seal = "2nVbT9d33j1ySDdHHmNKUgthfV7RbyQDTqRua8192Tn6"
 
 [programs.mainnet]
 csv_seal = "HzZ12WPJjDvZ8nCA9yjXgKAoJ8XV1386976Jwrm63RcD"

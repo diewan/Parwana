@@ -55,6 +55,9 @@ pub enum TransportError {
 
     #[error("Invalid event: {0}")]
     InvalidEvent(String),
+
+    #[error("Nostr transport not configured (feature disabled)")]
+    NostrNotConfigured,
 }
 
 /// Unique identifier for a Nostr event.
