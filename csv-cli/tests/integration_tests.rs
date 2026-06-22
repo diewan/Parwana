@@ -471,3 +471,56 @@ fn test_cli_terminology() {
         );
     }
 }
+
+/// Product contract for the CLI Testnet MVP gauntlet (CLI-TRUTH-001).
+///
+/// This is intentionally a scenario contract, not a production mock. The real
+/// gauntlet implementation must execute these steps against deterministic
+/// fixtures or real testnets while preserving fail-closed behavior.
+#[test]
+fn cli_golden_path_gauntlet_contract() {
+    let quick_start = std::fs::read_to_string("../csv-examples/cli-tutorial/quick-start.sh")
+        .expect("quick-start.sh should be readable from csv-cli tests");
+    let cross_chain = std::fs::read_to_string("../csv-examples/cli-tutorial/cross-chain-transfer.sh")
+        .expect("cross-chain-transfer.sh should be readable from csv-cli tests");
+    let scenario = format!("{}\n{}", quick_start, cross_chain);
+
+    let required_steps = [
+        ("wallet init", "csv wallet init --network test --words 12"),
+        ("bitcoin address generation", "csv wallet generate --chain bitcoin"),
+        ("ethereum address generation", "csv wallet generate --chain ethereum"),
+        ("wallet balance", "csv wallet balance"),
+        ("sanad create", "csv sanad create --chain ethereum"),
+        ("sanad state", "csv sanad state --chain ethereum"),
+        ("proof generate", "csv proof generate --chain ethereum"),
+        ("proof verify", "csv proof verify --chain ethereum"),
+        ("cross-chain transfer", "csv cross-chain transfer --from ethereum --to sui"),
+        ("cross-chain status", "csv cross-chain status <TRANSFER_ID>"),
+        ("sanad trace", "csv sanad trace --chain ethereum"),
+        ("replay attempt", "replay attempt"),
+        ("malformed proof attempt", "malformed proof attempt"),
+    ];
+
+    for (label, needle) in required_steps {
+        assert!(
+            scenario.contains(needle),
+            "CLI golden path gauntlet is missing required step `{}`: `{}`",
+            label,
+            needle
+        );
+    }
+
+    let forbidden_claims = [
+        "skip publish path creates a real Sanad",
+        "local cache is canonical",
+        "verification failure is a warning",
+    ];
+
+    for forbidden in forbidden_claims {
+        assert!(
+            !scenario.contains(forbidden),
+            "CLI gauntlet scripts must not claim unsafe behavior: `{}`",
+            forbidden
+        );
+    }
+}

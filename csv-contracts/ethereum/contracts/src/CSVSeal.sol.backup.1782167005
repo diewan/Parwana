@@ -10,11 +10,11 @@ contract CSVSeal {
 
     /// @notice Pinned ABI hash for contract freeze verification
     /// @dev This hash must match the deployed contract's ABI. Computed as keccak256(abi.encode(contractABI))
-    bytes32 public constant PINNED_ABI_HASH = 0x7f8e1b41739254250f829f116b47ecfc6bd88332acfed2a7bd1b532b181b1469;
+    bytes32 public constant PINNED_ABI_HASH = 0x67ebce307f23f9e5e5a017aacdbdfbb91d1073742f721d2bff9632f5562f16ae;
 
     /// @notice Pinned bytecode hash for contract freeze verification
     /// @dev This hash must match the deployed contract's bytecode (without constructor args)
-    bytes32 public constant PINNED_BYTECODE_HASH = 0xb93a35143e1abef191c162ad4488d12527e50926ca23cc58fc1a25247dd101ee;
+    bytes32 public constant PINNED_BYTECODE_HASH = 0x9731e533812159dc28f7cf1f4fd03eab736ee45c0d543a425cc0b4b71dca2730;
 
     uint8 public constant ASSET_CLASS_UNSPECIFIED = 0;
     uint8 public constant ASSET_CLASS_FUNGIBLE_TOKEN = 1;

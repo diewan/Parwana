@@ -164,13 +164,33 @@ async fn cmd_create(
     // Run readiness check before proceeding (CHAIN-READINESS-001)
     output::info("Checking chain readiness...");
     let chain_config = config.chain(&chain)?;
-    
+
     use csv_sdk::CsvClient;
     use csv_sdk::StoreBackend;
     use csv_hash::ChainId;
 
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
+
+    // Derive seed and private key for chains that require signing (Ethereum, Sui, Aptos, Solana)
+    let (seed_hex, private_key) = if chain.as_str() == "ethereum" || chain.as_str() == "sui" || chain.as_str() == "aptos" || chain.as_str() == "solana" {
+        let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
+        })?;
+        let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+        let seed = mnemonic.to_seed(None);
+        let seed_hex = hex::encode(seed.as_bytes());
+
+        // Derive the private key for this chain
+        let secret_key = csv_keys::bip44::derive_key(&seed.as_bytes(), &core_chain, account, index)
+            .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
+        let key_bytes = secret_key.as_bytes().to_vec();
+
+        (Some(seed_hex), Some(key_bytes))
+    } else {
+        (None, None)
+    };
 
     // Convert CLI config to SDK config format
     let mut sdk_config = csv_sdk::config::Config::default();
@@ -191,7 +211,7 @@ async fn cmd_create(
         finality_depth: chain_config.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
-        seed: None,
+        seed: seed_hex,
         contract_address: chain_config.contract_address.clone(),
         program_id: chain_config.program_id.clone(),
         account,
@@ -202,10 +222,21 @@ async fn cmd_create(
     sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
 
     // Build CSV client for readiness check
-    let client = CsvClient::builder()
+    let mut builder = CsvClient::builder()
         .with_chain(core_chain.clone())
         .with_config(sdk_config)
-        .with_store_backend(StoreBackend::InMemory)
+        .with_store_backend(StoreBackend::InMemory);
+
+    // Add private keys for chains that require signing
+    if let Some(pk) = private_key {
+        let mut keys = std::collections::HashMap::new();
+        let key_array: [u8; 32] = pk.try_into().map_err(|_| anyhow::anyhow!("Private key must be 32 bytes"))?;
+        let secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(key_array);
+        keys.insert(chain.as_str().to_string(), secret_handle);
+        builder = builder.with_private_keys(keys);
+    }
+
+    let client = builder
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client for readiness check: {}", e))?;
@@ -559,6 +590,23 @@ async fn cmd_create(
     let key_hex = if chain.as_str() == "bitcoin" {
         log::info!("BITCOIN: Using 64-byte BIP-39 seed for HD wallet derivation");
         seed_hex.clone()
+    } else if chain.as_str() == "ethereum" || chain.as_str() == "sui" || chain.as_str() == "aptos" || chain.as_str() == "solana" {
+        // For chains that require signing, derive private key directly using csv-keys bip44
+        // (matches wallet balance command approach)
+        log::info!("{}: Deriving private key using csv-keys bip44", chain.as_str().to_uppercase());
+        
+        // Use Wallet SDK for address derivation (for logging/verification)
+        let resolver = WalletIdentityResolver::from_seed(seed_array);
+        let address = resolver.derive_address(core_chain.clone(), account, index);
+        log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
+        eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
+        
+        // Derive private key directly using csv-keys bip44 (same as wallet balance)
+        let bip44_key = csv_keys::bip44::derive_key(&seed_array, &core_chain, account, index)
+            .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
+        let pk_hex = hex::encode(bip44_key.expose_secret());
+
+        pk_hex
     } else {
         let (secret_key, key_source) =
             signing_key_for_chain(&chain, account, &seed_array, state)?;

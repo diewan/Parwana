@@ -13,6 +13,9 @@ use std::sync::Mutex;
 /// Trait for Ethereum RPC operations
 #[async_trait]
 pub trait EthereumRpc: Send + Sync {
+    /// Check if a signer is configured for transaction signing
+    fn has_signer(&self) -> bool;
+
     /// Get current block number
     async fn block_number(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -296,6 +299,10 @@ impl MockEthereumRpc {
 
 #[async_trait]
 impl EthereumRpc for MockEthereumRpc {
+    fn has_signer(&self) -> bool {
+        false // Mock RPC doesn't have a signer
+    }
+
     async fn block_number(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.block_number)
     }
@@ -549,6 +556,10 @@ impl QuorumEthereumRpc {
 #[cfg(any())]
 #[async_trait]
 impl EthereumRpc for QuorumEthereumRpc {
+    fn has_signer(&self) -> bool {
+        false // Quorum RPC doesn't have a signer (uses external signing)
+    }
+
     async fn block_number(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let result = self.client.get_block_number().await?;
         Self::parse_u64(&result).ok_or_else(|| "Invalid block number response".into())

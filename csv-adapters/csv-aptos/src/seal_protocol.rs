@@ -143,9 +143,8 @@ impl AptosSealProtocol {
         if private_key_bytes.len() != 32 {
             return Err("Private key must be 32 bytes".into());
         }
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(
-            &private_key_bytes.try_into().map_err(|_| "Failed to parse private key")?,
-        );
+        let key_array: [u8; 32] = private_key_bytes.clone().try_into().map_err(|_| "Failed to parse private key")?;
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_array);
 
         // Derive Aptos account address from signing key
         let public_key = signing_key.verifying_key().to_bytes();
@@ -161,6 +160,9 @@ impl AptosSealProtocol {
         // Create seal protocol and attach signing key
         let mut seal = Self::from_config(config, rpc)?;
         seal.signing_key = Some(signing_key);
+        // Also store private key in config for readiness check
+        let key_array: [u8; 32] = private_key_bytes.try_into().unwrap();
+        seal.config.private_key = Some(csv_keys::memory::SecretKey::new(key_array));
         Ok(seal)
     }
 
@@ -194,6 +196,9 @@ impl AptosSealProtocol {
         ));
         let mut adapter = Self::from_config(config, rpc)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        // Also store private key in config for readiness check
+        let key_array = signing_key.to_bytes();
+        adapter.config.private_key = Some(csv_keys::memory::SecretKey::new(key_array));
         adapter.signing_key = Some(signing_key);
         // Also store the seal address in config for the event builder
         adapter.config.seal_contract.module_address = format_address(csv_seal_address);

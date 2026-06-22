@@ -181,50 +181,39 @@ pub fn derive_key_from_path(
 /// Uses proper BIP-32 HD key derivation with HMAC-SHA512.
 /// Derives master key from seed, then derives child keys along the path.
 fn derive_secp256k1(seed: &[u8; 64], path: &DerivationPath) -> Result<SecretKey, Bip44Error> {
-    use bitcoin::bip32::{Xpriv, DerivationPath as Bip32Path};
-    use bitcoin::Network;
-    use secp256k1::Secp256k1;
+    use bip32::{ChildNumber, DerivationPath as Bip32Path, ExtendedKey, XPrv};
     use std::str::FromStr;
 
-    // Create master extended private key from seed using BIP-32
-    let master_xpriv = Xpriv::new_master(Network::Testnet, seed)
-        .map_err(|e| Bip44Error::DerivationFailed(format!("Failed to create master key: {}", e)))?;
+    // Create master extended private key from seed using BIP-32 (network-agnostic)
+    // This matches the Wallet SDK's derivation method
+    let xprv = XPrv::new(seed).ok()
+        .ok_or_else(|| Bip44Error::DerivationFailed("Failed to create master key".to_string()))?;
 
     // Build BIP-32 derivation path string from components
-    // Hardened indices have ' appended (e.g., 44' means 44 | 0x80000000)
-    let purpose_str = if path.purpose >= 0x8000_0000 {
-        format!("{}'", path.purpose & 0x7FFF_FFFF)
-    } else {
-        format!("{}", path.purpose)
-    };
-    let coin_type_str = if path.coin_type >= 0x8000_0000 {
-        format!("{}'", path.coin_type & 0x7FFF_FFFF)
-    } else {
-        format!("{}", path.coin_type)
-    };
-    let account_str = if path.account >= 0x8000_0000 {
-        format!("{}'", path.account & 0x7FFF_FFFF)
-    } else {
-        format!("{}", path.account)
-    };
-
     let path_str = format!(
         "m/{}/{}/{}/{}/{}",
-        purpose_str, coin_type_str, account_str, path.change, path.address_index
+        path.purpose & 0x7FFF_FFFF,
+        path.coin_type & 0x7FFF_FFFF,
+        path.account & 0x7FFF_FFFF,
+        path.change,
+        path.address_index
     );
 
     let bip32_path = Bip32Path::from_str(&path_str)
         .map_err(|e| Bip44Error::DerivationFailed(format!("Invalid derivation path: {}", e)))?;
 
     // Derive the child key using proper BIP-32 hierarchy
-    let child_xpriv = master_xpriv
-        .derive_priv(&Secp256k1::new(), &bip32_path)
-        .map_err(|e| Bip44Error::DerivationFailed(format!("Failed to derive child key: {}", e)))?;
+    let mut derived = xprv;
+    for child in bip32_path {
+        derived = derived.derive_child(child)
+            .map_err(|e| Bip44Error::DerivationFailed(format!("Failed to derive child key: {}", e)))?;
+    }
 
     // Extract the 32-byte secret key from the extended private key
-    let key_bytes = child_xpriv.private_key.secret_bytes();
+    let key_bytes = derived.private_key().to_bytes();
+    let key_array: [u8; 32] = key_bytes.into();
 
-    Ok(SecretKey::new(key_bytes))
+    Ok(SecretKey::new(key_array))
 }
 
 /// Derive an Ed25519 key (Sui, Aptos, Solana).

@@ -174,7 +174,7 @@ impl Default for Config {
             .or_else(|_| std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC"))
             .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_JSON_RPC"))
             .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_REST_RPC"))
-            .unwrap_or_else(|_| "https://bitcoin-signet.g.alchemy.com/v2/".to_string());
+            .unwrap_or_else(|_| "https://mempool.space/signet/api".to_string());
 
         chains.insert(
             ChainId::new("bitcoin"),

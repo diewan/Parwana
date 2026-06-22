@@ -133,17 +133,17 @@ sol! {
         function updateProofRoot(bytes32 _proofRoot) external;
 
         // Lock operations
-        function lockSanad(
+        function lock_sanad(
             bytes32 sanadId,
             bytes32 commitment,
-            uint8 destinationChain,
+            bytes32 destinationChain,
             bytes calldata destinationOwner
         ) external;
 
-        function lockSanadWithMetadata(
+        function lock_sanad_with_metadata(
             bytes32 sanadId,
             bytes32 commitment,
-            uint8 destinationChain,
+            bytes32 destinationChain,
             bytes calldata destinationOwner,
             uint8 assetClass,
             bytes32 assetId,

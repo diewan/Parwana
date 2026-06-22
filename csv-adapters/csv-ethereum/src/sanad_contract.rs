@@ -25,15 +25,15 @@ fn keccak256(input: &[u8]) -> [u8; 32] {
 pub struct CsvLockAbi;
 
 impl CsvLockAbi {
-    /// Function selector for lockSanad(bytes32,bytes32,uint8,bytes)
+    /// Function selector for lock_sanad(bytes32,bytes32,bytes32,bytes)
     pub fn encode_lock_sanad(
         sanad_id: [u8; 32],
         commitment: [u8; 32],
-        destination_chain: u8,
+        destination_chain: [u8; 32],
         destination_owner: &[u8],
     ) -> Vec<u8> {
-        // selector = keccak256("lockSanad(bytes32,bytes32,uint8,bytes)")[:4]
-        let selector = keccak256(b"lockSanad(bytes32,bytes32,uint8,bytes)");
+        // selector = keccak256("lock_sanad(bytes32,bytes32,bytes32,bytes)")[:4]
+        let selector = keccak256(b"lock_sanad(bytes32,bytes32,bytes32,bytes)");
         let mut calldata = Vec::with_capacity(
             4 + 32 + 32 + 32 + 32 + destination_owner.len().next_multiple_of(32),
         );
@@ -47,9 +47,8 @@ impl CsvLockAbi {
         // commitment (bytes32)
         calldata.extend_from_slice(&commitment);
 
-        // destination_chain (uint8) - padded to 32 bytes
-        calldata.extend_from_slice(&[0u8; 31]);
-        calldata.push(destination_chain);
+        // destination_chain (bytes32) - chain ID hash
+        calldata.extend_from_slice(&destination_chain);
 
         // destination_owner (bytes) - offset to dynamic data
         let data_offset = 4 + 32 + 32 + 32 + 32; // 4 + 4 * 32 = 132
@@ -222,12 +221,13 @@ mod tests {
     fn test_encode_lock_sanad() {
         let sanad_id = [1u8; 32];
         let commitment = [2u8; 32];
+        let destination_chain = [5u8; 32]; // bytes32 chain ID hash
         let destination_owner = b"0x1234567890abcdef";
 
         let calldata = CsvLockAbi::encode_lock_sanad(
             sanad_id,
             commitment,
-            5, // destination chain
+            destination_chain,
             destination_owner,
         );
 
@@ -235,7 +235,7 @@ mod tests {
         assert!(calldata.len() >= 68);
 
         // Check selector is correct
-        let expected_selector = &keccak256(b"lockSanad(bytes32,bytes32,uint8,bytes)")[..4];
+        let expected_selector = &keccak256(b"lock_sanad(bytes32,bytes32,bytes32,bytes)")[..4];
         assert_eq!(&calldata[..4], expected_selector);
     }
 

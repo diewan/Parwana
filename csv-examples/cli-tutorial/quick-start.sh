@@ -71,7 +71,19 @@ if [ -z "$SKIP_ALL" ]; then
 fi
 
 if [ -z "$SKIP_ALL" ]; then
+    prompt_step "Generate Bitcoin Address" "Derives a Bitcoin testnet address from the wallet" "csv wallet generate --chain bitcoin"
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    prompt_step "Generate Ethereum Address" "Derives an Ethereum testnet address from the wallet" "csv wallet generate --chain ethereum"
+fi
+
+if [ -z "$SKIP_ALL" ]; then
     prompt_step "List Wallet Addresses" "Shows all wallet addresses across supported chains" "csv wallet list"
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    prompt_step "Check Wallet Balance" "Queries the runtime-backed wallet balance for Ethereum" "csv wallet balance --chain ethereum"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
@@ -92,13 +104,19 @@ echo "=============================================="
 echo ""
 echo "Next steps:"
 echo "  1. Fund your wallets from testnet faucets"
-echo "  2. Create a Sanad: csv sanad create --chain ethereum --value 1000000000000000000"
+echo "  2. Confirm balances: csv wallet balance --chain ethereum"
+echo "  3. Create a Sanad: csv sanad create --chain ethereum --value 1000000000000000000"
 echo "     → Copy the 'Sanad ID' from the output (line: 'Sanad ID')"
-echo "  3. Generate a proof: csv proof generate --chain ethereum <SANAD_ID> -o proof.json"
-echo "     → Replace <SANAD_ID> with the value from step 2"
-echo "  4. Transfer cross-chain: csv cross-chain transfer --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER>"
-echo "     → Replace <SANAD_ID> with the value from step 2"
+echo "  4. Query canonical state: csv sanad state --chain ethereum <SANAD_ID>"
+echo "  5. Generate a proof: csv proof generate --chain ethereum <SANAD_ID> -o proof.cbor"
+echo "     → Replace <SANAD_ID> with the value from step 3"
+echo "  6. Verify the proof: csv proof verify --chain ethereum --proof-file proof.cbor"
+echo "  7. Transfer cross-chain: csv cross-chain transfer --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER>"
+echo "     → Replace <SANAD_ID> with the value from step 3"
 echo "     → Replace <DEST_OWNER> with your destination chain address (run: csv wallet list)"
+echo "  8. Inspect lifecycle trace: csv sanad trace --chain ethereum <SANAD_ID>"
+echo "  9. Replay attempt: repeat step 7; it must fail closed as a replay attempt"
+echo "  10. Malformed proof attempt: corrupt proof.cbor and rerun step 6; it must fail closed"
 echo ""
 echo "Parameter Extraction Guide:"
 echo "  - Sanad ID: Found in output of 'csv sanad create' (line: 'Sanad ID')"

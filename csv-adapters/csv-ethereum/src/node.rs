@@ -285,6 +285,10 @@ mod real_rpc_impl {
 
     #[async_trait]
     impl EthereumRpc for EthereumNode {
+        fn has_signer(&self) -> bool {
+            self.signer.is_some()
+        }
+
         async fn block_number(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             self.block_number_raw().await.map_err(|e| e.into())
         }
@@ -716,13 +720,15 @@ mod real_rpc_impl {
         println!("[Ethereum]   Commitment: 0x{}", hex::encode(commitment));
         println!("[Ethereum]   Chain ID: {}", chain_id);
 
-        // Step 1: Build the calldata for lockSanad (public function)
+        // Step 1: Build the calldata for lock_sanad (public function)
         // For simple Sanad creation, we use destination chain 0 (Bitcoin) and empty destination owner
         // The sanadId is the commitment hash (not the seal_id which contains contract_address + slot_index + nonce)
+        // destination_chain is bytes32 (chain ID hash), not uint8
+        let destination_chain_hash = [0u8; 32]; // Placeholder: Bitcoin chain ID hash
         let calldata = CsvSealAbi::encode_lock_sanad(
             commitment,
             commitment,
-            0, // destination chain (Bitcoin as placeholder)
+            destination_chain_hash,
             &[0u8; 20], // destination owner (placeholder address)
         );
 
@@ -822,17 +828,18 @@ mod real_rpc_impl {
         }
     }
 
-    /// Legacy: Build and send a raw transaction that calls `lockSanad` on the CSVSeal contract.
+    /// Legacy: Build and send a raw transaction that calls `lock_sanad` on the CSVSeal contract.
    /// Expects pre-signed transaction bytes. For signing + sending, use `publish()`.
     pub async fn publish_seal_consumption(
         rpc: &dyn EthereumRpc,
         _seal: &EthereumSealPoint,
         commitment: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        let destination_chain_hash = [0u8; 32]; // Placeholder: Bitcoin chain ID hash
         let calldata = CsvSealAbi::encode_lock_sanad(
             commitment,
             commitment,
-            0, // destination chain (Bitcoin as placeholder)
+            destination_chain_hash,
             &[0u8; 20], // destination owner (placeholder address)
         );
         rpc.send_raw_transaction(calldata).await

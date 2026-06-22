@@ -49,16 +49,17 @@ impl CsvSealAbi {
         cross_chain_lock_signature()
     }
 
-    /// Encode the `lockSanad(sanadId, commitment, destinationChain, destinationOwner)` calldata
+    /// Encode the `lock_sanad(sanadId, commitment, destinationChain, destinationOwner)` calldata
     /// This is the public function for creating/locking a Sanad on Ethereum
+    /// Note: Matches Solidity function signature: lock_sanad(bytes32,bytes32,bytes32,bytes)
     pub fn encode_lock_sanad(
         sanad_id: [u8; 32],
         commitment: [u8; 32],
-        destination_chain: u8,
+        destination_chain: [u8; 32],
         destination_owner: &[u8],
     ) -> Vec<u8> {
-        // Function selector: keccak256("lockSanad(bytes32,bytes32,uint8,bytes)")[:4]
-        let selector = compute_keccak256(b"lockSanad(bytes32,bytes32,uint8,bytes)");
+        // Function selector: keccak256("lock_sanad(bytes32,bytes32,bytes32,bytes)")[:4]
+        let selector = compute_keccak256(b"lock_sanad(bytes32,bytes32,bytes32,bytes)");
         let dest_owner_len = destination_owner.len();
         let mut calldata = Vec::with_capacity(4 + 32 + 32 + 32 + 32 + dest_owner_len);
         calldata.extend_from_slice(&selector[..4]);
@@ -69,10 +70,8 @@ impl CsvSealAbi {
         // commitment (offset 0x40)
         calldata.extend_from_slice(&commitment);
 
-        // destinationChain (offset 0x60)
-        let mut chain_bytes = [0u8; 32];
-        chain_bytes[31] = destination_chain;
-        calldata.extend_from_slice(&chain_bytes);
+        // destinationChain (offset 0x60) - bytes32, not uint8
+        calldata.extend_from_slice(&destination_chain);
 
         // destinationOwner offset (offset 0x80)
         let mut offset_bytes = [0u8; 32];

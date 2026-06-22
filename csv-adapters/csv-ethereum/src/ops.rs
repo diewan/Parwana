@@ -1194,14 +1194,55 @@ impl ChainSanadOps for EthereumBackend {
         // Parse owner address for destination
         let owner_addr = self.parse_address(owner_key_id)?;
 
+        // Note: destination_chain is now bytes32 (chain ID hash), not uint8
+        use tiny_keccak::{Hasher, Keccak};
+        let destination_chain_hash = match destination_chain {
+            "bitcoin" => {
+                let mut hasher = Keccak::v256();
+                let mut output = [0u8; 32];
+                hasher.update(b"csv.chain.bitcoin");
+                hasher.finalize(&mut output);
+                output
+            },
+            "ethereum" => {
+                let mut hasher = Keccak::v256();
+                let mut output = [0u8; 32];
+                hasher.update(b"csv.chain.ethereum");
+                hasher.finalize(&mut output);
+                output
+            },
+            "sui" => {
+                let mut hasher = Keccak::v256();
+                let mut output = [0u8; 32];
+                hasher.update(b"csv.chain.sui");
+                hasher.finalize(&mut output);
+                output
+            },
+            "aptos" => {
+                let mut hasher = Keccak::v256();
+                let mut output = [0u8; 32];
+                hasher.update(b"csv.chain.aptos");
+                hasher.finalize(&mut output);
+                output
+            },
+            "solana" => {
+                let mut hasher = Keccak::v256();
+                let mut output = [0u8; 32];
+                hasher.update(b"csv.chain.solana");
+                hasher.finalize(&mut output);
+                output
+            },
+            _ => [0u8; 32], // Default to zero hash for unknown chains
+        };
+
         #[cfg(feature = "rpc")]
         {
             // Build the lock transaction using generated Alloy bindings
-            use crate::bindings::csv_seal::lockSanadCall;
-            let call = lockSanadCall {
+            use crate::bindings::csv_seal::lock_sanadCall;
+            let call = lock_sanadCall {
                 sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
                 commitment: alloy_primitives::FixedBytes::<32>::from_slice(commitment),
-                destinationChain: dest_chain_id,
+                destinationChain: alloy_primitives::FixedBytes::<32>::from_slice(&destination_chain_hash),
                 destinationOwner: alloy_primitives::Bytes::from(owner_addr.to_vec()),
             };
 
@@ -1232,7 +1273,7 @@ impl ChainSanadOps for EthereumBackend {
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = (contract, commitment, dest_chain_id, owner_addr);
+            let _ = (contract, commitment, destination_chain_hash, owner_addr);
             Err(ChainOpError::FeatureNotEnabled(
                 "Sanad locking requires the 'rpc' feature for transaction signing. \
                  Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
@@ -1815,8 +1856,9 @@ impl ChainReadinessCheck for EthereumBackend {
         // Check if contract is configured
         let contract_configured = self.contract_address.is_some();
 
-        // Check if signer is actually configured by checking the seal_protocol config
-        let signer_configured = self.seal_protocol.config().private_key.is_some();
+        // Check if signer is configured by checking if the RPC client has a signer
+        // The signer is added to the RPC client in the factory, not stored in the config
+        let signer_configured = self.rpc.has_signer();
 
         // Derive signer address from private key if available
         let signer_address = if signer_configured {

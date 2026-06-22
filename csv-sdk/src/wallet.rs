@@ -308,7 +308,7 @@ impl Wallet {
             let path = DerivationPath::from_str(&format!("m/44'/60'/{}'/0/{}", account, index))
                 .unwrap_or_else(|_| DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap());
 
-            // Create extended private key from seed
+            // Create extended private key from seed (network-agnostic bip32 crate)
             let xprv = XPrv::new(&self.seed).ok();
             
             if let Some(xprv) = xprv {
@@ -362,54 +362,21 @@ impl Wallet {
     }
 
     fn sui_address_with_path(&self, account: u32, index: u32) -> String {
-        // Sui address derivation using BIP-44: m/44'/784'/account'/0'/index
+        // Sui address derivation using SLIP-10: m/44'/784'/account'/0/index
         // Address = Blake2b-256(0x00 || public_key)
+        // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
         {
-            use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
-            use blake2::{Blake2b, Digest};
-            use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
-            use std::str::FromStr;
+            use csv_keys::bip44;
+            use csv_hash::chain_id::ChainId;
 
-            // Derive the BIP-32 path
-            let path = DerivationPath::from_str(&format!("m/44'/784'/{}'/0'/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/784'/0'/0'/0").unwrap());
-
-            // Create extended private key from seed
-            let xprv = XPrv::new(&self.seed).ok();
+            // Use csv-keys bip44 for consistent SLIP-10 derivation
+            let chain_id = ChainId::new("sui");
+            let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
             
-            if let Some(xprv) = xprv {
-                // Derive child key
-                let mut derived = xprv;
-                let mut success = true;
-                for child in path {
-                    match derived.derive_child(child) {
-                        Ok(d) => derived = d,
-                        Err(_) => {
-                            success = false;
-                            break;
-                        }
-                    }
-                }
-                let derived = if success { Some(derived) } else { None };
-                
-                if let Some(derived) = derived {
-                    // Get the private key bytes (first 32 bytes)
-                    let priv_key_bytes = &derived.private_key().to_bytes()[..32];
-                    
-                    // Create Ed25519 signing key
-                    if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
-                        let signing_key = EdSigningKey::from(&secret_key);
-                        let public_key = signing_key.verifying_key();
-                        
-                        // Sui address = Blake2b-256(0x00 || public_key)
-                        let mut hasher = Blake2b::new();
-                        hasher.update([0x00]); // Sui address prefix
-                        hasher.update(public_key.as_bytes());
-                        let hash: [u8; 32] = hasher.finalize().into();
-                        
-                        return format!("0x{}", hex::encode(&hash[..]));
-                    }
+            if let Ok(key) = secret_key {
+                if let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
+                    return address;
                 }
             }
             
@@ -428,54 +395,21 @@ impl Wallet {
     }
 
     fn aptos_address_with_path(&self, account: u32, index: u32) -> String {
-        // Aptos address derivation using BIP-44: m/44'/637'/account'/0'/index
+        // Aptos address derivation using SLIP-10: m/44'/637'/account'/0/index
         // Address = SHA3-256(public_key || 0x00)
+        // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
         {
-            use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
-            use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
-            use sha3::{Digest, Sha3_256};
-            use std::str::FromStr;
+            use csv_keys::bip44;
+            use csv_hash::chain_id::ChainId;
 
-            // Derive the BIP-32 path
-            let path = DerivationPath::from_str(&format!("m/44'/637'/{}'/0'/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/637'/0'/0'/0").unwrap());
-
-            // Create extended private key from seed
-            let xprv = XPrv::new(&self.seed).ok();
+            // Use csv-keys bip44 for consistent SLIP-10 derivation
+            let chain_id = ChainId::new("aptos");
+            let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
             
-            if let Some(xprv) = xprv {
-                // Derive child key
-                let mut derived = xprv;
-                let mut success = true;
-                for child in path {
-                    match derived.derive_child(child) {
-                        Ok(d) => derived = d,
-                        Err(_) => {
-                            success = false;
-                            break;
-                        }
-                    }
-                }
-                let derived = if success { Some(derived) } else { None };
-                
-                if let Some(derived) = derived {
-                    // Get the private key bytes (first 32 bytes)
-                    let priv_key_bytes = &derived.private_key().to_bytes()[..32];
-                    
-                    // Create Ed25519 signing key
-                    if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
-                        let signing_key = EdSigningKey::from(&secret_key);
-                        let public_key = signing_key.verifying_key();
-                        
-                        // Aptos address = SHA3-256(public_key || 0x00)
-                        let mut hasher = Sha3_256::new();
-                        hasher.update(public_key.as_bytes());
-                        hasher.update([0x00]); // Ed25519 single key scheme
-                        let hash: [u8; 32] = hasher.finalize().into();
-                        
-                        return format!("0x{}", hex::encode(&hash[..]));
-                    }
+            if let Ok(key) = secret_key {
+                if let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
+                    return address;
                 }
             }
             
@@ -494,47 +428,20 @@ impl Wallet {
     }
 
     fn sol_address_with_path(&self, account: u32, index: u32) -> String {
-        // Solana address derivation using BIP-44: m/44'/501'/account'/0'/index
+        // Solana address derivation using SLIP-10: m/44'/501'/account'/0/index
+        // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
         {
-            use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
-            use std::str::FromStr;
-            use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
+            use csv_keys::bip44;
+            use csv_hash::chain_id::ChainId;
 
-            // Derive the BIP-32 path
-            let path = DerivationPath::from_str(&format!("m/44'/501'/{}'/0'/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/501'/0'/0'/0").unwrap());
-
-            // Create extended private key from seed
-            let xprv = XPrv::new(&self.seed).ok();
+            // Use csv-keys bip44 for consistent SLIP-10 derivation
+            let chain_id = ChainId::new("solana");
+            let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
             
-            if let Some(xprv) = xprv {
-                // Derive child key
-                let mut derived = xprv;
-                let mut success = true;
-                for child in path {
-                    match derived.derive_child(child) {
-                        Ok(d) => derived = d,
-                        Err(_) => {
-                            success = false;
-                            break;
-                        }
-                    }
-                }
-                let derived = if success { Some(derived) } else { None };
-                
-                if let Some(derived) = derived {
-                    // Get the private key bytes (first 32 bytes)
-                    let priv_key_bytes = &derived.private_key().to_bytes()[..32];
-                    
-                    // Create Ed25519 signing key
-                    if let Ok(secret_key) = SecretKey::try_from(priv_key_bytes) {
-                        let signing_key = EdSigningKey::from(&secret_key);
-                        let public_key = signing_key.verifying_key();
-                        
-                        // Solana address is the 32-byte public key in base58
-                        return bs58::encode(public_key.as_bytes()).into_string();
-                    }
+            if let Ok(key) = secret_key {
+                if let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
+                    return address;
                 }
             }
             
