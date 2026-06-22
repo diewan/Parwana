@@ -21,7 +21,7 @@ use bitcoin::secp256k1::rand::{RngCore, rngs::OsRng};
 use hex;
 
 #[allow(unused_imports)]
-use crate::types::BitcoinSealPoint;
+use crate::types::{BitcoinSealPoint, UtxoProvenance};
 
 /// Hardened derivation constant
 const HARDENED: u32 = 0x8000_0000;
@@ -99,6 +99,8 @@ pub struct WalletUtxo {
     pub script_pubkey: Option<ScriptBuf>,
     /// Sanad ID this UTXO is associated with (for cross-chain lock lookups)
     pub sanad_id: Option<[u8; 32]>,
+    /// Provenance of this UTXO (tracks origin to prevent spending non-spendable outputs)
+    pub provenance: UtxoProvenance,
 }
 
 /// Derived Taproot key with spending info
@@ -183,7 +185,7 @@ impl SealWallet {
         Ok(wallet)
     }
 
-    fn derive_private_key(&self, path: &Bip86Path) -> Result<SecretKey, WalletError> {
+    pub fn derive_private_key(&self, path: &Bip86Path) -> Result<SecretKey, WalletError> {
         let btc_path = path.to_bitcoin_path(&self.network);
         let child = self
             .master_key
@@ -267,10 +269,14 @@ impl SealWallet {
     }
 
     pub fn add_utxo(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path) {
-        self.add_utxo_with_scriptpubkey(outpoint, amount_sat, path, None, None);
+        self.add_utxo_with_provenance(outpoint, amount_sat, path, None, None, UtxoProvenance::Unknown);
     }
 
     pub fn add_utxo_with_scriptpubkey(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>) {
+        self.add_utxo_with_provenance(outpoint, amount_sat, path, script_pubkey, sanad_id, UtxoProvenance::Unknown);
+    }
+
+    pub fn add_utxo_with_provenance(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>, provenance: UtxoProvenance) {
         self.utxos.lock().unwrap_or_else(|e| e.into_inner()).insert(
             outpoint,
             WalletUtxo {
@@ -281,6 +287,7 @@ impl SealWallet {
                 reserved_for: None,
                 script_pubkey,
                 sanad_id,
+                provenance,
             },
         );
     }
@@ -303,7 +310,19 @@ impl SealWallet {
     }
 
     /// Register an explicit sanad_id -> seal (txid, vout) mapping for cross-chain lock lookups
+    /// Also marks the corresponding UTXO as SanadAnchor to prevent it from being spent
     pub fn register_sanad_seal(&self, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) {
+        // Mark the UTXO as SanadAnchor to prevent spending
+        let txid_array: [u8; 32] = txid.clone().try_into().unwrap_or([0u8; 32]);
+        let outpoint = OutPoint {
+            txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array(txid_array)),
+            vout,
+        };
+        let mut utxos = self.utxos.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(utxo) = utxos.get_mut(&outpoint) {
+            utxo.provenance = UtxoProvenance::SanadAnchor;
+        }
+
         self.sanad_seals
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -322,7 +341,7 @@ impl SealWallet {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .values()
-            .filter(|u| !u.reserved && u.amount_sat >= min_sat)
+            .filter(|u| !u.reserved && u.amount_sat >= min_sat && u.provenance.is_spendable())
             .cloned()
             .collect();
         available.sort_by_key(|utxo| std::cmp::Reverse(utxo.amount_sat));
@@ -455,7 +474,7 @@ impl SealWallet {
                     } else {
                         consecutive_empty = 0;
                         for (outpoint, amount) in utxos {
-                            self.add_utxo(outpoint, amount, path.clone());
+                            self.add_utxo_with_provenance(outpoint, amount, path.clone(), None, None, UtxoProvenance::RpcWallet);
                             discovered_count += 1;
                         }
                     }
@@ -487,7 +506,7 @@ impl SealWallet {
 
         // Verify the outpoint belongs to this address
         // (In production, you'd verify the script_pubkey matches)
-        self.add_utxo(outpoint, amount_sat, path);
+        self.add_utxo_with_provenance(outpoint, amount_sat, path, None, None, UtxoProvenance::ImportedFunding);
         Ok(())
     }
 }
@@ -587,18 +606,56 @@ mod tests {
         let t1 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
         let t2 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([2u8; 32]));
         let t3 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([3u8; 32]));
-        w.add_utxo(OutPoint::new(t1, 0), 50_000, path.clone());
-        w.add_utxo(OutPoint::new(t2, 0), 30_000, path.clone());
-        w.add_utxo(OutPoint::new(t3, 0), 20_000, path);
+        w.add_utxo_with_provenance(OutPoint::new(t1, 0), 50_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(OutPoint::new(t2, 0), 30_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(OutPoint::new(t3, 0), 20_000, path, None, None, UtxoProvenance::RpcWallet);
         let sel = w.select_utxos(70_000).unwrap();
         assert_eq!(sel.len(), 2);
         assert_eq!(sel.iter().map(|u| u.amount_sat).sum::<u64>(), 80_000);
+    }
+
+    #[test]
+    fn test_wallet_utxo_selection_filters_non_spendable() {
+        let w = SealWallet::generate_random(Network::Signet);
+        let path = Bip86Path::external(0, 0);
+        let t1 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
+        let t2 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([2u8; 32]));
+        let t3 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([3u8; 32]));
+        // Add spendable UTXO
+        w.add_utxo_with_provenance(OutPoint::new(t1, 0), 50_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
+        // Add SanadAnchor (non-spendable)
+        w.add_utxo_with_provenance(OutPoint::new(t2, 0), 100_000, path.clone(), None, None, UtxoProvenance::SanadAnchor);
+        // Add ConsumedSeal (non-spendable)
+        w.add_utxo_with_provenance(OutPoint::new(t3, 0), 100_000, path, None, None, UtxoProvenance::ConsumedSeal);
+
+        // Should only select the spendable UTXO, not the SanadAnchor or ConsumedSeal
+        let sel = w.select_utxos(30_000).unwrap();
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].outpoint.vout, 0);
+        assert_eq!(sel[0].provenance, UtxoProvenance::RpcWallet);
+    }
+
+    #[test]
+    fn test_wallet_utxo_selection_filters_unknown() {
+        let w = SealWallet::generate_random(Network::Signet);
+        let path = Bip86Path::external(0, 0);
+        let t1 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
+        let t2 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([2u8; 32]));
+        // Add spendable UTXO
+        w.add_utxo_with_provenance(OutPoint::new(t1, 0), 50_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
+        // Add Unknown (non-spendable)
+        w.add_utxo_with_provenance(OutPoint::new(t2, 0), 100_000, path, None, None, UtxoProvenance::Unknown);
+
+        // Should only select the spendable UTXO, not the Unknown
+        let sel = w.select_utxos(30_000).unwrap();
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].provenance, UtxoProvenance::RpcWallet);
     }
     #[test]
     fn test_wallet_insufficient_funds() {
         let w = SealWallet::generate_random(Network::Signet);
         let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
-        w.add_utxo(OutPoint::new(txid, 0), 10_000, Bip86Path::external(0, 0));
+        w.add_utxo_with_provenance(OutPoint::new(txid, 0), 10_000, Bip86Path::external(0, 0), None, None, UtxoProvenance::RpcWallet);
         assert!(w.select_utxos(20_000).is_err());
     }
     #[test]
@@ -606,7 +663,7 @@ mod tests {
         let w = SealWallet::generate_random(Network::Signet);
         let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
         let op = OutPoint::new(txid, 0);
-        w.add_utxo(op, 100_000, Bip86Path::external(0, 0));
+        w.add_utxo_with_provenance(op, 100_000, Bip86Path::external(0, 0), None, None, UtxoProvenance::RpcWallet);
         assert_eq!(w.balance(), 100_000);
         w.reserve_utxos(&[op], "test");
         assert_eq!(w.balance(), 0);

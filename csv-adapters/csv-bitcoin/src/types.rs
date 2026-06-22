@@ -2,6 +2,31 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Provenance of a UTXO in the wallet
+///
+/// Tracks where a UTXO came from to prevent spending non-spendable outputs
+/// like Sanad anchors or consumed seals.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum UtxoProvenance {
+    /// UTXO discovered via RPC from the wallet's own addresses
+    RpcWallet,
+    /// UTXO manually imported from external funding
+    ImportedFunding,
+    /// UTXO is a Sanad seal anchor (must never be spent)
+    SanadAnchor,
+    /// UTXO from a consumed seal (must never be spent)
+    ConsumedSeal,
+    /// Unknown provenance (treated as non-spendable)
+    Unknown,
+}
+
+impl UtxoProvenance {
+    /// Returns true if this UTXO can be selected as a transaction input
+    pub fn is_spendable(&self) -> bool {
+        matches!(self, UtxoProvenance::RpcWallet | UtxoProvenance::ImportedFunding)
+    }
+}
+
 /// Bitcoin seal reference (UTXO OutPoint)
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BitcoinSealPoint {
