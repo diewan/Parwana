@@ -42,6 +42,27 @@ impl AdapterFactory for SuiFactory {
         // Parse package ID if provided
         let package_id = config.contract_address.as_deref();
 
+        // Convert SharedSecretHandle to SecretKey for SuiConfig
+        let signer_private_key = config.secret_key.as_bytes().map(|key_bytes| {
+            let mut key_array = [0u8; 32];
+            key_array.copy_from_slice(key_bytes);
+            csv_keys::memory::SecretKey::new(key_array)
+        });
+
+        // Derive signer address from private key if available
+        let signer_address = if let Some(ref key) = signer_private_key {
+            let key_bytes = key.expose_secret();
+            use blake2::Blake2b;
+            use blake2::Digest;
+            let mut hasher = Blake2b::new();
+            hasher.update([0x00]); // Sui address prefix
+            hasher.update(key_bytes);
+            let hash: [u8; 32] = hasher.finalize().into();
+            Some(format!("0x{}", hex::encode(hash)))
+        } else {
+            None
+        };
+
         let sui_config = SuiConfig {
             network,
             rpc_url: grpc_endpoint.url.clone(),
@@ -51,8 +72,8 @@ impl AdapterFactory for SuiFactory {
                 package_id: package_id.map(|s| s.to_string()),
                 ..Default::default()
             },
-            signer_address: None,
-            signer_private_key: None, // SharedSecretHandle is not compatible with Option<SecretKey>
+            signer_address,
+            signer_private_key,
         };
 
         // Create RPC client
@@ -61,34 +82,18 @@ impl AdapterFactory for SuiFactory {
                 .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui RPC client: {}", e)))?
         );
 
-        // Create seal protocol
-        let seal_protocol = SuiSealProtocol::from_config(sui_config, node.clone())
+        // Create seal protocol (signer is now in config, not passed separately)
+        let seal_protocol = SuiSealProtocol::from_config(sui_config.clone(), node.clone())
             .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui seal protocol: {}", e)))?;
 
-        // Create ChainBackend with signing key
-        log::info!("Factory: Creating Sui seal protocol with signing key");
-        let secret_key = &config.secret_key;
-        if let Some(key_bytes) = secret_key.as_bytes() {
-            let signing_key = ed25519_dalek::SigningKey::from_bytes(key_bytes);
-            let sui_backend = Arc::new(
-                SuiBackend::from_seal_protocol_with_key(Arc::new(seal_protocol), node.clone(), signing_key)
-                    .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend with key: {}", e)))?
-            );
-            let chain_backend: Arc<dyn ChainBackend> = sui_backend.clone();
-
-            // Create ChainAdapter for TransferCoordinator using SuiRuntimeAdapter
-            let chain_adapter: Box<dyn ChainAdapter> = Box::new(
-                SuiRuntimeAdapter::new(sui_backend)
-            );
-
-            return Ok(AdapterResult {
-                chain_backend,
-                chain_adapter: Some(chain_adapter),
-            });
+        // Log signer status
+        if sui_config.signer_private_key.is_some() {
+            log::info!("Factory: Creating Sui adapter with signer configured");
+        } else {
+            log::warn!("Factory: Creating Sui adapter in read-only mode (no signer configured)");
         }
 
-        // Fallback: create backend without signing key
-        log::warn!("Factory: No secret key available, creating Sui backend without signing key");
+        // Create backend - seal_protocol already has the signer from config
         let sui_backend = Arc::new(
             SuiBackend::from_seal_protocol(Arc::new(seal_protocol), node.clone())
                 .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e)))?

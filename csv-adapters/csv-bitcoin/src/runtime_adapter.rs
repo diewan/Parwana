@@ -51,7 +51,13 @@ impl BitcoinRuntimeAdapter {
 
           let seal_protocol = BitcoinSealProtocol::with_wallet(
              crate::config::BitcoinConfig {
-                 network: crate::config::Network::Regtest,
+                 network: match network {
+                     Network::Bitcoin => crate::config::Network::Mainnet,
+                     Network::Testnet => crate::config::Network::Testnet,
+                     Network::Signet => crate::config::Network::Signet,
+                     Network::Regtest => crate::config::Network::Regtest,
+                     _ => crate::config::Network::Signet,
+                 },
                  finality_depth: 6,
                  publication_timeout_seconds: 3600,
                  rpc_url: String::new(),

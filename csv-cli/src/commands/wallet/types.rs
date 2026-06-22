@@ -46,8 +46,14 @@ pub enum WalletAction {
         #[arg(value_enum)]
         chain: Chain,
         /// Address (uses stored address if not provided)
-        #[arg(short, long)]
+        #[arg(long)]
         address: Option<String>,
+        /// Account number (default: 0)
+        #[arg(short, long, default_value = "0")]
+        account: u32,
+        /// Address index (default: 0)
+        #[arg(short, long, default_value = "0")]
+        index: u32,
     },
     /// List all wallet addresses
     List {

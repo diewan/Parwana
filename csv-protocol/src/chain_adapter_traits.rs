@@ -589,7 +589,7 @@ pub struct CanonicalSealState {
 /// Use `CapabilityUnavailable` error for operations not supported on a chain.
 #[async_trait]
 pub trait ChainBackend:
-    ChainQuery + ChainSigner + ChainBroadcaster + ChainDeployer + ChainProofProvider + ChainSanadOps + SanadStateReader
+    ChainQuery + ChainSigner + ChainBroadcaster + ChainDeployer + ChainProofProvider + ChainSanadOps + SanadStateReader + ChainReadinessCheck
 {
     /// Get the chain identifier
     fn chain_id(&self) -> &'static str;
@@ -664,6 +664,64 @@ pub enum ChainCapability {
     Nfts,
     /// Supports cross-chain transfers
     CrossChain,
+}
+
+/// Readiness check result for a chain
+///
+/// **Layer:** L1
+/// **Serde:** Forbidden - L1 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChainReadiness {
+    /// Derived signer address for the given account/index
+    pub signer_address: Option<String>,
+    /// Balance address (may differ from signer address on some chains)
+    pub balance_address: Option<String>,
+    /// Whether signer is configured (has private key/seed)
+    pub signer_configured: bool,
+    /// Whether chain is write-capable (can sign and broadcast)
+    pub write_capable: bool,
+    /// Whether contract/program is configured
+    pub contract_configured: bool,
+    /// Whether account exists on chain
+    pub account_exists: bool,
+    /// Native balance in smallest unit
+    pub native_balance: Option<u64>,
+    /// Estimated minimum fee/rent/gas for operations
+    pub estimated_fee: Option<u64>,
+    /// Whether Sanad creation is supported
+    pub sanad_create_supported: bool,
+    /// Whether proof generation is supported
+    pub proof_generation_supported: bool,
+    /// Whether chain can be cross-chain source
+    pub cross_chain_source_supported: bool,
+    /// Whether chain can be cross-chain destination
+    pub cross_chain_destination_supported: bool,
+    /// Additional readiness information
+    pub metadata: Vec<u8>,
+}
+
+/// Trait for checking chain readiness
+///
+/// This trait provides a unified interface for checking whether a chain
+/// is properly configured for write operations.
+#[async_trait]
+pub trait ChainReadinessCheck: Send + Sync {
+    /// Check chain readiness for the given account and index
+    async fn check_readiness(
+        &self,
+        account: u32,
+        index: u32,
+    ) -> ChainOpResult<ChainReadiness>;
+
+    /// Quick check if chain is ready for write operations
+    ///
+    /// Returns true if all critical checks pass (signer configured, write capable, account exists).
+    async fn is_write_ready(&self, account: u32, index: u32) -> ChainOpResult<bool> {
+        let readiness = self.check_readiness(account, index).await?;
+        Ok(readiness.signer_configured
+            && readiness.write_capable
+            && readiness.account_exists)
+    }
 }
 
 #[cfg(test)]

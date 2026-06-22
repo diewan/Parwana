@@ -2757,6 +2757,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "blake2",
  "bs58",
  "csv-adapter-core",
  "csv-aptos",

@@ -157,9 +157,10 @@ impl BitcoinSealProtocol {
                     BitcoinError::RpcError(format!("Wallet creation from xpub failed: {}", e))
                 })?
         } else {
-            return Err(BitcoinError::RpcError(
-                "BitcoinSealProtocol::from_config requires either seed or xpub; refusing to generate a random production wallet".to_string(),
-            ));
+            // Read-only mode: generate a random wallet for address derivation only
+            // This allows readiness checks and queries without requiring seed/xpub
+            log::warn!("BitcoinSealProtocol: No seed or xpub provided, creating read-only adapter with random wallet (signing unavailable)");
+            SealWallet::generate_random(config.network.to_bitcoin_network())
         };
 
         Ok(Self {
@@ -282,16 +283,17 @@ impl BitcoinSealProtocol {
                         .ok()
                         .map(bitcoin::ScriptBuf::from);
 
-                    // Add UTXO to wallet with fetched details
+                    // Add UTXO as SanadAnchor (not spendable - belongs to different address)
                     let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index);
-                    self.wallet.add_utxo_with_scriptpubkey(
+                    self.wallet.add_utxo_with_provenance(
                         outpoint,
                         utxo_details.value,
                         path,
                         script_pubkey,
                         Some(*sanad_id),
+                        crate::types::UtxoProvenance::SanadAnchor,
                     );
-                    log::info!("Bitcoin: Added UTXO {}:{} to wallet from RPC (value={} sat)",
+                    log::info!("Bitcoin: Added UTXO {}:{} to wallet from RPC as SanadAnchor (value={} sat)",
                         hex::encode(txid_bytes), vout, utxo_details.value);
                     loaded_count += 1;
                 }
@@ -306,6 +308,65 @@ impl BitcoinSealProtocol {
             }
         }
 
+        Ok(loaded_count)
+    }
+
+    /// Fetch regular UTXOs from RPC for the current wallet address
+    /// This is called when the adapter is initialized with a seed but no UTXOs in config
+    pub async fn load_wallet_utxos(&self) -> Result<usize, BitcoinError> {
+        let rpc = self.rpc.as_ref().ok_or_else(|| {
+            BitcoinError::RpcError("No RPC client configured".to_string())
+        })?;
+
+        // Derive the current address
+        let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index);
+        let key = self.wallet.derive_key(&path)
+            .map_err(|e| BitcoinError::RpcError(format!("Failed to derive key: {}", e)))?;
+        let address = key.address.to_string();
+        log::info!("Bitcoin: Fetching UTXOs from RPC for address: {}", address);
+
+        // Fetch UTXOs from RPC
+        let rpc_utxos = rpc.get_utxos_for_address(address).await
+            .map_err(|e| BitcoinError::RpcError(format!("Failed to fetch UTXOs from RPC: {}", e)))?;
+
+        log::info!("Bitcoin: Fetched {} UTXOs from RPC", rpc_utxos.len());
+        let mut loaded_count = 0;
+
+        for utxo in rpc_utxos {
+            // Fetch scriptPubKey for this UTXO
+            let script_pubkey = match rpc.get_utxo_scriptpubkey(utxo.txid, utxo.vout).await {
+                Ok(Some(spk)) => Some(spk),
+                Ok(None) => {
+                    log::warn!("No scriptPubKey for UTXO {}:{}, skipping", hex::encode(utxo.txid), utxo.vout);
+                    continue;
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch scriptPubKey for UTXO {}:{}: {}, skipping", hex::encode(utxo.txid), utxo.vout, e);
+                    continue;
+                }
+            };
+
+            // Convert RPC UTXO to wallet format
+            let mut txid_array = utxo.txid;
+            txid_array.reverse(); // Convert internal to display byte order for OutPoint
+            let hash = bitcoin::hashes::Hash::from_byte_array(txid_array);
+            let outpoint = bitcoin::OutPoint {
+                txid: bitcoin::Txid::from_raw_hash(hash),
+                vout: utxo.vout,
+            };
+
+            // Decode scriptPubKey
+            let script_pubkey_buf = script_pubkey
+                .and_then(|spk_hex| hex::decode(&spk_hex).ok())
+                .map(bitcoin::ScriptBuf::from);
+
+            self.wallet.add_utxo_with_scriptpubkey(outpoint, utxo.amount_sat, path.clone(), script_pubkey_buf, None);
+            log::info!("Bitcoin: Added RPC UTXO to wallet: txid={}, vout={}, value={}",
+                hex::encode(outpoint.txid.as_byte_array()), outpoint.vout, utxo.amount_sat);
+            loaded_count += 1;
+        }
+
+        log::info!("Bitcoin: Loaded {} UTXOs from RPC", loaded_count);
         Ok(loaded_count)
     }
 
@@ -448,18 +509,34 @@ impl BitcoinSealProtocol {
             ProtocolError::Generic("No RPC client configured - call with_rpc() first".to_string())
         })?;
 
+        // If wallet is empty, try loading UTXOs for the current address first
+        if self.wallet.utxo_count() == 0 {
+            log::info!("Wallet is empty, loading UTXOs for current address from RPC");
+            match self.load_wallet_utxos().await {
+                Ok(count) => {
+                    if count > 0 {
+                        log::info!("Loaded {} UTXOs for current address, skipping gap scan", count);
+                        return Ok(count);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to load UTXOs for current address: {}, proceeding with gap scan", e);
+                }
+            }
+        }
+
         let wallet = &self.wallet;
         wallet.clear_utxos();
-        
+
       let mut discovered_count = 0;
         let mut consecutive_empty = 0;
-        
+
         for index in 0..gap_limit {
             let derived = self.wallet.derive_key(&crate::wallet::Bip86Path::external(account, index as u32))
                 .map_err(|e| ProtocolError::Generic(format!("Key derivation failed: {}", e)))?;
-            
+
             let address_str = derived.address.to_string();
-            
+
             match rpc.get_utxos_for_address(address_str.clone()).await {
                 Ok(utxos) => {
                     if utxos.is_empty() {
@@ -897,6 +974,32 @@ impl SealProtocol for BitcoinSealProtocol {
                     };
                     let (seal_ref, _path) = self.fund_seal(outpoint)?;
                     return Ok(seal_ref);
+                }
+
+                // If wallet is empty and we have an RPC client, try to fetch UTXOs from RPC
+                if self.rpc.is_some() && self.wallet.utxo_count() == 0 {
+                    log::info!("Wallet is empty, attempting to fetch UTXOs from RPC");
+                    match self.load_wallet_utxos().await {
+                        Ok(count) if count > 0 => {
+                            log::info!("Successfully loaded {} UTXOs from RPC, retrying seal creation", count);
+                            // Retry UTXO selection after loading from RPC
+                            let utxos = self.wallet.list_utxos();
+                            if let Some(utxo) = utxos.first() {
+                                let outpoint = bitcoin::OutPoint {
+                                    txid: utxo.outpoint.txid,
+                                    vout: utxo.outpoint.vout,
+                                };
+                                let (seal_ref, _path) = self.fund_seal(outpoint)?;
+                                return Ok(seal_ref);
+                            }
+                        }
+                        Ok(_) => {
+                            log::warn!("No UTXOs found on RPC for this address");
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load UTXOs from RPC: {}, falling back to derived seal", e);
+                        }
+                    }
                 }
 
                 // Fall back to deriving a new seal if no UTXOs available at all

@@ -7,6 +7,7 @@ use anyhow::Result;
 
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
+use csv_sdk::wallet::WalletIdentityResolver;
 use csv_sdk::CsvClient;
 
 use crate::config::{Chain, Config};
@@ -54,8 +55,24 @@ pub async fn cmd_transfer(
         ));
     }
 
-    // Get destination owner address
-    let dest_owner_str = dest_owner.or_else(|| state.get_address(&from).map(|s| s.to_string()));
+    // Get destination owner address using centralized identity resolver
+    let dest_owner_str = if dest_owner.is_none() {
+        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
+            let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+            let seed = mnemonic.to_seed(None);
+            let seed_array = *seed.as_bytes();
+
+            // Use centralized wallet identity resolver
+            let resolver = WalletIdentityResolver::from_seed(seed_array);
+            let chain_id = csv_hash::ChainId::new(to.as_str());
+            Some(resolver.derive_address(chain_id, 0, 0))
+        } else {
+            state.get_address(&to).map(|s| s.to_string())
+        }
+    } else {
+        dest_owner
+    };
 
     let Some(dest_addr) = dest_owner_str else {
         return Err(anyhow::anyhow!(
@@ -297,8 +314,13 @@ fn load_keystore_key(
             Ok(secret_key) => return Ok(Some(secret_key)),
             Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
             Err(csv_keys::file_keystore::FileKeystoreError::InvalidPassphrase) => {
-                // Key exists but wrong passphrase - fall back to mnemonic derivation
-                log::warn!("Keystore key '{}' exists but decryption failed (wrong passphrase), falling back to mnemonic derivation", key_id);
+                // FAIL CLOSED: Return error instead of falling back to mnemonic derivation
+                return Err(anyhow::anyhow!(
+                    "Keystore key '{}' exists but passphrase is incorrect. \
+                     Cannot proceed without correct passphrase. \
+                     This is a security requirement - wrong passphrase must fail closed.",
+                    key_id
+                ));
             }
             Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
         }

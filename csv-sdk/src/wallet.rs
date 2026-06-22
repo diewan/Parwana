@@ -255,8 +255,8 @@ impl Wallet {
         {
             use csv_bitcoin::wallet::{Bip86Path, SealWallet};
 
-            // Create wallet from seed (using regtest network for derivation)
-            let Ok(wallet) = SealWallet::from_seed(&self.seed, bitcoin::Network::Regtest) else {
+            // Create wallet from seed (using signet network for derivation by default)
+            let Ok(wallet) = SealWallet::from_seed(&self.seed, bitcoin::Network::Signet) else {
                 return format!(
                     "btc:seed-prefix-{}-{}-{}",
                     hex::encode(&self.seed[..4]),
@@ -363,9 +363,11 @@ impl Wallet {
 
     fn sui_address_with_path(&self, account: u32, index: u32) -> String {
         // Sui address derivation using BIP-44: m/44'/784'/account'/0'/index
+        // Address = Blake2b-256(0x00 || public_key)
         #[cfg(feature = "wallet")]
         {
             use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
+            use blake2::{Blake2b, Digest};
             use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
             use std::str::FromStr;
 
@@ -400,8 +402,13 @@ impl Wallet {
                         let signing_key = EdSigningKey::from(&secret_key);
                         let public_key = signing_key.verifying_key();
                         
-                        // Sui address is the 32-byte public key in hex
-                        return format!("0x{}", hex::encode(public_key.as_bytes()));
+                        // Sui address = Blake2b-256(0x00 || public_key)
+                        let mut hasher = Blake2b::new();
+                        hasher.update([0x00]); // Sui address prefix
+                        hasher.update(public_key.as_bytes());
+                        let hash: [u8; 32] = hasher.finalize().into();
+                        
+                        return format!("0x{}", hex::encode(&hash[..]));
                     }
                 }
             }
@@ -422,10 +429,12 @@ impl Wallet {
 
     fn aptos_address_with_path(&self, account: u32, index: u32) -> String {
         // Aptos address derivation using BIP-44: m/44'/637'/account'/0'/index
+        // Address = SHA3-256(public_key || 0x00)
         #[cfg(feature = "wallet")]
         {
             use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
             use ed25519_dalek::{SecretKey, SigningKey as EdSigningKey};
+            use sha3::{Digest, Sha3_256};
             use std::str::FromStr;
 
             // Derive the BIP-32 path
@@ -459,8 +468,13 @@ impl Wallet {
                         let signing_key = EdSigningKey::from(&secret_key);
                         let public_key = signing_key.verifying_key();
                         
-                        // Aptos address is the 32-byte public key in hex
-                        return format!("0x{}", hex::encode(public_key.as_bytes()));
+                        // Aptos address = SHA3-256(public_key || 0x00)
+                        let mut hasher = Sha3_256::new();
+                        hasher.update(public_key.as_bytes());
+                        hasher.update([0x00]); // Ed25519 single key scheme
+                        let hash: [u8; 32] = hasher.finalize().into();
+                        
+                        return format!("0x{}", hex::encode(&hash[..]));
                     }
                 }
             }
@@ -823,5 +837,64 @@ impl WalletManager {
              Use CsvClient::chain_runtime().get_balance() when client is built with chain configuration.",
             address, chain
         )))
+    }
+}
+
+/// Centralized wallet identity resolver.
+///
+/// This is the single canonical path for wallet address derivation across
+/// all CLI commands (balance, sanad create, seal create, cross-chain transfer).
+///
+/// # Security
+///
+/// - Wrong keystore passphrase MUST fail closed - never silently fall back to mnemonic derivation
+/// - No private key material is ever logged
+pub struct WalletIdentityResolver {
+    wallet: Wallet,
+}
+
+impl WalletIdentityResolver {
+    /// Create a new wallet identity resolver from a mnemonic phrase.
+    ///
+    /// # Arguments
+    ///
+    /// * `mnemonic` - The BIP-39 mnemonic phrase
+    /// * `passphrase` - Optional passphrase (use empty string for none)
+    pub fn from_mnemonic(mnemonic: &str, passphrase: &str) -> Result<Self, WalletError> {
+        let wallet = Wallet::from_mnemonic(mnemonic, passphrase)
+            .map_err(|e| WalletError::DerivationFailed(format!("from mnemonic: {}", e)))?;
+        Ok(Self { wallet })
+    }
+
+    /// Create a new wallet identity resolver from a raw seed.
+    ///
+    /// # Arguments
+    ///
+    /// * `seed` - The 64-byte BIP-39 seed
+    pub fn from_seed(seed: [u8; 64]) -> Self {
+        let wallet = Wallet::from_seed(seed);
+        Self { wallet }
+    }
+
+    /// Derive the address for a specific chain with account and index.
+    ///
+    /// This is the canonical address derivation method used by all CLI commands.
+    ///
+    /// # Arguments
+    ///
+    /// * `chain` - The chain to derive for
+    /// * `account` - BIP-44 account number
+    /// * `index` - Address index within the account
+    ///
+    /// # Returns
+    ///
+    /// The derived address as a string (chain-specific format)
+    pub fn derive_address(&self, chain: ChainId, account: u32, index: u32) -> String {
+        self.wallet.derive_address(chain, account, index)
+    }
+
+    /// Get the underlying wallet for advanced operations.
+    pub fn wallet(&self) -> &Wallet {
+        &self.wallet
     }
 }

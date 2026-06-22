@@ -112,6 +112,11 @@ pub enum AptosError {
     /// The proof must be properly formatted before attempting minting.
     #[error("Invalid proof format: {0}")]
     InvalidProofFormat(String),
+
+    /// Required initialization failed - seal or anchor collection setup failed.
+    /// Recovery: This is a fatal error for create_seal. Check gas balance and contract deployment.
+    #[error("Required initialization failed: {operation} - {reason}")]
+    InitializationFailed { operation: String, reason: String },
 }
 
 impl AptosError {
@@ -130,6 +135,7 @@ impl AptosError {
             | AptosError::NetworkMismatch { .. }
             | AptosError::FeatureNotEnabled(_)
             | AptosError::InvalidProofFormat(_)
+            | AptosError::InitializationFailed { .. }
             | AptosError::CoreError(_) => false,
         }
     }
@@ -163,6 +169,7 @@ impl HasErrorSuggestion for AptosError {
             AptosError::NetworkMismatch { .. } => 2010,
             AptosError::FeatureNotEnabled(_) => 2011,
             AptosError::InvalidProofFormat(_) => 2012,
+            AptosError::InitializationFailed { .. } => 2013,
             AptosError::CoreError(_) => 1,
         }
     }
@@ -265,6 +272,16 @@ impl HasErrorSuggestion for AptosError {
                     msg
                 )
             }
+            AptosError::InitializationFailed { operation, reason } => {
+                format!(
+                    "Required initialization failed for '{}': {}. \
+                     This is a fatal error for create_seal. Check: \
+                     1) Sufficient gas balance for initialization transaction, \
+                     2) CSVSeal contract is deployed at the configured address, \
+                     3) Account has permission to initialize collections.",
+                    operation, reason
+                )
+            }
             AptosError::CoreError(e) => format!("Core error: {}", e),
         }
     }
@@ -304,6 +321,11 @@ impl HasErrorSuggestion for AptosError {
                 what: "Enable required feature in Cargo.toml".to_string(),
             }),
             AptosError::InvalidProofFormat(_) => None,
+            AptosError::InitializationFailed { .. } => Some(FixAction::CheckState {
+                check: "account resources".to_string(),
+                url: "https://explorer.aptoslabs.com".to_string(),
+                what: "Check gas balance and contract deployment status".to_string(),
+            }),
             AptosError::CoreError(_) => None,
             _ => None,
         }
@@ -341,6 +363,12 @@ impl From<AptosError> for csv_protocol::ProtocolError {
             }
             AptosError::InvalidProofFormat(msg) => {
                 csv_protocol::ProtocolError::InvalidInput(format!("Invalid proof format: {}", msg))
+            }
+            AptosError::InitializationFailed { operation, reason } => {
+                csv_protocol::ProtocolError::NetworkError(format!(
+                    "Initialization failed for {}: {}",
+                    operation, reason
+                ))
             }
             aptos_err => csv_protocol::ProtocolError::NetworkError(format!("{}", aptos_err)),
         }

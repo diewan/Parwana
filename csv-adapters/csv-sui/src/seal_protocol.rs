@@ -158,8 +158,17 @@ impl SuiSealProtocol {
         
         let secret_key = csv_keys::memory::SecretKey::new(key_bytes);
         
+        // Derive signer address from private key
+        let key_bytes = secret_key.expose_secret();
+        use blake2::Blake2b;
+        let mut hasher = Blake2b::new();
+        hasher.update([0x00]); // Sui address prefix
+        hasher.update(key_bytes);
+        let hash: [u8; 32] = hasher.finalize().into();
+        let signer_address = Some(format!("0x{}", hex::encode(hash)));
+        
         let config = SuiConfig {
-            seal_contract: crate::SealContractConfig {
+            seal_contract: crate::config::SealContractConfig {
                 package_id: Some(
                     "0x0000000000000000000000000000000000000000000000000000000000000002"
                         .to_string(),
@@ -167,11 +176,35 @@ impl SuiSealProtocol {
                 ..Default::default()
             },
             signer_private_key: Some(secret_key),
+            signer_address,
             ..Default::default()
         };
         
         let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443")?);
         Self::from_config(config, node)
+    }
+
+    /// Check if the adapter is ready for write operations.
+    ///
+    /// Returns true if signer_private_key is configured, false otherwise.
+    /// Read operations (verification, queries) work without a signer,
+    /// but write operations (create_seal, publish) require a signer.
+    pub fn is_write_ready(&self) -> bool {
+        #[cfg(feature = "rpc")]
+        {
+            self.signing_key.is_some()
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            false
+        }
+    }
+
+    /// Get the signer address if configured.
+    ///
+    /// Returns None if no signer is configured.
+    pub fn signer_address(&self) -> Option<String> {
+        self.config.signer_address.clone()
     }
 
     /// Fetch the object digest from the chain for a given object ID and version.
@@ -1269,6 +1302,66 @@ mod tests {
         let result = adapter.verify_finality(anchor).await;
         // This should fail for now since the checkpoint doesn't exist
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_write_readiness_with_signer() {
+        let adapter = test_adapter();
+        // Adapter created with signer should be write-ready
+        assert!(adapter.is_write_ready());
+        // Signer address should be present
+        assert!(adapter.signer_address().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_write_readiness_without_signer() {
+        // Create adapter without signer
+        let config = SuiConfig {
+            seal_contract: crate::config::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            signer_private_key: None, // No signer
+            signer_address: None,
+            ..Default::default()
+        };
+
+        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
+        let adapter = SuiSealProtocol::from_config(config, node).unwrap();
+
+        // Adapter without signer should not be write-ready
+        assert!(!adapter.is_write_ready());
+        // Signer address should be None
+        assert!(adapter.signer_address().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_seal_fails_without_signer() {
+        // Create adapter without signer
+        let config = SuiConfig {
+            seal_contract: crate::config::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            signer_private_key: None, // No signer
+            signer_address: None,
+            ..Default::default()
+        };
+
+        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
+        let adapter = SuiSealProtocol::from_config(config, node).unwrap();
+
+        // create_seal should fail with SigningKeyNotConfigured error
+        let result = adapter.create_seal(None).await;
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Signing key not configured") || error_msg.contains("signer"));
     }
 
     #[test]

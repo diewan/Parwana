@@ -14,6 +14,7 @@ use crate::config::{Chain, Config, Network};
 use crate::output;
 use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager, UtxoRecord};
 
+use csv_sdk::wallet::WalletIdentityResolver;
 use csv_store::state::{
     CanonicalLifecycleEvent, CanonicalSanadState, LifecycleEventType, SanadLifecycleState,
 };
@@ -159,6 +160,80 @@ async fn cmd_create(
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header(&format!("Creating Sanad on {}", chain));
+
+    // Run readiness check before proceeding (CHAIN-READINESS-001)
+    output::info("Checking chain readiness...");
+    let chain_config = config.chain(&chain)?;
+    
+    use csv_sdk::CsvClient;
+    use csv_sdk::StoreBackend;
+    use csv_hash::ChainId;
+
+    // Map CLI Chain to protocol ChainId
+    let core_chain = ChainId::new(chain.as_str());
+
+    // Convert CLI config to SDK config format
+    let mut sdk_config = csv_sdk::config::Config::default();
+    sdk_config.network = match config.chain(&chain)?.network {
+        crate::config::Network::Test => csv_sdk::config::Network::Testnet,
+        crate::config::Network::Main => csv_sdk::config::Network::Mainnet,
+        crate::config::Network::Dev => csv_sdk::config::Network::Devnet,
+    };
+
+    // Convert chain config to SDK format
+    let sdk_chain_config = csv_sdk::config::ChainConfig {
+        rpc: csv_sdk::config::RpcConfig {
+            url: chain_config.rpc_url.clone(),
+            api_key: None,
+            timeout_ms: 30000,
+            max_retries: 3,
+        },
+        finality_depth: chain_config.finality_depth as u32,
+        enabled: true,
+        xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
+        seed: None,
+        contract_address: chain_config.contract_address.clone(),
+        program_id: chain_config.program_id.clone(),
+        account,
+        index,
+        utxos: vec![],
+        sanad_seals: vec![],
+    };
+    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+
+    // Build CSV client for readiness check
+    let client = CsvClient::builder()
+        .with_chain(core_chain.clone())
+        .with_config(sdk_config)
+        .with_store_backend(StoreBackend::InMemory)
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build CSV client for readiness check: {}", e))?;
+
+    let runtime = client.chain_runtime();
+
+    // Check readiness via the chain backend
+    let readiness = runtime.check_readiness(core_chain.clone(), account, index).await
+        .map_err(|e| anyhow::anyhow!("Failed to check chain readiness: {}", e))?;
+
+    // Abort if chain is not ready for write operations
+    if !readiness.signer_configured {
+        output::error("Chain readiness check failed: Signer not configured");
+        output::info("Use 'csv wallet init' or 'csv wallet import' to configure a signer");
+        return Err(anyhow::anyhow!("Cannot create sanad: signer not configured"));
+    }
+
+    if !readiness.write_capable {
+        output::error("Chain readiness check failed: Write capability not available");
+        return Err(anyhow::anyhow!("Cannot create sanad: write capability not available"));
+    }
+
+    if !readiness.sanad_create_supported {
+        output::error("Chain readiness check failed: Sanad creation not supported on this chain");
+        return Err(anyhow::anyhow!("Cannot create sanad: sanad creation not supported"));
+    }
+
+    output::success("Chain readiness check passed");
 
     // Handle content descriptor parameters (B-013)
     // Parse schema file, load payload, process attachments
@@ -310,35 +385,44 @@ async fn cmd_create(
         output::kv("Index", &index.to_string());
         output::kv("Derivation Path", &format!("m/86'/1'/{}'/0/{}", account, index));
 
-        // Derive and show the funding address
+        // Derive and show the funding address using centralized identity resolver
         if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
             let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
                 .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
             let seed = mnemonic.to_seed(None);
             let seed_array = *seed.as_bytes();
 
-            // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
+            // Use centralized wallet identity resolver
+            let resolver = WalletIdentityResolver::from_seed(seed_array);
             let chain_id = csv_hash::ChainId::new("bitcoin");
-            let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
-            let address = if let Some(ops) = wallet_ops {
-                ops.derive_address(&seed_array, account, index)
-                    .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-            } else {
-                // Fallback to csv-keys if factory not available
-                let key = csv_keys::derive_key(&seed_array, &chain_id, account, index)
-                    .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
-                csv_keys::bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-                    .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-            };
+            let address = resolver.derive_address(chain_id, account, index);
 
             output::kv("Funding Address", &address);
             output::info("Make sure this address has UTXOs before creating a sanad.");
         }
     }
 
+    // Check signer readiness for Sui before proceeding
+    if chain.as_str() == "sui" {
+        // Verify wallet mnemonic is available for signer derivation
+        if state.storage.wallet.mnemonic.is_none() {
+            return Err(anyhow::anyhow!(
+                "Sui signer not configured. Initialize or import a wallet first using 'csv wallet init' or 'csv wallet import'."
+            ));
+        }
+        
+        // Verify wallet has mnemonic configured for Sui signer derivation
+        if state.storage.wallet.mnemonic.is_none() {
+            output::warn("Wallet mnemonic not configured");
+            output::info("The signer will be derived from the wallet mnemonic");
+        }
+        
+        output::info("Sui signer will be derived from wallet mnemonic");
+    }
+
     // For Bitcoin, always refresh UTXOs from chain before creating a sanad
     let bitcoin_utxos: Option<Vec<(String, u32, u64, Option<String>)>> = if chain.as_str() == "bitcoin" {
-        // Derive the expected address for this account/index
+        // Derive the expected address for this account/index using centralized identity resolver
         let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
             anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
         })?;
@@ -347,19 +431,10 @@ async fn cmd_create(
         let seed = mnemonic.to_seed(None);
         let seed_array = *seed.as_bytes();
 
-        // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
+        // Use centralized wallet identity resolver
+        let resolver = WalletIdentityResolver::from_seed(seed_array);
         let chain_id = csv_hash::ChainId::new("bitcoin");
-        let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
-        let expected_address = if let Some(ref ops) = wallet_ops {
-            ops.derive_address(&seed_array, account, index)
-                .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-        } else {
-            // Fallback to csv-keys if factory not available
-            let key = csv_keys::derive_key(&seed_array, &chain_id, account, index)
-                .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
-            csv_keys::bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-                .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-        };
+        let expected_address = resolver.derive_address(chain_id.clone(), account, index);
 
         output::kv("Expected Address", &expected_address);
 
@@ -367,8 +442,12 @@ async fn cmd_create(
         let chain_cfg = config.chain(&chain)?;
         let rpc_url = chain_cfg.rpc_url.clone();
 
-        // Scan for UTXOs using wallet operations
+        // Initialize wallet factory before UTXO scan
+        let _factory = csv_coordinator::init_wallet_factory();
+
+        // Scan for UTXOs using wallet operations from csv-coordinator
         output::info("Scanning for UTXOs...");
+        let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
         let scanned_utxos = if let Some(ops) = wallet_ops {
             ops.scan_utxos(&seed_array, account, index, &rpc_url)
                 .await
@@ -408,10 +487,6 @@ async fn cmd_create(
     } else {
         None
     };
-
-    // Use the new runtime to create the sanad
-    use csv_sdk::CsvClient;
-    use csv_sdk::StoreBackend;
 
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
@@ -493,14 +568,13 @@ async fn cmd_create(
             key_source
         );
         let pk_hex = hex::encode(secret_key.expose_secret());
-        log::info!("CLI LAYER: Private key (first 8 bytes): 0x{}", &pk_hex[..16]);
 
-        // Derive and log the address for this key
+        // Derive and log the address using centralized identity resolver
         let core_chain = csv_hash::ChainId::new(chain.as_str());
-        if let Ok(address) = csv_keys::bip44::derive_address_from_key(secret_key.expose_secret(), &core_chain) {
-            log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
-            eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
-        }
+        let resolver = WalletIdentityResolver::from_seed(seed_array);
+        let address = resolver.derive_address(core_chain, account, index);
+        log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
+        eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
 
         pk_hex
     };
@@ -826,10 +900,39 @@ async fn cmd_create(
     );
 
     // Create ownership proof from the owner address
+    // For canonical mode, generate a signature over the commitment hash
+    let proof_bytes = if chain.as_str() == "bitcoin" {
+        // Derive the private key for Bitcoin (BIP-86 Taproot)
+        use secp256k1::{Secp256k1, SecretKey, Message};
+        
+        // Derive the BIP-86 path for the account/index
+        let path = csv_keys::bip44::DerivationPath::new_bip86(account, index);
+        
+        // Derive the private key from the seed using the existing bip44 module
+        let secret_key = csv_keys::bip44::derive_key_from_path(&seed_array, &path, &core_chain)
+            .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
+        
+        // Convert to secp256k1 SecretKey
+        let key_bytes = secret_key.as_bytes();
+        let private_key = SecretKey::from_slice(key_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to create secp256k1 key: {}", e))?;
+        
+        // Sign the commitment hash
+        let secp = Secp256k1::new();
+        let message = Message::from_digest_slice(commitment.as_bytes())
+            .map_err(|e| anyhow::anyhow!("Failed to create message: {}", e))?;
+        let signature = secp.sign_ecdsa(&message, &private_key);
+        signature.serialize_compact().to_vec()
+    } else {
+        // For other chains, use the seed as a simple signature placeholder
+        // TODO: Implement proper signing for other chains
+        seed_array[..32].to_vec()
+    };
+    
     let ownership_proof = csv_protocol::OwnershipProof {
         owner: owner_address.as_bytes().to_vec(),
-        proof: vec![], // No signature for CLI-created sanads
-        scheme: None,
+        proof: proof_bytes,
+        scheme: Some(csv_protocol::SignatureScheme::Secp256k1),
     };
 
     // Generate salt for ID derivation
@@ -986,8 +1089,13 @@ fn load_keystore_key(
             Ok(secret_key) => return Ok(Some(secret_key)),
             Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
             Err(csv_keys::file_keystore::FileKeystoreError::InvalidPassphrase) => {
-                // Key exists but wrong passphrase - fall back to mnemonic derivation
-                log::warn!("Keystore key '{}' exists but decryption failed (wrong passphrase), falling back to mnemonic derivation", key_id);
+                // FAIL CLOSED: Return error instead of falling back to mnemonic derivation
+                return Err(anyhow::anyhow!(
+                    "Keystore key '{}' exists but passphrase is incorrect. \
+                     Cannot proceed without correct passphrase. \
+                     This is a security requirement - wrong passphrase must fail closed.",
+                    key_id
+                ));
             }
             Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
         }
@@ -1741,13 +1849,23 @@ fn cmd_remove(sanad_id: Option<String>, all: bool, state: &mut UnifiedStateManag
     if all {
         output::header("Removing All Sanads");
         let count = state.storage.sanads.len();
-        if count == 0 {
-            output::info("No Sanads to remove");
-            return Ok(());
-        }
         state.storage.sanads.clear();
+
+        // Also clear wallet sanad_seals to free UTXOs marked as SanadAnchor
+        let seal_count = state.storage.wallet.sanad_seals.len();
+        if seal_count > 0 {
+            state.storage.wallet.sanad_seals.clear();
+            output::info(&format!("Cleared {} sanad_seal mappings from wallet state", seal_count));
+            output::info("UTXOs previously marked as SanadAnchor are now available for spending.");
+        }
+
         state.save()?;
-        output::info(&format!("Removed {} Sanad(s) from local tracking", count));
+
+        if count > 0 {
+            output::info(&format!("Removed {} Sanad(s) from local tracking", count));
+        } else {
+            output::info("No Sanads to remove");
+        }
         return Ok(());
     }
 

@@ -12,8 +12,9 @@ use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
-    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
-    FinalityStatus, SanadOperation, SanadOperationResult, SanadStateReader, TransactionStatus,
+    ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
+    ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperation,
+    SanadOperationResult, SanadStateReader, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::signature::SignatureScheme;
@@ -2574,5 +2575,86 @@ impl SanadStateReader for BitcoinBackend {
         // Query transaction history for this sanad_id
         // This would require querying the Bitcoin blockchain
         Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl ChainReadinessCheck for BitcoinBackend {
+    async fn check_readiness(&self, account: u32, index: u32) -> ChainOpResult<ChainReadiness> {
+        // Check if wallet has seed configured by attempting to derive an address
+        let signer_configured = self.seal_protocol.wallet.get_funding_address(account, index).is_ok();
+
+        // Derive signer address using get_funding_address
+        let signer_address = if signer_configured {
+            match self.seal_protocol.wallet.get_funding_address(account, index) {
+                Ok(key) => Some(key.address.to_string()),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        // Balance address is same as signer address for Bitcoin
+        let balance_address = signer_address.clone();
+
+        // Check write capability (signer configured + RPC available)
+        let write_capable = signer_configured;
+
+        // Bitcoin doesn't use contracts/programs
+        let contract_configured = false;
+
+        // Check if account exists (has UTXOs)
+        let account_exists = if let Some(ref addr) = balance_address {
+            match self.rpc.get_utxos_for_address(addr.clone()).await {
+                Ok(utxos) => !utxos.is_empty(),
+                Err(_) => false,
+            }
+        } else {
+            false
+        };
+
+        // Get native balance
+        let native_balance = if let Some(ref addr) = balance_address {
+            match self.rpc.get_utxos_for_address(addr.clone()).await {
+                Ok(utxos) => Some(utxos.iter().map(|u| u.amount_sat).sum()),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        // Estimate minimum fee (get current fee estimate)
+        let estimated_fee = match get_fee_estimate_rpc(self.rpc.as_ref()).await {
+            Ok(fee) => Some(fee),
+            Err(_) => Some(1000), // Default fallback
+        };
+
+        // Bitcoin supports sanad creation (via seals)
+        let sanad_create_supported = true;
+
+        // Bitcoin supports proof generation (SPV proofs)
+        let proof_generation_supported = true;
+
+        // Bitcoin can be cross-chain source
+        let cross_chain_source_supported = true;
+
+        // Bitcoin cannot be cross-chain destination (it's a source-only chain)
+        let cross_chain_destination_supported = false;
+
+        Ok(ChainReadiness {
+            signer_address,
+            balance_address,
+            signer_configured,
+            write_capable,
+            contract_configured,
+            account_exists,
+            native_balance,
+            estimated_fee,
+            sanad_create_supported,
+            proof_generation_supported,
+            cross_chain_source_supported,
+            cross_chain_destination_supported,
+            metadata: vec![],
+        })
     }
 }

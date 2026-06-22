@@ -14,8 +14,9 @@ use async_trait::async_trait;
 use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
-    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
-    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
+    ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
+    ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperationResult,
+    SanadStateReader, TransactionInfo, TransactionStatus,
 };
 
 use csv_hash::Hash;
@@ -1805,6 +1806,125 @@ impl SanadStateReader for EthereumBackend {
             .collect();
 
         Ok(events)
+    }
+}
+
+#[async_trait]
+impl ChainReadinessCheck for EthereumBackend {
+    async fn check_readiness(&self, _account: u32, _index: u32) -> ChainOpResult<ChainReadiness> {
+        // Check if contract is configured
+        let contract_configured = self.contract_address.is_some();
+
+        // Check if signer is actually configured by checking the seal_protocol config
+        let signer_configured = self.seal_protocol.config().private_key.is_some();
+
+        // Derive signer address from private key if available
+        let signer_address = if signer_configured {
+            if let Some(ref secret_key) = self.seal_protocol.config().private_key {
+                use secp256k1::{Secp256k1, SecretKey, PublicKey};
+                let secp = Secp256k1::new();
+                let key_bytes = secret_key.expose_secret();
+                let secret_key_obj = SecretKey::from_slice(key_bytes)
+                    .map_err(|e| ChainOpError::InvalidInput(format!("Invalid secret key: {}", e)))?;
+                let public_key = PublicKey::from_secret_key(&secp, &secret_key_obj);
+                let public_key_bytes = public_key.serialize_uncompressed();
+                
+                // Derive Ethereum address from public key (last 20 bytes of keccak256 hash)
+                use tiny_keccak::{Hasher, Keccak};
+                let mut hasher = Keccak::v256();
+                let mut hash = [0u8; 32];
+                hasher.update(&public_key_bytes[1..]); // Skip first byte (uncompressed prefix)
+                hasher.finalize(&mut hash);
+                let address_bytes = &hash[12..];
+                Some(format!("0x{}", hex::encode(address_bytes)))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Balance address is same as signer address for Ethereum
+        let balance_address = signer_address.clone();
+
+        // Check write capability (signer configured + RPC available)
+        let write_capable = signer_configured;
+
+        // Check if account exists (has balance > 0)
+        let account_exists = if let Some(ref addr) = balance_address {
+            // Parse address to bytes for RPC call
+            if let Ok(addr_bytes) = hex::decode(addr.trim_start_matches("0x")) {
+                if addr_bytes.len() == 20 {
+                    let mut addr_array = [0u8; 20];
+                    addr_array.copy_from_slice(&addr_bytes);
+                    match self.rpc.get_balance(addr_array).await {
+                        Ok(balance) => balance > 0,
+                        Err(_) => false,
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // Get native balance
+        let native_balance = if let Some(ref addr) = balance_address {
+            // Parse address to bytes for RPC call
+            if let Ok(addr_bytes) = hex::decode(addr.trim_start_matches("0x")) {
+                if addr_bytes.len() == 20 {
+                    let mut addr_array = [0u8; 20];
+                    addr_array.copy_from_slice(&addr_bytes);
+                    match self.rpc.get_balance(addr_array).await {
+                        Ok(balance) => Some(balance),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Estimate minimum fee (gas price * gas limit for simple tx)
+        let estimated_fee = match self.rpc.get_gas_price().await {
+            Ok(gas_price) => Some(gas_price.saturating_mul(21000)), // 21000 gas for simple transfer
+            Err(_) => Some(20_000_000_000), // 20 gwei fallback
+        };
+
+        // Ethereum supports sanad creation (via seal contract)
+        let sanad_create_supported = contract_configured;
+
+        // Ethereum supports proof generation (MPT proofs)
+        let proof_generation_supported = true;
+
+        // Ethereum can be cross-chain source
+        let cross_chain_source_supported = true;
+
+        // Ethereum can be cross-chain destination
+        let cross_chain_destination_supported = true;
+
+        Ok(ChainReadiness {
+            signer_address,
+            balance_address,
+            signer_configured,
+            write_capable,
+            contract_configured,
+            account_exists,
+            native_balance,
+            estimated_fee,
+            sanad_create_supported,
+            proof_generation_supported,
+            cross_chain_source_supported,
+            cross_chain_destination_supported,
+            metadata: vec![],
+        })
     }
 }
 

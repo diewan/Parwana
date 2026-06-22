@@ -273,7 +273,7 @@ impl SealWallet {
     }
 
     pub fn add_utxo_with_scriptpubkey(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>) {
-        self.add_utxo_with_provenance(outpoint, amount_sat, path, script_pubkey, sanad_id, UtxoProvenance::Unknown);
+        self.add_utxo_with_provenance(outpoint, amount_sat, path, script_pubkey, sanad_id, UtxoProvenance::RpcWallet);
     }
 
     pub fn add_utxo_with_provenance(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>, provenance: UtxoProvenance) {

@@ -1167,10 +1167,13 @@ impl SealProtocol for AptosSealProtocol {
             log::debug!("APTOS: Checking for seal collection resource type: {}", seal_collection_type);
             match self.rpc.get_resource(addr, &seal_collection_type, None).await {
                 Ok(None) => {
-                    log::debug!("APTOS: Initializing seal collection");
-                    if let Err(e) = self.init_seal_collection(addr).await {
-                        log::warn!("APTOS: Failed to init seal collection: {}, continuing anyway", e);
-                    }
+                    log::debug!("APTOS: Initializing seal collection (REQUIRED)");
+                    self.init_seal_collection(addr).await.map_err(|e| {
+                        AptosError::InitializationFailed {
+                            operation: "init_seal_collection".to_string(),
+                            reason: e.to_string(),
+                        }
+                    })?;
                 }
                 Ok(Some(_)) => {
                     log::debug!("APTOS: Seal collection already exists");
@@ -1195,11 +1198,14 @@ impl SealProtocol for AptosSealProtocol {
                     log::debug!("APTOS: AnchorDataCollection exists, will attempt to create seal with nonce {}", effective_nonce);
                 }
                 Ok(None) => {
-                    // AnchorDataCollection doesn't exist, need to initialize it
-                    log::debug!("APTOS: Initializing anchor collection");
-                    if let Err(e) = self.init_anchor_collection(addr).await {
-                        log::warn!("APTOS: Failed to init anchor collection: {}, continuing anyway", e);
-                    }
+                    // AnchorDataCollection doesn't exist, need to initialize it (REQUIRED)
+                    log::debug!("APTOS: Initializing anchor collection (REQUIRED)");
+                    self.init_anchor_collection(addr).await.map_err(|e| {
+                        AptosError::InitializationFailed {
+                            operation: "init_anchor_collection".to_string(),
+                            reason: e.to_string(),
+                        }
+                    })?;
                 }
                 Err(e) => {
                     log::warn!("APTOS: Failed to check anchor collection: {}, assuming it exists", e);

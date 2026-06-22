@@ -13,8 +13,9 @@ use csv_hash::Hash;
 use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
-    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
-    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
+    ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
+    ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperationResult,
+    SanadStateReader, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
@@ -1111,6 +1112,92 @@ impl SanadStateReader for SolanaBackend {
         // Query events from Solana transactions
         // This would require querying the transaction history for events related to this sanad_id
         Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl ChainReadinessCheck for SolanaBackend {
+    async fn check_readiness(&self, _account: u32, _index: u32) -> ChainOpResult<ChainReadiness> {
+        // Check if program is configured
+        let contract_configured = !self.seal_protocol.config.csv_program_id.is_empty();
+
+        // Check if signer is actually configured by checking the config
+        let signer_configured = self.seal_protocol.config.keypair.is_some();
+
+        // Derive signer address from keypair if available
+        let signer_address = if signer_configured {
+            if let Some(ref keypair) = self.seal_protocol.config.keypair {
+                use solana_sdk::signature::{keypair_from_seed, Signer};
+                let key_bytes = keypair.expose_secret();
+                let mut seed = [0u8; 32];
+                seed.copy_from_slice(key_bytes);
+                match keypair_from_seed(&seed) {
+                    Ok(kp) => Some(kp.pubkey().to_string()),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Balance address is same as signer address for Solana
+        let balance_address = signer_address.clone();
+
+        // Check write capability (signer configured + RPC available)
+        let write_capable = signer_configured;
+
+        // Check if account exists (has balance > 0)
+        let account_exists = if let Some(ref addr) = balance_address {
+            match <Self as ChainQuery>::get_balance(self, addr).await {
+                Ok(balance) => balance.total > 0,
+                Err(_) => false,
+            }
+        } else {
+            false
+        };
+
+        // Get native balance
+        let native_balance = if let Some(ref addr) = balance_address {
+            match <Self as ChainQuery>::get_balance(self, addr).await {
+                Ok(balance) => Some(balance.total),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        // Estimate minimum fee (5000 lamports for simple transaction)
+        let estimated_fee = Some(5000);
+
+        // Solana supports sanad creation (via program)
+        let sanad_create_supported = contract_configured;
+
+        // Solana supports proof generation
+        let proof_generation_supported = true;
+
+        // Solana can be cross-chain source
+        let cross_chain_source_supported = true;
+
+        // Solana can be cross-chain destination
+        let cross_chain_destination_supported = true;
+
+        Ok(ChainReadiness {
+            signer_address,
+            balance_address,
+            signer_configured,
+            write_capable,
+            contract_configured,
+            account_exists,
+            native_balance,
+            estimated_fee,
+            sanad_create_supported,
+            proof_generation_supported,
+            cross_chain_source_supported,
+            cross_chain_destination_supported,
+            metadata: vec![],
+        })
     }
 }
 

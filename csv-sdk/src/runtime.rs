@@ -51,8 +51,8 @@ use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
 use csv_protocol::chain_adapter_traits::{
-    BalanceInfo, ChainBackend, DeploymentStatus, SanadOperationResult, TransactionInfo,
-    TransactionStatus,
+    BalanceInfo, ChainBackend, ChainReadiness, DeploymentStatus, SanadOperationResult,
+    TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::ProofBundle;
 
@@ -470,6 +470,35 @@ impl ChainRuntime {
             .get(&chain)
             .cloned()
             .ok_or(CsvError::ChainNotSupported(chain))
+    }
+
+    /// Check chain readiness for the given account and index.
+    ///
+    /// This method performs comprehensive checks to determine if a chain is ready
+    /// for write operations, including signer configuration, contract deployment,
+    /// account existence, and balance checks.
+    ///
+    /// # Arguments
+    /// * `chain` - The blockchain to check
+    /// * `account` - Account index for HD wallet derivation
+    /// * `index` - Address index for HD wallet derivation
+    ///
+    /// # Returns
+    /// * `Ok(ChainReadiness)` - Detailed readiness information
+    /// * `Err` - If the check fails
+    pub async fn check_readiness(
+        &self,
+        chain: ChainId,
+        account: u32,
+        index: u32,
+    ) -> Result<ChainReadiness, CsvError> {
+        let adapter = self.get_adapter(chain.clone()).await?;
+
+        let result = adapter.check_readiness(account, index).await;
+        result.map_err(|e| CsvError::ProtocolError {
+            chain: chain.clone(),
+            message: format!("Readiness check failed: {}", e),
+        })
     }
 
     /// Check if an adapter is registered for the given chain.

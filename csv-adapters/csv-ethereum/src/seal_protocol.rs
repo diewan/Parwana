@@ -44,6 +44,10 @@ pub struct EthereumSealProtocol {
 }
 
 impl EthereumSealProtocol {
+    pub(crate) fn config(&self) -> &EthereumConfig {
+        &self.config
+    }
+
     pub fn from_config(
         config: EthereumConfig,
         rpc: Box<dyn EthereumRpc>,

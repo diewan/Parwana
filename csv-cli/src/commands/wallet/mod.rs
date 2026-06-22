@@ -36,8 +36,8 @@ pub async fn execute(
         WalletAction::Generate { chain, network } => {
             generate::cmd_generate(chain, network, config, state)
         }
-        WalletAction::Balance { chain, address } => {
-            balance::cmd_balance(chain, address, config, state).await
+        WalletAction::Balance { chain, address, account, index } => {
+            balance::cmd_balance(chain, address, account, index, config, state).await
         }
         WalletAction::List { chain, account, index } => {
             balance::cmd_list(chain, account, index, config, state)

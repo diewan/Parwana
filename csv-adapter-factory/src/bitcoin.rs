@@ -30,14 +30,14 @@ impl AdapterFactory for BitcoinFactory {
         };
 
         // Extract seed for wallet creation (64-byte BIP-39 seed takes precedence)
+        // Allow read-only mode if neither seed nor secret key is available
         let seed = if let Some(seed_hex) = &config.seed {
-            seed_hex.clone()
+            Some(seed_hex.clone())
+        } else if config.secret_key.as_bytes().is_some() {
+            config.secret_key.as_bytes().map(|bytes| hex::encode(bytes))
         } else {
-            // Fallback to secret_key (32-byte) - this will fail validation but provides a better error
-            config.secret_key
-                .as_bytes()
-                .map(|bytes| hex::encode(bytes))
-                .ok_or_else(|| FactoryError::InvalidConfig("Neither seed nor secret key available".to_string()))?
+            log::warn!("Factory: No seed or secret key provided, creating Bitcoin adapter in read-only mode");
+            None
         };
 
         // Select the highest priority REST endpoint
@@ -57,7 +57,7 @@ impl AdapterFactory for BitcoinFactory {
             api_key: rest_endpoint.api_key.clone(),
             xpub: None,
             private_key: None,
-            seed: Some(seed),
+            seed: seed,
             account: config.account,
             index: config.index,
             utxos: config.utxos.into_iter().map(|u| csv_bitcoin::config::UtxoConfig {

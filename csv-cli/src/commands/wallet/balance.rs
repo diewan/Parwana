@@ -1,15 +1,16 @@
 //! Wallet balance checking commands (Phase 5 Compliant).
 //!
 //! Uses csv-sdk runtime APIs only - no direct chain adapter dependencies.
+//! Uses centralized wallet identity resolver from csv-runtime.
 
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 
-use csv_coordinator::wallet_factory::{init_wallet_factory, get_wallet_operations};
 use csv_hash::ChainId;
 use csv_keys::Mnemonic;
+use csv_sdk::wallet::WalletIdentityResolver;
 use csv_sdk::CsvClient;
 use csv_sdk::StoreBackend;
 
@@ -17,37 +18,28 @@ use csv_sdk::StoreBackend;
 pub async fn cmd_balance(
     chain: Chain,
     address: Option<String>,
+    account: u32,
+    index: u32,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
-    // For Bitcoin, derive address from mnemonic if no explicit address is provided
-    let address = if chain.as_str() == "bitcoin" && address.is_none() {
+    // Use centralized wallet identity resolver for address derivation
+    let address = if address.is_none() {
         if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
             let mnemonic = Mnemonic::from_phrase(mnemonic_phrase)
                 .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
             let seed = mnemonic.to_seed(None);
             let seed_array = *seed.as_bytes();
 
-            // Initialize wallet factory and get Bitcoin operations
-            let _factory = init_wallet_factory();
+            // Use centralized wallet identity resolver
+            let resolver = WalletIdentityResolver::from_seed(seed_array);
             let chain_id = ChainId::from(chain.as_str());
-            let wallet_ops = get_wallet_operations(&chain_id);
-
-            let derived_address = if let Some(ops) = wallet_ops {
-                ops.derive_address(&seed_array, 0, 0)
-                    .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-            } else {
-                // Fallback to csv-wallet if factory not available
-                state.get_address(&chain).map(|s| s.to_string())
-                    .ok_or_else(|| anyhow::anyhow!("Wallet operations not available for {}", chain))?
-            };
-
-            Some(derived_address)
+            Some(resolver.derive_address(chain_id, account, index))
         } else {
             state.get_address(&chain).map(|s| s.to_string())
         }
     } else {
-        address.or_else(|| state.get_address(&chain).map(|s| s.to_string()))
+        address
     };
 
     if let Some(addr) = address {
@@ -99,33 +91,22 @@ pub fn cmd_list(
 
     let mut found_any = false;
     for chain in chains {
-        // For Bitcoin, derive address from mnemonic using account and index
-        if chain.as_str() == "bitcoin" {
-            if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
-                let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-                    .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-                let seed = mnemonic.to_seed(None);
-                let seed_array = *seed.as_bytes();
+        // Use centralized wallet identity resolver for all chains
+        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
+            let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
+                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
+            let seed = mnemonic.to_seed(None);
+            let seed_array = *seed.as_bytes();
 
-                // Use csv-coordinator wallet_factory for Bitcoin operations (BIP-86 Taproot)
-                let chain_id = ChainId::new("bitcoin");
-                let wallet_ops = get_wallet_operations(&chain_id);
-                let derived_address = if let Some(ops) = wallet_ops {
-                    ops.derive_address(&seed_array, 0, 0)
-                        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-                } else {
-                    // Fallback to csv-keys if factory not available
-                    let key = csv_keys::derive_key(&seed_array, &chain_id, 0, 0)
-                        .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
-                    csv_keys::bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-                        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-                };
+            // Use centralized wallet identity resolver
+            let resolver = WalletIdentityResolver::from_seed(seed_array);
+            let chain_id = ChainId::from(chain.as_str());
+            let derived_address = resolver.derive_address(chain_id, account, index);
 
-                output::kv(&format!("{} (account {}, index {})", chain, account, index), &derived_address);
-                found_any = true;
-            }
+            output::kv(&format!("{} (account {}, index {})", chain, account, index), &derived_address);
+            found_any = true;
         } else {
-            // For other chains, use stored address
+            // Fallback to stored address if no mnemonic
             if let Some(address) = state.get_address(&chain) {
                 output::kv(&format!("{}", chain), address);
                 found_any = true;

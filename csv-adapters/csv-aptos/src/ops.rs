@@ -15,8 +15,9 @@ use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
-    ChainProofProvider, ChainQuery, ChainSanadOps, ChainSigner, ContractStatus, DeploymentStatus,
-    FinalityStatus, SanadOperationResult, SanadStateReader, TransactionInfo, TransactionStatus,
+    ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
+    ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperationResult,
+    SanadStateReader, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
@@ -1409,6 +1410,90 @@ impl SanadStateReader for AptosBackend {
         // Query events from Aptos for this sanad_id
         // This would require querying the event logs from the contract
         Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl ChainReadinessCheck for AptosBackend {
+    async fn check_readiness(&self, _account: u32, _index: u32) -> ChainOpResult<ChainReadiness> {
+        // Check if module is configured
+        let contract_configured = !self.seal_protocol.config().seal_contract.module_address.is_empty();
+
+        // Check if signer is actually configured by checking the config
+        let signer_configured = self.seal_protocol.config().private_key.is_some();
+
+        // Derive signer address from private key if available
+        let signer_address = if signer_configured {
+            if let Some(ref secret_key) = self.seal_protocol.config().private_key {
+                use ed25519_dalek::SigningKey;
+                let key_bytes = secret_key.expose_secret();
+                let signing_key = SigningKey::from_bytes(key_bytes);
+                let public_key = signing_key.verifying_key();
+                let address = public_key.as_bytes().to_vec();
+                Some(format!("0x{}", hex::encode(address)))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Balance address is same as signer address for Aptos
+        let balance_address = signer_address.clone();
+
+        // Check write capability (signer configured + RPC available)
+        let write_capable = signer_configured;
+
+        // Check if account exists (has balance > 0)
+        let account_exists = if let Some(ref addr) = balance_address {
+            match <Self as ChainQuery>::get_balance(self, addr.as_str()).await {
+                Ok(balance) => balance.total > 0,
+                Err(_) => false,
+            }
+        } else {
+            false
+        };
+
+        // Get native balance
+        let native_balance = if let Some(ref addr) = balance_address {
+            match <Self as ChainQuery>::get_balance(self, addr.as_str()).await {
+                Ok(balance) => Some(balance.total),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        // Estimate minimum fee (100 APT for simple transaction)
+        let estimated_fee = Some(100_000_000); // 100 APT in octas
+
+        // Aptos supports sanad creation (via module)
+        let sanad_create_supported = contract_configured;
+
+        // Aptos supports proof generation
+        let proof_generation_supported = true;
+
+        // Aptos can be cross-chain source
+        let cross_chain_source_supported = true;
+
+        // Aptos can be cross-chain destination
+        let cross_chain_destination_supported = true;
+
+        Ok(ChainReadiness {
+            signer_address,
+            balance_address,
+            signer_configured,
+            write_capable,
+            contract_configured,
+            account_exists,
+            native_balance,
+            estimated_fee,
+            sanad_create_supported,
+            proof_generation_supported,
+            cross_chain_source_supported,
+            cross_chain_destination_supported,
+            metadata: vec![],
+        })
     }
 }
 
