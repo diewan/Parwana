@@ -25,7 +25,7 @@ pub enum Network {
 }
 
 impl Network {
-    fn to_rpc_url(&self) -> &'static str {
+    fn rpc_url(&self) -> &'static str {
         match self {
             Network::Main => "https://fullnode.mainnet.aptoslabs.com",
             Network::Test => "https://fullnode.testnet.aptoslabs.com",
@@ -113,7 +113,7 @@ impl WalletOperations for AptosWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = format!("{}/accounts/{}", self.network.to_rpc_url(), address);
+            let url = format!("{}/accounts/{}", self.network.rpc_url(), address);
             
             let response = client
                 .get(&url)
@@ -166,7 +166,7 @@ impl WalletOperations for AptosWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = format!("{}/transactions", self.network.to_rpc_url());
+            let url = format!("{}/transactions", self.network.rpc_url());
             
             let response = client
                 .post(&url)
@@ -198,7 +198,7 @@ impl WalletOperations for AptosWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = format!("{}/transactions/by_hash/{}", self.network.to_rpc_url(), tx_hash);
+            let url = format!("{}/transactions/by_hash/{}", self.network.rpc_url(), tx_hash);
             
             let response = client
                 .get(&url)

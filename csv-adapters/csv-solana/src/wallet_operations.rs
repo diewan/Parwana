@@ -17,6 +17,8 @@ use reqwest::Client as ReqwestClient;
 use serde_json::Value;
 #[cfg(feature = "rpc")]
 use ed25519_dalek::{SigningKey, Signature, Signer};
+#[cfg(feature = "rpc")]
+use base64::Engine;
 
 /// Network type for wallet operations
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +29,7 @@ pub enum Network {
 }
 
 impl Network {
-    fn to_rpc_url(&self) -> &'static str {
+    fn rpc_url(&self) -> &'static str {
         match self {
             Network::Main => "https://api.mainnet-beta.solana.com",
             Network::Test => "https://api.devnet.solana.com",
@@ -55,7 +57,7 @@ impl SolanaWalletOperations {
 
     /// Create new Solana wallet operations with RPC client
     #[cfg(feature = "rpc")]
-    pub fn with_rpc(network: Network, rpc_url: Option<String>) -> Self {
+    pub fn with_rpc(network: Network, _rpc_url: Option<String>) -> Self {
         let client = ReqwestClient::new();
         Self {
             network,
@@ -82,7 +84,7 @@ impl WalletOperations for SolanaWalletOperations {
         &self,
         seed: &[u8],
         account: u32,
-        index: u32,
+        _index: u32,
     ) -> Result<String, WalletError> {
         // Convert seed slice to array
         let mut seed_array = [0u8; 64];
@@ -115,7 +117,7 @@ impl WalletOperations for SolanaWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = self.network.to_rpc_url();
+            let url = self.network.rpc_url();
             
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -175,9 +177,9 @@ impl WalletOperations for SolanaWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = self.network.to_rpc_url();
+            let url = self.network.rpc_url();
             
-            let tx_base64 = base64::encode(signed_tx);
+            let tx_base64 = base64::engine::general_purpose::STANDARD.encode(signed_tx);
             
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -215,7 +217,7 @@ impl WalletOperations for SolanaWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = self.network.to_rpc_url();
+            let url = self.network.rpc_url();
             
             let request = serde_json::json!({
                 "jsonrpc": "2.0",

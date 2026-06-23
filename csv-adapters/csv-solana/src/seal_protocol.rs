@@ -6,7 +6,6 @@
 
 use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_hash::dag::DAGSegment;
 use csv_wire::HashWire;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};

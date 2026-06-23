@@ -75,7 +75,7 @@ pub(crate) struct LegacyWalletConfig {
 impl LegacyWalletConfig {
     /// Convert private_key String to typed SecretHandle (zeroize-on-drop)
     /// This should be called immediately after deserialization to ensure secrets are never exposed as raw strings
-    pub fn to_secret_handle(&self, chain: &str) -> Option<csv_wallet::SecretHandle> {
+    pub fn to_secret_handle(&self, _chain: &str) -> Option<csv_wallet::SecretHandle> {
         self.private_key.as_ref().map(|pk| {
             let bytes = hex::decode(pk).unwrap_or_else(|_| pk.as_bytes().to_vec());
             let key_array: [u8; 32] = if bytes.len() >= 32 {

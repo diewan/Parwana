@@ -1829,7 +1829,7 @@ impl SanadStateReader for EthereumBackend {
             .iter()
             .filter_map(|log| {
                 let topics = log.get("topics")?.as_array()?;
-                let event_type = if topics.len() > 0 {
+                let event_type = if !topics.is_empty() {
                     self._decode_event_type(topics[0].as_str()?)
                 } else {
                     "Unknown".to_string()
@@ -1920,10 +1920,7 @@ impl ChainReadinessCheck for EthereumBackend {
                 if addr_bytes.len() == 20 {
                     let mut addr_array = [0u8; 20];
                     addr_array.copy_from_slice(&addr_bytes);
-                    match self.rpc.get_balance(addr_array).await {
-                        Ok(balance) => Some(balance),
-                        Err(_) => None,
-                    }
+                    self.rpc.get_balance(addr_array).await.ok()
                 } else {
                     None
                 }

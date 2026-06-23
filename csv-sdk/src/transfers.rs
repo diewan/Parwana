@@ -339,6 +339,7 @@ impl TransferBuilder {
     /// When the runtime-coordinator feature is enabled and a TransferCoordinator
     /// is available, this method will use the full lock-prove-verify-mint flow
     /// with replay protection, durable recovery, and canonical verification.
+    #[allow(clippy::await_holding_lock)]
     pub async fn execute(self) -> Result<String, CsvError> {
         let _to_address = self.to_address.as_ref().ok_or_else(|| {
             CsvError::BuilderError(
@@ -355,6 +356,7 @@ impl TransferBuilder {
                     log::info!("TransferBuilder: TransferCoordinator available, executing real transfer");
                     // Get adapter registry from the manager
                     let adapter_registry = manager.adapter_registry();
+                    #[allow(clippy::await_holding_lock)]
                     let adapter_registry = adapter_registry.lock().map_err(|e| {
                         CsvError::RuntimeError(format!("Failed to lock adapter registry: {}", e))
                     })?;

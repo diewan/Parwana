@@ -293,7 +293,7 @@ impl SyncCoordinator {
     }
 
     /// Process a single slot - fetch block and process CSV-relevant transactions
-    async fn process_slot(rpc: &Arc<dyn SolanaRpc>, slot: u64, csv_program_id: solana_sdk::pubkey::Pubkey) -> SolanaResult<()> {
+    async fn process_slot(rpc: &Arc<dyn SolanaRpc>, slot: u64, _csv_program_id: solana_sdk::pubkey::Pubkey) -> SolanaResult<()> {
         // Fetch the block at this slot
         let block = rpc.get_block(slot)
             .map_err(|e| SolanaError::Rpc(format!("Failed to fetch block at slot {}: {}", slot, e)))?;

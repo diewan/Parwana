@@ -228,9 +228,31 @@ if [ "$INIT_SUCCESS" = false ]; then
     fi
 fi
 
+# Update ~/.csv/config.toml with the deployed module address
+CONFIG_FILE="$HOME/.csv/config.toml"
+if [ -f "$CONFIG_FILE" ]; then
+    echo "Updating $CONFIG_FILE..."
+    # Use sed to update contract_address for aptos chain
+    if command -v sed &>/dev/null; then
+        # Create backup
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.backup.$(date +%s)"
+        # Update contract_address for aptos chain
+        sed -i.bak "/\[chains.aptos\]/,/^\[/ s|contract_address = \".*\"|contract_address = \"${PACKAGE_ID}\"|" "$CONFIG_FILE"
+        rm -f "${CONFIG_FILE}.bak"
+        echo "  aptos contract_address updated to ${PACKAGE_ID}"
+    else
+        echo "WARNING: sed not found, cannot auto-update config file"
+        echo "Please manually update $CONFIG_FILE"
+        echo "Set chains.aptos.contract_address = ${PACKAGE_ID}"
+    fi
+else
+    echo "WARNING: $CONFIG_FILE not found, skipping config update"
+fi
+
 # Update deployment manifest
 echo "Updating deployment manifest..."
-MANIFEST_PATH="../../../deployments/deployment-manifest.json"
+# Calculate manifest path from current directory (csv-contracts/aptos/)
+MANIFEST_PATH="../../deployments/deployment-manifest.json"
 if [ -f "$MANIFEST_PATH" ]; then
     if command -v python3 &>/dev/null; then
         python3 -c "

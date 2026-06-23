@@ -2,7 +2,7 @@
   "manifest_version": "2.0.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-06-19T19:09:03.152191+00:00Z",
+  "updated_at": "2026-06-23T14:49:46.416695Z",
   "deployments": {
     "ethereum": {
       "network": "sepolia",
@@ -33,12 +33,12 @@
     },
     "sui": {
       "network": "testnet",
-      "package_id": "0x8b07f8ec1cfb18f52a69328b64d8dd0e781b46ca87dea9d8e44c858fb2d8adfb",
+      "package_id": "0x0fbc820f94deb55b7866b1f6106eb50b6eacb08e1b0832393a8892339461eee1",
       "verified": true
     },
     "aptos": {
       "network": "testnet",
-      "module_address": "ca17b1a481a0cdeaa4d9d252027ac805cfedcf0c4d0f48912378ebc833e7472b",
+      "module_address": "810d95132431185b5db7a84cba4d73b5e8135950372bcbcb69e159445ef1fb9c",
       "deployment_tx": "0x13fa44cb912109fc2209b729abc57f29cdd98f436899f38eecddb99d563e0d36",
       "verified": true
     }

@@ -6,7 +6,7 @@ resolution = false
 skip-lint = false
 
 [programs.devnet]
-csv_seal = "DDDqYtmUAyVFnt3wqzbVzpDFSTstZXieAhdx4XyayJVn"
+csv_seal = "9ekKQYpaLkTrycYmRNRDHohYZwXycHAyfLNirUDRnRVh"
 
 [programs.localnet]
 csv_seal = "2nVbT9d33j1ySDdHHmNKUgthfV7RbyQDTqRua8192Tn6"

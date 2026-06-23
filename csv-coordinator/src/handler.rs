@@ -192,6 +192,8 @@ impl TransferPhaseHandler for DefaultTransferHandler {
 ///
 /// This adapter simulates successful execution for all phases.
 pub struct MockChainAdapter {
+    /// Chain identifier for this mock adapter
+    #[allow(dead_code)]
     chain_id: String,
 }
 

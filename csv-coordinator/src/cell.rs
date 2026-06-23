@@ -97,6 +97,7 @@ pub struct TransferTask {
 
 impl TransferTask {
     /// Create a new transfer task.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         transfer_id: String,
         sanad_id: SanadId,
@@ -287,7 +288,7 @@ async fn cell_worker(
             CellTask::Process(transfer) => {
                 let transfer_id = transfer.transfer_id.clone();
                 let _source_chain = transfer.source_chain.clone();
-                let stage = transfer.stage.clone();
+                let stage = transfer.stage;
 
                 tracing::info!(
                     chain_id = config.chain_id,

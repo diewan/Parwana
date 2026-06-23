@@ -1,6 +1,5 @@
 //! Type definitions for Solana adapter
 
-use csv_hash::Hash;
 use csv_wire::HashWire;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};

@@ -63,7 +63,7 @@ pub fn cmd_list(
     chain_filter: Option<Chain>,
     account: u32,
     index: u32,
-    config: &Config,
+    _config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header("Wallet Addresses");

@@ -36,7 +36,6 @@ use std::time::SystemTime;
 
 use uuid::Uuid;
 
-use csv_protocol::sanad::SanadId as TransferId;
 use csv_wire::SanadIdWire;
 
 /// Runtime instance identifier.

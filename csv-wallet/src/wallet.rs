@@ -224,9 +224,12 @@ impl WalletManager {
     /// # Returns
     /// The signature
     pub async fn sign(&self, chain: &str, message: &[u8]) -> Result<crate::signer::Signature> {
-        let signers = self.signers.read().unwrap();
-        let signer = signers.get(chain)
-            .ok_or_else(|| WalletError::UnsupportedChain(chain.to_string()))?;
+        let signer = {
+            let signers = self.signers.read().unwrap();
+            signers.get(chain)
+                .ok_or_else(|| WalletError::UnsupportedChain(chain.to_string()))?
+                .clone()
+        };
         signer.sign(message).await
     }
 
@@ -298,7 +301,7 @@ pub mod address {
 /// Wallet interface for chain-agnostic operations
 pub trait Wallet: Send + Sync {
     /// Sign a message
-    async fn sign(&self, chain: &str, message: &[u8]) -> Result<crate::signer::Signature>;
+    fn sign(&self, chain: &str, message: &[u8]) -> impl std::future::Future<Output = Result<crate::signer::Signature>> + Send;
 
     /// Get public key for a chain
     fn public_key(&self, chain: &str) -> Result<Vec<u8>>;
@@ -308,8 +311,19 @@ pub trait Wallet: Send + Sync {
 }
 
 impl Wallet for WalletManager {
-    async fn sign(&self, chain: &str, message: &[u8]) -> Result<crate::signer::Signature> {
-        self.sign(chain, message).await
+    fn sign(&self, chain: &str, message: &[u8]) -> impl std::future::Future<Output = Result<crate::signer::Signature>> + Send {
+        let chain = chain.to_string();
+        let message = message.to_vec();
+        let signers = self.signers.clone();
+        async move {
+            let signer = {
+                let signers = signers.read().unwrap();
+                signers.get(&chain)
+                    .cloned()
+                    .ok_or(WalletError::UnsupportedChain(chain))?
+            };
+            signer.sign(&message).await
+        }
     }
 
     fn public_key(&self, chain: &str) -> Result<Vec<u8>> {

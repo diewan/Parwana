@@ -1,8 +1,8 @@
 //! CLI commands for chain management and validation.
 
-use clap::{Args, Subcommand};
+use clap::Subcommand;
 use std::sync::{Arc, RwLock};
-use csv_runtime::chain_discovery::{ChainDiscovery, ChainConfig};
+use csv_runtime::chain_discovery::ChainDiscovery;
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 use csv_hash::chain_id::ChainId;
 
@@ -89,8 +89,8 @@ impl ChainCommands {
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let discovery = ChainDiscovery::new(adapter_registry);
         
-        let chain_id = ChainId::new(chain_id);
-        let config = discovery.get_config(&chain_id)
+        let _chain_id = ChainId::new(chain_id);
+        let config = discovery.get_config(&_chain_id)
             .map_err(|e| format!("Failed to get chain config: {}", e))?;
         
         if let Some(cfg) = config {
@@ -104,7 +104,7 @@ impl ChainCommands {
             }
             println!("  Enabled: {}", cfg.enabled);
         } else {
-            println!("Chain '{}' not found.", chain_id.as_str());
+            println!("Chain '{}' not found.", chain_id);
         }
         
         Ok(())
@@ -143,7 +143,7 @@ impl ChainCommands {
         }
         
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
-        let discovery = ChainDiscovery::new(adapter_registry);
+        let _discovery = ChainDiscovery::new(adapter_registry);
         
         let entries = std::fs::read_dir(chains_dir)?;
         let mut valid_count = 0;

@@ -30,7 +30,6 @@ use crate::error::CsvError;
 use crate::wallet::Wallet;
 
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
-use csv_protocol::secret::SecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::{

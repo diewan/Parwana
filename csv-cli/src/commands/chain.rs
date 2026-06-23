@@ -202,7 +202,7 @@ fn expand_path(path: &str) -> String {
 }
 
 async fn cmd_readiness(chain: &Chain, account: u32, index: u32, config: &Config) -> Result<()> {
-    let chain_config = config.chain(chain)?;
+    let _chain_config = config.chain(chain)?;
 
     output::header(&format!("Chain Readiness: {}", chain));
 

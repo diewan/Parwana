@@ -216,7 +216,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         // Get the first active seal from the seal protocol
         let active_seals = self.backend.seal_protocol().get_active_seals();
-        let seal_point = active_seals.first()
+        let _seal_point = active_seals.first()
             .cloned()
             .unwrap_or_else(|| SolanaSealPoint {
                 account: solana_sdk::pubkey::Pubkey::default(),

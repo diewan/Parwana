@@ -100,9 +100,9 @@ impl BlsVerifier {
 
         #[cfg(not(feature = "bls"))]
         {
-            return Err(AnchorError::InvalidSignature(
+            Err(AnchorError::InvalidSignature(
                 "BLS signature verification requires the 'bls' feature to be enabled".to_string()
-            ));
+            ))
         }
     }
 }

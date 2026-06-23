@@ -139,10 +139,10 @@ pub const DEFAULT_RELAYS: &[&str] = &[
 
 /// Serialize a proof bundle to canonical bytes.
 pub fn serialize_proof(proof: &ProofBundle) -> Result<Vec<u8>, TransportError> {
-    proof.to_canonical_bytes().map_err(|e| TransportError::Serialization(e))
+    proof.to_canonical_bytes().map_err(TransportError::Serialization)
 }
 
 /// Deserialize a proof bundle from canonical bytes.
 pub fn deserialize_proof(data: &[u8]) -> Result<ProofBundle, TransportError> {
-    ProofBundle::from_canonical_bytes(data).map_err(|e| TransportError::Serialization(e))
+    ProofBundle::from_canonical_bytes(data).map_err(TransportError::Serialization)
 }

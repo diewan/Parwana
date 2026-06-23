@@ -16,7 +16,6 @@ use bitcoin::{
 
 use crate::tapret::TapretCommitment;
 use crate::wallet::{Bip86Path, SealWallet, WalletUtxo};
-use crate::types::UtxoProvenance;
 
 /// Dust threshold for P2TR outputs (BIP-0448: 330 sat for P2TR)
 const P2TR_DUST_SAT: u64 = 330;
@@ -130,7 +129,6 @@ impl CommitmentTxBuilder {
 
         // Calculate initial fee estimate (will be recalculated after selecting inputs)
         let output_count = if change_path.is_some() { 2 } else { 1 };
-        let mut fee = self.calculate_fee(input_utxos.len(), output_count);
 
         // Add more UTXOs if insufficient for commitment + fees
         // Only select spendable UTXOs (RpcWallet or ImportedFunding)
@@ -163,7 +161,7 @@ impl CommitmentTxBuilder {
         }
         
         // Recalculate fee with final input count
-        fee = self.calculate_fee(input_utxos.len(), output_count);
+        let fee = self.calculate_fee(input_utxos.len(), output_count);
 
         // Final validation
         if total_input < fee + commitment_value_sat {
@@ -280,14 +278,13 @@ impl CommitmentTxBuilder {
 
             // Get scriptPubKey for this input
             let derived_script_pubkey = input_key.address.script_pubkey();
-            let input_script_pubkey = utxo.script_pubkey
+            let _input_script_pubkey = utxo.script_pubkey
                 .as_ref()
                 .unwrap_or(&derived_script_pubkey);
 
             // CRITICAL: Verify scriptPubKey matches the derived wallet address
             // This ensures we're signing for an output that actually belongs to our wallet
-            if utxo.script_pubkey.is_some() {
-                let actual_script = utxo.script_pubkey.as_ref().unwrap();
+            if let Some(actual_script) = &utxo.script_pubkey {
                 if actual_script != &derived_script_pubkey {
                     return Err(TxBuilderError::WalletError(format!(
                         "ScriptPubKey mismatch for input {}: derived {:?} does not match on-chain {:?}",

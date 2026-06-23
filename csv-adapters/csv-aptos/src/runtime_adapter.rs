@@ -14,7 +14,7 @@ use csv_protocol::finality::capabilities::{
 };
 use csv_protocol::signature::SignatureScheme;
 use csv_protocol::proof_taxonomy::ProofBundle;
-use csv_protocol::chain_adapter_traits::{ChainBackend, ChainProofProvider, ChainQuery};
+use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery};
 use std::sync::Arc;
 
 use crate::ops::AptosBackend;

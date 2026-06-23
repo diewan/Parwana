@@ -877,7 +877,7 @@ mod real_rpc_impl {
                 println!("[Ethereum]       Topic {}: 0x{}", j, hex::encode(topic));
             }
             println!("[Ethereum]     Data length: {} bytes", log.data.len());
-            if log.data.len() > 0 {
+            if !log.data.is_empty() {
                 println!("[Ethereum]     Data (first 64 bytes): 0x{}", hex::encode(&log.data[..log.data.len().min(64)]));
             }
 

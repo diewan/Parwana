@@ -507,7 +507,7 @@ impl AptosSealProtocol {
         let (sequence_number, ledger) = {
             let max_retries = 3;
             let mut retry_count = 0;
-            let mut sequence_number = 0;
+            let sequence_number;
             
             loop {
                 log::debug!("APTOS: Fetching account sequence number (attempt {}/{})", retry_count + 1, max_retries);
@@ -670,7 +670,7 @@ impl AptosSealProtocol {
         let (sequence_number, ledger) = {
             let max_retries = 3;
             let mut retry_count = 0;
-            let mut sequence_number = 0;
+            let sequence_number;
             
             loop {
                 log::debug!("APTOS: Fetching account sequence number (attempt {}/{})", retry_count + 1, max_retries);
@@ -1490,7 +1490,7 @@ impl AptosSealProtocol {
 
         let resource_array = resources
             .as_array()
-            .ok_or_else(|| format!("Expected array of resources"))?;
+            .ok_or_else(|| "Expected array of resources".to_string())?;
 
         // Find the SealCollection resource
         for resource in resource_array {

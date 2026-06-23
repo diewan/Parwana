@@ -19,8 +19,6 @@ use k256::ecdsa::SigningKey;
 use reqwest::Client as ReqwestClient;
 #[cfg(feature = "rpc")]
 use serde_json::Value;
-#[cfg(feature = "rpc")]
-use k256::elliptic_curve::sec1::ToEncodedPoint;
 
 /// Network type for wallet operations
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +29,7 @@ pub enum Network {
 }
 
 impl Network {
-    fn to_rpc_url(&self) -> &'static str {
+    fn rpc_url(&self) -> &'static str {
         match self {
             Network::Main => "https://eth.llamarpc.com",
             Network::Test => "https://rpc.sepolia.org",
@@ -59,7 +57,7 @@ impl EthereumWalletOperations {
 
     /// Create new Ethereum wallet operations with RPC client
     #[cfg(feature = "rpc")]
-    pub fn with_rpc(network: Network, rpc_url: Option<String>) -> Self {
+    pub fn with_rpc(network: Network, _rpc_url: Option<String>) -> Self {
         let client = ReqwestClient::new();
         Self {
             network,
@@ -86,7 +84,7 @@ impl WalletOperations for EthereumWalletOperations {
         &self,
         seed: &[u8],
         account: u32,
-        index: u32,
+        _index: u32,
     ) -> Result<String, WalletError> {
         // Convert seed slice to array
         let mut seed_array = [0u8; 64];
@@ -119,7 +117,7 @@ impl WalletOperations for EthereumWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = self.network.to_rpc_url();
+            let url = self.network.rpc_url();
             
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -171,7 +169,7 @@ impl WalletOperations for EthereumWalletOperations {
                 .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive private key: {}", e)))?;
             
             let secp = Secp256k1::new();
-            let public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
+            let _public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
             
             // Sign the transaction data (simplified - in production would use proper Ethereum transaction signing)
             let signing_key = SigningKey::from_slice(&seed_array[..32])
@@ -193,7 +191,7 @@ impl WalletOperations for EthereumWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = self.network.to_rpc_url();
+            let url = self.network.rpc_url();
             
             let tx_hex = hex::encode(signed_tx);
             
@@ -233,7 +231,7 @@ impl WalletOperations for EthereumWalletOperations {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = self.network.to_rpc_url();
+            let url = self.network.rpc_url();
             
             let request = serde_json::json!({
                 "jsonrpc": "2.0",

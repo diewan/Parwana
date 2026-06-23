@@ -181,7 +181,7 @@ pub fn derive_key_from_path(
 /// Uses proper BIP-32 HD key derivation with HMAC-SHA512.
 /// Derives master key from seed, then derives child keys along the path.
 fn derive_secp256k1(seed: &[u8; 64], path: &DerivationPath) -> Result<SecretKey, Bip44Error> {
-    use bip32::{ChildNumber, DerivationPath as Bip32Path, ExtendedKey, XPrv};
+    use bip32::{DerivationPath as Bip32Path, XPrv};
     use std::str::FromStr;
 
     // Create master extended private key from seed using BIP-32 (network-agnostic)

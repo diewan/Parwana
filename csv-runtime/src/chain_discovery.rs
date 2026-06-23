@@ -30,6 +30,7 @@ pub enum ChainDiscoveryError {
 /// chain-specific adapter instances on demand.
 pub struct ChainDiscovery {
     /// Registry of available adapters
+    #[allow(dead_code)]
     adapter_registry: Arc<RwLock<AdapterRegistryImpl>>,
     /// Chain configurations
     chain_configs: Arc<RwLock<HashMap<ChainId, ChainConfig>>>,
@@ -56,10 +57,12 @@ pub struct ChainConfig {
     pub enabled: bool,
 }
 
+#[allow(dead_code)]
 fn default_enabled() -> bool {
     true
 }
 
+#[allow(dead_code)]
 fn default_network() -> String {
     "mainnet".to_string()
 }

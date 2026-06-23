@@ -139,13 +139,13 @@ where
         let mut block_hasher = sha2::Sha256::new();
         block_hasher.update(b"CSV-CELESTIA-BLOCK-");
         block_hasher.update(commitment.as_bytes());
-        block_hasher.update(&seal.height.to_le_bytes());
+        block_hasher.update(seal.height.to_le_bytes());
         let block_hash: [u8; 32] = block_hasher.finalize().into();
 
         // Derive tx hash from the proof_id (which contains the namespace and commitment)
         let mut tx_hasher = sha2::Sha256::new();
         tx_hasher.update(seal.proof_id.to_bytes());
-        tx_hasher.update(&seal.height.to_le_bytes());
+        tx_hasher.update(seal.height.to_le_bytes());
         let tx_hash: [u8; 32] = tx_hasher.finalize().into();
 
         log::info!("CELESTIA: Derived block hash for height {}: 0x{}", seal.height, hex::encode(block_hash));
@@ -227,8 +227,8 @@ where
         let mut commitment_hasher = sha2::Sha256::new();
         commitment_hasher.update(b"CSV-CELESTIA-SEAL-");
         commitment_hasher.update(self.namespace.as_bytes());
-        commitment_hasher.update(&height.to_le_bytes());
-        commitment_hasher.update(&std::time::SystemTime::now()
+        commitment_hasher.update(height.to_le_bytes());
+        commitment_hasher.update(std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)

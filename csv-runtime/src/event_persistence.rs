@@ -311,7 +311,7 @@ impl EventStore for InMemoryEventStore {
         position: &StreamPosition,
         limit: usize,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError> {
-        let aggregate_id_wire: SanadIdWire = position.aggregate_id.clone().into();
+        let aggregate_id_wire: SanadIdWire = position.aggregate_id.clone();
         let guard = self
             .events
             .lock()
@@ -356,13 +356,13 @@ impl EventStore for InMemoryEventStore {
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        Ok(guard.keys()
+        guard.keys()
             .map(|w| {
                 let wire = w.clone();
                 csv_protocol::sanad::SanadId::try_from(wire)
-                    .map_err(|e| EventStoreError::Serialization(e))
+                    .map_err(EventStoreError::Serialization)
             })
-            .collect::<Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()
     }
 
     fn event_count(&self) -> Result<usize, EventStoreError> {

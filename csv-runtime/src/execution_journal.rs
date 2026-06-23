@@ -30,7 +30,6 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use csv_hash::{Hash, sanad::SanadId};
 use csv_wire::{HashWire, SanadIdWire};
 use csv_protocol::transfer_state::TransferStage;
 use serde::{Deserialize, Serialize};

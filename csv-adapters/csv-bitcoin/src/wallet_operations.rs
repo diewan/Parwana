@@ -17,8 +17,6 @@ use std::sync::Arc;
 use reqwest::Client as ReqwestClient;
 #[cfg(feature = "rpc")]
 use serde_json::Value;
-#[cfg(any(feature = "rpc", feature = "signet-rest"))]
-use ed25519_dalek::{SigningKey, Signature, Signer};
 
 /// Network type for wallet operations
 #[derive(Debug, Clone, Copy)]
@@ -37,7 +35,7 @@ impl Network {
         }
     }
 
-    fn to_esplora_url(&self) -> &'static str {
+    fn esplora_url(&self) -> &'static str {
         match self {
             Network::Main => "https://mempool.space/api",
             Network::Test => "https://mempool.space/signet/api",
@@ -134,7 +132,7 @@ impl WalletOperations for BitcoinWalletOperations {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
-            let url = format!("{}/address/{}", self.network.to_esplora_url(), address);
+            let url = format!("{}/address/{}", self.network.esplora_url(), address);
             
             let response = client
                 .get(&url)
@@ -176,7 +174,7 @@ impl WalletOperations for BitcoinWalletOperations {
             .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive private key: {}", e)))?;
         
         let secp = Secp256k1::new();
-        let public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
+        let _public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
         
         // Sign the transaction data (simplified - in production would use proper Bitcoin transaction signing)
         let message = secp256k1::Message::from_digest_slice(tx_data)
@@ -190,7 +188,7 @@ impl WalletOperations for BitcoinWalletOperations {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
-            let url = format!("{}/tx", self.network.to_esplora_url());
+            let url = format!("{}/tx", self.network.esplora_url());
             
             let tx_hex = hex::encode(signed_tx);
             
@@ -220,7 +218,7 @@ impl WalletOperations for BitcoinWalletOperations {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
-            let url = format!("{}/tx/{}", self.network.to_esplora_url(), tx_hash);
+            let url = format!("{}/tx/{}", self.network.esplora_url(), tx_hash);
             
             let response = client
                 .get(&url)
@@ -257,7 +255,7 @@ impl WalletOperations for BitcoinWalletOperations {
         &self,
         seed: &[u8],
         account: u32,
-        index: u32,
+        _index: u32,
         rpc_url: &str,
     ) -> Result<Vec<(String, u32, u64, Option<String>)>, WalletError> {
         Self::scan_utxos(seed, self.network, account, 20, rpc_url).await
@@ -293,9 +291,7 @@ impl BitcoinWalletOperations {
         if seed.len() >= 64 {
             seed_array.copy_from_slice(&seed[..64]);
         } else {
-            return Err(WalletError::KeyDerivation(format!(
-                "Seed must be at least 64 bytes"
-            )));
+            return Err(WalletError::KeyDerivation("Seed must be at least 64 bytes".to_string()));
         }
 
         let wallet = SealWallet::from_seed(&seed_array, btc_network)
@@ -499,9 +495,7 @@ impl BitcoinWalletOperations {
         if seed.len() >= 64 {
             seed_array.copy_from_slice(&seed[..64]);
         } else {
-            return Err(WalletError::KeyDerivation(format!(
-                "Seed must be at least 64 bytes"
-            )));
+            return Err(WalletError::KeyDerivation("Seed must be at least 64 bytes".to_string()));
         }
 
         let wallet = SealWallet::from_seed(&seed_array, btc_network)

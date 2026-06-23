@@ -12,7 +12,6 @@ use std::sync::Mutex;
 #[cfg(all(feature = "rpc", not(test)))]
 use crate::finality::FinalityCheckerTrait;
 use csv_hash::Hash;
-use csv_hash::dag::DAGSegment;
 use csv_protocol::commitment::Commitment;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::proof_taxonomy::{FinalityProof, ProofBundle};

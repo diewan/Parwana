@@ -1478,7 +1478,7 @@ impl SanadStateReader for SuiBackend {
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get seal object: {}", e)))?;
         
         match object_response.into_inner().object {
-            Some(object) => {
+            Some(_object) => {
                 // The Sui RPC/SDK types do not currently expose the seal state fields
                 // needed to populate CanonicalSealState fully.
                 // Return what we can determine from the object's existence.

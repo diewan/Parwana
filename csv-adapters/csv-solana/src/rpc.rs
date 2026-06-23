@@ -6,7 +6,7 @@
 use solana_sdk::{
     account::Account, pubkey::Pubkey, signature::Signature, transaction::Transaction,
 };
-use solana_transaction_status::{EncodedConfirmedBlock, UiTransaction, EncodedTransaction};
+use solana_transaction_status::EncodedConfirmedBlock;
 
 use crate::error::SolanaError;
 use crate::error::SolanaResult;

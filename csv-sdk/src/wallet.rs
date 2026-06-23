@@ -295,21 +295,24 @@ impl Wallet {
         self.eth_address_with_path(0, 0)
     }
 
+    #[allow(clippy::unwrap_used)]
+    #[allow(unused_variables)]
     fn eth_address_with_path(&self, account: u32, index: u32) -> String {
         // Ethereum address derivation using BIP-44: m/44'/60'/account'/0/index
         #[cfg(feature = "wallet")]
         {
-            use bip32::{ChildNumber, DerivationPath, ExtendedKey, XPrv};
+            use bip32::{DerivationPath, XPrv};
             use k256::ecdsa::SigningKey;
             use sha3::{Digest, Keccak256};
             use std::str::FromStr;
 
             // Derive the BIP-32 path
+            let default_path = DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap();
             let path = DerivationPath::from_str(&format!("m/44'/60'/{}'/0/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap());
+                .unwrap_or(default_path);
 
             // Create extended private key from seed (network-agnostic bip32 crate)
-            let xprv = XPrv::new(&self.seed).ok();
+            let xprv = XPrv::new(self.seed).ok();
             
             if let Some(xprv) = xprv {
                 // Derive child key
@@ -361,6 +364,7 @@ impl Wallet {
         self.sui_address_with_path(0, 0)
     }
 
+    #[allow(unused_variables)]
     fn sui_address_with_path(&self, account: u32, index: u32) -> String {
         // Sui address derivation using SLIP-10: m/44'/784'/account'/0/index
         // Address = Blake2b-256(0x00 || public_key)
@@ -374,10 +378,9 @@ impl Wallet {
             let chain_id = ChainId::new("sui");
             let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
             
-            if let Ok(key) = secret_key {
-                if let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
+            if let Ok(key) = secret_key
+                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
                     return address;
-                }
             }
             
             // Fallback if derivation fails
@@ -394,6 +397,7 @@ impl Wallet {
         self.aptos_address_with_path(0, 0)
     }
 
+    #[allow(unused_variables)]
     fn aptos_address_with_path(&self, account: u32, index: u32) -> String {
         // Aptos address derivation using SLIP-10: m/44'/637'/account'/0/index
         // Address = SHA3-256(public_key || 0x00)
@@ -407,10 +411,9 @@ impl Wallet {
             let chain_id = ChainId::new("aptos");
             let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
             
-            if let Ok(key) = secret_key {
-                if let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
+            if let Ok(key) = secret_key
+                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
                     return address;
-                }
             }
             
             // Fallback if derivation fails
@@ -427,6 +430,7 @@ impl Wallet {
         self.sol_address_with_path(0, 0)
     }
 
+    #[allow(unused_variables)]
     fn sol_address_with_path(&self, account: u32, index: u32) -> String {
         // Solana address derivation using SLIP-10: m/44'/501'/account'/0/index
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
@@ -439,10 +443,9 @@ impl Wallet {
             let chain_id = ChainId::new("solana");
             let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
             
-            if let Ok(key) = secret_key {
-                if let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
+            if let Ok(key) = secret_key
+                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
                     return address;
-                }
             }
             
             // Fallback if derivation fails
@@ -472,19 +475,22 @@ impl Wallet {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
+    #[allow(unused_variables)]
     fn sign_ethereum(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Ethereum ECDSA signing
         #[cfg(feature = "wallet")]
         {
-            use bip32::{DerivationPath, ExtendedKey, XPrv};
+            use bip32::{DerivationPath, XPrv};
             use k256::ecdsa::{signature::Signer, Signature, SigningKey};
             use std::str::FromStr;
 
             // Derive the BIP-32 path
+            let default_path = DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap();
             let path = DerivationPath::from_str(&format!("m/44'/60'/{}'/0/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap());
+                .unwrap_or(default_path);
 
-            let xprv = XPrv::new(&self.seed).ok();
+            let xprv = XPrv::new(self.seed).ok();
 
             if let Some(xprv) = xprv {
                 // Iterate through path components and derive each child
@@ -519,18 +525,21 @@ impl Wallet {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
+    #[allow(unused_variables)]
     fn sign_solana(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Solana Ed25519 signing
         #[cfg(feature = "wallet")]
         {
-            use bip32::{DerivationPath, ExtendedKey, XPrv};
+            use bip32::{DerivationPath, XPrv};
             use ed25519_dalek::{SecretKey, Signer, SigningKey};
             use std::str::FromStr;
 
+            let default_path = DerivationPath::from_str("m/44'/501'/0'/0'/0").unwrap();
             let path = DerivationPath::from_str(&format!("m/44'/501'/{}'/0'/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/501'/0'/0'/0").unwrap());
+                .unwrap_or(default_path);
 
-            let xprv = XPrv::new(&self.seed).ok();
+            let xprv = XPrv::new(self.seed).ok();
 
             if let Some(xprv) = xprv {
                 // Iterate through path components and derive each child
@@ -565,18 +574,21 @@ impl Wallet {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
+    #[allow(unused_variables)]
     fn sign_sui(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Sui Ed25519 signing
         #[cfg(feature = "wallet")]
         {
-            use bip32::{DerivationPath, ExtendedKey, XPrv};
+            use bip32::{DerivationPath, XPrv};
             use ed25519_dalek::{SecretKey, Signer, SigningKey};
             use std::str::FromStr;
 
+            let default_path = DerivationPath::from_str("m/44'/784'/0'/0'/0").unwrap();
             let path = DerivationPath::from_str(&format!("m/44'/784'/{}'/0'/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/784'/0'/0'/0").unwrap());
+                .unwrap_or(default_path);
 
-            let xprv = XPrv::new(&self.seed).ok();
+            let xprv = XPrv::new(self.seed).ok();
 
             if let Some(xprv) = xprv {
                 // Use derive instead of derive_path - API has changed in bip32 crate
@@ -612,18 +624,21 @@ impl Wallet {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
+    #[allow(unused_variables)]
     fn sign_aptos(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
         // Aptos Ed25519 signing
         #[cfg(feature = "wallet")]
         {
-            use bip32::{DerivationPath, ExtendedKey, XPrv};
+            use bip32::{DerivationPath, XPrv};
             use ed25519_dalek::{SecretKey, Signer, SigningKey};
             use std::str::FromStr;
 
+            let default_path = DerivationPath::from_str("m/44'/637'/0'/0'/0").unwrap();
             let path = DerivationPath::from_str(&format!("m/44'/637'/{}'/0'/{}", account, index))
-                .unwrap_or_else(|_| DerivationPath::from_str("m/44'/637'/0'/0'/0").unwrap());
+                .unwrap_or(default_path);
 
-            let xprv = XPrv::new(&self.seed).ok();
+            let xprv = XPrv::new(self.seed).ok();
 
             if let Some(xprv) = xprv {
                 // Use derive instead of derive_path - API has changed in bip32 crate

@@ -1045,7 +1045,7 @@ impl ChainSanadOps for AptosBackend {
             log::debug!("APTOS: Building mint_sanad transaction");
 
             // Parse source chain to u8
-            let source_chain_u8 = match source_chain.as_ref() {
+            let source_chain_u8 = match source_chain {
                 "bitcoin" => 0,
                 "sui" => 1,
                 "aptos" => 2,

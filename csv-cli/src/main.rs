@@ -16,6 +16,15 @@
 
 #![allow(dead_code)]
 #![allow(deprecated)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::bind_instead_of_map)]
+#![allow(clippy::useless_format)]
+#![allow(clippy::match_result_ok)]
 //! csv sanad transfer --chain bitcoin --sanad-id 0x... --to bcrt1...
 //! csv sanad consume --chain bitcoin --sanad-id 0x...
 //! csv sanad list --chain bitcoin

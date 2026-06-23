@@ -9,10 +9,7 @@ use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 use csv_protocol::signature::SignatureScheme;
-use ed25519_dalek::{Signer, SigningKey};
 use hex;
-use k256::ecdsa::SigningKey as Secp256k1SigningKey;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
 
 /// Test proof bundle fixture
 pub struct TestProofBundle;
@@ -102,6 +99,7 @@ impl TestTransfer {
 /// This is a mock adapter that implements the ChainAdapter trait
 /// with fake proof builders for testing purposes only.
 pub struct TestAdapter {
+    /// Chain capabilities for this test adapter
     pub caps: ChainCapabilities,
 }
 
@@ -155,7 +153,7 @@ impl TestAdapter {
             vec![],
             vec![],
         );
-        Ok(ProofBundle::with_signature_scheme(
+        ProofBundle::with_signature_scheme(
             SignatureScheme::Ed25519,
             DAGSegment::new(vec![node], root_commitment),
             vec![encoded_signature],
@@ -166,7 +164,7 @@ impl TestAdapter {
                 .unwrap(),
             FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
         )
-        .map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
     }
 
     /// Build a fake lock result for testing

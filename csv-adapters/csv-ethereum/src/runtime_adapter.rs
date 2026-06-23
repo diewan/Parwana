@@ -11,7 +11,7 @@ use csv_adapter_core::{
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::signature::SignatureScheme;
 use csv_protocol::proof_taxonomy::ProofBundle;
-use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery, ChainProofProvider};
+use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery};
 use std::sync::Arc;
 
 use crate::ops::EthereumBackend;
@@ -148,7 +148,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         );
 
         // Create a seal point from the lock tx hash
-        let seal_point = EthereumSealPoint::new(
+        let _seal_point = EthereumSealPoint::new(
             [0u8; 20], // contract address
             0,        // slot index
             0,        // nonce
@@ -186,7 +186,6 @@ impl ChainAdapter for EthereumRuntimeAdapter {
     ) -> Result<SealRegistryStatus, AdapterError> {
         #[cfg(feature = "rpc")]
         {
-            use csv_protocol::chain_adapter_traits::ChainSanadOps;
             match self.backend.is_sanad_locked(seal_id).await {
                 Ok(locked) => {
                     if locked {
@@ -224,22 +223,20 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 }
 
 #[cfg(feature = "rpc")]
+#[allow(dead_code)]
 fn build_ethereum_signature(backend: &EthereumBackend, message: &[u8]) -> Vec<Vec<u8>> {
-    match backend.sign_message(message) {
-        Ok(sig) => {
-            let pk = backend.rpc().as_any()
-                .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
-                .and_then(|node| node.public_key());
-            
-            if let Some(pk_bytes) = pk {
-                let mut encoded = Vec::with_capacity(4 + pk_bytes.len() + sig.len());
-                encoded.extend_from_slice(&(pk_bytes.len() as u32).to_le_bytes());
-                encoded.extend_from_slice(&pk_bytes);
-                encoded.extend_from_slice(&sig);
-                return vec![encoded];
-            }
+    if let Ok(sig) = backend.sign_message(message) {
+        let pk = backend.rpc().as_any()
+            .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
+            .and_then(|node| node.public_key());
+        
+        if let Some(pk_bytes) = pk {
+            let mut encoded = Vec::with_capacity(4 + pk_bytes.len() + sig.len());
+            encoded.extend_from_slice(&(pk_bytes.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(&pk_bytes);
+            encoded.extend_from_slice(&sig);
+            return vec![encoded];
         }
-        Err(_) => {}
     }
     vec![]
 }

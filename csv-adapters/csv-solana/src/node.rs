@@ -7,7 +7,6 @@
 #[cfg(feature = "rpc")]
 pub mod real_rpc_impl {
     use solana_commitment_config::CommitmentConfig;
-    use solana_rpc_client::rpc_client::RpcClient;
     use solana_sdk::{
         account::Account, pubkey::Pubkey, signature::Signature, transaction::Transaction,
     };
@@ -194,7 +193,7 @@ pub mod real_rpc_impl {
         }
 
         fn get_block(&self, slot: u64) -> SolanaResult<Option<solana_transaction_status::EncodedConfirmedBlock>> {
-            use solana_transaction_status::{UiConfirmedBlock, EncodedConfirmedBlock};
+            use solana_transaction_status::EncodedConfirmedBlock;
             
             // Get the block using the RPC client with the correct method
             let ui_block = self.client
@@ -223,7 +222,7 @@ pub mod real_rpc_impl {
                 block_time: ui_block.block_time,
                 block_height: ui_block.block_height,
                 rewards: ui_block.rewards,
-                transactions: transactions,
+                transactions,
                 num_partitions: None,
             };
 

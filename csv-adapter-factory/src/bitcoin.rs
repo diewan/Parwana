@@ -34,7 +34,7 @@ impl AdapterFactory for BitcoinFactory {
         let seed = if let Some(seed_hex) = &config.seed {
             Some(seed_hex.clone())
         } else if config.secret_key.as_bytes().is_some() {
-            config.secret_key.as_bytes().map(|bytes| hex::encode(bytes))
+            config.secret_key.as_bytes().map(hex::encode)
         } else {
             log::warn!("Factory: No seed or secret key provided, creating Bitcoin adapter in read-only mode");
             None
@@ -54,7 +54,7 @@ impl AdapterFactory for BitcoinFactory {
             .unwrap_or(csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc);
         
         let btc_config = BitcoinConfig {
-            network: network,
+            network,
             finality_depth: 6,
             publication_timeout_seconds: 3600,
             rpc_url: rest_endpoint.url.clone(),
@@ -62,7 +62,7 @@ impl AdapterFactory for BitcoinFactory {
             api_key: rest_endpoint.api_key.clone(),
             xpub: None,
             private_key: None,
-            seed: seed,
+            seed,
             account: config.account,
             index: config.index,
             utxos: config.utxos.into_iter().map(|u| csv_bitcoin::config::UtxoConfig {
@@ -108,11 +108,10 @@ impl AdapterFactory for BitcoinFactory {
         let seal_arc = Arc::new(seal);
 
         // Load UTXO data for every registered sanad_seal from RPC (needed for spending)
-        if has_sanad_seals {
-            if let Err(e) = seal_arc.load_sanad_seal_utxos().await {
+        if has_sanad_seals
+            && let Err(e) = seal_arc.load_sanad_seal_utxos().await {
                 log::warn!("Failed to load sanad seal UTXOs: {}", e);
             }
-        }
 
         let chain_backend: Arc<dyn ChainBackend> = Arc::new(
             BitcoinBackend::from_seal_protocol(Arc::clone(&seal_arc))

@@ -1252,9 +1252,12 @@ async fn cmd_list(
             true
         };
 
-        // Query on-chain state using the new canonical state query (replaces check_sanad_on_chain_status)
-        let on_chain_state =
-            query_sanad_on_chain_state(&sanad.chain, &sanad.id, Some(sanad), config, state).await;
+        // Only query on-chain state when --update flag is set
+        let on_chain_state = if update {
+            query_sanad_on_chain_state(&sanad.chain, &sanad.id, Some(sanad), config, state).await
+        } else {
+            None
+        };
 
         let state_enum = if let Some(ref cs) = on_chain_state {
             cs.state
@@ -2399,71 +2402,69 @@ async fn query_bitcoin_sanad_state(
 ) -> Option<CanonicalSanadState> {
     let tracked = state.get_sanad(sanad_id_hex)?;
 
-    if let Some(anchor_tx_hash) = &tracked.anchor_tx_hash {
-        if let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x")) {
-            if tx_hash_bytes.len() >= 32 {
-                let txid = &tx_hash_bytes[0..32];
-                let vout = if tx_hash_bytes.len() >= 36 {
-                    u32::from_le_bytes(tx_hash_bytes[32..36].try_into().unwrap_or([0; 4]))
+    if let Some(anchor_tx_hash) = &tracked.anchor_tx_hash
+        && let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x"))
+        && tx_hash_bytes.len() >= 32 {
+        let txid = &tx_hash_bytes[0..32];
+        let vout = if tx_hash_bytes.len() >= 36 {
+            u32::from_le_bytes(tx_hash_bytes[32..36].try_into().unwrap_or([0; 4]))
+        } else {
+            state
+                .storage
+                .wallet
+                .sanad_seals
+                .iter()
+                .find(|s| s.sanad_id == sanad_id_hex)
+                .map(|s| s.vout)
+                .unwrap_or(0)
+        };
+
+        let txid_display = hex::encode(txid);
+
+        // Runtime-mediated validation: check UTXO status via runtime
+        match validate_bitcoin_utxo_via_runtime(&txid_display, vout, config, tracked).await
+        {
+            Ok(is_valid) => {
+                if is_valid {
+                    return Some(CanonicalSanadState {
+                        sanad_id: sanad_id_hex.to_string(),
+                        seal_id: None,
+                        chain: csv_hash::ChainId::new("bitcoin"),
+                        state: SanadLifecycleState::Active,
+                        owner: None,
+                        commitment: Some(tracked.commitment.clone()),
+                        nullifier: tracked.nullifier.clone(),
+                        source_chain: None,
+                        destination_chain: None,
+                        tx_hash: Some(txid_display),
+                        block_height: None,
+                        updated_at: Some(tracked.created_at),
+                    });
                 } else {
-                    state
-                        .storage
-                        .wallet
-                        .sanad_seals
-                        .iter()
-                        .find(|s| s.sanad_id == sanad_id_hex)
-                        .map(|s| s.vout)
-                        .unwrap_or(0)
-                };
-
-                let txid_display = hex::encode(txid);
-
-                // Runtime-mediated validation: check UTXO status via runtime
-                match validate_bitcoin_utxo_via_runtime(&txid_display, vout, config, tracked).await
-                {
-                    Ok(is_valid) => {
-                        if is_valid {
-                            return Some(CanonicalSanadState {
-                                sanad_id: sanad_id_hex.to_string(),
-                                seal_id: None,
-                                chain: csv_hash::ChainId::new("bitcoin"),
-                                state: SanadLifecycleState::Active,
-                                owner: None,
-                                commitment: Some(tracked.commitment.clone()),
-                                nullifier: tracked.nullifier.clone(),
-                                source_chain: None,
-                                destination_chain: None,
-                                tx_hash: Some(txid_display),
-                                block_height: None,
-                                updated_at: Some(tracked.created_at),
-                            });
-                        } else {
-                            // UTXO is spent/invalid
-                            return Some(CanonicalSanadState {
-                                sanad_id: sanad_id_hex.to_string(),
-                                seal_id: None,
-                                chain: csv_hash::ChainId::new("bitcoin"),
-                                state: SanadLifecycleState::Consumed,
-                                owner: None,
-                                commitment: Some(tracked.commitment.clone()),
-                                nullifier: tracked.nullifier.clone(),
-                                source_chain: None,
-                                destination_chain: None,
-                                tx_hash: Some(txid_display),
-                                block_height: None,
-                                updated_at: Some(tracked.created_at),
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        // Fail closed if RPC unavailable - return error instead of partial state
-                        log::warn!(
-                            "Failed to validate Bitcoin sanad state via runtime: {}. Cannot return canonical state without on-chain validation.",
-                            e
-                        );
-                        return None;
-                    }
+                    // UTXO is spent/invalid
+                    return Some(CanonicalSanadState {
+                        sanad_id: sanad_id_hex.to_string(),
+                        seal_id: None,
+                        chain: csv_hash::ChainId::new("bitcoin"),
+                        state: SanadLifecycleState::Consumed,
+                        owner: None,
+                        commitment: Some(tracked.commitment.clone()),
+                        nullifier: tracked.nullifier.clone(),
+                        source_chain: None,
+                        destination_chain: None,
+                        tx_hash: Some(txid_display),
+                        block_height: None,
+                        updated_at: Some(tracked.created_at),
+                    });
                 }
+            }
+            Err(e) => {
+                // Fail closed if RPC unavailable - return error instead of partial state
+                log::warn!(
+                    "Failed to validate Bitcoin sanad state via runtime: {}. Cannot return canonical state without on-chain validation.",
+                    e
+                );
+                return None;
             }
         }
     }
@@ -2482,17 +2483,12 @@ async fn query_sui_sanad_state(
 
     // Parse seal reference to extract object ID
     if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&tracked.seal_ref)
-    {
-        if seal_ref_bytes.len() >= 2 {
+        && seal_ref_bytes.len() >= 2 {
             let mut pos = 0;
             if seal_ref_bytes[pos] == 1 {
                 pos += 1;
             }
-            if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
-                pos += 1;
-            } else {
-                pos += 1;
-            }
+            pos += 1;
 
             if seal_ref_bytes.len() >= pos + 4 {
                 let id_len = u32::from_le_bytes([
@@ -2523,7 +2519,6 @@ async fn query_sui_sanad_state(
                 }
             }
         }
-    }
 
     None
 }
@@ -2537,7 +2532,7 @@ async fn query_solana_sanad_state(
 ) -> Option<CanonicalSanadState> {
     let tracked = local_sanad?;
     // Return local state - live chain state should be queried via runtime/adapter
-    return Some(CanonicalSanadState {
+    Some(CanonicalSanadState {
         sanad_id: sanad_id_hex.to_string(),
         seal_id: None,
         chain: csv_hash::ChainId::new("solana"),
@@ -2550,7 +2545,7 @@ async fn query_solana_sanad_state(
         tx_hash: None,
         block_height: None,
         updated_at: Some(tracked.created_at),
-    });
+    })
 }
 
 /// Aptos: check AnchorDataCollection state (uses local state only, no direct chain RPC calls)
@@ -2562,7 +2557,7 @@ async fn query_aptos_sanad_state(
 ) -> Option<CanonicalSanadState> {
     let tracked = local_sanad?;
     // Return local state - live chain state should be queried via runtime/adapter
-    return Some(CanonicalSanadState {
+    Some(CanonicalSanadState {
         sanad_id: sanad_id_hex.to_string(),
         seal_id: None,
         chain: csv_hash::ChainId::new("aptos"),
@@ -2575,7 +2570,7 @@ async fn query_aptos_sanad_state(
         tx_hash: None,
         block_height: None,
         updated_at: Some(tracked.created_at),
-    });
+    })
 }
 /// Query lifecycle events for a Sanad
 ///
@@ -2609,7 +2604,7 @@ async fn query_sanad_lifecycle_events(
 /// Returns Ok(true) if UTXO is valid/unspent, Ok(false) if spent/invalid, Err if RPC unavailable
 async fn validate_bitcoin_utxo_via_runtime(
     txid: &str,
-    vout: u32,
+    _vout: u32,
     config: &Config,
     sanad: &SanadRecord,
 ) -> Result<bool, anyhow::Error> {
@@ -2621,11 +2616,13 @@ async fn validate_bitcoin_utxo_via_runtime(
     let core_chain = ChainId::new(sanad.chain.as_str());
 
     // Convert CLI config to SDK config format
-    let mut sdk_config = csv_sdk::config::Config::default();
-    sdk_config.network = match config.chain(&sanad.chain)?.network {
-        Network::Test => csv_sdk::config::Network::Testnet,
-        Network::Main => csv_sdk::config::Network::Mainnet,
-        Network::Dev => csv_sdk::config::Network::Devnet,
+    let mut sdk_config = csv_sdk::config::Config {
+        network: match config.chain(&sanad.chain)?.network {
+            Network::Test => csv_sdk::config::Network::Testnet,
+            Network::Main => csv_sdk::config::Network::Mainnet,
+            Network::Dev => csv_sdk::config::Network::Devnet,
+        },
+        ..Default::default()
     };
 
     // Convert chain config to SDK format
@@ -2665,10 +2662,25 @@ async fn validate_bitcoin_utxo_via_runtime(
     let runtime = client.chain_runtime();
     match runtime.get_transaction(core_chain, txid).await {
         Ok(tx_info) => {
-            // Check if transaction is confirmed (UTXO is unspent)
+            // Check transaction status with tri-state logic
             match tx_info.status {
-                csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => Ok(true),
-                _ => Ok(false),
+                csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => {
+                    // Transaction is confirmed - for Bitcoin, assume the vout is unspent
+                    // unless we have evidence it's spent. This is a safe default for newly created Sanads.
+                    // TODO: Add vout-specific spend checking via Bitcoin backend RPC
+                    Ok(true)
+                }
+                csv_protocol::chain_adapter_traits::TransactionStatus::Pending => {
+                    // Transaction is in mempool - treat as Active (not Consumed)
+                    // The vout exists and is unspent in the mempool
+                    Ok(true)
+                }
+                csv_protocol::chain_adapter_traits::TransactionStatus::Failed { .. } |
+                csv_protocol::chain_adapter_traits::TransactionStatus::Dropped |
+                csv_protocol::chain_adapter_traits::TransactionStatus::Unknown => {
+                    // Transaction failed, was dropped, or unknown - treat as invalid
+                    Ok(false)
+                }
             }
         }
         Err(e) => {

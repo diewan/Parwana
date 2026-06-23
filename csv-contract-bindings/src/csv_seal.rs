@@ -119,75 +119,118 @@ impl CsvSealMethod {
 pub enum CsvSealEvent {
     /// SanadCreated(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint256 timestamp)
     SanadCreated {
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The commitment hash
         commitment: [u8; 32],
+        /// The owner address
         owner: Vec<u8>,
+        /// The timestamp when the sanad was created
         timestamp: u64,
     },
     /// SanadConsumed(bytes32 indexed sanadId, bytes32 indexed nullifier, address indexed consumer, uint256 timestamp)
     SanadConsumed {
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The nullifier hash
         nullifier: [u8; 32],
+        /// The consumer address
         consumer: Vec<u8>,
+        /// The timestamp when the sanad was consumed
         timestamp: u64,
     },
     /// SanadLocked(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 destinationChain, bytes destinationOwner, uint256 timestamp)
     SanadLocked {
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The commitment hash
         commitment: [u8; 32],
+        /// The owner address
         owner: Vec<u8>,
+        /// The destination chain identifier
         destination_chain: [u8; 32],
+        /// The destination owner address
         destination_owner: Vec<u8>,
+        /// The timestamp when the sanad was locked
         timestamp: u64,
     },
     /// SanadMinted(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 sourceChain, bytes sourceSealRef, uint256 timestamp)
     SanadMinted {
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The commitment hash
         commitment: [u8; 32],
+        /// The owner address
         owner: Vec<u8>,
+        /// The source chain identifier
         source_chain: [u8; 32],
+        /// The source seal reference
         source_seal_ref: Vec<u8>,
+        /// The timestamp when the sanad was minted
         timestamp: u64,
     },
     /// SanadRefunded(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed claimant, string reason, uint256 timestamp)
     SanadRefunded {
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The commitment hash
         commitment: [u8; 32],
+        /// The claimant address
         claimant: Vec<u8>,
+        /// The reason for the refund
         reason: String,
+        /// The timestamp when the sanad was refunded
         timestamp: u64,
     },
     /// SanadTransferred(bytes32 indexed sanadId, address indexed from, address indexed to, uint256 timestamp)
     SanadTransferred {
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The sender address
         from: Vec<u8>,
+        /// The recipient address
         to: Vec<u8>,
+        /// The timestamp when the sanad was transferred
         timestamp: u64,
     },
     /// NullifierRegistered(bytes32 indexed nullifier, bytes32 indexed sanadId, bytes32 sourceChain, uint256 timestamp)
     NullifierRegistered {
+        /// The nullifier hash
         nullifier: [u8; 32],
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The source chain identifier
         source_chain: [u8; 32],
+        /// The timestamp when the nullifier was registered
         timestamp: u64,
     },
     /// CommitmentAnchored(bytes32 indexed commitment, bytes32 indexed sealId, address indexed owner, uint256 timestamp)
     CommitmentAnchored {
+        /// The commitment hash
         commitment: [u8; 32],
+        /// The seal identifier
         seal_id: [u8; 32],
+        /// The owner address
         owner: Vec<u8>,
+        /// The timestamp when the commitment was anchored
         timestamp: u64,
     },
     /// ProofRootUpdated(bytes32 indexed proofRoot, uint256 blockNumber, address indexed updater)
     ProofRootUpdated {
+        /// The proof root hash
         proof_root: [u8; 32],
+        /// The block number
         block_number: u64,
+        /// The updater address
         updater: Vec<u8>,
     },
     /// ReplayDetected(bytes32 indexed replayId, bytes32 indexed sanadId, uint256 timestamp)
     ReplayDetected {
+        /// The replay identifier
         replay_id: [u8; 32],
+        /// The unique identifier of the sanad
         sanad_id: [u8; 32],
+        /// The timestamp when the replay was detected
         timestamp: u64,
     },
 }

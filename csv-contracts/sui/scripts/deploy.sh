@@ -220,20 +220,22 @@ fi
 
 # Extract package ID from output (if not already set from fallback)
 if [ -z "$PACKAGE_ID" ]; then
-    # Filter out non-JSON lines (log messages) to get clean JSON
-    CLEAN_JSON=$(echo "$PUBLISH_OUTPUT" | grep -v '^\[' | grep -v '^INCLUDING' | grep -v '^BUILDING' 2>/dev/null || echo "$PUBLISH_OUTPUT")
+    # Extract JSON portion from output (starts with '{', ends with '}')
+    # This handles build warnings and ANSI codes in the output
+    CLEAN_JSON=$(echo "$PUBLISH_OUTPUT" | sed -n '/^{/,/^}/p' 2>/dev/null || echo "$PUBLISH_OUTPUT")
     PACKAGE_ID=$(echo "$CLEAN_JSON" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
-    for event in data.get('events', []):
-        if event.get('type') == 'published':
-            print(event['packageId'])
-            sys.exit(0)
-    # Fallback: parse from objectChanges
+    # Try objectChanges first (Sui publish output format)
     for change in data.get('objectChanges', []):
         if change.get('type') == 'published':
             print(change.get('packageId', ''))
+            sys.exit(0)
+    # Fallback: try events
+    for event in data.get('events', []):
+        if event.get('type') == 'published':
+            print(event['packageId'])
             sys.exit(0)
 except json.JSONDecodeError as e:
     sys.stderr.write(f'JSON parse error: {e}\\n')
@@ -262,9 +264,31 @@ else
     echo "WARNING: Move.toml not found"
 fi
 
+# Update ~/.csv/config.toml with the deployed package ID
+CONFIG_FILE="$HOME/.csv/config.toml"
+if [ -f "$CONFIG_FILE" ]; then
+    echo "Updating $CONFIG_FILE..."
+    # Use sed to update contract_address for sui chain
+    if command -v sed &>/dev/null; then
+        # Create backup
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.backup.$(date +%s)"
+        # Update contract_address for sui chain
+        sed -i.bak "/\[chains.sui\]/,/^\[/ s|contract_address = \".*\"|contract_address = \"${PACKAGE_ID}\"|" "$CONFIG_FILE"
+        rm -f "${CONFIG_FILE}.bak"
+        echo "  sui contract_address updated to ${PACKAGE_ID}"
+    else
+        echo "WARNING: sed not found, cannot auto-update config file"
+        echo "Please manually update $CONFIG_FILE"
+        echo "Set chains.sui.contract_address = ${PACKAGE_ID}"
+    fi
+else
+    echo "WARNING: $CONFIG_FILE not found, skipping config update"
+fi
+
 # Update deployment manifest
 echo "Updating deployment manifest..."
-MANIFEST_PATH="../../../deployments/deployment-manifest.json"
+# Calculate manifest path from current directory (csv-contracts/sui/)
+MANIFEST_PATH="../../deployments/deployment-manifest.json"
 if [ -f "$MANIFEST_PATH" ]; then
     if command -v python3 &>/dev/null; then
         python3 -c "

@@ -570,13 +570,12 @@ impl TransferCoordinator {
         } else {
             Some(transfer_to_registry_entry(&transfer)?)
         };
-        if let Some(entry) = registry_entry {
-            if let Err(e) = self.replay_db.store_transfer_entry(&entry).await {
-                return Err(TransferCoordinatorError::RuntimeError(format!(
-                    "Failed to persist transfer entry: {}",
-                    e
-                )));
-            }
+        if let Some(entry) = registry_entry
+            && let Err(e) = self.replay_db.store_transfer_entry(&entry).await {
+            return Err(TransferCoordinatorError::RuntimeError(format!(
+                "Failed to persist transfer entry: {}",
+                e
+            )));
         }
 
         // Step 2: Verify source chain capabilities

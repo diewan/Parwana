@@ -1276,7 +1276,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         // Convert metadata to Vec<u8> for storage
-        let metadata_bytes = serde_json::to_vec(&metadata)
+        let _metadata_bytes = serde_json::to_vec(&metadata)
             .map_err(|e| ChainOpError::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
         // Record metadata for a sanad using OP_RETURN
         // This creates a transaction with metadata in the witness or OP_RETURN

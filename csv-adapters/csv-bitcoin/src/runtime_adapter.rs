@@ -9,7 +9,6 @@ use csv_adapter_core::{
     AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
     CrossChainTransfer,
 };
-use csv_protocol::chain_adapter_traits::ChainProofProvider;
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::signature::SignatureScheme;
 use csv_protocol::proof_taxonomy::ProofBundle;
@@ -198,7 +197,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         );
 
         // Create a seal point from the sanad_id
-        let seal_point = BitcoinSealPoint::new(
+        let _seal_point = BitcoinSealPoint::new(
             *transfer.sanad_id.as_bytes(),
             0,
             None,

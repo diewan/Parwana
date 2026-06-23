@@ -48,7 +48,6 @@ use crate::wallet::WalletManager;
 
 // Import adapter registry for cross-chain transfers
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
-use csv_protocol::secret::SecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
 use csv_adapter_factory::{AdapterFactory, AdapterConfig, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol, BitcoinFactory, EthereumFactory, SuiFactory, AptosFactory, SolanaFactory, AdapterResult as FactoryAdapterResult};
@@ -373,11 +372,10 @@ impl CsvClient {
         if let Some(adapter) = self.adapter_registry.lock().map_err(|e| CsvError::ProtocolError {
             chain: csv_hash::ChainId::new(chain),
             message: format!("Failed to lock adapter registry: {}", e),
-        })?.get(chain) {
-            if let Some(sanad_ops) = (&**adapter).as_any().downcast_ref::<csv_bitcoin::BitcoinChainSanadOps>() {
+        })?.get(chain)
+            && let Some(sanad_ops) = (**adapter).as_any().downcast_ref::<csv_bitcoin::BitcoinChainSanadOps>() {
                 sanad_ops.register_sanad_seal(sanad_id, txid, vout);
                 return Ok(());
-            }
         }
         Err(CsvError::ProtocolError {
             chain: csv_hash::ChainId::new(chain),
@@ -396,8 +394,8 @@ impl CsvClient {
     ///
     /// * `network` - Network type (Mainnet or Testnet) to configure RPC endpoints
     /// * `private_keys` - Optional map of chain to private key in hex format (with or without 0x prefix)
-    ///                   Only needed if performing transactions that require signing.
-    ///                   The private keys are NOT stored in config.
+    ///   Only needed if performing transactions that require signing.
+    ///   The private keys are NOT stored in config.
     ///
     /// # Example
     ///

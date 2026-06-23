@@ -65,7 +65,7 @@ async fn cmd_address(
     chain: crate::config::Chain,
     account: u32,
     index: u32,
-    config: &Config,
+    _config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header(&format!("Funding Address for {}", chain));
