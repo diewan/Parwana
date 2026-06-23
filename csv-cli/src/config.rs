@@ -17,9 +17,7 @@ pub use csv_store::state::{Chain, ChainConfig, ChainId, Network, WalletAccount};
 
 // Import deployment manifest reader
 use csv_protocol::deployment_manifest::{
-    get_aptos_contract_address,
-    get_ethereum_contract_address,
-    get_solana_program_id,
+    get_aptos_contract_address, get_ethereum_contract_address, get_solana_program_id,
     get_sui_package_id,
 };
 
@@ -205,8 +203,9 @@ impl Default for Config {
         );
 
         // Sui Testnet
-        let sui_package_id = get_sui_package_id()
-            .unwrap_or_else(|_| "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string());
+        let sui_package_id = get_sui_package_id().unwrap_or_else(|_| {
+            "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string()
+        });
         chains.insert(
             ChainId::new("sui"),
             ChainConfig {
@@ -221,8 +220,9 @@ impl Default for Config {
         );
 
         // Aptos Testnet
-        let aptos_contract_address = get_aptos_contract_address()
-            .unwrap_or_else(|_| "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string());
+        let aptos_contract_address = get_aptos_contract_address().unwrap_or_else(|_| {
+            "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string()
+        });
         chains.insert(
             ChainId::new("aptos"),
             ChainConfig {
@@ -282,19 +282,60 @@ impl Config {
 
             // Merge missing chains and fields from defaults
             let defaults = Config::default();
-            for (chain, default_chain_config) in defaults.chains {
-                if let Some(existing_chain_config) = config.chains.get_mut(&chain) {
+            let mut changed = false;
+            for (chain, default_chain_config) in &defaults.chains {
+                if let Some(existing_chain_config) = config.chains.get_mut(chain) {
                     // Merge missing fields from defaults
                     if existing_chain_config.program_id.is_none() {
-                        existing_chain_config.program_id = default_chain_config.program_id;
+                        existing_chain_config.program_id = default_chain_config.program_id.clone();
+                        changed = true;
                     }
                     if existing_chain_config.contract_address.is_none() {
-                        existing_chain_config.contract_address = default_chain_config.contract_address;
+                        existing_chain_config.contract_address =
+                            default_chain_config.contract_address.clone();
+                        changed = true;
                     }
                 } else {
-                    // Add missing chain
-                    config.chains.insert(chain, default_chain_config);
+                    config
+                        .chains
+                        .insert(chain.clone(), default_chain_config.clone());
+                    changed = true;
                 }
+            }
+
+            for chain_name in ["sui", "aptos"] {
+                let chain = ChainId::new(chain_name);
+                let invalid = config
+                    .chains
+                    .get(&chain)
+                    .and_then(|chain_config| chain_config.contract_address.as_deref())
+                    .is_some_and(|address| !is_hex_address_len(address, 32));
+                if invalid {
+                    let replacement = defaults
+                        .chains
+                        .get(&chain)
+                        .and_then(|chain_config| chain_config.contract_address.clone())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "No canonical {} deployment address is available",
+                                chain_name
+                            )
+                        })?;
+                    let chain_config = config.chains.get_mut(&chain).ok_or_else(|| {
+                        anyhow::anyhow!("{} chain disappeared during config migration", chain_name)
+                    })?;
+                    eprintln!(
+                        "Migrating invalid {} contract address to canonical deployment: {}",
+                        chain_name, replacement
+                    );
+                    chain_config.contract_address = Some(replacement);
+                    changed = true;
+                }
+            }
+
+            if changed {
+                let toml_content = toml::to_string_pretty(&config)?;
+                std::fs::write(&path, toml_content)?;
             }
 
             Ok(config)
@@ -403,6 +444,11 @@ impl Config {
             _ => String::new(),
         }
     }
+}
+
+fn is_hex_address_len(value: &str, expected_bytes: usize) -> bool {
+    let value = value.strip_prefix("0x").unwrap_or(value);
+    value.len() == expected_bytes * 2 && hex::decode(value).is_ok()
 }
 
 /// Get cached wallet config from csv-wallet data (internal helper, legacy format)
@@ -647,6 +693,41 @@ finality_depth = 3
             config.data_dir, "/custom/data/dir",
             "Loaded config: data_dir should be from file"
         );
+    }
+
+    #[test]
+    fn test_config_load_migrates_invalid_sui_and_aptos_addresses() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("legacy-config.toml");
+        let toml_content = r#"data_dir = "/custom/data"
+
+[chains.sui]
+rpc_url = "https://fullnode.testnet.sui.io:443"
+network = "test"
+contract_address = "0xd71e8e8d48f98f9cb68cc59e3283121b68a4c507"
+finality_depth = 1
+
+[chains.aptos]
+rpc_url = "https://fullnode.testnet.aptoslabs.com/v1"
+network = "test"
+contract_address = "0xd71e8e8d48f98f9cb68cc59e3283121b68a4c507"
+finality_depth = 1
+"#;
+        std::fs::write(&config_path, toml_content).unwrap();
+
+        let config = Config::load(Some(config_path.to_str().unwrap())).unwrap();
+        for chain_name in ["sui", "aptos"] {
+            let address = config
+                .chain(&ChainId::new(chain_name))
+                .unwrap()
+                .contract_address
+                .as_deref()
+                .unwrap();
+            assert!(is_hex_address_len(address, 32));
+        }
+
+        let persisted = std::fs::read_to_string(config_path).unwrap();
+        assert!(!persisted.contains("0xd71e8e8d48f98f9cb68cc59e3283121b68a4c507"));
     }
 
     #[test]

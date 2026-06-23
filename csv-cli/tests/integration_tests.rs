@@ -11,9 +11,9 @@ use std::path::Path;
 /// Test that WalletIdentityResolver produces consistent addresses across calls
 #[test]
 fn test_wallet_identity_resolver_consistency() {
+    use csv_hash::ChainId;
     use csv_keys::Mnemonic;
     use csv_sdk::wallet::WalletIdentityResolver;
-    use csv_hash::ChainId;
 
     // Use a test mnemonic
     let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -63,102 +63,93 @@ fn test_wallet_identity_resolver_consistency() {
     assert!(!sui_addr.is_empty(), "Sui address should not be empty");
 }
 
-/// Test that wallet balance command uses WalletIdentityResolver
+/// Test that wallet balance command uses the centralized wallet identity.
 #[test]
 fn test_wallet_balance_uses_identity_resolver() {
     let wallet_balance = Path::new("src/commands/wallet/balance.rs");
     if let Ok(content) = std::fs::read_to_string(wallet_balance) {
         assert!(
-            content.contains("WalletIdentityResolver"),
-            "wallet/balance.rs should use WalletIdentityResolver for address derivation"
+            content.contains("WalletIdentity"),
+            "wallet/balance.rs should use WalletIdentity for address derivation"
         );
         assert!(
-            content.contains("csv_sdk::wallet::WalletIdentityResolver"),
-            "wallet/balance.rs should import WalletIdentityResolver from csv_sdk::wallet"
+            content.contains("crate::wallet_identity::WalletIdentity"),
+            "wallet/balance.rs should import the centralized WalletIdentity"
         );
         assert!(
-            content.contains("derive_address"),
-            "wallet/balance.rs should call derive_address on WalletIdentityResolver"
+            content.contains(".address("),
+            "wallet/balance.rs should resolve its address through WalletIdentity"
         );
     }
 }
 
-/// Test that sanad create command uses WalletIdentityResolver
+/// Test that sanad commands use the centralized wallet identity.
 #[test]
 fn test_sanad_create_uses_identity_resolver() {
     let sanads_rs = Path::new("src/commands/sanads.rs");
     if let Ok(content) = std::fs::read_to_string(sanads_rs) {
         assert!(
-            content.contains("WalletIdentityResolver"),
-            "sanads.rs should use WalletIdentityResolver for address derivation"
+            content.contains("WalletIdentity"),
+            "sanads.rs should use WalletIdentity"
         );
         assert!(
-            content.contains("csv_sdk::wallet::WalletIdentityResolver"),
-            "sanads.rs should import WalletIdentityResolver from csv_sdk::wallet"
+            content.contains("crate::wallet_identity::WalletIdentity"),
+            "sanads.rs should import the centralized WalletIdentity"
         );
         assert!(
-            content.contains("derive_address"),
-            "sanads.rs should call derive_address on WalletIdentityResolver"
+            content.contains("signing_map"),
+            "sanads.rs should obtain signing handles through WalletIdentity"
         );
     }
 }
 
-/// Test that cross-chain transfer command uses WalletIdentityResolver
+/// Test that cross-chain transfer uses the centralized wallet identity.
 #[test]
 fn test_cross_chain_transfer_uses_identity_resolver() {
     let transfer_rs = Path::new("src/commands/cross_chain/transfer.rs");
     if let Ok(content) = std::fs::read_to_string(transfer_rs) {
         assert!(
-            content.contains("WalletIdentityResolver"),
-            "cross_chain/transfer.rs should use WalletIdentityResolver for address derivation"
+            content.contains("WalletIdentity"),
+            "cross_chain/transfer.rs should use WalletIdentity"
         );
         assert!(
-            content.contains("csv_sdk::wallet::WalletIdentityResolver"),
-            "cross_chain/transfer.rs should import WalletIdentityResolver from csv_sdk::wallet"
+            content.contains("crate::wallet_identity::WalletIdentity"),
+            "cross_chain/transfer.rs should import the centralized WalletIdentity"
         );
         assert!(
-            content.contains("derive_address"),
-            "cross_chain/transfer.rs should call derive_address on WalletIdentityResolver"
+            content.contains("signing_map"),
+            "cross_chain/transfer.rs should obtain signing handles through WalletIdentity"
         );
     }
 }
 
-/// Test that passphrase validation fails closed (WALLET-IDENTITY-001)
+/// Test that signing has one mnemonic-derived authority (WALLET-IDENTITY-001)
 #[test]
-fn test_passphrase_validation_fails_closed() {
-    let sanads_rs = Path::new("src/commands/sanads.rs");
-    if let Ok(content) = std::fs::read_to_string(sanads_rs) {
-        // Should have fail-closed error message for InvalidPassphrase
+fn test_signing_uses_canonical_mnemonic_authority() {
+    let wallet_identity = Path::new("src/wallet_identity.rs");
+    if let Ok(content) = std::fs::read_to_string(wallet_identity) {
         assert!(
-            content.contains("FAIL CLOSED") || content.contains("fail closed"),
-            "sanads.rs should fail closed on wrong passphrase"
+            content.contains("csv_keys::bip44::derive_key"),
+            "wallet identity should derive non-Bitcoin signers from the canonical seed"
         );
         assert!(
-            content.contains("passphrase is incorrect") || content.contains("wrong passphrase must fail closed"),
-            "sanads.rs should explicitly mention incorrect passphrase in error"
+            !content.contains("retrieve_key"),
+            "wallet identity must not consult a second keystore authority"
         );
-        // Check that the InvalidPassphrase error returns an error (doesn't fall through)
         assert!(
-            content.contains("return Err(anyhow::anyhow!") && content.contains("InvalidPassphrase"),
-            "sanads.rs should return error on InvalidPassphrase (not fall through)"
+            content.contains("Stored {} signing key") || content.contains("signer_address"),
+            "wallet identity should verify signer/address consistency"
         );
     }
 
-    let transfer_rs = Path::new("src/commands/cross_chain/transfer.rs");
-    if let Ok(content) = std::fs::read_to_string(transfer_rs) {
-        // Should have fail-closed error message for InvalidPassphrase
+    for command in [
+        "src/commands/sanads.rs",
+        "src/commands/cross_chain/transfer.rs",
+    ] {
+        let content = std::fs::read_to_string(command).unwrap();
         assert!(
-            content.contains("FAIL CLOSED") || content.contains("fail closed"),
-            "cross_chain/transfer.rs should fail closed on wrong passphrase"
-        );
-        assert!(
-            content.contains("passphrase is incorrect") || content.contains("wrong passphrase must fail closed"),
-            "cross_chain/transfer.rs should explicitly mention incorrect passphrase in error"
-        );
-        // Check that the InvalidPassphrase error returns an error (doesn't fall through)
-        assert!(
-            content.contains("return Err(anyhow::anyhow!") && content.contains("InvalidPassphrase"),
-            "cross_chain/transfer.rs should return error on InvalidPassphrase (not fall through)"
+            content.contains("signing_map"),
+            "{command} should delegate key loading to WalletIdentity"
         );
     }
 }
@@ -238,12 +229,14 @@ fn test_utxo_validation_uses_runtime() {
         );
         // Should use runtime for validation
         assert!(
-            content.contains("validate_bitcoin_utxo_via_runtime") || content.contains("runtime.get_transaction"),
+            content.contains("validate_bitcoin_utxo_via_runtime")
+                || content.contains("runtime.get_transaction"),
             "sanads.rs should use runtime-mediated UTXO validation"
         );
         // Should fail closed when RPC unavailable
         assert!(
-            content.contains("RPC or validation support unavailable") || content.contains("Fail closed"),
+            content.contains("RPC or validation support unavailable")
+                || content.contains("Fail closed"),
             "sanads.rs should fail closed when RPC or validation support is unavailable"
         );
     }
@@ -481,20 +474,30 @@ fn test_cli_terminology() {
 fn cli_golden_path_gauntlet_contract() {
     let quick_start = std::fs::read_to_string("../csv-examples/cli-tutorial/quick-start.sh")
         .expect("quick-start.sh should be readable from csv-cli tests");
-    let cross_chain = std::fs::read_to_string("../csv-examples/cli-tutorial/cross-chain-transfer.sh")
-        .expect("cross-chain-transfer.sh should be readable from csv-cli tests");
+    let cross_chain =
+        std::fs::read_to_string("../csv-examples/cli-tutorial/cross-chain-transfer.sh")
+            .expect("cross-chain-transfer.sh should be readable from csv-cli tests");
     let scenario = format!("{}\n{}", quick_start, cross_chain);
 
     let required_steps = [
         ("wallet init", "csv wallet init --network test --words 12"),
-        ("bitcoin address generation", "csv wallet generate --chain bitcoin"),
-        ("ethereum address generation", "csv wallet generate --chain ethereum"),
+        (
+            "bitcoin address generation",
+            "csv wallet generate --chain bitcoin",
+        ),
+        (
+            "ethereum address generation",
+            "csv wallet generate --chain ethereum",
+        ),
         ("wallet balance", "csv wallet balance"),
         ("sanad create", "csv sanad create --chain ethereum"),
         ("sanad state", "csv sanad state --chain ethereum"),
         ("proof generate", "csv proof generate --chain ethereum"),
         ("proof verify", "csv proof verify --chain ethereum"),
-        ("cross-chain transfer", "csv cross-chain transfer --from ethereum --to sui"),
+        (
+            "cross-chain transfer",
+            "csv cross-chain transfer --from ethereum --to sui",
+        ),
         ("cross-chain status", "csv cross-chain status <TRANSFER_ID>"),
         ("sanad trace", "csv sanad trace --chain ethereum"),
         ("replay attempt", "replay attempt"),

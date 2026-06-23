@@ -25,10 +25,15 @@ fn seal_used_signature() -> [u8; 32] {
     compute_keccak256(b"SealUsed(bytes32,bytes32)")
 }
 
-/// The `CrossChainLock` event signature: keccak256("CrossChainLock(bytes32,bytes32,address,uint8,bytes,bytes32,uint8,bytes32,bytes32,uint8,bytes32)")
+/// The canonical `SanadLocked` event signature.
+fn sanad_locked_signature() -> [u8; 32] {
+    compute_keccak256(b"SanadLocked(bytes32,bytes32,address,bytes32,bytes,uint256)")
+}
+
+/// The legacy `CrossChainLock` event emitted alongside `SanadLocked`.
 /// Computed at runtime, cached for repeated use.
 fn cross_chain_lock_signature() -> [u8; 32] {
-    compute_keccak256(b"CrossChainLock(bytes32,bytes32,address,uint8,bytes,bytes32,uint8,bytes32,bytes32,uint8,bytes32)")
+    compute_keccak256(b"CrossChainLock(bytes32,bytes32,address,bytes32,bytes,uint256)")
 }
 
 /// The CSVSeal contract interface
@@ -47,6 +52,10 @@ impl CsvSealAbi {
     /// The `CrossChainLock` event signature (keccak256 of "CrossChainLock(...)")
     pub fn cross_chain_lock_event_signature() -> [u8; 32] {
         cross_chain_lock_signature()
+    }
+
+    pub fn sanad_locked_event_signature() -> [u8; 32] {
+        sanad_locked_signature()
     }
 
     /// Encode the `lock_sanad(sanadId, commitment, destinationChain, destinationOwner)` calldata
@@ -250,5 +259,17 @@ mod tests {
         // Should not be all zeros or the old temporary value
         assert!(sig.iter().any(|&b| b != 0));
         assert_ne!(sig, [0u8; 32]);
+    }
+
+    #[test]
+    fn deployed_lock_event_signatures_match_receipt_topics() {
+        assert_eq!(
+            hex::encode(CsvSealAbi::sanad_locked_event_signature()),
+            "52c9f67ca4166f0d847d41f1534595f94ecbc4199343811303902a5c77809008"
+        );
+        assert_eq!(
+            hex::encode(CsvSealAbi::cross_chain_lock_event_signature()),
+            "985c262386f4528df2619b0f2d852de0df5d9b76cf6b8330a3fb561a607726de"
+        );
     }
 }

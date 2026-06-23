@@ -43,6 +43,7 @@ mod commands;
 mod config;
 mod output;
 mod state;
+mod wallet_identity;
 
 use commands::*;
 use config::Config;
@@ -214,7 +215,9 @@ async fn main() -> anyhow::Result<()> {
     // Dispatch commands
     let result = match cli.command {
         Commands::Chain { action } => chain::execute(action, &config).await,
-        Commands::ChainManagement { action } => chain_management::ChainCommands::execute(&action).await.map_err(|e| anyhow::anyhow!("{:?}", e)),
+        Commands::ChainManagement { action } => chain_management::ChainCommands::execute(&action)
+            .await
+            .map_err(|e| anyhow::anyhow!("{:?}", e)),
         Commands::Wallet { action } => wallet::execute(action, &config, &mut state).await,
         Commands::Sanad { action } => sanads::execute(action, &config, &mut state).await,
         Commands::Proof { action } => {

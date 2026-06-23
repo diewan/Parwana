@@ -12,8 +12,8 @@ pub use types::WalletAction;
 use crate::config::Config;
 use crate::output;
 use crate::state::UnifiedStateManager;
+use crate::wallet_identity::WalletIdentity;
 use anyhow::Result;
-use csv_wallet::address;
 
 /// Execute wallet command.
 pub async fn execute(
@@ -36,19 +36,28 @@ pub async fn execute(
         WalletAction::Generate { chain, network } => {
             generate::cmd_generate(chain, network, config, state)
         }
-        WalletAction::Balance { chain, address, account, index } => {
-            balance::cmd_balance(chain, address, account, index, config, state).await
-        }
-        WalletAction::List { chain, account, index } => {
-            balance::cmd_list(chain, account, index, config, state)
-        }
+        WalletAction::Balance {
+            chain,
+            address,
+            account,
+            index,
+        } => balance::cmd_balance(chain, address, account, index, config, state).await,
+        WalletAction::List {
+            chain,
+            account,
+            index,
+        } => balance::cmd_list(chain, account, index, config, state),
         WalletAction::PrivateKey { chain } => private_key::cmd_private_key(chain, config, state),
-        WalletAction::Address { chain, account, index } => {
-            cmd_address(chain, account, index, config, state).await
-        }
-        WalletAction::Scan { chain, account, gap_limit } => {
-            cmd_scan(chain, account, gap_limit, config, state).await
-        }
+        WalletAction::Address {
+            chain,
+            account,
+            index,
+        } => cmd_address(chain, account, index, config, state).await,
+        WalletAction::Scan {
+            chain,
+            account,
+            gap_limit,
+        } => cmd_scan(chain, account, gap_limit, config, state).await,
     }
 }
 
@@ -61,19 +70,8 @@ async fn cmd_address(
 ) -> Result<()> {
     output::header(&format!("Funding Address for {}", chain));
 
-    // Derive seed from wallet mnemonic
-    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-    })?;
-
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array = *seed.as_bytes();
-
-    // Use csv-wallet for address derivation (unified wallet abstraction)
-    let address = address::derive_funding_address(&seed_array, chain.as_str(), account, index)
-        .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
+    let identity = WalletIdentity::from_state(state)?;
+    let address = identity.address(&chain, account, index)?;
 
     output::kv("Address", &address);
     output::kv("Account", &account.to_string());
@@ -91,7 +89,9 @@ async fn cmd_address(
     output::kv("Derivation Path", &derivation_path);
 
     if chain.as_str() == "bitcoin" {
-        output::info("Send Bitcoin to this address, then run 'csv wallet scan --chain bitcoin' to discover UTXOs.");
+        output::info(
+            "Send Bitcoin to this address, then run 'csv wallet scan --chain bitcoin' to discover UTXOs.",
+        );
     }
 
     Ok(())
@@ -112,7 +112,10 @@ async fn cmd_scan(
     output::info("  ```rust");
     output::info("  use csv_sdk::prelude::*;");
     output::info("  ");
-    output::info(&format!("  let client = CsvClient::builder().with_chain(\"{}\").build()?;", chain));
+    output::info(&format!(
+        "  let client = CsvClient::builder().with_chain(\"{}\").build()?;",
+        chain
+    ));
     output::info("  ");
     output::info("  // Use client.wallet() for chain-specific operations");
     output::info("  ```");

@@ -14,7 +14,7 @@ use crate::config::{Chain, Config, Network};
 use crate::output;
 use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager, UtxoRecord};
 
-use csv_sdk::wallet::WalletIdentityResolver;
+use crate::wallet_identity::WalletIdentity;
 use csv_store::state::{
     CanonicalLifecycleEvent, CanonicalSanadState, LifecycleEventType, SanadLifecycleState,
 };
@@ -128,13 +128,48 @@ pub async fn execute(
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     match action {
-        SanadAction::Create { chain, value, account, index, skip_publish, schema, payload, content_root, attachments, disclosure_policy, proof_policy, schema_hash, disclosure_policy_hash, proof_policy_hash } => {
-            cmd_create(chain, value, account, index, skip_publish, schema, payload, content_root, attachments, disclosure_policy, proof_policy, schema_hash, disclosure_policy_hash, proof_policy_hash, config, state).await
+        SanadAction::Create {
+            chain,
+            value,
+            account,
+            index,
+            skip_publish,
+            schema,
+            payload,
+            content_root,
+            attachments,
+            disclosure_policy,
+            proof_policy,
+            schema_hash,
+            disclosure_policy_hash,
+            proof_policy_hash,
+        } => {
+            cmd_create(
+                chain,
+                value,
+                account,
+                index,
+                skip_publish,
+                schema,
+                payload,
+                content_root,
+                attachments,
+                disclosure_policy,
+                proof_policy,
+                schema_hash,
+                disclosure_policy_hash,
+                proof_policy_hash,
+                config,
+                state,
+            )
+            .await
         }
         SanadAction::Show { sanad_id } => cmd_show(sanad_id, state),
         SanadAction::List { chain, update } => cmd_list(chain, update, config, state).await,
         SanadAction::Transfer { sanad_id, to } => cmd_transfer(sanad_id, to, state),
-        SanadAction::Consume { chain, sanad_id } => cmd_consume(chain, sanad_id, config, state).await,
+        SanadAction::Consume { chain, sanad_id } => {
+            cmd_consume(chain, sanad_id, config, state).await
+        }
         SanadAction::Remove { sanad_id, all } => cmd_remove(sanad_id, all, state),
         SanadAction::State { chain, sanad_id } => cmd_state(chain, sanad_id, config, state).await,
         SanadAction::Trace { chain, sanad_id } => cmd_trace(chain, sanad_id, config, state).await,
@@ -165,32 +200,13 @@ async fn cmd_create(
     output::info("Checking chain readiness...");
     let chain_config = config.chain(&chain)?;
 
+    use csv_hash::ChainId;
     use csv_sdk::CsvClient;
     use csv_sdk::StoreBackend;
-    use csv_hash::ChainId;
 
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
-
-    // Derive seed and private key for chains that require signing (Ethereum, Sui, Aptos, Solana)
-    let (seed_hex, private_key) = if chain.as_str() == "ethereum" || chain.as_str() == "sui" || chain.as_str() == "aptos" || chain.as_str() == "solana" {
-        let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-        })?;
-        let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-        let seed = mnemonic.to_seed(None);
-        let seed_hex = hex::encode(seed.as_bytes());
-
-        // Derive the private key for this chain
-        let secret_key = csv_keys::bip44::derive_key(&seed.as_bytes(), &core_chain, account, index)
-            .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
-        let key_bytes = secret_key.as_bytes().to_vec();
-
-        (Some(seed_hex), Some(key_bytes))
-    } else {
-        (None, None)
-    };
+    let identity = WalletIdentity::from_state(state)?;
 
     // Convert CLI config to SDK config format
     let mut sdk_config = csv_sdk::config::Config::default();
@@ -211,7 +227,7 @@ async fn cmd_create(
         finality_depth: chain_config.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
-        seed: seed_hex,
+        seed: (chain.as_str() == "bitcoin").then(|| identity.bitcoin_seed_hex()),
         contract_address: chain_config.contract_address.clone(),
         program_id: chain_config.program_id.clone(),
         account,
@@ -219,7 +235,9 @@ async fn cmd_create(
         utxos: vec![],
         sanad_seals: vec![],
     };
-    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+    sdk_config
+        .chains
+        .insert(chain.as_str().to_string(), sdk_chain_config);
 
     // Build CSV client for readiness check
     let mut builder = CsvClient::builder()
@@ -227,14 +245,7 @@ async fn cmd_create(
         .with_config(sdk_config)
         .with_store_backend(StoreBackend::InMemory);
 
-    // Add private keys for chains that require signing
-    if let Some(pk) = private_key {
-        let mut keys = std::collections::HashMap::new();
-        let key_array: [u8; 32] = pk.try_into().map_err(|_| anyhow::anyhow!("Private key must be 32 bytes"))?;
-        let secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(key_array);
-        keys.insert(chain.as_str().to_string(), secret_handle);
-        builder = builder.with_private_keys(keys);
-    }
+    builder = builder.with_private_keys(identity.signing_map(&[(&chain, account, index)], state)?);
 
     let client = builder
         .build()
@@ -244,37 +255,48 @@ async fn cmd_create(
     let runtime = client.chain_runtime();
 
     // Check readiness via the chain backend
-    let readiness = runtime.check_readiness(core_chain.clone(), account, index).await
+    let readiness = runtime
+        .check_readiness(core_chain.clone(), account, index)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to check chain readiness: {}", e))?;
 
     // Abort if chain is not ready for write operations
     if !readiness.signer_configured {
         output::error("Chain readiness check failed: Signer not configured");
         output::info("Use 'csv wallet init' or 'csv wallet import' to configure a signer");
-        return Err(anyhow::anyhow!("Cannot create sanad: signer not configured"));
+        return Err(anyhow::anyhow!(
+            "Cannot create sanad: signer not configured"
+        ));
     }
 
     if !readiness.write_capable {
         output::error("Chain readiness check failed: Write capability not available");
-        return Err(anyhow::anyhow!("Cannot create sanad: write capability not available"));
+        return Err(anyhow::anyhow!(
+            "Cannot create sanad: write capability not available"
+        ));
     }
 
     if !readiness.sanad_create_supported {
         output::error("Chain readiness check failed: Sanad creation not supported on this chain");
-        return Err(anyhow::anyhow!("Cannot create sanad: sanad creation not supported"));
+        return Err(anyhow::anyhow!(
+            "Cannot create sanad: sanad creation not supported"
+        ));
     }
 
     output::success("Chain readiness check passed");
 
     // Handle content descriptor parameters (B-013)
     // Parse schema file, load payload, process attachments
-    let (schema_hash_final, payload_hash_final, attachment_root_final) = if schema.is_some() || payload.is_some() || attachments.is_some() {
+    let (schema_hash_final, payload_hash_final, attachment_root_final) = if schema.is_some()
+        || payload.is_some()
+        || attachments.is_some()
+    {
         output::info("Processing content descriptor parameters (B-013)");
-        
+
         // Parse schema file if provided
         let schema_hash_val = if let Some(ref schema_path) = schema {
             output::kv("Schema file", schema_path);
-            
+
             // Check if it's a file path or a direct hex hash
             if schema_path.starts_with("0x") || schema_path.len() == 64 {
                 // Direct hex hash
@@ -290,15 +312,16 @@ async fn cmd_create(
                 // File path - read and parse JSON schema
                 let schema_content = std::fs::read_to_string(schema_path)
                     .map_err(|e| anyhow::anyhow!("Failed to read schema file: {}", e))?;
-                
+
                 // Parse JSON schema to extract schema_hash
                 let schema_json: serde_json::Value = serde_json::from_str(&schema_content)
                     .map_err(|e| anyhow::anyhow!("Failed to parse schema JSON: {}", e))?;
-                
-                let schema_hash_str = schema_json.get("schema_hash")
+
+                let schema_hash_str = schema_json
+                    .get("schema_hash")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("Schema file missing 'schema_hash' field"))?;
-                
+
                 let bytes = hex::decode(schema_hash_str.trim_start_matches("0x"))
                     .map_err(|e| anyhow::anyhow!("Invalid schema_hash in file: {}", e))?;
                 if bytes.len() != 32 {
@@ -306,34 +329,34 @@ async fn cmd_create(
                 }
                 let mut hash_bytes = [0u8; 32];
                 hash_bytes.copy_from_slice(&bytes);
-                
+
                 output::kv("Schema hash", schema_hash_str);
                 Some(Hash::new(hash_bytes))
             }
         } else {
             None
         };
-        
+
         // Load payload file if provided
         let payload_hash_val = if let Some(ref payload_path) = payload {
             output::kv("Payload file", payload_path);
-            
+
             // Read payload file
             let payload_bytes = std::fs::read(payload_path)
                 .map_err(|e| anyhow::anyhow!("Failed to read payload file: {}", e))?;
-            
+
             // Check if it's JSON or binary
             if payload_path.ends_with(".json") {
                 // Validate JSON
                 let _payload_json: serde_json::Value = serde_json::from_slice(&payload_bytes)
                     .map_err(|e| anyhow::anyhow!("Failed to parse payload JSON: {}", e))?;
             }
-            
+
             // Compute SHA256 hash of payload
             let mut hasher = sha2::Sha256::new();
             hasher.update(&payload_bytes);
             let hash_bytes = hasher.finalize();
-            
+
             let hash_hex = hex::encode(&hash_bytes);
             output::kv("Payload hash", &hash_hex);
             let mut hash_array = [0u8; 32];
@@ -342,39 +365,53 @@ async fn cmd_create(
         } else {
             None
         };
-        
+
         // Process attachments if provided
         let attachment_root_val = if let Some(ref attachments_str) = attachments {
             output::kv("Attachments", attachments_str);
-            
+
             // Split comma-separated file paths
-            let attachment_paths: Vec<&str> = attachments_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-            
+            let attachment_paths: Vec<&str> = attachments_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
             if !attachment_paths.is_empty() {
                 // Compute Merkle root of attachment hashes
                 let mut attachment_hashes = Vec::new();
-                
+
                 for (i, attachment_path) in attachment_paths.iter().enumerate() {
-                    output::info(&format!("Processing attachment {}/{}: {}", i + 1, attachment_paths.len(), attachment_path));
-                    
+                    output::info(&format!(
+                        "Processing attachment {}/{}: {}",
+                        i + 1,
+                        attachment_paths.len(),
+                        attachment_path
+                    ));
+
                     // Read attachment file
-                    let attachment_bytes = std::fs::read(attachment_path)
-                        .map_err(|e| anyhow::anyhow!("Failed to read attachment file {}: {}", attachment_path, e))?;
-                    
+                    let attachment_bytes = std::fs::read(attachment_path).map_err(|e| {
+                        anyhow::anyhow!("Failed to read attachment file {}: {}", attachment_path, e)
+                    })?;
+
                     // Compute SHA256 hash
                     let mut hasher = sha2::Sha256::new();
                     hasher.update(&attachment_bytes);
                     let hash_bytes = hasher.finalize();
                     attachment_hashes.push(hash_bytes);
-                    
-                    output::kv(&format!("Attachment {} hash", i + 1), &hex::encode(&hash_bytes));
+
+                    output::kv(
+                        &format!("Attachment {} hash", i + 1),
+                        &hex::encode(&hash_bytes),
+                    );
                 }
-                
+
                 // Compute Merkle root using csv-content ContentTree
-                let leaf_data: Vec<Vec<u8>> = attachment_hashes.iter().map(|h| h.to_vec()).collect();
+                let leaf_data: Vec<Vec<u8>> =
+                    attachment_hashes.iter().map(|h| h.to_vec()).collect();
                 let tree = ContentTree::from_leaves(leaf_data);
                 let root = tree.root_hash;
-                
+
                 let root_hex = hex::encode(&root);
                 output::kv("Attachment root", &root_hex);
                 Some(root)
@@ -384,7 +421,7 @@ async fn cmd_create(
         } else {
             None
         };
-        
+
         // Parse disclosure policy if provided
         if let Some(ref disclosure_policy_path) = disclosure_policy {
             output::kv("Disclosure policy", disclosure_policy_path);
@@ -394,7 +431,7 @@ async fn cmd_create(
                 disclosure_policy_path
             ));
         }
-        
+
         // Parse proof policy if provided
         if let Some(ref proof_policy_path) = proof_policy {
             output::kv("Proof policy", proof_policy_path);
@@ -404,7 +441,7 @@ async fn cmd_create(
                 proof_policy_path
             ));
         }
-        
+
         (schema_hash_val, payload_hash_val, attachment_root_val)
     } else {
         (None, None, None)
@@ -414,19 +451,14 @@ async fn cmd_create(
     if chain.as_str() == "bitcoin" {
         output::kv("Account", &account.to_string());
         output::kv("Index", &index.to_string());
-        output::kv("Derivation Path", &format!("m/86'/1'/{}'/0/{}", account, index));
+        output::kv(
+            "Derivation Path",
+            &format!("m/86'/1'/{}'/0/{}", account, index),
+        );
 
         // Derive and show the funding address using centralized identity resolver
-        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
-            let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-            let seed = mnemonic.to_seed(None);
-            let seed_array = *seed.as_bytes();
-
-            // Use centralized wallet identity resolver
-            let resolver = WalletIdentityResolver::from_seed(seed_array);
-            let chain_id = csv_hash::ChainId::new("bitcoin");
-            let address = resolver.derive_address(chain_id, account, index);
+        if state.storage.wallet.mnemonic.is_some() {
+            let address = identity.address(&chain, account, index)?;
 
             output::kv("Funding Address", &address);
             output::info("Make sure this address has UTXOs before creating a sanad.");
@@ -441,83 +473,83 @@ async fn cmd_create(
                 "Sui signer not configured. Initialize or import a wallet first using 'csv wallet init' or 'csv wallet import'."
             ));
         }
-        
+
         // Verify wallet has mnemonic configured for Sui signer derivation
         if state.storage.wallet.mnemonic.is_none() {
             output::warn("Wallet mnemonic not configured");
             output::info("The signer will be derived from the wallet mnemonic");
         }
-        
+
         output::info("Sui signer will be derived from wallet mnemonic");
     }
 
     // For Bitcoin, always refresh UTXOs from chain before creating a sanad
-    let bitcoin_utxos: Option<Vec<(String, u32, u64, Option<String>)>> = if chain.as_str() == "bitcoin" {
-        // Derive the expected address for this account/index using centralized identity resolver
-        let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-        })?;
-        let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-        let seed = mnemonic.to_seed(None);
-        let seed_array = *seed.as_bytes();
+    let bitcoin_utxos: Option<Vec<(String, u32, u64, Option<String>)>> =
+        if chain.as_str() == "bitcoin" {
+            // Derive the expected address for this account/index using centralized identity resolver
+            let seed_array = *identity.seed();
+            let chain_id = csv_hash::ChainId::new("bitcoin");
+            let expected_address = identity.address(&chain, account, index)?;
 
-        // Use centralized wallet identity resolver
-        let resolver = WalletIdentityResolver::from_seed(seed_array);
-        let chain_id = csv_hash::ChainId::new("bitcoin");
-        let expected_address = resolver.derive_address(chain_id.clone(), account, index);
+            output::kv("Expected Address", &expected_address);
 
-        output::kv("Expected Address", &expected_address);
+            // Get RPC URL from config
+            let chain_cfg = config.chain(&chain)?;
+            let rpc_url = chain_cfg.rpc_url.clone();
 
-        // Get RPC URL from config
-        let chain_cfg = config.chain(&chain)?;
-        let rpc_url = chain_cfg.rpc_url.clone();
+            // Initialize wallet factory before UTXO scan
+            let _factory = csv_coordinator::init_wallet_factory();
 
-        // Initialize wallet factory before UTXO scan
-        let _factory = csv_coordinator::init_wallet_factory();
+            // Scan for UTXOs using wallet operations from csv-coordinator
+            output::info("Scanning for UTXOs...");
+            let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
+            let scanned_utxos = if let Some(ops) = wallet_ops {
+                ops.scan_utxos(&seed_array, account, index, &rpc_url)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
+            } else {
+                output::warning("Wallet operations not available, skipping UTXO scan");
+                Vec::new()
+            };
 
-        // Scan for UTXOs using wallet operations from csv-coordinator
-        output::info("Scanning for UTXOs...");
-        let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
-        let scanned_utxos = if let Some(ops) = wallet_ops {
-            ops.scan_utxos(&seed_array, account, index, &rpc_url)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
-        } else {
-            output::warning("Wallet operations not available, skipping UTXO scan");
-            Vec::new()
-        };
-
-        if scanned_utxos.is_empty() {
-            output::warning("No UTXOs found for this address. Make sure the address has been funded.");
-            output::info("You can fund the address using: ");
-            output::info(&format!("  {}", expected_address));
-        } else {
-            output::kv("Found UTXOs", &scanned_utxos.len().to_string());
-            for (i, utxo) in scanned_utxos.iter().enumerate() {
-                output::info(&format!("  UTXO {}: {}:{} ({} sats)", i + 1, &utxo.0[..16], utxo.1, utxo.2));
+            if scanned_utxos.is_empty() {
+                output::warning(
+                    "No UTXOs found for this address. Make sure the address has been funded.",
+                );
+                output::info("You can fund the address using: ");
+                output::info(&format!("  {}", expected_address));
+            } else {
+                output::kv("Found UTXOs", &scanned_utxos.len().to_string());
+                for (i, utxo) in scanned_utxos.iter().enumerate() {
+                    output::info(&format!(
+                        "  UTXO {}: {}:{} ({} sats)",
+                        i + 1,
+                        &utxo.0[..16],
+                        utxo.1,
+                        utxo.2
+                    ));
+                }
             }
-        }
 
-        // Clear old UTXOs for this account and add new ones
-        state.storage.wallet.utxos.retain(|u| u.account != account);
-        for utxo in &scanned_utxos {
-            state.storage.wallet.utxos.push(UtxoRecord {
-                txid: utxo.0.clone(),
-                vout: utxo.1,
-                value: utxo.2,
-                account,
-                index,
-                derivation_path: format!("m/86'/1'/{}'/0/{}", account, index),
-                script_pubkey: utxo.3.clone(),
-            });
-        }
-        state.save()?;
+            // Clear old UTXOs for this account and add new ones
+            state.storage.wallet.utxos.retain(|u| u.account != account);
+            for utxo in &scanned_utxos {
+                state.storage.wallet.utxos.push(UtxoRecord {
+                    txid: utxo.0.clone(),
+                    vout: utxo.1,
+                    value: utxo.2,
+                    account,
+                    index,
+                    derivation_path: format!("m/86'/1'/{}'/0/{}", account, index),
+                    script_pubkey: utxo.3.clone(),
+                });
+            }
+            state.save()?;
 
-        Some(scanned_utxos)
-    } else {
-        None
-    };
+            Some(scanned_utxos)
+        } else {
+            None
+        };
 
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
@@ -536,14 +568,8 @@ async fn cmd_create(
     eprintln!("CLI LAYER: Account: {}, Index: {}", account, index);
 
     // Derive seed for SDK config (Bitcoin needs 64-byte BIP-39 seed in config)
-    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-    })?;
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array: [u8; 64] = *seed.as_bytes();
-    let seed_hex = hex::encode(seed_array);
+    let seed_array = *identity.seed();
+    let seed_hex = identity.bitcoin_seed_hex();
 
     let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
@@ -555,99 +581,68 @@ async fn cmd_create(
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
-        seed: if chain.as_str() == "bitcoin" { Some(seed_hex.clone()) } else { None },
+        seed: if chain.as_str() == "bitcoin" {
+            Some(seed_hex.clone())
+        } else {
+            None
+        },
         contract_address: chain_cfg.contract_address.clone(),
         program_id: chain_cfg.program_id.clone(),
         account,
         index,
-        utxos: bitcoin_utxos.clone().unwrap_or_default().into_iter().map(|(txid, vout, value, scriptpubkey_hex): (String, u32, u64, Option<String>)| {
-            // Pass txid as-is from blockchain scan (display format)
-            // Bitcoin adapter's from_config loads UTXOs in display format
-            csv_sdk::config::UtxoConfig {
-                txid: txid.clone(),
-                vout,
-                value,
-                account,
-                index,
-                script_pubkey: scriptpubkey_hex,
-            }
-        }).collect(),
-        sanad_seals: state.storage.wallet.sanad_seals.iter().map(|s| csv_sdk::config::SanadSealConfig {
-            sanad_id: s.sanad_id.clone(),
-            anchor_txid: s.anchor_txid.clone(),
-            vout: s.vout,
-        }).collect(),
+        utxos: bitcoin_utxos
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(
+                |(txid, vout, value, scriptpubkey_hex): (String, u32, u64, Option<String>)| {
+                    // Pass txid as-is from blockchain scan (display format)
+                    // Bitcoin adapter's from_config loads UTXOs in display format
+                    csv_sdk::config::UtxoConfig {
+                        txid: txid.clone(),
+                        vout,
+                        value,
+                        account,
+                        index,
+                        script_pubkey: scriptpubkey_hex,
+                    }
+                },
+            )
+            .collect(),
+        sanad_seals: state
+            .storage
+            .wallet
+            .sanad_seals
+            .iter()
+            .map(|s| csv_sdk::config::SanadSealConfig {
+                sanad_id: s.sanad_id.clone(),
+                anchor_txid: s.anchor_txid.clone(),
+                vout: s.vout,
+            })
+            .collect(),
     };
-    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+    sdk_config
+        .chains
+        .insert(chain.as_str().to_string(), sdk_chain_config);
 
     // Extract UTXOs from SDK config before building client (config is moved)
-    let sdk_utxos = sdk_config.chains.get(chain.as_str())
+    let sdk_utxos = sdk_config
+        .chains
+        .get(chain.as_str())
         .and_then(|c| Some(c.utxos.clone()))
         .unwrap_or_default();
 
-    // For Bitcoin, use the raw 64-byte BIP-39 seed instead of the derived 32-byte private key
-    // BitcoinSealProtocol::from_config requires 64-byte seed for HD wallet derivation
-    let key_hex = if chain.as_str() == "bitcoin" {
-        log::info!("BITCOIN: Using 64-byte BIP-39 seed for HD wallet derivation");
-        seed_hex.clone()
-    } else if chain.as_str() == "ethereum" || chain.as_str() == "sui" || chain.as_str() == "aptos" || chain.as_str() == "solana" {
-        // For chains that require signing, derive private key directly using csv-keys bip44
-        // (matches wallet balance command approach)
-        log::info!("{}: Deriving private key using csv-keys bip44", chain.as_str().to_uppercase());
-        
-        // Use Wallet SDK for address derivation (for logging/verification)
-        let resolver = WalletIdentityResolver::from_seed(seed_array);
-        let address = resolver.derive_address(core_chain.clone(), account, index);
-        log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
-        eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
-        
-        // Derive private key directly using csv-keys bip44 (same as wallet balance)
-        let bip44_key = csv_keys::bip44::derive_key(&seed_array, &core_chain, account, index)
-            .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
-        let pk_hex = hex::encode(bip44_key.expose_secret());
-
-        pk_hex
-    } else {
-        let (secret_key, key_source) =
-            signing_key_for_chain(&chain, account, &seed_array, state)?;
-        log::info!(
-            "{}: Using {} 32-byte private key",
-            chain.as_str().to_uppercase(),
-            key_source
-        );
-        let pk_hex = hex::encode(secret_key.expose_secret());
-
-        // Derive and log the address using centralized identity resolver
-        let core_chain = csv_hash::ChainId::new(chain.as_str());
-        let resolver = WalletIdentityResolver::from_seed(seed_array);
-        let address = resolver.derive_address(core_chain, account, index);
-        log::info!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
-        eprintln!("CLI LAYER: Derived address for {}: {}", chain.as_str().to_uppercase(), address);
-
-        pk_hex
-    };
-
-    let mut private_keys = std::collections::HashMap::new();
-    let key_bytes = hex::decode(&key_hex)
-        .map_err(|e| anyhow::anyhow!("Failed to decode private key hex: {}", e))?;
-
-    // Bitcoin uses 64-byte seed for HD derivation, other chains use 32-byte private key
-    let secret_handle = if chain.as_str() == "bitcoin" {
-        // For Bitcoin, use the 64-byte seed directly
-        let seed_array: [u8; 64] = key_bytes.try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid seed length for Bitcoin (expected 64 bytes)"))?;
-        csv_protocol::secret::SharedSecretHandle::from_seed(seed_array)
-    } else {
-        // For other chains, use 32-byte private key
-        let key_array: [u8; 32] = key_bytes.try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid private key length (expected 32 bytes)"))?;
-        csv_protocol::secret::SharedSecretHandle::from_bytes(key_array)
-    };
-
-    private_keys.insert(chain.as_str().to_string(), secret_handle);
+    let private_keys = identity.signing_map(&[(&chain, account, index)], state)?;
 
     // Build CSV client with the requested chain enabled
-    eprintln!("CLI LAYER: Building client with SDK config RPC URL: {}", sdk_config.chains.get(chain.as_str()).map(|c| &c.rpc.url).unwrap_or(&"N/A".to_string()));
+    eprintln!(
+        "CLI LAYER: Building client with SDK config RPC URL: {}",
+        sdk_config
+            .chains
+            .get(chain.as_str())
+            .map(|c| &c.rpc.url)
+            .unwrap_or(&"N/A".to_string())
+    );
     let client = CsvClient::builder()
         .with_chain(core_chain.clone())
         .with_config(sdk_config)
@@ -665,45 +660,79 @@ async fn cmd_create(
     if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty() {
         output::info("Validating UTXOs via runtime...");
         let runtime = client.chain_runtime();
-        
+
         // Validate each UTXO is still unspent on-chain
         let mut validated_utxos = Vec::new();
         for utxo_config in &sdk_utxos {
             // Use runtime to check transaction status
-            match runtime.get_transaction(core_chain.clone(), &utxo_config.txid).await {
+            match runtime
+                .get_transaction(core_chain.clone(), &utxo_config.txid)
+                .await
+            {
                 Ok(tx_info) => {
                     // Check if transaction is confirmed and UTXO is unspent
                     match tx_info.status {
-                        csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => {
-                            output::info(&format!("  UTXO {}:{} validated on-chain", &utxo_config.txid[..16], utxo_config.vout));
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed {
+                            ..
+                        } => {
+                            output::info(&format!(
+                                "  UTXO {}:{} validated on-chain",
+                                &utxo_config.txid[..16],
+                                utxo_config.vout
+                            ));
                             validated_utxos.push(utxo_config.clone());
                         }
                         csv_protocol::chain_adapter_traits::TransactionStatus::Pending => {
-                            output::warning(&format!("  UTXO {}:{} is pending, skipping", &utxo_config.txid[..16], utxo_config.vout));
+                            output::warning(&format!(
+                                "  UTXO {}:{} is pending, skipping",
+                                &utxo_config.txid[..16],
+                                utxo_config.vout
+                            ));
                         }
-                        csv_protocol::chain_adapter_traits::TransactionStatus::Failed { reason } => {
-                            output::warning(&format!("  UTXO {}:{} failed: {}, skipping", &utxo_config.txid[..16], utxo_config.vout, reason));
+                        csv_protocol::chain_adapter_traits::TransactionStatus::Failed {
+                            reason,
+                        } => {
+                            output::warning(&format!(
+                                "  UTXO {}:{} failed: {}, skipping",
+                                &utxo_config.txid[..16],
+                                utxo_config.vout,
+                                reason
+                            ));
                         }
                         csv_protocol::chain_adapter_traits::TransactionStatus::Dropped => {
-                            output::warning(&format!("  UTXO {}:{} was dropped, skipping", &utxo_config.txid[..16], utxo_config.vout));
+                            output::warning(&format!(
+                                "  UTXO {}:{} was dropped, skipping",
+                                &utxo_config.txid[..16],
+                                utxo_config.vout
+                            ));
                         }
                         csv_protocol::chain_adapter_traits::TransactionStatus::Unknown => {
-                            output::warning(&format!("  UTXO {}:{} has unknown status, skipping", &utxo_config.txid[..16], utxo_config.vout));
+                            output::warning(&format!(
+                                "  UTXO {}:{} has unknown status, skipping",
+                                &utxo_config.txid[..16],
+                                utxo_config.vout
+                            ));
                         }
                     }
                 }
                 Err(e) => {
                     // Fail closed if RPC is unavailable - this is a security requirement
-                    return Err(anyhow::anyhow!("Failed to validate UTXO {}:{} via runtime: {}. RPC or validation support unavailable - cannot proceed without on-chain validation.", 
-                        &utxo_config.txid[..16], utxo_config.vout, e));
+                    return Err(anyhow::anyhow!(
+                        "Failed to validate UTXO {}:{} via runtime: {}. RPC or validation support unavailable - cannot proceed without on-chain validation.",
+                        &utxo_config.txid[..16],
+                        utxo_config.vout,
+                        e
+                    ));
                 }
             }
         }
-        
+
         if validated_utxos.is_empty() {
-            return Err(anyhow::anyhow!("No valid UTXOs after runtime validation. Ensure RPC is configured and UTXOs are unspent."));
+            return Err(anyhow::anyhow!(
+                "No valid UTXOs after runtime validation. Ensure RPC is configured and UTXOs are unspent."
+            ));
         }
-        
+
         output::kv("Validated UTXOs", &validated_utxos.len().to_string());
     } else if chain.as_str() == "bitcoin" {
         output::info("Skipping CLI-level UTXO validation (Bitcoin adapter will fetch from RPC)");
@@ -731,7 +760,8 @@ async fn cmd_create(
 
     // For Bitcoin, use existing UTXOs instead of creating new seals
     // We need to track both the seal and the anchor since we publish during UTXO selection
-    let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty() {
+    let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty()
+    {
         output::info("BITCOIN: Selecting UTXO for seal creation");
 
         // Use pre-extracted SDK config utxos (display format from blockchain scan)
@@ -748,8 +778,14 @@ async fn cmd_create(
 
         // Try UTXOs in order until one succeeds
         for (attempt, selected_utxo) in sorted_utxos.iter().enumerate() {
-            output::info(&format!("Attempt {}/{}: Using UTXO {}:{} ({} sats) for seal",
-                attempt + 1, sorted_utxos.len(), &selected_utxo.txid[..16], selected_utxo.vout, selected_utxo.value));
+            output::info(&format!(
+                "Attempt {}/{}: Using UTXO {}:{} ({} sats) for seal",
+                attempt + 1,
+                sorted_utxos.len(),
+                &selected_utxo.txid[..16],
+                selected_utxo.vout,
+                selected_utxo.value
+            ));
 
             // Convert display format txid to internal byte order for seal
             // SDK config has display format, but Bitcoin adapter reverses when loading into wallet
@@ -758,7 +794,10 @@ async fn cmd_create(
             if txid_bytes.len() != 32 {
                 return Err(anyhow::anyhow!("Invalid txid length"));
             }
-            eprintln!("DEBUG: SDK config txid (display): {}", hex::encode(&txid_bytes));
+            eprintln!(
+                "DEBUG: SDK config txid (display): {}",
+                hex::encode(&txid_bytes)
+            );
             let mut txid_array = [0u8; 32];
             txid_array.copy_from_slice(&txid_bytes);
             txid_array.reverse(); // Convert display to internal byte order
@@ -776,10 +815,17 @@ async fn cmd_create(
             };
 
             // Try to publish with this UTXO
-            match runtime.publish_seal(core_chain.clone(), seal.clone(), commitment).await {
+            match runtime
+                .publish_seal(core_chain.clone(), seal.clone(), commitment)
+                .await
+            {
                 Ok(anchor) => {
-                    output::info(&format!("Successfully published using UTXO {}:{} ({} sats)",
-                        &selected_utxo.txid[..16], selected_utxo.vout, selected_utxo.value));
+                    output::info(&format!(
+                        "Successfully published using UTXO {}:{} ({} sats)",
+                        &selected_utxo.txid[..16],
+                        selected_utxo.vout,
+                        selected_utxo.value
+                    ));
                     successful_seal = Some(seal);
                     successful_utxo_ref = Some((selected_utxo.txid.clone(), selected_utxo.vout));
                     successful_anchor = Some(anchor);
@@ -787,13 +833,18 @@ async fn cmd_create(
                 }
                 Err(e) => {
                     let error_str = e.to_string();
-                    output::warning(&format!("Failed to publish with UTXO {}:{}: {}",
-                        &selected_utxo.txid[..16], selected_utxo.vout, error_str));
+                    output::warning(&format!(
+                        "Failed to publish with UTXO {}:{}: {}",
+                        &selected_utxo.txid[..16],
+                        selected_utxo.vout,
+                        error_str
+                    ));
 
                     // Check if this is a "missing or spent" error - if so, try next UTXO
-                    if error_str.contains("bad-txns-inputs-missingorspent") ||
-                       error_str.contains("already spent") ||
-                       error_str.contains("missing") {
+                    if error_str.contains("bad-txns-inputs-missingorspent")
+                        || error_str.contains("already spent")
+                        || error_str.contains("missing")
+                    {
                         output::info("UTXO appears to be spent or missing, trying next UTXO...");
                         last_error = Some(anyhow::anyhow!("{}", e));
                         continue;
@@ -805,11 +856,11 @@ async fn cmd_create(
             }
         }
 
-        let seal = successful_seal
-            .ok_or_else(|| {
-                last_error.unwrap_or_else(|| anyhow::anyhow!("All UTXOs failed - no valid UTXOs available"))
-            })?;
-        
+        let seal = successful_seal.ok_or_else(|| {
+            last_error
+                .unwrap_or_else(|| anyhow::anyhow!("All UTXOs failed - no valid UTXOs available"))
+        })?;
+
         let anchor = successful_anchor
             .ok_or_else(|| anyhow::anyhow!("No anchor from successful publish"))?;
 
@@ -820,37 +871,57 @@ async fn cmd_create(
         if chain.as_str() == "bitcoin" {
             output::info("BITCOIN: Using adapter to create seal (will fetch UTXOs from RPC)");
         }
-        log::info!("{}: Creating seal via chain adapter", chain.as_str().to_uppercase());
+        log::info!(
+            "{}: Creating seal via chain adapter",
+            chain.as_str().to_uppercase()
+        );
         let seal = runtime
             .create_seal(core_chain.clone(), value)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create seal: {}", e))?;
-        log::info!("{}: Seal created successfully", chain.as_str().to_uppercase());
+        log::info!(
+            "{}: Seal created successfully",
+            chain.as_str().to_uppercase()
+        );
         (seal, None, None)
     };
 
     // Step 2: Publish the commitment under the seal (skip for Bitcoin since we already did it during UTXO selection)
     let anchor: Option<csv_protocol::CommitAnchor> = if skip_publish {
         // Skip publishing - return None for anchor
-        log::info!("{}: Skipping commitment publishing (--skip-publish flag set)", chain.as_str().to_uppercase());
-        output::info(&format!("Skipping commitment publishing (--skip-publish flag set)"));
+        log::info!(
+            "{}: Skipping commitment publishing (--skip-publish flag set)",
+            chain.as_str().to_uppercase()
+        );
+        output::info(&format!(
+            "Skipping commitment publishing (--skip-publish flag set)"
+        ));
         None
     } else if let Some(ref anchor) = anchor {
         // Bitcoin: already published during UTXO selection
-        log::info!("{}: Commitment already published during UTXO selection (anchor_id: 0x{})", 
-            chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
+        log::info!(
+            "{}: Commitment already published during UTXO selection (anchor_id: 0x{})",
+            chain.as_str().to_uppercase(),
+            hex::encode(&anchor.anchor_id[..8])
+        );
         output::info(&format!("Commitment published to {}", chain.as_str()));
         Some(anchor.clone())
     } else {
         // Other chains: publish now
-        log::info!("{}: Publishing commitment under seal", chain.as_str().to_uppercase());
+        log::info!(
+            "{}: Publishing commitment under seal",
+            chain.as_str().to_uppercase()
+        );
         output::info(&format!("Publishing commitment to {}...", chain.as_str()));
         let anchor = runtime
             .publish_seal(core_chain.clone(), seal.clone(), commitment)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to publish seal: {}", e))?;
-        log::info!("{}: Commitment published successfully (anchor_id: 0x{})", 
-            chain.as_str().to_uppercase(), hex::encode(&anchor.anchor_id[..8]));
+        log::info!(
+            "{}: Commitment published successfully (anchor_id: 0x{})",
+            chain.as_str().to_uppercase(),
+            hex::encode(&anchor.anchor_id[..8])
+        );
         output::info(&format!("Commitment published to {}", chain.as_str()));
         Some(anchor)
     };
@@ -859,22 +930,17 @@ async fn cmd_create(
     if chain.as_str() == "bitcoin" {
         if let Some((used_txid, used_vout)) = selected_utxo_ref {
             // Remove the spent UTXO from wallet state
-            state.storage.wallet.utxos.retain(|u| !(u.txid == used_txid && u.vout == used_vout));
+            state
+                .storage
+                .wallet
+                .utxos
+                .retain(|u| !(u.txid == used_txid && u.vout == used_vout));
             state.save()?;
         }
     }
 
     // Derive owner address for ownership proof
-    let owner_address = if chain.as_str() == "bitcoin" {
-        hex::encode(seed_array) // Use seed as owner identifier for Bitcoin
-    } else {
-        // Try to derive address from the signing key
-        if let Ok(addr) = csv_keys::bip44::derive_address_from_key(&seed_array, &core_chain) {
-            addr
-        } else {
-            hex::encode(&seed_array[..32])
-        }
-    };
+    let owner_address = identity.address(&chain, account, index)?;
 
     // Parse content descriptor hashes from hex strings (legacy parameters, take precedence over file-parsed values)
     let schema_hash_legacy = if let Some(ref hash_str) = schema_hash {
@@ -930,41 +996,44 @@ async fn cmd_create(
     };
 
     // Use legacy hash parameters if provided, otherwise use file-parsed values
-    let final_schema_hash = schema_hash_legacy.or(schema_hash_final).unwrap_or(Hash::new([0u8; 32]));
+    let final_schema_hash = schema_hash_legacy
+        .or(schema_hash_final)
+        .unwrap_or(Hash::new([0u8; 32]));
     let final_payload_hash = payload_hash_final.unwrap_or(commitment); // Use commitment as default payload hash
     let final_attachment_root = attachment_root_final.or(content_root_parsed);
-    let final_disclosure_policy_hash = disclosure_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32]));
+    let final_disclosure_policy_hash =
+        disclosure_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32]));
     let final_proof_policy_hash = proof_policy_hash_parsed.unwrap_or(Hash::new([0u8; 32]));
 
     // Create a SanadPayloadDescriptor with content descriptor support (B-013)
     let descriptor = csv_protocol::SanadPayloadDescriptor::new(
         csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
-        final_schema_hash, // schema_hash
-        1, // payload_codec: canonical CBOR
-        final_payload_hash, // payload_hash
-        final_attachment_root, // attachment_root (includes content_root)
+        final_schema_hash,            // schema_hash
+        1,                            // payload_codec: canonical CBOR
+        final_payload_hash,           // payload_hash
+        final_attachment_root,        // attachment_root (includes content_root)
         final_disclosure_policy_hash, // disclosure_policy_hash
-        final_proof_policy_hash, // proof_policy_hash
+        final_proof_policy_hash,      // proof_policy_hash
     );
 
     // Create ownership proof from the owner address
     // For canonical mode, generate a signature over the commitment hash
     let proof_bytes = if chain.as_str() == "bitcoin" {
         // Derive the private key for Bitcoin (BIP-86 Taproot)
-        use secp256k1::{Secp256k1, SecretKey, Message};
-        
+        use secp256k1::{Message, Secp256k1, SecretKey};
+
         // Derive the BIP-86 path for the account/index
         let path = csv_keys::bip44::DerivationPath::new_bip86(account, index);
-        
+
         // Derive the private key from the seed using the existing bip44 module
         let secret_key = csv_keys::bip44::derive_key_from_path(&seed_array, &path, &core_chain)
             .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
-        
+
         // Convert to secp256k1 SecretKey
         let key_bytes = secret_key.as_bytes();
         let private_key = SecretKey::from_slice(key_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to create secp256k1 key: {}", e))?;
-        
+
         // Sign the commitment hash
         let secp = Secp256k1::new();
         let message = Message::from_digest_slice(commitment.as_bytes())
@@ -976,7 +1045,7 @@ async fn cmd_create(
         // TODO: Implement proper signing for other chains
         seed_array[..32].to_vec()
     };
-    
+
     let ownership_proof = csv_protocol::OwnershipProof {
         owner: owner_address.as_bytes().to_vec(),
         proof: proof_bytes,
@@ -987,7 +1056,13 @@ async fn cmd_create(
     let salt: [u8; 16] = rand::random();
 
     // Create the sanad through the runtime
-      match client.sanads().create(&descriptor, commitment, ownership_proof, &salt, core_chain.clone()) {
+    match client.sanads().create(
+        &descriptor,
+        commitment,
+        ownership_proof,
+        &salt,
+        core_chain.clone(),
+    ) {
         Ok(sanad) => {
             let sanad_id_hex = sanad.id.bytes.clone();
 
@@ -1039,20 +1114,28 @@ async fn cmd_create(
                     let _sanad_id_bytes = hex::decode(&sanad.id.bytes).unwrap_or_default();
                     let anchor_txid_hex = hex::encode(&anchor.anchor_id);
                     let output_index = u32::from_le_bytes(
-                        anchor.metadata[..4.min(anchor.metadata.len())].try_into().unwrap_or([0, 0, 0, 0])
+                        anchor.metadata[..4.min(anchor.metadata.len())]
+                            .try_into()
+                            .unwrap_or([0, 0, 0, 0]),
                     );
                     // Note: SDK runtime automatically registers sanad seals during publish_seal
                     // Manual registration is no longer needed and causes "adapter not found" warnings
 
                     // Persist the mapping to state for cross-run lookups
-                    state.storage.wallet.sanad_seals.push(csv_store::state::wallet::SanadSealRecord {
-                        sanad_id: sanad_id_hex.clone(),
-                        anchor_txid: anchor_txid_hex.clone(),
-                        vout: output_index,
-                    });
+                    state.storage.wallet.sanad_seals.push(
+                        csv_store::state::wallet::SanadSealRecord {
+                            sanad_id: sanad_id_hex.clone(),
+                            anchor_txid: anchor_txid_hex.clone(),
+                            vout: output_index,
+                        },
+                    );
                     state.save()?;
-                    log::info!("Persisted sanad seal to state: sanad_id={}, txid={}, vout={}", 
-                        sanad_id_hex, anchor_txid_hex, output_index);
+                    log::info!(
+                        "Persisted sanad seal to state: sanad_id={}, txid={}, vout={}",
+                        sanad_id_hex,
+                        anchor_txid_hex,
+                        output_index
+                    );
                 }
             }
 
@@ -1069,11 +1152,14 @@ async fn cmd_create(
                 output::kv("Anchor TX Hash", &hex::encode(&anchor.anchor_id));
                 output::kv("Block Height", &anchor.block_height.to_string());
             }
-            output::kv("Status", if anchor.is_some() {
-                "Created and published via runtime"
-            } else {
-                "Created (not published)"
-            });
+            output::kv(
+                "Status",
+                if anchor.is_some() {
+                    "Created and published via runtime"
+                } else {
+                    "Created (not published)"
+                },
+            );
 
             // UnifiedStateManager is automatically saved after command execution
             println!();
@@ -1094,62 +1180,6 @@ async fn cmd_create(
     }
 
     Ok(())
-}
-
-fn signing_key_for_chain(
-    chain: &Chain,
-    account: u32,
-    seed_array: &[u8; 64],
-    state: &UnifiedStateManager,
-) -> Result<(csv_keys::memory::SecretKey, &'static str)> {
-    // Try keystore first for all chains (not just Aptos)
-    if let Some(secret_key) = load_keystore_key(chain, account, state)? {
-        return Ok((secret_key, "keystore"));
-    }
-
-    let mut keys = csv_keys::bip44::derive_all_chain_keys(seed_array, account);
-    let core_chain = ChainId::new(chain.as_str());
-    let secret_key = keys
-        .remove(&core_chain)
-        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
-
-    Ok((secret_key, "mnemonic-derived"))
-}
-
-fn load_keystore_key(
-    chain: &Chain,
-    account: u32,
-    state: &UnifiedStateManager,
-) -> Result<Option<csv_keys::memory::SecretKey>> {
-    let mut key_ids = Vec::new();
-    if let Some(wallet_account) = state.get_account(chain) {
-        if let Some(keystore_ref) = &wallet_account.keystore_ref {
-            key_ids.push(keystore_ref.clone());
-        }
-    }
-    key_ids.push(format!("{}-{}", chain.as_str(), account));
-
-    let mut keystore = csv_keys::file_keystore::FileKeystore::new(None)?;
-    let passphrase = csv_keys::memory::Passphrase::new(state.passphrase().to_string());
-
-    for key_id in key_ids {
-        match keystore.retrieve_key(&key_id, &passphrase) {
-            Ok(secret_key) => return Ok(Some(secret_key)),
-            Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
-            Err(csv_keys::file_keystore::FileKeystoreError::InvalidPassphrase) => {
-                // FAIL CLOSED: Return error instead of falling back to mnemonic derivation
-                return Err(anyhow::anyhow!(
-                    "Keystore key '{}' exists but passphrase is incorrect. \
-                     Cannot proceed without correct passphrase. \
-                     This is a security requirement - wrong passphrase must fail closed.",
-                    key_id
-                ));
-            }
-            Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
-        }
-    }
-
-    Ok(None)
 }
 
 fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
@@ -1191,7 +1221,12 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &mut UnifiedStateManager) -> Result<()> {
+async fn cmd_list(
+    chain: Option<Chain>,
+    update: bool,
+    config: &Config,
+    state: &mut UnifiedStateManager,
+) -> Result<()> {
     output::header("Tracked Sanads");
     if update {
         output::info("Querying on-chain status for all sanads...");
@@ -1210,19 +1245,16 @@ async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &m
 
         // Check if sanad has a valid seal_ref (required for non-Bitcoin chains)
         let has_valid_seal = if sanad.chain.as_str() != "bitcoin" {
-            base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref).is_ok()
+            base64::engine::general_purpose::STANDARD
+                .decode(&sanad.seal_ref)
+                .is_ok()
         } else {
             true
         };
 
         // Query on-chain state using the new canonical state query (replaces check_sanad_on_chain_status)
-        let on_chain_state = query_sanad_on_chain_state(
-            &sanad.chain,
-            &sanad.id,
-            Some(sanad),
-            config,
-            state,
-        ).await;
+        let on_chain_state =
+            query_sanad_on_chain_state(&sanad.chain, &sanad.id, Some(sanad), config, state).await;
 
         let state_enum = if let Some(ref cs) = on_chain_state {
             cs.state
@@ -1237,7 +1269,9 @@ async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &m
         // Collect updates to apply after the loop
         if update {
             let new_status = match state_enum {
-                SanadLifecycleState::Consumed | SanadLifecycleState::Invalid => SanadStatus::Consumed,
+                SanadLifecycleState::Consumed | SanadLifecycleState::Invalid => {
+                    SanadStatus::Consumed
+                }
                 _ => SanadStatus::Active,
             };
 
@@ -1262,7 +1296,10 @@ async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &m
     } else {
         output::table(&headers, &rows);
         if update && updated_count > 0 {
-            output::info(&format!("Updated {} sanad(s) status in local store", updated_count));
+            output::info(&format!(
+                "Updated {} sanad(s) status in local store",
+                updated_count
+            ));
             state.save()?;
         }
     }
@@ -1272,14 +1309,26 @@ async fn cmd_list(chain: Option<Chain>, update: bool, config: &Config, state: &m
 
 /// Check on-chain status of a sanad to detect if it's consumed or inaccessible
 /// Returns Some(status) if on-chain check was performed, None if falling back to local status
-async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state: &UnifiedStateManager) -> Option<String> {
+async fn check_sanad_on_chain_status(
+    sanad: &SanadRecord,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Option<String> {
     // For Bitcoin, check if the UTXO is still unspent
     if sanad.chain.as_str() == "bitcoin" {
         if let Some(anchor_tx_hash) = &sanad.anchor_tx_hash {
-            log::debug!("Bitcoin sanad {}: checking anchor_tx_hash: {}", sanad.id, anchor_tx_hash);
+            log::debug!(
+                "Bitcoin sanad {}: checking anchor_tx_hash: {}",
+                sanad.id,
+                anchor_tx_hash
+            );
             if let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x")) {
-                log::debug!("Bitcoin sanad {}: decoded {} bytes from anchor_tx_hash", sanad.id, tx_hash_bytes.len());
-                
+                log::debug!(
+                    "Bitcoin sanad {}: decoded {} bytes from anchor_tx_hash",
+                    sanad.id,
+                    tx_hash_bytes.len()
+                );
+
                 let (txid, vout) = if tx_hash_bytes.len() >= 36 {
                     let txid = &tx_hash_bytes[0..32];
                     let vout_bytes = &tx_hash_bytes[32..36];
@@ -1287,58 +1336,92 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                     (txid, vout)
                 } else if tx_hash_bytes.len() == 32 {
                     let txid = &tx_hash_bytes[0..32];
-                    let vout = state.storage.wallet.sanad_seals
+                    let vout = state
+                        .storage
+                        .wallet
+                        .sanad_seals
                         .iter()
                         .find(|s| s.sanad_id == sanad.id)
                         .map(|s| s.vout)
                         .unwrap_or(0);
-                    log::debug!("Bitcoin sanad {}: looked up vout {} from sanad_seals", sanad.id, vout);
+                    log::debug!(
+                        "Bitcoin sanad {}: looked up vout {} from sanad_seals",
+                        sanad.id,
+                        vout
+                    );
                     (txid, vout)
                 } else {
-                    log::warn!("Bitcoin sanad {}: anchor_tx_hash has invalid length ({} bytes)", 
-                        sanad.id, tx_hash_bytes.len());
+                    log::warn!(
+                        "Bitcoin sanad {}: anchor_tx_hash has invalid length ({} bytes)",
+                        sanad.id,
+                        tx_hash_bytes.len()
+                    );
                     return None;
                 };
-                
+
                 let mut txid_display = [0u8; 32];
                 txid_display.copy_from_slice(txid);
                 // anchor_tx_hash is already in display format (mempool.space returns display-order
                 // txids from /tx broadcast; no reversal is needed here).
                 let txid_hex = hex::encode(txid_display);
-                
-                log::debug!("Bitcoin sanad {}: checking UTXO {}:{} on-chain", sanad.id, &txid_hex[..16], vout);
-                
+
+                log::debug!(
+                    "Bitcoin sanad {}: checking UTXO {}:{} on-chain",
+                    sanad.id,
+                    &txid_hex[..16],
+                    vout
+                );
+
                 // Runtime-mediated validation: build client and check UTXO status
                 // Fail closed if RPC unavailable - security requirement
                 match validate_bitcoin_utxo_via_runtime(&txid_hex, vout, config, sanad).await {
                     Ok(is_valid) => {
                         if is_valid {
-                            log::debug!("Bitcoin sanad {}: UTXO {}:{} is valid", sanad.id, &txid_hex[..16], vout);
+                            log::debug!(
+                                "Bitcoin sanad {}: UTXO {}:{} is valid",
+                                sanad.id,
+                                &txid_hex[..16],
+                                vout
+                            );
                             return Some("Active".to_string());
                         } else {
-                            log::debug!("Bitcoin sanad {}: UTXO {}:{} is spent/invalid", sanad.id, &txid_hex[..16], vout);
+                            log::debug!(
+                                "Bitcoin sanad {}: UTXO {}:{} is spent/invalid",
+                                sanad.id,
+                                &txid_hex[..16],
+                                vout
+                            );
                             return Some("Consumed".to_string());
                         }
                     }
                     Err(e) => {
-                        log::warn!("Bitcoin sanad {}: failed to validate UTXO via runtime: {}. Falling back to local status.", sanad.id, e);
+                        log::warn!(
+                            "Bitcoin sanad {}: failed to validate UTXO via runtime: {}. Falling back to local status.",
+                            sanad.id,
+                            e
+                        );
                         // Fall through to return None (use local status)
                     }
                 }
             } else {
-                log::warn!("Bitcoin sanad {}: failed to decode anchor_tx_hash", sanad.id);
+                log::warn!(
+                    "Bitcoin sanad {}: failed to decode anchor_tx_hash",
+                    sanad.id
+                );
             }
         } else {
             log::warn!("Bitcoin sanad {}: no anchor_tx_hash found", sanad.id);
         }
         return None;
     }
-    
+
     // For Aptos, check if seal was consumed by querying AnchorDataCollection
     if sanad.chain.as_str() == "aptos" {
         log::debug!("Aptos sanad {}: checking on-chain status", sanad.id);
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
-            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
+            if let Ok(seal_ref_bytes) =
+                base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref)
+            {
                 if seal_ref_bytes.len() >= 2 {
                     let mut pos = 0;
                     let sanad_nonce = if seal_ref_bytes[pos] == 1 {
@@ -1347,70 +1430,97 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                             if let Ok(nonce_bytes) = seal_ref_bytes[pos..pos + 8].try_into() {
                                 pos += 8;
                                 Some(u64::from_le_bytes(nonce_bytes))
-                            } else { None }
-                        } else { None }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     } else {
                         pos += 1;
                         None
                     };
-                    
+
                     if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
                         pos += 9;
                     } else if seal_ref_bytes.len() > pos {
                         pos += 1;
                     }
-                    
+
                     if seal_ref_bytes.len() >= pos + 4 {
-                        let id_len = u32::from_le_bytes([seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3]]) as usize;
+                        let id_len = u32::from_le_bytes([
+                            seal_ref_bytes[pos],
+                            seal_ref_bytes[pos + 1],
+                            seal_ref_bytes[pos + 2],
+                            seal_ref_bytes[pos + 3],
+                        ]) as usize;
                         pos += 4;
                         if seal_ref_bytes.len() >= pos + id_len && id_len == 32 {
-                            let addr_hex = format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + id_len]));
-                            
+                            let addr_hex =
+                                format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + id_len]));
+
                             use reqwest::Client;
                             let client = Client::new();
                             let contract_addr = if let Some(ca) = &chain_cfg.contract_address {
                                 ca.clone()
                             } else {
-                                "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string()
+                                "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50"
+                                    .to_string()
                             };
-                            
-                            let anchor_collection_type = format!("{}::CSVSeal::AnchorDataCollection", contract_addr);
+
+                            let anchor_collection_type =
+                                format!("{}::CSVSeal::AnchorDataCollection", contract_addr);
                             let collection_url = format!(
                                 "{}/accounts/{}/resource/{}",
                                 chain_cfg.rpc_url.trim_end_matches('/'),
                                 addr_hex,
                                 anchor_collection_type
                             );
-                            
-                            log::debug!("Aptos sanad {}: querying AnchorDataCollection at {}", sanad.id, collection_url);
-                            
-                            if let Ok(response) = client.get(&collection_url).timeout(std::time::Duration::from_secs(5)).send().await {
+
+                            log::debug!(
+                                "Aptos sanad {}: querying AnchorDataCollection at {}",
+                                sanad.id,
+                                collection_url
+                            );
+
+                            if let Ok(response) = client
+                                .get(&collection_url)
+                                .timeout(std::time::Duration::from_secs(5))
+                                .send()
+                                .await
+                            {
                                 if response.status().is_success() {
                                     if let Ok(data) = response.json::<serde_json::Value>().await {
-                                        if let Some(table_handle) = data.get("data")
+                                        if let Some(table_handle) = data
+                                            .get("data")
                                             .and_then(|d| d.get("data"))
                                             .and_then(|d| d.get("handle"))
-                                            .and_then(|h| h.as_str()) {
-                                            
+                                            .and_then(|h| h.as_str())
+                                        {
                                             let table_url = format!(
                                                 "{}/accounts/{}/table_item",
                                                 chain_cfg.rpc_url.trim_end_matches('/'),
                                                 addr_hex
                                             );
-                                            
+
                                             let key_type = "u64";
-                                            let value_type = format!("{}::CSVSeal::AnchorData", contract_addr);
+                                            let value_type =
+                                                format!("{}::CSVSeal::AnchorData", contract_addr);
                                             let sanad_nonce_val = sanad_nonce.unwrap_or(0);
-                                            
+
                                             let table_payload = serde_json::json!({
                                                 "key_type": key_type,
                                                 "value_type": value_type,
                                                 "key": format!("0x{:016x}", sanad_nonce_val),
                                                 "handle": table_handle
                                             });
-                                            
-                                            log::debug!("Aptos sanad {}: checking table item for nonce {}", sanad.id, sanad_nonce_val);
-                                            
+
+                                            log::debug!(
+                                                "Aptos sanad {}: checking table item for nonce {}",
+                                                sanad.id,
+                                                sanad_nonce_val
+                                            );
+
                                             if let Ok(table_response) = client
                                                 .post(&table_url)
                                                 .json(&table_payload)
@@ -1419,20 +1529,34 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                                                 .await
                                             {
                                                 if table_response.status().is_success() {
-                                                    log::debug!("Aptos sanad {}: nonce {} found in AnchorDataCollection table, marking as Consumed", sanad.id, sanad_nonce_val);
+                                                    log::debug!(
+                                                        "Aptos sanad {}: nonce {} found in AnchorDataCollection table, marking as Consumed",
+                                                        sanad.id,
+                                                        sanad_nonce_val
+                                                    );
                                                     return Some("Consumed".to_string());
                                                 } else if table_response.status().as_u16() == 404 {
-                                                    log::debug!("Aptos sanad {}: nonce {} not found in AnchorDataCollection table, marking as Active", sanad.id, sanad_nonce_val);
+                                                    log::debug!(
+                                                        "Aptos sanad {}: nonce {} not found in AnchorDataCollection table, marking as Active",
+                                                        sanad.id,
+                                                        sanad_nonce_val
+                                                    );
                                                     return Some("Active".to_string());
                                                 }
                                             }
                                         } else {
-                                            if let Some(next_nonce_str) = data.get("data")
+                                            if let Some(next_nonce_str) = data
+                                                .get("data")
                                                 .and_then(|d| d.get("next_nonce"))
-                                                .and_then(|n| n.as_str()) {
-                                                if let Ok(next_nonce) = next_nonce_str.parse::<u64>() {
+                                                .and_then(|n| n.as_str())
+                                            {
+                                                if let Ok(next_nonce) =
+                                                    next_nonce_str.parse::<u64>()
+                                                {
                                                     if let Some(sanad_nonce) = sanad_nonce {
-                                                        if sanad_nonce < next_nonce.saturating_sub(1) {
+                                                        if sanad_nonce
+                                                            < next_nonce.saturating_sub(1)
+                                                        {
                                                             return Some("Consumed".to_string());
                                                         } else {
                                                             return Some("Active".to_string());
@@ -1443,7 +1567,10 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                                         }
                                     }
                                 } else if response.status().as_u16() == 404 {
-                                    log::debug!("Aptos sanad {}: AnchorDataCollection not found (404)", sanad.id);
+                                    log::debug!(
+                                        "Aptos sanad {}: AnchorDataCollection not found (404)",
+                                        sanad.id
+                                    );
                                 }
                             }
                         }
@@ -1453,47 +1580,51 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
         }
         return None;
     }
-    
+
     // For Ethereum, check if sanad is locked on-chain via CSVLock.getSanadState
     if sanad.chain.as_str() == "ethereum" {
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
             use reqwest::Client;
             use sha3::{Digest, Keccak256};
             let client = Client::new();
-            
+
             let contract_addr = if let Some(addr) = &chain_cfg.contract_address {
                 addr.clone()
             } else {
                 log::debug!("Ethereum sanad {}: no contract address in config", sanad.id);
                 return None;
             };
-            
+
             let mut hasher = Keccak256::new();
             hasher.update(b"getSanadState(bytes32)");
             let selector = &hasher.finalize()[..4];
-            
+
             let sanad_id_hex = sanad.id.trim_start_matches("0x");
             let sanad_id_bytes = match hex::decode(sanad_id_hex) {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    log::debug!("Ethereum sanad {}: failed to decode sanad_id: {}", sanad.id, e);
+                    log::debug!(
+                        "Ethereum sanad {}: failed to decode sanad_id: {}",
+                        sanad.id,
+                        e
+                    );
                     return None;
                 }
             };
-            
+
             let mut calldata = Vec::with_capacity(36);
             calldata.extend_from_slice(selector);
             calldata.extend_from_slice(&sanad_id_bytes);
-            
+
             let calldata_hex = format!("0x{}", hex::encode(&calldata));
             let contract_addr_normalized = contract_addr.trim_start_matches("0x");
-            
+
             // Try multiple RPC endpoints for reliability
             let mut rpc_urls = vec![chain_cfg.rpc_url.trim_end_matches('/').to_string()];
             // Add fallback RPCs
             rpc_urls.push("https://eth-sepolia.g.alchemy.com/v2/demo".to_string());
             rpc_urls.push("https://rpc.sepolia.org".to_string());
-            
+
             for url in &rpc_urls {
                 let payload = serde_json::json!({
                     "jsonrpc": "2.0",
@@ -1504,25 +1635,40 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                     }, "latest"],
                     "id": 1
                 });
-                
-                log::debug!("Ethereum sanad {}: calling getSanadState on {} via {}", sanad.id, contract_addr, url);
-                
-                if let Ok(response) = client.post(url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+
+                log::debug!(
+                    "Ethereum sanad {}: calling getSanadState on {} via {}",
+                    sanad.id,
+                    contract_addr,
+                    url
+                );
+
+                if let Ok(response) = client
+                    .post(url)
+                    .timeout(std::time::Duration::from_secs(5))
+                    .json(&payload)
+                    .send()
+                    .await
+                {
                     if let Ok(result) = response.json::<serde_json::Value>().await {
-                        eprintln!("DEBUG: Ethereum sanad {} RPC response from {}: {}", sanad.id, url, result);
+                        eprintln!(
+                            "DEBUG: Ethereum sanad {} RPC response from {}: {}",
+                            sanad.id, url, result
+                        );
                         if let Some(hex_str) = result.get("result").and_then(|r| r.as_str()) {
-                            let response_bytes = match hex::decode(hex_str.trim_start_matches("0x")) {
+                            let response_bytes = match hex::decode(hex_str.trim_start_matches("0x"))
+                            {
                                 Ok(bytes) => bytes,
                                 Err(_) => continue,
                             };
-                            
+
                             // getSanadState returns 4 x 32 bytes:
                             // [state (uint8, padded), isUsed (bool, padded), lockTimestamp (uint256), refunded (bool, padded)]
                             if response_bytes.len() >= 128 {
                                 let state = response_bytes[31]; // state is uint8, last byte of first 32-byte word
                                 let is_used = response_bytes[63] != 0; // isUsed is bool, last byte of second 32-byte word
                                 let refunded = response_bytes[127] != 0; // refunded is bool, last byte of fourth 32-byte word
-                                
+
                                 let status = match state {
                                     0 => "Uncreated",
                                     1 => "Active",
@@ -1531,12 +1677,12 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                                     4 => "Refunded",
                                     _ => "Unknown",
                                 };
-                                
+
                                 eprintln!(
                                     "DEBUG: Ethereum sanad {} state={} isUsed={} refunded={}",
                                     sanad.id, status, is_used, refunded
                                 );
-                                
+
                                 // Map contract state to display status
                                 return match state {
                                     3 => Some("Consumed".to_string()), // Consumed
@@ -1545,27 +1691,35 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                                 };
                             }
                         } else if let Some(err) = result.get("error") {
-                            eprintln!("DEBUG: Ethereum sanad {} RPC error from {}: {}", sanad.id, url, err);
+                            eprintln!(
+                                "DEBUG: Ethereum sanad {} RPC error from {}: {}",
+                                sanad.id, url, err
+                            );
                         }
                     }
                 }
             }
-            
-            log::warn!("Ethereum sanad {}: all RPC endpoints failed, falling back to local status", sanad.id);
+
+            log::warn!(
+                "Ethereum sanad {}: all RPC endpoints failed, falling back to local status",
+                sanad.id
+            );
         }
         return None;
     }
-    
+
     // For Sui, check if seal object is consumed by querying the Seal object via REST API
     if sanad.chain.as_str() == "sui" {
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
             use reqwest::Client;
             let client = Client::new();
-            
-            if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref) {
+
+            if let Ok(seal_ref_bytes) =
+                base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref)
+            {
                 let object_id = if seal_ref_bytes.len() >= 2 {
                     let mut pos = 0;
-                    
+
                     let _nonce = if seal_ref_bytes[pos] == 1 {
                         pos += 1;
                         if seal_ref_bytes.len() < pos + 8 {
@@ -1573,15 +1727,20 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                         }
                         pos += 8;
                         Some(u64::from_le_bytes([
-                            seal_ref_bytes[pos-8], seal_ref_bytes[pos-7], seal_ref_bytes[pos-6],
-                            seal_ref_bytes[pos-5], seal_ref_bytes[pos-4], seal_ref_bytes[pos-3],
-                            seal_ref_bytes[pos-2], seal_ref_bytes[pos-1],
+                            seal_ref_bytes[pos - 8],
+                            seal_ref_bytes[pos - 7],
+                            seal_ref_bytes[pos - 6],
+                            seal_ref_bytes[pos - 5],
+                            seal_ref_bytes[pos - 4],
+                            seal_ref_bytes[pos - 3],
+                            seal_ref_bytes[pos - 2],
+                            seal_ref_bytes[pos - 1],
                         ]))
                     } else {
                         pos += 1;
                         None
                     };
-                    
+
                     let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
                         pos += 1;
                         if seal_ref_bytes.len() < pos + 8 {
@@ -1595,59 +1754,86 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
                     } else {
                         None
                     };
-                    
+
                     if seal_ref_bytes.len() < pos + 4 {
                         return None;
                     }
                     let id_len = u32::from_le_bytes([
-                        seal_ref_bytes[pos], seal_ref_bytes[pos + 1],
-                        seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3],
+                        seal_ref_bytes[pos],
+                        seal_ref_bytes[pos + 1],
+                        seal_ref_bytes[pos + 2],
+                        seal_ref_bytes[pos + 3],
                     ]) as usize;
                     pos += 4;
-                    
+
                     if seal_ref_bytes.len() < pos + id_len {
                         return None;
                     }
-                    
+
                     let object_id = &seal_ref_bytes[pos..pos + id_len];
                     Some(object_id)
                 } else {
                     return None;
                 };
-                
+
                 if let Some(object_id) = object_id {
                     if object_id.len() < 32 {
                         return None;
                     }
-                    
+
                     let object_id = &object_id[0..32];
                     let object_id_hex = format!("0x{}", hex::encode(object_id));
-                    
+
                     // Use Sui REST API to fetch object data
                     let base_url = chain_cfg.rpc_url.trim_end_matches('/');
                     let url = format!("{}/v1(objects/{})", base_url, object_id_hex);
-                    
-                    log::debug!("Sui sanad {}: fetching object {} from {}", sanad.id, object_id_hex, url);
-                    
-                    if let Ok(response) = client.get(&url).timeout(std::time::Duration::from_secs(5)).send().await {
+
+                    log::debug!(
+                        "Sui sanad {}: fetching object {} from {}",
+                        sanad.id,
+                        object_id_hex,
+                        url
+                    );
+
+                    if let Ok(response) = client
+                        .get(&url)
+                        .timeout(std::time::Duration::from_secs(5))
+                        .send()
+                        .await
+                    {
                         if let Ok(result) = response.json::<serde_json::Value>().await {
                             if let Some(status) = result.get("status") {
-                                if status.as_str() == Some("Deleted") || status.as_str() == Some("NotFound") {
-                                    log::debug!("Sui sanad {}: object is deleted/not found", sanad.id);
+                                if status.as_str() == Some("Deleted")
+                                    || status.as_str() == Some("NotFound")
+                                {
+                                    log::debug!(
+                                        "Sui sanad {}: object is deleted/not found",
+                                        sanad.id
+                                    );
                                     return Some("Inaccessible".to_string());
                                 }
                             }
-                            
+
                             // Check the consumed field in the object data
-                            if let Some(contents) = result.get("data").and_then(|d| d.get("contents")) {
-                                if let Some(display_data) = contents.get("display").and_then(|d| d.get("data")) {
+                            if let Some(contents) =
+                                result.get("data").and_then(|d| d.get("contents"))
+                            {
+                                if let Some(display_data) =
+                                    contents.get("display").and_then(|d| d.get("data"))
+                                {
                                     if let Some(consumed) = display_data.get("consumed") {
                                         if let Some(consumed_bool) = consumed.as_bool() {
                                             if consumed_bool {
-                                                log::debug!("Sui sanad {}: seal object is marked consumed", sanad.id);
+                                                log::debug!(
+                                                    "Sui sanad {}: seal object is marked consumed",
+                                                    sanad.id
+                                                );
                                                 return Some("Consumed".to_string());
                                             } else {
-                                                log::debug!("Sui sanad {}: seal object is NOT consumed", sanad.id);
+                                                log::debug!(
+                                                    "Sui sanad {}: seal object is NOT consumed",
+                                                    sanad.id
+                                                );
                                                 return Some("Active".to_string());
                                             }
                                         }
@@ -1661,68 +1847,87 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
         }
         return None;
     }
-    
+
     // For Solana, derive the SanadAccount PDA and check the consumed flag
     if sanad.chain.as_str() == "solana" {
         if let Ok(chain_cfg) = config.chain(&sanad.chain) {
             use reqwest::Client;
             use solana_sdk::pubkey::Pubkey;
             use std::str::FromStr;
-            
+
             let client = Client::new();
-            
+
             // Decode the program ID as base58 (Solana's native address encoding)
-            let program_id = Pubkey::from_str("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj")
-                .ok()?;
-            
+            let program_id =
+                Pubkey::from_str("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj").ok()?;
+
             // Parse the owner pubkey from the sanad record
             let owner_pubkey = Pubkey::from_str(&sanad.owner).ok()?;
-            
+
             // Derive the PDA using the correct Solana algorithm
-            let sanad_id_bytes: [u8; 32] = hex::decode(
-                    sanad.id.trim_start_matches("0x")
-                ).ok()?.try_into().ok()?;
+            let sanad_id_bytes: [u8; 32] = hex::decode(sanad.id.trim_start_matches("0x"))
+                .ok()?
+                .try_into()
+                .ok()?;
             let sanad_id_hash = csv_hash::Hash::new(sanad_id_bytes);
-            
+
             let (seal_pda, _bump) = Pubkey::find_program_address(
                 &[b"sanad", owner_pubkey.as_ref(), sanad_id_hash.as_bytes()],
                 &program_id,
             );
-            
+
             let url = chain_cfg.rpc_url.trim_end_matches('/').to_string();
-            
+
             let payload = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "getAccountInfo",
                 "params": [[seal_pda.to_string()], {"encoding": "base64"}],
                 "id": 1
             });
-            
-            log::debug!("Solana sanad {}: fetching PDA {} via getAccountInfo", sanad.id, seal_pda);
-            
-            if let Ok(response) = client.post(&url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+
+            log::debug!(
+                "Solana sanad {}: fetching PDA {} via getAccountInfo",
+                sanad.id,
+                seal_pda
+            );
+
+            if let Ok(response) = client
+                .post(&url)
+                .timeout(std::time::Duration::from_secs(5))
+                .json(&payload)
+                .send()
+                .await
+            {
                 if let Ok(result) = response.json::<serde_json::Value>().await {
                     if let Some(value) = result.get("result").and_then(|r| r.get("value")) {
                         if value.is_null() {
                             log::debug!("Solana sanad {}: PDA account not found", sanad.id);
                             return Some("Inaccessible".to_string());
                         }
-                        
+
                         // Parse the base64 encoded account data to check consumed flag
                         if let Some(data) = value.get("data").and_then(|d| d.get("data")) {
                             if let Some(data_str) = data.as_str() {
-                                if let Ok(account_data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
-                                    // Parse SanadAccount: 8 (discriminator) + 32 (owner) + 32 (sanad_id) + 
-                                    // 32 (commitment) + 32 (state_root) + 32 (nullifier) + 1 (asset_class) + 
-                                    // 32 (asset_id) + 32 (metadata_hash) + 1 (proof_system) + 32 (proof_root) + 
+                                if let Ok(account_data) =
+                                    base64::engine::general_purpose::STANDARD.decode(data_str)
+                                {
+                                    // Parse SanadAccount: 8 (discriminator) + 32 (owner) + 32 (sanad_id) +
+                                    // 32 (commitment) + 32 (state_root) + 32 (nullifier) + 1 (asset_class) +
+                                    // 32 (asset_id) + 32 (metadata_hash) + 1 (proof_system) + 32 (proof_root) +
                                     // 1 (consumed) + 1 (locked) + 8 (created_at) + 1 (bump)
                                     if account_data.len() >= 44 {
                                         let consumed = account_data[43] != 0;
                                         if consumed {
-                                            log::debug!("Solana sanad {}: SanadAccount consumed flag is true", sanad.id);
+                                            log::debug!(
+                                                "Solana sanad {}: SanadAccount consumed flag is true",
+                                                sanad.id
+                                            );
                                             return Some("Consumed".to_string());
                                         } else {
-                                            log::debug!("Solana sanad {}: SanadAccount consumed flag is false", sanad.id);
+                                            log::debug!(
+                                                "Solana sanad {}: SanadAccount consumed flag is false",
+                                                sanad.id
+                                            );
                                             return Some("Active".to_string());
                                         }
                                     }
@@ -1735,11 +1940,10 @@ async fn check_sanad_on_chain_status(sanad: &SanadRecord, config: &Config, state
         }
         return None;
     }
-    
+
     // Chain not supported for on-chain verification
     None
 }
-
 
 fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> Result<()> {
     output::header(&format!("Transferring Sanad to {}", to));
@@ -1761,7 +1965,10 @@ async fn cmd_consume(
     let sanad_id_bytes = hex::decode(sanad_id.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
     if sanad_id_bytes.len() != 32 {
-        return Err(anyhow::anyhow!("Sanad ID must be 32 bytes ({} bytes provided)", sanad_id_bytes.len()));
+        return Err(anyhow::anyhow!(
+            "Sanad ID must be 32 bytes ({} bytes provided)",
+            sanad_id_bytes.len()
+        ));
     }
     let mut sanad_id_array = [0u8; 32];
     sanad_id_array.copy_from_slice(&sanad_id_bytes);
@@ -1774,7 +1981,9 @@ async fn cmd_consume(
     if tracked_sanad.is_none() {
         output::warning("Sanad not found in local tracking");
         output::info("This Sanad may exist on-chain but hasn't been tracked locally");
-        return Err(anyhow::anyhow!("Sanad not found in local state. Use 'csv sanad list' to see tracked Sanads."));
+        return Err(anyhow::anyhow!(
+            "Sanad not found in local state. Use 'csv sanad list' to see tracked Sanads."
+        ));
     }
 
     // Use the runtime to consume the sanad
@@ -1783,6 +1992,7 @@ async fn cmd_consume(
 
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
+    let identity = WalletIdentity::from_state(state)?;
 
     // Convert CLI config to SDK config format
     let mut sdk_config = csv_sdk::config::Config::default();
@@ -1804,7 +2014,7 @@ async fn cmd_consume(
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
-        seed: None,
+        seed: (chain.as_str() == "bitcoin").then(|| identity.bitcoin_seed_hex()),
         contract_address: chain_cfg.contract_address.clone(),
         program_id: chain_cfg.program_id.clone(),
         account: 0,
@@ -1812,12 +2022,17 @@ async fn cmd_consume(
         utxos: Vec::new(),
         sanad_seals: Vec::new(),
     };
-    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+    sdk_config
+        .chains
+        .insert(chain.as_str().to_string(), sdk_chain_config);
+
+    let private_keys = identity.signing_map(&[(&chain, 0, 0)], state)?;
 
     // Build CSV client with the requested chain enabled
     let client = CsvClient::builder()
         .with_chain(core_chain.clone())
         .with_config(sdk_config)
+        .with_private_keys(private_keys)
         .with_store_backend(StoreBackend::InMemory)
         .build()
         .await
@@ -1829,43 +2044,6 @@ async fn cmd_consume(
         Network::Main => csv_sdk::client::NetworkType::Mainnet,
         Network::Dev => csv_sdk::client::NetworkType::Testnet, // Dev uses testnet
     };
-
-    // Derive private key from wallet mnemonic
-    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-    })?;
-
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array = *seed.as_bytes();
-
-    // For Bitcoin, use the raw 64-byte BIP-39 seed
-    let key_hex = if chain.as_str() == "bitcoin" {
-        hex::encode(seed_array)
-    } else {
-        let (secret_key, _key_source) = signing_key_for_chain(&chain, 0, &seed_array, state)?;
-        hex::encode(secret_key.expose_secret())
-    };
-
-    let mut private_keys = std::collections::HashMap::new();
-    let key_bytes = hex::decode(&key_hex)
-        .map_err(|e| anyhow::anyhow!("Failed to decode private key hex: {}", e))?;
-
-    // Bitcoin uses 64-byte seed for HD derivation, other chains use 32-byte private key
-    let secret_handle = if chain.as_str() == "bitcoin" {
-        // For Bitcoin, use the 64-byte seed directly
-        let seed_array: [u8; 64] = key_bytes.try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid seed length for Bitcoin (expected 64 bytes)"))?;
-        csv_protocol::secret::SharedSecretHandle::from_seed(seed_array)
-    } else {
-        // For other chains, use 32-byte private key
-        let key_array: [u8; 32] = key_bytes.try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid private key length (expected 32 bytes)"))?;
-        csv_protocol::secret::SharedSecretHandle::from_bytes(key_array)
-    };
-
-    private_keys.insert(chain.as_str().to_string(), secret_handle);
 
     // Note: SDK adapters are automatically created during client build
     // Do NOT call init_adapters here as it has been removed from SDK
@@ -1884,7 +2062,12 @@ async fn cmd_consume(
     output::kv("Block Height", &result.block_height.to_string());
 
     // Update sanad status in local state
-    if let Some(tracked) = state.storage.sanads.iter_mut().find(|s| s.id == hex::encode(sanad_id.as_bytes())) {
+    if let Some(tracked) = state
+        .storage
+        .sanads
+        .iter_mut()
+        .find(|s| s.id == hex::encode(sanad_id.as_bytes()))
+    {
         tracked.status = SanadStatus::Consumed;
         state.save()?;
         output::info("Sanad status updated in local state");
@@ -1903,7 +2086,10 @@ fn cmd_remove(sanad_id: Option<String>, all: bool, state: &mut UnifiedStateManag
         let seal_count = state.storage.wallet.sanad_seals.len();
         if seal_count > 0 {
             state.storage.wallet.sanad_seals.clear();
-            output::info(&format!("Cleared {} sanad_seal mappings from wallet state", seal_count));
+            output::info(&format!(
+                "Cleared {} sanad_seal mappings from wallet state",
+                seal_count
+            ));
             output::info("UTXOs previously marked as SanadAnchor are now available for spending.");
         }
 
@@ -1918,7 +2104,10 @@ fn cmd_remove(sanad_id: Option<String>, all: bool, state: &mut UnifiedStateManag
     }
 
     let sanad_id = sanad_id.ok_or_else(|| anyhow::anyhow!("Must provide --all or a Sanad ID"))?;
-    output::header(&format!("Removing Sanad {}", &sanad_id[..8.min(sanad_id.len())]));
+    output::header(&format!(
+        "Removing Sanad {}",
+        &sanad_id[..8.min(sanad_id.len())]
+    ));
 
     // Normalize sanad_id (remove 0x prefix if present)
     let normalized_id = sanad_id.trim_start_matches("0x").to_string();
@@ -1964,7 +2153,8 @@ async fn cmd_state(
     let local_sanad = state.get_sanad(&sanad_id_hex);
 
     // Query on-chain state
-    let on_chain_state = query_sanad_on_chain_state(&chain, &sanad_id_hex, local_sanad, config, state).await;
+    let on_chain_state =
+        query_sanad_on_chain_state(&chain, &sanad_id_hex, local_sanad, config, state).await;
 
     match on_chain_state {
         Some(cs) => {
@@ -1994,9 +2184,12 @@ async fn cmd_state(
                 output::kv("Block Height", &height.to_string());
             }
             if let Some(updated) = &cs.updated_at {
-                output::kv("Updated", &chrono::DateTime::from_timestamp(*updated as i64, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| updated.to_string()));
+                output::kv(
+                    "Updated",
+                    &chrono::DateTime::from_timestamp(*updated as i64, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| updated.to_string()),
+                );
             }
         }
         None => {
@@ -2015,7 +2208,9 @@ async fn cmd_state(
                 }
             } else {
                 output::error("Sanad not found locally and on-chain query returned no data");
-                output::info("This Sanad may not exist on-chain or the chain adapter may not support state queries yet");
+                output::info(
+                    "This Sanad may not exist on-chain or the chain adapter may not support state queries yet",
+                );
             }
         }
     }
@@ -2115,7 +2310,10 @@ async fn query_sanad_on_chain_state(
 }
 
 /// Ethereum: call getSanadState and return full CanonicalSanadState
-async fn query_ethereum_sanad_state(sanad_id_hex: &str, config: &Config) -> Option<CanonicalSanadState> {
+async fn query_ethereum_sanad_state(
+    sanad_id_hex: &str,
+    config: &Config,
+) -> Option<CanonicalSanadState> {
     use reqwest::Client;
     use sha3::{Digest, Keccak256};
 
@@ -2149,15 +2347,23 @@ async fn query_ethereum_sanad_state(sanad_id_hex: &str, config: &Config) -> Opti
         "id": 1
     });
 
-    if let Ok(response) = client.post(&chain_cfg.rpc_url).timeout(std::time::Duration::from_secs(5)).json(&payload).send().await {
+    if let Ok(response) = client
+        .post(&chain_cfg.rpc_url)
+        .timeout(std::time::Duration::from_secs(5))
+        .json(&payload)
+        .send()
+        .await
+    {
         if let Ok(result) = response.json::<serde_json::Value>().await {
             if let Some(hex_str) = result.get("result").and_then(|r| r.as_str()) {
                 let response_bytes = hex::decode(hex_str.trim_start_matches("0x")).ok()?;
 
                 if response_bytes.len() >= 128 {
                     let state = response_bytes[31];
-                    let locked_at = u64::from_be_bytes(response_bytes[64..72].try_into().unwrap_or([0; 8]));
-                    let consumed_at = u64::from_be_bytes(response_bytes[96..104].try_into().unwrap_or([0; 8]));
+                    let locked_at =
+                        u64::from_be_bytes(response_bytes[64..72].try_into().unwrap_or([0; 8]));
+                    let consumed_at =
+                        u64::from_be_bytes(response_bytes[96..104].try_into().unwrap_or([0; 8]));
 
                     return Some(CanonicalSanadState {
                         sanad_id: sanad_id_hex.to_string(),
@@ -2171,7 +2377,11 @@ async fn query_ethereum_sanad_state(sanad_id_hex: &str, config: &Config) -> Opti
                         destination_chain: None,
                         tx_hash: None,
                         block_height: None,
-                        updated_at: Some(if consumed_at > 0 { consumed_at } else { locked_at }),
+                        updated_at: Some(if consumed_at > 0 {
+                            consumed_at
+                        } else {
+                            locked_at
+                        }),
                     });
                 }
             }
@@ -2196,7 +2406,10 @@ async fn query_bitcoin_sanad_state(
                 let vout = if tx_hash_bytes.len() >= 36 {
                     u32::from_le_bytes(tx_hash_bytes[32..36].try_into().unwrap_or([0; 4]))
                 } else {
-                    state.storage.wallet.sanad_seals
+                    state
+                        .storage
+                        .wallet
+                        .sanad_seals
                         .iter()
                         .find(|s| s.sanad_id == sanad_id_hex)
                         .map(|s| s.vout)
@@ -2206,7 +2419,8 @@ async fn query_bitcoin_sanad_state(
                 let txid_display = hex::encode(txid);
 
                 // Runtime-mediated validation: check UTXO status via runtime
-                match validate_bitcoin_utxo_via_runtime(&txid_display, vout, config, tracked).await {
+                match validate_bitcoin_utxo_via_runtime(&txid_display, vout, config, tracked).await
+                {
                     Ok(is_valid) => {
                         if is_valid {
                             return Some(CanonicalSanadState {
@@ -2243,7 +2457,10 @@ async fn query_bitcoin_sanad_state(
                     }
                     Err(e) => {
                         // Fail closed if RPC unavailable - return error instead of partial state
-                        log::warn!("Failed to validate Bitcoin sanad state via runtime: {}. Cannot return canonical state without on-chain validation.", e);
+                        log::warn!(
+                            "Failed to validate Bitcoin sanad state via runtime: {}. Cannot return canonical state without on-chain validation.",
+                            e
+                        );
                         return None;
                     }
                 }
@@ -2264,18 +2481,30 @@ async fn query_sui_sanad_state(
     let tracked = local_sanad?;
 
     // Parse seal reference to extract object ID
-    if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&tracked.seal_ref) {
+    if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&tracked.seal_ref)
+    {
         if seal_ref_bytes.len() >= 2 {
             let mut pos = 0;
-            if seal_ref_bytes[pos] == 1 { pos += 1; }
-            if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 { pos += 1; }
-            else { pos += 1; }
+            if seal_ref_bytes[pos] == 1 {
+                pos += 1;
+            }
+            if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
+                pos += 1;
+            } else {
+                pos += 1;
+            }
 
             if seal_ref_bytes.len() >= pos + 4 {
-                let id_len = u32::from_le_bytes([seal_ref_bytes[pos], seal_ref_bytes[pos + 1], seal_ref_bytes[pos + 2], seal_ref_bytes[pos + 3]]) as usize;
+                let id_len = u32::from_le_bytes([
+                    seal_ref_bytes[pos],
+                    seal_ref_bytes[pos + 1],
+                    seal_ref_bytes[pos + 2],
+                    seal_ref_bytes[pos + 3],
+                ]) as usize;
                 pos += 4;
                 if seal_ref_bytes.len() >= pos + id_len && id_len >= 32 {
-                    let object_id_hex = format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + 32]));
+                    let object_id_hex =
+                        format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + 32]));
                     // Return local state - live chain state should be queried via runtime/adapter
                     return Some(CanonicalSanadState {
                         sanad_id: sanad_id_hex.to_string(),
@@ -2384,13 +2613,13 @@ async fn validate_bitcoin_utxo_via_runtime(
     config: &Config,
     sanad: &SanadRecord,
 ) -> Result<bool, anyhow::Error> {
+    use csv_hash::ChainId;
     use csv_sdk::CsvClient;
     use csv_sdk::StoreBackend;
-    use csv_hash::ChainId;
-    
+
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(sanad.chain.as_str());
-    
+
     // Convert CLI config to SDK config format
     let mut sdk_config = csv_sdk::config::Config::default();
     sdk_config.network = match config.chain(&sanad.chain)?.network {
@@ -2398,7 +2627,7 @@ async fn validate_bitcoin_utxo_via_runtime(
         Network::Main => csv_sdk::config::Network::Mainnet,
         Network::Dev => csv_sdk::config::Network::Devnet,
     };
-    
+
     // Convert chain config to SDK format
     let chain_cfg = config.chain(&sanad.chain)?;
     let sdk_chain_config = csv_sdk::config::ChainConfig {
@@ -2419,8 +2648,10 @@ async fn validate_bitcoin_utxo_via_runtime(
         utxos: vec![],
         sanad_seals: vec![],
     };
-    sdk_config.chains.insert(sanad.chain.as_str().to_string(), sdk_chain_config);
-    
+    sdk_config
+        .chains
+        .insert(sanad.chain.as_str().to_string(), sdk_chain_config);
+
     // Build CSV client
     let client = CsvClient::builder()
         .with_chain(core_chain.clone())
@@ -2429,16 +2660,14 @@ async fn validate_bitcoin_utxo_via_runtime(
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client for validation: {}", e))?;
-    
+
     // Use runtime to check transaction status
     let runtime = client.chain_runtime();
     match runtime.get_transaction(core_chain, txid).await {
         Ok(tx_info) => {
             // Check if transaction is confirmed (UTXO is unspent)
             match tx_info.status {
-                csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => {
-                    Ok(true)
-                }
+                csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => Ok(true),
                 _ => Ok(false),
             }
         }

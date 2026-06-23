@@ -857,12 +857,14 @@ mod real_rpc_impl {
         commitment: [u8; 32],
         csv_seal_address: [u8; 20],
     ) -> bool {
+        let sanad_locked_sig = CsvSealAbi::sanad_locked_event_signature();
         let cross_chain_sig = CsvSealAbi::cross_chain_lock_event_signature();
         let seal_used_sig = CsvSealAbi::seal_used_event_signature();
 
         println!("[Ethereum] Verifying events in receipt...");
         println!("[Ethereum]   Expected seal_id: 0x{}", hex::encode(seal_id));
         println!("[Ethereum]   Expected commitment: 0x{}", hex::encode(commitment));
+        println!("[Ethereum]   Expected SanadLocked sig: 0x{}", hex::encode(sanad_locked_sig));
         println!("[Ethereum]   Expected CrossChainLock sig: 0x{}", hex::encode(cross_chain_sig));
         println!("[Ethereum]   Expected SealUsed sig: 0x{}", hex::encode(seal_used_sig));
         println!("[Ethereum]   Logs in receipt: {}", receipt.logs.len());
@@ -884,15 +886,18 @@ mod real_rpc_impl {
                 continue;
             }
 
-            // Check for CrossChainLock event (emitted by lockSanad)
-            if log.topics.len() >= 3 && log.topics[0] == cross_chain_sig {
-                println!("[Ethereum]     -> CrossChainLock event signature matches");
+            // The deployed contract emits canonical SanadLocked and legacy CrossChainLock
+            // with identical indexed fields.
+            if log.topics.len() >= 3
+                && (log.topics[0] == sanad_locked_sig || log.topics[0] == cross_chain_sig)
+            {
+                println!("[Ethereum]     -> Sanad lock event signature matches");
                 // topics[1] = indexed sanadId, topics[2] = indexed commitment
                 if log.topics[1] == seal_id && log.topics[2] == commitment {
-                    println!("[Ethereum]     -> CrossChainLock event verified!");
+                    println!("[Ethereum]     -> Sanad lock event verified!");
                     return true;
                 }
-                println!("[Ethereum]     -> CrossChainLock event: seal_id or commitment mismatch");
+                println!("[Ethereum]     -> Sanad lock event: seal_id or commitment mismatch");
             }
 
             // Also check for SealUsed event (emitted by markSealUsed and lockSanad)
@@ -921,3 +926,63 @@ pub use real_rpc_impl::{
     AlloyRpcError, EthereumNode, publish, publish_seal_consumption,
     verify_seal_consumption_in_receipt, wait_for_transaction_receipt,
 };
+
+#[cfg(all(test, feature = "rpc"))]
+mod receipt_tests {
+    use super::verify_seal_consumption_in_receipt;
+    use crate::rpc::{LogEntry, TransactionReceipt};
+    use crate::seal_contract::CsvSealAbi;
+
+    fn receipt(topic: [u8; 32], sanad_id: [u8; 32], commitment: [u8; 32]) -> TransactionReceipt {
+        TransactionReceipt {
+            tx_hash: [1u8; 32],
+            block_number: 11_122_645,
+            block_hash: [2u8; 32],
+            contract_address: None,
+            logs: vec![LogEntry {
+                address: [3u8; 20],
+                topics: vec![topic, sanad_id, commitment, [0u8; 32]],
+                data: vec![0u8; 160],
+                log_index: 0,
+            }],
+            status: 1,
+            gas_used: 204_096,
+            success: true,
+        }
+    }
+
+    #[test]
+    fn accepts_deployed_sanad_locked_event() {
+        let sanad_id = [4u8; 32];
+        let commitment = [5u8; 32];
+        let receipt = receipt(
+            CsvSealAbi::sanad_locked_event_signature(),
+            sanad_id,
+            commitment,
+        );
+
+        assert!(verify_seal_consumption_in_receipt(
+            &receipt,
+            sanad_id,
+            commitment,
+            [3u8; 20],
+        ));
+    }
+
+    #[test]
+    fn rejects_deployed_sanad_locked_event_with_wrong_commitment() {
+        let sanad_id = [4u8; 32];
+        let receipt = receipt(
+            CsvSealAbi::sanad_locked_event_signature(),
+            sanad_id,
+            [5u8; 32],
+        );
+
+        assert!(!verify_seal_consumption_in_receipt(
+            &receipt,
+            sanad_id,
+            [6u8; 32],
+            [3u8; 20],
+        ));
+    }
+}

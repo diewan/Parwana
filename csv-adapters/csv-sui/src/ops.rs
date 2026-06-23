@@ -238,9 +238,16 @@ impl ChainQuery for SuiBackend {
             // Collect the first balance from the stream
             use futures::StreamExt;
             let mut pinned = Box::pin(balance_stream);
-            let balance = pinned.next().await
-                .ok_or_else(|| ChainOpError::InvalidInput("No balance found".to_string()))
-                .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?
+            let Some(balance_result) = pinned.next().await else {
+                return Ok(BalanceInfo {
+                    address: address.to_string(),
+                    total: 0,
+                    available: 0,
+                    locked: 0,
+                    tokens: Vec::new(),
+                });
+            };
+            let balance = balance_result
                 .map_err(|e| ChainOpError::RpcError(format!("Failed to get balance: {}", e)))?;
             
             // Build token information from balance response

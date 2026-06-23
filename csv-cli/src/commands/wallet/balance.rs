@@ -8,6 +8,7 @@ use crate::output;
 use crate::state::UnifiedStateManager;
 use anyhow::Result;
 
+use crate::wallet_identity::WalletIdentity;
 use csv_hash::ChainId;
 use csv_keys::Mnemonic;
 use csv_sdk::CsvClient;
@@ -24,20 +25,8 @@ pub async fn cmd_balance(
 ) -> Result<()> {
     // Use centralized wallet identity resolver for address derivation
     let address = if address.is_none() {
-        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
-            let mnemonic = Mnemonic::from_phrase(mnemonic_phrase)
-                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-            let seed = mnemonic.to_seed(None);
-            let seed_array = *seed.as_bytes();
-
-            // Use csv-keys bip44 derivation for consistency with wallet init
-            use csv_keys::bip44;
-            let chain_id = ChainId::from(chain.as_str());
-            let key = bip44::derive_key(&seed_array, &chain_id, account, index)
-                .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
-            let addr = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-                .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-            Some(addr)
+        if state.storage.wallet.mnemonic.is_some() {
+            Some(WalletIdentity::from_state(state)?.address(&chain, account, index)?)
         } else {
             state.get_address(&chain).map(|s| s.to_string())
         }
@@ -56,7 +45,6 @@ pub async fn cmd_balance(
             }
             Err(e) => {
                 output::error(&format!("Failed to query balance: {}", e));
-                output::info("Balance query requires chain RPC to be configured");
             }
         }
     } else {
@@ -95,21 +83,14 @@ pub fn cmd_list(
     let mut found_any = false;
     for chain in chains {
         // Use csv-keys bip44 derivation for all chains (consistent with wallet init)
-        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
-            let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-            let seed = mnemonic.to_seed(None);
-            let seed_array = *seed.as_bytes();
+        if state.storage.wallet.mnemonic.is_some() {
+            let derived_address =
+                WalletIdentity::from_state(state)?.address(&chain, account, index)?;
 
-            // Use csv-keys bip44 derivation for consistency
-            use csv_keys::bip44;
-            let chain_id = ChainId::from(chain.as_str());
-            let key = bip44::derive_key(&seed_array, &chain_id, account, index)
-                .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
-            let derived_address = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-                .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?;
-
-            output::kv(&format!("{} (account {}, index {})", chain, account, index), &derived_address);
+            output::kv(
+                &format!("{} (account {}, index {})", chain, account, index),
+                &derived_address,
+            );
             found_any = true;
         } else {
             // Fallback to stored address if no mnemonic
@@ -133,7 +114,12 @@ pub fn cmd_list(
 ///
 /// This function uses only the unified CsvClient runtime, avoiding direct
 /// chain adapter dependencies per Phase 5 of the Production Guarantee Plan.
-async fn query_balance(chain: &Chain, address: &str, config: &Config, state: &UnifiedStateManager) -> Result<f64> {
+async fn query_balance(
+    chain: &Chain,
+    address: &str,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<f64> {
     use csv_sdk::config::{ChainConfig, RpcConfig, StoreConfig};
     use csv_sdk::prelude::NetworkType;
     use std::collections::HashMap;
@@ -162,26 +148,6 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config, state: &Un
         None
     };
 
-    // Derive private keys from mnemonic for chains that require signing
-    let mut private_keys = std::collections::HashMap::new();
-    if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
-        let mnemonic = Mnemonic::from_phrase(mnemonic_phrase)
-            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-        let seed = mnemonic.to_seed(None);
-        let seed_array = *seed.as_bytes();
-
-        // Derive Ethereum private key
-        if chain.as_str() == "ethereum" {
-            use csv_keys::bip44;
-            let eth_key = bip44::derive_key_from_name(&seed_array, "ethereum", 0, 0)
-                .map_err(|e| anyhow::anyhow!("Failed to derive Ethereum key: {}", e))?;
-            private_keys.insert(
-                "ethereum".to_string(),
-                csv_protocol::secret::SharedSecretHandle::from_bytes(*eth_key.expose_secret()),
-            );
-        }
-    }
-
     let mut sdk_chains = HashMap::new();
     if let Some(cc) = &sdk_chain {
         let rpc = RpcConfig {
@@ -190,7 +156,7 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config, state: &Un
             timeout_ms: 30_000,
             max_retries: 3,
         };
-          sdk_chains.insert(
+        sdk_chains.insert(
             core_chain.to_string(),
             ChainConfig {
                 rpc,
@@ -224,7 +190,10 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config, state: &Un
                 xpub: wallet_xpub,
                 seed: wallet_seed,
                 contract_address: None,
-                program_id: config.chain(&core_chain).ok().and_then(|c| c.program_id.clone()),
+                program_id: config
+                    .chain(&core_chain)
+                    .ok()
+                    .and_then(|c| c.program_id.clone()),
                 account: 0,
                 index: 0,
                 utxos: Vec::new(),
@@ -251,18 +220,10 @@ async fn query_balance(chain: &Chain, address: &str, config: &Config, state: &Un
         .with_store_backend(StoreBackend::InMemory)
         .with_config(sdk_config);
 
-    let client = if !private_keys.is_empty() {
-        client_builder
-            .with_private_keys(private_keys)
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?
-    } else {
-        client_builder
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?
-    };
+    let client = client_builder
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     // Get chain runtime and query balance through the unified runtime
     let clean_address = address.strip_prefix("0x").unwrap_or(address);

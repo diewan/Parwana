@@ -198,7 +198,11 @@ impl StateStorage {
 
     /// Add or update account.
     pub fn set_account(&mut self, account: WalletAccount) {
-        self.wallet.add_account(account);
+        if let Some(existing) = self.wallet.get_account_mut(&account.chain) {
+            *existing = account;
+        } else {
+            self.wallet.add_account(account);
+        }
     }
 
     /// Get address for a chain.

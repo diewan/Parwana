@@ -198,7 +198,7 @@ impl CsvMintAbi {
 
 /// CrossChainLock event signature
 pub fn cross_chain_lock_signature() -> [u8; 32] {
-    keccak256(b"CrossChainLock(bytes32,bytes32,address,uint8,bytes,bytes32,uint8,bytes32,bytes32,uint8,bytes32)")
+    keccak256(b"CrossChainLock(bytes32,bytes32,address,bytes32,bytes,uint256)")
 }
 
 /// SanadMinted event signature

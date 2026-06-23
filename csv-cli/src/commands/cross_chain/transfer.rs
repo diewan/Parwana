@@ -7,7 +7,6 @@ use anyhow::Result;
 
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
-use csv_sdk::wallet::WalletIdentityResolver;
 use csv_sdk::CsvClient;
 
 use crate::config::{Chain, Config};
@@ -15,6 +14,7 @@ use crate::output;
 use crate::state::{TransferRecord, TransferStatus, UnifiedStateManager};
 
 use super::to_protocol_chain;
+use crate::wallet_identity::WalletIdentity;
 
 /// Execute cross-chain transfer using only runtime API
 pub async fn cmd_transfer(
@@ -57,16 +57,9 @@ pub async fn cmd_transfer(
 
     // Get destination owner address using centralized identity resolver
     let dest_owner_str = if dest_owner.is_none() {
-        if let Some(mnemonic_phrase) = &state.storage.wallet.mnemonic {
-            let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-                .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-            let seed = mnemonic.to_seed(None);
-            let seed_array = *seed.as_bytes();
-
-            // Use centralized wallet identity resolver
-            let resolver = WalletIdentityResolver::from_seed(seed_array);
-            let chain_id = csv_hash::ChainId::new(to.as_str());
-            Some(resolver.derive_address(chain_id, 0, 0))
+        if state.storage.wallet.mnemonic.is_some() {
+            let identity = WalletIdentity::from_state(state)?;
+            Some(identity.address(&to, 0, 0)?)
         } else {
             state.get_address(&to).map(|s| s.to_string())
         }
@@ -84,19 +77,25 @@ pub async fn cmd_transfer(
     // Create client builder with source and destination chains
     // Build SDK config from CLI config
     let mut sdk_config = csv_sdk::config::Config::default();
-    
+
     // Add source chain config
     if let Some(from_chain_config) = config.chain(&from).ok() {
         // Include UTXOs from wallet state for Bitcoin
         let utxos = if from.as_str() == "bitcoin" {
-            state.storage.wallet.utxos.iter().map(|u| csv_sdk::config::UtxoConfig {
-                txid: u.txid.clone(),
-                vout: u.vout,
-                value: u.value,
-                account: u.account,
-                index: u.index,
-                script_pubkey: u.script_pubkey.clone(),
-            }).collect()
+            state
+                .storage
+                .wallet
+                .utxos
+                .iter()
+                .map(|u| csv_sdk::config::UtxoConfig {
+                    txid: u.txid.clone(),
+                    vout: u.vout,
+                    value: u.value,
+                    account: u.account,
+                    index: u.index,
+                    script_pubkey: u.script_pubkey.clone(),
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -111,21 +110,31 @@ pub async fn cmd_transfer(
             finality_depth: finality_depth.unwrap_or(from_chain_config.finality_depth) as u32,
             enabled: true,
             xpub: None,
-            seed: None,
+            seed: (from.as_str() == "bitcoin")
+                .then(|| {
+                    WalletIdentity::from_state(state).map(|identity| identity.bitcoin_seed_hex())
+                })
+                .transpose()?,
             contract_address: from_chain_config.contract_address.clone(),
             program_id: from_chain_config.program_id.clone(),
             account: 0,
             index: 0,
             utxos,
-            sanad_seals: state.storage.wallet.sanad_seals.iter().map(|s| csv_sdk::config::SanadSealConfig {
-                sanad_id: s.sanad_id.clone(),
-                anchor_txid: s.anchor_txid.clone(),
-                vout: s.vout,
-            }).collect(),
+            sanad_seals: state
+                .storage
+                .wallet
+                .sanad_seals
+                .iter()
+                .map(|s| csv_sdk::config::SanadSealConfig {
+                    sanad_id: s.sanad_id.clone(),
+                    anchor_txid: s.anchor_txid.clone(),
+                    vout: s.vout,
+                })
+                .collect(),
         };
         sdk_config.chains.insert(from.to_string(), chain_config);
     }
-    
+
     // Add destination chain config
     if let Some(to_chain_config) = config.chain(&to).ok() {
         let chain_config = csv_sdk::config::ChainConfig {
@@ -138,7 +147,11 @@ pub async fn cmd_transfer(
             finality_depth: to_chain_config.finality_depth as u32,
             enabled: true,
             xpub: None,
-            seed: None,
+            seed: (to.as_str() == "bitcoin")
+                .then(|| {
+                    WalletIdentity::from_state(state).map(|identity| identity.bitcoin_seed_hex())
+                })
+                .transpose()?,
             contract_address: to_chain_config.contract_address.clone(),
             program_id: to_chain_config.program_id.clone(),
             account: 0,
@@ -149,45 +162,8 @@ pub async fn cmd_transfer(
         sdk_config.chains.insert(to.to_string(), chain_config);
     }
 
-    // Derive private keys from wallet mnemonic for chains that require signing
-    let mnemonic_phrase = state.storage.wallet.mnemonic.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("No wallet mnemonic found. Initialize or import a wallet first.")
-    })?;
-
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array = *seed.as_bytes();
-
-    let mut private_keys = std::collections::HashMap::new();
-
-    // Derive private key for source chain
-    let from_key_hex = if from.as_str() == "bitcoin" {
-        hex::encode(seed_array)
-    } else {
-        let (secret_key, _) = signing_key_for_chain(&from, 0, &seed_array, state)?;
-        hex::encode(secret_key.expose_secret())
-    };
-    let from_key_bytes = hex::decode(&from_key_hex)
-        .map_err(|e| anyhow::anyhow!("Failed to decode from private key hex: {}", e))?;
-    let from_key_array: [u8; 32] = from_key_bytes.try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid from private key length"))?;
-    let from_secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(from_key_array);
-    private_keys.insert(from.to_string(), from_secret_handle);
-
-    // Derive private key for destination chain
-    let to_key_hex = if to.as_str() == "bitcoin" {
-        hex::encode(seed_array)
-    } else {
-        let (secret_key, _) = signing_key_for_chain(&to, 0, &seed_array, state)?;
-        hex::encode(secret_key.expose_secret())
-    };
-    let to_key_bytes = hex::decode(&to_key_hex)
-        .map_err(|e| anyhow::anyhow!("Failed to decode to private key hex: {}", e))?;
-    let to_key_array: [u8; 32] = to_key_bytes.try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid to private key length"))?;
-    let to_secret_handle = csv_protocol::secret::SharedSecretHandle::from_bytes(to_key_array);
-    private_keys.insert(to.to_string(), to_secret_handle);
+    let identity = WalletIdentity::from_state(state)?;
+    let private_keys = identity.signing_map(&[(&from, 0, 0), (&to, 0, 0)], state)?;
 
     let client = CsvClient::builder()
         .with_chain(from_chain.clone())
@@ -254,7 +230,10 @@ pub async fn cmd_transfer(
 
     // Update local Sanad store: mark source Sanad as consumed
     if let Err(e) = state.consume_sanad(&sanad_id_hash.to_hex()) {
-        log::warn!("Failed to mark source Sanad as consumed in local store: {}", e);
+        log::warn!(
+            "Failed to mark source Sanad as consumed in local store: {}",
+            e
+        );
     }
 
     Ok(())
@@ -271,60 +250,4 @@ fn generate_transfer_id(sanad_id: &Hash, from: &Chain, to: &Chain) -> String {
     hasher.update(chrono::Utc::now().timestamp().to_le_bytes());
 
     format!("0x{}", hex::encode(hasher.finalize()))
-}
-
-fn signing_key_for_chain(
-    chain: &Chain,
-    account: u32,
-    seed_array: &[u8; 64],
-    state: &UnifiedStateManager,
-) -> Result<(csv_keys::memory::SecretKey, &'static str)> {
-    // Try keystore first for all chains (not just Aptos)
-    if let Some(secret_key) = load_keystore_key(chain, account, state)? {
-        return Ok((secret_key, "keystore"));
-    }
-
-    let mut keys = csv_keys::bip44::derive_all_chain_keys(seed_array, account);
-    let core_chain = csv_hash::ChainId::new(chain.as_str());
-    let secret_key = keys
-        .remove(&core_chain)
-        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
-
-    Ok((secret_key, "mnemonic-derived"))
-}
-
-fn load_keystore_key(
-    chain: &Chain,
-    account: u32,
-    state: &UnifiedStateManager,
-) -> Result<Option<csv_keys::memory::SecretKey>> {
-    let mut key_ids = Vec::new();
-    if let Some(wallet_account) = state.get_account(chain) {
-        if let Some(keystore_ref) = &wallet_account.keystore_ref {
-            key_ids.push(keystore_ref.clone());
-        }
-    }
-    key_ids.push(format!("{}-{}", chain.as_str(), account));
-
-    let mut keystore = csv_keys::file_keystore::FileKeystore::new(None)?;
-    let passphrase = csv_keys::memory::Passphrase::new(state.passphrase().to_string());
-
-    for key_id in key_ids {
-        match keystore.retrieve_key(&key_id, &passphrase) {
-            Ok(secret_key) => return Ok(Some(secret_key)),
-            Err(csv_keys::file_keystore::FileKeystoreError::KeyNotFound(_)) => {}
-            Err(csv_keys::file_keystore::FileKeystoreError::InvalidPassphrase) => {
-                // FAIL CLOSED: Return error instead of falling back to mnemonic derivation
-                return Err(anyhow::anyhow!(
-                    "Keystore key '{}' exists but passphrase is incorrect. \
-                     Cannot proceed without correct passphrase. \
-                     This is a security requirement - wrong passphrase must fail closed.",
-                    key_id
-                ));
-            }
-            Err(e) => return Err(anyhow::anyhow!("Failed to load key '{}': {}", key_id, e)),
-        }
-    }
-
-    Ok(None)
 }

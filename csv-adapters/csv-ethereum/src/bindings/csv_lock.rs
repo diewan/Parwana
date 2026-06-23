@@ -42,14 +42,9 @@ sol! {
             bytes32 indexed sanadId,
             bytes32 indexed commitment,
             address indexed owner,
-            uint8 destinationChain,
+            bytes32 destinationChain,
             bytes destinationOwner,
-            bytes32 sourceTxHash,
-            uint8 assetClass,
-            bytes32 assetId,
-            bytes32 metadataHash,
-            uint8 proofSystem,
-            bytes32 proofRoot
+            uint256 timestamp
         );
 
         event SealUsed(bytes32 indexed sealId, bytes32 commitment);

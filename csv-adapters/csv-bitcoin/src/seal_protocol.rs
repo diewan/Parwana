@@ -35,6 +35,13 @@ use crate::types::{
 };
 use crate::wallet::SealWallet;
 
+fn outpoint_from_internal_txid(txid: [u8; 32], vout: u32) -> bitcoin::OutPoint {
+    bitcoin::OutPoint {
+        txid: bitcoin::Txid::from_byte_array(txid),
+        vout,
+    }
+}
+
 /// Bitcoin implementation of the SealProtocol trait with HD wallet support
 pub struct BitcoinSealProtocol {
     config: BitcoinConfig,
@@ -333,6 +340,26 @@ impl BitcoinSealProtocol {
         let mut loaded_count = 0;
 
         for utxo in rpc_utxos {
+            match rpc.is_utxo_unspent(utxo.txid, utxo.vout).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    log::warn!(
+                        "RPC-discovered UTXO {}:{} is already spent or missing, skipping",
+                        hex::encode(utxo.txid),
+                        utxo.vout
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    return Err(BitcoinError::RpcError(format!(
+                        "Failed to validate RPC-discovered UTXO {}:{}: {}",
+                        hex::encode(utxo.txid),
+                        utxo.vout,
+                        e
+                    )));
+                }
+            }
+
             // Fetch scriptPubKey for this UTXO
             let script_pubkey = match rpc.get_utxo_scriptpubkey(utxo.txid, utxo.vout).await {
                 Ok(Some(spk)) => Some(spk),
@@ -346,14 +373,8 @@ impl BitcoinSealProtocol {
                 }
             };
 
-            // Convert RPC UTXO to wallet format
-            let mut txid_array = utxo.txid;
-            txid_array.reverse(); // Convert internal to display byte order for OutPoint
-            let hash = bitcoin::hashes::Hash::from_byte_array(txid_array);
-            let outpoint = bitcoin::OutPoint {
-                txid: bitcoin::Txid::from_raw_hash(hash),
-                vout: utxo.vout,
-            };
+            // UtxoInfo stores txids in Bitcoin's internal byte order.
+            let outpoint = outpoint_from_internal_txid(utxo.txid, utxo.vout);
 
             // Decode scriptPubKey
             let script_pubkey_buf = script_pubkey
@@ -757,11 +778,12 @@ impl SealProtocol for BitcoinSealProtocol {
 
             // Fetch and validate the actual on-chain scriptPubKey (what the node expects)
             // This is optional - if mempool.space hasn't indexed the transaction yet, we skip this validation
-            // mempool.space expects display format txid (reversed bytes), but seal.txid is internal byte order
-            let mut display_txid = seal.txid;
-            display_txid.reverse(); // Convert internal to display byte order for RPC
-            log::info!("Fetching scriptPubKey for INPUT UTXO: txid={}, vout={}", hex::encode(display_txid), seal.vout);
-            let _onchain_spk = match rpc.get_utxo_scriptpubkey(display_txid, seal.vout).await {
+            log::info!(
+                "Fetching scriptPubKey for INPUT UTXO: txid={}, vout={}",
+                seal.txid_hex(),
+                seal.vout
+            );
+            let _onchain_spk = match rpc.get_utxo_scriptpubkey(seal.txid, seal.vout).await {
                 Ok(Some(spk)) => {
                     log::info!("Successfully fetched scriptPubKey for INPUT UTXO");
                     Some(spk)
@@ -1179,6 +1201,19 @@ mod tests {
                 panic!("Expected Tapret variant");
             }
         }
+    }
+
+    #[test]
+    fn rpc_internal_txid_round_trips_to_display_outpoint() {
+        let display =
+            "8d981f37959fc264935325da7ff575215084d7e58193ff66e7932204d63382b8";
+        let mut internal: [u8; 32] = hex::decode(display).unwrap().try_into().unwrap();
+        internal.reverse();
+
+        let outpoint = outpoint_from_internal_txid(internal, 617);
+
+        assert_eq!(outpoint.txid.to_string(), display);
+        assert_eq!(outpoint.vout, 617);
     }
 
     #[tokio::test]

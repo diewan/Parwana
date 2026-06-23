@@ -12,19 +12,11 @@
 use crate::config::{Chain, Config, Network};
 use crate::output;
 use crate::state::UnifiedStateManager;
+use crate::wallet_identity::WalletIdentity;
 use anyhow::Result;
 use std::collections::HashMap;
 
-use csv_coordinator::wallet_factory::{init_wallet_factory, get_wallet_operations};
-use csv_hash::ChainId;
-use csv_keys::{
-    Mnemonic, MnemonicType,
-    bip44::{derive_address_from_key, derive_all_chain_keys},
-    file_keystore::FileKeystore,
-    memory::Passphrase,
-};
-use csv_wallet::{address, WalletError};
-
+use csv_keys::{Mnemonic, MnemonicType};
 /// Initialize wallet with one-command setup.
 pub fn cmd_init(
     network: Network,
@@ -35,13 +27,6 @@ pub fn cmd_init(
 ) -> Result<()> {
     output::header("CSV Wallet Initialization");
     output::info("Setting up your cross-chain wallet...");
-
-    // Prompt for passphrase
-    let passphrase = prompt_passphrase("Enter keystore passphrase (min 12 chars)")?;
-    if passphrase.len() < 12 {
-        anyhow::bail!("Passphrase must be at least 12 characters");
-    }
-    let passphrase = Passphrase::new(passphrase);
 
     // Step 1: Generate mnemonic
     let mnemonic = generate_mnemonic(words)?;
@@ -54,9 +39,6 @@ pub fn cmd_init(
     // Step 2: Generate wallets for all supported chains
     let mut addresses = HashMap::new();
 
-    // Initialize file keystore
-    let mut keystore = FileKeystore::new(None)?;
-
     for chain in [
         Chain::new("bitcoin"),
         Chain::new("ethereum"),
@@ -65,15 +47,7 @@ pub fn cmd_init(
         Chain::new("solana"),
     ] {
         output::info(&format!("Generating {} wallet...", chain));
-        let address = generate_wallet_for_chain(
-            &chain,
-            &network,
-            &mnemonic,
-            account,
-            state,
-            &mut keystore,
-            &passphrase,
-        )?;
+        let address = generate_wallet_for_chain(&chain, &network, &mnemonic, account, state)?;
         addresses.insert(chain.clone(), address.clone());
         output::success(&format!("{} wallet generated", chain));
     }
@@ -110,7 +84,7 @@ pub fn cmd_init(
 /// Generate a single wallet for a specific chain.
 ///
 /// This requires an existing mnemonic from `wallet init` or `wallet import`.
-/// It derives the key for the specified chain and stores it in the keystore.
+/// It derives the account from the encrypted wallet mnemonic.
 pub fn cmd_generate(
     chain: Chain,
     network: Network,
@@ -142,59 +116,16 @@ fn generate_mnemonic(words: u8) -> Result<String> {
     Ok(mnemonic.as_str().to_string())
 }
 
-/// Generate wallet for a specific chain from mnemonic using keystore runtime.
+/// Generate wallet for a specific chain from the canonical mnemonic.
 fn generate_wallet_for_chain(
     chain: &Chain,
     _network: &Network,
     mnemonic: &str,
     account: u32,
     state: &mut UnifiedStateManager,
-    keystore: &mut FileKeystore,
-    passphrase: &Passphrase,
 ) -> Result<String> {
-    // Phase 5: Use WalletFactory for unified address derivation
-    // Convert mnemonic to seed
-    let mnemonic_obj =
-        Mnemonic::from_phrase(mnemonic).map_err(|e| anyhow::anyhow!("Invalid mnemonic: {}", e))?;
-    let seed = mnemonic_obj.to_seed(None);
-    let seed_array = *seed.as_bytes();
-
-    // Initialize wallet factory and get chain-specific operations
-    let _factory = init_wallet_factory();
-    let chain_id = ChainId::from(chain.as_str());
-    let wallet_ops = get_wallet_operations(&chain_id);
-
-    // Use WalletFactory for address derivation (unified wallet abstraction)
-    let address = if let Some(ops) = wallet_ops {
-        ops.derive_address(&seed_array, account, 0)
-            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-    } else {
-        // Fallback to csv-wallet address derivation
-        address::derive_funding_address(&seed_array, chain.as_str(), account, 0)
-            .map_err(|e| match e {
-                csv_wallet::WalletError::UnsupportedChain(chain) => {
-                    anyhow::anyhow!("{}", WalletError::UnsupportedChain(chain))
-                }
-                other => anyhow::anyhow!("Failed to derive address: {}", other),
-            })?
-    };
-
-    // Derive keys for keystore storage
-    let core_chain = ChainId::new(chain.as_str());
-    let keys = derive_all_chain_keys(&seed_array, account);
-    let key = keys
-        .get(&core_chain)
-        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for {:?}", chain))?;
-
-    // Store private key in encrypted file keystore
-    let key_id = format!("{}-{}", chain.to_string().to_lowercase(), account);
-    keystore.store_key(
-        &key_id,
-        &chain.to_string().to_lowercase(),
-        Some(&format!("{} Account (account {})", chain, account)),
-        key,
-        passphrase,
-    )?;
+    let identity = WalletIdentity::from_mnemonic(mnemonic)?;
+    let address = identity.address(chain, account, 0)?;
 
     // Store in state with derivation path
     let (purpose, coin_type) = match chain.as_str() {
@@ -207,6 +138,9 @@ fn generate_wallet_for_chain(
     };
     let derivation_path = format!("m/{}/{}'/{}'/0/0", purpose, coin_type, account);
     state.store_address_with_derivation(chain.clone(), address.clone(), Some(derivation_path));
+    if let Some(account_record) = state.storage.wallet.get_account_mut(chain) {
+        account_record.keystore_ref = None;
+    }
 
     Ok(address)
 }
@@ -219,11 +153,8 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
         anyhow::anyhow!("No mnemonic found. Run 'csv wallet init' first to generate a mnemonic.")
     })?;
 
-    // Convert mnemonic to seed
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array = *seed.as_bytes();
+    let identity = WalletIdentity::from_mnemonic(mnemonic_phrase)?;
+    let seed_array = *identity.seed();
 
     // Derive BIP-86 xpub (safe to share, can derive addresses but not spend)
     use csv_keys::bip39::{BitcoinNetwork, derive_xpub};
@@ -235,24 +166,7 @@ fn generate_bitcoin(network: Network, state: &mut UnifiedStateManager) -> Result
     let xpub = derive_xpub(&seed_array, bitcoin_network, 0)
         .map_err(|e| anyhow::anyhow!("Failed to derive xpub: {}", e))?;
 
-    // Use WalletFactory for address derivation (unified wallet abstraction)
-    let _factory = init_wallet_factory();
-    let chain_id = ChainId::from("bitcoin");
-    let wallet_ops = get_wallet_operations(&chain_id);
-
-    let address = if let Some(ops) = wallet_ops {
-        ops.derive_address(&seed_array, 0, 0)
-            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-    } else {
-        // Fallback to csv-wallet address derivation
-        address::derive_funding_address(&seed_array, "bitcoin", 0, 0)
-            .map_err(|e| match e {
-                csv_wallet::WalletError::UnsupportedChain(chain) => {
-                    anyhow::anyhow!("{}", WalletError::UnsupportedChain(chain))
-                }
-                other => anyhow::anyhow!("Failed to derive address: {}", other),
-            })?
-    };
+    let address = identity.address(&Chain::new("bitcoin"), 0, 0)?;
 
     // Store address in state
     state.store_address(Chain::new("bitcoin"), address.clone());
@@ -280,53 +194,8 @@ fn generate_from_mnemonic(
         anyhow::anyhow!("No mnemonic found. Run 'csv wallet init' first to generate a mnemonic.")
     })?;
 
-    // Convert mnemonic to seed
-    let mnemonic = csv_keys::Mnemonic::from_phrase(mnemonic_phrase)
-        .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {}", e))?;
-    let seed = mnemonic.to_seed(None);
-    let seed_array = *seed.as_bytes();
-
-    // Use WalletFactory for address derivation (unified wallet abstraction)
-    let _factory = init_wallet_factory();
-    let chain_id = ChainId::from(chain.as_str());
-    let wallet_ops = get_wallet_operations(&chain_id);
-
-    let address = if let Some(ops) = wallet_ops {
-        ops.derive_address(&seed_array, 0, 0)
-            .map_err(|e| anyhow::anyhow!("Failed to derive address: {}", e))?
-    } else {
-        // Fallback to csv-wallet address derivation
-        address::derive_funding_address(&seed_array, chain.as_str(), 0, 0)
-            .map_err(|e| match e {
-                csv_wallet::WalletError::UnsupportedChain(chain) => {
-                    anyhow::anyhow!("{}", WalletError::UnsupportedChain(chain))
-                }
-                other => anyhow::anyhow!("Failed to derive address: {}", other),
-            })?
-    };
-
-    // Derive key for keystore storage
-    let core_chain = ChainId::new(chain.as_str());
-    let keys = derive_all_chain_keys(&seed_array, 0);
-    let secret_key = keys
-        .get(&core_chain)
-        .ok_or_else(|| anyhow::anyhow!("Failed to derive key for chain: {}", chain))?;
-
-    // Store private key in encrypted file keystore
-    use csv_keys::file_keystore::FileKeystore;
-    use csv_keys::memory::Passphrase;
-
-    let key_id = format!("{}-0", chain.to_string().to_lowercase());
-    let mut keystore = FileKeystore::new(None)?;
-    let passphrase = Passphrase::new(state.passphrase().to_string());
-
-    keystore.store_key(
-        &key_id,
-        &chain.to_string().to_lowercase(),
-        Some(&format!("{} Account (account 0)", chain)),
-        secret_key,
-        &passphrase,
-    )?;
+    let identity = WalletIdentity::from_mnemonic(mnemonic_phrase)?;
+    let address = identity.address(chain, 0, 0)?;
 
     // Store address in state with derivation path
     let (purpose, coin_type) = match chain.as_str() {
@@ -337,16 +206,22 @@ fn generate_from_mnemonic(
         _ => ("44", "0"),
     };
     let derivation_path = format!("m/{}/{}'/0'/0/0", purpose, coin_type);
-    state.store_address_with_derivation(chain.clone(), address.clone(), Some(derivation_path.clone()));
+    state.store_address_with_derivation(
+        chain.clone(),
+        address.clone(),
+        Some(derivation_path.clone()),
+    );
+    if let Some(account_record) = state.storage.wallet.get_account_mut(chain) {
+        account_record.keystore_ref = None;
+    }
 
     output::header(&format!("{} Wallet Generated", chain));
     output::kv("Address", &address);
     output::kv("Derivation Path", &derivation_path);
-    output::kv("Keystore ID", &key_id);
 
     println!();
     output::info("Wallet derived from your existing mnemonic.");
-    output::info("Private key stored in encrypted keystore.");
+    output::info("The encrypted wallet mnemonic is the single signing authority.");
 
     Ok(())
 }
@@ -418,16 +293,4 @@ fn expand_path(path: &str) -> String {
         return home.join(stripped).to_string_lossy().to_string();
     }
     path.to_string()
-}
-
-/// Prompt user for a passphrase with confirmation.
-fn prompt_passphrase(prompt: &str) -> Result<String> {
-    use std::io::{self, Write};
-
-    print!("{}: ", prompt);
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input.trim().to_string())
 }
