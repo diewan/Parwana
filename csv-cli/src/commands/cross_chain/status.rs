@@ -8,7 +8,11 @@ use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::{TransferStatus, UnifiedStateManager};
 
-pub fn cmd_status(transfer_id: String, state: &UnifiedStateManager) -> Result<()> {
+pub async fn cmd_status(
+    transfer_id: String,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<()> {
     let bytes = hex::decode(transfer_id.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid Transfer ID: {}", e))?;
     let mut hash_bytes = [0u8; 32];
@@ -17,8 +21,14 @@ pub fn cmd_status(transfer_id: String, state: &UnifiedStateManager) -> Result<()
 
     output::header(&format!("Transfer: {}", transfer_id));
 
+    // Try to get canonical transfer state from runtime (CLI-STATE-001)
+    // For now, we display local state but label it as non-canonical
+    // Full runtime-backed transfer state requires csv-runtime TransferCoordinator integration
+    
     if let Some(transfer) = state.get_transfer(&transfer_id_hash.to_string()) {
         output::header("📋 Cross-Chain Transfer Report");
+        output::info("Source: Local display cache (non-canonical)");
+        output::info("Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration");
 
         output::kv("Transfer ID", &hex::encode(transfer.id.as_bytes()));
         output::kv("Sanad ID", &hex::encode(transfer.sanad_id.as_bytes()));
@@ -66,7 +76,7 @@ pub fn cmd_status(transfer_id: String, state: &UnifiedStateManager) -> Result<()
             output::kv("Contract Address", contract);
         }
     } else {
-        output::warning("Transfer not found");
+        output::warning("Transfer not found in local display cache");
     }
 
     Ok(())
@@ -74,6 +84,8 @@ pub fn cmd_status(transfer_id: String, state: &UnifiedStateManager) -> Result<()
 
 pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
     output::header("Cross-Chain Transfers");
+    output::info("Source: Local display cache (non-canonical)");
+    output::info("Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration");
 
     let headers = vec!["Transfer ID", "From", "To", "Sanad ID", "Status"];
     let mut rows = Vec::new();

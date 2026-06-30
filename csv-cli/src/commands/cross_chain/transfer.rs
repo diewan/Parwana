@@ -34,18 +34,10 @@ pub async fn cmd_transfer(
         from_chain, to_chain
     ));
 
-    // Parse sanad ID
-    let bytes = hex::decode(sanad_id.trim_start_matches("0x"))
+    // Parse sanad ID using canonical parser
+    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
         .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
-    if bytes.len() < 32 {
-        return Err(anyhow::anyhow!(
-            "Invalid Sanad ID: expected at least 32 bytes, got {} bytes",
-            bytes.len()
-        ));
-    }
-    let mut sanad_bytes = [0u8; 32];
-    sanad_bytes.copy_from_slice(&bytes[..32]);
-    let sanad_id_hash = Hash::new(sanad_bytes);
+    let sanad_id_hash = Hash::new(*sanad_id_parsed.as_bytes());
 
     // Check if we have the sanad
     if state.get_sanad(&sanad_id_hash.to_hex()).is_none() {
@@ -73,6 +65,100 @@ pub async fn cmd_transfer(
             to_chain
         ));
     };
+
+    // Check chain capabilities before executing transfer
+    // Create a minimal client for capability checks
+    let mut sdk_config_check = csv_sdk::config::Config::default();
+    
+    // Add source chain config for capability check
+    if let Some(from_chain_config) = config.chain(&from).ok() {
+        let chain_config = csv_sdk::config::ChainConfig {
+            rpc: csv_sdk::config::RpcConfig {
+                url: from_chain_config.rpc_url.clone(),
+                api_key: None,
+                timeout_ms: 30000,
+                max_retries: 3,
+            },
+            finality_depth: from_chain_config.finality_depth as u32,
+            enabled: true,
+            xpub: None,
+            seed: None,
+            contract_address: from_chain_config.contract_address.clone(),
+            program_id: from_chain_config.program_id.clone(),
+            account: 0,
+            index: 0,
+            utxos: Vec::new(),
+            sanad_seals: Vec::new(),
+        };
+        sdk_config_check.chains.insert(from.to_string(), chain_config);
+    }
+
+    // Add destination chain config for capability check
+    if let Some(to_chain_config) = config.chain(&to).ok() {
+        let chain_config = csv_sdk::config::ChainConfig {
+            rpc: csv_sdk::config::RpcConfig {
+                url: to_chain_config.rpc_url.clone(),
+                api_key: None,
+                timeout_ms: 30000,
+                max_retries: 3,
+            },
+            finality_depth: to_chain_config.finality_depth as u32,
+            enabled: true,
+            xpub: None,
+            seed: None,
+            contract_address: to_chain_config.contract_address.clone(),
+            program_id: to_chain_config.program_id.clone(),
+            account: 0,
+            index: 0,
+            utxos: Vec::new(),
+            sanad_seals: Vec::new(),
+        };
+        sdk_config_check.chains.insert(to.to_string(), chain_config);
+    }
+
+    let check_client = CsvClient::builder()
+        .with_chain(from_chain.clone())
+        .with_chain(to_chain.clone())
+        .with_config(sdk_config_check)
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create CSV client for capability check: {}", e))?;
+
+    let runtime = check_client.chain_runtime();
+
+    // Check source chain can be cross-chain source
+    let from_readiness = runtime
+        .check_readiness(from_chain.clone(), 0, 0)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to check source chain readiness: {}", e))?;
+
+    if !from_readiness.cross_chain_source_supported {
+        output::error(&format!(
+            "Chain {:?} cannot be used as cross-chain transfer source",
+            from_chain
+        ));
+        return Err(anyhow::anyhow!(
+            "Cross-chain transfer not supported: source chain lacks capability"
+        ));
+    }
+
+    // Check destination chain can be cross-chain destination
+    let to_readiness = runtime
+        .check_readiness(to_chain.clone(), 0, 0)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to check destination chain readiness: {}", e))?;
+
+    if !to_readiness.cross_chain_destination_supported {
+        output::error(&format!(
+            "Chain {:?} cannot be used as cross-chain transfer destination",
+            to_chain
+        ));
+        return Err(anyhow::anyhow!(
+            "Cross-chain transfer not supported: destination chain lacks capability"
+        ));
+    }
+
+    output::success("Chain capability checks passed");
 
     // Create client builder with source and destination chains
     // Build SDK config from CLI config

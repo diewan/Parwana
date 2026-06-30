@@ -166,7 +166,103 @@ impl SanadId {
     pub fn as_bytes(&self) -> &[u8; 32] {
         self.0.as_bytes()
     }
+
+    /// Parse a Sanad ID from a hex string.
+    ///
+    /// Accepts both `0x`-prefixed and non-prefixed hex strings.
+    /// The input must represent exactly 32 bytes (64 hex characters, or 66 with `0x` prefix).
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Hex string representing the Sanad ID (with or without `0x` prefix)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The input is not valid hexadecimal
+    /// - The decoded length is not exactly 32 bytes
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use csv_hash::sanad::SanadId;
+    ///
+    /// // Parse without 0x prefix
+    /// let id1 = SanadId::parse_hex("abc123...")?;
+    ///
+    /// // Parse with 0x prefix
+    /// let id2 = SanadId::parse_hex("0xabc123...")?;
+    ///
+    /// // Both produce the same SanadId
+    /// assert_eq!(id1, id2);
+    /// ```
+    pub fn parse_hex(input: &str) -> Result<Self, ParseSanadIdError> {
+        let trimmed = input.trim();
+        let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+
+        if hex_str.len() != 64 {
+            return Err(ParseSanadIdError::InvalidLength {
+                expected: 64,
+                actual: hex_str.len(),
+            });
+        }
+
+        let bytes = hex::decode(hex_str).map_err(|e| ParseSanadIdError::InvalidHex {
+            message: e.to_string(),
+        })?;
+
+        if bytes.len() != 32 {
+            return Err(ParseSanadIdError::InvalidLength {
+                expected: 32,
+                actual: bytes.len(),
+            });
+        }
+
+        let mut array = [0u8; 32];
+        array.copy_from_slice(&bytes);
+        Ok(Self::new(array))
+    }
 }
+
+/// Error type for parsing Sanad IDs from hex strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseSanadIdError {
+    /// Input is not valid hexadecimal
+    ///
+    /// Contains the error message from the hex decoder
+    InvalidHex {
+        /// Error message describing why the hex is invalid
+        message: String,
+    },
+    /// Decoded length does not match expected length
+    ///
+    /// Sanad IDs must be exactly 32 bytes (64 hex characters)
+    InvalidLength {
+        /// Expected length in bytes
+        expected: usize,
+        /// Actual length in bytes
+        actual: usize,
+    },
+}
+
+impl std::fmt::Display for ParseSanadIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseSanadIdError::InvalidHex { message } => {
+                write!(f, "Invalid hex input: {}", message)
+            }
+            ParseSanadIdError::InvalidLength { expected, actual } => {
+                write!(
+                    f,
+                    "Invalid length: expected {} bytes, got {} bytes",
+                    expected, actual
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ParseSanadIdError {}
 
 #[cfg(test)]
 mod tests {
@@ -303,5 +399,128 @@ mod tests {
 
         // Both methods must produce the same ID
         assert_eq!(id1, id2, "from_descriptor_commitment_salt must use from_domain_canonical");
+    }
+
+    #[test]
+    fn test_parse_hex_valid_without_prefix() {
+        // Test parsing valid hex without 0x prefix
+        let hex_str = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let sanad_id = SanadId::parse_hex(hex_str).unwrap();
+        assert_eq!(sanad_id.as_bytes()[0], 0x01);
+        assert_eq!(sanad_id.as_bytes()[31], 0x20);
+    }
+
+    #[test]
+    fn test_parse_hex_valid_with_prefix() {
+        // Test parsing valid hex with 0x prefix
+        let hex_str = "0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let sanad_id = SanadId::parse_hex(hex_str).unwrap();
+        assert_eq!(sanad_id.as_bytes()[0], 0x01);
+        assert_eq!(sanad_id.as_bytes()[31], 0x20);
+    }
+
+    #[test]
+    fn test_parse_hex_consistency() {
+        // Test that 0x and non-0x forms produce the same SanadId
+        let hex_without = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let hex_with = "0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+
+        let id1 = SanadId::parse_hex(hex_without).unwrap();
+        let id2 = SanadId::parse_hex(hex_with).unwrap();
+
+        assert_eq!(id1, id2, "0x prefix must not affect parsing");
+    }
+
+    #[test]
+    fn test_parse_hex_invalid_length_too_short() {
+        // Test that too-short hex strings fail
+        let hex_str = "01020304";
+        let result = SanadId::parse_hex(hex_str);
+        assert!(result.is_err());
+        match result {
+            Err(ParseSanadIdError::InvalidLength { expected, actual }) => {
+                assert_eq!(expected, 64);
+                assert_eq!(actual, 8);
+            }
+            _ => panic!("Expected InvalidLength error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hex_invalid_length_too_long() {
+        // Test that too-long hex strings fail
+        let hex_str = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122";
+        let result = SanadId::parse_hex(hex_str);
+        assert!(result.is_err());
+        match result {
+            Err(ParseSanadIdError::InvalidLength { expected, actual }) => {
+                assert_eq!(expected, 64);
+                assert_eq!(actual, 68);
+            }
+            _ => panic!("Expected InvalidLength error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hex_invalid_hex_characters() {
+        // Test that non-hex characters fail
+        let hex_str = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg";
+        let result = SanadId::parse_hex(hex_str);
+        assert!(result.is_err());
+        match result {
+            Err(ParseSanadIdError::InvalidHex { .. }) => {}
+            _ => panic!("Expected InvalidHex error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hex_whitespace_handling() {
+        // Test that leading/trailing whitespace is trimmed
+        let hex_str = "  0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20  ";
+        let sanad_id = SanadId::parse_hex(hex_str).unwrap();
+        assert_eq!(sanad_id.as_bytes()[0], 0x01);
+        assert_eq!(sanad_id.as_bytes()[31], 0x20);
+    }
+
+    #[test]
+    fn test_parse_hex_ascii_re_encoding_regression() {
+        // Regression test: ensure we don't double-encode ASCII bytes
+        // This test verifies that if someone mistakenly hex-encodes the hex string,
+        // it will fail with a length error rather than producing a wrong ID
+        let valid_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let id1 = SanadId::parse_hex(valid_hex).unwrap();
+
+        // If someone does hex::encode(sanad_id.as_bytes()) and then tries to parse that,
+        // they get a 64-char hex string (32 bytes encoded as hex = 64 hex chars)
+        // This should actually succeed since it's the same as the original hex string
+        let double_encoded = hex::encode(id1.as_bytes());
+        assert_eq!(double_encoded.len(), 64);
+        let id2 = SanadId::parse_hex(&double_encoded).unwrap();
+        assert_eq!(id1, id2, "hex::encode(sanad_id.as_bytes()) should produce parseable hex");
+
+        // The real regression test: if someone treats the hex string as ASCII and hex-encodes THAT,
+        // they would get 128 chars (64 ASCII chars encoded as hex = 128 hex chars)
+        // This should fail with InvalidLength
+        let ascii_bytes = valid_hex.as_bytes();
+        let ascii_hex_encoded = hex::encode(ascii_bytes);
+        assert_eq!(ascii_hex_encoded.len(), 128);
+        let result = SanadId::parse_hex(&ascii_hex_encoded);
+        assert!(result.is_err());
+        match result {
+            Err(ParseSanadIdError::InvalidLength { expected, actual }) => {
+                assert_eq!(expected, 64);
+                assert_eq!(actual, 128);
+            }
+            _ => panic!("Expected InvalidLength error for ASCII hex-encoded input"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hex_roundtrip() {
+        // Test that we can parse a Sanad ID that was previously displayed as hex
+        let original = SanadId::new([0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99]);
+        let hex_display = hex::encode(original.as_bytes());
+        let parsed = SanadId::parse_hex(&hex_display).unwrap();
+        assert_eq!(original, parsed);
     }
 }

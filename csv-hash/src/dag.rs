@@ -6,11 +6,13 @@
 use crate::Hash;
 use crate::csv_tagged_hash;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// A single node in the state transition DAG
 /// L0 type: uses canonical_cbor for serialization (manual implementation)
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DAGNode {
     /// Unique identifier for this node
     pub node_id: Hash,
@@ -233,7 +235,8 @@ impl DAGNode {
 
 /// A segment of the state transition DAG
 /// L0 type: uses manual canonical_cbor serialization
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DAGSegment {
     /// Nodes in this segment
     pub nodes: Vec<DAGNode>,

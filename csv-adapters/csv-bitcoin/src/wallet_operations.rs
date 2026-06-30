@@ -11,6 +11,8 @@ use csv_hash::chain_id::ChainId;
 use csv_wallet::error::WalletError;
 use csv_wallet::wallet_traits::WalletOperations;
 use std::collections::HashMap;
+
+#[cfg(any(feature = "rpc", feature = "signet-rest"))]
 use std::sync::Arc;
 
 #[cfg(any(feature = "rpc", feature = "signet-rest"))]
@@ -128,11 +130,11 @@ impl WalletOperations for BitcoinWalletOperations {
         Ok(key.address.to_string())
     }
 
-    async fn get_balance(&self, address: &str) -> Result<String, WalletError> {
+    async fn get_balance(&self, _address: &str) -> Result<String, WalletError> {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
-            let url = format!("{}/address/{}", self.network.esplora_url(), address);
+            let url = format!("{}/address/{}", self.network.esplora_url(), _address);
             
             let response = client
                 .get(&url)
@@ -184,13 +186,13 @@ impl WalletOperations for BitcoinWalletOperations {
         Ok(signature.serialize_compact().to_vec())
     }
 
-    async fn broadcast_transaction(&self, signed_tx: &[u8]) -> Result<String, WalletError> {
+    async fn broadcast_transaction(&self, _signed_tx: &[u8]) -> Result<String, WalletError> {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
             let url = format!("{}/tx", self.network.esplora_url());
             
-            let tx_hex = hex::encode(signed_tx);
+            let tx_hex = hex::encode(_signed_tx);
             
             let response = client
                 .post(&url)
@@ -214,11 +216,11 @@ impl WalletOperations for BitcoinWalletOperations {
     }
 
 
-    async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
+    async fn get_transaction_status(&self, _tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
-            let url = format!("{}/tx/{}", self.network.esplora_url(), tx_hash);
+            let url = format!("{}/tx/{}", self.network.esplora_url(), _tx_hash);
             
             let response = client
                 .get(&url)
@@ -232,7 +234,7 @@ impl WalletOperations for BitcoinWalletOperations {
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
             
             let mut status = HashMap::new();
-            status.insert("txid".to_string(), tx_hash.to_string());
+            status.insert("txid".to_string(), _tx_hash.to_string());
             status.insert("status".to_string(), data["status"].get("confirmed")
                 .and_then(|v| v.as_bool())
                 .map(|c| if c { "confirmed".to_string() } else { "pending".to_string() })

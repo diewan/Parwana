@@ -58,6 +58,18 @@ pub enum ChainAction {
         /// Address index for HD wallet derivation (default: 0)
         #[arg(long, default_value = "0")]
         index: u32,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show chain capabilities matrix
+    Capabilities {
+        /// Chain name (optional, if not specified shows all chains)
+        #[arg(value_enum)]
+        chain: Option<Chain>,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -69,7 +81,8 @@ pub async fn execute(action: ChainAction, config: &Config) -> Result<()> {
         ChainAction::SetRpc { chain, url } => cmd_set_rpc(chain, url, config),
         ChainAction::SetNetwork { chain, network } => cmd_set_network(chain, network, config),
         ChainAction::SetContract { chain, address } => cmd_set_contract(chain, address, config),
-        ChainAction::Readiness { chain, account, index } => cmd_readiness(&chain, account, index, config).await,
+        ChainAction::Readiness { chain, account, index, json } => cmd_readiness(&chain, account, index, json, config).await,
+        ChainAction::Capabilities { chain, json } => cmd_capabilities(chain, json, config).await,
     }
 }
 
@@ -201,13 +214,8 @@ fn expand_path(path: &str) -> String {
     path.to_string()
 }
 
-async fn cmd_readiness(chain: &Chain, account: u32, index: u32, config: &Config) -> Result<()> {
+async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, config: &Config) -> Result<()> {
     let _chain_config = config.chain(chain)?;
-
-    output::header(&format!("Chain Readiness: {}", chain));
-
-    output::kv("Account", &account.to_string());
-    output::kv("Index", &index.to_string());
 
     // Use the runtime to check readiness
     use csv_sdk::CsvClient;
@@ -261,50 +269,230 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, config: &Config)
     // Check readiness via the chain backend
     match runtime.check_readiness(core_chain.clone(), account, index).await {
         Ok(readiness) => {
-            output::kv("Derived Signer Address", readiness.signer_address.as_deref().unwrap_or("N/A"));
-            output::kv("Balance Address", readiness.balance_address.as_deref().unwrap_or("N/A"));
-            output::kv("Signer Configured", if readiness.signer_configured { "Yes" } else { "No" });
-            output::kv("Write Capable", if readiness.write_capable { "Yes" } else { "No" });
-            output::kv("Contract/Program Configured", if readiness.contract_configured { "Yes" } else { "No" });
-            output::kv("Account Exists", if readiness.account_exists { "Yes" } else { "No" });
-            
-            if let Some(balance) = readiness.native_balance {
-                output::kv("Native Balance", &balance.to_string());
+            if json {
+                // Output as JSON
+                let json_output = serde_json::json!({
+                    "chain": chain.as_str(),
+                    "account": account,
+                    "index": index,
+                    "signer_address": readiness.signer_address,
+                    "balance_address": readiness.balance_address,
+                    "signer_configured": readiness.signer_configured,
+                    "write_capable": readiness.write_capable,
+                    "contract_configured": readiness.contract_configured,
+                    "account_exists": readiness.account_exists,
+                    "native_balance": readiness.native_balance,
+                    "estimated_fee": readiness.estimated_fee,
+                    "sanad_create_supported": readiness.sanad_create_supported,
+                    "proof_generation_supported": readiness.proof_generation_supported,
+                    "cross_chain_source_supported": readiness.cross_chain_source_supported,
+                    "cross_chain_destination_supported": readiness.cross_chain_destination_supported,
+                    "ready_for_writes": readiness.signer_configured && readiness.write_capable
+                });
+                println!("{}", serde_json::to_string_pretty(&json_output)?);
             } else {
-                output::kv("Native Balance", "N/A");
-            }
-            
-            if let Some(fee) = readiness.estimated_fee {
-                output::kv("Estimated Minimum Fee", &fee.to_string());
-            } else {
-                output::kv("Estimated Minimum Fee", "N/A");
-            }
-            
-            output::kv("Sanad Create Supported", if readiness.sanad_create_supported { "Yes" } else { "No" });
-            output::kv("Proof Generation Supported", if readiness.proof_generation_supported { "Yes" } else { "No" });
-            output::kv("Cross-Chain Source Supported", if readiness.cross_chain_source_supported { "Yes" } else { "No" });
-            output::kv("Cross-Chain Destination Supported", if readiness.cross_chain_destination_supported { "Yes" } else { "No" });
+                // Output as human-readable text
+                output::header(&format!("Chain Readiness: {}", chain));
 
-            // Overall readiness assessment
-            let ready_for_writes = readiness.signer_configured && readiness.write_capable;
-            if ready_for_writes {
-                output::success("Chain is ready for write operations");
-            } else {
-                output::warn("Chain is NOT ready for write operations");
-                if !readiness.signer_configured {
-                    output::info("  - Signer not configured (use 'csv wallet init' or 'csv wallet import')");
+                output::kv("Account", &account.to_string());
+                output::kv("Index", &index.to_string());
+
+                output::kv("Derived Signer Address", readiness.signer_address.as_deref().unwrap_or("N/A"));
+                output::kv("Balance Address", readiness.balance_address.as_deref().unwrap_or("N/A"));
+                output::kv("Signer Configured", if readiness.signer_configured { "Yes" } else { "No" });
+                output::kv("Write Capable", if readiness.write_capable { "Yes" } else { "No" });
+                output::kv("Contract/Program Configured", if readiness.contract_configured { "Yes" } else { "No" });
+                output::kv("Account Exists", if readiness.account_exists { "Yes" } else { "No" });
+
+                if let Some(balance) = readiness.native_balance {
+                    output::kv("Native Balance", &balance.to_string());
+                } else {
+                    output::kv("Native Balance", "N/A");
                 }
-                if !readiness.write_capable {
-                    output::info("  - Write capability not available");
+
+                if let Some(fee) = readiness.estimated_fee {
+                    output::kv("Estimated Minimum Fee", &fee.to_string());
+                } else {
+                    output::kv("Estimated Minimum Fee", "N/A");
                 }
+
+                output::kv("Sanad Create Supported", if readiness.sanad_create_supported { "Yes" } else { "No" });
+                output::kv("Proof Generation Supported", if readiness.proof_generation_supported { "Yes" } else { "No" });
+                output::kv("Cross-Chain Source Supported", if readiness.cross_chain_source_supported { "Yes" } else { "No" });
+                output::kv("Cross-Chain Destination Supported", if readiness.cross_chain_destination_supported { "Yes" } else { "No" });
+
+                // Overall readiness assessment
+                let ready_for_writes = readiness.signer_configured && readiness.write_capable;
+                if ready_for_writes {
+                    output::success("Chain is ready for write operations");
+                } else {
+                    output::warn("Chain is NOT ready for write operations");
+                    if !readiness.signer_configured {
+                        output::info("  - Signer not configured (use 'csv wallet init' or 'csv wallet import')");
+                    }
+                    if !readiness.write_capable {
+                        output::info("  - Write capability not available");
+                    }
+                }
+
+                println!();
             }
         }
         Err(e) => {
-            output::error(&format!("Failed to check readiness: {}", e));
-            output::info("This may indicate the chain adapter is not properly configured or RPC is unavailable");
+            if json {
+                let json_output = serde_json::json!({
+                    "chain": chain.as_str(),
+                    "account": account,
+                    "index": index,
+                    "error": format!("Failed to check readiness: {}", e)
+                });
+                println!("{}", serde_json::to_string_pretty(&json_output)?);
+            } else {
+                output::error(&format!("Failed to check readiness: {}", e));
+                output::info("This may indicate the chain adapter is not properly configured or RPC is unavailable");
+                println!();
+            }
         }
     }
 
-    println!();
+    Ok(())
+}
+
+async fn cmd_capabilities(chain: Option<Chain>, json: bool, config: &Config) -> Result<()> {
+    use csv_protocol::finality::capabilities::{ChainCapabilities, FinalityDepths};
+
+    let chains_to_check = if let Some(c) = chain {
+        vec![c]
+    } else {
+        config.chains.keys().cloned().collect()
+    };
+
+    let finality_depths = FinalityDepths::defaults();
+
+    if json {
+        // Output as JSON
+        let mut capabilities_array = Vec::new();
+        for chain in chains_to_check {
+            let chain_str = chain.as_str();
+            let chain_config = config.chain(&chain)?;
+
+            // Determine chain capabilities based on chain type
+            let caps = match chain_str {
+                "bitcoin" => ChainCapabilities::bitcoin(),
+                "ethereum" => ChainCapabilities::ethereum(),
+                "celestia" => ChainCapabilities::celestia(),
+                _ => {
+                    // Default capabilities for other chains
+                    ChainCapabilities {
+                        state_model: csv_protocol::finality::capabilities::StateModel::Account,
+                        finality_model: csv_protocol::finality::capabilities::FinalityModel::BftInstant,
+                        finality_depth: finality_depths.for_chain_or_default(chain_str, 10),
+                        deterministic_finality: true,
+                        proof_model: csv_protocol::finality::capabilities::ProofModel::AccumulatorPath,
+                        replay_protection: csv_protocol::finality::capabilities::ReplayProtectionModel::SmartContractNullifier,
+                        native_single_use_semantics: false,
+                        reorg_risk: csv_protocol::finality::capabilities::ReorgRisk::Low,
+                        max_safe_reorg_depth: 0,
+                        supports_light_client_proofs: true,
+                        supports_state_proofs: true,
+                        supports_transaction_inclusion_proofs: true,
+                        supports_offline_verification: false,
+                        supports_zk_proofs: false,
+                        chain_role: csv_protocol::finality::capabilities::ChainRole::Settlement,
+                    }
+                }
+            };
+
+            let chain_caps = serde_json::json!({
+                "chain": chain_str,
+                "network": chain_config.network.to_string(),
+                "rpc_configured": !chain_config.rpc_url.is_empty(),
+                "contract_configured": chain_config.contract_address.is_some(),
+                "program_id_configured": chain_config.program_id.is_some(),
+                "finality_depth": chain_config.finality_depth,
+                "state_model": format!("{:?}", caps.state_model),
+                "finality_model": format!("{:?}", caps.finality_model),
+                "deterministic_finality": caps.deterministic_finality,
+                "proof_model": format!("{:?}", caps.proof_model),
+                "replay_protection": format!("{:?}", caps.replay_protection),
+                "native_single_use_semantics": caps.native_single_use_semantics,
+                "reorg_risk": format!("{:?}", caps.reorg_risk),
+                "max_safe_reorg_depth": caps.max_safe_reorg_depth,
+                "supports_light_client_proofs": caps.supports_light_client_proofs,
+                "supports_state_proofs": caps.supports_state_proofs,
+                "supports_transaction_inclusion_proofs": caps.supports_transaction_inclusion_proofs,
+                "supports_offline_verification": caps.supports_offline_verification,
+                "supports_zk_proofs": caps.supports_zk_proofs,
+                "chain_role": format!("{:?}", caps.chain_role),
+                "can_authorize_mint": caps.can_authorize_mint(),
+            });
+            capabilities_array.push(chain_caps);
+        }
+
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "capabilities": capabilities_array }))?);
+    } else {
+        // Output as human-readable table
+        output::header("Chain Capabilities Matrix");
+
+        let headers = vec![
+            "Chain", "Network", "RPC", "Contract", "State Model", "Finality",
+            "Proof Model", "Reorg Risk", "Chain Role", "Can Mint"
+        ];
+        let mut rows = Vec::new();
+
+        for chain in chains_to_check {
+            let chain_str = chain.as_str();
+            let chain_config = config.chain(&chain)?;
+
+            // Determine chain capabilities based on chain type
+            let caps = match chain_str {
+                "bitcoin" => ChainCapabilities::bitcoin(),
+                "ethereum" => ChainCapabilities::ethereum(),
+                "celestia" => ChainCapabilities::celestia(),
+                _ => {
+                    // Default capabilities for other chains
+                    ChainCapabilities {
+                        state_model: csv_protocol::finality::capabilities::StateModel::Account,
+                        finality_model: csv_protocol::finality::capabilities::FinalityModel::BftInstant,
+                        finality_depth: finality_depths.for_chain_or_default(chain_str, 10),
+                        deterministic_finality: true,
+                        proof_model: csv_protocol::finality::capabilities::ProofModel::AccumulatorPath,
+                        replay_protection: csv_protocol::finality::capabilities::ReplayProtectionModel::SmartContractNullifier,
+                        native_single_use_semantics: false,
+                        reorg_risk: csv_protocol::finality::capabilities::ReorgRisk::Low,
+                        max_safe_reorg_depth: 0,
+                        supports_light_client_proofs: true,
+                        supports_state_proofs: true,
+                        supports_transaction_inclusion_proofs: true,
+                        supports_offline_verification: false,
+                        supports_zk_proofs: false,
+                        chain_role: csv_protocol::finality::capabilities::ChainRole::Settlement,
+                    }
+                }
+            };
+
+            rows.push(vec![
+                format!("{}", chain),
+                chain_config.network.to_string(),
+                if !chain_config.rpc_url.is_empty() { "✓" } else { "✗" }.to_string(),
+                if chain_config.contract_address.is_some() || chain_config.program_id.is_some() {
+                    "✓"
+                } else {
+                    "✗"
+                }.to_string(),
+                format!("{:?}", caps.state_model),
+                format!("{:?}", caps.finality_model),
+                format!("{:?}", caps.proof_model),
+                format!("{:?}", caps.reorg_risk),
+                format!("{:?}", caps.chain_role),
+                if caps.can_authorize_mint() { "Yes" } else { "No" }.to_string(),
+            ]);
+        }
+
+        output::table(&headers, &rows);
+        println!();
+        output::info("Use 'csv chain readiness --chain <chain> --json' for detailed runtime readiness checks");
+    }
+
     Ok(())
 }

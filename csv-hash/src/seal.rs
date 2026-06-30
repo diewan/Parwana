@@ -4,6 +4,7 @@
 //! Anchors represent on-chain references containing commitments.
 
 use anyhow::Result;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
@@ -28,7 +29,8 @@ pub const MAX_ANCHOR_METADATA_SIZE: usize = 4096;
 /// - Aptos: Resource address + key
 ///
 /// **Layer:** L0
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SealPoint {
     /// Chain-specific seal identifier
     pub id: Vec<u8>,
@@ -274,7 +276,8 @@ impl SealPoint {
 /// - Sui: Object ID + version
 ///
 /// **Layer:** L0
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CommitAnchor {
     /// Chain-specific anchor identifier
     pub anchor_id: Vec<u8>,

@@ -122,6 +122,15 @@ pub trait BitcoinRpc: Send + Sync {
         Err("Bitcoin RPC implementation does not support block header fetching".into())
     }
 
+    /// Get raw 80-byte block header data for SPV verification
+    async fn get_raw_block_header(
+        &self,
+        block_hash: [u8; 32],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        let _ = block_hash;
+        Err("Bitcoin RPC implementation does not support raw block header fetching".into())
+    }
+
     /// Create and broadcast an OP_RETURN transaction with the given data
     /// This is used for minting/committing data to the Bitcoin blockchain
     async fn create_op_return_transaction(
@@ -247,6 +256,22 @@ impl BitcoinRpc for TestBitcoinRpc {
             timestamp: 1234567890,
             version: 1,
         })
+    }
+
+    async fn get_raw_block_header(
+        &self,
+        block_hash: [u8; 32],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        // For testing, return a dummy 80-byte block header
+        // Format: version (4) + prev_blockhash (32) + merkle_root (32) + timestamp (4) + bits (4) + nonce (4)
+        let mut header = vec![0u8; 80];
+        header[0..4].copy_from_slice(&1u32.to_le_bytes()); // version
+        header[4..36].copy_from_slice(&block_hash); // prev_blockhash (use block_hash as placeholder)
+        header[36..68].copy_from_slice(&[0u8; 32]); // merkle_root (placeholder)
+        header[68..72].copy_from_slice(&1234567890u32.to_le_bytes()); // timestamp
+        header[72..76].copy_from_slice(&0x207fffffu32.to_le_bytes()); // bits
+        header[76..80].copy_from_slice(&0u32.to_le_bytes()); // nonce
+        Ok(header)
     }
 
     async fn create_op_return_transaction(

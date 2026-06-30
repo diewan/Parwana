@@ -74,21 +74,42 @@ async fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateMa
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
+    // Check chain readiness for seal creation
+    let runtime = client.chain_runtime();
+    let readiness = runtime
+        .check_readiness(core_chain.clone(), 0, 0)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to check chain readiness: {}", e))?;
+
+    if !readiness.write_capable {
+        output::error("Chain readiness check failed: Write capability not available");
+        return Err(anyhow::anyhow!(
+            "Cannot create seal: write capability not available"
+        ));
+    }
+
+    output::success("Chain readiness check passed");
+
     // Create a seal by creating a basic Sanad (which creates a seal)
     let sanads = client.sanads();
 
     // Generate a commitment for seal creation
     let commitment = Hash::new(generate_commitment());
 
+    // Generate non-zero placeholder hashes for required fields
+    let schema_hash = Hash::new([1u8; 32]);
+    let disclosure_policy_hash = Hash::new([2u8; 32]);
+    let proof_policy_hash = Hash::new([3u8; 32]);
+
     // Create a minimal SanadPayloadDescriptor
     let descriptor = csv_protocol::SanadPayloadDescriptor::new(
         csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
-        Hash::new([0u8; 32]),
+        schema_hash,
         1,
         commitment,
         None,
-        Hash::new([0u8; 32]),
-        Hash::new([0u8; 32]),
+        disclosure_policy_hash,
+        proof_policy_hash,
     );
 
     // Create ownership proof with empty owner
@@ -141,21 +162,54 @@ async fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateMan
 
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid seal reference: {}", e))?;
+    let seal_hash = csv_hash::Hash::new(seal_bytes[..32.min(seal_bytes.len())].try_into().unwrap_or([0u8; 32]));
     let seal_hex = hex::encode(&seal_bytes);
-
-    if state.is_seal_consumed(&seal_hex) {
-        output::error("Seal already consumed");
-        return Err(anyhow::anyhow!("Seal replay detected"));
-    }
 
     let core_chain = to_protocol_chain(chain.clone());
 
-    // Use runtime to consume the seal
+    // Use runtime to check canonical seal state before consuming (CLI-STATE-001)
     let client = CsvClient::builder()
-        .with_chain(core_chain)
+        .with_chain(core_chain.clone())
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
+
+    let runtime = client.chain_runtime();
+
+    // Query canonical seal state via ChainBackend (fail closed if unavailable)
+    match runtime.get_adapter(core_chain.clone()).await {
+        Ok(adapter) => {
+            match adapter.get_seal_state(&seal_hash).await {
+                Ok(canonical_state) => {
+                    // Check if seal is already consumed on-chain
+                    if canonical_state.consumed_at.is_some() {
+                        output::error("Seal already consumed on-chain");
+                        return Err(anyhow::anyhow!(
+                            "Seal replay detected: canonical state shows seal consumed at {}",
+                            canonical_state.consumed_at.unwrap()
+                        ));
+                    }
+                    output::info("Canonical state check passed: seal is not consumed on-chain");
+                }
+                Err(e) => {
+                    // Chain query failed - fail closed (CLI-STATE-001)
+                    return Err(anyhow::anyhow!(
+                        "Failed to query canonical seal state from chain: {}. \
+                         Cannot proceed without on-chain validation.",
+                        e
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            // Adapter not available - fail closed (CLI-STATE-001)
+            return Err(anyhow::anyhow!(
+                "Chain adapter not available for {}: {}. \
+                 Cannot determine canonical seal state without chain access.",
+                chain, e
+            ));
+        }
+    }
 
     // Find the sanad associated with this seal and burn it (consuming the seal)
     let sanads = client.sanads();
@@ -174,6 +228,7 @@ async fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateMan
     // Burn the sanad, which consumes the seal
     match sanads.burn(&sanad_id) {
         Ok(()) => {
+            // Update local display cache AFTER successful on-chain consumption
             state.record_seal_consumption(seal_hex.clone());
 
             output::kv("Chain", chain.as_ref());
@@ -193,83 +248,74 @@ async fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager)
 
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid seal reference: {}", e))?;
+    let seal_hash = csv_hash::Hash::new(seal_bytes[..32.min(seal_bytes.len())].try_into().unwrap_or([0u8; 32]));
 
     let core_chain = to_protocol_chain(chain.clone());
 
-    // Use runtime to verify seal status
+    // Use runtime to verify seal status via ChainBackend (CLI-STATE-001)
     let client = CsvClient::builder()
-        .with_chain(core_chain)
+        .with_chain(core_chain.clone())
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
-    // Query the sanad status via the sanads manager
-    let sanads = client.sanads();
-
-    // Create a SanadId from the seal reference
-    let sanad_id_bytes: [u8; 32] = seal_bytes[..32.min(seal_bytes.len())]
-        .try_into()
-        .unwrap_or_else(|_| {
-            let mut padded = [0u8; 32];
-            padded[..seal_bytes.len().min(32)]
-                .copy_from_slice(&seal_bytes[..seal_bytes.len().min(32)]);
-            padded
-        });
-    let sanad_id = SanadId::new(sanad_id_bytes);
-
-    // Check if the sanad exists and get its status
-    let local_consumed = state.is_seal_consumed(&hex::encode(&seal_bytes));
-
-    match sanads.get(&sanad_id) {
-        Ok(Some(sanad)) => {
-            // Sanad exists in the system
-            let status = if local_consumed || sanad.nullifier.is_some() {
-                "Consumed"
-            } else {
-                "Unconsumed"
-            };
-            output::kv("Chain", chain.as_ref());
-            output::kv_hash("Seal", &seal_bytes);
-            output::kv("Status", status);
-            output::kv("Sanad ID", &sanad.id.bytes[..16.min(sanad.id.bytes.len())]);
-
-            if !local_consumed && sanad.nullifier.is_none() {
-                output::info("Seal is available for use");
-            }
-        }
-        Ok(None) => {
-            // Sanad not found in the system
-            output::kv("Chain", chain.as_ref());
-            output::kv_hash("Seal", &seal_bytes);
-            output::kv(
-                "Status",
-                if local_consumed {
-                    "Consumed"
-                } else {
-                    "Unknown"
-                },
-            );
-
-            if local_consumed {
-                output::info("Seal was consumed locally but not found in runtime");
-            } else {
-                output::warning("Seal not found in the system");
+    let runtime = client.chain_runtime();
+    
+    // Query canonical seal state via ChainBackend (fail closed if unavailable)
+    match runtime.get_adapter(core_chain.clone()).await {
+        Ok(adapter) => {
+            match adapter.get_seal_state(&seal_hash).await {
+                Ok(canonical_state) => {
+                    // Display canonical state from chain
+                    output::kv("Chain", chain.as_ref());
+                    output::kv_hash("Seal", &seal_bytes);
+                    output::kv("State", &format!("State({})", canonical_state.state));
+                    output::kv("Owner", &canonical_state.owner);
+                    output::kv_hash("Commitment", canonical_state.commitment.as_bytes());
+                    if canonical_state.created_at > 0 {
+                        output::kv(
+                            "Created",
+                            &chrono::DateTime::from_timestamp(canonical_state.created_at, 0)
+                                .map(|dt| dt.to_rfc3339())
+                                .unwrap_or_else(|| canonical_state.created_at.to_string()),
+                        );
+                    }
+                    if let Some(consumed_at) = canonical_state.consumed_at {
+                        output::kv(
+                            "Consumed",
+                            &chrono::DateTime::from_timestamp(consumed_at, 0)
+                                .map(|dt| dt.to_rfc3339())
+                                .unwrap_or_else(|| consumed_at.to_string()),
+                        );
+                    }
+                    output::success("Canonical seal state from chain");
+                }
+                Err(e) => {
+                    // Chain query failed - fail closed (CLI-STATE-001)
+                    return Err(anyhow::anyhow!(
+                        "Failed to query canonical seal state from chain: {}. \
+                         Local state cannot be used as canonical truth.",
+                        e
+                    ));
+                }
             }
         }
         Err(e) => {
-            // Query failed, fall back to local state
-            output::warning(&format!("Provider query failed: {}", e));
-            output::kv("Chain", chain.as_ref());
-            output::kv_hash("Seal", &seal_bytes);
-            output::kv(
-                "Status",
-                if local_consumed {
-                    "Consumed"
-                } else {
-                    "Unconsumed"
-                },
-            );
+            // Adapter not available - fail closed (CLI-STATE-001)
+            return Err(anyhow::anyhow!(
+                "Chain adapter not available for {}: {}. \
+                 Cannot determine canonical seal state without chain access.",
+                chain, e
+            ));
         }
+    }
+
+    // Show local display cache if available (non-canonical)
+    let local_consumed = state.is_seal_consumed(&hex::encode(&seal_bytes));
+    if local_consumed {
+        output::info("---");
+        output::info("Local display cache (non-canonical, for reference only):");
+        output::kv("Local Status", "Consumed");
     }
 
     Ok(())

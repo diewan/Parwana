@@ -63,6 +63,73 @@ jobs:
       - name: Run CLI architecture compliance tests
         run: CXXFLAGS="-include cstdint" cargo test -p csv-cli --test architecture_compliance
 
+      - name: No todo! or unimplemented! in production code
+        run: |
+          violations=$(grep -rn "todo!\|unimplemented!" csv-*/src/ \
+            --exclude-dir=csv-cli --exclude-dir=csv-sdk --exclude-dir=csv-examples \
+            --exclude-dir=csv-testkit --exclude-dir=csv-mcp-server 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: todo! or unimplemented! found in production code"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: No panic! or unreachable! in production code
+        run: |
+          violations=$(grep -rn "panic!\|unreachable!" csv-*/src/ \
+            --exclude-dir=csv-cli --exclude-dir=csv-sdk --exclude-dir=csv-examples \
+            --exclude-dir=csv-testkit --exclude-dir=csv-mcp-server 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: panic! or unreachable! found in production code"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: No unwrap() or expect() in critical paths
+        run: |
+          violations=$(grep -rn "\.unwrap()\|\.expect(" csv-runtime/src/ csv-protocol/src/ csv-verifier/src/ csv-hash/src/ csv-proof/src/ csv-codec/src/ 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: .unwrap() or .expect() found in critical paths"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: No zero hash patterns in production code
+        run: |
+          violations=$(grep -rn "Hash::new(\[0u8; 32\])\|\[0u8; 32\]\|\[0; 32\]" csv-runtime/src/ csv-sdk/src/ csv-cli/src/ csv-protocol/src/ csv-verifier/src/ csv-hash/src/ csv-proof/src/ 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: zero hash patterns found in production code"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: No placeholder Ok(true) or Ok(()) in validation code
+        run: |
+          violations=$(grep -rn "Ok(true)\|Ok(())" csv-verifier/src/ csv-protocol/src/ csv-runtime/src/ 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: placeholder Ok(true) or Ok(()) found in validation code"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: No direct chain adapter imports in CLI
+        run: |
+          violations=$(grep -rn "use csv_adapters::csv_bitcoin\|use csv_adapters::csv_ethereum\|use csv_adapters::csv_solana\|use csv_adapters::csv_sui\|use csv_adapters::csv_aptos\|use csv_adapters::csv_celestia" csv-cli/src/ 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: direct chain adapter imports found in CLI"
+            echo "$violations"
+            exit 1
+          fi
+
+      - name: No direct chain adapter imports in runtime
+        run: |
+          violations=$(grep -rn "use csv_adapters::csv_bitcoin\|use csv_adapters::csv_ethereum\|use csv_adapters::csv_solana\|use csv_adapters::csv_sui\|use csv_adapters::csv_aptos\|use csv_adapters::csv_celestia" csv-runtime/src/ 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "FAIL: direct chain adapter imports found in runtime"
+            echo "$violations"
+            exit 1
+          fi
+
   formal-verification:
     name: Formal model check
     runs-on: ubuntu-24.04

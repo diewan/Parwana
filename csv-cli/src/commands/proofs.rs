@@ -8,6 +8,7 @@ use std::io::Read;
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::UnifiedStateManager;
+use csv_hash::sanad::SanadId;
 
 /// Canonical proof output format (CBOR-serializable).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,21 +96,13 @@ async fn cmd_generate(
 ) -> Result<()> {
     use csv_sdk::prelude::CsvClient;
 
-    use csv_hash::sanad::SanadId;
-
     output::header(&format!("Generating Proof on {}", chain));
 
-    let bytes = hex::decode(sanad_id.trim_start_matches("0x"))
+    let sanad_id_obj = SanadId::parse_hex(&sanad_id)
         .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
-    if bytes.len() < 32 {
-        return Err(anyhow::anyhow!("Sanad ID must be at least 32 bytes"));
-    }
-    let mut hash_bytes = [0u8; 32];
-    hash_bytes.copy_from_slice(&bytes[..32]);
-    let sanad_id_obj = SanadId::new(hash_bytes);
 
     output::kv("Chain", chain.as_ref());
-    output::kv_hash("Sanad ID", &hash_bytes);
+    output::kv_hash("Sanad ID", sanad_id_obj.as_bytes());
 
     // Get chain configuration
     let _chain_config = config.chain(&chain)?;
@@ -270,16 +263,8 @@ async fn cmd_verify(
 
     // Extract sanad_id from proof
     let sanad_id_str = &proof_output.sanad_id;
-    let bytes = hex::decode(sanad_id_str.trim_start_matches("0x"))
+    let sanad_id = SanadId::parse_hex(sanad_id_str)
         .map_err(|e| anyhow::anyhow!("Invalid Sanad ID in proof: {}", e))?;
-    if bytes.len() < 32 {
-        return Err(anyhow::anyhow!(
-            "Sanad ID in proof must be at least 32 bytes"
-        ));
-    }
-    let mut hash_bytes = [0u8; 32];
-    hash_bytes.copy_from_slice(&bytes[..32]);
-    let sanad_id = SanadId::new(hash_bytes);
 
     output::progress(1, 4, "Building CSV client...");
 

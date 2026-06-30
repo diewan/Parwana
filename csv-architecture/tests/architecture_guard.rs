@@ -33,6 +33,31 @@ const SILENT_CRYPTO_DEFAULT_PATTERNS: &[&str] = &[
     ".unwrap_or_default()",
 ];
 
+const FORBIDDEN_PLACEHOLDER_PATTERNS: &[&str] = &[
+    "todo!()",
+    "todo! (",
+    "unimplemented!()",
+    "unimplemented! (",
+];
+
+const FORBIDDEN_PANIC_PATTERNS: &[&str] = &[
+    "panic!()",
+    "panic! (",
+    "unreachable!()",
+    "unreachable! (",
+];
+
+const FORBIDDEN_UNWRAP_PATTERNS: &[&str] = &[
+    ".unwrap()",
+    ".unwrap (",
+    ".expect(",
+    ".expect (",
+];
+
+const FORBIDDEN_ZERO_HASH_PATTERNS: &[&str] = &[
+    "Hash::new([0u8; 32])",
+];
+
 #[test]
 fn authority_crates_do_not_depend_on_chain_adapters() {
     let root = workspace_root();
@@ -250,6 +275,196 @@ fn architecture_debt_ratchet_does_not_grow() {
     );
 }
 
+#[test]
+fn production_code_has_no_todo_or_unimplemented() {
+    let root = workspace_root();
+    let production_dirs = [
+        "csv-runtime/src",
+        "csv-sdk/src",
+        "csv-cli/src",
+        "csv-protocol/src",
+        "csv-verifier/src",
+        "csv-storage/src",
+        "csv-coordinator/src",
+        "csv-admission/src",
+        "csv-hash/src",
+        "csv-proof/src",
+        "csv-content/src",
+        "csv-codec/src",
+        "csv-wire/src",
+        "csv-algebra/src",
+        "csv-schema/src",
+    ];
+
+    for src_dir in &production_dirs {
+        let dir_path = root.join(src_dir);
+        if !dir_path.exists() {
+            continue;
+        }
+        let findings = scan_files(&dir_path, FORBIDDEN_PLACEHOLDER_PATTERNS);
+        assert!(
+            findings.is_empty(),
+            "{} must not contain todo!() or unimplemented!() in production code:\n{}",
+            src_dir,
+            findings.join("\n")
+        );
+    }
+}
+
+#[test]
+fn production_code_has_no_panics() {
+    let root = workspace_root();
+    let production_dirs = [
+        "csv-runtime/src",
+        "csv-sdk/src",
+        "csv-cli/src",
+        "csv-protocol/src",
+        "csv-verifier/src",
+        "csv-storage/src",
+        "csv-coordinator/src",
+        "csv-admission/src",
+        "csv-proof/src",
+        "csv-content/src",
+        "csv-codec/src",
+        "csv-wire/src",
+        "csv-algebra/src",
+        "csv-schema/src",
+    ];
+
+    for src_dir in &production_dirs {
+        let dir_path = root.join(src_dir);
+        if !dir_path.exists() {
+            continue;
+        }
+        let findings = scan_files(&dir_path, FORBIDDEN_PANIC_PATTERNS);
+        assert!(
+            findings.is_empty(),
+            "{} must not contain panic!() in production code:\n{}",
+            src_dir,
+            findings.join("\n")
+        );
+    }
+}
+
+#[test]
+fn critical_paths_have_no_unwrap_or_expect() {
+    let root = workspace_root();
+    let critical_dirs = [
+        "csv-runtime/src",
+        "csv-protocol/src",
+        "csv-verifier/src",
+        "csv-hash/src",
+        "csv-proof/src",
+        "csv-codec/src",
+    ];
+
+    for src_dir in &critical_dirs {
+        let dir_path = root.join(src_dir);
+        if !dir_path.exists() {
+            continue;
+        }
+        let findings = scan_files(&dir_path, FORBIDDEN_UNWRAP_PATTERNS);
+        assert!(
+            findings.is_empty(),
+            "{} (critical path) must not contain .unwrap() or .expect() in production code:\n{}",
+            src_dir,
+            findings.join("\n")
+        );
+    }
+}
+
+#[test]
+fn production_code_has_no_zero_hashes() {
+    let root = workspace_root();
+    let production_dirs = [
+        "csv-runtime/src",
+        "csv-sdk/src",
+        "csv-cli/src",
+        "csv-protocol/src",
+        "csv-verifier/src",
+        "csv-hash/src",
+        "csv-proof/src",
+    ];
+
+    for src_dir in &production_dirs {
+        let dir_path = root.join(src_dir);
+        if !dir_path.exists() {
+            continue;
+        }
+        let findings = scan_files(&dir_path, FORBIDDEN_ZERO_HASH_PATTERNS);
+        assert!(
+            findings.is_empty(),
+            "{} must not contain zero hash patterns in production code:\n{}",
+            src_dir,
+            findings.join("\n")
+        );
+    }
+}
+
+#[test]
+fn cli_does_not_import_chain_adapters_directly() {
+    let root = workspace_root();
+    let cli_src = root.join("csv-cli/src");
+    if !cli_src.exists() {
+        return;
+    }
+
+    let adapter_imports = scan_files(
+        &cli_src,
+        &[
+            "use csv_adapters::csv_bitcoin",
+            "use csv_adapters::csv_ethereum",
+            "use csv_adapters::csv_solana",
+            "use csv_adapters::csv_sui",
+            "use csv_adapters::csv_aptos",
+            "use csv_adapters::csv_celestia",
+            "csv_bitcoin::",
+            "csv_ethereum::",
+            "csv_solana::",
+            "csv_sui::",
+            "csv_aptos::",
+            "csv_celestia::",
+        ],
+    );
+    assert!(
+        adapter_imports.is_empty(),
+        "csv-cli must not import chain adapters directly; use csv-runtime instead:\n{}",
+        adapter_imports.join("\n")
+    );
+}
+
+#[test]
+fn runtime_does_not_import_concrete_adapters_directly() {
+    let root = workspace_root();
+    let runtime_src = root.join("csv-runtime/src");
+    if !runtime_src.exists() {
+        return;
+    }
+
+    let adapter_imports = scan_files(
+        &runtime_src,
+        &[
+            "use csv_adapters::csv_bitcoin",
+            "use csv_adapters::csv_ethereum",
+            "use csv_adapters::csv_solana",
+            "use csv_adapters::csv_sui",
+            "use csv_adapters::csv_aptos",
+            "use csv_adapters::csv_celestia",
+            "csv_bitcoin::",
+            "csv_ethereum::",
+            "csv_solana::",
+            "csv_sui::",
+            "csv_aptos::",
+            "csv_celestia::",
+        ],
+    );
+    assert!(
+        adapter_imports.is_empty(),
+        "csv-runtime must not import concrete chain adapters directly; use trait objects:\n{}",
+        adapter_imports.join("\n")
+    );
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -294,14 +509,29 @@ fn scan_files_inner(path: &Path, patterns: &[&str], findings: &mut Vec<String>) 
         return;
     }
 
+    // Skip test files and directories
+    let path_str = path.to_string_lossy();
+    if path_str.contains("/tests/") || path_str.contains("\\tests\\") {
+        return;
+    }
+
     let Ok(content) = fs::read_to_string(path) else {
         return;
     };
+
+    // Skip entire files that contain test modules
+    if content.contains("#[cfg(test)]") || content.contains("#[test]") {
+        return;
+    }
+
     for (idx, line) in content.lines().enumerate() {
         let trimmed = line.trim_start();
+
+        // Skip comments
         if trimmed.starts_with("//") || trimmed.starts_with('#') {
             continue;
         }
+
         for pattern in patterns {
             if line.contains(pattern) {
                 findings.push(format!("{}:{}: {}", path.display(), idx + 1, line.trim()));

@@ -262,15 +262,24 @@ mod tests {
                 vec![],
                 vec![],
             );
-            Ok(ProofBundle::new(
-                DAGSegment::new(vec![node], csv_hash::Hash::new([0u8; 32])),
+            let seal_point = SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None)
+                .map_err(|e| AdapterError::Generic(format!("Invalid seal point: {}", e)))?;
+            let commit_anchor = CommitAnchor::new(vec![1u8; 32], 100, vec![])
+                .map_err(|e| AdapterError::Generic(format!("Invalid commit anchor: {}", e)))?;
+            let inclusion_proof = InclusionProof::new(vec![], csv_hash::Hash::new([1u8; 32]), 100, 0)
+                .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
+            let finality_proof = csv_protocol::proof_taxonomy::FinalityProof::new(vec![1u8; 32], 6, true)
+                .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+            let proof_bundle = ProofBundle::new(
+                DAGSegment::new(vec![node], csv_hash::Hash::new([1u8; 32])),
                 vec![vec![0u8; 64]],
-                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None).unwrap(),
-                CommitAnchor::new(vec![0u8; 32], 100, vec![]).unwrap(),
-                InclusionProof::new(vec![], csv_hash::Hash::new([0u8; 32]), 100, 0).unwrap(),
-                csv_protocol::proof_taxonomy::FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
+                seal_point,
+                commit_anchor,
+                inclusion_proof,
+                finality_proof,
             )
-            .unwrap())
+            .map_err(|e| AdapterError::Generic(format!("Invalid proof bundle: {}", e)))?;
+            Ok(proof_bundle)
         }
 
         async fn validate_source_proof(
