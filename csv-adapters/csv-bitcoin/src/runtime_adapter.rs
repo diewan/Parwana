@@ -328,11 +328,19 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
             block_height: inclusion_proof.block_number,
         };
 
-        // Extract the lock transaction ID from the transfer
-        let lock_txid = hex::decode(&transfer.lock_tx_hash)
-            .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
+        // Extract the lock transaction ID from the transfer. `lock_tx_hash`
+        // is already the raw 32-byte txid (set from decoded RPC tx hashes in
+        // the transfer coordinator), not a hex string - hex-decoding it again
+        // here would corrupt the txid and was masking SPV verification with
+        // garbage data.
+        if transfer.lock_tx_hash.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid lock tx hash length: expected 32 bytes, got {}",
+                transfer.lock_tx_hash.len()
+            )));
+        }
         let mut txid_array = [0u8; 32];
-        txid_array.copy_from_slice(&lock_txid[..lock_txid.len().min(32)]);
+        txid_array.copy_from_slice(&transfer.lock_tx_hash);
 
         // Verify SPV merkle proof - ensures transaction is in the block
         // This provides cryptographic proof that the lock transaction was mined
@@ -429,12 +437,17 @@ impl BitcoinRuntimeAdapter {
 
     /// Extract UTXO outpoint from transfer
     fn extract_utxo_outpoint(&self, transfer: &CrossChainTransfer) -> Result<bitcoin::OutPoint, AdapterError> {
-        let txid_bytes = hex::decode(&transfer.lock_tx_hash)
-            .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
-        
+        // `lock_tx_hash` is already the raw 32-byte txid, not a hex string
+        // (see `validate_source_proof` above for the same fix and rationale).
+        if transfer.lock_tx_hash.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid lock tx hash length: expected 32 bytes, got {}",
+                transfer.lock_tx_hash.len()
+            )));
+        }
         let mut txid_array = [0u8; 32];
-        txid_array.copy_from_slice(&txid_bytes[..txid_bytes.len().min(32)]);
-        
+        txid_array.copy_from_slice(&transfer.lock_tx_hash);
+
         // Convert to internal byte order for Bitcoin Txid
         txid_array.reverse();
         
@@ -622,17 +635,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_source_proof_spv_verification() {
+        // UTXO is intentionally left unmarked (spent), so this exercises the
+        // SPV-verification-passes-but-UTXO-already-consumed path: SPV/
+        // finality checks alone are not sufficient to authorize a mint, the
+        // UTXO must also still be unspent.
         let adapter = BitcoinRuntimeAdapter::new(
             Network::Regtest,
             SealWallet::generate_random(Network::Regtest),
             Box::new(crate::rpc::TestBitcoinRpc::new(200)),
         );
 
+        // lock_tx_hash = [0u8; 32] matches the all-zero merkle_root in
+        // TestBitcoinRpc's dummy block header, so SPV verification (empty
+        // merkle branch => txid must equal root) passes.
         let transfer = CrossChainTransfer {
             id: "test-transfer-1".to_string(),
             source_chain: "bitcoin".to_string(),
             destination_chain: "ethereum".to_string(),
-            lock_tx_hash: vec![1u8; 32],
+            lock_tx_hash: vec![0u8; 32],
             lock_output_index: 0,
             sanad_id: Hash::new([2u8; 32]),
             transition_id: vec![1u8; 32],
@@ -674,8 +694,146 @@ mod tests {
         };
 
         let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        // Expected to fail because UTXO is not marked as unspent
-        assert!(result.is_err() || result.is_ok()); // Accept either for now
+        // SPV passed, but the UTXO was never marked unspent in the test RPC,
+        // so this must still fail closed on the double-spend check.
+        assert!(result.is_err(), "expected rejection: SPV-valid but unmarked (spent) UTXO must not pass, got {:?}", result);
+        let err_string = result.unwrap_err().to_string();
+        assert!(
+            err_string.contains("double-spend") || err_string.contains("spent"),
+            "expected a double-spend/spent error once SPV passed, got: {}",
+            err_string
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_source_proof_succeeds_when_unspent_and_finalized() {
+        // Positive-path companion to `test_validate_source_proof_spv_verification`:
+        // with SPV passing, sufficient confirmations, and the UTXO explicitly
+        // marked unspent, validation must succeed.
+        let mut rpc = crate::rpc::TestBitcoinRpc::new(200);
+        rpc.mark_utxo_unspent(vec![0u8; 32], 0);
+        let adapter = BitcoinRuntimeAdapter::new(
+            Network::Regtest,
+            SealWallet::generate_random(Network::Regtest),
+            Box::new(rpc),
+        );
+
+        let transfer = CrossChainTransfer {
+            id: "test-transfer-1b".to_string(),
+            source_chain: "bitcoin".to_string(),
+            destination_chain: "ethereum".to_string(),
+            lock_tx_hash: vec![0u8; 32],
+            lock_output_index: 0,
+            sanad_id: Hash::new([2u8; 32]),
+            transition_id: vec![1u8; 32],
+        };
+
+        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
+            vec![],
+            Hash::new([3u8; 32]),
+            0,
+            100,
+        ).unwrap();
+
+        let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
+            finality_data: 100u64.to_le_bytes().to_vec(),
+            block_hash: Hash::new([3u8; 32]),
+            threshold: 6,
+            confirmations: 100,
+            data: vec![],
+            source: "bitcoin".to_string(),
+            is_deterministic: false,
+        };
+
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(
+            vec![2u8; 32],
+            100,
+            vec![],
+        ).unwrap();
+
+        let proof_bundle = ProofBundle {
+            version: 1,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+            seal_ref: csv_hash::seal::SealPoint::new(vec![1u8; 32], Some(0), None).unwrap(),
+            signature_scheme: csv_protocol::signature::SignatureScheme::Secp256k1,
+            signatures: vec![vec![0xCDu8; 68]],
+            transition_dag: test_transition_dag(Hash::new([2u8; 32])),
+        };
+
+        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        assert!(result.is_ok(), "expected success: SPV-valid, finalized, unspent UTXO, got {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_validate_source_proof_rejects_replay_of_consumed_utxo() {
+        // The core replay-rejection guarantee for this ticket: a proof bundle
+        // referencing a Bitcoin lock UTXO that has already been consumed
+        // (e.g. by an earlier successful mint) must be rejected on
+        // resubmission, even though every other field is structurally valid.
+        let mut rpc = crate::rpc::TestBitcoinRpc::new(200);
+        rpc.mark_utxo_unspent(vec![0u8; 32], 0);
+        // Simulate the UTXO having already been consumed by a prior mint.
+        rpc.mark_utxo_spent(vec![0u8; 32], 0);
+        let adapter = BitcoinRuntimeAdapter::new(
+            Network::Regtest,
+            SealWallet::generate_random(Network::Regtest),
+            Box::new(rpc),
+        );
+
+        let transfer = CrossChainTransfer {
+            id: "test-transfer-replay".to_string(),
+            source_chain: "bitcoin".to_string(),
+            destination_chain: "ethereum".to_string(),
+            lock_tx_hash: vec![0u8; 32],
+            lock_output_index: 0,
+            sanad_id: Hash::new([2u8; 32]),
+            transition_id: vec![1u8; 32],
+        };
+
+        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
+            vec![],
+            Hash::new([3u8; 32]),
+            0,
+            100,
+        ).unwrap();
+
+        let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
+            finality_data: 100u64.to_le_bytes().to_vec(),
+            block_hash: Hash::new([3u8; 32]),
+            threshold: 6,
+            confirmations: 100,
+            data: vec![],
+            source: "bitcoin".to_string(),
+            is_deterministic: false,
+        };
+
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(
+            vec![2u8; 32],
+            100,
+            vec![],
+        ).unwrap();
+
+        let proof_bundle = ProofBundle {
+            version: 1,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+            seal_ref: csv_hash::seal::SealPoint::new(vec![1u8; 32], Some(0), None).unwrap(),
+            signature_scheme: csv_protocol::signature::SignatureScheme::Secp256k1,
+            signatures: vec![vec![0xCDu8; 68]],
+            transition_dag: test_transition_dag(Hash::new([2u8; 32])),
+        };
+
+        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        assert!(result.is_err(), "replayed proof for a consumed UTXO must be rejected, got {:?}", result);
+        let err_string = result.unwrap_err().to_string();
+        assert!(
+            err_string.contains("double-spend") || err_string.contains("spent"),
+            "expected a double-spend/spent error on replay, got: {}",
+            err_string
+        );
     }
 
     #[tokio::test]
@@ -743,11 +901,13 @@ mod tests {
             Box::new(crate::rpc::TestBitcoinRpc::new(106)), // 6 confirmations
         );
 
+        // lock_tx_hash = [0u8; 32] matches the dummy header's placeholder
+        // merkle_root so SPV verification passes with an empty branch.
         let transfer = CrossChainTransfer {
             id: "test-transfer-3".to_string(),
             source_chain: "bitcoin".to_string(),
             destination_chain: "ethereum".to_string(),
-            lock_tx_hash: vec![1u8; 32],
+            lock_tx_hash: vec![0u8; 32],
             lock_output_index: 0,
             sanad_id: Hash::new([2u8; 32]),
             transition_id: vec![1u8; 32],
@@ -788,9 +948,16 @@ mod tests {
         };
 
         let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        // Should succeed with sufficient confirmations and unspent UTXO
-        // May still fail on SPV verification due to test data, but confirmations should pass
-        assert!(result.is_ok() || result.is_err());
+        // Confirmations are sufficient and SPV passes, but the UTXO was
+        // never marked unspent in this test's RPC, so this must still fail
+        // closed on the double-spend check rather than succeed.
+        assert!(result.is_err(), "expected rejection on unmarked (spent) UTXO despite sufficient confirmations, got {:?}", result);
+        let err_string = result.unwrap_err().to_string();
+        assert!(
+            err_string.contains("double-spend") || err_string.contains("spent"),
+            "expected a double-spend/spent error, got: {}",
+            err_string
+        );
     }
 
     #[tokio::test]
@@ -801,11 +968,17 @@ mod tests {
             Box::new(crate::rpc::TestBitcoinRpc::new(200)),
         );
 
+        // `TestBitcoinRpc::get_raw_block_header` returns a dummy 80-byte
+        // header whose merkle_root field is the all-zero placeholder. For
+        // SPV verification to pass with an empty merkle branch (single-tx
+        // block), the claimed txid must equal that placeholder root - so
+        // the lock tx hash here is deliberately [0u8; 32] to isolate the
+        // UTXO double-spend check from SPV verification.
         let transfer = CrossChainTransfer {
             id: "test-transfer-4".to_string(),
             source_chain: "bitcoin".to_string(),
             destination_chain: "ethereum".to_string(),
-            lock_tx_hash: vec![1u8; 32],
+            lock_tx_hash: vec![0u8; 32],
             lock_output_index: 0,
             sanad_id: Hash::new([2u8; 32]),
             transition_id: vec![1u8; 32],
@@ -845,11 +1018,18 @@ mod tests {
             transition_dag: test_transition_dag(Hash::new([2u8; 32])),
         };
 
+        // The test RPC's `unspent_utxos` set is empty, so the UTXO for this
+        // lock tx is reported as already spent - this is the replay/double-
+        // mint guard: a Bitcoin lock UTXO that has already been consumed
+        // must not be usable to authorize a second destination mint.
         let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        // Should fail due to UTXO not being marked as unspent (simulating spent)
-        assert!(result.is_err());
+        assert!(result.is_err(), "expected validate_source_proof to reject a spent/already-consumed UTXO, got {:?}", result);
         let err_string = result.unwrap_err().to_string();
-        assert!(err_string.contains("double-spend") || err_string.contains("spent"));
+        assert!(
+            err_string.contains("double-spend") || err_string.contains("spent"),
+            "expected a double-spend/spent error, got: {}",
+            err_string
+        );
     }
 
     #[test]
@@ -944,11 +1124,20 @@ mod tests {
             Box::new(crate::rpc::TestBitcoinRpc::new(100)),
         );
 
+        // Use a non-palindromic byte pattern so the internal-byte-order
+        // reversal performed by `extract_utxo_outpoint` is actually
+        // observable (a uniform [1u8; 32] fixture reverses to itself and
+        // can't distinguish "reversed" from "not reversed").
+        let mut raw_txid = [0u8; 32];
+        for (i, b) in raw_txid.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+
         let transfer = CrossChainTransfer {
             id: "test-transfer-6".to_string(),
             source_chain: "bitcoin".to_string(),
             destination_chain: "ethereum".to_string(),
-            lock_tx_hash: vec![1u8; 32],
+            lock_tx_hash: raw_txid.to_vec(),
             lock_output_index: 5,
             sanad_id: Hash::new([2u8; 32]),
             transition_id: vec![1u8; 32],
@@ -956,7 +1145,11 @@ mod tests {
 
         let outpoint = adapter.extract_utxo_outpoint(&transfer).unwrap();
         assert_eq!(outpoint.vout, 5);
-        // Txid should be reversed (internal byte order)
-        assert_ne!(&outpoint.txid.as_byte_array()[..], &[1u8; 32][..]);
+        // Txid should be reversed (internal byte order) relative to the raw
+        // lock_tx_hash, and equal to its reverse.
+        let mut expected = raw_txid;
+        expected.reverse();
+        assert_eq!(&outpoint.txid.as_byte_array()[..], &expected[..]);
+        assert_ne!(&outpoint.txid.as_byte_array()[..], &raw_txid[..]);
     }
 }

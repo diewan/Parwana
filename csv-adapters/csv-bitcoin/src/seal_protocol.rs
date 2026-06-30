@@ -862,27 +862,30 @@ impl SealProtocol for BitcoinSealProtocol {
         &self,
         anchor: Self::CommitAnchor,
     ) -> Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
-        // If we have an RPC client, fetch real Merkle proof from the blockchain
-        if let Some(rpc) = &self.rpc {
-            // Get the block containing the anchor transaction
-            let block_hash = rpc.get_block_hash(anchor.block_height).await.map_err(|e| {
-                ProtocolError::InclusionProofFailed(format!("Failed to get block hash: {}", e))
-            })?;
+        // Real SPV inclusion evidence requires an RPC backend that can supply
+        // a genuine Merkle branch for the anchor transaction. Fail closed
+        // rather than shipping a proof with an empty Merkle branch: a proof
+        // bundle with no inclusion evidence is indistinguishable from a
+        // fabricated one and must never be treated as valid SPV evidence.
+        let rpc = self.rpc.as_ref().ok_or_else(|| {
+            Box::new(ProtocolError::InclusionProofFailed(
+                "Cannot verify inclusion: no RPC backend configured to supply Merkle proof"
+                    .to_string(),
+            )) as Box<dyn std::error::Error>
+        })?;
 
-            // Extract the Merkle proof for the anchor transaction
-            // This would require block fetching which is RPC-backend specific
-            // For now, return a proof with just the block hash
-            return Ok(BitcoinInclusionProof::new(
-                vec![],
-                block_hash,
-                0,
-                anchor.block_height,
-            ));
-        }
+        let block_hash = rpc.get_block_hash(anchor.block_height).await.map_err(|e| {
+            ProtocolError::InclusionProofFailed(format!("Failed to get block hash: {}", e))
+        })?;
 
-        // Without RPC, return empty proof (fallback mode)
-        let proof = BitcoinInclusionProof::new(vec![], anchor.txid, 0, anchor.block_height);
-        Ok(proof)
+        let inclusion = rpc.get_inclusion_proof(anchor.txid, block_hash).await.map_err(|e| {
+            Box::new(ProtocolError::InclusionProofFailed(format!(
+                "Cannot verify inclusion: chain capability unavailable ({})",
+                e
+            ))) as Box<dyn std::error::Error>
+        })?;
+
+        Ok(inclusion)
     }
 
     async fn verify_finality(
@@ -1054,10 +1057,17 @@ impl SealProtocol for BitcoinSealProtocol {
     async fn build_proof_bundle(
         &self,
         anchor: Self::CommitAnchor,
-        _transition_dag: csv_protocol::seal_protocol::DagSegment,
+        transition_dag: csv_protocol::seal_protocol::DagSegment,
     ) -> Result<ProofBundle, Box<dyn std::error::Error + 'static>> {
         let inclusion = self.verify_inclusion(anchor.clone()).await?;
         let finality = self.verify_finality(anchor.clone()).await?;
+
+        if !finality.meets_required_depth {
+            return Err(Box::new(ProtocolError::FinalityNotReached(format!(
+                "Only {} confirmations, need {}",
+                finality.confirmations, self.config.finality_depth
+            ))));
+        }
 
         let seal_ref = CoreSealPoint::new(anchor.txid.to_vec(), Some(0), None)
             .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
@@ -1065,9 +1075,15 @@ impl SealProtocol for BitcoinSealProtocol {
         let anchor_ref = CoreCommitAnchor::new(anchor.txid.to_vec(), anchor.block_height, vec![])
             .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
+        // Encode the real Merkle branch + position/height metadata, matching
+        // the layout `extract_merkle_branch` expects on the validating side.
         let mut proof_bytes = Vec::new();
+        for sibling in &inclusion.merkle_branch {
+            proof_bytes.extend_from_slice(sibling);
+        }
         proof_bytes.extend_from_slice(&inclusion.block_hash);
-        proof_bytes.extend_from_slice(&inclusion.tx_index.to_le_bytes());
+        proof_bytes.extend_from_slice(&(inclusion.tx_index as u64).to_le_bytes());
+        proof_bytes.extend_from_slice(&inclusion.block_height.to_le_bytes());
 
         let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
             proof_bytes,
@@ -1084,10 +1100,43 @@ impl SealProtocol for BitcoinSealProtocol {
         )
         .map_err(|e: &str| ProtocolError::Generic(e.to_string()))?;
 
+        // Convert the untyped DagSegment carried by the caller into a real,
+        // non-empty DAGNode/DAGSegment. Mirrors the Ethereum adapter's
+        // build_proof_bundle: a proof bundle with an empty transition DAG
+        // and no signatures is structurally indistinguishable from a
+        // fabricated one and must never be produced here.
+        let mut node_id_data = Vec::new();
+        node_id_data.extend_from_slice(transition_dag.anchor_from.as_bytes());
+        node_id_data.extend_from_slice(transition_dag.anchor_to.as_bytes());
+        node_id_data.extend_from_slice(&anchor.txid);
+        let node_id = csv_hash::Hash::new(csv_hash::csv_tagged_hash("dag-node-id", &node_id_data));
+
+        let dag_node = csv_hash::dag::DAGNode::new(
+            node_id,
+            transition_dag.transition_data.clone(),
+            vec![transition_dag.proof.clone()],
+            vec![anchor.txid.to_vec()],
+            vec![transition_dag.anchor_from],
+        );
+        let root_commitment = dag_node.hash();
+        let dag_segment = csv_hash::dag::DAGSegment::new(vec![dag_node], root_commitment);
+
+        let signatures: Vec<Vec<u8>> = dag_segment
+            .nodes
+            .iter()
+            .flat_map(|node| node.signatures.clone())
+            .collect();
+        if signatures.iter().all(|s| s.is_empty()) {
+            return Err(Box::new(ProtocolError::Generic(
+                "Cannot build proof bundle: transition DAG carries no authorizing proof/signature data"
+                    .to_string(),
+            )));
+        }
+
         Ok(ProofBundle::with_signature_scheme(
             csv_protocol::SignatureScheme::Secp256k1,
-            csv_hash::dag::DAGSegment::new(vec![], csv_hash::Hash::new([0u8; 32])),
-            vec![],
+            dag_segment,
+            signatures,
             seal_ref,
             anchor_ref,
             inclusion_proof,
@@ -1137,6 +1186,125 @@ mod tests {
 
     fn test_adapter() -> BitcoinSealProtocol {
         BitcoinSealProtocol::signet().unwrap()
+    }
+
+    /// Test-only RPC that can supply a real (non-empty) SPV inclusion proof,
+    /// used to verify `verify_inclusion`/`build_proof_bundle` produce real
+    /// evidence when the chain capability is available.
+    #[derive(Clone)]
+    struct InclusionCapableRpc {
+        block_count: u64,
+        merkle_branch: Vec<[u8; 32]>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::rpc::BitcoinRpc for InclusionCapableRpc {
+        async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.block_count)
+        }
+        async fn get_block_hash(&self, height: u64) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            let mut hash = [0u8; 32];
+            hash[..8].copy_from_slice(&height.to_le_bytes());
+            Ok(hash)
+        }
+        async fn is_utxo_unspent(&self, _txid: [u8; 32], _vout: u32) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(true)
+        }
+        async fn send_raw_transaction(&self, _tx_bytes: Vec<u8>) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            Err("InclusionCapableRpc cannot broadcast transactions".into())
+        }
+        async fn get_tx_confirmations(&self, _txid: [u8; 32]) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(0)
+        }
+        async fn get_utxos_for_address(&self, _address: String) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
+        }
+        async fn get_inclusion_proof(
+            &self,
+            _txid: [u8; 32],
+            block_hash: [u8; 32],
+        ) -> Result<crate::types::BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(crate::types::BitcoinInclusionProof::new(
+                self.merkle_branch.clone(),
+                block_hash,
+                0,
+                100,
+            ))
+        }
+        fn clone_boxed(&self) -> Box<dyn crate::rpc::BitcoinRpc + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_verify_inclusion_fails_closed_without_rpc() {
+        // No RPC attached: verify_inclusion must fail closed rather than
+        // return a proof with an empty Merkle branch.
+        let adapter = test_adapter();
+        let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
+        let result = adapter.verify_inclusion(anchor).await;
+        assert!(result.is_err(), "verify_inclusion without RPC must fail closed, not fabricate an empty proof");
+    }
+
+    #[tokio::test]
+    async fn test_verify_inclusion_fails_closed_when_rpc_lacks_merkle_capability() {
+        // RPC attached but it doesn't implement get_inclusion_proof (uses
+        // the trait's fail-closed default): must still fail closed.
+        let wallet = SealWallet::generate_random(bitcoin::Network::Signet);
+        let config = BitcoinConfig::default();
+        let adapter = BitcoinSealProtocol::with_wallet(config, wallet)
+            .unwrap()
+            .with_rpc(Box::new(crate::rpc::TestBitcoinRpc::new(200)));
+        let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
+        let result = adapter.verify_inclusion(anchor).await;
+        assert!(result.is_err(), "verify_inclusion must fail closed when RPC cannot supply real Merkle evidence");
+    }
+
+    #[tokio::test]
+    async fn test_build_proof_bundle_produces_non_empty_dag_and_signatures() {
+        let wallet = SealWallet::generate_random(bitcoin::Network::Signet);
+        let config = BitcoinConfig::default();
+        let rpc = InclusionCapableRpc {
+            block_count: 200,
+            merkle_branch: vec![[9u8; 32], [8u8; 32]],
+        };
+        let adapter = BitcoinSealProtocol::with_wallet(config, wallet)
+            .unwrap()
+            .with_rpc(Box::new(rpc));
+
+        let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
+        let transition_dag = csv_protocol::seal_protocol::DagSegment::new(
+            Hash::new([5u8; 32]),
+            Hash::new([6u8; 32]),
+            vec![0xAAu8; 16],
+            vec![0xBBu8; 8],
+        );
+
+        let bundle = adapter
+            .build_proof_bundle(anchor, transition_dag)
+            .await
+            .expect("inclusion-capable RPC should allow real proof construction");
+
+        assert!(!bundle.transition_dag.nodes.is_empty(), "DAG must not be empty");
+        assert!(!bundle.signatures.is_empty(), "signatures must not be empty");
+        assert!(!bundle.inclusion_proof.proof_bytes.is_empty(), "inclusion proof bytes must not be empty");
+    }
+
+    #[tokio::test]
+    async fn test_build_proof_bundle_fails_closed_without_merkle_capability() {
+        // Without an RPC that can supply real Merkle evidence, building a
+        // proof bundle must fail closed instead of shipping an empty/
+        // fabricated inclusion proof and DAG.
+        let adapter = test_adapter();
+        let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
+        let transition_dag = csv_protocol::seal_protocol::DagSegment::new(
+            Hash::new([5u8; 32]),
+            Hash::new([6u8; 32]),
+            vec![0xAAu8; 16],
+            vec![0xBBu8; 8],
+        );
+        let result = adapter.build_proof_bundle(anchor, transition_dag).await;
+        assert!(result.is_err(), "build_proof_bundle must fail closed without real Merkle evidence");
     }
 
     #[tokio::test]
