@@ -944,13 +944,13 @@ async fn cmd_create(
 
     // For Bitcoin, mark the used UTXO as spent in wallet state to prevent reuse
     if chain.as_str() == "bitcoin" {
-        if let Some((used_txid, used_vout)) = selected_utxo_ref {
+        if let Some((ref used_txid, used_vout)) = selected_utxo_ref {
             // Remove the spent UTXO from wallet state
             state
                 .storage
                 .wallet
                 .utxos
-                .retain(|u| !(u.txid == used_txid && u.vout == used_vout));
+                .retain(|u| !(&u.txid == used_txid && u.vout == used_vout));
             state.save()?;
         }
     }
@@ -1011,26 +1011,57 @@ async fn cmd_create(
         None
     };
 
-    // Use legacy hash parameters if provided, otherwise use file-parsed values
-    let final_schema_hash = schema_hash_legacy
-        .or(schema_hash_final)
-        .ok_or_else(|| anyhow::anyhow!("Schema hash must be provided either via legacy parameter or content file"))?;
-    let final_payload_hash = payload_hash_final.unwrap_or(commitment); // Use commitment as default payload hash
-    let final_attachment_root = attachment_root_final.or(content_root_parsed);
-    let final_disclosure_policy_hash =
-        disclosure_policy_hash_parsed.ok_or_else(|| anyhow::anyhow!("Disclosure policy hash must be provided"))?;
-    let final_proof_policy_hash = proof_policy_hash_parsed.ok_or_else(|| anyhow::anyhow!("Proof policy hash must be provided"))?;
+    // Resolve content descriptor inputs (legacy hash params take precedence over
+    // file-parsed values). Every field stays an explicit `Option<Hash>` here --
+    // there is no zero-hash or "use the commitment instead" fallback for a
+    // missing field. `CreateSanadRequest::build_descriptor()` is the single
+    // fail-closed gate: a required field that is still `None` after this
+    // resolution step produces a typed error, never a fabricated hash
+    // (SANAD-CREATE-001).
+    let content_descriptor = csv_sdk::sanads::ContentDescriptorInput {
+        schema_id: None,
+        schema_hash: schema_hash_legacy.or(schema_hash_final),
+        payload_codec: None,
+        payload_hash: payload_hash_final,
+        content_root: content_root_parsed,
+        attachment_root: attachment_root_final,
+        disclosure_policy_hash: disclosure_policy_hash_parsed,
+        proof_policy_hash: proof_policy_hash_parsed,
+    };
 
-    // Create a SanadPayloadDescriptor with content descriptor support (B-013)
-    let descriptor = csv_protocol::SanadPayloadDescriptor::new(
-        csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
-        final_schema_hash,            // schema_hash
-        1,                            // payload_codec: canonical CBOR
-        final_payload_hash,           // payload_hash
-        final_attachment_root,        // attachment_root (includes content_root)
-        final_disclosure_policy_hash, // disclosure_policy_hash
-        final_proof_policy_hash,      // proof_policy_hash
-    );
+    // Build the typed creation request. The CLI's only job is to assemble
+    // this request from user input and chain-specific funding/publication
+    // that already happened above; all "is a required field missing"
+    // decisions are delegated to the SDK so the same fail-closed rule
+    // applies regardless of caller.
+    let publish_policy = if skip_publish {
+        csv_sdk::sanads::PublishPolicy::DraftOnly
+    } else {
+        csv_sdk::sanads::PublishPolicy::Publish
+    };
+    let funding_selector = match selected_utxo_ref {
+        Some((ref txid, vout)) => csv_sdk::sanads::FundingSelector::Explicit {
+            reference: format!("{}:{}", txid, vout),
+        },
+        None => csv_sdk::sanads::FundingSelector::Automatic,
+    };
+    let create_request = csv_sdk::sanads::CreateSanadRequest {
+        chain: core_chain.clone(),
+        owner: owner_address.as_bytes().to_vec(),
+        value,
+        content_descriptor,
+        funding_selector,
+        publish_policy,
+    };
+
+    // Fail closed here (before signing/persisting anything) if a required
+    // descriptor field is missing. The descriptor itself is rebuilt from the
+    // same request inside create_draft()/finalize_published() below, so this
+    // call exists purely to surface the validation error as early as
+    // possible rather than after deriving a signature.
+    create_request
+        .build_descriptor()
+        .map_err(|e| anyhow::anyhow!("Cannot create sanad: {}", e))?;
 
     // Create ownership proof from the owner address
     // For canonical mode, generate a signature over the commitment hash
@@ -1071,15 +1102,54 @@ async fn cmd_create(
     // Generate salt for ID derivation
     let salt: [u8; 16] = rand::random();
 
-    // Create the sanad through the runtime
-    match client.sanads().create(
-        &descriptor,
+    // `--skip-publish` can, at most, produce a local unsigned/unpublished
+    // draft (SanadsManager::create_draft). It must never reach the path that
+    // persists a SanadRecord with SanadStatus::Active or claims a seal/anchor
+    // exists, because no commitment was actually published anywhere
+    // (SANAD-CREATE-001).
+    if matches!(create_request.publish_policy, csv_sdk::sanads::PublishPolicy::DraftOnly) {
+        let draft = client
+            .sanads()
+            .create_draft(&create_request, commitment, ownership_proof, &salt)
+            .map_err(|e| anyhow::anyhow!("Failed to build sanad draft: {}", e))?;
+
+        let descriptor_hash = draft.descriptor.compute_hash();
+
+        output::kv("Chain", chain.as_ref());
+        output::kv_hash("Descriptor Hash", descriptor_hash.as_bytes());
+        output::kv_hash("Commitment", draft.commitment.as_bytes());
+        output::kv(
+            "Value",
+            &value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "default".to_string()),
+        );
+        output::kv("Status", "Draft (not published, no seal, no anchor)");
+        println!();
+        output::warning(
+            "This is an unpublished local draft, not a real Sanad. \
+             No seal was created and nothing was anchored on-chain. \
+             Re-run without --skip-publish to create and publish a real Sanad.",
+        );
+
+        return Ok(());
+    }
+
+    // Create the sanad through the runtime and persist the canonical,
+    // published result.
+    match client.sanads().finalize_published(
+        &create_request,
         commitment,
         ownership_proof,
         &salt,
-        core_chain.clone(),
+        seal.to_vec(),
+        anchor
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Internal error: publish policy requires an anchor but none was produced"))?,
+        false,
     ) {
-        Ok(sanad) => {
+        Ok(result) => {
+            let sanad = result.sanad;
             let sanad_id_hex = sanad.id.bytes.clone();
 
             // Convert seal to base64 for storage
@@ -1118,7 +1188,7 @@ async fn cmd_create(
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                anchor_tx_hash: anchor.as_ref().map(|a| hex::encode(&a.anchor_id)),
+                anchor_tx_hash: Some(hex::encode(&result.anchor.anchor_id)),
                 nonce,
             };
 
@@ -1126,33 +1196,32 @@ async fn cmd_create(
 
             // Register the sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups
             if chain.as_str() == "bitcoin" {
-                if let Some(ref anchor) = anchor {
-                    let _sanad_id_bytes = hex::decode(&sanad.id.bytes).unwrap_or_default();
-                    let anchor_txid_hex = hex::encode(&anchor.anchor_id);
-                    let output_index = u32::from_le_bytes(
-                        anchor.metadata[..4.min(anchor.metadata.len())]
-                            .try_into()
-                            .unwrap_or([0, 0, 0, 0]),
-                    );
-                    // Note: SDK runtime automatically registers sanad seals during publish_seal
-                    // Manual registration is no longer needed and causes "adapter not found" warnings
+                let anchor = &result.anchor;
+                let _sanad_id_bytes = hex::decode(&sanad.id.bytes).unwrap_or_default();
+                let anchor_txid_hex = hex::encode(&anchor.anchor_id);
+                let output_index = u32::from_le_bytes(
+                    anchor.metadata[..4.min(anchor.metadata.len())]
+                        .try_into()
+                        .unwrap_or([0, 0, 0, 0]),
+                );
+                // Note: SDK runtime automatically registers sanad seals during publish_seal
+                // Manual registration is no longer needed and causes "adapter not found" warnings
 
-                    // Persist the mapping to state for cross-run lookups
-                    state.storage.wallet.sanad_seals.push(
-                        csv_store::state::wallet::SanadSealRecord {
-                            sanad_id: sanad_id_hex.clone(),
-                            anchor_txid: anchor_txid_hex.clone(),
-                            vout: output_index,
-                        },
-                    );
-                    state.save()?;
-                    log::info!(
-                        "Persisted sanad seal to state: sanad_id={}, txid={}, vout={}",
-                        sanad_id_hex,
-                        anchor_txid_hex,
-                        output_index
-                    );
-                }
+                // Persist the mapping to state for cross-run lookups
+                state.storage.wallet.sanad_seals.push(
+                    csv_store::state::wallet::SanadSealRecord {
+                        sanad_id: sanad_id_hex.clone(),
+                        anchor_txid: anchor_txid_hex.clone(),
+                        vout: output_index,
+                    },
+                );
+                state.save()?;
+                log::info!(
+                    "Persisted sanad seal to state: sanad_id={}, txid={}, vout={}",
+                    sanad_id_hex,
+                    anchor_txid_hex,
+                    output_index
+                );
             }
 
             output::kv("Chain", chain.as_ref());
@@ -1164,30 +1233,15 @@ async fn cmd_create(
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "default".to_string()),
             );
-            if let Some(ref anchor) = anchor {
-                output::kv("Anchor TX Hash", &hex::encode(&anchor.anchor_id));
-                output::kv("Block Height", &anchor.block_height.to_string());
-            }
-            output::kv(
-                "Status",
-                if anchor.is_some() {
-                    "Created and published via runtime"
-                } else {
-                    "Created (not published)"
-                },
-            );
+            output::kv("Anchor TX Hash", &hex::encode(&result.anchor.anchor_id));
+            output::kv("Block Height", &result.anchor.block_height.to_string());
+            output::kv("Status", "Created and published via runtime");
 
             // UnifiedStateManager is automatically saved after command execution
             println!();
-            if anchor.is_some() {
-                output::info(
-                    "Sanad created and published successfully. Use 'csv sanad show <sanad_id>' to view details",
-                );
-            } else {
-                output::info(
-                    "Sanad created successfully (not published). Use 'csv sanad show <sanad_id>' to view details",
-                );
-            }
+            output::info(
+                "Sanad created and published successfully. Use 'csv sanad show <sanad_id>' to view details",
+            );
         }
         Err(e) => {
             output::error(&format!("Failed to create sanad via runtime: {}", e));

@@ -58,10 +58,202 @@ use crate::local_store::SanadRecord;
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
-use csv_protocol::Sanad;
+use csv_protocol::{CommitAnchor, OwnershipProof, Sanad, SanadPayloadDescriptor};
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
+
+/// Explicit content-descriptor inputs for a Sanad creation request.
+///
+/// Every field here maps 1:1 onto a [`SanadPayloadDescriptor`] field. There is
+/// **no implicit default**: a hash that the caller did not supply is `None`,
+/// never an all-zero [`Hash`]. A zero hash is indistinguishable from the
+/// legitimately-computed hash of all-zero content, so it must never be used
+/// as a "missing value" sentinel (SANAD-CREATE-001).
+///
+/// `schema_hash`, `payload_hash`, `disclosure_policy_hash`, and
+/// `proof_policy_hash` are required by the protocol descriptor and therefore
+/// required here too — [`CreateSanadRequest::validate`] fails closed with
+/// [`CsvError::InvalidInput`] if any of them is missing.
+#[derive(Debug, Clone, Default)]
+pub struct ContentDescriptorInput {
+    /// Registered schema identifier (defaults to the canonical descriptor schema id if `None`).
+    pub schema_id: Option<String>,
+    /// Hash of the schema definition. Required.
+    pub schema_hash: Option<Hash>,
+    /// Canonical payload serialization codec identifier (defaults to CBOR = 1 if `None`).
+    pub payload_codec: Option<u8>,
+    /// Hash of the actual payload content. Required.
+    pub payload_hash: Option<Hash>,
+    /// Optional Merkle root over content subtrees. Explicitly absent when `None`.
+    pub content_root: Option<Hash>,
+    /// Optional root over attachment hashes. Explicitly absent when `None`.
+    pub attachment_root: Option<Hash>,
+    /// Hash of the disclosure policy. Required.
+    pub disclosure_policy_hash: Option<Hash>,
+    /// Hash of the proof policy. Required.
+    pub proof_policy_hash: Option<Hash>,
+}
+
+/// How the caller wants seal funding selected for a same-chain Sanad creation.
+///
+/// This replaces ad hoc "pick the first/largest UTXO" logic scattered through
+/// callers with an explicit, typed selection policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FundingSelector {
+    /// Let the chain adapter/runtime pick funding automatically (e.g. a
+    /// freshly-created seal with an adapter-managed value).
+    Automatic,
+    /// Use a specific, caller-identified funding reference (e.g. a Bitcoin
+    /// `txid:vout`). The runtime/adapter is responsible for validating that
+    /// the referenced output is actually spendable before anchoring.
+    Explicit {
+        /// Chain-specific reference string (e.g. `"<txid>:<vout>"`).
+        reference: String,
+    },
+}
+
+/// Whether a Sanad creation request should actually be anchored on-chain.
+///
+/// `--skip-publish` (or any equivalent caller option) must map to
+/// [`PublishPolicy::DraftOnly`], which can only ever produce a
+/// [`SanadDraft`] — an explicitly unpublished, unsigned-for-chain export.
+/// It must never be able to produce a [`Sanad`] that looks like a real,
+/// actively-anchored Sanad (SANAD-CREATE-001).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishPolicy {
+    /// Publish the commitment under a seal on-chain and return a real,
+    /// anchored Sanad.
+    Publish,
+    /// Do not publish anything on-chain. Produces a local-only draft that
+    /// cannot be mistaken for an active Sanad.
+    DraftOnly,
+}
+
+/// A typed, canonical request to create a Sanad.
+///
+/// The CLI (or any other caller) builds this request; the SDK/runtime is
+/// responsible for executing it. No chain-specific business logic belongs
+/// in the request itself — `chain` simply selects which adapter executes
+/// the request.
+#[derive(Debug, Clone)]
+pub struct CreateSanadRequest {
+    /// The chain the Sanad's seal will be anchored on.
+    pub chain: ChainId,
+    /// The owner's address/identifier bytes.
+    pub owner: Vec<u8>,
+    /// Chain-specific value (e.g. sats for Bitcoin). `None` lets the adapter
+    /// pick a default; this is intentionally distinct from "missing
+    /// descriptor field" semantics, which always fail closed instead.
+    pub value: Option<u64>,
+    /// Explicit content descriptor inputs. See [`ContentDescriptorInput`].
+    pub content_descriptor: ContentDescriptorInput,
+    /// How seal funding should be selected.
+    pub funding_selector: FundingSelector,
+    /// Whether to actually publish on-chain, or only produce a local draft.
+    pub publish_policy: PublishPolicy,
+}
+
+/// A local-only, unpublished Sanad creation draft.
+///
+/// Produced when [`PublishPolicy::DraftOnly`] is requested (e.g.
+/// `--skip-publish`). A draft is **not** a real, active Sanad: it has no
+/// seal anchor, no on-chain transaction, and no finality status, and it
+/// must never be persisted or displayed as if it were one.
+#[derive(Debug, Clone)]
+pub struct SanadDraft {
+    /// The descriptor that would be bound into the Sanad ID once published.
+    pub descriptor: SanadPayloadDescriptor,
+    /// The commitment hash that would be published.
+    pub commitment: Hash,
+    /// The ownership proof that would accompany publication.
+    pub owner: OwnershipProof,
+    /// The salt that would be used for ID derivation.
+    pub salt: Vec<u8>,
+    /// The chain this draft targets.
+    pub chain: ChainId,
+}
+
+/// The canonical result of successfully creating and publishing a Sanad.
+///
+/// Carries everything the acceptance criteria for SANAD-CREATE-001 require:
+/// the canonical Sanad ID, seal reference, owner, commitment, anchor
+/// transaction, block height, and finality status.
+#[derive(Debug, Clone)]
+pub struct SanadCreationResult {
+    /// The canonical Sanad.
+    pub sanad: Sanad,
+    /// The seal reference (chain-specific encoded seal bytes) the Sanad is anchored to.
+    pub seal_ref: Vec<u8>,
+    /// The owner address/identifier bytes.
+    pub owner: Vec<u8>,
+    /// The commitment hash bound into the Sanad.
+    pub commitment: Hash,
+    /// The on-chain anchor produced by publishing the seal.
+    pub anchor: CommitAnchor,
+    /// Whether the anchor has reached the chain's configured finality depth.
+    /// `false` means the Sanad is anchored but not yet final; callers must
+    /// not treat it as irreversible until this is `true`.
+    pub finalized: bool,
+}
+
+impl CreateSanadRequest {
+    /// Validate that all descriptor fields required by the protocol are
+    /// present, and resolve them into a [`SanadPayloadDescriptor`].
+    ///
+    /// This is the single fail-closed gate for "missing required descriptor
+    /// field": there is no fallback to an all-zero hash anywhere in this
+    /// path. Callers that omit a required field get a typed
+    /// [`CsvError::InvalidInput`], never a fabricated value.
+    pub fn build_descriptor(&self) -> Result<SanadPayloadDescriptor, CsvError> {
+        let d = &self.content_descriptor;
+
+        let schema_hash = d.schema_hash.ok_or_else(|| {
+            CsvError::InvalidInput(
+                "content_descriptor.schema_hash is required and was not provided".to_string(),
+            )
+        })?;
+        let payload_hash = d.payload_hash.ok_or_else(|| {
+            CsvError::InvalidInput(
+                "content_descriptor.payload_hash is required and was not provided".to_string(),
+            )
+        })?;
+        let disclosure_policy_hash = d.disclosure_policy_hash.ok_or_else(|| {
+            CsvError::InvalidInput(
+                "content_descriptor.disclosure_policy_hash is required and was not provided"
+                    .to_string(),
+            )
+        })?;
+        let proof_policy_hash = d.proof_policy_hash.ok_or_else(|| {
+            CsvError::InvalidInput(
+                "content_descriptor.proof_policy_hash is required and was not provided"
+                    .to_string(),
+            )
+        })?;
+
+        let schema_id = d
+            .schema_id
+            .clone()
+            .unwrap_or_else(|| SanadPayloadDescriptor::SCHEMA_ID.to_string());
+        let payload_codec = d.payload_codec.unwrap_or(1); // 1 = canonical CBOR
+
+        let mut descriptor = SanadPayloadDescriptor::new(
+            schema_id,
+            schema_hash,
+            payload_codec,
+            payload_hash,
+            d.content_root,
+            disclosure_policy_hash,
+            proof_policy_hash,
+        );
+
+        if let Some(attachment_root) = d.attachment_root {
+            descriptor = descriptor.with_attachment_root(attachment_root);
+        }
+
+        Ok(descriptor)
+    }
+}
 
 /// Filter options for listing Sanads.
 #[derive(Debug, Clone, Default)]
@@ -204,6 +396,115 @@ impl SanadsManager {
         });
 
         Ok(sanad)
+    }
+
+    /// Build a local-only, unpublished draft from a [`CreateSanadRequest`].
+    ///
+    /// This is the **only** outcome [`PublishPolicy::DraftOnly`] (e.g.
+    /// `--skip-publish`) can ever produce. It performs no chain I/O, persists
+    /// nothing, and emits no events — the returned [`SanadDraft`] has no
+    /// seal anchor, no transaction, and no finality status, so it can never
+    /// be mistaken for a real, active Sanad (SANAD-CREATE-001).
+    ///
+    /// Required descriptor fields are validated and fail closed via
+    /// [`CreateSanadRequest::build_descriptor`]; missing fields produce
+    /// [`CsvError::InvalidInput`], never an all-zero hash default.
+    ///
+    /// # Errors
+    ///
+    /// - [`CsvError::InvalidInput`] if `request.publish_policy` is not
+    ///   [`PublishPolicy::DraftOnly`], if `request.owner` is empty, or if a
+    ///   required content descriptor field is missing.
+    pub fn create_draft(
+        &self,
+        request: &CreateSanadRequest,
+        commitment: Hash,
+        owner_proof: OwnershipProof,
+        salt: &[u8],
+    ) -> Result<SanadDraft, CsvError> {
+        if request.publish_policy != PublishPolicy::DraftOnly {
+            return Err(CsvError::InvalidInput(
+                "create_draft requires PublishPolicy::DraftOnly; use finalize_published() for PublishPolicy::Publish".to_string(),
+            ));
+        }
+        if request.owner.is_empty() {
+            return Err(CsvError::InvalidInput(
+                "CreateSanadRequest.owner must not be empty".to_string(),
+            ));
+        }
+        if owner_proof.owner.is_empty() || owner_proof.proof.is_empty() {
+            return Err(CsvError::InvalidInput(
+                "Ownership proof must have non-empty owner and signature bytes".to_string(),
+            ));
+        }
+
+        let descriptor = request.build_descriptor()?;
+
+        Ok(SanadDraft {
+            descriptor,
+            commitment,
+            owner: owner_proof,
+            salt: salt.to_vec(),
+            chain: request.chain.clone(),
+        })
+    }
+
+    /// Finalize a [`CreateSanadRequest`] with [`PublishPolicy::Publish`] into
+    /// a canonical, persisted [`SanadCreationResult`].
+    ///
+    /// The caller (typically the CLI) is responsible for performing the
+    /// actual on-chain publish via [`crate::runtime::ChainRuntime`] — that is
+    /// chain-specific execution, not SDK-level business logic. This method
+    /// is the single place that turns a successful publish into the
+    /// canonical record: it validates the request, builds and binds the
+    /// descriptor, derives the Sanad, persists it, and emits the creation
+    /// event.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` — The original typed creation request (must use
+    ///   [`PublishPolicy::Publish`]).
+    /// * `commitment` — The commitment hash that was actually published.
+    /// * `owner_proof` — The ownership proof accompanying the publish.
+    /// * `salt` — Salt bytes used for Sanad ID derivation.
+    /// * `seal_ref` — Chain-specific encoded seal bytes the commitment was published under.
+    /// * `anchor` — The [`CommitAnchor`] returned by the chain adapter/runtime publish call.
+    /// * `finalized` — Whether the anchor has reached the chain's configured finality depth.
+    ///
+    /// # Errors
+    ///
+    /// - [`CsvError::InvalidInput`] if `request.publish_policy` is not
+    ///   [`PublishPolicy::Publish`], or required fields are missing/empty.
+    /// - [`CsvError::ChainNotSupported`] if the chain is not enabled.
+    /// - [`CsvError::SerializationError`] if the Sanad cannot be serialized.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finalize_published(
+        &self,
+        request: &CreateSanadRequest,
+        commitment: Hash,
+        owner_proof: OwnershipProof,
+        salt: &[u8],
+        seal_ref: Vec<u8>,
+        anchor: CommitAnchor,
+        finalized: bool,
+    ) -> Result<SanadCreationResult, CsvError> {
+        if request.publish_policy != PublishPolicy::Publish {
+            return Err(CsvError::InvalidInput(
+                "finalize_published requires PublishPolicy::Publish; use create_draft() for PublishPolicy::DraftOnly".to_string(),
+            ));
+        }
+
+        let descriptor = request.build_descriptor()?;
+        let sanad = self.create(&descriptor, commitment, owner_proof, salt, request.chain.clone())?;
+
+        Ok(SanadCreationResult {
+            sanad,
+            seal_ref,
+            owner: request.owner.clone(),
+            commitment,
+            anchor,
+            finalized,
+        })
     }
 
     /// Get a Sanad by its ID.
@@ -360,5 +661,197 @@ impl SanadsManager {
              Sanad ID: {:?}",
             sanad_id
         )))
+    }
+}
+
+#[cfg(test)]
+mod create_request_tests {
+    use super::*;
+
+    fn base_request() -> CreateSanadRequest {
+        CreateSanadRequest {
+            chain: ChainId::new("ethereum"),
+            owner: vec![1, 2, 3, 4],
+            value: Some(100),
+            content_descriptor: ContentDescriptorInput::default(),
+            funding_selector: FundingSelector::Automatic,
+            publish_policy: PublishPolicy::DraftOnly,
+        }
+    }
+
+    fn full_descriptor() -> ContentDescriptorInput {
+        ContentDescriptorInput {
+            schema_id: None,
+            schema_hash: Some(Hash::sha256(b"schema")),
+            payload_codec: None,
+            payload_hash: Some(Hash::sha256(b"payload")),
+            content_root: None,
+            attachment_root: None,
+            disclosure_policy_hash: Some(Hash::sha256(b"disclosure")),
+            proof_policy_hash: Some(Hash::sha256(b"proof")),
+        }
+    }
+
+    /// SANAD-CREATE-001: a missing required descriptor field must fail closed
+    /// with a typed error, never fall back to an all-zero hash.
+    #[test]
+    fn missing_payload_hash_fails_closed() {
+        let mut request = base_request();
+        request.content_descriptor = ContentDescriptorInput {
+            payload_hash: None,
+            ..full_descriptor()
+        };
+
+        let err = request.build_descriptor().unwrap_err();
+        match err {
+            CsvError::InvalidInput(msg) => assert!(msg.contains("payload_hash")),
+            other => panic!("expected InvalidInput, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn missing_schema_hash_fails_closed() {
+        let mut request = base_request();
+        request.content_descriptor = ContentDescriptorInput {
+            schema_hash: None,
+            ..full_descriptor()
+        };
+        assert!(matches!(
+            request.build_descriptor(),
+            Err(CsvError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn missing_disclosure_policy_hash_fails_closed() {
+        let mut request = base_request();
+        request.content_descriptor = ContentDescriptorInput {
+            disclosure_policy_hash: None,
+            ..full_descriptor()
+        };
+        assert!(matches!(
+            request.build_descriptor(),
+            Err(CsvError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn missing_proof_policy_hash_fails_closed() {
+        let mut request = base_request();
+        request.content_descriptor = ContentDescriptorInput {
+            proof_policy_hash: None,
+            ..full_descriptor()
+        };
+        assert!(matches!(
+            request.build_descriptor(),
+            Err(CsvError::InvalidInput(_))
+        ));
+    }
+
+    /// A fully-populated descriptor must never silently substitute a zero
+    /// hash for any required field.
+    #[test]
+    fn complete_descriptor_builds_without_zero_hash_substitution() {
+        let mut request = base_request();
+        request.content_descriptor = full_descriptor();
+
+        let descriptor = request.build_descriptor().expect("should build");
+        let zero_hex = hex::encode([0u8; 32]);
+        assert_ne!(descriptor.schema_hash.bytes, zero_hex);
+        assert_eq!(
+            descriptor.payload_hash.bytes,
+            hex::encode(request.content_descriptor.payload_hash.unwrap().as_bytes())
+        );
+    }
+
+    /// `--skip-publish` (PublishPolicy::DraftOnly) must only ever be able to
+    /// produce a SanadDraft, never something that looks like a published
+    /// anchor/result.
+    #[test]
+    fn draft_only_policy_produces_draft_with_no_anchor() {
+        let client = Arc::new(ClientRef::new());
+        let manager = SanadsManager::new(client);
+
+        let mut request = base_request();
+        request.content_descriptor = full_descriptor();
+        request.publish_policy = PublishPolicy::DraftOnly;
+
+        let owner_proof = OwnershipProof {
+            owner: vec![9, 9, 9],
+            proof: vec![1, 1, 1],
+            scheme: None,
+        };
+        let commitment = Hash::sha256(b"commitment");
+        let salt = [7u8; 16];
+
+        let draft = manager
+            .create_draft(&request, commitment, owner_proof, &salt)
+            .expect("draft should build");
+
+        // SanadDraft has no anchor/seal_ref/finality fields at all -- the
+        // type itself makes "draft pretending to be published" impossible.
+        assert_eq!(draft.commitment.as_bytes(), commitment.as_bytes());
+        assert_eq!(draft.chain, request.chain);
+    }
+
+    /// Calling create_draft with PublishPolicy::Publish must fail closed
+    /// rather than silently treating a publish request as a draft.
+    #[test]
+    fn create_draft_rejects_publish_policy() {
+        let client = Arc::new(ClientRef::new());
+        let manager = SanadsManager::new(client);
+
+        let mut request = base_request();
+        request.content_descriptor = full_descriptor();
+        request.publish_policy = PublishPolicy::Publish;
+
+        let owner_proof = OwnershipProof {
+            owner: vec![9, 9, 9],
+            proof: vec![1, 1, 1],
+            scheme: None,
+        };
+
+        let result = manager.create_draft(
+            &request,
+            Hash::sha256(b"commitment"),
+            owner_proof,
+            &[7u8; 16],
+        );
+        assert!(matches!(result, Err(CsvError::InvalidInput(_))));
+    }
+
+    /// Calling finalize_published with PublishPolicy::DraftOnly must fail
+    /// closed: a skip-publish request must never be finalized as if it were
+    /// a real, anchored Sanad.
+    #[test]
+    fn finalize_published_rejects_draft_only_policy() {
+        let client = Arc::new(ClientRef::new());
+        let manager = SanadsManager::new(client);
+
+        let mut request = base_request();
+        request.content_descriptor = full_descriptor();
+        request.publish_policy = PublishPolicy::DraftOnly;
+
+        let owner_proof = OwnershipProof {
+            owner: vec![9, 9, 9],
+            proof: vec![1, 1, 1],
+            scheme: None,
+        };
+        let anchor = CommitAnchor {
+            anchor_id: vec![1, 2, 3],
+            block_height: 10,
+            metadata: vec![],
+        };
+
+        let result = manager.finalize_published(
+            &request,
+            Hash::sha256(b"commitment"),
+            owner_proof,
+            &[7u8; 16],
+            vec![0xAA],
+            anchor,
+            false,
+        );
+        assert!(matches!(result, Err(CsvError::InvalidInput(_))));
     }
 }
