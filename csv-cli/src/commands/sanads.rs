@@ -15,9 +15,7 @@ use crate::output;
 use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager, UtxoRecord};
 
 use crate::wallet_identity::WalletIdentity;
-use csv_store::state::{
-    CanonicalLifecycleEvent, CanonicalSanadState, LifecycleEventType, SanadLifecycleState,
-};
+use csv_store::state::{CanonicalSanadState, SanadLifecycleState};
 
 #[derive(Subcommand)]
 pub enum SanadAction {
@@ -1880,33 +1878,6 @@ async fn query_sanad_on_chain_state(
             None
         }
     }
-}
-
-/// Query lifecycle events for a Sanad
-///
-/// Returns creation event from local state. Chain-specific event queries
-/// require Phase 5: SanadStateReader trait with chain adapter event indexing.
-async fn query_sanad_lifecycle_events(
-    _chain: &Chain,
-    sanad_id_hex: &str,
-    _config: &Config,
-    state: &UnifiedStateManager,
-) -> Vec<CanonicalLifecycleEvent> {
-    let mut events = Vec::new();
-
-    // Get local sanad for creation event
-    if let Some(tracked) = state.get_sanad(sanad_id_hex) {
-        events.push(CanonicalLifecycleEvent {
-            timestamp: tracked.created_at,
-            chain: tracked.chain.clone(),
-            event: LifecycleEventType::Created,
-            actor: None,
-            tx_hash: tracked.anchor_tx_hash.clone(),
-            state_after: SanadLifecycleState::from_local_status(tracked.status),
-        });
-    }
-
-    events
 }
 
 /// Build SDK config from CLI config for runtime client construction
