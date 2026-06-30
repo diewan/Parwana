@@ -4,7 +4,6 @@ use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::Subcommand;
 use sha2::Digest;
-use std::str::FromStr;
 
 use csv_content::ContentTree;
 use csv_hash::ChainId;
@@ -286,8 +285,8 @@ async fn cmd_create(
 
     // For contract chains (Ethereum, Solana, Sui, Aptos), check contract deployment
     let is_contract_chain = matches!(
-        chain,
-        Chain::Ethereum | Chain::Solana | Chain::Sui | Chain::Aptos
+        chain.as_str(),
+        "ethereum" | "solana" | "sui" | "aptos"
     );
     if is_contract_chain && !readiness.contract_configured {
         output::error("Chain readiness check failed: Contract/program not deployed or configured");
@@ -1205,12 +1204,13 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
     let sanad_id_hash = Hash::new(*sanad_id_parsed.as_bytes());
 
     output::header(&format!("Sanad: {}", hex::encode(sanad_id_hash.as_bytes())));
+    output::info("Source: local display cache (non-canonical). Use 'csv sanad state' for canonical on-chain state.");
 
     if let Some(tracked) = state.get_sanad(&sanad_id_hash.to_hex()) {
         output::kv("Chain", tracked.chain.as_ref());
         output::kv_hash("Commitment", tracked.commitment.as_bytes());
         output::kv(
-            "Status",
+            "Local Status",
             match tracked.status {
                 SanadStatus::Consumed => "Consumed",
                 SanadStatus::Transferred => "Transferred",
@@ -1228,6 +1228,59 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
     Ok(())
 }
 
+/// Resolved display label and (optional) status update for a single `cmd_list` row.
+struct ResolvedSanadRow {
+    label: String,
+    /// `Some(status)` only when the new status was derived from a canonical
+    /// on-chain query. Local-only fallback must never produce a status update.
+    status_update: Option<SanadStatus>,
+}
+
+/// Pure decision logic for a single Sanad row in `csv sanad list`.
+///
+/// This is the load-bearing rule for CLI-STATE-001: a local cache must never be
+/// presented as canonical, and must never silently overwrite local state as if
+/// it were a fresh canonical result. When `--update` is requested but the
+/// canonical chain query fails (`on_chain_state == None`), the row is labeled
+/// explicitly as stale local data and no status update is produced.
+fn resolve_sanad_row_status(
+    update_requested: bool,
+    has_valid_seal: bool,
+    local_status: SanadStatus,
+    on_chain_state: Option<SanadLifecycleState>,
+) -> ResolvedSanadRow {
+    let local_label = || {
+        if !has_valid_seal {
+            SanadLifecycleState::Invalid.label()
+        } else {
+            SanadLifecycleState::from_local_status(local_status).label()
+        }
+    };
+
+    match on_chain_state {
+        Some(canonical) => {
+            let status_update = Some(match canonical {
+                SanadLifecycleState::Consumed | SanadLifecycleState::Invalid => {
+                    SanadStatus::Consumed
+                }
+                _ => SanadStatus::Active,
+            });
+            ResolvedSanadRow {
+                label: canonical.label().to_string(),
+                status_update,
+            }
+        }
+        None if update_requested => ResolvedSanadRow {
+            label: format!("{} (local cache, chain query failed)", local_label()),
+            status_update: None,
+        },
+        None => ResolvedSanadRow {
+            label: local_label().to_string(),
+            status_update: None,
+        },
+    }
+}
+
 async fn cmd_list(
     chain: Option<Chain>,
     update: bool,
@@ -1237,6 +1290,8 @@ async fn cmd_list(
     output::header("Tracked Sanads");
     if update {
         output::info("Querying on-chain status for all sanads...");
+    } else {
+        output::info("Source: local display cache (non-canonical). Use --update to query canonical chain state, or 'csv sanad state' for a single Sanad.");
     }
 
     let headers = vec!["Sanad ID", "Chain", "State"];
@@ -1266,31 +1321,24 @@ async fn cmd_list(
             None
         };
 
-        let state_enum = if let Some(ref cs) = on_chain_state {
-            cs.state
-        } else if !has_valid_seal {
-            SanadLifecycleState::Invalid
-        } else {
-            SanadLifecycleState::from_local_status(sanad.status)
-        };
+        let resolved = resolve_sanad_row_status(
+            update,
+            has_valid_seal,
+            sanad.status,
+            on_chain_state.as_ref().map(|cs| cs.state),
+        );
 
-        let status = state_enum.label().to_string();
-
-        // Collect updates to apply after the loop
-        if update {
-            let new_status = match state_enum {
-                SanadLifecycleState::Consumed | SanadLifecycleState::Invalid => {
-                    SanadStatus::Consumed
-                }
-                _ => SanadStatus::Active,
-            };
-
-            if sanad.status != new_status {
-                updates_to_apply.push((sanad.id.clone(), new_status));
-            }
+        if let Some(new_status) = resolved.status_update
+            && sanad.status != new_status
+        {
+            updates_to_apply.push((sanad.id.clone(), new_status));
         }
 
-        rows.push(vec![sanad.id.clone(), sanad.chain.to_string(), status]);
+        rows.push(vec![
+            sanad.id.clone(),
+            sanad.chain.to_string(),
+            resolved.label,
+        ]);
     }
 
     // Apply updates after the loop to avoid borrow checker issues
@@ -1315,644 +1363,6 @@ async fn cmd_list(
     }
 
     Ok(())
-}
-
-/// Check on-chain status of a sanad to detect if it's consumed or inaccessible
-/// Returns Some(status) if on-chain check was performed, None if falling back to local status
-async fn check_sanad_on_chain_status(
-    sanad: &SanadRecord,
-    config: &Config,
-    state: &UnifiedStateManager,
-) -> Option<String> {
-    // For Bitcoin, check if the UTXO is still unspent
-    if sanad.chain.as_str() == "bitcoin" {
-        if let Some(anchor_tx_hash) = &sanad.anchor_tx_hash {
-            log::debug!(
-                "Bitcoin sanad {}: checking anchor_tx_hash: {}",
-                sanad.id,
-                anchor_tx_hash
-            );
-            if let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x")) {
-                log::debug!(
-                    "Bitcoin sanad {}: decoded {} bytes from anchor_tx_hash",
-                    sanad.id,
-                    tx_hash_bytes.len()
-                );
-
-                let (txid, vout) = if tx_hash_bytes.len() >= 36 {
-                    let txid = &tx_hash_bytes[0..32];
-                    let vout_bytes = &tx_hash_bytes[32..36];
-                    let vout = u32::from_le_bytes(vout_bytes.try_into().unwrap_or([0u8; 4]));
-                    (txid, vout)
-                } else if tx_hash_bytes.len() == 32 {
-                    let txid = &tx_hash_bytes[0..32];
-                    let vout = state
-                        .storage
-                        .wallet
-                        .sanad_seals
-                        .iter()
-                        .find(|s| s.sanad_id == sanad.id)
-                        .map(|s| s.vout)
-                        .unwrap_or(0);
-                    log::debug!(
-                        "Bitcoin sanad {}: looked up vout {} from sanad_seals",
-                        sanad.id,
-                        vout
-                    );
-                    (txid, vout)
-                } else {
-                    log::warn!(
-                        "Bitcoin sanad {}: anchor_tx_hash has invalid length ({} bytes)",
-                        sanad.id,
-                        tx_hash_bytes.len()
-                    );
-                    return None;
-                };
-
-                let mut txid_display = [0u8; 32];
-                txid_display.copy_from_slice(txid);
-                // anchor_tx_hash is already in display format (mempool.space returns display-order
-                // txids from /tx broadcast; no reversal is needed here).
-                let txid_hex = hex::encode(txid_display);
-
-                log::debug!(
-                    "Bitcoin sanad {}: checking UTXO {}:{} on-chain",
-                    sanad.id,
-                    &txid_hex[..16],
-                    vout
-                );
-
-                // Runtime-mediated validation: build client and check UTXO status
-                // Fail closed if RPC unavailable - security requirement
-                match validate_bitcoin_utxo_via_runtime(&txid_hex, vout, config, sanad).await {
-                    Ok(is_valid) => {
-                        if is_valid {
-                            log::debug!(
-                                "Bitcoin sanad {}: UTXO {}:{} is valid",
-                                sanad.id,
-                                &txid_hex[..16],
-                                vout
-                            );
-                            return Some("Active".to_string());
-                        } else {
-                            log::debug!(
-                                "Bitcoin sanad {}: UTXO {}:{} is spent/invalid",
-                                sanad.id,
-                                &txid_hex[..16],
-                                vout
-                            );
-                            return Some("Consumed".to_string());
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Bitcoin sanad {}: failed to validate UTXO via runtime: {}. Falling back to local status.",
-                            sanad.id,
-                            e
-                        );
-                        // Fall through to return None (use local status)
-                    }
-                }
-            } else {
-                log::warn!(
-                    "Bitcoin sanad {}: failed to decode anchor_tx_hash",
-                    sanad.id
-                );
-            }
-        } else {
-            log::warn!("Bitcoin sanad {}: no anchor_tx_hash found", sanad.id);
-        }
-        return None;
-    }
-
-    // For Aptos, check if seal was consumed by querying AnchorDataCollection
-    if sanad.chain.as_str() == "aptos" {
-        log::debug!("Aptos sanad {}: checking on-chain status", sanad.id);
-        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
-            if let Ok(seal_ref_bytes) =
-                base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref)
-            {
-                if seal_ref_bytes.len() >= 2 {
-                    let mut pos = 0;
-                    let sanad_nonce = if seal_ref_bytes[pos] == 1 {
-                        pos += 1;
-                        if seal_ref_bytes.len() >= pos + 8 {
-                            if let Ok(nonce_bytes) = seal_ref_bytes[pos..pos + 8].try_into() {
-                                pos += 8;
-                                Some(u64::from_le_bytes(nonce_bytes))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        pos += 1;
-                        None
-                    };
-
-                    if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
-                        pos += 9;
-                    } else if seal_ref_bytes.len() > pos {
-                        pos += 1;
-                    }
-
-                    if seal_ref_bytes.len() >= pos + 4 {
-                        let id_len = u32::from_le_bytes([
-                            seal_ref_bytes[pos],
-                            seal_ref_bytes[pos + 1],
-                            seal_ref_bytes[pos + 2],
-                            seal_ref_bytes[pos + 3],
-                        ]) as usize;
-                        pos += 4;
-                        if seal_ref_bytes.len() >= pos + id_len && id_len == 32 {
-                            let addr_hex =
-                                format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + id_len]));
-
-                            use reqwest::Client;
-                            let client = Client::new();
-                            let contract_addr = if let Some(ca) = &chain_cfg.contract_address {
-                                ca.clone()
-                            } else {
-                                "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50"
-                                    .to_string()
-                            };
-
-                            let anchor_collection_type =
-                                format!("{}::CSVSeal::AnchorDataCollection", contract_addr);
-                            let collection_url = format!(
-                                "{}/accounts/{}/resource/{}",
-                                chain_cfg.rpc_url.trim_end_matches('/'),
-                                addr_hex,
-                                anchor_collection_type
-                            );
-
-                            log::debug!(
-                                "Aptos sanad {}: querying AnchorDataCollection at {}",
-                                sanad.id,
-                                collection_url
-                            );
-
-                            if let Ok(response) = client
-                                .get(&collection_url)
-                                .timeout(std::time::Duration::from_secs(5))
-                                .send()
-                                .await
-                            {
-                                if response.status().is_success() {
-                                    if let Ok(data) = response.json::<serde_json::Value>().await {
-                                        if let Some(table_handle) = data
-                                            .get("data")
-                                            .and_then(|d| d.get("data"))
-                                            .and_then(|d| d.get("handle"))
-                                            .and_then(|h| h.as_str())
-                                        {
-                                            let table_url = format!(
-                                                "{}/accounts/{}/table_item",
-                                                chain_cfg.rpc_url.trim_end_matches('/'),
-                                                addr_hex
-                                            );
-
-                                            let key_type = "u64";
-                                            let value_type =
-                                                format!("{}::CSVSeal::AnchorData", contract_addr);
-                                            let sanad_nonce_val = sanad_nonce.unwrap_or(0);
-
-                                            let table_payload = serde_json::json!({
-                                                "key_type": key_type,
-                                                "value_type": value_type,
-                                                "key": format!("0x{:016x}", sanad_nonce_val),
-                                                "handle": table_handle
-                                            });
-
-                                            log::debug!(
-                                                "Aptos sanad {}: checking table item for nonce {}",
-                                                sanad.id,
-                                                sanad_nonce_val
-                                            );
-
-                                            if let Ok(table_response) = client
-                                                .post(&table_url)
-                                                .json(&table_payload)
-                                                .timeout(std::time::Duration::from_secs(5))
-                                                .send()
-                                                .await
-                                            {
-                                                if table_response.status().is_success() {
-                                                    log::debug!(
-                                                        "Aptos sanad {}: nonce {} found in AnchorDataCollection table, marking as Consumed",
-                                                        sanad.id,
-                                                        sanad_nonce_val
-                                                    );
-                                                    return Some("Consumed".to_string());
-                                                } else if table_response.status().as_u16() == 404 {
-                                                    log::debug!(
-                                                        "Aptos sanad {}: nonce {} not found in AnchorDataCollection table, marking as Active",
-                                                        sanad.id,
-                                                        sanad_nonce_val
-                                                    );
-                                                    return Some("Active".to_string());
-                                                }
-                                            }
-                                        } else {
-                                            if let Some(next_nonce_str) = data
-                                                .get("data")
-                                                .and_then(|d| d.get("next_nonce"))
-                                                .and_then(|n| n.as_str())
-                                            {
-                                                if let Ok(next_nonce) =
-                                                    next_nonce_str.parse::<u64>()
-                                                {
-                                                    if let Some(sanad_nonce) = sanad_nonce {
-                                                        if sanad_nonce
-                                                            < next_nonce.saturating_sub(1)
-                                                        {
-                                                            return Some("Consumed".to_string());
-                                                        } else {
-                                                            return Some("Active".to_string());
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else if response.status().as_u16() == 404 {
-                                    log::debug!(
-                                        "Aptos sanad {}: AnchorDataCollection not found (404)",
-                                        sanad.id
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return None;
-    }
-
-    // For Ethereum, check if sanad is locked on-chain via CSVLock.getSanadState
-    if sanad.chain.as_str() == "ethereum" {
-        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
-            use reqwest::Client;
-            use sha3::{Digest, Keccak256};
-            let client = Client::new();
-
-            let contract_addr = if let Some(addr) = &chain_cfg.contract_address {
-                addr.clone()
-            } else {
-                log::debug!("Ethereum sanad {}: no contract address in config", sanad.id);
-                return None;
-            };
-
-            let mut hasher = Keccak256::new();
-            hasher.update(b"getSanadState(bytes32)");
-            let selector = &hasher.finalize()[..4];
-
-            let sanad_id_hex = sanad.id.trim_start_matches("0x");
-            let sanad_id_bytes = match hex::decode(sanad_id_hex) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    log::debug!(
-                        "Ethereum sanad {}: failed to decode sanad_id: {}",
-                        sanad.id,
-                        e
-                    );
-                    return None;
-                }
-            };
-
-            let mut calldata = Vec::with_capacity(36);
-            calldata.extend_from_slice(selector);
-            calldata.extend_from_slice(&sanad_id_bytes);
-
-            let calldata_hex = format!("0x{}", hex::encode(&calldata));
-            let contract_addr_normalized = contract_addr.trim_start_matches("0x");
-
-            // Try multiple RPC endpoints for reliability
-            let mut rpc_urls = vec![chain_cfg.rpc_url.trim_end_matches('/').to_string()];
-            // Add fallback RPCs
-            rpc_urls.push("https://eth-sepolia.g.alchemy.com/v2/demo".to_string());
-            rpc_urls.push("https://rpc.sepolia.org".to_string());
-
-            for url in &rpc_urls {
-                let payload = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": "eth_call",
-                    "params": [{
-                        "to": format!("0x{}", contract_addr_normalized),
-                        "data": calldata_hex.clone()
-                    }, "latest"],
-                    "id": 1
-                });
-
-                log::debug!(
-                    "Ethereum sanad {}: calling getSanadState on {} via {}",
-                    sanad.id,
-                    contract_addr,
-                    url
-                );
-
-                if let Ok(response) = client
-                    .post(url)
-                    .timeout(std::time::Duration::from_secs(5))
-                    .json(&payload)
-                    .send()
-                    .await
-                {
-                    if let Ok(result) = response.json::<serde_json::Value>().await {
-                        eprintln!(
-                            "DEBUG: Ethereum sanad {} RPC response from {}: {}",
-                            sanad.id, url, result
-                        );
-                        if let Some(hex_str) = result.get("result").and_then(|r| r.as_str()) {
-                            let response_bytes = match hex::decode(hex_str.trim_start_matches("0x"))
-                            {
-                                Ok(bytes) => bytes,
-                                Err(_) => continue,
-                            };
-
-                            // getSanadState returns 4 x 32 bytes:
-                            // [state (uint8, padded), isUsed (bool, padded), lockTimestamp (uint256), refunded (bool, padded)]
-                            if response_bytes.len() >= 128 {
-                                let state = response_bytes[31]; // state is uint8, last byte of first 32-byte word
-                                let is_used = response_bytes[63] != 0; // isUsed is bool, last byte of second 32-byte word
-                                let refunded = response_bytes[127] != 0; // refunded is bool, last byte of fourth 32-byte word
-
-                                let status = match state {
-                                    0 => "Uncreated",
-                                    1 => "Active",
-                                    2 => "Locked",
-                                    3 => "Consumed",
-                                    4 => "Refunded",
-                                    _ => "Unknown",
-                                };
-
-                                eprintln!(
-                                    "DEBUG: Ethereum sanad {} state={} isUsed={} refunded={}",
-                                    sanad.id, status, is_used, refunded
-                                );
-
-                                // Map contract state to display status
-                                return match state {
-                                    3 => Some("Consumed".to_string()), // Consumed
-                                    4 => Some("Consumed".to_string()), // Refunded (also consumed)
-                                    _ => Some("Active".to_string()),   // Active, Locked, Uncreated
-                                };
-                            }
-                        } else if let Some(err) = result.get("error") {
-                            eprintln!(
-                                "DEBUG: Ethereum sanad {} RPC error from {}: {}",
-                                sanad.id, url, err
-                            );
-                        }
-                    }
-                }
-            }
-
-            log::warn!(
-                "Ethereum sanad {}: all RPC endpoints failed, falling back to local status",
-                sanad.id
-            );
-        }
-        return None;
-    }
-
-    // For Sui, check if seal object is consumed by querying the Seal object via REST API
-    if sanad.chain.as_str() == "sui" {
-        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
-            use reqwest::Client;
-            let client = Client::new();
-
-            if let Ok(seal_ref_bytes) =
-                base64::engine::general_purpose::STANDARD.decode(&sanad.seal_ref)
-            {
-                let object_id = if seal_ref_bytes.len() >= 2 {
-                    let mut pos = 0;
-
-                    let _nonce = if seal_ref_bytes[pos] == 1 {
-                        pos += 1;
-                        if seal_ref_bytes.len() < pos + 8 {
-                            return None;
-                        }
-                        pos += 8;
-                        Some(u64::from_le_bytes([
-                            seal_ref_bytes[pos - 8],
-                            seal_ref_bytes[pos - 7],
-                            seal_ref_bytes[pos - 6],
-                            seal_ref_bytes[pos - 5],
-                            seal_ref_bytes[pos - 4],
-                            seal_ref_bytes[pos - 3],
-                            seal_ref_bytes[pos - 2],
-                            seal_ref_bytes[pos - 1],
-                        ]))
-                    } else {
-                        pos += 1;
-                        None
-                    };
-
-                    let _version = if seal_ref_bytes.len() > pos && seal_ref_bytes[pos] == 1 {
-                        pos += 1;
-                        if seal_ref_bytes.len() < pos + 8 {
-                            return None;
-                        }
-                        pos += 8;
-                        Some(0u64)
-                    } else if seal_ref_bytes.len() > pos {
-                        pos += 1;
-                        None
-                    } else {
-                        None
-                    };
-
-                    if seal_ref_bytes.len() < pos + 4 {
-                        return None;
-                    }
-                    let id_len = u32::from_le_bytes([
-                        seal_ref_bytes[pos],
-                        seal_ref_bytes[pos + 1],
-                        seal_ref_bytes[pos + 2],
-                        seal_ref_bytes[pos + 3],
-                    ]) as usize;
-                    pos += 4;
-
-                    if seal_ref_bytes.len() < pos + id_len {
-                        return None;
-                    }
-
-                    let object_id = &seal_ref_bytes[pos..pos + id_len];
-                    Some(object_id)
-                } else {
-                    return None;
-                };
-
-                if let Some(object_id) = object_id {
-                    if object_id.len() < 32 {
-                        return None;
-                    }
-
-                    let object_id = &object_id[0..32];
-                    let object_id_hex = format!("0x{}", hex::encode(object_id));
-
-                    // Use Sui REST API to fetch object data
-                    let base_url = chain_cfg.rpc_url.trim_end_matches('/');
-                    let url = format!("{}/v1(objects/{})", base_url, object_id_hex);
-
-                    log::debug!(
-                        "Sui sanad {}: fetching object {} from {}",
-                        sanad.id,
-                        object_id_hex,
-                        url
-                    );
-
-                    if let Ok(response) = client
-                        .get(&url)
-                        .timeout(std::time::Duration::from_secs(5))
-                        .send()
-                        .await
-                    {
-                        if let Ok(result) = response.json::<serde_json::Value>().await {
-                            if let Some(status) = result.get("status") {
-                                if status.as_str() == Some("Deleted")
-                                    || status.as_str() == Some("NotFound")
-                                {
-                                    log::debug!(
-                                        "Sui sanad {}: object is deleted/not found",
-                                        sanad.id
-                                    );
-                                    return Some("Inaccessible".to_string());
-                                }
-                            }
-
-                            // Check the consumed field in the object data
-                            if let Some(contents) =
-                                result.get("data").and_then(|d| d.get("contents"))
-                            {
-                                if let Some(display_data) =
-                                    contents.get("display").and_then(|d| d.get("data"))
-                                {
-                                    if let Some(consumed) = display_data.get("consumed") {
-                                        if let Some(consumed_bool) = consumed.as_bool() {
-                                            if consumed_bool {
-                                                log::debug!(
-                                                    "Sui sanad {}: seal object is marked consumed",
-                                                    sanad.id
-                                                );
-                                                return Some("Consumed".to_string());
-                                            } else {
-                                                log::debug!(
-                                                    "Sui sanad {}: seal object is NOT consumed",
-                                                    sanad.id
-                                                );
-                                                return Some("Active".to_string());
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return None;
-    }
-
-    // For Solana, derive the SanadAccount PDA and check the consumed flag
-    if sanad.chain.as_str() == "solana" {
-        if let Ok(chain_cfg) = config.chain(&sanad.chain) {
-            use reqwest::Client;
-            use solana_sdk::pubkey::Pubkey;
-            use std::str::FromStr;
-
-            let client = Client::new();
-
-            // Decode the program ID as base58 (Solana's native address encoding)
-            let program_id =
-                Pubkey::from_str("CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj").ok()?;
-
-            // Parse the owner pubkey from the sanad record
-            let owner_pubkey = Pubkey::from_str(&sanad.owner).ok()?;
-
-            // Derive the PDA using the correct Solana algorithm
-            let sanad_id_bytes: [u8; 32] = hex::decode(sanad.id.trim_start_matches("0x"))
-                .ok()?
-                .try_into()
-                .ok()?;
-            let sanad_id_hash = csv_hash::Hash::new(sanad_id_bytes);
-
-            let (seal_pda, _bump) = Pubkey::find_program_address(
-                &[b"sanad", owner_pubkey.as_ref(), sanad_id_hash.as_bytes()],
-                &program_id,
-            );
-
-            let url = chain_cfg.rpc_url.trim_end_matches('/').to_string();
-
-            let payload = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "getAccountInfo",
-                "params": [[seal_pda.to_string()], {"encoding": "base64"}],
-                "id": 1
-            });
-
-            log::debug!(
-                "Solana sanad {}: fetching PDA {} via getAccountInfo",
-                sanad.id,
-                seal_pda
-            );
-
-            if let Ok(response) = client
-                .post(&url)
-                .timeout(std::time::Duration::from_secs(5))
-                .json(&payload)
-                .send()
-                .await
-            {
-                if let Ok(result) = response.json::<serde_json::Value>().await {
-                    if let Some(value) = result.get("result").and_then(|r| r.get("value")) {
-                        if value.is_null() {
-                            log::debug!("Solana sanad {}: PDA account not found", sanad.id);
-                            return Some("Inaccessible".to_string());
-                        }
-
-                        // Parse the base64 encoded account data to check consumed flag
-                        if let Some(data) = value.get("data").and_then(|d| d.get("data")) {
-                            if let Some(data_str) = data.as_str() {
-                                if let Ok(account_data) =
-                                    base64::engine::general_purpose::STANDARD.decode(data_str)
-                                {
-                                    // Parse SanadAccount: 8 (discriminator) + 32 (owner) + 32 (sanad_id) +
-                                    // 32 (commitment) + 32 (state_root) + 32 (nullifier) + 1 (asset_class) +
-                                    // 32 (asset_id) + 32 (metadata_hash) + 1 (proof_system) + 32 (proof_root) +
-                                    // 1 (consumed) + 1 (locked) + 8 (created_at) + 1 (bump)
-                                    if account_data.len() >= 44 {
-                                        let consumed = account_data[43] != 0;
-                                        if consumed {
-                                            log::debug!(
-                                                "Solana sanad {}: SanadAccount consumed flag is true",
-                                                sanad.id
-                                            );
-                                            return Some("Consumed".to_string());
-                                        } else {
-                                            log::debug!(
-                                                "Solana sanad {}: SanadAccount consumed flag is false",
-                                                sanad.id
-                                            );
-                                            return Some("Active".to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return None;
-    }
-
-    // Chain not supported for on-chain verification
-    None
 }
 
 fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> Result<()> {
@@ -2054,7 +1464,7 @@ async fn cmd_consume(
     // Consume the sanad via the runtime
     output::info(&format!("Consuming sanad on {}...", chain));
     let result = runtime
-        .consume_sanad(core_chain.clone(), &sanad_id, "default")
+        .consume_sanad(core_chain.clone(), &sanad_id_parsed, "default")
         .await
         .map_err(|e| anyhow::anyhow!("Failed to consume sanad: {}", e))?;
 
@@ -2336,8 +1746,11 @@ async fn cmd_trace(
     Ok(())
 }
 
-/// Query on-chain state and return a CanonicalSanadState.
-/// This replaces the old check_sanad_on_chain_status which only returned "Active"/"Consumed".
+/// Query canonical on-chain state for a Sanad via the runtime-backed chain adapter
+/// (`SanadStateReader::get_sanad_state`). This is the single, uniform path for all
+/// chains — no chain gets a hand-rolled RPC parser or a local-only fabricated state
+/// (CLI-STATE-001). Returns `None` if the adapter/chain query is unavailable; callers
+/// must treat `None` as "canonical state unknown", never as "Active".
 async fn query_sanad_on_chain_state(
     chain: &Chain,
     sanad_id_hex: &str,
@@ -2345,294 +1758,67 @@ async fn query_sanad_on_chain_state(
     config: &Config,
     state: &UnifiedStateManager,
 ) -> Option<CanonicalSanadState> {
-    // Ethereum: call getSanadState and return full state
-    if chain.as_str() == "ethereum" {
-        return query_ethereum_sanad_state(sanad_id_hex, config).await;
-    }
+    let sanad_id_parsed = SanadId::parse_hex(sanad_id_hex).ok()?;
 
-    // Bitcoin: check UTXO state
-    if chain.as_str() == "bitcoin" {
-        return query_bitcoin_sanad_state(sanad_id_hex, config, state).await;
-    }
+    let sdk_config = build_sdk_config_from_cli_config(config, chain, state).ok()?;
+    let core_chain = csv_hash::ChainId::new(chain.as_str());
 
-    // Sui: parse seal object state
-    if chain.as_str() == "sui" {
-        return query_sui_sanad_state(sanad_id_hex, local_sanad, config, state).await;
-    }
-
-    // Solana: parse PDA state
-    if chain.as_str() == "solana" {
-        return query_solana_sanad_state(sanad_id_hex, local_sanad, config, state).await;
-    }
-
-    // Aptos: check AnchorDataCollection state
-    if chain.as_str() == "aptos" {
-        return query_aptos_sanad_state(sanad_id_hex, local_sanad, config, state).await;
-    }
-
-    None
-}
-
-/// Ethereum: call getSanadState and return full CanonicalSanadState
-async fn query_ethereum_sanad_state(
-    sanad_id_hex: &str,
-    config: &Config,
-) -> Option<CanonicalSanadState> {
-    use reqwest::Client;
-    use sha3::{Digest, Keccak256};
-
-    let client = Client::new();
-
-    // Find the chain config — try ethereum first, then look for any chain with a contract
-    let chain_cfg = config.chain(&Chain::from_str("ethereum").ok()?).ok()?;
-
-    let contract_addr = chain_cfg.contract_address.as_ref()?;
-
-    let mut hasher = Keccak256::new();
-    hasher.update(b"getSanadState(bytes32)");
-    let selector = &hasher.finalize()[..4];
-
-    let sanad_id_bytes = hex::decode(sanad_id_hex.trim_start_matches("0x")).ok()?;
-
-    let mut calldata = Vec::with_capacity(36);
-    calldata.extend_from_slice(selector);
-    calldata.extend_from_slice(&sanad_id_bytes);
-
-    let calldata_hex = format!("0x{}", hex::encode(&calldata));
-    let contract_addr_normalized = contract_addr.trim_start_matches("0x");
-
-    let payload = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": format!("0x{}", contract_addr_normalized),
-            "data": calldata_hex
-        }, "latest"],
-        "id": 1
-    });
-
-    if let Ok(response) = client
-        .post(&chain_cfg.rpc_url)
-        .timeout(std::time::Duration::from_secs(5))
-        .json(&payload)
-        .send()
+    let client = csv_sdk::CsvClient::builder()
+        .with_chain(core_chain.clone())
+        .with_config(sdk_config)
+        .with_store_backend(csv_sdk::StoreBackend::InMemory)
+        .build()
         .await
-    {
-        if let Ok(result) = response.json::<serde_json::Value>().await {
-            if let Some(hex_str) = result.get("result").and_then(|r| r.as_str()) {
-                let response_bytes = hex::decode(hex_str.trim_start_matches("0x")).ok()?;
+        .ok()?;
 
-                if response_bytes.len() >= 128 {
-                    let state = response_bytes[31];
-                    let locked_at =
-                        u64::from_be_bytes(response_bytes[64..72].try_into().unwrap_or([0; 8]));
-                    let consumed_at =
-                        u64::from_be_bytes(response_bytes[96..104].try_into().unwrap_or([0; 8]));
+    let runtime = client.chain_runtime();
+    let adapter = match runtime.get_adapter(core_chain.clone()).await {
+        Ok(adapter) => adapter,
+        Err(e) => {
+            log::warn!(
+                "Chain adapter not available for {}: {}. Cannot determine canonical state.",
+                chain, e
+            );
+            return None;
+        }
+    };
 
-                    return Some(CanonicalSanadState {
-                        sanad_id: sanad_id_hex.to_string(),
-                        seal_id: None,
-                        chain: csv_hash::ChainId::new("ethereum"),
-                        state: SanadLifecycleState::from_u8(state),
-                        owner: None,
-                        commitment: None,
-                        nullifier: None,
-                        source_chain: None,
-                        destination_chain: None,
-                        tx_hash: None,
-                        block_height: None,
-                        updated_at: Some(if consumed_at > 0 {
-                            consumed_at
-                        } else {
-                            locked_at
-                        }),
-                    });
-                }
-            }
+    match adapter.get_sanad_state(&sanad_id_parsed).await {
+        Ok(canonical) => {
+            let lifecycle_state = SanadLifecycleState::from_u8(canonical.state);
+            Some(CanonicalSanadState {
+                sanad_id: sanad_id_hex.to_string(),
+                seal_id: None,
+                chain: core_chain,
+                state: lifecycle_state,
+                owner: Some(canonical.owner),
+                commitment: local_sanad.map(|s| s.commitment.clone()),
+                nullifier: canonical
+                    .nullifier
+                    .map(|n| hex::encode(n.as_bytes()))
+                    .or_else(|| local_sanad.and_then(|s| s.nullifier.clone())),
+                source_chain: None,
+                destination_chain: None,
+                tx_hash: None,
+                block_height: None,
+                updated_at: canonical
+                    .consumed_at
+                    .or(canonical.minted_at)
+                    .or(canonical.locked_at)
+                    .map(|t| t as u64)
+                    .or(Some(canonical.created_at as u64)),
+            })
+        }
+        Err(e) => {
+            log::warn!(
+                "Failed to query canonical sanad state from chain {}: {}. Cannot return canonical state without on-chain validation.",
+                chain, e
+            );
+            None
         }
     }
-
-    None
 }
 
-/// Bitcoin: check UTXO state
-async fn query_bitcoin_sanad_state(
-    sanad_id_hex: &str,
-    config: &Config,
-    state: &UnifiedStateManager,
-) -> Option<CanonicalSanadState> {
-    let tracked = state.get_sanad(sanad_id_hex)?;
-
-    if let Some(anchor_tx_hash) = &tracked.anchor_tx_hash
-        && let Ok(tx_hash_bytes) = hex::decode(anchor_tx_hash.trim_start_matches("0x"))
-        && tx_hash_bytes.len() >= 32 {
-        let txid = &tx_hash_bytes[0..32];
-        let vout = if tx_hash_bytes.len() >= 36 {
-            u32::from_le_bytes(tx_hash_bytes[32..36].try_into().unwrap_or([0; 4]))
-        } else {
-            state
-                .storage
-                .wallet
-                .sanad_seals
-                .iter()
-                .find(|s| s.sanad_id == sanad_id_hex)
-                .map(|s| s.vout)
-                .unwrap_or(0)
-        };
-
-        let txid_display = hex::encode(txid);
-
-        // Runtime-mediated validation: check UTXO status via runtime
-        match validate_bitcoin_utxo_via_runtime(&txid_display, vout, config, tracked).await
-        {
-            Ok(is_valid) => {
-                if is_valid {
-                    return Some(CanonicalSanadState {
-                        sanad_id: sanad_id_hex.to_string(),
-                        seal_id: None,
-                        chain: csv_hash::ChainId::new("bitcoin"),
-                        state: SanadLifecycleState::Active,
-                        owner: None,
-                        commitment: Some(tracked.commitment.clone()),
-                        nullifier: tracked.nullifier.clone(),
-                        source_chain: None,
-                        destination_chain: None,
-                        tx_hash: Some(txid_display),
-                        block_height: None,
-                        updated_at: Some(tracked.created_at),
-                    });
-                } else {
-                    // UTXO is spent/invalid
-                    return Some(CanonicalSanadState {
-                        sanad_id: sanad_id_hex.to_string(),
-                        seal_id: None,
-                        chain: csv_hash::ChainId::new("bitcoin"),
-                        state: SanadLifecycleState::Consumed,
-                        owner: None,
-                        commitment: Some(tracked.commitment.clone()),
-                        nullifier: tracked.nullifier.clone(),
-                        source_chain: None,
-                        destination_chain: None,
-                        tx_hash: Some(txid_display),
-                        block_height: None,
-                        updated_at: Some(tracked.created_at),
-                    });
-                }
-            }
-            Err(e) => {
-                // Fail closed if RPC unavailable - return error instead of partial state
-                log::warn!(
-                    "Failed to validate Bitcoin sanad state via runtime: {}. Cannot return canonical state without on-chain validation.",
-                    e
-                );
-                return None;
-            }
-        }
-    }
-
-    None
-}
-
-/// Sui: parse seal object state (uses local state only, no direct chain RPC calls)
-async fn query_sui_sanad_state(
-    sanad_id_hex: &str,
-    local_sanad: Option<&SanadRecord>,
-    _config: &Config,
-    _state: &UnifiedStateManager,
-) -> Option<CanonicalSanadState> {
-    let tracked = local_sanad?;
-
-    // Parse seal reference to extract object ID
-    if let Ok(seal_ref_bytes) = base64::engine::general_purpose::STANDARD.decode(&tracked.seal_ref)
-        && seal_ref_bytes.len() >= 2 {
-            let mut pos = 0;
-            if seal_ref_bytes[pos] == 1 {
-                pos += 1;
-            }
-            pos += 1;
-
-            if seal_ref_bytes.len() >= pos + 4 {
-                let id_len = u32::from_le_bytes([
-                    seal_ref_bytes[pos],
-                    seal_ref_bytes[pos + 1],
-                    seal_ref_bytes[pos + 2],
-                    seal_ref_bytes[pos + 3],
-                ]) as usize;
-                pos += 4;
-                if seal_ref_bytes.len() >= pos + id_len && id_len >= 32 {
-                    let object_id_hex =
-                        format!("0x{}", hex::encode(&seal_ref_bytes[pos..pos + 32]));
-                    // Return local state - live chain state should be queried via runtime/adapter
-                    return Some(CanonicalSanadState {
-                        sanad_id: sanad_id_hex.to_string(),
-                        seal_id: Some(object_id_hex),
-                        chain: csv_hash::ChainId::new("sui"),
-                        state: SanadLifecycleState::Active,
-                        owner: None,
-                        commitment: Some(tracked.commitment.clone()),
-                        nullifier: tracked.nullifier.clone(),
-                        source_chain: None,
-                        destination_chain: None,
-                        tx_hash: None,
-                        block_height: None,
-                        updated_at: Some(tracked.created_at),
-                    });
-                }
-            }
-        }
-
-    None
-}
-
-/// Solana: parse PDA state (uses local state only, no direct chain RPC calls)
-async fn query_solana_sanad_state(
-    sanad_id_hex: &str,
-    local_sanad: Option<&SanadRecord>,
-    _config: &Config,
-    _state: &UnifiedStateManager,
-) -> Option<CanonicalSanadState> {
-    let tracked = local_sanad?;
-    // Return local state - live chain state should be queried via runtime/adapter
-    Some(CanonicalSanadState {
-        sanad_id: sanad_id_hex.to_string(),
-        seal_id: None,
-        chain: csv_hash::ChainId::new("solana"),
-        state: SanadLifecycleState::Active,
-        owner: None,
-        commitment: Some(tracked.commitment.clone()),
-        nullifier: tracked.nullifier.clone(),
-        source_chain: None,
-        destination_chain: None,
-        tx_hash: None,
-        block_height: None,
-        updated_at: Some(tracked.created_at),
-    })
-}
-
-/// Aptos: check AnchorDataCollection state (uses local state only, no direct chain RPC calls)
-async fn query_aptos_sanad_state(
-    sanad_id_hex: &str,
-    local_sanad: Option<&SanadRecord>,
-    _config: &Config,
-    _state: &UnifiedStateManager,
-) -> Option<CanonicalSanadState> {
-    let tracked = local_sanad?;
-    // Return local state - live chain state should be queried via runtime/adapter
-    Some(CanonicalSanadState {
-        sanad_id: sanad_id_hex.to_string(),
-        seal_id: None,
-        chain: csv_hash::ChainId::new("aptos"),
-        state: SanadLifecycleState::Active,
-        owner: None,
-        commitment: Some(tracked.commitment.clone()),
-        nullifier: tracked.nullifier.clone(),
-        source_chain: None,
-        destination_chain: None,
-        tx_hash: None,
-        block_height: None,
-        updated_at: Some(tracked.created_at),
-    })
-}
 /// Query lifecycle events for a Sanad
 ///
 /// Returns creation event from local state. Chain-specific event queries
@@ -2698,97 +1884,80 @@ fn build_sdk_config_from_cli_config(
         sanad_seals: vec![],
     };
     sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
-    
+
     Ok(sdk_config)
 }
 
-/// Validate a Bitcoin UTXO using runtime-mediated validation
-/// This function builds a CsvClient and uses chain_runtime to check UTXO status
-/// Returns Ok(true) if UTXO is valid/unspent, Ok(false) if spent/invalid, Err if RPC unavailable
-async fn validate_bitcoin_utxo_via_runtime(
-    txid: &str,
-    _vout: u32,
-    config: &Config,
-    sanad: &SanadRecord,
-) -> Result<bool, anyhow::Error> {
-    use csv_hash::ChainId;
-    use csv_sdk::CsvClient;
-    use csv_sdk::StoreBackend;
+#[cfg(test)]
+mod state_tests {
+    use super::*;
 
-    // Map CLI Chain to protocol ChainId
-    let core_chain = ChainId::new(sanad.chain.as_str());
+    /// CLI-STATE-001: a Sanad that is canonically Consumed on-chain must never be
+    /// displayed or persisted as Active because of stale/local data.
+    #[test]
+    fn canonical_consumed_overrides_local_active() {
+        let resolved = resolve_sanad_row_status(
+            true,
+            true,
+            SanadStatus::Active,
+            Some(SanadLifecycleState::Consumed),
+        );
+        assert_eq!(resolved.label, "Consumed");
+        assert_eq!(resolved.status_update, Some(SanadStatus::Consumed));
+    }
 
-    // Convert CLI config to SDK config format
-    let mut sdk_config = csv_sdk::config::Config {
-        network: match config.chain(&sanad.chain)?.network {
-            Network::Test => csv_sdk::config::Network::Testnet,
-            Network::Main => csv_sdk::config::Network::Mainnet,
-            Network::Dev => csv_sdk::config::Network::Devnet,
-        },
-        ..Default::default()
-    };
+    /// CLI-STATE-001: when --update is requested and the canonical on-chain query
+    /// fails, the local cache must be labeled explicitly as stale/local and must
+    /// NOT produce a status update (i.e. it cannot silently overwrite local state
+    /// or be confused with a fresh canonical result).
+    #[test]
+    fn failed_chain_query_does_not_mark_active_or_persist_update() {
+        let resolved = resolve_sanad_row_status(true, true, SanadStatus::Consumed, None);
+        assert!(
+            resolved.label.contains("local cache"),
+            "label must disclose it is local-cache data, got: {}",
+            resolved.label
+        );
+        assert!(
+            resolved.label.contains("chain query failed"),
+            "label must disclose the chain query failed, got: {}",
+            resolved.label
+        );
+        assert_eq!(
+            resolved.status_update, None,
+            "a failed canonical query must never produce a local status overwrite"
+        );
+    }
 
-    // Convert chain config to SDK format
-    let chain_cfg = config.chain(&sanad.chain)?;
-    let sdk_chain_config = csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_cfg.rpc_url.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
-        finality_depth: chain_cfg.finality_depth as u32,
-        enabled: true,
-        xpub: None,
-        seed: None,
-        contract_address: chain_cfg.contract_address.clone(),
-        program_id: chain_cfg.program_id.clone(),
-        account: 0,
-        index: 0,
-        utxos: vec![],
-        sanad_seals: vec![],
-    };
-    sdk_config
-        .chains
-        .insert(sanad.chain.as_str().to_string(), sdk_chain_config);
+    /// Without --update, the CLI must not fabricate a canonical-looking label;
+    /// it falls back to the plain local status (no on-chain query was attempted).
+    #[test]
+    fn no_update_requested_uses_local_status_without_chain_query_failure_label() {
+        let resolved = resolve_sanad_row_status(false, true, SanadStatus::Active, None);
+        assert_eq!(resolved.label, "Active");
+        assert_eq!(resolved.status_update, None);
+    }
 
-    // Build CSV client
-    let client = CsvClient::builder()
-        .with_chain(core_chain.clone())
-        .with_config(sdk_config)
-        .with_store_backend(StoreBackend::InMemory)
-        .build()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to build CSV client for validation: {}", e))?;
+    /// An invalid seal reference must be treated as Invalid for local display,
+    /// regardless of the locally recorded status.
+    #[test]
+    fn invalid_seal_overrides_local_status_label() {
+        let resolved = resolve_sanad_row_status(false, false, SanadStatus::Active, None);
+        assert_eq!(resolved.label, "Invalid");
+        assert_eq!(resolved.status_update, None);
+    }
 
-    // Use runtime to check transaction status
-    let runtime = client.chain_runtime();
-    match runtime.get_transaction(core_chain, txid).await {
-        Ok(tx_info) => {
-            // Check transaction status with tri-state logic
-            match tx_info.status {
-                csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { .. } => {
-                    // Transaction is confirmed - for Bitcoin, assume the vout is unspent
-                    // unless we have evidence it's spent. This is a safe default for newly created Sanads.
-                    // TODO: Add vout-specific spend checking via Bitcoin backend RPC
-                    Ok(true)
-                }
-                csv_protocol::chain_adapter_traits::TransactionStatus::Pending => {
-                    // Transaction is in mempool - treat as Active (not Consumed)
-                    // The vout exists and is unspent in the mempool
-                    Ok(true)
-                }
-                csv_protocol::chain_adapter_traits::TransactionStatus::Failed { .. } |
-                csv_protocol::chain_adapter_traits::TransactionStatus::Dropped |
-                csv_protocol::chain_adapter_traits::TransactionStatus::Unknown => {
-                    // Transaction failed, was dropped, or unknown - treat as invalid
-                    Ok(false)
-                }
-            }
-        }
-        Err(e) => {
-            // Return error to indicate RPC/validation unavailable
-            Err(anyhow::anyhow!("Runtime validation failed: {}", e))
-        }
+    /// A canonical Active result is reflected as a status update, proving the
+    /// update path is reachable (not just the fail-closed path).
+    #[test]
+    fn canonical_active_produces_status_update() {
+        let resolved = resolve_sanad_row_status(
+            true,
+            true,
+            SanadStatus::Consumed,
+            Some(SanadLifecycleState::Active),
+        );
+        assert_eq!(resolved.label, "Active");
+        assert_eq!(resolved.status_update, Some(SanadStatus::Active));
     }
 }
