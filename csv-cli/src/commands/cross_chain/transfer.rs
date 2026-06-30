@@ -264,13 +264,17 @@ pub async fn cmd_transfer(
     // Note: SDK already initializes adapters via bitcoin_from_config with loaded UTXOs
     // Do NOT call init_adapters here as it would replace the adapters with fresh wallets
 
-    // Execute the real cross-chain transfer via runtime
+    // Execute the real cross-chain transfer via runtime. TransferCoordinator
+    // owns the full lock -> await-finality -> build-proof -> verify -> mint
+    // state machine; it only returns `Ok` once the destination mint has been
+    // confirmed and the replay entry promoted to `Consumed`. There is no
+    // partial-success return value to fabricate a status from.
     output::info(&format!(
         "Locking Sanad {} on {:?}",
         sanad_id_hash, from_chain
     ));
     let sanad = SanadId(sanad_id_hash);
-    let transfer_id = client
+    let receipt = client
         .transfers()
         .cross_chain(sanad, to_chain.clone())
         .to_address(dest_addr.clone())
@@ -279,42 +283,58 @@ pub async fn cmd_transfer(
         .await
         .map_err(|e| anyhow::anyhow!("Transfer execution failed: {}", e))?;
 
+    // Every field below comes straight off the runtime's TransferReceipt.
+    // The CLI does not compute or default any of transfer_id, replay_id,
+    // lock_tx_hash, or mint_tx_hash.
+    let transfer_id = receipt.transfer_id.clone();
+
     output::success(&format!(
-        "Transfer {} initiated. Sanad locked on source chain.",
+        "Transfer {} completed. Sanad locked on source chain and minted on destination chain.",
         transfer_id
     ));
+    output::kv("Transfer ID", &receipt.transfer_id);
+    output::kv("Replay ID", &receipt.replay_id.to_string());
+    output::kv("Source Chain", &receipt.source_chain.to_string());
+    output::kv("Destination Chain", &receipt.destination_chain.to_string());
+    output::kv("Lock Tx Hash", &receipt.lock_tx_hash);
+    output::kv("Mint Tx Hash", &receipt.mint_tx_hash);
 
     // Clone for use in record after get_address call
     let from_chain_clone = from.clone();
     let sender = state.get_address(&from).map(|s| s.to_string());
 
-    // Record transfer in state
+    // Record transfer in local display cache. The runtime has already
+    // confirmed completion by the time execute() returns Ok, so this record
+    // reflects the runtime's final state, not a locally-guessed status.
     let transfer_record = TransferRecord {
-        id: transfer_id.clone(),
+        id: receipt.transfer_id.clone(),
         source_chain: from_chain_clone,
         dest_chain: to,
         sanad_id: sanad_id_hash.to_string(),
         sender_address: sender,
         destination_address: Some(dest_addr),
-        source_tx_hash: None,
+        source_tx_hash: Some(receipt.lock_tx_hash.clone()),
         source_fee: None,
-        dest_tx_hash: None,
+        dest_tx_hash: Some(receipt.mint_tx_hash.clone()),
         dest_fee: None,
         destination_contract: None,
         proof: None,
-        status: TransferStatus::Initiated,
+        status: TransferStatus::Completed,
         created_at: chrono::Utc::now().timestamp() as u64,
-        completed_at: None,
+        completed_at: Some(chrono::Utc::now().timestamp() as u64),
     };
 
     state.add_transfer(transfer_record);
 
     output::success(&format!(
-        "Transfer {} recorded in local state.",
+        "Transfer {} recorded in local display cache.",
         transfer_id
     ));
 
-    // Update local Sanad store: mark source Sanad as consumed
+    // The runtime only returns Ok(receipt) after the destination mint is
+    // confirmed and the replay entry is promoted to Consumed — i.e. the
+    // transfer has reached its final state. Only then is it safe to mark
+    // the source Sanad consumed in the local display cache.
     if let Err(e) = state.consume_sanad(&sanad_id_hash.to_hex()) {
         log::warn!(
             "Failed to mark source Sanad as consumed in local store: {}",
@@ -323,17 +343,4 @@ pub async fn cmd_transfer(
     }
 
     Ok(())
-}
-
-/// Generate deterministic transfer ID
-fn generate_transfer_id(sanad_id: &Hash, from: &Chain, to: &Chain) -> String {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(sanad_id.as_bytes());
-    hasher.update(from.to_string().as_bytes());
-    hasher.update(to.to_string().as_bytes());
-    hasher.update(chrono::Utc::now().timestamp().to_le_bytes());
-
-    format!("0x{}", hex::encode(hasher.finalize()))
 }

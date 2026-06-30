@@ -217,6 +217,36 @@ impl TransferManager {
     }
 }
 
+/// The faithful runtime receipt for a completed cross-chain transfer.
+///
+/// Every field on this type is sourced directly from
+/// [`csv_runtime::TransferCoordinator::execute`]'s
+/// [`TransferReceipt`](csv_runtime::transfer_coordinator::TransferReceipt).
+/// The SDK does not compute, default, or fabricate any of these values —
+/// the runtime is the only authority for transfer ID, replay ID, and the
+/// lock/mint transaction hashes that prove the transfer happened.
+#[derive(Debug, Clone)]
+pub struct TransferReceipt {
+    /// Runtime-assigned transfer identifier.
+    pub transfer_id: String,
+    /// Replay ID the runtime used to guard against double-execution.
+    pub replay_id: csv_hash::Hash,
+    /// Source chain the Sanad was locked on.
+    pub source_chain: ChainId,
+    /// Destination chain the Sanad was minted on.
+    pub destination_chain: ChainId,
+    /// Transaction hash of the lock on the source chain, as reported by the runtime.
+    pub lock_tx_hash: String,
+    /// Transaction hash of the mint on the destination chain, as reported by the runtime.
+    pub mint_tx_hash: String,
+}
+
+impl std::fmt::Display for TransferReceipt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.transfer_id)
+    }
+}
+
 /// A record of a cross-chain transfer.
 #[derive(Debug, Clone)]
 pub struct TransferRecord {
@@ -326,8 +356,11 @@ impl TransferBuilder {
     ///
     /// # Returns
     ///
-    /// A unique transfer identifier. Use [`TransferManager::status()`]
-    /// to track progress.
+    /// The faithful [`TransferReceipt`] produced by the runtime coordinator:
+    /// transfer ID, replay ID, source/destination chains, and the lock/mint
+    /// transaction hashes. Every field is read from the coordinator's
+    /// response — none of it is computed or guessed locally. Use
+    /// [`TransferManager::status()`] to track progress afterwards.
     ///
     /// # Errors
     ///
@@ -340,7 +373,7 @@ impl TransferBuilder {
     /// is available, this method will use the full lock-prove-verify-mint flow
     /// with replay protection, durable recovery, and canonical verification.
     #[allow(clippy::await_holding_lock)]
-    pub async fn execute(self) -> Result<String, CsvError> {
+    pub async fn execute(self) -> Result<TransferReceipt, CsvError> {
         let _to_address = self.to_address.as_ref().ok_or_else(|| {
             CsvError::BuilderError(
                 "Destination address is required. Use .to_address() to set it.".to_string(),
@@ -407,7 +440,14 @@ impl TransferBuilder {
                         .map_err(|e| CsvError::RuntimeError(format!("Transfer execution failed: {}", e)))?;
 
                     log::info!("TransferBuilder: Transfer executed successfully, transfer_id={}", receipt.transfer_id);
-                    return Ok(receipt.transfer_id);
+                    return Ok(TransferReceipt {
+                        transfer_id: receipt.transfer_id,
+                        replay_id: receipt.replay_id,
+                        source_chain: self.from_chain,
+                        destination_chain: self.to_chain,
+                        lock_tx_hash: receipt.lock_tx_hash,
+                        mint_tx_hash: receipt.mint_tx_hash,
+                    });
                 } else {
                     log::warn!("TransferBuilder: TransferCoordinator not available in TransferManager");
                 }
