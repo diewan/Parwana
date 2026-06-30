@@ -1,32 +1,78 @@
 //! Proof generation and verification commands
+//!
+//! `csv proof generate` produces the canonical `ProofBundle` artifact
+//! (the exact type verified by `csv-sdk`/`csv-verifier`) and `csv proof
+//! verify` consumes that same canonical artifact end-to-end. No lossy
+//! summary is ever reconstructed for verification: the bytes that are
+//! verified are the bytes that were produced.
+//!
+//! Output modes for `proof generate`:
+//! - default: canonical binary `ProofBundle` artifact (the bytes produced by
+//!   `ProofBundle::to_canonical_bytes()`), written to a file or stdout.
+//! - `--hex`: the same canonical artifact bytes, hex-encoded.
+//! - `--json-summary`: a display-only JSON summary of the bundle. This is
+//!   NEVER accepted as input to `proof verify` or `proof verify-cross-chain`
+//!   — it exists purely for human inspection.
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::Subcommand;
-use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::{Read, Write};
 
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::UnifiedStateManager;
 use csv_hash::sanad::SanadId;
+use csv_protocol::proof_taxonomy::ProofBundle;
 
-/// Canonical proof output format (CBOR-serializable).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProofOutput {
+/// Display-only summary of a canonical `ProofBundle`.
+///
+/// This type is never parsed back into a `ProofBundle`. It exists solely so
+/// `--json-summary` can render a human-readable view of the canonical
+/// artifact without ever being treated as verifiable proof material.
+#[derive(Debug, Clone, serde::Serialize)]
+struct ProofSummary {
     chain: String,
     sanad_id: String,
-    proof_type: String,
-    block_height: u64,
-    inclusion_proof: String,
-    dag_root: String,
+    version: u32,
     seal_id: String,
-    anchor_height: u64,
-    generated_at: String,
+    anchor_id: String,
+    anchor_block_height: u64,
+    inclusion_block_number: u64,
+    inclusion_leaf_index: usize,
+    finality_confirmations: u64,
+    finality_is_deterministic: bool,
+    signature_count: usize,
+    signature_scheme: String,
+    dag_root_commitment: String,
+    dag_node_count: usize,
+    artifact_bytes: usize,
+}
+
+impl ProofSummary {
+    fn from_bundle(chain: &str, sanad_id: &str, bundle: &ProofBundle, artifact_bytes: usize) -> Self {
+        Self {
+            chain: chain.to_string(),
+            sanad_id: sanad_id.to_string(),
+            version: bundle.version,
+            seal_id: hex::encode(&bundle.seal_ref.id),
+            anchor_id: hex::encode(&bundle.anchor_ref.anchor_id),
+            anchor_block_height: bundle.anchor_ref.block_height,
+            inclusion_block_number: bundle.inclusion_proof.block_number,
+            inclusion_leaf_index: bundle.inclusion_proof.leaf_index,
+            finality_confirmations: bundle.finality_proof.confirmations,
+            finality_is_deterministic: bundle.finality_proof.is_deterministic,
+            signature_count: bundle.signatures.len(),
+            signature_scheme: format!("{:?}", bundle.signature_scheme),
+            dag_root_commitment: bundle.transition_dag.root_commitment.to_hex(),
+            dag_node_count: bundle.transition_dag.nodes.len(),
+            artifact_bytes,
+        }
+    }
 }
 
 #[derive(Subcommand)]
 pub enum ProofAction {
-    /// Generate inclusion proof for a Sanad
+    /// Generate the canonical inclusion proof bundle for a Sanad
     Generate {
         /// Source chain
         #[arg(value_enum)]
@@ -36,15 +82,25 @@ pub enum ProofAction {
         /// Output file (prints to stdout if not specified)
         #[arg(short, long)]
         output: Option<String>,
+        /// Print a display-only JSON summary instead of the canonical artifact.
+        /// The summary is never accepted by `proof verify`.
+        #[arg(long)]
+        json_summary: bool,
+        /// Hex-encode the canonical artifact bytes instead of writing raw binary
+        #[arg(long)]
+        hex: bool,
     },
-    /// Verify an inclusion proof
+    /// Verify a canonical proof bundle artifact
     Verify {
         /// Destination chain (verifies ON this chain)
         #[arg(value_enum)]
         chain: Chain,
-        /// Proof file (reads from stdin if not specified)
+        /// Proof artifact file (reads from stdin if not specified)
         #[arg(short, long)]
         proof: Option<String>,
+        /// Treat the input as hex-encoded canonical artifact bytes
+        #[arg(long)]
+        hex: bool,
     },
     /// Verify cross-chain proof (proof from chain A verified on chain B)
     VerifyCrossChain {
@@ -54,8 +110,14 @@ pub enum ProofAction {
         /// Destination chain (where proof is being verified)
         #[arg(long)]
         dest: Chain,
-        /// Proof file
+        /// Proof artifact file
         proof: String,
+        /// Treat the input as hex-encoded canonical artifact bytes
+        #[arg(long)]
+        hex: bool,
+        /// Sanad ID this proof must be bound to (hex)
+        #[arg(long)]
+        sanad_id: String,
     },
 }
 
@@ -71,35 +133,98 @@ pub async fn execute(
             chain,
             sanad_id,
             output,
-        } => cmd_generate(
-            chain, sanad_id, output, config, state, canonical, proof_tree,
-        ).await,
-        ProofAction::Verify { chain, proof } => {
-            cmd_verify(chain, proof, config, state, canonical, proof_tree).await
+            json_summary,
+            hex: hex_mode,
+        } => {
+            cmd_generate(
+                chain,
+                sanad_id,
+                output,
+                json_summary,
+                hex_mode,
+                config,
+                state,
+                proof_tree,
+            )
+            .await
         }
+        ProofAction::Verify {
+            chain,
+            proof,
+            hex: hex_mode,
+        } => cmd_verify(chain, proof, hex_mode, config, state, canonical, proof_tree).await,
         ProofAction::VerifyCrossChain {
             source,
             dest,
             proof,
-        } => cmd_verify_cross_chain(source, dest, proof, config, state, canonical, proof_tree).await,
+            hex: hex_mode,
+            sanad_id,
+        } => {
+            cmd_verify_cross_chain(
+                source, dest, proof, hex_mode, sanad_id, config, state, canonical, proof_tree,
+            )
+            .await
+        }
     }
+}
+
+/// Load the canonical `ProofBundle` artifact bytes that `proof generate` produced.
+///
+/// Bytes are decoded with `ProofBundle::from_canonical_bytes`, the exact inverse
+/// of the canonical encoder used by `proof generate`. Malformed or truncated
+/// artifacts are rejected here rather than papered over with synthesized or
+/// defaulted fields.
+fn decode_proof_bundle(raw_bytes: &[u8], hex_mode: bool) -> Result<ProofBundle> {
+    let artifact_bytes: std::borrow::Cow<'_, [u8]> = if hex_mode {
+        let trimmed = std::str::from_utf8(raw_bytes)
+            .context("Proof file is not valid UTF-8 hex text")?
+            .trim();
+        std::borrow::Cow::Owned(
+            hex::decode(trimmed).context("Proof file is not valid hex-encoded data")?,
+        )
+    } else {
+        std::borrow::Cow::Borrowed(raw_bytes)
+    };
+
+    if artifact_bytes.is_empty() {
+        bail!("Proof bundle is empty - no proof artifact provided");
+    }
+
+    let bundle = ProofBundle::from_canonical_bytes(&artifact_bytes)
+        .map_err(|e| anyhow::anyhow!("Malformed proof bundle: {}", e))?;
+
+    if bundle.signatures.is_empty() {
+        bail!("Proof bundle has no signatures - missing signature");
+    }
+    if bundle.signatures.iter().any(|sig| sig.is_empty()) {
+        bail!("Proof bundle contains an empty signature");
+    }
+    if bundle.seal_ref.id.is_empty() {
+        bail!("Proof bundle has an empty seal reference");
+    }
+    if bundle.transition_dag.nodes.is_empty() {
+        bail!("Proof bundle has an empty state transition DAG");
+    }
+
+    Ok(bundle)
 }
 
 async fn cmd_generate(
     chain: Chain,
     sanad_id: String,
     output: Option<String>,
+    json_summary: bool,
+    hex_mode: bool,
     config: &Config,
     _state: &UnifiedStateManager,
-    canonical: bool,
     proof_tree: bool,
 ) -> Result<()> {
     use csv_sdk::prelude::CsvClient;
 
     output::header(&format!("Generating Proof on {}", chain));
 
-    let sanad_id_obj = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_obj =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
 
     output::kv("Chain", chain.as_ref());
     output::kv_hash("Sanad ID", sanad_id_obj.as_bytes());
@@ -121,81 +246,80 @@ async fn cmd_generate(
 
     output::progress(2, 4, "Querying chain state for inclusion proof...");
 
-    // Use the proof manager to generate the proof
-    let rt = tokio::runtime::Runtime::new()?;
-    let proof_bundle = rt.block_on(async {
-        // Get the chain runtime
-        let runtime = client.chain_runtime();
+    // Use the runtime to generate the canonical proof bundle. This is the
+    // exact ProofBundle type that csv-verifier consumes - no lossy summary
+    // is derived from it here.
+    let runtime = client.chain_runtime();
+    let proof_bundle = runtime
+        .generate_proof(adapter_chain, &sanad_id_obj)
+        .await
+        .map_err(|e| anyhow::anyhow!("Proof generation failed: {}", e))?;
 
-        // Generate the proof using the runtime
-        runtime
-            .generate_proof(adapter_chain, &sanad_id_obj)
-            .await
-            .map_err(|e| anyhow::anyhow!("Proof generation failed: {}", e))
-    })?;
+    output::progress(3, 4, "Encoding canonical proof bundle...");
 
-    output::progress(3, 4, "Serializing proof bundle...");
-
-    // Serialize the proof bundle using canonical CBOR
-    let proof_type = match chain.as_str() {
-        "bitcoin" => "merkle",
-        "ethereum" => "mpt",
-        "sui" => "checkpoint",
-        "aptos" => "ledger",
-        "solana" => "epoch",
-        _ => "unknown",
-    };
-
-    let proof_output = ProofOutput {
-        chain: chain.to_string(),
-        sanad_id,
-        proof_type: proof_type.to_string(),
-        block_height: proof_bundle.finality_proof.confirmations,
-        inclusion_proof: hex::encode(&proof_bundle.inclusion_proof.proof_bytes),
-        dag_root: hex::encode(proof_bundle.transition_dag.root_commitment.as_bytes()),
-        seal_id: hex::encode(&proof_bundle.seal_ref.id),
-        anchor_height: proof_bundle.anchor_ref.block_height,
-        generated_at: chrono::Utc::now().to_rfc3339(),
-    };
-
-    let cbor_bytes = csv_hash::canonical::to_canonical_cbor(&proof_output)
-        .map_err(|e| anyhow::anyhow!("CBOR serialization failed: {}", e))?;
+    // The canonical artifact: the same bytes that decode_proof_bundle expects
+    // back during verification.
+    let artifact_bytes = proof_bundle
+        .to_canonical_bytes()
+        .map_err(|e| anyhow::anyhow!("Canonical proof encoding failed: {}", e))?;
 
     output::progress(4, 4, "Finalizing...");
 
-    if let Some(path) = output {
-        let payload = if canonical {
-            cbor_bytes.clone()
+    if json_summary {
+        let summary =
+            ProofSummary::from_bundle(chain.as_str(), &sanad_id, &proof_bundle, artifact_bytes.len());
+        if let Some(path) = &output {
+            let payload = serde_json::to_vec_pretty(&summary)?;
+            std::fs::write(path, &payload)?;
+            output::success(&format!("Proof summary (display-only) saved to {}", path));
         } else {
-            serde_json::to_vec_pretty(&proof_output)?
-        };
-        std::fs::write(&path, &payload)?;
-        output::success(&format!("Proof saved to {}", path));
-    } else if canonical || proof_tree {
-        output::proof_tree(&proof_output, proof_tree, canonical);
-    } else {
-        output::kv("Proof (CBOR)", &hex::encode(&cbor_bytes));
+            output::proof_tree(&summary, proof_tree, false);
+        }
+        output::success(&format!(
+            "{} proof summary generated (display-only, not a verifiable artifact)",
+            chain
+        ));
+        return Ok(());
     }
 
-    output::success(&format!("{} proof generated successfully", chain));
+    if let Some(path) = &output {
+        if hex_mode {
+            std::fs::write(path, hex::encode(&artifact_bytes))?;
+        } else {
+            std::fs::write(path, &artifact_bytes)?;
+        }
+        output::success(&format!("Canonical proof bundle saved to {}", path));
+    } else if hex_mode {
+        println!("{}", hex::encode(&artifact_bytes));
+    } else {
+        std::io::stdout()
+            .write_all(&artifact_bytes)
+            .context("Failed to write canonical proof bundle to stdout")?;
+    }
+
+    output::success(&format!(
+        "{} canonical proof bundle generated successfully ({} bytes)",
+        chain,
+        artifact_bytes.len()
+    ));
     Ok(())
 }
 
 async fn cmd_verify(
     chain: Chain,
     proof_file: Option<String>,
+    hex_mode: bool,
     _config: &Config,
     _state: &UnifiedStateManager,
     canonical: bool,
     proof_tree: bool,
 ) -> Result<()> {
     use csv_hash::sanad::SanadId;
-    use csv_protocol::proof_taxonomy::ProofBundle;
     use csv_sdk::prelude::CsvClient;
 
     output::header(&format!("Verifying Proof on {}", chain));
 
-    let proof_bytes = match proof_file {
+    let raw_bytes = match proof_file {
         Some(path) => std::fs::read(&path)?,
         None => {
             let mut input = Vec::new();
@@ -204,71 +328,20 @@ async fn cmd_verify(
         }
     };
 
-    // Try CBOR first, fall back to JSON for backward compatibility
-    let proof_output: ProofOutput = csv_hash::canonical::from_canonical_cbor(&proof_bytes)
-        .or_else(|_| {
-            // Fallback: try parsing as JSON
-            let json: serde_json::Value = serde_json::from_slice(&proof_bytes)
-                .map_err(|e| anyhow::anyhow!("Invalid proof format: {}", e))?;
-            Ok::<ProofOutput, anyhow::Error>(ProofOutput {
-                chain: json
-                    .get("chain")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string(),
-                sanad_id: json
-                    .get("sanad_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                proof_type: json
-                    .get("proof_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string(),
-                block_height: json
-                    .get("block_height")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-                inclusion_proof: json
-                    .get("inclusion_proof")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                dag_root: json
-                    .get("dag_root")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                seal_id: json
-                    .get("seal_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                anchor_height: json
-                    .get("anchor_height")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-                generated_at: json
-                    .get("generated_at")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to parse proof: {}", e))?;
+    // Decode the exact canonical artifact - no field is reconstructed,
+    // fabricated, or defaulted. Malformed or incomplete bundles are
+    // rejected here, before verification runs.
+    let proof_bundle = decode_proof_bundle(&raw_bytes, hex_mode)?;
 
-    output::kv("Proof Chain", &proof_output.chain);
-    output::kv("Proof Type", &proof_output.proof_type);
+    // The Sanad ID this bundle is bound to comes from the seal reference
+    // inside the canonical bundle itself - not from a side-channel summary.
+    let sanad_id = SanadId::from_bytes(&proof_bundle.seal_ref.id);
 
-    // Extract sanad_id from proof
-    let sanad_id_str = &proof_output.sanad_id;
-    let sanad_id = SanadId::parse_hex(sanad_id_str)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID in proof: {}", e))?;
+    output::kv("Seal ID", &hex::encode(&proof_bundle.seal_ref.id));
+    output::kv("Anchor Block Height", &proof_bundle.anchor_ref.block_height.to_string());
 
     output::progress(1, 4, "Building CSV client...");
 
-    // Build the CSV client
     let adapter_chain = csv_hash::chain_id::ChainId::new(chain.as_str());
 
     let client = CsvClient::builder()
@@ -277,71 +350,15 @@ async fn cmd_verify(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
-    output::progress(2, 4, "Reconstructing proof bundle...");
+    output::progress(2, 4, "Verifying canonical proof bundle...");
 
-    // Parse the proof bundle from CBOR/JSON
-    let inclusion_proof_bytes = hex::decode(&proof_output.inclusion_proof)
-        .map_err(|e| anyhow::anyhow!("Invalid inclusion proof: {}", e))?;
+    let runtime = client.chain_runtime();
+    let valid = runtime
+        .verify_proof_bundle(adapter_chain, &proof_bundle, &sanad_id)
+        .await
+        .map_err(|e| anyhow::anyhow!("Proof verification error: {}", e))?;
 
-    // Reconstruct the proof bundle
-    let proof_bundle = {
-        use csv_hash::{
-            Hash,
-            dag::{DAGNode, DAGSegment},
-            seal::{CommitAnchor, SealPoint},
-        };
-        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
-
-        let dag_root = hex::decode(&proof_output.dag_root)
-            .ok()
-            .and_then(|b| b.try_into().ok())
-            .map(Hash::new)
-            .unwrap_or_else(|| Hash::new(hash_bytes));
-
-        let seal_id = hex::decode(&proof_output.seal_id).unwrap_or_else(|_| hash_bytes.to_vec());
-
-        let anchor_height = proof_output.anchor_height;
-
-        let dag_node = DAGNode::new(dag_root, vec![], vec![], vec![], vec![]);
-        let dag_segment = DAGSegment::new(vec![dag_node], dag_root);
-
-        let seal_ref = SealPoint::new(seal_id.clone(), None, None)
-            .map_err(|e| anyhow::anyhow!("Failed to create seal ref: {}", e))?;
-
-        let anchor_ref = CommitAnchor::new(seal_id, anchor_height, inclusion_proof_bytes.clone())
-            .map_err(|e| anyhow::anyhow!("Failed to create anchor ref: {}", e))?;
-
-        let inclusion_proof = InclusionProof::new(inclusion_proof_bytes, dag_root, 0, 0)
-            .map_err(|e| anyhow::anyhow!("Failed to create inclusion proof: {}", e))?;
-
-        let confirmations = proof_output.block_height;
-
-        let finality_proof = FinalityProof::new(vec![], confirmations, true)
-            .map_err(|e| anyhow::anyhow!("Failed to create finality proof: {}", e))?;
-
-        ProofBundle::new(
-            dag_segment,
-            vec![], // No signatures in stored proof
-            seal_ref,
-            anchor_ref,
-            inclusion_proof,
-            finality_proof,
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to create proof bundle: {}", e))?
-    };
-
-    output::progress(3, 4, "Verifying cryptographic proof...");
-
-    // Use the runtime to verify
-    let rt = tokio::runtime::Runtime::new()?;
-    let valid = rt.block_on(async {
-        let runtime = client.chain_runtime();
-        runtime
-            .verify_proof_bundle(adapter_chain, &proof_bundle, &sanad_id)
-            .await
-            .map_err(|e| anyhow::anyhow!("Proof verification error: {}", e))
-    })?;
-
+    output::progress(3, 4, "Checking verification result...");
     output::progress(4, 4, "Finalizing verification...");
 
     let level = if valid {
@@ -372,89 +389,90 @@ async fn cmd_verify_cross_chain(
     source: Chain,
     dest: Chain,
     proof_file: String,
+    hex_mode: bool,
+    expected_sanad_id: String,
     _config: &Config,
     _state: &UnifiedStateManager,
     canonical: bool,
     proof_tree: bool,
 ) -> Result<()> {
+    use csv_sdk::prelude::CsvClient;
+
     output::header(&format!(
         "Cross-Chain Proof Verification: {} → {}",
         source, dest
     ));
 
-    let proof_bytes = std::fs::read(&proof_file)?;
+    let raw_bytes = std::fs::read(&proof_file)?;
 
-    // Try CBOR first, fall back to JSON
-    let proof_output: ProofOutput = csv_hash::canonical::from_canonical_cbor(&proof_bytes)
-        .or_else(|_| {
-            let json: serde_json::Value = serde_json::from_slice(&proof_bytes)
-                .map_err(|e| anyhow::anyhow!("Invalid proof format: {}", e))?;
-            Ok::<ProofOutput, anyhow::Error>(ProofOutput {
-                chain: json
-                    .get("chain")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string(),
-                sanad_id: json
-                    .get("sanad_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                proof_type: json
-                    .get("proof_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string(),
-                block_height: json
-                    .get("block_height")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-                inclusion_proof: json
-                    .get("inclusion_proof")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                dag_root: json
-                    .get("dag_root")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                seal_id: json
-                    .get("seal_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                anchor_height: json
-                    .get("anchor_height")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-                generated_at: json
-                    .get("generated_at")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to parse proof: {}", e))?;
+    // Decode the canonical artifact - same rules as same-chain verification:
+    // no reconstructed signatures, no fabricated finality data, no fabricated DAG.
+    let proof_bundle = decode_proof_bundle(&raw_bytes, hex_mode)?;
+
+    let expected_sanad_id_obj = SanadId::parse_hex(&expected_sanad_id)
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+
+    if proof_bundle.seal_ref.id.as_slice() != expected_sanad_id_obj.as_bytes() {
+        bail!("Proof bundle seal reference does not match the expected Sanad ID");
+    }
 
     output::kv("Source Chain", source.as_ref());
     output::kv("Destination Chain", dest.as_ref());
+    output::kv("Seal ID", &hex::encode(&proof_bundle.seal_ref.id));
 
-    // Verify the proof is from the claimed source chain
-    if proof_output.chain != source.to_string() {
+    output::progress(1, 4, "Verifying source chain proof...");
+
+    let source_adapter_chain = csv_hash::chain_id::ChainId::new(source.as_str());
+    let source_client = CsvClient::builder()
+        .with_chain(source_adapter_chain.clone())
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build source CSV client: {}", e))?;
+
+    let source_runtime = source_client.chain_runtime();
+    let source_valid = source_runtime
+        .verify_proof_bundle(source_adapter_chain, &proof_bundle, &expected_sanad_id_obj)
+        .await
+        .map_err(|e| anyhow::anyhow!("Source chain proof verification error: {}", e))?;
+
+    if !source_valid {
         return Err(anyhow::anyhow!(
-            "Proof claims to be from {} but file says {}",
-            source,
-            proof_output.chain
+            "Proof verification failed on source chain {} - invalid or forged proof",
+            source
         ));
     }
 
-    output::progress(1, 4, "Verifying source chain proof...");
     output::progress(2, 4, "Checking cross-chain compatibility...");
     output::progress(3, 4, "Verifying on destination chain...");
+
+    let dest_adapter_chain = csv_hash::chain_id::ChainId::new(dest.as_str());
+    let dest_client = CsvClient::builder()
+        .with_chain(dest_adapter_chain.clone())
+        .build()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to build destination CSV client: {}", e))?;
+
+    let dest_runtime = dest_client.chain_runtime();
+    let dest_valid = dest_runtime
+        .verify_proof_bundle(dest_adapter_chain, &proof_bundle, &expected_sanad_id_obj)
+        .await
+        .map_err(|e| anyhow::anyhow!("Destination chain proof verification error: {}", e))?;
+
     output::progress(4, 4, "Checking seal registry for double-spend...");
 
-    output::proof_tree(&proof_output, proof_tree, canonical);
+    if !dest_valid {
+        return Err(anyhow::anyhow!(
+            "Proof verification failed on destination chain {} - invalid or forged proof",
+            dest
+        ));
+    }
+
+    let result = serde_json::json!({
+        "valid": true,
+        "source_chain": source.as_ref(),
+        "dest_chain": dest.as_ref(),
+    });
+    output::proof_tree(&result, proof_tree, canonical);
     output::success("Cross-chain proof verified successfully");
     Ok(())
 }
