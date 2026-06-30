@@ -504,6 +504,16 @@ impl BitcoinWalletOperations {
             .map_err(|e| WalletError::KeyDerivation(format!("Failed to create wallet: {}", e)))?;
 
         let mut utxos = Vec::new();
+        // Track per-address RPC outcomes so that a fully-unreachable RPC endpoint
+        // (every address scan failing at the network/HTTP layer) can be reported
+        // as a hard error instead of being silently reinterpreted as "wallet has
+        // no UTXOs". Conflating "RPC is down" with "address is empty" would let
+        // Sanad creation proceed (or report a false negative) on stale/missing
+        // chain data, which violates the fail-closed requirement for UTXO
+        // discovery feeding seal-backed Sanad creation.
+        let mut addresses_checked = 0usize;
+        let mut rpc_failures = 0usize;
+        let mut last_rpc_error: Option<String> = None;
 
         for index in 0..gap_limit as u32 {
             let key = wallet
@@ -514,6 +524,7 @@ impl BitcoinWalletOperations {
             // Fetch UTXOs for this address using mempool RPC
             let url = format!("{}/address/{}/utxo", rpc_url, address_str);
             let response = reqwest::get(&url).await;
+            addresses_checked += 1;
 
             match response {
                 Ok(resp) if resp.status().is_success() => {
@@ -574,15 +585,39 @@ impl BitcoinWalletOperations {
                         }
                     }
                 }
-                Ok(_resp) => {
-                    // Non-success status - skip this address
+                Ok(resp) => {
+                    // Non-success HTTP status from the indexer - record as an RPC
+                    // failure for this address rather than treating it as "no UTXOs".
+                    rpc_failures += 1;
+                    last_rpc_error = Some(format!(
+                        "indexer returned HTTP {} for {}",
+                        resp.status(),
+                        url
+                    ));
                     continue;
                 }
-                Err(_) => {
-                    // Request failed - skip this address
+                Err(e) => {
+                    // Network-level failure (timeout, DNS, connection refused, etc).
+                    rpc_failures += 1;
+                    last_rpc_error = Some(format!("request to {} failed: {}", url, e));
                     continue;
                 }
             }
+        }
+
+        // Fail closed: if every address scan failed at the RPC layer, we cannot
+        // distinguish "wallet is empty" from "indexer is unreachable". Returning
+        // Ok(vec![]) here would let callers (e.g. `csv sanad create --chain
+        // bitcoin`) report "no UTXOs found, fund the address" when the real
+        // problem is an unreachable RPC endpoint - masking the failure instead
+        // of surfacing it.
+        if addresses_checked > 0 && rpc_failures == addresses_checked {
+            return Err(WalletError::RpcError(format!(
+                "UTXO scan failed for all {} address(es) queried against {}: {}",
+                addresses_checked,
+                rpc_url,
+                last_rpc_error.unwrap_or_else(|| "unknown error".to_string())
+            )));
         }
 
         Ok(utxos)
@@ -608,5 +643,47 @@ mod tests {
         let addr_str = address.unwrap();
         // Testnet taproot addresses start with "tb1p"
         assert!(addr_str.starts_with("tb1p"));
+    }
+
+    /// Regression test: when the configured RPC/indexer endpoint is completely
+    /// unreachable, `scan_utxos` must fail closed (return Err) instead of
+    /// silently reporting an empty UTXO set. Conflating "RPC down" with
+    /// "wallet empty" would let `csv sanad create --chain bitcoin` either
+    /// proceed on stale state or tell the user to fund an address that may
+    /// already be funded, masking a real infrastructure failure.
+    #[tokio::test]
+    async fn test_scan_utxos_fails_closed_when_rpc_unreachable() {
+        let seed = [7u8; 64];
+        // Port 1 is reserved (TCPMUX) and never has a listener in test/CI
+        // environments, so every request in the gap-limit loop is refused at
+        // the transport layer deterministically and quickly (no real network
+        // access required, no hanging connect).
+        let unreachable_rpc_url = "http://127.0.0.1:1";
+
+        let result = BitcoinWalletOperations::scan_utxos(
+            &seed,
+            Network::Test,
+            0,
+            /* gap_limit */ 2,
+            unreachable_rpc_url,
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "scan_utxos must fail closed when the RPC endpoint is unreachable for every address, got: {:?}",
+            result
+        );
+        let err = result.unwrap_err();
+        match err {
+            WalletError::RpcError(msg) => {
+                assert!(
+                    msg.contains("UTXO scan failed"),
+                    "unexpected RpcError message: {}",
+                    msg
+                );
+            }
+            other => panic!("expected WalletError::RpcError, got {:?}", other),
+        }
     }
 }
