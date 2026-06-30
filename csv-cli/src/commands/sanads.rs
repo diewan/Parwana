@@ -1366,8 +1366,13 @@ async fn cmd_list(
 }
 
 fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> Result<()> {
+    // Validate via the canonical parser so malformed IDs are rejected here
+    // rather than silently passed through to the (unimplemented) local path.
+    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+
     output::header(&format!("Transferring Sanad to {}", to));
-    output::kv("Sanad ID", &sanad_id);
+    output::kv("Sanad ID", &hex::encode(sanad_id_parsed.as_bytes()));
     output::kv("New Owner", &to);
     output::info("Cross-chain transfer: use 'csv cross-chain transfer' instead");
     Ok(())
@@ -1477,7 +1482,7 @@ async fn cmd_consume(
         .storage
         .sanads
         .iter_mut()
-        .find(|s| s.id == hex::encode(sanad_id.as_bytes()))
+        .find(|s| s.id == hex::encode(sanad_id_parsed.as_bytes()))
     {
         tracked.status = SanadStatus::Consumed;
         state.save()?;
@@ -1520,8 +1525,12 @@ fn cmd_remove(sanad_id: Option<String>, all: bool, state: &mut UnifiedStateManag
         &sanad_id[..8.min(sanad_id.len())]
     ));
 
-    // Normalize sanad_id (remove 0x prefix if present)
-    let normalized_id = sanad_id.trim_start_matches("0x").to_string();
+    // Parse sanad_id using the canonical parser so 0x/non-0x forms, invalid
+    // length, and non-hex input are all rejected consistently with the other
+    // sanad subcommands (create/show/consume/state/trace).
+    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let normalized_id = hex::encode(sanad_id_parsed.as_bytes());
 
     // Check if sanad exists
     if state.get_sanad(&normalized_id).is_none() {
@@ -1959,5 +1968,79 @@ mod state_tests {
         );
         assert_eq!(resolved.label, "Active");
         assert_eq!(resolved.status_update, Some(SanadStatus::Active));
+    }
+}
+
+/// CLI-ID-001: Sanad ID parsing/display must be normalized everywhere a
+/// user-supplied ID string is turned into the canonical lookup key used to
+/// match `SanadRecord.id` (e.g. in `cmd_consume`, `cmd_remove`, `cmd_show`,
+/// `cmd_state`, `cmd_trace`). The lookup key MUST be derived via
+/// `SanadId::parse_hex(..).as_bytes()` re-encoded as hex — never via
+/// `String::as_bytes()` on the raw user input, which yields the ASCII bytes
+/// of the hex string itself rather than the 32-byte identifier.
+#[cfg(test)]
+mod id_normalization_tests {
+    use super::*;
+
+    const VALID_HEX: &str =
+        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+
+    /// The canonical lookup key (as stored in `SanadRecord.id`) must be
+    /// identical regardless of `0x` prefix, matching how `cmd_create` stores
+    /// `sanad.id.bytes` and how `cmd_consume`/`cmd_remove`/`cmd_show`/
+    /// `cmd_state`/`cmd_trace` all re-derive the key.
+    #[test]
+    fn lookup_key_identical_across_0x_and_non_0x_forms() {
+        let with_prefix = format!("0x{VALID_HEX}");
+
+        let parsed_plain = SanadId::parse_hex(VALID_HEX).unwrap();
+        let parsed_prefixed = SanadId::parse_hex(&with_prefix).unwrap();
+
+        let key_plain = hex::encode(parsed_plain.as_bytes());
+        let key_prefixed = hex::encode(parsed_prefixed.as_bytes());
+
+        assert_eq!(
+            key_plain, key_prefixed,
+            "0x-prefixed and bare hex forms must resolve to the same lookup key"
+        );
+        assert_eq!(key_plain, VALID_HEX);
+    }
+
+    /// Regression for the bug fixed in `cmd_consume`: deriving the lookup key
+    /// via `hex::encode(sanad_id.as_bytes())` where `sanad_id` is the raw
+    /// `String` (not the parsed `SanadId`) re-encodes the ASCII bytes of the
+    /// hex string itself, producing a 128-character string that can never
+    /// match the 64-character canonical key stored in `SanadRecord.id`.
+    #[test]
+    fn ascii_bytes_of_raw_string_never_matches_canonical_key() {
+        let raw_input: String = VALID_HEX.to_string();
+        let parsed = SanadId::parse_hex(&raw_input).unwrap();
+
+        let canonical_key = hex::encode(parsed.as_bytes());
+        // This mirrors the bug: hex-encoding the ASCII bytes of the raw
+        // input string instead of the parsed 32-byte identifier.
+        let buggy_key = hex::encode(raw_input.as_bytes());
+
+        assert_eq!(canonical_key.len(), 64);
+        assert_eq!(buggy_key.len(), 128);
+        assert_ne!(
+            canonical_key, buggy_key,
+            "the buggy ASCII-byte lookup key must never coincide with the canonical key"
+        );
+    }
+
+    /// Malformed input (wrong length) must fail to parse rather than silently
+    /// producing some other key, so commands like `cmd_remove`/`cmd_consume`
+    /// fail closed instead of operating on a misderived identifier.
+    #[test]
+    fn invalid_length_input_fails_to_parse() {
+        assert!(SanadId::parse_hex("deadbeef").is_err());
+        assert!(SanadId::parse_hex(&format!("{VALID_HEX}ff")).is_err());
+    }
+
+    /// Non-hex input must fail to parse rather than being silently coerced.
+    #[test]
+    fn non_hex_input_fails_to_parse() {
+        assert!(SanadId::parse_hex(&"zz".repeat(32)).is_err());
     }
 }
