@@ -2,6 +2,22 @@
 
 This index converts the CLI-first stabilization directive into context-scoped tickets. The milestone is the **CSV CLI Testnet MVP**: the CLI must be the first complete, honest, adversarially safe application of the protocol.
 
+## Product definition of CLI MVP
+
+The **CLI golden-path gauntlet** is the executable product definition of the CLI Testnet MVP. It is enforced by the contract test
+[`cli_golden_path_gauntlet_contract`](../../csv-cli/tests/integration_tests.rs) and is run with:
+
+```bash
+cargo test -p csv-cli --test integration_tests cli_golden_path_gauntlet_contract
+```
+
+The gauntlet asserts that the tutorial scripts ([`quick-start.sh`](../../csv-examples/cli-tutorial/quick-start.sh) and
+[`cross-chain-transfer.sh`](../../csv-examples/cli-tutorial/cross-chain-transfer.sh)) exercise the full
+`wallet init -> wallet generate -> wallet balance -> sanad create -> sanad state -> proof generate -> proof verify ->
+cross-chain transfer -> cross-chain status -> sanad trace -> replay attempt -> malformed proof attempt` flow, and that
+neither script claims unsafe shortcuts (skip-publish paths producing real Sanads, local cache as canonical truth, or
+verification failure treated as a warning). See [CLI-TRUTH-001](CLI-TRUTH-001.md) for the originating ticket.
+
 ## Release Gates
 
 | Gate | Name | Requirement |
