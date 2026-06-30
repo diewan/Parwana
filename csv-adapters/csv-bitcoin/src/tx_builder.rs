@@ -461,6 +461,7 @@ impl From<crate::wallet::WalletError> for TxBuilderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::UtxoProvenance;
     use bitcoin::{Network, OutPoint};
 
     fn make_utxo(path: Bip86Path, amount: u64) -> WalletUtxo {
