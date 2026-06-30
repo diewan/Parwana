@@ -86,8 +86,14 @@ pub struct UnsignedDeployTx {
 }
 
 impl EthereumBackend {
-    /// Create new Ethereum chain operations from RPC client
-    pub fn new(rpc: Box<dyn EthereumRpc>, config: EthereumConfig) -> Self {
+    /// Create new Ethereum chain operations from RPC client.
+    ///
+    /// Fails closed: if the seal protocol cannot be constructed from the supplied
+    /// RPC/config (e.g. malformed configuration), this returns a typed error instead
+    /// of silently substituting a mock RPC client. A mock fallback here would mean
+    /// production callers could end up signing/reading against a fake in-memory chain
+    /// without any indication that real contract-backed behavior was never wired up.
+    pub fn new(rpc: Box<dyn EthereumRpc>, config: EthereumConfig) -> ChainOpResult<Self> {
         let mut domain = [0u8; 32];
         domain[..10].copy_from_slice(b"CSV-ETH---");
         let chain_id = config.network.chain_id().to_le_bytes();
@@ -98,24 +104,19 @@ impl EthereumBackend {
             prefer_checkpoint_finality: config.use_checkpoint_finality,
         });
 
-        // Create seal protocol using the real RPC (not a mock)
-        // This is required for publish() to work, which downcasts to EthereumNode
+        // Create seal protocol using the real RPC (not a mock). This is required for
+        // publish() to work, which downcasts to EthereumNode. No mock fallback: if this
+        // fails, construction fails closed with a typed error.
         let csv_seal_address = config.contract_address.unwrap_or([0u8; 20]);
         let seal = EthereumSealProtocol::from_config(config.clone(), rpc.clone_boxed(), csv_seal_address)
-            .unwrap_or_else(|e| {
-                // Fallback to mock if real RPC creation fails
-                eprintln!("Warning: Failed to create seal protocol with real RPC: {}, using mock", e);
-                let mock_rpc = Box::new(crate::rpc::MockEthereumRpc::new(1000));
-                let seal_config = EthereumConfig {
-                    network: crate::config::Network::Sepolia,
-                    finality_depth: 12,
-                    ..Default::default()
-                };
-                EthereumSealProtocol::from_config(seal_config, mock_rpc, [0u8; 20])
-                    .expect("failed to create EthereumSealProtocol from fallback config")
-            });
+            .map_err(|e| {
+                ChainOpError::RpcError(format!(
+                    "Failed to construct Ethereum seal protocol from RPC/config: {}",
+                    e
+                ))
+            })?;
 
-        Self {
+        Ok(Self {
             rpc,
             config: config.clone(),
             domain_separator: domain,
@@ -125,7 +126,7 @@ impl EthereumBackend {
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: Arc::new(seal),
-        }
+        })
     }
 
     /// Create from EthereumSealProtocol
@@ -191,6 +192,17 @@ impl EthereumBackend {
         calldata.extend_from_slice(&selector[..4]);
         // Pad argument to 32 bytes
         calldata.extend_from_slice(arg);
+        calldata
+    }
+
+    /// Encode a call with two bytes32 arguments (e.g. create_seal(bytes32,bytes32),
+    /// consume_seal(bytes32,bytes32)).
+    fn _encode_call_2args(&self, function_sig: &str, arg1: &[u8; 32], arg2: &[u8; 32]) -> Vec<u8> {
+        let selector = self._keccak256(function_sig.as_bytes());
+        let mut calldata = Vec::with_capacity(4 + 32 + 32);
+        calldata.extend_from_slice(&selector[..4]);
+        calldata.extend_from_slice(arg1);
+        calldata.extend_from_slice(arg2);
         calldata
     }
 
@@ -1119,22 +1131,71 @@ impl ChainSanadOps for EthereumBackend {
         asset_id: &str,
         metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
-        let _ = owner;
-        let _ = asset_class;
-        let _ = asset_id;
-        let _ = metadata;
+        let contract = self.contract()?;
 
-        // In Ethereum, creating a sanad involves calling the CSV seal contract
-        // The contract would:
-        // 1. Create a new seal entry with metadata
-        // 2. Store the commitment
-        // 3. Emit a SanadCreated event
+        // `owner` is informational (the actual on-chain owner is msg.sender, derived
+        // from the configured signer); validate it so malformed input fails closed
+        // instead of being silently dropped.
+        if !owner.is_empty() {
+            self.parse_address(owner)?;
+        }
 
-        Err(ChainOpError::CapabilityUnavailable(
-            "Sanad creation requires a signed transaction to the CSV seal contract. \
-             Construct and submit a transaction calling the createSanad function."
-                .to_string(),
-        ))
+        // create_seal(bytes32 commitment, bytes32 sealId) anchors a commitment and
+        // creates a Sanad entry owned by msg.sender. The contract does not accept
+        // owner/asset_class/metadata directly; metadata is recorded separately via
+        // record_sanad_metadata. Derive a deterministic sealId/commitment from the
+        // caller-supplied asset_id so repeated calls with the same asset_id collide
+        // (matching create_seal's own anchor-replay protection) instead of silently
+        // minting a fresh identity from nothing.
+        if asset_id.is_empty() {
+            return Err(ChainOpError::InvalidInput(
+                "asset_id must not be empty: it is used to derive the Sanad commitment"
+                    .to_string(),
+            ));
+        }
+        let seal_id = self.keccak256(format!("csv.sanad.create.{}", asset_id).as_bytes());
+        let commitment = self.keccak256(format!("csv.sanad.commitment.{}", asset_id).as_bytes());
+
+        #[cfg(feature = "rpc")]
+        {
+            let calldata =
+                self._encode_call_2args("create_seal(bytes32,bytes32)", &commitment, &seal_id);
+
+            let tx_hash = self
+                .build_sign_and_send_transaction(contract, &calldata, owner)
+                .await?;
+
+            let receipt = self.wait_for_receipt(&tx_hash).await?;
+
+            let created_sanad_id = SanadId::new(seal_id);
+
+            Ok(SanadOperationResult {
+                sanad_id: created_sanad_id,
+                operation: SanadOperation::Create,
+                transaction_hash: hex::encode(tx_hash),
+                block_height: receipt.block_number,
+                chain_id: self.config.network.chain_id().to_string(),
+                metadata: serde_json::to_vec(&serde_json::json!({
+                    "operation": "create",
+                    "asset_class": asset_class,
+                    "asset_id": asset_id,
+                    "owner": owner,
+                    "metadata": metadata,
+                    "contract": hex::encode(contract),
+                }))
+                .unwrap_or_default(),
+            })
+        }
+
+        #[cfg(not(feature = "rpc"))]
+        {
+            let _ = (contract, asset_class, metadata, seal_id, commitment);
+            Err(ChainOpError::FeatureNotEnabled(
+                "Sanad creation requires the 'rpc' feature for transaction signing. \
+                 Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
+                    .to_string(),
+            ))
+        }
     }
 
     async fn consume_sanad(
@@ -1147,7 +1208,12 @@ impl ChainSanadOps for EthereumBackend {
 
         #[cfg(feature = "rpc")]
         {
-            let calldata = crate::seal_contract::CsvSealAbi::encode_mark_seal_used(*sanad_id_bytes, *sanad_id_bytes);
+            // Canonical contract function is `consume_seal(bytes32 sealId, bytes32 nullifier)`
+            // (the legacy `markSealUsed` function no longer exists on the deployed
+            // CSVSeal.sol). A zero nullifier is a valid, contract-supported input: the
+            // contract only registers a nullifier mapping entry when it is non-zero.
+            let nullifier = [0u8; 32];
+            let calldata = self._encode_call_2args("consume_seal(bytes32,bytes32)", sanad_id_bytes, &nullifier);
 
             let tx_hash = self
                 .build_sign_and_send_transaction(contract, &calldata, owner_key_id)
@@ -1411,35 +1477,54 @@ impl ChainSanadOps for EthereumBackend {
         metadata: serde_json::Value,
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        // Note: CSVLock.sol on Ethereum records metadata during lockSanad or lockSanadWithMetadata.
-        // There is no separate updateMetadata function in the contract.
-        // Metadata recording happens atomically with the lock operation.
-
-        let _ = metadata;
-        let _ = owner_key_id;
-
-        // Check if sanad is locked (metadata would have been recorded then)
+        // The deployed CSVSeal.sol contract exposes a canonical
+        // record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32) function
+        // (see CSVSeal.sol). Call it directly rather than relying on lock-time recording.
         let contract = self.contract()?;
         let sanad_id_bytes = *sanad_id.0.as_bytes();
 
+        let asset_class = metadata
+            .get("asset_class")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u8;
+        let proof_system = metadata
+            .get("proof_system")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u8;
+        let asset_id = parse_metadata_hash_field(&metadata, "asset_id")?;
+        let metadata_hash = parse_metadata_hash_field(&metadata, "metadata_hash")?;
+        let proof_root = parse_metadata_hash_field(&metadata, "proof_root")?;
+
         #[cfg(feature = "rpc")]
         {
-            // Try to query contract state to verify metadata was recorded
-            use crate::bindings::csv_seal::getLockInfoCall;
-            let _call = getLockInfoCall {
-                sanadId: alloy_primitives::FixedBytes::<32>::from_slice(&sanad_id_bytes),
-            };
+            let selector = self._keccak256(
+                b"record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)",
+            );
+            let mut calldata = Vec::with_capacity(4 + 6 * 32);
+            calldata.extend_from_slice(&selector[..4]);
+            calldata.extend_from_slice(&sanad_id_bytes);
+            calldata.extend_from_slice(&[0u8; 31]);
+            calldata.push(asset_class);
+            calldata.extend_from_slice(&asset_id);
+            calldata.extend_from_slice(&metadata_hash);
+            calldata.extend_from_slice(&[0u8; 31]);
+            calldata.push(proof_system);
+            calldata.extend_from_slice(&proof_root);
 
-            // For now, return success noting that metadata was recorded at lock time
+            let tx_hash = self
+                .build_sign_and_send_transaction(contract, &calldata, owner_key_id)
+                .await?;
+
+            let receipt = self.wait_for_receipt(&tx_hash).await?;
+
             Ok(SanadOperationResult {
                 sanad_id: sanad_id.clone(),
                 operation: SanadOperation::RecordMetadata,
-                transaction_hash: String::new(), // No separate tx - metadata recorded at lock
-                block_height: 0,
+                transaction_hash: hex::encode(tx_hash),
+                block_height: receipt.block_number,
                 chain_id: self.config.network.chain_id().to_string(),
                 metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "record_metadata",
-                    "note": "On Ethereum, metadata is recorded during lockSanad operation",
                     "contract": hex::encode(contract),
                 })).unwrap_or_default(),
             })
@@ -1447,10 +1532,10 @@ impl ChainSanadOps for EthereumBackend {
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = contract;
+            let _ = (contract, sanad_id_bytes, asset_class, proof_system, asset_id, metadata_hash, proof_root, owner_key_id);
             Err(ChainOpError::FeatureNotEnabled(
-                "Metadata verification requires the 'rpc' feature. \
-                 Note: On Ethereum, metadata is recorded during the lock operation."
+                "Metadata recording requires the 'rpc' feature for transaction signing. \
+                 Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
                     .to_string(),
             ))
         }
@@ -1461,35 +1546,69 @@ impl ChainSanadOps for EthereumBackend {
         sanad_id: &SanadId,
         expected_state: &str,
     ) -> ChainOpResult<bool> {
-        // Query the CSV seal contract for the seal state using eth_call
-        let contract = self.contract()?;
-        let commitment = sanad_id.0.as_bytes();
-        let mut commitment_array = [0u8; 32];
-        let copy_len = commitment.len().min(32);
-        commitment_array[..copy_len].copy_from_slice(&commitment[..copy_len]);
+        // Reuse the canonical state reader (SanadStateReader::get_sanad_state), which
+        // already queries the deployed CSVSeal.sol contract's sanadStates(bytes32)
+        // mapping via eth_call. This keeps a single source of truth for "what is the
+        // on-chain state of this Sanad" instead of a second, divergent encoding path.
+        let canonical = SanadStateReader::get_sanad_state(self, sanad_id).await?;
 
-        // Build the eth_call to getSealState(bytes32 commitment) function
-        // Function selector: keccak256("getSealState(bytes32)")[0..4]
-        use sha3::{Digest, Keccak256};
-        let mut selector_input = Vec::new();
-        selector_input.extend_from_slice(b"getSealState(bytes32)");
-        let selector_hash = Keccak256::digest(&selector_input);
-        let selector = &selector_hash[..4];
+        let expected_numeric = canonical_sanad_state_code(expected_state).ok_or_else(|| {
+            ChainOpError::InvalidInput(format!(
+                "Unknown expected_state '{}'. Expected one of: uncreated, created, active, \
+                 locked, consumed, minted, transferred, refunded, burned, invalid, or a \
+                 numeric state code (0-9).",
+                expected_state
+            ))
+        })?;
 
-        // Build the calldata: selector (4 bytes) + commitment (32 bytes)
-        let mut calldata = Vec::with_capacity(36);
-        calldata.extend_from_slice(selector);
-        calldata.extend_from_slice(&commitment_array);
+        Ok(canonical.state == expected_numeric)
+    }
+}
 
-        // Perform the eth_call to query contract state
-        // This is a read-only call that doesn't create a transaction
-        // Note: call_contract is not available in the EthereumRpc trait
-        // This functionality needs to be implemented or the code path refactored
-        Err(ChainOpError::FeatureNotEnabled(
-            "call_contract method not available in EthereumRpc trait. \
-             This functionality needs to be implemented via eth_call RPC method."
-                .to_string(),
-        ))
+/// Map a canonical Sanad state name (or numeric string) to its contract state code.
+///
+/// Mirrors the `SanadState` enum in CSVSeal.sol:
+/// 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred,
+/// 7=Refunded, 8=Burned, 9=Invalid.
+fn canonical_sanad_state_code(expected_state: &str) -> Option<u8> {
+    match expected_state.to_lowercase().as_str() {
+        "uncreated" => Some(0),
+        "created" => Some(1),
+        "active" => Some(2),
+        "locked" => Some(3),
+        "consumed" => Some(4),
+        "minted" => Some(5),
+        "transferred" => Some(6),
+        "refunded" => Some(7),
+        "burned" => Some(8),
+        "invalid" => Some(9),
+        other => other.parse::<u8>().ok(),
+    }
+}
+
+/// Parse an optional 32-byte hex field out of a metadata JSON object.
+///
+/// Missing fields default to the zero hash (a valid, contract-supported "unset"
+/// value per CSVSeal.sol's SanadMetadata defaults). Present-but-malformed fields
+/// fail closed with a typed error rather than silently defaulting.
+fn parse_metadata_hash_field(metadata: &serde_json::Value, field: &str) -> ChainOpResult<[u8; 32]> {
+    match metadata.get(field).and_then(|v| v.as_str()) {
+        None => Ok([0u8; 32]),
+        Some(hex_str) => {
+            let bytes = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| {
+                ChainOpError::InvalidInput(format!("Invalid hex for metadata field '{}': {}", field, e))
+            })?;
+            if bytes.len() != 32 {
+                return Err(ChainOpError::InvalidInput(format!(
+                    "Metadata field '{}' must be 32 bytes, got {}",
+                    field,
+                    bytes.len()
+                )));
+            }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            Ok(arr)
+        }
     }
 }
 
@@ -1984,7 +2103,8 @@ mod tests {
             private_key: None,
             contract_address: None,
         };
-        let ops = EthereumBackend::new(rpc, config);
+        let ops = EthereumBackend::new(rpc, config)
+            .expect("EthereumBackend::new should succeed with a mock RPC and valid config");
         assert_eq!(ops.config.network.chain_id(), 1);
     }
 
@@ -1999,7 +2119,8 @@ mod tests {
             private_key: None,
             contract_address: None,
         };
-        let ops = EthereumBackend::new(rpc, config);
+        let ops = EthereumBackend::new(rpc, config)
+            .expect("EthereumBackend::new should succeed with a mock RPC and valid config");
 
         // Valid address
         assert!(ops.validate_address("0x0000000000000000000000000000000000000000"));
@@ -2009,5 +2130,103 @@ mod tests {
 
         // Invalid - not hex
         assert!(!ops.validate_address("0xZZZZ"));
+    }
+
+    fn test_ops_with_contract(contract_address: Option<[u8; 20]>) -> EthereumBackend {
+        let rpc = Box::new(MockEthereumRpc::new(1000));
+        let config = EthereumConfig {
+            network: Network::Sepolia,
+            finality_depth: 15,
+            use_checkpoint_finality: true,
+            rpc_url: "http://127.0.0.1:8545".to_string(),
+            private_key: None,
+            contract_address,
+        };
+        EthereumBackend::new(rpc, config)
+            .expect("EthereumBackend::new should succeed with a mock RPC and valid config")
+    }
+
+    #[test]
+    fn test_canonical_sanad_state_code_maps_names() {
+        assert_eq!(canonical_sanad_state_code("uncreated"), Some(0));
+        assert_eq!(canonical_sanad_state_code("Created"), Some(1));
+        assert_eq!(canonical_sanad_state_code("ACTIVE"), Some(2));
+        assert_eq!(canonical_sanad_state_code("locked"), Some(3));
+        assert_eq!(canonical_sanad_state_code("consumed"), Some(4));
+        assert_eq!(canonical_sanad_state_code("minted"), Some(5));
+        assert_eq!(canonical_sanad_state_code("transferred"), Some(6));
+        assert_eq!(canonical_sanad_state_code("refunded"), Some(7));
+        assert_eq!(canonical_sanad_state_code("burned"), Some(8));
+        assert_eq!(canonical_sanad_state_code("invalid"), Some(9));
+        assert_eq!(canonical_sanad_state_code("4"), Some(4));
+        assert_eq!(canonical_sanad_state_code("not-a-state"), None);
+    }
+
+    #[test]
+    fn test_parse_metadata_hash_field_defaults_to_zero() {
+        let metadata = serde_json::json!({});
+        let result = parse_metadata_hash_field(&metadata, "asset_id").unwrap();
+        assert_eq!(result, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_parse_metadata_hash_field_parses_hex() {
+        let hex_val = "0x".to_string() + &"ab".repeat(32);
+        let metadata = serde_json::json!({ "asset_id": hex_val });
+        let result = parse_metadata_hash_field(&metadata, "asset_id").unwrap();
+        assert_eq!(result, [0xabu8; 32]);
+    }
+
+    #[test]
+    fn test_parse_metadata_hash_field_rejects_wrong_length() {
+        let metadata = serde_json::json!({ "asset_id": "0xabcd" });
+        assert!(parse_metadata_hash_field(&metadata, "asset_id").is_err());
+    }
+
+    #[test]
+    fn test_parse_metadata_hash_field_rejects_invalid_hex() {
+        let metadata = serde_json::json!({ "asset_id": "not-hex" });
+        assert!(parse_metadata_hash_field(&metadata, "asset_id").is_err());
+    }
+
+    #[test]
+    fn test_encode_call_2args_layout() {
+        let ops = test_ops_with_contract(None);
+        let arg1 = [1u8; 32];
+        let arg2 = [2u8; 32];
+        let calldata = ops._encode_call_2args("consume_seal(bytes32,bytes32)", &arg1, &arg2);
+        assert_eq!(calldata.len(), 4 + 32 + 32);
+        assert_eq!(&calldata[4..36], &arg1[..]);
+        assert_eq!(&calldata[36..68], &arg2[..]);
+
+        let expected_selector = ops._keccak256(b"consume_seal(bytes32,bytes32)");
+        assert_eq!(&calldata[..4], &expected_selector[..4]);
+    }
+
+    #[tokio::test]
+    async fn test_create_sanad_rejects_empty_asset_id() {
+        let ops = test_ops_with_contract(Some([0x11u8; 20]));
+        let result = ops
+            .create_sanad("0x0000000000000000000000000000000000000000", "fungible", "", serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_sanad_rejects_malformed_owner() {
+        let ops = test_ops_with_contract(Some([0x11u8; 20]));
+        let result = ops
+            .create_sanad("not-an-address", "fungible", "asset-1", serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_sanad_requires_contract_configured() {
+        let ops = test_ops_with_contract(None);
+        let result = ops
+            .create_sanad("0x0000000000000000000000000000000000000000", "fungible", "asset-1", serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
     }
 }

@@ -76,9 +76,13 @@ impl AdapterFactory for EthereumFactory {
             })?;
         }
 
-        // Create ChainBackend
+        // Create ChainBackend. Fails closed (no mock fallback) if construction fails.
         let eth_backend = Arc::new(
             EthereumBackend::new(Box::new(rpc) as Box<dyn EthereumRpc>, eth_config)
+                .map_err(|e| FactoryError::CreationFailed(format!(
+                    "Failed to construct Ethereum chain backend: {}",
+                    e
+                )))?
         );
         
         let chain_backend: Arc<dyn ChainBackend> = eth_backend.clone();
