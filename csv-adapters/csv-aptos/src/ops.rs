@@ -47,27 +47,26 @@ pub struct AptosBackend {
 }
 
 impl AptosBackend {
-    /// Create new Aptos chain operations from RPC client
-    pub fn new(rpc: Box<dyn AptosRpc>, network: AptosNetwork) -> Self {
+    /// Create new Aptos chain operations from RPC client.
+    ///
+    /// Fails closed: if the seal protocol cannot be constructed from the supplied
+    /// RPC/config (e.g. malformed configuration), this returns a typed error instead
+    /// of silently substituting a mock RPC client. A mock fallback here would mean
+    /// production callers could end up signing/reading against a fake in-memory chain
+    /// without any indication that real contract-backed behavior was never wired up.
+    pub fn new(rpc: Box<dyn AptosRpc>, network: AptosNetwork) -> ChainOpResult<Self> {
         // Create seal protocol using the real RPC (not a mock)
         // This is required for publish() to work with transaction signing
         let config = crate::config::AptosConfig {
             network: network.clone(),
             ..Default::default()
         };
-        let seal = AptosSealProtocol::from_config(config, rpc.clone_boxed())
-            .unwrap_or_else(|e| {
-                // Fallback to mock if real RPC creation fails
-                eprintln!("Warning: Failed to create seal protocol with real RPC: {}, using mock", e);
-                AptosSealProtocol::from_config(
-                    crate::config::AptosConfig {
-                        network: AptosNetwork::Testnet,
-                        ..Default::default()
-                    },
-                    Box::new(crate::rpc::MockAptosRpc::new(0)),
-                )
-                .expect("default AptosSealProtocol config must succeed")
-            });
+        let seal = AptosSealProtocol::from_config(config, rpc.clone_boxed()).map_err(|e| {
+            ChainOpError::RpcError(format!(
+                "Failed to construct Aptos seal protocol from RPC/config: {}",
+                e
+            ))
+        })?;
 
         // MED-DUP-03: Derive domain separator from SealProtocol instead of recomputing
         let domain_separator = seal.domain();
@@ -76,13 +75,13 @@ impl AptosBackend {
         let module_address = [0u8; 32];
         let event_builder = CommitmentEventBuilder::new(module_address, "CSV::AnchorEvent");
 
-        Self {
+        Ok(Self {
             rpc,
             network,
             domain_separator,
             event_builder,
             seal_protocol: Arc::new(seal),
-        }
+        })
     }
 
     /// Create from AptosSealProtocol
@@ -1505,14 +1504,16 @@ mod tests {
     #[test]
     fn test_aptos_chain_operations_creation() {
         let rpc = Box::new(MockAptosRpc::new(1));
-        let ops = AptosBackend::new(rpc, AptosNetwork::Devnet);
+        let ops = AptosBackend::new(rpc, AptosNetwork::Devnet)
+            .expect("AptosBackend::new should succeed with a mock RPC and valid config");
         assert_eq!(ops.network, AptosNetwork::Devnet);
     }
 
     #[test]
     fn test_address_validation() {
         let rpc = Box::new(MockAptosRpc::new(1));
-        let ops = AptosBackend::new(rpc, AptosNetwork::Devnet);
+        let ops = AptosBackend::new(rpc, AptosNetwork::Devnet)
+            .expect("AptosBackend::new should succeed with a mock RPC and valid config");
 
         // Valid address
         assert!(ops.validate_address(
@@ -1524,5 +1525,26 @@ mod tests {
 
         // Invalid - not hex
         assert!(!ops.validate_address("0xZZZZ"));
+    }
+
+    #[test]
+    fn test_aptos_backend_new_fails_closed_on_bad_config() {
+        // A missing module address makes `AptosSealProtocol::from_config` fail
+        // validation. `AptosBackend::new` must propagate that error instead of
+        // silently falling back to a mock RPC / seal protocol, since a mock
+        // fallback here would let production callers sign/read against a fake
+        // in-memory chain with no indication real contract-backed behavior was
+        // never wired up.
+        let rpc: Box<dyn AptosRpc> = Box::new(MockAptosRpc::new(1));
+        let mut bad_config = crate::config::AptosConfig {
+            network: AptosNetwork::Devnet,
+            ..Default::default()
+        };
+        bad_config.seal_contract.module_address = String::new();
+        let result = AptosSealProtocol::from_config(bad_config, rpc);
+        assert!(
+            result.is_err(),
+            "empty module address must fail closed, not fall back to a mock seal protocol"
+        );
     }
 }

@@ -85,6 +85,41 @@ def parse_frontmatter(text: str) -> Tuple[Dict[str, object], str]:
     return meta, body
 
 
+REQUIRED_TICKET_FIELDS: Tuple[str, ...] = (
+    "target_file",
+    "interface_files",
+    "reference_file",
+    "target_patterns",
+    "forbidden_patterns",
+    "verify_commands",
+    "security_critical",
+    "context_radius",
+    "cross_boundary_check",
+)
+
+MAX_CONTEXT_PACK_TOKENS = 60_000
+
+
+def lint_ticket_frontmatter(meta: Dict[str, object]) -> List[str]:
+    """Check that the ticket declares the fields DEV-WORKFLOW-001 requires.
+
+    Returns human-readable warnings rather than raising, so a stale/incomplete
+    ticket still produces a usable (but flagged) context pack instead of
+    blocking the agent entirely.
+    """
+    warnings: List[str] = []
+    for field in REQUIRED_TICKET_FIELDS:
+        if field not in meta:
+            warnings.append(f"missing required field `{field}`")
+            continue
+        value = meta[field]
+        if isinstance(value, list) and not any(str(v).strip() for v in value):
+            warnings.append(f"field `{field}` is present but empty")
+        elif isinstance(value, str) and not value.strip():
+            warnings.append(f"field `{field}` is present but empty")
+    return warnings
+
+
 def meta_str(meta: Dict[str, object], key: str, default: str = "") -> str:
     val = meta.get(key, default)
     if isinstance(val, list):
@@ -386,7 +421,26 @@ def build_context_pack(ticket_path: Path, repo_root: Path, radius_override: Opti
         )
     )
 
+    hygiene_warnings = lint_ticket_frontmatter(meta)
+    if hygiene_warnings:
+        sections.append(
+            "## Ticket hygiene warnings\n\n"
+            "DEV-WORKFLOW-001 requires every ticket to declare target_file, interface_files, "
+            "reference_file, target_patterns, forbidden_patterns, verify_commands, security_critical, "
+            "context_radius, and cross_boundary_check. This ticket is missing some of them:\n\n"
+            + "\n".join(f"- {w}" for w in hygiene_warnings)
+            + "\n\nFix the ticket frontmatter before treating this pack as complete context."
+        )
+
     sections.append(f"## Ticket\n\n```markdown\n{raw}\n```")
+
+    if meta_bool(meta, "security_critical", False):
+        sections.append(
+            "## Adversarial review required\n\n"
+            "This ticket is `security_critical: true`. Per the agent-workflow README, use a stronger "
+            "model where available and run a second adversarial review pass (what could still fail, and "
+            "which test prevents it) before treating this ticket as done."
+        )
 
     agent_path = default_agent_file(repo_root, crate, meta_str(meta, "agent_md", ""))
     if agent_path:
@@ -580,6 +634,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     approx_tokens = max(1, len(pack) // 4)
     print(f"wrote {output_path}")
     print(f"approx chars: {len(pack):,}; rough tokens: {approx_tokens:,}")
+    if approx_tokens > MAX_CONTEXT_PACK_TOKENS:
+        print(
+            f"warning: context pack is ~{approx_tokens:,} tokens, over the "
+            f"{MAX_CONTEXT_PACK_TOKENS:,}-token target (DEV-WORKFLOW-001). "
+            "Split this ticket or narrow its target_patterns/interface_files.",
+            file=sys.stderr,
+        )
     return 0
 
 
