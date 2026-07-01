@@ -178,6 +178,10 @@ impl Default for Config {
             ChainId::new("bitcoin"),
             ChainConfig {
                 rpc_url: bitcoin_rpc,
+                // Esplora REST indexer for address→UTXO scanning; `rpc_url` may be
+                // a JSON-RPC endpoint (Alchemy) which has no address index.
+                indexer_url: Some("https://mempool.space/signet/api".to_string()),
+                indexer_backend: None, // esplora (mempool) by default
                 network: Network::Test,
                 contract_address: None, // UTXO-native, no contract
                 chain_id: None,
@@ -193,6 +197,8 @@ impl Default for Config {
             ChainId::new("ethereum"),
             ChainConfig {
                 rpc_url: "https://ethereum-sepolia-rpc.publicnode.com".to_string(),
+                indexer_url: None,
+                indexer_backend: None,
                 network: Network::Test,
                 contract_address: ethereum_contract_address,
                 chain_id: Some(11155111),
@@ -210,6 +216,8 @@ impl Default for Config {
             ChainId::new("sui"),
             ChainConfig {
                 rpc_url: "https://fullnode.testnet.sui.io:443".to_string(),
+                indexer_url: None,
+                indexer_backend: None,
                 network: Network::Test,
                 contract_address: Some(sui_package_id),
                 chain_id: None,
@@ -227,6 +235,8 @@ impl Default for Config {
             ChainId::new("aptos"),
             ChainConfig {
                 rpc_url: "https://fullnode.testnet.aptoslabs.com/v1".to_string(),
+                indexer_url: None,
+                indexer_backend: None,
                 network: Network::Test,
                 contract_address: Some(aptos_contract_address),
                 chain_id: None,
@@ -243,6 +253,8 @@ impl Default for Config {
             ChainId::new("solana"),
             ChainConfig {
                 rpc_url: "https://api.devnet.solana.com".to_string(),
+                indexer_url: None,
+                indexer_backend: None,
                 network: Network::Test,
                 contract_address: None, // Not deployed yet
                 chain_id: None,
@@ -293,6 +305,19 @@ impl Config {
                     if existing_chain_config.contract_address.is_none() {
                         existing_chain_config.contract_address =
                             default_chain_config.contract_address.clone();
+                        changed = true;
+                    }
+                    // Backfill the REST indexer used for address scanning so
+                    // pre-existing configs (written before these fields existed)
+                    // don't silently scan against a JSON-RPC rpc_url. Only fill
+                    // when unset — an explicit user value always wins.
+                    if existing_chain_config.indexer_url.is_none() {
+                        existing_chain_config.indexer_url = default_chain_config.indexer_url.clone();
+                        changed = true;
+                    }
+                    if existing_chain_config.indexer_backend.is_none() {
+                        existing_chain_config.indexer_backend =
+                            default_chain_config.indexer_backend.clone();
                         changed = true;
                     }
                 } else {
@@ -775,6 +800,8 @@ rpc_url = "missing bracket"
         // Set a new chain config
         let new_chain = ChainConfig {
             rpc_url: "https://new.chain.com".to_string(),
+            indexer_url: None,
+            indexer_backend: None,
             network: Network::Test,
             contract_address: None,
             chain_id: Some(12345),

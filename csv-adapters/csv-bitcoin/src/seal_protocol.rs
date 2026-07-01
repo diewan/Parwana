@@ -145,12 +145,15 @@ impl BitcoinSealProtocol {
                             let mut sanad_id = [0u8; 32];
                             sanad_id.copy_from_slice(&sanad_bytes);
                             if let Ok(txid_bytes) = hex::decode(&seal_config.anchor_txid) {
-                                // anchor_txid in config (and in SanadSealRecord) is stored as display-format hex.
-                                // The sanad_seals HashMap must hold internal-byte-order bytes so that
-                                // Txid::from_byte_array() and UTXO lookups work correctly.
-                                let mut txid_internal = txid_bytes.clone();
-                                txid_internal.reverse();
-                                wallet.register_sanad_seal(sanad_id, txid_internal, seal_config.vout);
+                                // anchor_txid in config (and in SanadSealRecord) is already stored in
+                                // internal byte order: it is hex(CommitAnchor.anchor_id), and the
+                                // anchor_id ultimately comes from send_raw_transaction(), which reverses
+                                // the node's display txid to internal order before returning it. The
+                                // sanad_seals HashMap must also hold internal-byte-order bytes so that
+                                // Txid::from_byte_array() and UTXO lookups work correctly, so store the
+                                // config bytes as-is (do NOT reverse — that double-flip was BTC byte-order
+                                // bug making the map hold display order and breaking lock/refund spends).
+                                wallet.register_sanad_seal(sanad_id, txid_bytes, seal_config.vout);
                                 log::info!("Bitcoin: Registered sanad_seal for sanad_id={}", hex::encode(sanad_id));
                             }
                         }
@@ -277,13 +280,13 @@ impl BitcoinSealProtocol {
                 continue;
             }
 
-            // RPC expects display-format txid, but our HashMap stores internal byte order.
-            // Reverse back to display format for the HTTP query.
-            let mut display_txid = txid_array;
-            display_txid.reverse();
-
+            // The HashMap and RPC layer both work in internal byte order: the
+            // BitcoinRpc methods (get_utxo_details / is_utxo_unspent) take an
+            // internal-order txid and reverse to display themselves for the HTTP
+            // query. Pass the internal bytes straight through — reversing here
+            // would double-flip and query a non-existent (display-order) txid.
             // Fetch UTXO details from RPC
-            match rpc.get_utxo_details(display_txid, *vout).await {
+            match rpc.get_utxo_details(txid_array, *vout).await {
                 Ok(Some(utxo_details)) => {
                     // Parse scriptPubKey
                     let script_pubkey = hex::decode(&utxo_details.script_pubkey)
@@ -739,6 +742,11 @@ impl SealProtocol for BitcoinSealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
+        // Bitcoin anchors the commitment as an OP_RETURN transaction; there is
+        // no on-chain contract mapping to key by sanad_id here. The canonical
+        // sanad_id -> anchor mapping is recorded by the ops-layer publish_seal
+        // (see csv-bitcoin/src/ops.rs), so this layer does not need it.
+        _sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         self.verify_utxo_unspent(&seal).await?;
 

@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["cli", "blockchain", "cryptography", "csv-validation", "cross-chain"]
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.93"
+rust-version = "1.95"
 
 [[bin]]
 name = "csv"

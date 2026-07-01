@@ -622,11 +622,18 @@ pub trait ChainBackend:
     /// # Arguments
     /// * `seal` - The seal reference to use for publishing
     /// * `commitment` - Domain-separated commitment hash for the state transition
+    /// * `sanad_id` - The canonical Sanad ID. On-chain lifecycle state MUST be
+    ///   keyed by this value so the canonical state reader can find the Sanad.
     ///
     /// # Returns
     /// * `Ok(CommitAnchor)` - The anchor reference containing tx hash and block height
     /// * `Err` - If publication fails or seal already consumed
-    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor>;
+    async fn publish_seal(
+        &self,
+        seal: SealPoint,
+        commitment: Hash,
+        sanad_id: Hash,
+    ) -> ChainOpResult<CommitAnchor>;
 }
 
 /// Chain capabilities that may not be available on all chains

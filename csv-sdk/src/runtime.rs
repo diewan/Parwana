@@ -347,11 +347,13 @@ impl ChainRuntime {
         chain: ChainId,
         seal: csv_hash::seal::SealPoint,
         commitment: csv_hash::Hash,
+        sanad_id: csv_hash::Hash,
     ) -> Result<csv_hash::seal::CommitAnchor, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
-        // Delegate to the adapter's publish_seal method
-        let result = adapter.publish_seal(seal, commitment).await;
+        // Delegate to the adapter's publish_seal method. The canonical sanad_id
+        // is threaded through so on-chain state is keyed by it (not the commitment).
+        let result = adapter.publish_seal(seal, commitment, sanad_id).await;
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Seal publishing failed: {}", e),

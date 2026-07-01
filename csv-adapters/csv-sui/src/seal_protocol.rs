@@ -496,6 +496,7 @@ impl SealProtocol for SuiSealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
+        _sanad_id: Hash,
     ) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         log::info!("SUI: Publishing commitment via seal object {}", format_object_id(seal.object_id));
         log::info!("SUI: Commitment hash: 0x{}", hex::encode(commitment.as_bytes()));

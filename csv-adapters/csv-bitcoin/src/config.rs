@@ -13,10 +13,20 @@ pub struct BitcoinConfig {
     pub finality_depth: u32,
     /// Publication timeout (for censorship detection)
     pub publication_timeout_seconds: u64,
-    /// RPC endpoint URL
+    /// RPC endpoint URL (used for broadcast / gettxout / proof queries)
     pub rpc_url: String,
-    /// RPC backend type (explicitly specifies transport protocol)
+    /// RPC backend type (explicitly specifies transport protocol).
+    ///
+    /// This is NOT sniffed from the URL — the caller declares it. Different
+    /// backends expose genuinely different capabilities (see [`BitcoinRpcBackend`]).
     pub rpc_backend: BitcoinRpcBackend,
+    /// REST/esplora indexer base URL used for address→UTXO scanning and tx
+    /// lookups. Address-index scanning is a REST-only capability: a JSON-RPC
+    /// endpoint (Alchemy, QuickNode, bare Bitcoin Core without a wallet) cannot
+    /// enumerate the UTXOs of an arbitrary address. When `rpc_backend` is itself
+    /// a REST backend this may be `None` and callers fall back to `rpc_url`;
+    /// when `rpc_backend` is JSON-RPC this must be set to scan.
+    pub indexer_url: Option<String>,
     /// Optional API key for RPC authentication (e.g., Tatum, Alchemy)
     pub api_key: Option<String>,
     /// Optional xpub for HD wallet derivation (BIP-86)
@@ -120,61 +130,50 @@ pub enum BitcoinRpcBackend {
     /// Supports: /address/{addr}/utxo, /tx/{txid}, /tx, /tx/{txid}/outspend/{vout}
     /// Does NOT support: Bitcoin Core JSON-RPC methods
     MempoolRest,
+    /// Trezor Blockbook REST API (Alchemy Bitcoin "UTXO API", self-hosted Blockbook)
+    /// Supports: /api/v2/utxo/{descriptor}, /api/v2/tx/{txid}, /api/v2/sendtx/{hex}
+    /// Unlike Bitcoin Core JSON-RPC, this CAN enumerate an address's UTXOs, so it
+    /// is a valid scanning indexer. Response shape differs from esplora (satoshi
+    /// values are decimal strings; paths are /api/v2/...).
+    BlockbookRest,
 }
 
 impl BitcoinRpcBackend {
-    /// Detect backend type from URL pattern
-    /// 
-    /// This is a heuristic based on known endpoint patterns.
-    /// For production use, explicitly specify the backend type instead of relying on detection.
-    pub fn detect_from_url(url: &str) -> Option<Self> {
-        if url.contains("mempool.space") || url.contains("mempool") {
-            Some(Self::MempoolRest)
-        } else if url.contains("blockstream.info") || url.contains("blockstream.com") {
-            Some(Self::BlockstreamRest)
-        } else if url.contains("127.0.0.1") || url.contains("localhost") 
-            || url.contains("quicknode") || url.contains("alchemy") 
-            || url.contains("bitcoincore") || url.contains("btc-rpc") {
-            Some(Self::BitcoinCoreJsonRpc)
-        } else {
-            // Unknown endpoint - default to BitcoinCoreJsonRpc but warn
-            None
-        }
+    /// True if this backend speaks the esplora REST convention (append
+    /// `/address/{addr}/utxo`, `/tx/{txid}`, …) rather than JSON-RPC.
+    ///
+    /// Only REST backends can enumerate an address's UTXOs; JSON-RPC endpoints
+    /// have no address index (see [`BitcoinConfig::indexer_url`]).
+    pub fn is_rest(&self) -> bool {
+        matches!(
+            self,
+            Self::BlockstreamRest | Self::MempoolRest | Self::BlockbookRest
+        )
     }
 
-    /// Validate that a URL is compatible with this backend type
-    pub fn validate_url(&self, url: &str) -> Result<(), String> {
+    /// Construct the concrete [`BitcoinRpc`](crate::rpc::BitcoinRpc) client for
+    /// this backend. This is the single place transport selection happens; it is
+    /// driven entirely by the explicitly-declared backend, never by inspecting
+    /// the URL string.
+    ///
+    /// Blockstream and mempool.space share the esplora REST shape, so both are
+    /// served by [`MempoolSignetRpc`](crate::mempool_rpc::MempoolSignetRpc)
+    /// pointed at the given base URL.
+    #[cfg(feature = "signet-rest")]
+    pub fn build_rpc(
+        &self,
+        url: String,
+        api_key: Option<String>,
+    ) -> Box<dyn crate::rpc::BitcoinRpc + Send + Sync> {
         match self {
             Self::BitcoinCoreJsonRpc => {
-                // Bitcoin Core JSON-RPC endpoints typically don't have /api or /rest paths
-                if url.contains("/api/") || url.contains("/rest/") {
-                    return Err(format!(
-                        "URL '{}' appears to be a REST API but BitcoinCoreJsonRpc backend requires a JSON-RPC endpoint. \
-                         Use BlockstreamRest or MempoolRest backend instead, or use a real Bitcoin Core RPC endpoint.",
-                        url
-                    ));
-                }
-                Ok(())
+                Box::new(crate::json_rpc::BitcoinJsonRpc::new(url))
             }
-            Self::BlockstreamRest => {
-                if !url.contains("blockstream") {
-                    return Err(format!(
-                        "URL '{}' does not appear to be a Blockstream endpoint. \
-                         Use BitcoinCoreJsonRpc backend for Bitcoin Core RPC, or MempoolRest for mempool.space.",
-                        url
-                    ));
-                }
-                Ok(())
+            Self::BlockstreamRest | Self::MempoolRest => {
+                Box::new(crate::mempool_rpc::MempoolSignetRpc::with_url_and_key(url, api_key))
             }
-            Self::MempoolRest => {
-                if !url.contains("mempool") {
-                    return Err(format!(
-                        "URL '{}' does not appear to be a mempool.space endpoint. \
-                         Use BitcoinCoreJsonRpc backend for Bitcoin Core RPC, or BlockstreamRest for Blockstream.",
-                        url
-                    ));
-                }
-                Ok(())
+            Self::BlockbookRest => {
+                Box::new(crate::blockbook_rpc::BlockbookRpc::with_url_and_key(url, api_key))
             }
         }
     }
@@ -225,10 +224,11 @@ impl BitcoinConfig {
     /// 5. BITCOIN_TATUM_SIGNET_REST_RPC (Tatum REST)
     ///
     /// Also loads API key from TATUM_SIGNET_API_KEY if using Tatum endpoints
-    /// 
-    /// **IMPORTANT**: This method validates transport compatibility. If the env override
-    /// changes the transport type (e.g., from REST to JSON-RPC), it will return an error
-    /// unless the backend type is also explicitly specified.
+    ///
+    /// This only overrides the URL and API key; it does NOT change `rpc_backend`.
+    /// The transport is an explicit choice of the caller — pointing an env var at
+    /// an endpoint of a different transport than the configured backend is a
+    /// configuration error the caller must resolve by setting `rpc_backend` too.
     pub fn with_env_rpc(mut self) -> Result<Self, String> {
         let rpc_url = std::env::var("BITCOIN_RPC_URL")
             .or_else(|_| std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC"))
@@ -238,27 +238,26 @@ impl BitcoinConfig {
             .ok();
 
         if let Some(url) = rpc_url {
-            // Detect backend type from new URL
-            let detected_backend = BitcoinRpcBackend::detect_from_url(&url);
-            
-            // Validate that the new URL is compatible with the current backend type
-            if let Err(_e) = self.rpc_backend.validate_url(&url) {
-                // If validation fails, try to detect the correct backend type
-                if let Some(detected) = detected_backend {
-                    self.rpc_backend = detected;
-                } else {
-                    return Err(format!("RPC URL '{}' is incompatible with backend {:?}", url, self.rpc_backend));
-                }
-            }
-            
-            self.rpc_url = url.clone();
-
             // If using Tatum endpoint, load the API key
             if url.contains("tatum.io") {
                 self.api_key = std::env::var("TATUM_SIGNET_API_KEY").ok();
             }
+            self.rpc_url = url;
         }
         Ok(self)
+    }
+
+    /// Resolve the REST/esplora indexer base URL to use for address scanning.
+    ///
+    /// Returns the explicitly-configured `indexer_url` if set; otherwise falls
+    /// back to `rpc_url` when the primary backend is itself REST. Returns `None`
+    /// when the primary is JSON-RPC and no indexer was configured — the caller
+    /// must surface that as "address scanning requires a REST indexer" rather
+    /// than silently guessing a public one.
+    pub fn resolve_indexer_url(&self) -> Option<String> {
+        self.indexer_url
+            .clone()
+            .or_else(|| self.rpc_backend.is_rest().then(|| self.rpc_url.clone()))
     }
 
     /// Validate configuration values
@@ -280,23 +279,8 @@ impl BitcoinConfig {
         if expected_mainnet {
             return Err("mainnet config should not use localhost rpc_url".to_string());
         }
-        
-        // Validate that RPC URL is compatible with the specified backend type
-        // If validation fails, this is a configuration error that the user must fix
-        self.rpc_backend.validate_url(&self.rpc_url)?;
-        
-        Ok("Configuration is valid".to_string())
-    }
 
-    /// Auto-detect and set the correct backend type based on the RPC URL
-    /// This should be called after setting rpc_url but before creating the RPC client
-    pub fn auto_detect_backend(mut self) -> Self {
-        if let Some(detected) = BitcoinRpcBackend::detect_from_url(&self.rpc_url) {
-            if detected != self.rpc_backend {
-                self.rpc_backend = detected;
-            }
-        }
-        self
+        Ok("Configuration is valid".to_string())
     }
 }
 
@@ -308,6 +292,7 @@ impl Default for BitcoinConfig {
             publication_timeout_seconds: 3600, // 1 hour
             rpc_url: "https://blockstream.info/signet/api".to_string(),
             rpc_backend: BitcoinRpcBackend::BlockstreamRest,
+            indexer_url: None,
             api_key: None,
             xpub: None,
             private_key: None,

@@ -255,6 +255,7 @@ impl SealProtocol for SolanaSealProtocol {
         &self,
         commitment: Hash,
         seal_point: Self::SealPoint,
+        _sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         let wallet = self
             .wallet

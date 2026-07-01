@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["blockchain", "cryptography", "csv-validation", "cross-chain", "smart-contracts"]
 categories = ["cryptography::cryptocurrencies", "authentication"]
 publish = true
-rust-version = "1.93"
+rust-version = "1.95"
 
 [dependencies]
 csv-protocol = { path = "../csv-protocol" }

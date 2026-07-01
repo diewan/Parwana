@@ -228,7 +228,9 @@ async fn main() -> anyhow::Result<()> {
             .await
             .map_err(|e| anyhow::anyhow!("{:?}", e)),
         Commands::Wallet { action } => wallet::execute(action, &config, &mut state).await,
-        Commands::Sanad { action } => sanads::execute(action, &config, &mut state).await,
+        Commands::Sanad { action } => {
+            sanads::execute(action, &config, &mut state, cli.canonical).await
+        }
         Commands::Proof { action } => {
             proofs::execute(action, &config, &state, cli.canonical, cli.proof_tree).await
         }

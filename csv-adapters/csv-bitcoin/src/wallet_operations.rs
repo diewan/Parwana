@@ -3,6 +3,7 @@
 //! This module provides chain-specific wallet operations for Bitcoin,
 //! implementing the generic WalletOperations trait from csv-wallet.
 
+use crate::rpc::BitcoinRpc;
 use crate::wallet::{Bip86Path, SealWallet};
 use async_trait::async_trait;
 use bitcoin::{hashes::Hash, Network as BtcNetwork, OutPoint, Txid};
@@ -17,7 +18,7 @@ use std::sync::Arc;
 
 #[cfg(any(feature = "rpc", feature = "signet-rest"))]
 use reqwest::Client as ReqwestClient;
-#[cfg(feature = "rpc")]
+#[cfg(any(feature = "rpc", feature = "signet-rest"))]
 use serde_json::Value;
 
 /// Network type for wallet operations
@@ -259,8 +260,32 @@ impl WalletOperations for BitcoinWalletOperations {
         account: u32,
         _index: u32,
         rpc_url: &str,
+        indexer_kind: Option<&str>,
     ) -> Result<Vec<(String, u32, u64, Option<String>)>, WalletError> {
-        Self::scan_utxos(seed, self.network, account, 20, rpc_url).await
+        // Address→UTXO discovery is a REST capability. `indexer_kind` explicitly
+        // selects the REST flavour (esplora vs Blockbook) — we never sniff the
+        // URL. `rpc_url` is the indexer base the caller resolved from
+        // BitcoinConfig::indexer_url. A JSON-RPC URL here fails closed with a
+        // clear error rather than being silently rerouted to a public indexer.
+        #[cfg(feature = "signet-rest")]
+        {
+            use crate::config::BitcoinRpcBackend;
+            let backend = match indexer_kind {
+                Some("blockbook") | Some("alchemy") => BitcoinRpcBackend::BlockbookRest,
+                Some("blockstream") => BitcoinRpcBackend::BlockstreamRest,
+                // None / "esplora" / "mempool" / anything else → esplora REST.
+                _ => BitcoinRpcBackend::MempoolRest,
+            };
+            let rpc = backend.build_rpc(rpc_url.to_string(), None);
+            Self::scan_utxos(seed, self.network, account, 20, rpc.as_ref()).await
+        }
+        #[cfg(not(feature = "signet-rest"))]
+        {
+            let _ = (seed, account, rpc_url, indexer_kind);
+            Err(WalletError::RpcError(
+                "UTXO scanning requires the `signet-rest` feature (REST indexer client)".to_string(),
+            ))
+        }
     }
 }
 
@@ -284,7 +309,7 @@ impl BitcoinWalletOperations {
         network: Network,
         account: u32,
         gap_limit: usize,
-        rpc_url: &str,
+        rpc: &dyn BitcoinRpc,
     ) -> Result<(SealWallet, Vec<WalletUtxo>), WalletError> {
         let btc_network = network.to_bitcoin_network();
 
@@ -307,122 +332,66 @@ impl BitcoinWalletOperations {
                 .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive address: {}", e)))?;
             let address_str = key.address.to_string();
 
-            // Fetch UTXOs for this address using mempool RPC
-            let url = format!("{}/address/{}/utxo", rpc_url, address_str);
-            let response = reqwest::get(&url).await;
+            // Address→UTXO discovery goes through the injected REST indexer client.
+            // Fail closed on RPC error: a failed query must not be silently treated
+            // as "address empty" when we are about to load these UTXOs for signing.
+            let found = rpc
+                .get_utxos_for_address(address_str.clone())
+                .await
+                .map_err(|e| {
+                    WalletError::RpcError(format!(
+                        "UTXO scan failed for address {}: {}",
+                        address_str, e
+                    ))
+                })?;
 
-            match response {
-                Ok(resp) if resp.status().is_success() => {
-                    let utxo_list: Vec<serde_json::Value> = resp
-                        .json()
-                        .await
-                        .unwrap_or_default();
+            for utxo in found {
+                // UtxoInfo.txid is internal byte order (RPC clients normalize on parse).
+                let outpoint = OutPoint {
+                    txid: Txid::from_byte_array(utxo.txid),
+                    vout: utxo.vout,
+                };
+                let value = utxo.amount_sat;
 
-                    if !utxo_list.is_empty() {
-                        for utxo in utxo_list {
-                            let txid = utxo
-                                .get("txid")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let vout = utxo
-                                .get("vout")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as u32;
-                            let value = utxo
-                                .get("value")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0);
+                // scriptPubKey is needed for correct sighash calculation; fetch it
+                // via the same client (esplora /tx/{txid}).
+                let scriptpubkey_hex = rpc
+                    .get_utxo_scriptpubkey(utxo.txid, utxo.vout)
+                    .await
+                    .ok()
+                    .flatten();
 
-                            // Fetch scriptPubKey from the transaction endpoint
-                            let scriptpubkey_hex = if !txid.is_empty() {
-                                let tx_url = format!("{}/tx/{}", rpc_url, txid);
-                                if let Ok(tx_resp) = reqwest::get(&tx_url).await {
-                                    if tx_resp.status().is_success() {
-                                        if let Ok(tx_data) = tx_resp.json::<serde_json::Value>().await {
-                                            if let Some(vouts) =
-                                                tx_data.get("vout").and_then(|v| v.as_array())
-                                            {
-                                                if let Some(vout_data) = vouts.get(vout as usize) {
-                                                    vout_data
-                                                        .get("scriptpubkey")
-                                                        .and_then(|v| v.as_str())
-                                                        .map(|s| s.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
+                let derivation_path = Bip86Path::external(account, index);
 
-                            // Create OutPoint - mempool.space returns txids in display format (reversed bytes)
-                            let txid_bytes = match hex::decode(txid) {
-                                Ok(bytes) if bytes.len() == 32 => {
-                                    let mut arr = [0u8; 32];
-                                    arr.copy_from_slice(&bytes);
-                                    arr
-                                }
-                                _ => continue,
-                            };
-                            let mut internal_txid = txid_bytes;
-                            internal_txid.reverse();
-                            let txid_hash = Txid::from_byte_array(internal_txid);
-                            let outpoint = OutPoint {
-                                txid: txid_hash,
-                                vout,
-                            };
-
-                            // Create Bip86Path
-                            let derivation_path = Bip86Path::external(account, index);
-
-                            // Add UTXO to wallet with scriptPubKey if available
-                            if let Some(ref spk_hex) = scriptpubkey_hex {
-                                if let Ok(spk_bytes) = hex::decode(spk_hex) {
-                                    let script_pubkey = bitcoin::ScriptBuf::from_bytes(spk_bytes);
-                                    wallet.add_utxo_with_scriptpubkey(
-                                        outpoint,
-                                        value,
-                                        derivation_path.clone(),
-                                        Some(script_pubkey),
-                                        None,
-                                    );
-                                } else {
-                                    wallet.add_utxo(outpoint, value, derivation_path.clone());
-                                }
-                            } else {
-                                wallet.add_utxo(outpoint, value, derivation_path.clone());
-                            }
-
-                            wallet_utxos.push(WalletUtxo {
-                                txid: txid.to_string(),
-                                vout,
-                                value,
-                                scriptpubkey_hex,
-                                outpoint,
-                                derivation_path,
-                            });
-                        }
+                if let Some(spk_hex) = scriptpubkey_hex.as_ref() {
+                    if let Ok(spk_bytes) = hex::decode(spk_hex) {
+                        let script_pubkey = bitcoin::ScriptBuf::from_bytes(spk_bytes);
+                        wallet.add_utxo_with_scriptpubkey(
+                            outpoint,
+                            value,
+                            derivation_path.clone(),
+                            Some(script_pubkey),
+                            None,
+                        );
+                    } else {
+                        wallet.add_utxo(outpoint, value, derivation_path.clone());
                     }
+                } else {
+                    wallet.add_utxo(outpoint, value, derivation_path.clone());
                 }
-                Ok(_resp) => {
-                    // Non-success status - skip this address
-                    continue;
-                }
-                Err(_) => {
-                    // Request failed - skip this address
-                    continue;
-                }
+
+                // Persist txid in display format (reversed internal order), matching
+                // what downstream UTXO records expect.
+                let mut display = utxo.txid;
+                display.reverse();
+                wallet_utxos.push(WalletUtxo {
+                    txid: hex::encode(display),
+                    vout: utxo.vout,
+                    value,
+                    scriptpubkey_hex,
+                    outpoint,
+                    derivation_path,
+                });
             }
         }
 
@@ -488,7 +457,7 @@ impl BitcoinWalletOperations {
         network: Network,
         account: u32,
         gap_limit: usize,
-        rpc_url: &str,
+        rpc: &dyn BitcoinRpc,
     ) -> Result<Vec<(String, u32, u64, Option<String>)>, WalletError> {
         let btc_network = network.to_bitcoin_network();
 
@@ -504,13 +473,13 @@ impl BitcoinWalletOperations {
             .map_err(|e| WalletError::KeyDerivation(format!("Failed to create wallet: {}", e)))?;
 
         let mut utxos = Vec::new();
-        // Track per-address RPC outcomes so that a fully-unreachable RPC endpoint
-        // (every address scan failing at the network/HTTP layer) can be reported
-        // as a hard error instead of being silently reinterpreted as "wallet has
-        // no UTXOs". Conflating "RPC is down" with "address is empty" would let
-        // Sanad creation proceed (or report a false negative) on stale/missing
-        // chain data, which violates the fail-closed requirement for UTXO
-        // discovery feeding seal-backed Sanad creation.
+        // Track per-address RPC outcomes so that a fully-unreachable indexer
+        // (every address query failing) is reported as a hard error instead of
+        // being silently reinterpreted as "wallet has no UTXOs". Conflating "RPC
+        // is down" with "address is empty" would let Sanad creation proceed (or
+        // report a false negative) on stale/missing chain data, which violates
+        // the fail-closed requirement for UTXO discovery feeding seal-backed
+        // Sanad creation.
         let mut addresses_checked = 0usize;
         let mut rpc_failures = 0usize;
         let mut last_rpc_error: Option<String> = None;
@@ -520,102 +489,50 @@ impl BitcoinWalletOperations {
                 .get_funding_address(account, index)
                 .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive address: {}", e)))?;
             let address_str = key.address.to_string();
-
-            // Fetch UTXOs for this address using mempool RPC
-            let url = format!("{}/address/{}/utxo", rpc_url, address_str);
-            let response = reqwest::get(&url).await;
             addresses_checked += 1;
 
-            match response {
-                Ok(resp) if resp.status().is_success() => {
-                    let utxo_list: Vec<serde_json::Value> = resp
-                        .json()
-                        .await
-                        .unwrap_or_default();
+            match rpc.get_utxos_for_address(address_str.clone()).await {
+                Ok(found) => {
+                    for utxo in found {
+                        // scriptPubKey (needed downstream for sighash) is fetched via
+                        // the same client; a missing/failed lookup is tolerated as None.
+                        let scriptpubkey_hex = rpc
+                            .get_utxo_scriptpubkey(utxo.txid, utxo.vout)
+                            .await
+                            .ok()
+                            .flatten();
 
-                    if !utxo_list.is_empty() {
-                        for utxo in utxo_list {
-                            let txid = utxo
-                                .get("txid")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let vout = utxo
-                                .get("vout")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as u32;
-                            let value = utxo
-                                .get("value")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0);
-
-                            // Fetch scriptPubKey from the transaction endpoint
-                            let scriptpubkey_hex = if !txid.is_empty() {
-                                let tx_url = format!("{}/tx/{}", rpc_url, txid);
-                                if let Ok(tx_resp) = reqwest::get(&tx_url).await {
-                                    if tx_resp.status().is_success() {
-                                        if let Ok(tx_data) = tx_resp.json::<serde_json::Value>().await {
-                                            if let Some(vouts) =
-                                                tx_data.get("vout").and_then(|v| v.as_array())
-                                            {
-                                                if let Some(vout_data) = vouts.get(vout as usize) {
-                                                    vout_data
-                                                        .get("scriptpubkey")
-                                                        .and_then(|v| v.as_str())
-                                                        .map(|s| s.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-
-                            utxos.push((txid.to_string(), vout, value, scriptpubkey_hex));
-                        }
+                        // Emit txid in display format (reversed internal order).
+                        let mut display = utxo.txid;
+                        display.reverse();
+                        utxos.push((
+                            hex::encode(display),
+                            utxo.vout,
+                            utxo.amount_sat,
+                            scriptpubkey_hex,
+                        ));
                     }
                 }
-                Ok(resp) => {
-                    // Non-success HTTP status from the indexer - record as an RPC
-                    // failure for this address rather than treating it as "no UTXOs".
+                Err(e) => {
                     rpc_failures += 1;
                     last_rpc_error = Some(format!(
-                        "indexer returned HTTP {} for {}",
-                        resp.status(),
-                        url
+                        "get_utxos_for_address({}) failed: {}",
+                        address_str, e
                     ));
-                    continue;
-                }
-                Err(e) => {
-                    // Network-level failure (timeout, DNS, connection refused, etc).
-                    rpc_failures += 1;
-                    last_rpc_error = Some(format!("request to {} failed: {}", url, e));
-                    continue;
                 }
             }
         }
 
-        // Fail closed: if every address scan failed at the RPC layer, we cannot
+        // Fail closed: if every address query failed at the RPC layer, we cannot
         // distinguish "wallet is empty" from "indexer is unreachable". Returning
         // Ok(vec![]) here would let callers (e.g. `csv sanad create --chain
         // bitcoin`) report "no UTXOs found, fund the address" when the real
-        // problem is an unreachable RPC endpoint - masking the failure instead
-        // of surfacing it.
+        // problem is an unreachable indexer - masking the failure instead of
+        // surfacing it.
         if addresses_checked > 0 && rpc_failures == addresses_checked {
             return Err(WalletError::RpcError(format!(
-                "UTXO scan failed for all {} address(es) queried against {}: {}",
+                "UTXO scan failed for all {} address(es): {}",
                 addresses_checked,
-                rpc_url,
                 last_rpc_error.unwrap_or_else(|| "unknown error".to_string())
             )));
         }
@@ -651,21 +568,47 @@ mod tests {
     /// "wallet empty" would let `csv sanad create --chain bitcoin` either
     /// proceed on stale state or tell the user to fund an address that may
     /// already be funded, masking a real infrastructure failure.
+    /// A `BitcoinRpc` whose address-index queries always fail, standing in for an
+    /// unreachable/erroring indexer. Only the methods `scan_utxos` touches need
+    /// real behaviour; the rest defer to the trait defaults.
+    struct FailingIndexerRpc;
+
+    #[async_trait]
+    impl BitcoinRpc for FailingIndexerRpc {
+        async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Err("unreachable".into())
+        }
+        async fn get_block_hash(&self, _height: u64) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            Err("unreachable".into())
+        }
+        async fn is_utxo_unspent(&self, _txid: [u8; 32], _vout: u32) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Err("unreachable".into())
+        }
+        async fn send_raw_transaction(&self, _tx: Vec<u8>) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            Err("unreachable".into())
+        }
+        async fn get_tx_confirmations(&self, _txid: [u8; 32]) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Err("unreachable".into())
+        }
+        async fn get_utxos_for_address(&self, _address: String) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+            Err("indexer unreachable: connection refused".into())
+        }
+        fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync> {
+            Box::new(FailingIndexerRpc)
+        }
+    }
+
     #[tokio::test]
     async fn test_scan_utxos_fails_closed_when_rpc_unreachable() {
         let seed = [7u8; 64];
-        // Port 1 is reserved (TCPMUX) and never has a listener in test/CI
-        // environments, so every request in the gap-limit loop is refused at
-        // the transport layer deterministically and quickly (no real network
-        // access required, no hanging connect).
-        let unreachable_rpc_url = "http://127.0.0.1:1";
+        let rpc = FailingIndexerRpc;
 
         let result = BitcoinWalletOperations::scan_utxos(
             &seed,
             Network::Test,
             0,
             /* gap_limit */ 2,
-            unreachable_rpc_url,
+            &rpc,
         )
         .await;
 

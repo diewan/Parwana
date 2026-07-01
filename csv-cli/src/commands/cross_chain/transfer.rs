@@ -75,6 +75,8 @@ pub async fn cmd_transfer(
         let chain_config = csv_sdk::config::ChainConfig {
             rpc: csv_sdk::config::RpcConfig {
                 url: from_chain_config.rpc_url.clone(),
+                indexer_url: from_chain_config.indexer_url.clone(),
+                indexer_backend: from_chain_config.indexer_backend.clone(),
                 api_key: None,
                 timeout_ms: 30000,
                 max_retries: 3,
@@ -98,6 +100,8 @@ pub async fn cmd_transfer(
         let chain_config = csv_sdk::config::ChainConfig {
             rpc: csv_sdk::config::RpcConfig {
                 url: to_chain_config.rpc_url.clone(),
+                indexer_url: to_chain_config.indexer_url.clone(),
+                indexer_backend: to_chain_config.indexer_backend.clone(),
                 api_key: None,
                 timeout_ms: 30000,
                 max_retries: 3,
@@ -189,6 +193,8 @@ pub async fn cmd_transfer(
         let chain_config = csv_sdk::config::ChainConfig {
             rpc: csv_sdk::config::RpcConfig {
                 url: from_chain_config.rpc_url.clone(),
+                indexer_url: from_chain_config.indexer_url.clone(),
+                indexer_backend: from_chain_config.indexer_backend.clone(),
                 api_key: None,
                 timeout_ms: 30000,
                 max_retries: 3,
@@ -226,6 +232,8 @@ pub async fn cmd_transfer(
         let chain_config = csv_sdk::config::ChainConfig {
             rpc: csv_sdk::config::RpcConfig {
                 url: to_chain_config.rpc_url.clone(),
+                indexer_url: to_chain_config.indexer_url.clone(),
+                indexer_backend: to_chain_config.indexer_backend.clone(),
                 api_key: None,
                 timeout_ms: 30000,
                 max_retries: 3,

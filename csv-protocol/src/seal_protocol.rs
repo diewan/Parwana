@@ -321,6 +321,9 @@ pub trait SealProtocol {
     /// # Arguments
     /// * `commitment` - The commitment hash to publish (32 bytes)
     /// * `seal` - The seal reference authorizing this commitment
+    /// * `sanad_id` - The canonical Sanad ID. On-chain state that tracks the
+    ///   Sanad lifecycle MUST be keyed by this value (not the commitment or a
+    ///   chain-specific seal id) so the canonical state reader can find it.
     ///
     /// # Returns
     /// * `Ok(CommitAnchor)` - The anchor reference for inclusion/finality proofs
@@ -329,6 +332,7 @@ pub trait SealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
+        sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>>;
 
     /// Verify and extract inclusion proof from the base layer.

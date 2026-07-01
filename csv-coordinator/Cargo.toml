@@ -2,7 +2,7 @@
 name = "csv-coordinator"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.95"
 
 [dependencies]
 csv-protocol = { path = "../csv-protocol" }
@@ -29,7 +29,7 @@ async-trait = "0.1"
 
 [features]
 default = ["bitcoin"]
-bitcoin = ["dep:csv-bitcoin", "dep:bitcoin"]
+bitcoin = ["dep:csv-bitcoin", "csv-bitcoin/signet-rest", "dep:bitcoin"]
 ethereum = ["dep:csv-ethereum"]
 sui = ["dep:csv-sui"]
 aptos = ["dep:csv-aptos"]

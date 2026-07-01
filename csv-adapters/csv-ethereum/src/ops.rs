@@ -1693,7 +1693,12 @@ impl ChainBackend for EthereumBackend {
         })
     }
 
-    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(
+        &self,
+        seal: SealPoint,
+        commitment: Hash,
+        sanad_id: Hash,
+    ) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to EthereumSealPoint
         if seal.id.len() < 28 {
             return Err(ChainOpError::InvalidInput(
@@ -1713,10 +1718,11 @@ impl ChainBackend for EthereumBackend {
         let ethereum_seal =
             crate::types::EthereumSealPoint::new(contract_address, slot_index, nonce);
 
-        // Call the seal protocol's publish method
+        // Call the seal protocol's publish method. The on-chain state is keyed
+        // by the canonical sanad_id via create_seal(commitment, sanad_id).
         let ethereum_anchor = self
             .seal_protocol
-            .publish(commitment, ethereum_seal)
+            .publish(commitment, ethereum_seal, sanad_id)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 
@@ -1763,7 +1769,16 @@ impl SanadStateReader for EthereumBackend {
             )));
         };
 
-        // Query locks[sanadId] - returns (bytes32 commitment, uint256 timestamp, uint8 destinationChain, bool refunded)
+        // Query locks[sanadId]. The auto-generated getter for the LockRecord struct
+        // returns every field (the nested SanadMetadata struct is inlined). All members
+        // are static value types, so the return is a fixed 11-slot (352-byte) ABI tuple:
+        //   [0..32]    commitment           (bytes32)
+        //   [32..64]   owner                (address, right-aligned -> [44..64])
+        //   [64..96]   timestamp            (uint256)
+        //   [96..128]  destinationChain     (bytes32)
+        //   [128..160] destinationOwnerRoot (bytes32)
+        //   [160..320] metadata             (5 static slots)
+        //   [320..352] refunded             (bool -> byte 351)
         let lock_result = self
             .rpc
             .eth_call(
@@ -1776,21 +1791,19 @@ impl SanadStateReader for EthereumBackend {
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query locks: {}", e)))?;
 
-        let (commitment, owner, refunded) = if lock_result.len() >= 96 {
-            // commitment: bytes32 at offset 0 (bytes 0-31)
+        let (commitment, owner, refunded) = if lock_result.len() >= 352 {
+            // commitment: bytes32 in slot 0
             let mut commitment_bytes = [0u8; 32];
             commitment_bytes.copy_from_slice(&lock_result[0..32]);
             let commitment = Hash::new(commitment_bytes);
 
-            // owner: address at offset 32 (bytes 32-51, stored right-aligned in 32 bytes)
-            let owner_bytes = &lock_result[52..68]; // address is 20 bytes, right-aligned in 32-byte slot starting at byte 32
+            // owner: 20-byte address right-aligned in the 32-byte slot [32..64]
             let mut owner_full = [0u8; 20];
-            owner_full.copy_from_slice(owner_bytes);
+            owner_full.copy_from_slice(&lock_result[44..64]);
             let owner = format!("0x{}", hex::encode(owner_full));
 
-            // destinationChain: uint8 at offset 64 (byte 95)
-            // refunded: bool at offset 96 (byte 127)
-            let refunded = lock_result[127] == 1;
+            // refunded: bool in the final slot [320..352]
+            let refunded = lock_result[351] == 1;
 
             (commitment, owner, refunded)
         } else {
@@ -1826,16 +1839,11 @@ impl SanadStateReader for EthereumBackend {
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadRefundedAt: {}", e)))?;
 
-        // Check if nullifier is registered
-        let nullifier = if state == 4 || state == 5 {
-            // Sanad is Consumed or Minted - check for nullifier
-            // The nullifier would have been registered during minting
-            // For now, we query the nullifiers mapping - but we need the nullifier hash
-            // Since we don't have it stored, we return None and rely on the state
-            None
-        } else {
-            None
-        };
+        // The contract's `nullifiers` mapping is keyed by the nullifier hash, which
+        // is not recoverable from sanad state alone (it is revealed at mint/consume
+        // time). Until that preimage is plumbed through, report None and rely on the
+        // canonical `state` for Consumed/Minted detection.
+        let nullifier = None;
 
         Ok(CanonicalSanadState {
             state,

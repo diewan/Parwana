@@ -65,6 +65,20 @@ impl std::str::FromStr for Network {
 pub struct ChainConfig {
     /// RPC endpoint URL.
     pub rpc_url: String,
+    /// REST/esplora indexer base URL for address→UTXO scanning (Bitcoin).
+    ///
+    /// Address-index scanning is a REST-only capability; a JSON-RPC `rpc_url`
+    /// (e.g. Alchemy) cannot enumerate an address's UTXOs. When `rpc_url` is
+    /// itself a REST endpoint this may be left unset and the scanner falls back
+    /// to `rpc_url`. `#[serde(default)]` keeps older config/state files loading.
+    #[serde(default)]
+    pub indexer_url: Option<String>,
+    /// Explicit indexer transport for scanning (Bitcoin): `"esplora"` (mempool /
+    /// blockstream) or `"blockbook"` (Alchemy UTXO API / self-hosted Blockbook).
+    /// Selected explicitly, never sniffed from the URL. `None` = chain default
+    /// (esplora for Bitcoin).
+    #[serde(default)]
+    pub indexer_backend: Option<String>,
     /// Network environment.
     pub network: Network,
     /// Contract/package address (if deployed).
@@ -91,6 +105,14 @@ impl ChainConfig {
                     Network::Main => std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
                         .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string()),
                 },
+                // Default `rpc_url` above is JSON-RPC (Alchemy/Ankr), which has no
+                // address index, so provide an explicit esplora indexer for scans.
+                indexer_url: Some(match network {
+                    Network::Dev => "http://localhost:3000/api".to_string(),
+                    Network::Test => "https://mempool.space/signet/api".to_string(),
+                    Network::Main => "https://mempool.space/api".to_string(),
+                }),
+                indexer_backend: None, // esplora (mempool) is the default flavour
                 network: *network,
                 contract_address: None,
                 chain_id: None,
@@ -104,6 +126,8 @@ impl ChainConfig {
                     Network::Test => "https://ethereum-sepolia-rpc.publicnode.com".to_string(),
                     Network::Main => "https://ethereum-rpc.publicnode.com".to_string(),
                 },
+                indexer_url: None,
+                indexer_backend: None,
                 network: *network,
                 contract_address: get_ethereum_contract_address().ok(),
                 chain_id: match network {
@@ -121,6 +145,8 @@ impl ChainConfig {
                     Network::Test => "https://fullnode.testnet.sui.io:443".to_string(),
                     Network::Main => "https://fullnode.mainnet.sui.io:443".to_string(),
                 },
+                indexer_url: None,
+                indexer_backend: None,
                 network: *network,
                 contract_address: Some(get_sui_package_id()
                     .unwrap_or_else(|_| "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string())),
@@ -135,6 +161,8 @@ impl ChainConfig {
                     Network::Test => "https://fullnode.testnet.aptoslabs.com/v1".to_string(),
                     Network::Main => "https://fullnode.mainnet.aptoslabs.com/v1".to_string(),
                 },
+                indexer_url: None,
+                indexer_backend: None,
                 network: *network,
                 contract_address: Some(get_aptos_contract_address()
                     .unwrap_or_else(|_| "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string())),
@@ -149,6 +177,8 @@ impl ChainConfig {
                     Network::Test => "https://api.devnet.solana.com".to_string(),
                     Network::Main => "https://api.mainnet-beta.solana.com".to_string(),
                 },
+                indexer_url: None,
+                indexer_backend: None,
                 network: *network,
                 contract_address: None,
                 chain_id: None,
@@ -159,6 +189,8 @@ impl ChainConfig {
             },
             _ => Self {
                 rpc_url: String::new(),
+                indexer_url: None,
+                indexer_backend: None,
                 network: *network,
                 contract_address: None,
                 chain_id: None,

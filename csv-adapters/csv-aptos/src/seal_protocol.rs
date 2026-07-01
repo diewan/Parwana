@@ -819,6 +819,7 @@ impl SealProtocol for AptosSealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
+        _sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Publishing commitment via seal {}",
@@ -2082,7 +2083,7 @@ mod tests {
         // Create a seal
         let seal = AptosSealPoint::new([1u8; 32], resource_type.clone(), 0);
         let commitment = Hash::new([1u8; 32]);
-        let result = adapter.publish(commitment, seal).await;
+        let result = adapter.publish(commitment, seal, commitment).await;
         assert!(result.is_ok());
     }
 
@@ -2114,11 +2115,11 @@ mod tests {
 
         let seal = AptosSealPoint::new([1u8; 32], resource_type.clone(), 0);
         let commitment = Hash::new([1u8; 32]);
-        adapter.publish(commitment, seal.clone()).await.unwrap();
+        adapter.publish(commitment, seal.clone(), commitment).await.unwrap();
 
         // Try to publish again with same seal
         let commitment2 = Hash::new([2u8; 32]);
-        let result = adapter.publish(commitment2, seal).await;
+        let result = adapter.publish(commitment2, seal, commitment2).await;
         assert!(result.is_err());
     }
 

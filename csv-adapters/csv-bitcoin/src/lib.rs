@@ -17,6 +17,7 @@ pub mod adapter_impl;
 pub mod bip341;
 pub mod config;
 pub mod error;
+pub mod lock_script;
 pub mod mint;
 pub mod mpc_batch;
 pub mod node;
@@ -38,6 +39,9 @@ pub mod zk_prover;
 
 #[cfg(feature = "signet-rest")]
 pub mod mempool_rpc;
+
+#[cfg(feature = "signet-rest")]
+pub mod blockbook_rpc;
 
 pub mod json_rpc;
 
@@ -78,5 +82,8 @@ pub use node::real_rpc::{BitcoinNode, TxInfo};
 
 #[cfg(feature = "signet-rest")]
 pub use mempool_rpc::MempoolSignetRpc;
+
+#[cfg(feature = "signet-rest")]
+pub use blockbook_rpc::BlockbookRpc;
 
 pub use json_rpc::BitcoinJsonRpc;

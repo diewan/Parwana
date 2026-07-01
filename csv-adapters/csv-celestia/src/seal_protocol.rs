@@ -117,6 +117,7 @@ where
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
+        _sanad_id: Hash,
     ) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         // This is a synchronous wrapper around async code
         // In production, this should be properly async

@@ -79,7 +79,11 @@ pub trait WalletOperations: Send + Sync {
     /// * `seed` - BIP-39 seed bytes
     /// * `account` - BIP-44 account index
     /// * `index` - Address index within the account
-    /// * `rpc_url` - RPC endpoint URL for chain queries
+    /// * `rpc_url` - RPC/indexer endpoint URL for chain queries
+    /// * `indexer_kind` - Optional chain-specific indexer transport hint (e.g.
+    ///   `"esplora"` / `"blockbook"` for Bitcoin) so the implementation picks the
+    ///   right REST client explicitly instead of inspecting the URL. `None` means
+    ///   the chain default. Chains that don't scan UTXOs ignore it.
     ///
     /// # Returns
     /// Vector of UTXOs as (txid, vout, value, scriptpubkey_hex) tuples
@@ -89,8 +93,10 @@ pub trait WalletOperations: Send + Sync {
         account: u32,
         index: u32,
         rpc_url: &str,
+        indexer_kind: Option<&str>,
     ) -> Result<Vec<(String, u32, u64, Option<String>)>> {
         // Default implementation for chains that don't support UTXO scanning
+        let _ = indexer_kind;
         Ok(Vec::new())
     }
 }

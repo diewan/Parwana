@@ -961,7 +961,12 @@ impl ChainBackend for SolanaBackend {
         })
     }
 
-    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(
+        &self,
+        seal: SealPoint,
+        commitment: Hash,
+        sanad_id: Hash,
+    ) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to SolanaSealPoint
         if seal.id.len() < 32 {
             return Err(ChainOpError::InvalidInput(
@@ -983,7 +988,7 @@ impl ChainBackend for SolanaBackend {
         // Call the seal protocol's publish method
         let solana_anchor = self
             .seal_protocol
-            .publish(commitment, solana_seal)
+            .publish(commitment, solana_seal, sanad_id)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 

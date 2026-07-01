@@ -227,10 +227,12 @@ fn test_utxo_validation_uses_runtime() {
             !content.contains("TODO: Implement proper UTXO validation using Bitcoin adapter"),
             "sanads.rs should not have TODO for UTXO validation - must be implemented"
         );
-        // Should use runtime for validation
+        // Should use runtime for validation. The call is written as
+        // `match runtime\n    .get_transaction(...)`, so match the
+        // method call rather than a specific one-line formatting.
         assert!(
             content.contains("validate_bitcoin_utxo_via_runtime")
-                || content.contains("runtime.get_transaction"),
+                || content.contains(".get_transaction("),
             "sanads.rs should use runtime-mediated UTXO validation"
         );
         // Should fail closed when RPC unavailable

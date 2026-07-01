@@ -91,7 +91,7 @@ pub struct RpcEndpoint {
 /// RPC protocol type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RpcProtocol {
-    /// REST API
+    /// REST API (esplora convention: /address/{addr}/utxo, /tx/{txid})
     Rest,
     /// gRPC
     Grpc,
@@ -99,6 +99,8 @@ pub enum RpcProtocol {
     WebSocket,
     /// JSON-RPC
     JsonRpc,
+    /// Trezor Blockbook REST API (Alchemy Bitcoin UTXO API, self-hosted Blockbook)
+    Blockbook,
 }
 
 /// UTXO configuration.

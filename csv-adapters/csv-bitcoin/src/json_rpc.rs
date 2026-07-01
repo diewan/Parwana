@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-use crate::rpc::{BitcoinRpc, BlockHeader, UtxoInfo};
+use crate::rpc::{BitcoinRpc, BlockHeader, UtxoDetails, UtxoInfo};
 
 /// Maximum number of retries for transient failures
 const MAX_RETRIES: u32 = 3;
@@ -263,13 +263,22 @@ impl BitcoinRpc for BitcoinJsonRpc {
             Ok(result)
         }.await;
 
-        // If listunspent fails, try REST API fallback (for Alchemy and other limited RPC providers)
-        if listunspent_result.is_err() {
-            log::warn!("listunspent failed, attempting REST API fallback for address: {}", address);
-            return get_utxos_from_mempool(&self.client, &self.rpc_url, &address).await;
-        }
-
-        listunspent_result
+        // `listunspent` only works on a Bitcoin Core node that has this address
+        // imported into a server-side wallet. Hosted JSON-RPC providers (Alchemy,
+        // QuickNode, …) expose no address index at all, so there is no way to
+        // enumerate an arbitrary address's UTXOs over JSON-RPC. Rather than
+        // silently reach out to a hardcoded public REST indexer — which hides the
+        // capability gap and pins users to mempool.space — fail honestly and tell
+        // the caller to configure a REST/esplora indexer for scanning.
+        listunspent_result.map_err(|e| {
+            format!(
+                "JSON-RPC endpoint {} cannot enumerate UTXOs for address {} \
+                 (no address index; `listunspent` requires a server-side wallet): {}. \
+                 Configure a REST/esplora indexer (BitcoinConfig::indexer_url) for address scanning.",
+                self.rpc_url, address, e
+            )
+            .into()
+        })
     }
 
     async fn get_utxo_scriptpubkey(
@@ -298,6 +307,48 @@ impl BitcoinRpc for BitcoinJsonRpc {
             }
         }
         
+        Ok(None)
+    }
+
+    async fn get_utxo_details(
+        &self,
+        txid: [u8; 32],
+        vout: u32,
+    ) -> Result<Option<UtxoDetails>, Box<dyn std::error::Error + Send + Sync>> {
+        // RPC expects display format (reversed bytes)
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
+
+        // Use gettxout, not getrawtransaction: gettxout reads the live UTXO set and
+        // returns null when the output is spent or was never confirmed, so a spent or
+        // non-existent seal anchor is rejected here instead of failing opaquely at
+        // broadcast with `bad-txns-inputs-missingorspent`. It also works on pruned /
+        // non-txindex providers (e.g. Alchemy) and carries value + scriptPubKey.
+        let txout: Option<Value> = self.call("gettxout", vec![
+            Value::from(txid_hex),
+            Value::from(vout),
+        ]).await?;
+
+        let Some(output) = txout else {
+            // Output spent or unknown to the node's UTXO set.
+            return Ok(None);
+        };
+
+        let script_pubkey = output.get("scriptPubKey")
+            .and_then(|spk| spk.get("hex"))
+            .and_then(|h| h.as_str());
+        let value_btc = output.get("value").and_then(|v| v.as_f64());
+
+        if let (Some(script_pubkey), Some(value_btc)) = (script_pubkey, value_btc) {
+            return Ok(Some(UtxoDetails {
+                txid,
+                vout,
+                value: (value_btc * 100_000_000.0).round() as u64,
+                script_pubkey: script_pubkey.to_string(),
+            }));
+        }
+
         Ok(None)
     }
 
@@ -384,93 +435,3 @@ struct JsonRpcError {
     message: Option<String>,
 }
 
-/// REST API fallback for UTXO queries when listunspent is not supported
-/// Uses mempool.space as a reliable fallback for Bitcoin Signet
-async fn get_utxos_from_mempool(
-    client: &Client,
-    rpc_url: &str,
-    address: &str,
-) -> Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
-    // Use mempool.space as the fallback REST API
-    // Detect network from RPC URL or default to signet
-    // Check for signet first before checking for "bitcoin" to avoid false positives
-    let network = if rpc_url.contains("signet") {
-        "https://mempool.space/signet/api"
-    } else if rpc_url.contains("testnet") {
-        "https://mempool.space/testnet/api"
-    } else if rpc_url.contains("mainnet") {
-        "https://mempool.space/api"
-    } else {
-        // Default to signet for Alchemy and other test endpoints
-        "https://mempool.space/signet/api"
-    };
-
-    let rest_url = format!("{}/address/{}/utxo", network, address);
-
-    let req = client.get(&rest_url);
-
-    match req.send().await {
-        Ok(resp) if resp.status().is_success() => {
-            let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                format!("Failed to read REST API response: {}", e).into()
-            })?;
-
-            // Parse REST API response (mempool.space format)
-            let utxos: Vec<Value> = serde_json::from_str(&text).map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                format!("Failed to parse REST API response: {}", e).into()
-            })?;
-
-            let result: Vec<UtxoInfo> = utxos
-                .into_iter()
-                .filter_map(|u| {
-                    let txid_hex = u.get("txid")?.as_str()?;
-                    let vout = u.get("vout")?.as_u64()? as u32;
-                    let value = u.get("value")?.as_u64()?;
-                    
-                    let confirmations = if let Some(status) = u.get("status") {
-                        if status.get("confirmed").and_then(|c| c.as_bool()).unwrap_or(false) {
-                            let block_height = status.get("block_height").and_then(|h| h.as_u64()).unwrap_or(0);
-                            if block_height > 0 {
-                                // We don't have current height from mempool.space in this context
-                                // Just use the block_height as a proxy for confirmations
-                                block_height
-                            } else {
-                                0
-                            }
-                        } else {
-                            0
-                        }
-                    } else {
-                        0
-                    };
-                    
-                    let txid_bytes = hex::decode(txid_hex).ok()?;
-                    let mut txid = [0u8; 32];
-                    txid.copy_from_slice(&txid_bytes);
-                    // mempool.space returns txids in display format (reversed bytes)
-                    // Reverse to get internal byte order for consistent storage
-                    txid.reverse();
-                    
-                    Some(UtxoInfo {
-                        txid,
-                        vout,
-                        amount_sat: value,
-                        confirmations,
-                    })
-                })
-                .collect();
-            
-            Ok(result)
-        }
-        Ok(resp) => {
-            let status = resp.status();
-            let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                format!("HTTP {} at {}: failed to read error text: {}", status, rest_url, e).into()
-            })?;
-            Err(format!("REST API fallback failed: HTTP {} at {}: {}", status, rest_url, error_text).into())
-        }
-        Err(e) => {
-            Err(format!("REST API fallback network error: {}", e).into())
-        }
-    }
-}

@@ -701,12 +701,17 @@ mod real_rpc_impl {
         }
     }
 
-    /// Publishes a seal consumption transaction: builds calldata -> signs -> broadcasts -> returns tx hash.
-    /// For Sanad creation, this calls lockSanad (public function) instead of markSealUsed (owner-only).
+    /// Publishes a Sanad-creation transaction: builds calldata -> signs -> broadcasts -> returns tx hash.
+    ///
+    /// This calls the canonical `create_seal(commitment, sanad_id)` entrypoint, which
+    /// anchors the commitment and sets `sanadStates[sanad_id] = Created`. The on-chain
+    /// state is keyed by the canonical `sanad_id` so that the state reader
+    /// (`sanadStates(sanad_id)`) observes the entry — see BTC-XFER / SANAD-KEY.
     pub async fn publish(
         rpc: &EthereumNode,
         seal: &EthereumSealPoint,
         commitment: [u8; 32],
+        sanad_id: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let signer = rpc
             .signer
@@ -715,22 +720,17 @@ mod real_rpc_impl {
 
         let chain_id = rpc.chain_id.ok_or("Chain ID not available")?;
 
-        println!("[Ethereum] Building transaction for lockSanad...");
+        println!("[Ethereum] Building transaction for create_seal...");
         println!("[Ethereum]   Seal ID: 0x{}", hex::encode(seal.seal_id));
+        println!("[Ethereum]   Sanad ID (state key): 0x{}", hex::encode(sanad_id));
         println!("[Ethereum]   Commitment: 0x{}", hex::encode(commitment));
         println!("[Ethereum]   Chain ID: {}", chain_id);
 
-        // Step 1: Build the calldata for lock_sanad (public function)
-        // For simple Sanad creation, we use destination chain 0 (Bitcoin) and empty destination owner
-        // The sanadId is the commitment hash (not the seal_id which contains contract_address + slot_index + nonce)
-        // destination_chain is bytes32 (chain ID hash), not uint8
-        let destination_chain_hash = [0u8; 32]; // Placeholder: Bitcoin chain ID hash
-        let calldata = CsvSealAbi::encode_lock_sanad(
-            commitment,
-            commitment,
-            destination_chain_hash,
-            &[0u8; 20], // destination owner (placeholder address)
-        );
+        // Step 1: Build the calldata for create_seal(commitment, sanad_id).
+        // The on-chain state must be keyed by the canonical sanad_id (not the
+        // commitment, and not the seal_id which encodes contract_address +
+        // slot_index + nonce), so the state reader can find the entry.
+        let calldata = CsvSealAbi::encode_create_seal(commitment, sanad_id);
 
         println!("[Ethereum]   Calldata length: {} bytes", calldata.len());
         println!("[Ethereum]   Function selector: 0x{}", hex::encode(&calldata[..4]));
@@ -834,15 +834,60 @@ mod real_rpc_impl {
         rpc: &dyn EthereumRpc,
         _seal: &EthereumSealPoint,
         commitment: [u8; 32],
+        sanad_id: [u8; 32],
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
-        let destination_chain_hash = [0u8; 32]; // Placeholder: Bitcoin chain ID hash
-        let calldata = CsvSealAbi::encode_lock_sanad(
-            commitment,
-            commitment,
-            destination_chain_hash,
-            &[0u8; 20], // destination owner (placeholder address)
-        );
+        let calldata = CsvSealAbi::encode_create_seal(commitment, sanad_id);
         rpc.send_raw_transaction(calldata).await
+    }
+
+    /// Verify that a transaction receipt contains a valid `SanadCreated` event
+    /// (emitted by `create_seal`) for the given `sanad_id`/`commitment`.
+    ///
+    /// `create_seal` emits `SanadCreated(sanadId, commitment, owner, ts)` (both
+    /// `sanadId` and `commitment` indexed) plus the legacy `SealUsed(sanadId, commitment)`.
+    /// We accept either as proof the creation landed under the canonical key.
+    pub fn verify_seal_creation_in_receipt(
+        receipt: &TransactionReceipt,
+        sanad_id: [u8; 32],
+        commitment: [u8; 32],
+        csv_seal_address: [u8; 20],
+    ) -> bool {
+        let sanad_created_sig = CsvSealAbi::sanad_created_event_signature();
+        let seal_used_sig = CsvSealAbi::seal_used_event_signature();
+
+        println!("[Ethereum] Verifying create_seal events in receipt...");
+        println!("[Ethereum]   Expected sanad_id: 0x{}", hex::encode(sanad_id));
+        println!("[Ethereum]   Expected commitment: 0x{}", hex::encode(commitment));
+
+        for log in receipt.logs.iter() {
+            if log.address != csv_seal_address {
+                continue;
+            }
+
+            // Canonical: SanadCreated(sanadId indexed, commitment indexed, ...)
+            if log.topics.len() >= 3
+                && log.topics[0] == sanad_created_sig
+                && log.topics[1] == sanad_id
+                && log.topics[2] == commitment
+            {
+                println!("[Ethereum]   -> SanadCreated event verified!");
+                return true;
+            }
+
+            // Legacy: SealUsed(sanadId indexed, commitment in data)
+            if log.topics.len() >= 2
+                && log.topics[0] == seal_used_sig
+                && log.topics[1] == sanad_id
+                && log.data.len() >= 32
+                && log.data[..32] == commitment
+            {
+                println!("[Ethereum]   -> SealUsed (legacy) event verified!");
+                return true;
+            }
+        }
+
+        println!("[Ethereum]   No matching SanadCreated/SealUsed event found");
+        false
     }
 
     /// Verify that a transaction receipt contains a valid `CrossChainLock` or `SealUsed` event.
@@ -924,7 +969,8 @@ mod real_rpc_impl {
 #[cfg(feature = "rpc")]
 pub use real_rpc_impl::{
     AlloyRpcError, EthereumNode, publish, publish_seal_consumption,
-    verify_seal_consumption_in_receipt, wait_for_transaction_receipt,
+    verify_seal_consumption_in_receipt, verify_seal_creation_in_receipt,
+    wait_for_transaction_receipt,
 };
 
 #[cfg(all(test, feature = "rpc"))]

@@ -124,6 +124,7 @@ pub async fn execute(
     action: SanadAction,
     config: &Config,
     state: &mut UnifiedStateManager,
+    canonical: bool,
 ) -> Result<()> {
     match action {
         SanadAction::Create {
@@ -157,6 +158,7 @@ pub async fn execute(
                 schema_hash,
                 disclosure_policy_hash,
                 proof_policy_hash,
+                canonical,
                 config,
                 state,
             )
@@ -174,6 +176,23 @@ pub async fn execute(
     }
 }
 
+/// Parse an optional `0x`-prefixed (or bare) 32-byte hex string into a `Hash`.
+/// Returns `Ok(None)` when the input is absent, and a typed error when the hex
+/// is malformed or not exactly 32 bytes.
+fn parse_opt_hash(value: &Option<String>, label: &str) -> Result<Option<Hash>> {
+    let Some(hash_str) = value else {
+        return Ok(None);
+    };
+    let bytes = hex::decode(hash_str.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("Invalid {} hex: {}", label, e))?;
+    if bytes.len() != 32 {
+        return Err(anyhow::anyhow!("{} must be 32 bytes", label));
+    }
+    let mut hash_bytes = [0u8; 32];
+    hash_bytes.copy_from_slice(&bytes);
+    Ok(Some(Hash::new(hash_bytes)))
+}
+
 async fn cmd_create(
     chain: Chain,
     value: Option<u64>,
@@ -189,6 +208,7 @@ async fn cmd_create(
     schema_hash: Option<String>,
     disclosure_policy_hash: Option<String>,
     proof_policy_hash: Option<String>,
+    canonical: bool,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
@@ -218,6 +238,8 @@ async fn cmd_create(
     let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_config.rpc_url.clone(),
+            indexer_url: chain_config.indexer_url.clone(),
+            indexer_backend: chain_config.indexer_backend.clone(),
             api_key: None,
             timeout_ms: 30000,
             max_retries: 3,
@@ -507,9 +529,18 @@ async fn cmd_create(
 
             output::kv("Expected Address", &expected_address);
 
-            // Get RPC URL from config
+            // Address→UTXO scanning is a REST/esplora capability. Use the
+            // explicitly-configured indexer_url; fall back to rpc_url only when no
+            // indexer is set (correct when rpc_url is itself a REST endpoint). A
+            // JSON-RPC rpc_url with no indexer will fail closed with a clear error
+            // rather than being silently rerouted to a public indexer.
             let chain_cfg = config.chain(&chain)?;
-            let rpc_url = chain_cfg.rpc_url.clone();
+            let scan_url = chain_cfg
+                .indexer_url
+                .clone()
+                .unwrap_or_else(|| chain_cfg.rpc_url.clone());
+            // Explicit indexer transport ("esplora" | "blockbook"); None = default.
+            let indexer_kind = chain_cfg.indexer_backend.clone();
 
             // Initialize wallet factory before UTXO scan
             let _factory = csv_coordinator::init_wallet_factory();
@@ -518,7 +549,7 @@ async fn cmd_create(
             output::info("Scanning for UTXOs...");
             let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
             let scanned_utxos = if let Some(ops) = wallet_ops {
-                ops.scan_utxos(&seed_array, account, index, &rpc_url)
+                ops.scan_utxos(&seed_array, account, index, &scan_url, indexer_kind.as_deref())
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
             } else {
@@ -588,6 +619,11 @@ async fn cmd_create(
     let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_cfg.rpc_url.clone(),
+            // Carry the explicit REST indexer selection through to the SDK so the
+            // runtime adapter scans/queries via the right transport (e.g. Alchemy
+            // Blockbook) instead of appending esplora paths to a JSON-RPC URL.
+            indexer_url: chain_cfg.indexer_url.clone(),
+            indexer_backend: chain_cfg.indexer_backend.clone(),
             api_key: None,
             timeout_ms: 30000,
             max_retries: 3,
@@ -772,6 +808,89 @@ async fn cmd_create(
 
     let runtime = client.chain_runtime();
 
+    // ────────────────────────────────────────────────────────────────────
+    // Resolve the content descriptor and derive the canonical sanad_id BEFORE
+    // publishing anything. Two reasons this must happen pre-publish:
+    //   1. On-chain lifecycle state is keyed by the canonical sanad_id
+    //      (e.g. Ethereum `create_seal(commitment, sanad_id)`), so we need the
+    //      id in hand to pass down into publish_seal.
+    //   2. A missing required descriptor field must fail closed *before* we
+    //      broadcast/spend anything, not after — otherwise we burn gas/an anchor
+    //      and then abort (SANAD-CREATE-001).
+    // ────────────────────────────────────────────────────────────────────
+
+    // Derive owner address for ownership proof / descriptor request.
+    let owner_address = identity.address(&chain, account, index)?;
+
+    // Parse content descriptor hashes from hex strings (legacy parameters, take
+    // precedence over file-parsed values).
+    let schema_hash_legacy = parse_opt_hash(&schema_hash, "schema hash")?;
+    let content_root_parsed = parse_opt_hash(&content_root, "content root")?;
+    let disclosure_policy_hash_parsed =
+        parse_opt_hash(&disclosure_policy_hash, "disclosure policy hash")?;
+    let proof_policy_hash_parsed = parse_opt_hash(&proof_policy_hash, "proof policy hash")?;
+
+    // Resolve each required descriptor field. In `--canonical` mode, any field
+    // the user did not supply is filled with a deterministic, REAL (non-zero)
+    // default hash so a fully-canonical Sanad can be created without hand-passing
+    // every hash. This never fabricates a zero hash and only applies when the
+    // caller explicitly opted into canonical mode; without `--canonical` the
+    // fields stay `None` and the SDK's fail-closed gate rejects the create.
+    let canonical_default =
+        |domain: &str| -> Option<Hash> { canonical.then(|| Hash::sha256(domain.as_bytes())) };
+    let content_descriptor = csv_sdk::sanads::ContentDescriptorInput {
+        schema_id: None,
+        schema_hash: schema_hash_legacy
+            .or(schema_hash_final)
+            .or_else(|| canonical_default("csv.sanad.default.schema.v1")),
+        payload_codec: None,
+        payload_hash: payload_hash_final
+            .or_else(|| canonical_default("csv.sanad.default.payload.v1")),
+        content_root: content_root_parsed,
+        attachment_root: attachment_root_final,
+        disclosure_policy_hash: disclosure_policy_hash_parsed
+            .or_else(|| canonical_default("csv.sanad.default.disclosure.v1")),
+        proof_policy_hash: proof_policy_hash_parsed
+            .or_else(|| canonical_default("csv.sanad.default.proof.v1")),
+    };
+
+    let publish_policy = if skip_publish {
+        csv_sdk::sanads::PublishPolicy::DraftOnly
+    } else {
+        csv_sdk::sanads::PublishPolicy::Publish
+    };
+
+    // Build the typed creation request. `funding_selector` is not consumed by
+    // the finalize/draft paths (funding/publication is driven imperatively
+    // below), so we set it to Automatic here where the selected UTXO is not yet
+    // known.
+    let create_request = csv_sdk::sanads::CreateSanadRequest {
+        chain: core_chain.clone(),
+        owner: owner_address.as_bytes().to_vec(),
+        value,
+        content_descriptor,
+        funding_selector: csv_sdk::sanads::FundingSelector::Automatic,
+        publish_policy,
+    };
+
+    // Fail closed here (before publishing/broadcasting anything) if a required
+    // descriptor field is missing, and derive the canonical descriptor hash.
+    let descriptor = create_request
+        .build_descriptor()
+        .map_err(|e| anyhow::anyhow!("Cannot create sanad: {}", e))?;
+
+    // Salt and canonical sanad_id. The SAME salt is threaded into
+    // finalize_published() below so the persisted sanad_id matches exactly the
+    // id written on-chain during publish.
+    let salt: [u8; 16] = rand::random();
+    let sanad_id = csv_hash::sanad::SanadId::from_descriptor_commitment(
+        descriptor.compute_hash(),
+        commitment,
+        &salt,
+    );
+    let sanad_id_hash = Hash::new(*sanad_id.as_bytes());
+    output::kv_hash("Sanad ID", sanad_id.as_bytes());
+
     // For Bitcoin, use existing UTXOs instead of creating new seals
     // We need to track both the seal and the anchor since we publish during UTXO selection
     let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty()
@@ -830,7 +949,7 @@ async fn cmd_create(
 
             // Try to publish with this UTXO
             match runtime
-                .publish_seal(core_chain.clone(), seal.clone(), commitment)
+                .publish_seal(core_chain.clone(), seal.clone(), commitment, sanad_id_hash)
                 .await
             {
                 Ok(anchor) => {
@@ -928,7 +1047,7 @@ async fn cmd_create(
         );
         output::info(&format!("Publishing commitment to {}...", chain.as_str()));
         let anchor = runtime
-            .publish_seal(core_chain.clone(), seal.clone(), commitment)
+            .publish_seal(core_chain.clone(), seal.clone(), commitment, sanad_id_hash)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to publish seal: {}", e))?;
         log::info!(
@@ -952,114 +1071,6 @@ async fn cmd_create(
             state.save()?;
         }
     }
-
-    // Derive owner address for ownership proof
-    let owner_address = identity.address(&chain, account, index)?;
-
-    // Parse content descriptor hashes from hex strings (legacy parameters, take precedence over file-parsed values)
-    let schema_hash_legacy = if let Some(ref hash_str) = schema_hash {
-        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
-            .map_err(|e| anyhow::anyhow!("Invalid schema hash hex: {}", e))?;
-        if bytes.len() != 32 {
-            return Err(anyhow::anyhow!("Schema hash must be 32 bytes"));
-        }
-        let mut hash_bytes = [0u8; 32];
-        hash_bytes.copy_from_slice(&bytes);
-        Some(Hash::new(hash_bytes))
-    } else {
-        None
-    };
-
-    let content_root_parsed = if let Some(ref hash_str) = content_root {
-        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
-            .map_err(|e| anyhow::anyhow!("Invalid content root hex: {}", e))?;
-        if bytes.len() != 32 {
-            return Err(anyhow::anyhow!("Content root must be 32 bytes"));
-        }
-        let mut hash_bytes = [0u8; 32];
-        hash_bytes.copy_from_slice(&bytes);
-        Some(Hash::new(hash_bytes))
-    } else {
-        None
-    };
-
-    let disclosure_policy_hash_parsed = if let Some(ref hash_str) = disclosure_policy_hash {
-        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
-            .map_err(|e| anyhow::anyhow!("Invalid disclosure policy hash hex: {}", e))?;
-        if bytes.len() != 32 {
-            return Err(anyhow::anyhow!("Disclosure policy hash must be 32 bytes"));
-        }
-        let mut hash_bytes = [0u8; 32];
-        hash_bytes.copy_from_slice(&bytes);
-        Some(Hash::new(hash_bytes))
-    } else {
-        None
-    };
-
-    let proof_policy_hash_parsed = if let Some(ref hash_str) = proof_policy_hash {
-        let bytes = hex::decode(hash_str.trim_start_matches("0x"))
-            .map_err(|e| anyhow::anyhow!("Invalid proof policy hash hex: {}", e))?;
-        if bytes.len() != 32 {
-            return Err(anyhow::anyhow!("Proof policy hash must be 32 bytes"));
-        }
-        let mut hash_bytes = [0u8; 32];
-        hash_bytes.copy_from_slice(&bytes);
-        Some(Hash::new(hash_bytes))
-    } else {
-        None
-    };
-
-    // Resolve content descriptor inputs (legacy hash params take precedence over
-    // file-parsed values). Every field stays an explicit `Option<Hash>` here --
-    // there is no zero-hash or "use the commitment instead" fallback for a
-    // missing field. `CreateSanadRequest::build_descriptor()` is the single
-    // fail-closed gate: a required field that is still `None` after this
-    // resolution step produces a typed error, never a fabricated hash
-    // (SANAD-CREATE-001).
-    let content_descriptor = csv_sdk::sanads::ContentDescriptorInput {
-        schema_id: None,
-        schema_hash: schema_hash_legacy.or(schema_hash_final),
-        payload_codec: None,
-        payload_hash: payload_hash_final,
-        content_root: content_root_parsed,
-        attachment_root: attachment_root_final,
-        disclosure_policy_hash: disclosure_policy_hash_parsed,
-        proof_policy_hash: proof_policy_hash_parsed,
-    };
-
-    // Build the typed creation request. The CLI's only job is to assemble
-    // this request from user input and chain-specific funding/publication
-    // that already happened above; all "is a required field missing"
-    // decisions are delegated to the SDK so the same fail-closed rule
-    // applies regardless of caller.
-    let publish_policy = if skip_publish {
-        csv_sdk::sanads::PublishPolicy::DraftOnly
-    } else {
-        csv_sdk::sanads::PublishPolicy::Publish
-    };
-    let funding_selector = match selected_utxo_ref {
-        Some((ref txid, vout)) => csv_sdk::sanads::FundingSelector::Explicit {
-            reference: format!("{}:{}", txid, vout),
-        },
-        None => csv_sdk::sanads::FundingSelector::Automatic,
-    };
-    let create_request = csv_sdk::sanads::CreateSanadRequest {
-        chain: core_chain.clone(),
-        owner: owner_address.as_bytes().to_vec(),
-        value,
-        content_descriptor,
-        funding_selector,
-        publish_policy,
-    };
-
-    // Fail closed here (before signing/persisting anything) if a required
-    // descriptor field is missing. The descriptor itself is rebuilt from the
-    // same request inside create_draft()/finalize_published() below, so this
-    // call exists purely to surface the validation error as early as
-    // possible rather than after deriving a signature.
-    create_request
-        .build_descriptor()
-        .map_err(|e| anyhow::anyhow!("Cannot create sanad: {}", e))?;
 
     // Create ownership proof from the owner address
     // For canonical mode, generate a signature over the commitment hash
@@ -1096,9 +1107,6 @@ async fn cmd_create(
         proof: proof_bytes,
         scheme: Some(csv_protocol::SignatureScheme::Secp256k1),
     };
-
-    // Generate salt for ID derivation
-    let salt: [u8; 16] = rand::random();
 
     // `--skip-publish` can, at most, produce a local unsigned/unpublished
     // draft (SanadsManager::create_draft). It must never reach the path that
@@ -1475,6 +1483,11 @@ async fn cmd_consume(
     let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_cfg.rpc_url.clone(),
+            // Carry the explicit REST indexer selection through to the SDK so the
+            // runtime adapter scans/queries via the right transport (e.g. Alchemy
+            // Blockbook) instead of appending esplora paths to a JSON-RPC URL.
+            indexer_url: chain_cfg.indexer_url.clone(),
+            indexer_backend: chain_cfg.indexer_backend.clone(),
             api_key: None,
             timeout_ms: 30000,
             max_retries: 3,
@@ -1902,6 +1915,11 @@ fn build_sdk_config_from_cli_config(
     let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_cfg.rpc_url.clone(),
+            // Carry the explicit REST indexer selection through to the SDK so the
+            // runtime adapter scans/queries via the right transport (e.g. Alchemy
+            // Blockbook) instead of appending esplora paths to a JSON-RPC URL.
+            indexer_url: chain_cfg.indexer_url.clone(),
+            indexer_backend: chain_cfg.indexer_backend.clone(),
             api_key: None,
             timeout_ms: 30000,
             max_retries: 3,
@@ -1915,7 +1933,25 @@ fn build_sdk_config_from_cli_config(
         account: 0,
         index: 0,
         utxos: vec![],
-        sanad_seals: vec![],
+        // Bitcoin has no on-chain contract mapping sanad_id -> state; the adapter
+        // derives canonical state from each sanad's anchor/seal UTXO. Feed it the
+        // locally-tracked sanad_id -> anchor_txid mappings so get_sanad_state can
+        // resolve the seal and validate it on-chain. Other chains ignore this field.
+        sanad_seals: if chain.as_str() == "bitcoin" {
+            state
+                .storage
+                .wallet
+                .sanad_seals
+                .iter()
+                .map(|s| csv_sdk::config::SanadSealConfig {
+                    sanad_id: s.sanad_id.clone(),
+                    anchor_txid: s.anchor_txid.clone(),
+                    vout: s.vout,
+                })
+                .collect()
+        } else {
+            vec![]
+        },
     };
     sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
 

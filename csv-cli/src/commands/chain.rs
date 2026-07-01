@@ -238,6 +238,8 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
     let sdk_chain_config = csv_sdk::config::ChainConfig {
         rpc: csv_sdk::config::RpcConfig {
             url: chain_cfg.rpc_url.clone(),
+            indexer_url: chain_cfg.indexer_url.clone(),
+            indexer_backend: chain_cfg.indexer_backend.clone(),
             api_key: None,
             timeout_ms: 30000,
             max_retries: 3,

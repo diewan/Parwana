@@ -204,13 +204,14 @@ impl SealProtocol for EthereumSealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
+        sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         self.verify_slot_available(&seal)
             .map_err(ProtocolError::from)?;
 
         #[cfg(feature = "rpc")]
         {
-            use crate::node::{EthereumNode, publish, verify_seal_consumption_in_receipt, wait_for_transaction_receipt};
+            use crate::node::{EthereumNode, publish, verify_seal_creation_in_receipt, wait_for_transaction_receipt};
 
             // Downcast to EthereumNode for the publish flow
             let real_rpc = self
@@ -224,8 +225,9 @@ impl SealProtocol for EthereumSealProtocol {
                     )) as Box<dyn std::error::Error>
                 })?;
 
-            // Build, sign, and broadcast the transaction
-            let tx_hash = publish(real_rpc, &seal, *commitment.as_bytes())
+            // Build, sign, and broadcast the create_seal transaction. The
+            // on-chain state is keyed by the canonical sanad_id.
+            let tx_hash = publish(real_rpc, &seal, *commitment.as_bytes(), *sanad_id.as_bytes())
                 .await
                 .map_err(|e| {
                     Box::new(ProtocolError::PublishFailed(e.to_string()))
@@ -240,16 +242,16 @@ impl SealProtocol for EthereumSealProtocol {
                         as Box<dyn std::error::Error>
                 })?;
 
-            let has_valid_event = verify_seal_consumption_in_receipt(
+            let has_valid_event = verify_seal_creation_in_receipt(
                 &receipt,
-                *commitment.as_bytes(),
+                *sanad_id.as_bytes(),
                 *commitment.as_bytes(),
                 self.csv_seal_address,
             );
 
             if !has_valid_event {
                 return Err(Box::new(ProtocolError::PublishFailed(
-                    "SealUsed event not found or mismatched in receipt".to_string(),
+                    "SanadCreated event not found or mismatched in receipt".to_string(),
                 )) as Box<dyn std::error::Error>);
             }
 
@@ -275,7 +277,8 @@ impl SealProtocol for EthereumSealProtocol {
 
         #[cfg(not(feature = "rpc"))]
         {
-            // Simulated path: in production, call CSVSeal.markSealUsed()
+            let _ = sanad_id;
+            // Simulated path: in production, call CSVSeal.create_seal()
             let mut tx_hash = [0u8; 32];
             tx_hash[..8].copy_from_slice(b"sim-tx-");
             tx_hash[8..].copy_from_slice(commitment.as_bytes());

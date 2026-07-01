@@ -235,6 +235,25 @@ impl SealWallet {
         Ok(sig.as_ref().to_vec())
     }
 
+    /// Produce a 64-byte Schnorr signature for the given sighash using the
+    /// *untweaked* key. Use this for Taproot script-path spends, where the
+    /// leaf script commits to the raw (BIP-86-derived, untweaked) x-only
+    /// public key directly via `OP_CHECKSIG` — as opposed to
+    /// `sign_taproot_keypath`, which signs against the tap-tweaked output
+    /// key used for key-path spends.
+    pub fn sign_taproot_scriptpath(
+        &self,
+        path: &Bip86Path,
+        sighash: &[u8; 32],
+    ) -> Result<Vec<u8>, WalletError> {
+        let secret_key = self.derive_private_key(path)?;
+        let kp = secp256k1::Keypair::from_secret_key(&self.secp, &secret_key);
+        let msg = secp256k1::Message::from_digest_slice(sighash)
+            .map_err(|e| WalletError::SigningFailed(e.to_string()))?;
+        let sig = self.secp.sign_schnorr_no_aux_rand(&msg, &kp);
+        Ok(sig.as_ref().to_vec())
+    }
+
     pub fn next_address(
         &self,
         account: u32,

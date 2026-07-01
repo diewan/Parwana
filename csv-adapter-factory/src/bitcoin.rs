@@ -10,9 +10,7 @@ use std::sync::Arc;
 use csv_bitcoin::{
     config::BitcoinConfig,
     ops::BitcoinBackend,
-    rpc::BitcoinRpc,
     seal_protocol::BitcoinSealProtocol,
-    mempool_rpc::MempoolSignetRpc,
     runtime_adapter::BitcoinRuntimeAdapter,
     Network as BtcNetwork,
 };
@@ -40,26 +38,48 @@ impl AdapterFactory for BitcoinFactory {
             None
         };
 
-        // Select the highest priority REST endpoint
-        let rest_endpoint = config.rpc_endpoints
+        // Select the highest priority endpoint that can serve Bitcoin queries.
+        // The endpoint's declared `protocol` drives backend selection explicitly —
+        // we do NOT sniff the URL string.
+        let rpc_endpoint = config.rpc_endpoints
             .iter()
-            .filter(|e| e.protocol == super::RpcProtocol::Rest)
+            .filter(|e| matches!(
+                e.protocol,
+                super::RpcProtocol::Rest | super::RpcProtocol::JsonRpc | super::RpcProtocol::Blockbook
+            ))
             .min_by_key(|e| e.priority)
-            .ok_or_else(|| FactoryError::InvalidConfig("No REST RPC endpoint found".to_string()))?;
+            .ok_or_else(|| FactoryError::InvalidConfig("No REST, JSON-RPC, or Blockbook endpoint found".to_string()))?;
 
         let has_sanad_seals = !config.sanad_seals.is_empty();
-        
-        // Auto-detect RPC backend from URL
-        let rpc_backend = csv_bitcoin::BitcoinRpcBackend::detect_from_url(&rest_endpoint.url)
-            .unwrap_or(csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc);
-        
+
+        // Map the endpoint's explicitly-declared protocol to a Bitcoin backend.
+        let rpc_backend = match rpc_endpoint.protocol {
+            super::RpcProtocol::JsonRpc => csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc,
+            super::RpcProtocol::Blockbook => csv_bitcoin::BitcoinRpcBackend::BlockbookRest,
+            _ => csv_bitcoin::BitcoinRpcBackend::MempoolRest,
+        };
+
+        // Address scanning needs a REST indexer: reuse the endpoint URL if it is
+        // itself REST (esplora or Blockbook), otherwise pick the highest-priority
+        // REST-ish endpoint if any.
+        let indexer_url = if rpc_backend.is_rest() {
+            Some(rpc_endpoint.url.clone())
+        } else {
+            config.rpc_endpoints
+                .iter()
+                .filter(|e| matches!(e.protocol, super::RpcProtocol::Rest | super::RpcProtocol::Blockbook))
+                .min_by_key(|e| e.priority)
+                .map(|e| e.url.clone())
+        };
+
         let btc_config = BitcoinConfig {
             network,
             finality_depth: 6,
             publication_timeout_seconds: 3600,
-            rpc_url: rest_endpoint.url.clone(),
+            rpc_url: rpc_endpoint.url.clone(),
             rpc_backend,
-            api_key: rest_endpoint.api_key.clone(),
+            indexer_url,
+            api_key: rpc_endpoint.api_key.clone(),
             xpub: None,
             private_key: None,
             seed,
@@ -80,26 +100,12 @@ impl AdapterFactory for BitcoinFactory {
             }).collect(),
         };
 
-        // Create ChainBackend from config first — this registers all sanad_seals
-        // Use appropriate RPC implementation based on detected backend type
-        let rpc_client: Box<dyn BitcoinRpc + Send + Sync> = match rpc_backend {
-            csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc => {
-                Box::new(csv_bitcoin::BitcoinJsonRpc::new(rest_endpoint.url.clone()))
-            }
-            csv_bitcoin::BitcoinRpcBackend::MempoolRest => {
-                Box::new(MempoolSignetRpc::with_url_and_key(
-                    rest_endpoint.url.clone(),
-                    rest_endpoint.api_key.clone(),
-                ))
-            }
-            csv_bitcoin::BitcoinRpcBackend::BlockstreamRest => {
-                // TODO: Implement BlockstreamRest RPC
-                Box::new(MempoolSignetRpc::with_url_and_key(
-                    rest_endpoint.url.clone(),
-                    rest_endpoint.api_key.clone(),
-                ))
-            }
-        };
+        // Create ChainBackend from config first — this registers all sanad_seals.
+        // Transport selection lives entirely in `BitcoinRpcBackend::build_rpc`.
+        let rpc_client = rpc_backend.build_rpc(
+            rpc_endpoint.url.clone(),
+            rpc_endpoint.api_key.clone(),
+        );
 
         let seal = BitcoinSealProtocol::from_config(btc_config, rpc_client)
             .map_err(|e| FactoryError::CreationFailed(
@@ -120,24 +126,10 @@ impl AdapterFactory for BitcoinFactory {
 
         // Create ChainAdapter from the SAME seal_arc — shares the wallet + sanad_seals
         let btc_network_for_runtime = network.to_bitcoin_network();
-        let rpc_adapter: Box<dyn BitcoinRpc + Send + Sync> = match rpc_backend {
-            csv_bitcoin::BitcoinRpcBackend::BitcoinCoreJsonRpc => {
-                Box::new(csv_bitcoin::BitcoinJsonRpc::new(rest_endpoint.url.clone()))
-            }
-            csv_bitcoin::BitcoinRpcBackend::MempoolRest => {
-                Box::new(MempoolSignetRpc::with_url_and_key(
-                    rest_endpoint.url.clone(),
-                    rest_endpoint.api_key.clone(),
-                ))
-            }
-            csv_bitcoin::BitcoinRpcBackend::BlockstreamRest => {
-                // TODO: Implement BlockstreamRest RPC
-                Box::new(MempoolSignetRpc::with_url_and_key(
-                    rest_endpoint.url.clone(),
-                    rest_endpoint.api_key.clone(),
-                ))
-            }
-        };
+        let rpc_adapter = rpc_backend.build_rpc(
+            rpc_endpoint.url.clone(),
+            rpc_endpoint.api_key.clone(),
+        );
 
         let chain_adapter: Box<dyn ChainAdapter> = Box::new(
             BitcoinRuntimeAdapter::from_seal_protocol(

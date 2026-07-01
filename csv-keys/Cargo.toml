@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["keystore", "bip39", "bip44", "crypto", "wallet"]
 categories = ["cryptography", "cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.93"
+rust-version = "1.95"
 
 [dependencies]
 csv-hash = { path = "../csv-hash", features = ["serde"] }

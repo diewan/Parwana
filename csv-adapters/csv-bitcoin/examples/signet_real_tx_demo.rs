@@ -68,6 +68,7 @@ async fn main() {
         publication_timeout_seconds: 300,
         rpc_url: "https://mempool.space/signet".to_string(),
         rpc_backend: csv_bitcoin::BitcoinRpcBackend::MempoolRest,
+        indexer_url: None,
         api_key: None,
         xpub: None,
         private_key: None,
@@ -102,8 +103,9 @@ async fn main() {
     println!("\n--- Publishing commitment to Signet ---");
     let commitment = Hash::new([0xAB; 32]);
 
+    // Demo uses the commitment as the sanad_id (Bitcoin ignores it here).
     let anchor = adapter
-        .publish(commitment, seal.clone())
+        .publish(commitment, seal.clone(), commitment)
         .await
         .expect("Failed to publish commitment");
 

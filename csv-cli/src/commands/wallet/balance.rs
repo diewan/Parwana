@@ -152,6 +152,8 @@ async fn query_balance(
     if let Some(cc) = &sdk_chain {
         let rpc = RpcConfig {
             url: cc.rpc_url.clone(),
+            indexer_url: cc.indexer_url.clone(),
+            indexer_backend: cc.indexer_backend.clone(),
             api_key: None,
             timeout_ms: 30_000,
             max_retries: 3,
@@ -177,6 +179,8 @@ async fn query_balance(
         let rpc_url = config.get_rpc_url(&core_chain);
         let rpc = RpcConfig {
             url: rpc_url,
+            indexer_url: None,
+            indexer_backend: None,
             api_key: None,
             timeout_ms: 30_000,
             max_retries: 3,

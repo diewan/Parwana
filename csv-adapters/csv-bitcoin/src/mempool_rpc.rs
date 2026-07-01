@@ -124,6 +124,12 @@ impl MempoolSignetRpc {
                     let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
                         format!("HTTP {} at {}: failed to read error text: {}", status, url, e).into()
                     })?;
+                    // 4xx is a permanent error (wrong path/endpoint, bad address,
+                    // not-found) — retrying with exponential backoff just wastes
+                    // ~14s per request. Fail fast; only retry transient 5xx/network.
+                    if status.is_client_error() {
+                        return Err(format!("HTTP {} at {}: {}", status, url, error_text).into());
+                    }
                     last_err = Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
                 }
                 Err(e) => {
@@ -166,7 +172,11 @@ impl MempoolSignetRpc {
                     return resp.text().await.map_err(|e| e.into());
                 }
                 Ok(resp) => {
-                    last_err = Some(format!("HTTP {} at {}", resp.status(), url).into());
+                    let status = resp.status();
+                    if status.is_client_error() {
+                        return Err(format!("HTTP {} at {}", status, url).into());
+                    }
+                    last_err = Some(format!("HTTP {} at {}", status, url).into());
                 }
                 Err(e) => {
                     last_err = Some(format!("Network error at {}: {}", url, e).into());
@@ -222,6 +232,10 @@ impl MempoolSignetRpc {
                             status, url, e
                         )
                     })?;
+                    // Fail fast on permanent 4xx (e.g. invalid tx); retry only 5xx/network.
+                    if status.is_client_error() {
+                        return Err(format!("HTTP {} at {}: {}", status, url, error_text).into());
+                    }
                     last_err = Some(format!("HTTP {} at {}: {}", status, url, error_text).into());
                 }
                 Err(e) => {
@@ -295,7 +309,10 @@ impl MempoolSignetRpc {
         required_confirmations: u64,
         timeout_secs: u64,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        let txid_hex = hex::encode(txid);
+        // Trait contract: txid is internal byte order; reverse to display for REST.
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         let start = Instant::now();
         let poll_interval = Duration::from_secs(10);
 
@@ -356,8 +373,11 @@ impl MempoolSignetRpc {
             .map(|t| {
                 let decoded = hex::decode(t)?;
                 let mut arr = [0u8; 32];
-                // Mempool.space returns txids in standard format (no reversal needed)
+                // mempool.space returns block txids in display format; reverse to
+                // internal byte order so they match the internal-order `txid` arg
+                // (from send_raw_transaction) and Bitcoin's internal-order Merkle math.
                 arr.copy_from_slice(&decoded);
+                arr.reverse();
                 Ok(arr)
             })
             .collect::<Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>>>()?;
@@ -402,8 +422,12 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space API uses standard txid format (no reversal needed)
-        let txid_hex = hex::encode(txid);
+        // Trait contract: txid args are internal byte order. mempool.space REST
+        // expects display format, so reverse before building the URL (matches
+        // BitcoinJsonRpc so the two backends are interchangeable).
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         let spend_url = format!("{}/tx/{}/outspend/{}", self.base_url, txid_hex, vout);
         let spend_status: OutSpendStatus = self.get_with_retry(&spend_url).await?;
         Ok(!spend_status.spent)
@@ -419,7 +443,10 @@ impl BitcoinRpc for MempoolSignetRpc {
         let txid_hex = self.post_text_with_retry(&url, tx_hex).await?;
         let txid_bytes = hex::decode(txid_hex.trim())?;
         let mut result = [0u8; 32];
+        // mempool.space returns the txid in display format; reverse to internal
+        // byte order for consistent storage (matches BitcoinJsonRpc's contract).
         result.copy_from_slice(&txid_bytes);
+        result.reverse();
         Ok(result)
     }
 
@@ -427,8 +454,10 @@ impl BitcoinRpc for MempoolSignetRpc {
         &self,
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space API uses standard txid format (no reversal needed)
-        let txid_hex = hex::encode(txid);
+        // Trait contract: txid is internal byte order; reverse to display for REST.
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
 
         match self.get_tx_status(&txid_hex).await {
             Ok(status) => {
@@ -478,9 +507,10 @@ impl BitcoinRpc for MempoolSignetRpc {
             .filter_map(|u| {
                 let txid_bytes = hex::decode(&u.txid).ok()?;
                 let mut txid = [0u8; 32];
+                // mempool.space returns txids in display format; reverse to internal
+                // byte order so UtxoInfo.txid matches BitcoinJsonRpc's contract.
                 txid.copy_from_slice(&txid_bytes);
-                // Mempool.space API returns txids in display format (reversed bytes)
-                // Keep as-is - seal protocol handles conversion to internal byte order
+                txid.reverse();
                 let confirmations = if u.status.confirmed {
                     let bh = u.status.block_height.unwrap_or(current_height as u32) as u64;
                     current_height.saturating_sub(bh) + 1
@@ -503,8 +533,11 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space /tx/{txid} endpoint uses standard txid format (no byte reversal)
-        let txid_hex = hex::encode(txid);
+        // Trait contract: txid is internal byte order; reverse to display for the
+        // mempool.space /tx/{txid} endpoint.
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         let url = format!("{}/tx/{}", self.base_url, txid_hex);
 
         log::debug!("Fetching scriptPubKey for txid: {}, vout: {}, URL: {}", txid_hex, vout, url);
@@ -527,8 +560,12 @@ impl BitcoinRpc for MempoolSignetRpc {
         txid: [u8; 32],
         vout: u32,
     ) -> Result<Option<crate::rpc::UtxoDetails>, Box<dyn std::error::Error + Send + Sync>> {
-        // Mempool.space /tx/{txid} endpoint uses standard txid format (no byte reversal)
-        let txid_hex = hex::encode(txid);
+        // Trait contract: txid is internal byte order; reverse to display for the
+        // mempool.space /tx/{txid} endpoint. The returned UtxoDetails.txid keeps the
+        // original internal-order `txid` below.
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
         let url = format!("{}/tx/{}", self.base_url, txid_hex);
 
         log::debug!("Fetching UTXO details for txid: {}, vout: {}, URL: {}", txid_hex, vout, url);
@@ -663,8 +700,10 @@ pub async fn get_address_utxos(
     let result: Vec<(OutPoint, u64)> = utxos
         .into_iter()
         .map(|u| {
-            let txid_bytes = hex::decode(&u.txid)?;
-            // mempool.space returns txid in standard format (no reversal needed)
+            let mut txid_bytes = hex::decode(&u.txid)?;
+            // mempool.space returns txid in display format; reverse to internal byte
+            // order, which is what Txid::from_slice (consensus order) expects.
+            txid_bytes.reverse();
             let txid = Txid::from_slice(&txid_bytes).expect("valid txid");
             let outpoint = OutPoint::new(txid, u.vout);
             Ok((outpoint, u.value))

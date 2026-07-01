@@ -54,6 +54,14 @@ impl std::fmt::Display for Network {
 pub struct RpcConfig {
     /// RPC endpoint URL.
     pub url: String,
+    /// REST/esplora indexer base URL for Bitcoin address scanning. `None` falls
+    /// back to `url` when that is itself a REST endpoint.
+    #[serde(default)]
+    pub indexer_url: Option<String>,
+    /// Explicit indexer transport for Bitcoin scanning: `"esplora"` or
+    /// `"blockbook"` (Alchemy UTXO API). Selected explicitly, never sniffed.
+    #[serde(default)]
+    pub indexer_backend: Option<String>,
     /// API key (if required by the provider).
     pub api_key: Option<String>,
     /// Request timeout in milliseconds.
@@ -66,6 +74,8 @@ impl Default for RpcConfig {
     fn default() -> Self {
         Self {
             url: String::new(),
+            indexer_url: None,
+            indexer_backend: None,
             api_key: None,
             timeout_ms: 30_000,
             max_retries: 3,

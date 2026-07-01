@@ -1549,7 +1549,12 @@ impl ChainBackend for SuiBackend {
         })
     }
 
-    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(
+        &self,
+        seal: SealPoint,
+        commitment: Hash,
+        sanad_id: Hash,
+    ) -> ChainOpResult<CommitAnchor> {
         if seal.id.len() < 32 {
             return Err(ChainOpError::InvalidInput(
                 "Seal ID too short for Sui, expected at least 32 bytes".to_string(),
@@ -1568,7 +1573,7 @@ impl ChainBackend for SuiBackend {
 
         let sui_anchor = self
             .seal_protocol
-            .publish(commitment, sui_seal)
+            .publish(commitment, sui_seal, sanad_id)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
 

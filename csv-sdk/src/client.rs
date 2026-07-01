@@ -493,10 +493,27 @@ impl CsvClient {
                     .and_then(|keys| keys.get("bitcoin"))
                     .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
-                // Create RPC endpoint configuration
+                // Create RPC endpoint configuration. Address scanning + queries
+                // need a REST indexer; the transport is chosen explicitly from
+                // config (never sniffed). For Alchemy's Blockbook UTXO API, point
+                // the endpoint at the Blockbook base with the Blockbook protocol —
+                // that one client serves scan, gettxout, fees and broadcast.
+                let indexer_backend = chain_config.and_then(|c| c.rpc.indexer_backend.clone());
+                let indexer_url = chain_config.and_then(|c| c.rpc.indexer_url.clone());
+                let (endpoint_url, protocol) = match indexer_backend.as_deref() {
+                    Some("blockbook") | Some("alchemy") => (
+                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
+                        RpcProtocol::Blockbook,
+                    ),
+                    // esplora / default: prefer an explicit indexer_url if set.
+                    _ => (
+                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
+                        RpcProtocol::Rest,
+                    ),
+                };
                 let rpc_endpoint = RpcEndpoint {
-                    url: rpc_url.clone(),
-                    protocol: RpcProtocol::Rest,
+                    url: endpoint_url,
+                    protocol,
                     api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
                     priority: 0,
                 };
@@ -874,10 +891,27 @@ impl CsvClient {
                     .and_then(|keys| keys.get("aptos"))
                     .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
-                // Create RPC endpoint configuration
+                // Create RPC endpoint configuration. Address scanning + queries
+                // need a REST indexer; the transport is chosen explicitly from
+                // config (never sniffed). For Alchemy's Blockbook UTXO API, point
+                // the endpoint at the Blockbook base with the Blockbook protocol —
+                // that one client serves scan, gettxout, fees and broadcast.
+                let indexer_backend = chain_config.and_then(|c| c.rpc.indexer_backend.clone());
+                let indexer_url = chain_config.and_then(|c| c.rpc.indexer_url.clone());
+                let (endpoint_url, protocol) = match indexer_backend.as_deref() {
+                    Some("blockbook") | Some("alchemy") => (
+                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
+                        RpcProtocol::Blockbook,
+                    ),
+                    // esplora / default: prefer an explicit indexer_url if set.
+                    _ => (
+                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
+                        RpcProtocol::Rest,
+                    ),
+                };
                 let rpc_endpoint = RpcEndpoint {
-                    url: rpc_url.clone(),
-                    protocol: RpcProtocol::Rest,
+                    url: endpoint_url,
+                    protocol,
                     api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
                     priority: 0,
                 };

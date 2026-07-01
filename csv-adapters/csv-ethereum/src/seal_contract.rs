@@ -36,6 +36,12 @@ fn cross_chain_lock_signature() -> [u8; 32] {
     compute_keccak256(b"CrossChainLock(bytes32,bytes32,address,bytes32,bytes,uint256)")
 }
 
+/// The canonical `SanadCreated` event signature, emitted by `create_seal`.
+/// `event SanadCreated(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, uint256 timestamp)`
+fn sanad_created_signature() -> [u8; 32] {
+    compute_keccak256(b"SanadCreated(bytes32,bytes32,address,uint256)")
+}
+
 /// The CSVSeal contract interface
 ///
 /// Seal identifiers are 32-byte values. When consumed, they emit a LOG event
@@ -56,6 +62,11 @@ impl CsvSealAbi {
 
     pub fn sanad_locked_event_signature() -> [u8; 32] {
         sanad_locked_signature()
+    }
+
+    /// The `SanadCreated` event signature (emitted by `create_seal`).
+    pub fn sanad_created_event_signature() -> [u8; 32] {
+        sanad_created_signature()
     }
 
     /// Encode the `lock_sanad(sanadId, commitment, destinationChain, destinationOwner)` calldata
@@ -95,6 +106,28 @@ impl CsvSealAbi {
         len_bytes[24..].copy_from_slice(&len.to_be_bytes());
         calldata.extend_from_slice(&len_bytes);
         calldata.extend_from_slice(destination_owner);
+
+        calldata
+    }
+
+    /// Encode the `create_seal(commitment, sealId)` calldata.
+    ///
+    /// This is the canonical Sanad-creation entrypoint: it anchors the
+    /// commitment and sets `sanadStates[sealId] = Created`, keyed by `sealId`
+    /// (which callers pass as the canonical `sanad_id`). Matches the Solidity
+    /// signature `create_seal(bytes32,bytes32)` with argument order
+    /// `(commitment, sealId)`.
+    pub fn encode_create_seal(commitment: [u8; 32], seal_id: [u8; 32]) -> Vec<u8> {
+        // Function selector: keccak256("create_seal(bytes32,bytes32)")[:4]
+        let selector = compute_keccak256(b"create_seal(bytes32,bytes32)");
+        let mut calldata = Vec::with_capacity(4 + 32 + 32);
+        calldata.extend_from_slice(&selector[..4]);
+
+        // commitment (offset 0x20)
+        calldata.extend_from_slice(&commitment);
+
+        // sealId (offset 0x40)
+        calldata.extend_from_slice(&seal_id);
 
         calldata
     }

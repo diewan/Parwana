@@ -62,6 +62,7 @@ impl BitcoinRuntimeAdapter {
                  publication_timeout_seconds: 3600,
                  rpc_url: String::new(),
                  rpc_backend: crate::config::BitcoinRpcBackend::MempoolRest,
+                 indexer_url: None,
                  api_key: None,
                  xpub: None,
                  private_key: None,
@@ -106,7 +107,9 @@ impl BitcoinRuntimeAdapter {
 
         // Wrap the shared seal protocol in a ChainSanadOps instance.
         // BitcoinChainSanadOps::from_arc reuses the Arc without cloning the wallet data.
-        let sanad_ops = Arc::new(BitcoinChainSanadOps::from_arc(Arc::clone(&seal)));
+        let sanad_ops = Arc::new(
+            BitcoinChainSanadOps::from_arc(Arc::clone(&seal)).with_rpc(rpc.clone_boxed()),
+        );
 
         Self {
             chain_id,

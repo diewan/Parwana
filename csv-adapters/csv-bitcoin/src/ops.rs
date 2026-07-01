@@ -25,6 +25,11 @@ use crate::seal_protocol::BitcoinSealProtocol;
 use crate::types::BitcoinSealPoint;
 use csv_protocol::seal_protocol::SealProtocol;
 
+/// Number of confirmations the lock transaction must accrue before a
+/// cross-chain lock can be refunded back to the owner (~24 hours at
+/// Bitcoin's ~10 minute block time).
+const LOCK_CSV_TIMEOUT_BLOCKS: u64 = 144;
+
 /// Bitcoin-specific extension to ChainSigner that accepts prevout amounts
 ///
 /// HIGH-BTC-01: BIP-143 sighash requires the spent UTXO value.
@@ -821,14 +826,42 @@ impl BitcoinChainSanadOps {
         lock_seal: BitcoinSealPoint,
         _owner_key: &[u8],
     ) -> Result<bitcoin::Transaction, String> {
+        // lock_seal.txid is in internal byte order; reverse to display for
+        // the Txid parser (matches the equivalent conversion in lock_sanad).
+        let mut display_txid = lock_seal.txid;
+        display_txid.reverse();
         let lock_outpoint = bitcoin::OutPoint {
-            txid: hex::encode(lock_seal.txid)
+            txid: hex::encode(display_txid)
                 .parse::<bitcoin::Txid>()
                 .expect("valid txid"),
             vout: lock_seal.vout,
         };
 
-        // Build refund transaction that spends the lock UTXO
+        let wallet = &self.adapter.wallet;
+        let utxo = wallet.get_utxo(&lock_outpoint).ok_or_else(|| {
+            format!(
+                "UTXO {}:{} not found in wallet",
+                lock_outpoint.txid, lock_outpoint.vout
+            )
+        })?;
+
+        let fee = 500;
+        let refund_amount = utxo.amount_sat.saturating_sub(fee);
+        if refund_amount == 0 {
+            return Err(format!(
+                "Refund amount ({} sat) does not cover the fee ({} sat)",
+                utxo.amount_sat, fee
+            ));
+        }
+
+        let derived_key = wallet
+            .derive_key(&utxo.path)
+            .map_err(|e| format!("Failed to derive refund output key: {}", e))?;
+
+        // Build refund transaction that spends the lock UTXO via its CSV
+        // script path. nSequence must encode a relative locktime (BIP-68) of
+        // at least LOCK_CSV_TIMEOUT_BLOCKS for the leaf script's
+        // OP_CHECKSEQUENCEVERIFY to succeed.
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::from_height(0)
@@ -836,10 +869,13 @@ impl BitcoinChainSanadOps {
             input: vec![bitcoin::TxIn {
                 previous_output: lock_outpoint,
                 script_sig: bitcoin::ScriptBuf::new(),
-                sequence: bitcoin::Sequence::from_consensus(0),
+                sequence: bitcoin::Sequence::from_height(LOCK_CSV_TIMEOUT_BLOCKS as u16),
                 witness: bitcoin::Witness::new(),
             }],
-            output: vec![], // Would contain refund output to owner
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(refund_amount),
+                script_pubkey: derived_key.address.script_pubkey(),
+            }],
         };
 
         Ok(tx)
@@ -868,23 +904,42 @@ impl BitcoinChainSanadOps {
                 format!("UTXO {}:{} not found in wallet", input_outpoint.txid, input_outpoint.vout)
             ))?;
 
-        // Calculate sighash for the transaction
+        // Rebuild the same script-path-only Taproot tree used to construct
+        // the lock output (see build_lock_transaction / lock_script) so we
+        // can compute the correct leaf script and control block for a CSV
+        // script-path spend. This output has no key-path spend at all.
         let derived_key = wallet.derive_key(&utxo.path)
             .map_err(|e| ChainOpError::SigningError(format!("Failed to derive key: {}", e)))?;
+        let (leaf_script, spend_info) = crate::lock_script::build_lock_taproot(
+            wallet.secp(),
+            &derived_key.internal_xonly,
+            LOCK_CSV_TIMEOUT_BLOCKS as u32,
+        );
+        let control_block = spend_info
+            .control_block(&(leaf_script.clone(), bitcoin::taproot::LeafVersion::TapScript))
+            .ok_or_else(|| ChainOpError::SigningError(
+                "Failed to build control block for lock script".to_string()
+            ))?;
 
-        // Use the actual scriptPubKey from the UTXO if available
-        let derived_spk = derived_key.address.script_pubkey();
+        // Use the actual scriptPubKey from the UTXO if available, falling
+        // back to recomputing the CSV taproot output script.
+        let derived_spk = bitcoin::ScriptBuf::new_p2tr_tweaked(spend_info.output_key());
         let input_script_pubkey = utxo.script_pubkey
             .as_ref()
             .unwrap_or(&derived_spk);
 
+        let leaf_hash = bitcoin::taproot::TapLeafHash::from_script(
+            &leaf_script,
+            bitcoin::taproot::LeafVersion::TapScript,
+        );
         let sighash = bitcoin::sighash::SighashCache::new(&tx)
-            .taproot_key_spend_signature_hash(
+            .taproot_script_spend_signature_hash(
                 0,
                 &bitcoin::sighash::Prevouts::All(&[&bitcoin::TxOut {
                     value: bitcoin::Amount::from_sat(utxo.amount_sat),
                     script_pubkey: input_script_pubkey.clone(),
                 }]),
+                leaf_hash,
                 bitcoin::sighash::TapSighashType::Default,
             )
             .map_err(|e| ChainOpError::SigningError(format!("Sighash failed: {}", e)))?;
@@ -892,13 +947,19 @@ impl BitcoinChainSanadOps {
         let mut sighash_bytes = [0u8; 32];
         sighash_bytes.copy_from_slice(sighash.as_ref());
 
-        // Sign with the wallet
+        // Sign with the wallet's untweaked key — the leaf script's
+        // OP_CHECKSIG commits directly to the raw x-only pubkey, not the
+        // tap-tweaked output key used for key-path spends.
         let schnorr_sig = wallet
-            .sign_taproot_keypath(&utxo.path, &sighash_bytes)
+            .sign_taproot_scriptpath(&utxo.path, &sighash_bytes)
             .map_err(|e| ChainOpError::SigningError(format!("Signing failed: {}", e)))?;
 
-        // Build the witness
-        let witness = bitcoin::Witness::from_slice(&[schnorr_sig.as_slice()]);
+        // Script-path witness: [signature, leaf script, control block]
+        let witness = bitcoin::Witness::from_slice(&[
+            schnorr_sig.as_slice(),
+            leaf_script.as_bytes(),
+            control_block.serialize().as_slice(),
+        ]);
 
         // Create signed transaction
         let mut signed_tx = tx.clone();
@@ -921,18 +982,41 @@ impl BitcoinChainSanadOps {
         dest_hash: &bitcoin_hashes::sha256d::Hash,
         _owner_key: &[u8],
     ) -> Result<bitcoin::Transaction, String> {
-        // Get the UTXO from the wallet to know the amount
+        // Get the UTXO from the wallet to know the amount and owning key path
         let wallet = &self.adapter.wallet;
         let utxo = wallet.get_utxo(&seal_outpoint)
             .ok_or_else(|| format!("UTXO {}:{} not found in wallet", seal_outpoint.txid, seal_outpoint.vout))?;
 
-        // Calculate fee (1 input, 1 output)
+        // Calculate fee (1 input, 2 outputs)
         let fee = 500; // Simple fee estimate for lock transaction
         let lock_amount = utxo.amount_sat.saturating_sub(fee);
 
-        // Create OP_RETURN output with destination hash for cross-chain proof
+        // The locked value must land on a spendable output (vout 0), not the
+        // OP_RETURN commitment: OP_RETURN outputs are provably unspendable, so
+        // nodes reject unspendable outputs carrying value above
+        // `-maxburnamount` (default 0 on Bitcoin Core >= 25.0).
+        //
+        // It must also be genuinely immobile until the CSV timeout — a plain
+        // key-path P2TR back to the owner could be spent instantly, giving a
+        // destination-chain verifier no real guarantee the source BTC won't
+        // move while a mint is finalizing. So vout 0 is a script-path-only
+        // Taproot output (NUMS internal key, no key-path spend exists) whose
+        // sole spending path is `<144> OP_CSV OP_DROP <owner_pubkey>
+        // OP_CHECKSIG` — consensus-enforced by BIP-68/112, not just the
+        // application-level check in refund_sanad. See lock_script.rs.
+        let derived_key = wallet.derive_key(&utxo.path)
+            .map_err(|e| format!("Failed to derive lock output key: {}", e))?;
+        let (_leaf_script, spend_info) = crate::lock_script::build_lock_taproot(
+            wallet.secp(),
+            &derived_key.internal_xonly,
+            LOCK_CSV_TIMEOUT_BLOCKS as u32,
+        );
+        let lock_value_script = bitcoin::ScriptBuf::new_p2tr_tweaked(spend_info.output_key());
+
+        // OP_RETURN commitment output carrying the destination chain hash.
+        // Zero value, as OP_RETURN outputs must be for standard transactions.
         // Format: OP_RETURN OP_PUSH32 <dest_hash>
-        let lock_script = bitcoin::ScriptBuf::new_op_return(dest_hash.as_byte_array());
+        let commitment_script = bitcoin::ScriptBuf::new_op_return(dest_hash.as_byte_array());
 
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
@@ -944,10 +1028,16 @@ impl BitcoinChainSanadOps {
                 sequence: bitcoin::Sequence::from_consensus(0xffffffff), // Disable RBF for lock
                 witness: bitcoin::Witness::new(),
             }],
-            output: vec![bitcoin::TxOut {
-                value: bitcoin::Amount::from_sat(lock_amount),
-                script_pubkey: lock_script,
-            }],
+            output: vec![
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(lock_amount),
+                    script_pubkey: lock_value_script,
+                },
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::ZERO,
+                    script_pubkey: commitment_script,
+                },
+            ],
         };
         Ok(tx)
     }
@@ -1161,8 +1251,11 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                 }
             };
 
-            // Publish commitment to the seal
-            let anchor = match self.adapter.publish(commitment, seal.clone()).await {
+            // Publish commitment to the seal. This adapter-level create helper
+            // identifies the sanad by its commitment (see SanadId(commitment)
+            // below), so the sanad_id passed here is the commitment. Bitcoin's
+            // SealProtocol::publish ignores it (no contract mapping).
+            let anchor = match self.adapter.publish(commitment, seal.clone(), commitment).await {
                 Ok(anchor) => anchor,
                 Err(e) => {
                     log::warn!("Failed to publish commitment with UTXO {}:{}: {}, trying next UTXO",
@@ -1276,8 +1369,65 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                 ChainOpError::TransactionError(format!("Failed to build lock tx: {}", e))
             })?;
 
+        // Capture the spendable lock output (vout 0, see build_lock_transaction)
+        // before the tx is moved into signing, so we can re-register the
+        // sanad_seal against it below.
+        let lock_output = lock_tx.output[0].clone();
+
         // Sign and broadcast the lock transaction
         let signed_tx = self.sign_and_broadcast_lock(lock_tx, &key_bytes).await?;
+
+        // The lock tx spends the original seal outpoint and creates a new
+        // spendable output at vout 0. Re-point the sanad_id -> seal mapping at
+        // that new output so a later refund_sanad (or any other
+        // find_seal_for_sanad lookup) targets the UTXO that actually holds the
+        // locked value, instead of the now-spent seal outpoint.
+        match hex::decode(&signed_tx) {
+            Ok(lock_txid_bytes) if lock_txid_bytes.len() == 32 => {
+                if let Some(seal_utxo) = self.adapter.wallet.get_utxo(&lock_outpoint) {
+                    let mut txid_array = [0u8; 32];
+                    txid_array.copy_from_slice(&lock_txid_bytes);
+                    let new_outpoint = bitcoin::OutPoint {
+                        txid: bitcoin::Txid::from_raw_hash(
+                            bitcoin::hashes::sha256d::Hash::from_byte_array(txid_array),
+                        ),
+                        vout: 0,
+                    };
+                    self.adapter.wallet.add_utxo_with_provenance(
+                        new_outpoint,
+                        lock_output.value.to_sat(),
+                        seal_utxo.path.clone(),
+                        Some(lock_output.script_pubkey.clone()),
+                        Some(*sanad_id.as_bytes()),
+                        crate::types::UtxoProvenance::SanadAnchor,
+                    );
+                    // Mark the now-spent seal input so it's never mistaken for
+                    // a still-live anchor by a future lookup.
+                    self.adapter.wallet.add_utxo_with_provenance(
+                        lock_outpoint,
+                        seal_utxo.amount_sat,
+                        seal_utxo.path.clone(),
+                        seal_utxo.script_pubkey.clone(),
+                        seal_utxo.sanad_id,
+                        crate::types::UtxoProvenance::ConsumedSeal,
+                    );
+                }
+                self.adapter.wallet.register_sanad_seal(
+                    *sanad_id.as_bytes(),
+                    lock_txid_bytes,
+                    0,
+                );
+            }
+            _ => {
+                log::warn!(
+                    "lock_sanad: could not decode lock txid '{}'; sanad_seal not \
+                     updated for sanad_id={} — refund_sanad will fail to find the \
+                     lock UTXO",
+                    signed_tx,
+                    hex::encode(sanad_id.as_bytes())
+                );
+            }
+        }
 
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),
@@ -1288,7 +1438,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             metadata: serde_json::to_vec(&serde_json::json!({
                 "destination_chain": destination_chain,
                 "lock_type": "utxo_csv",
-                "timeout_blocks": 144, // ~24 hours
+                "timeout_blocks": LOCK_CSV_TIMEOUT_BLOCKS,
             })).unwrap_or_default(),
         })
     }
@@ -1332,14 +1482,26 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             ))
         })?;
 
-        // Verify CSV timeout has expired (144 blocks = ~24 hours)
-        let current_height = self.adapter.get_current_height().await;
-        let csv_timeout = 144u64;
+        // Verify the CSV timeout has expired: the lock transaction itself must
+        // have accrued at least LOCK_CSV_TIMEOUT_BLOCKS confirmations. This is
+        // relative to when the lock confirmed, not the chain tip's absolute
+        // height — comparing `current_height < 144` was a no-op on any chain
+        // already past block 144 (i.e. every live signet/mainnet chain), which
+        // would let a refund through immediately after the lock confirmed.
+        let rpc = self.rpc.as_ref().ok_or_else(|| {
+            ChainOpError::RpcError("No RPC client configured for confirmation check".to_string())
+        })?;
+        let confirmations = rpc
+            .get_tx_confirmations(lock_seal.txid)
+            .await
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to fetch lock tx confirmations: {}", e))
+            })?;
 
-        if current_height < csv_timeout {
+        if confirmations < LOCK_CSV_TIMEOUT_BLOCKS {
             return Err(ChainOpError::InvalidInput(format!(
-                "CSV timeout not yet expired. Current: {}, Required: {}",
-                current_height, csv_timeout
+                "CSV timeout not yet expired. Lock tx confirmations: {}, required: {}",
+                confirmations, LOCK_CSV_TIMEOUT_BLOCKS
             )));
         }
 
@@ -1357,16 +1519,18 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             .sign_and_broadcast_refund(refund_tx, &key_bytes)
             .await?;
 
+        let refund_height = self.adapter.get_current_height().await;
+
         Ok(SanadOperationResult {
             sanad_id: sanad_id.clone(),
             operation: SanadOperation::Refund,
-            transaction_hash: format!("0x{}", hex::encode(signed_tx.as_bytes())),
-            block_height: self.adapter.get_current_height().await,
+            transaction_hash: format!("0x{}", signed_tx),
+            block_height: refund_height,
             chain_id: "bitcoin".to_string(),
             metadata: serde_json::to_vec(&serde_json::json!({
                 "lock_txid": hex::encode(lock_seal_txid),
                 "lock_vout": lock_seal_vout,
-                "refund_height": current_height,
+                "refund_height": refund_height,
             })).unwrap_or_default(),
         })
     }
@@ -1779,18 +1943,6 @@ impl BitcoinBackend {
             seal_protocol: Arc::new(seal),
         }
     }
-
-    /// Find a transaction associated with a sanad_id by scanning UTXOs
-    async fn find_sanad_transaction(&self, _sanad_id: &[u8; 32]) -> ChainOpResult<[u8; 32]> {
-        // For Bitcoin, we need to scan the blockchain for transactions
-        // that contain the sanad_id in their OP_RETURN or Tapret data
-        // In production, this would scan the blockchain for matching transactions
-        Err(ChainOpError::CapabilityUnavailable(
-            "Transaction scanning not yet implemented for Bitcoin. \
-             Use a block explorer API or index to find transactions by sanad_id."
-                .to_string(),
-        ))
-    }
 }
 
 #[async_trait]
@@ -2054,8 +2206,11 @@ impl ChainSanadOps for BitcoinBackend {
         let seal_vout = seal.vout;
         let seal_nonce = seal.nonce.unwrap_or(0);
 
+        // Adapter-level create helper: the sanad is identified by its commitment
+        // (see SanadId(commitment) below), so the sanad_id passed here is the
+        // commitment. Bitcoin's SealProtocol::publish ignores it.
         let anchor = self.seal_protocol
-            .publish(commitment, seal)
+            .publish(commitment, seal, commitment)
             .await
             .map_err(|e| ChainOpError::TransactionError(format!("Failed to publish commitment: {}", e)))?;
 
@@ -2570,7 +2725,12 @@ impl ChainBackend for BitcoinBackend {
         })
     }
 
-    async fn publish_seal(&self, seal: SealPoint, commitment: Hash) -> ChainOpResult<CommitAnchor> {
+    async fn publish_seal(
+        &self,
+        seal: SealPoint,
+        commitment: Hash,
+        sanad_id: Hash,
+    ) -> ChainOpResult<CommitAnchor> {
         // Convert core SealPoint to BitcoinSealPoint
         if seal.id.len() < 36 {
             return Err(ChainOpError::InvalidInput(
@@ -2586,12 +2746,23 @@ impl ChainBackend for BitcoinBackend {
 
         let bitcoin_seal = BitcoinSealPoint::new(txid, vout, seal.nonce);
 
-        // Call the seal protocol's publish method
+        // Call the seal protocol's publish method (Bitcoin anchors via OP_RETURN;
+        // there is no contract mapping, so sanad_id is not consumed here).
         let bitcoin_anchor = self
             .seal_protocol
-            .publish(commitment, bitcoin_seal)
+            .publish(commitment, bitcoin_seal, sanad_id)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal publishing failed: {}", e)))?;
+
+        // Register the canonical sanad_id -> anchor UTXO mapping so the state
+        // reader (get_sanad_state -> find_seal_for_sanad(sanad_id)) can locate
+        // this sanad by its canonical id, not the commitment. Keyed on the real
+        // sanad_id, matching the id the SDK persists for this create.
+        self.seal_protocol.wallet.register_sanad_seal(
+            *sanad_id.as_bytes(),
+            bitcoin_anchor.txid.to_vec(),
+            bitcoin_anchor.output_index,
+        );
 
         // Convert BitcoinCommitAnchor to core CommitAnchor
         Ok(CommitAnchor {
@@ -2605,33 +2776,38 @@ impl ChainBackend for BitcoinBackend {
 #[async_trait]
 impl SanadStateReader for BitcoinBackend {
     async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
-        // For Bitcoin, sanad state is tracked via UTXO and transaction history
-        // Query the transaction associated with this sanad_id
-        let sanad_id_bytes = sanad_id.as_bytes();
-        
-        // Try to find the transaction by looking for OP_RETURN or Tapret outputs
-        // containing this sanad_id in their data
-        let txid = self
-            .find_sanad_transaction(sanad_id_bytes)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to find sanad transaction: {}", e)))?;
-        
-        // Check if the transaction exists and get confirmations
-        let confirmations = self
+        // Bitcoin has no smart contract that stores canonical sanad state, so we
+        // derive it from the sanad's current seal/anchor UTXO. The seal map is kept
+        // current across the lifecycle (create registers the anchor; lock re-points
+        // it at the lock output), so `find_seal_for_sanad` yields the outpoint that
+        // presently holds the sanad, and its spent/unspent status on-chain tells us
+        // whether the sanad is still live.
+        //
+        // This requires the adapter to have been built with the sanad_id -> anchor
+        // mappings (config.sanad_seals). Without a known anchor there is no on-chain
+        // reference to validate against, so we fail closed rather than fabricate a
+        // state — callers then fall back to their explicitly non-canonical local cache.
+        let seal = self.seal_protocol.find_seal_for_sanad(sanad_id).ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(format!(
+                "No known anchor for sanad {} (register its seal via config.sanad_seals). \
+                 Cannot determine canonical Bitcoin state without an on-chain reference.",
+                hex::encode(sanad_id.as_bytes())
+            ))
+        })?;
+
+        // is_utxo_unspent uses gettxout (the live UTXO set), which works on pruned /
+        // non-txindex providers and returns false for spent or unmined outputs.
+        let unspent = self
             .rpc
-            .get_tx_confirmations(txid)
+            .is_utxo_unspent(seal.txid, seal.vout)
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction confirmations: {}", e)))?;
-        
-        // Determine state based on transaction confirmations
-        let state = if confirmations > 0 {
-            // Transaction is confirmed - sanad is active
-            2 // Active
-        } else {
-            // Transaction is unconfirmed - sanad is created but not yet active
-            1 // Created
-        };
-        
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query seal UTXO status: {}", e)))?;
+
+        // Seal still live in the UTXO set -> Active. Seal spent -> the sanad has been
+        // consumed/transferred out of that output. Bitcoin carries no on-chain lock
+        // metadata, so Locked/Minted/Transferred cannot be distinguished from here.
+        let state = if unspent { 2 /* Active */ } else { 4 /* Consumed */ };
+
         Ok(CanonicalSanadState {
             state,
             owner: "unknown".to_string(),

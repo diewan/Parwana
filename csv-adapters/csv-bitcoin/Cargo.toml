@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["bitcoin", "blockchain", "cryptography", "csv-validation", "utxo"]
 categories = ["cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.93"
+rust-version = "1.95"
 
 [package.metadata.docs.rs]
 all-features = true
