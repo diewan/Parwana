@@ -502,7 +502,10 @@ impl FinalityAnchor {
     pub fn is_valid_successor(&self, new: &FinalityAnchor) -> bool {
         self.chain == new.chain
             && new.finalized_height > self.finalized_height
-            && new.finalized_hash != HashWire { bytes: hex::encode([0u8; 32]) }
+            && new.finalized_hash
+                != HashWire {
+                    bytes: hex::encode([0u8; 32]),
+                }
     }
 
     /// Check if this anchor is older than the given duration.
@@ -518,7 +521,10 @@ impl FinalityAnchor {
 
     /// Check if this anchor's hash is valid (non-zero).
     pub fn is_valid(&self) -> bool {
-        self.finalized_hash != HashWire { bytes: hex::encode([0u8; 32]) }
+        self.finalized_hash
+            != HashWire {
+                bytes: hex::encode([0u8; 32]),
+            }
     }
 }
 
@@ -568,7 +574,10 @@ impl AncestorContinuityProof {
         Self {
             chain,
             anchor,
-            ancestor_hashes: ancestor_hashes.into_iter().map(|(h, hash)| (h, hash.into())).collect(),
+            ancestor_hashes: ancestor_hashes
+                .into_iter()
+                .map(|(h, hash)| (h, hash.into()))
+                .collect(),
             min_depth,
         }
     }

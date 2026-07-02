@@ -2,7 +2,9 @@
 
 #[cfg(test)]
 mod tests {
-    use csv_adapter_factory::{AdapterFactory, AdapterConfig, BitcoinFactory, NetworkType, RpcEndpoint, RpcProtocol};
+    use csv_adapter_factory::{
+        AdapterConfig, AdapterFactory, BitcoinFactory, NetworkType, RpcEndpoint, RpcProtocol,
+    };
     use csv_hash::chain_id::ChainId;
     use csv_protocol::secret::SharedSecretHandle;
 
@@ -31,11 +33,17 @@ mod tests {
         };
 
         let result = factory.create_adapter(config).await;
-        assert!(result.is_ok(), "Factory should create Bitcoin adapter successfully");
-        
+        assert!(
+            result.is_ok(),
+            "Factory should create Bitcoin adapter successfully"
+        );
+
         let adapter_result = result.unwrap();
         // chain_backend is Arc<dyn ChainBackend>, always present if creation succeeds
-        assert!(adapter_result.chain_adapter.is_some(), "ChainAdapter should be created");
+        assert!(
+            adapter_result.chain_adapter.is_some(),
+            "ChainAdapter should be created"
+        );
     }
 
     #[tokio::test]
@@ -90,6 +98,9 @@ mod tests {
         };
 
         let result = factory.create_adapter(config).await;
-        assert!(result.is_ok(), "Factory should create Bitcoin adapter with seed");
+        assert!(
+            result.is_ok(),
+            "Factory should create Bitcoin adapter with seed"
+        );
     }
 }

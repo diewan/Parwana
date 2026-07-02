@@ -33,11 +33,15 @@ impl CanonicalEncoding for DAGNode {
             EncodingFormat::ManualBinary => Ok(self.to_canonical_bytes()),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
         }
     }
 }
@@ -60,7 +64,7 @@ impl DAGNode {
         }
     }
 
-  /// Compute the node hash using canonical serialization and tagged hashing
+    /// Compute the node hash using canonical serialization and tagged hashing
     ///
     /// Format: `[node_id][bytecode_len:u32 LE][bytecode][signatures_len:u32 LE][sig_len:u32 LE][sig_bytes]...[witnesses_len:u32 LE][wit_len:u32 LE][wit_bytes]...[parents_len:u32 LE][parent_id]...`
     pub fn hash(&self) -> Hash {
@@ -251,11 +255,15 @@ impl CanonicalEncoding for DAGSegment {
             EncodingFormat::ManualBinary => Ok(self.to_canonical_bytes()),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
         }
     }
 }
@@ -273,11 +281,11 @@ impl DAGSegment {
         data.extend_from_slice(self.root_commitment.as_bytes());
         Ok(data)
     }
-    
+
     /// Decode using MCE format
     fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
         let mut pos = 0;
-        
+
         let nodes_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -285,9 +293,11 @@ impl DAGSegment {
             pos += 4;
             len
         } else {
-            return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for nodes length".to_string()));
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for nodes length".to_string(),
+            ));
         };
-        
+
         let mut nodes = Vec::with_capacity(nodes_len);
         for _ in 0..nodes_len {
             let node_len = if bytes.len() >= pos + 4 {
@@ -297,27 +307,33 @@ impl DAGSegment {
                 pos += 4;
                 len
             } else {
-                return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for node length".to_string()));
+                return Err(csv_codec::CodecError::DeserializationError(
+                    "Insufficient bytes for node length".to_string(),
+                ));
             };
             let node = if bytes.len() >= pos + node_len {
                 let node_bytes = &bytes[pos..pos + node_len];
                 pos += node_len;
                 DAGNode::decode_mce(node_bytes)?
             } else {
-                return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for node data".to_string()));
+                return Err(csv_codec::CodecError::DeserializationError(
+                    "Insufficient bytes for node data".to_string(),
+                ));
             };
             nodes.push(node);
         }
-        
+
         let root_commitment = if bytes.len() >= pos + 32 {
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&bytes[pos..pos + 32]);
             pos += 32;
             Hash::new(hash)
         } else {
-            return Err(csv_codec::CodecError::DeserializationError("Insufficient bytes for root commitment".to_string()));
+            return Err(csv_codec::CodecError::DeserializationError(
+                "Insufficient bytes for root commitment".to_string(),
+            ));
         };
-        
+
         Ok(Self {
             nodes,
             root_commitment,

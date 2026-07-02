@@ -4,8 +4,8 @@
 //! network selection, RPC endpoints, and production settings.
 
 use csv_keys::memory::SecretKey;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 // Import deployment manifest reader
 use csv_protocol::deployment_manifest::get_aptos_module_address;
@@ -136,9 +136,8 @@ pub struct SealContractConfig {
 impl Default for SealContractConfig {
     fn default() -> Self {
         // Try to read from deployment manifest, fall back to default
-        let module_address = get_aptos_module_address()
-            .unwrap_or_else(|_| "0x1".to_string());
-        
+        let module_address = get_aptos_module_address().unwrap_or_else(|_| "0x1".to_string());
+
         Self {
             module_address,
             module_name: "CSVSeal".to_string(),
@@ -189,9 +188,13 @@ where
     let opt_str: Option<String> = Option::deserialize(deserializer)?;
     match opt_str {
         Some(s) => {
-            let bytes = hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
+            let bytes =
+                hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
             if bytes.len() != 32 {
-                return Err(D::Error::custom(format!("private key must be 32 bytes, got {}", bytes.len())));
+                return Err(D::Error::custom(format!(
+                    "private key must be 32 bytes, got {}",
+                    bytes.len()
+                )));
             }
             let mut key_bytes = [0u8; 32];
             key_bytes.copy_from_slice(&bytes);

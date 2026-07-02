@@ -69,11 +69,7 @@ impl InMemorySealStore {
             .collect())
     }
 
-    pub fn consume_sanad(
-        &mut self,
-        sanad_id: &str,
-        consumed_at: u64,
-    ) -> Result<(), StoreError> {
+    pub fn consume_sanad(&mut self, sanad_id: &str, consumed_at: u64) -> Result<(), StoreError> {
         let record = self
             .sanads
             .iter_mut()
@@ -100,10 +96,7 @@ impl InMemorySealStore {
     }
 
     pub fn has_sanad(&self, sanad_id: &str) -> Result<bool, StoreError> {
-        Ok(self
-            .sanads
-            .iter()
-            .any(|record| record.sanad_id == sanad_id))
+        Ok(self.sanads.iter().any(|record| record.sanad_id == sanad_id))
     }
 }
 

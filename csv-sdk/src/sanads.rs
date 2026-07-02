@@ -226,8 +226,7 @@ impl CreateSanadRequest {
         })?;
         let proof_policy_hash = d.proof_policy_hash.ok_or_else(|| {
             CsvError::InvalidInput(
-                "content_descriptor.proof_policy_hash is required and was not provided"
-                    .to_string(),
+                "content_descriptor.proof_policy_hash is required and was not provided".to_string(),
             )
         })?;
 
@@ -387,13 +386,10 @@ impl SanadsManager {
         store.save_sanad(&record)?;
         drop(store); // Release lock before emitting event
 
-        let sanad_id = csv_hash::sanad::SanadId::from_bytes(
-            &hex::decode(&sanad_id_hex).unwrap_or_default()
-        );
-        self.client.emit_event(crate::events::Event::SanadCreated {
-            sanad_id,
-            chain,
-        });
+        let sanad_id =
+            csv_hash::sanad::SanadId::from_bytes(&hex::decode(&sanad_id_hex).unwrap_or_default());
+        self.client
+            .emit_event(crate::events::Event::SanadCreated { sanad_id, chain });
 
         Ok(sanad)
     }
@@ -495,7 +491,13 @@ impl SanadsManager {
         }
 
         let descriptor = request.build_descriptor()?;
-        let sanad = self.create(&descriptor, commitment, owner_proof, salt, request.chain.clone())?;
+        let sanad = self.create(
+            &descriptor,
+            commitment,
+            owner_proof,
+            salt,
+            request.chain.clone(),
+        )?;
 
         Ok(SanadCreationResult {
             sanad,
@@ -607,7 +609,10 @@ impl SanadsManager {
     /// # Errors
     ///
     /// Always returns [`CsvError::ChainNotEnabled`] directing users to TransferManager.
-    #[deprecated(since = "0.5.0", note = "Use CsvClient::transfers().cross_chain() instead")]
+    #[deprecated(
+        since = "0.5.0",
+        note = "Use CsvClient::transfers().cross_chain() instead"
+    )]
     pub fn transfer(
         &self,
         sanad_id: &SanadId,

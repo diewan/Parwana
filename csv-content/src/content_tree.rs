@@ -60,7 +60,10 @@ impl serde::Serialize for ContentNode {
         s.serialize_field("node_type", &self.node_type)?;
         s.serialize_field("hash", &self.hash.0)?;
         s.serialize_field("data", &self.data)?;
-        s.serialize_field("children", &self.children.iter().map(|h| h.0).collect::<Vec<_>>())?;
+        s.serialize_field(
+            "children",
+            &self.children.iter().map(|h| h.0).collect::<Vec<_>>(),
+        )?;
         s.serialize_field("encryption_key_id", &self.encryption_key_id)?;
         s.serialize_field("metadata", &self.metadata)?;
         s.end()
@@ -72,7 +75,6 @@ impl<'de> serde::Deserialize<'de> for ContentNode {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -85,24 +87,36 @@ impl<'de> serde::Deserialize<'de> for ContentNode {
         }
 
         struct ContentNodeVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for ContentNodeVisitor {
             type Value = ContentNode;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct ContentNode")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let node_type = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let data = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let children_bytes: Vec<[u8; 32]> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
-                let encryption_key_id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
-                let metadata = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
+                let node_type = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let data = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let children_bytes: Vec<[u8; 32]> = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let encryption_key_id = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                let metadata = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
                 Ok(ContentNode {
                     node_type,
                     hash: Hash(hash_bytes),
@@ -112,7 +126,7 @@ impl<'de> serde::Deserialize<'de> for ContentNode {
                     metadata,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -123,7 +137,7 @@ impl<'de> serde::Deserialize<'de> for ContentNode {
                 let mut children = None;
                 let mut encryption_key_id = None;
                 let mut metadata = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::NodeType => {
@@ -166,13 +180,16 @@ impl<'de> serde::Deserialize<'de> for ContentNode {
                         }
                     }
                 }
-                
-                let node_type = node_type.ok_or_else(|| serde::de::Error::missing_field("node_type"))?;
+
+                let node_type =
+                    node_type.ok_or_else(|| serde::de::Error::missing_field("node_type"))?;
                 let hash = hash.ok_or_else(|| serde::de::Error::missing_field("hash"))?;
                 let data = data.ok_or_else(|| serde::de::Error::missing_field("data"))?;
-                let children = children.ok_or_else(|| serde::de::Error::missing_field("children"))?;
-                let metadata = metadata.ok_or_else(|| serde::de::Error::missing_field("metadata"))?;
-                
+                let children =
+                    children.ok_or_else(|| serde::de::Error::missing_field("children"))?;
+                let metadata =
+                    metadata.ok_or_else(|| serde::de::Error::missing_field("metadata"))?;
+
                 Ok(ContentNode {
                     node_type,
                     hash,
@@ -183,8 +200,19 @@ impl<'de> serde::Deserialize<'de> for ContentNode {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("ContentNode", &["node_type", "hash", "data", "children", "encryption_key_id", "metadata"], ContentNodeVisitor)
+
+        deserializer.deserialize_struct(
+            "ContentNode",
+            &[
+                "node_type",
+                "hash",
+                "data",
+                "children",
+                "encryption_key_id",
+                "metadata",
+            ],
+            ContentNodeVisitor,
+        )
     }
 }
 
@@ -240,11 +268,15 @@ impl serde::Serialize for ContentTree {
         use serde::ser::SerializeStruct;
         let mut s = serializer.serialize_struct("ContentTree", 5)?;
         s.serialize_field("root_hash", &self.root_hash.0)?;
-        s.serialize_field("leaf_hashes", &self.leaf_hashes.iter().map(|h| h.0).collect::<Vec<_>>())?;
+        s.serialize_field(
+            "leaf_hashes",
+            &self.leaf_hashes.iter().map(|h| h.0).collect::<Vec<_>>(),
+        )?;
         s.serialize_field("depth", &self.depth)?;
         s.serialize_field("leaf_count", &self.leaf_count)?;
         // Serialize HashMap as Vec of (hash_bytes, metadata) tuples
-        let metadata_vec: Vec<([u8; 32], NodeMetadata)> = self.node_metadata
+        let metadata_vec: Vec<([u8; 32], NodeMetadata)> = self
+            .node_metadata
             .iter()
             .map(|(k, v)| (k.0, v.clone()))
             .collect();
@@ -258,7 +290,6 @@ impl<'de> serde::Deserialize<'de> for ContentTree {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -270,24 +301,37 @@ impl<'de> serde::Deserialize<'de> for ContentTree {
         }
 
         struct ContentTreeVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for ContentTreeVisitor {
             type Value = ContentTree;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct ContentTree")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let root_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let leaf_hashes_bytes: Vec<[u8; 32]> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let depth = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let leaf_count = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
-                let metadata_vec: Vec<([u8; 32], NodeMetadata)> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
-                let node_metadata: std::collections::HashMap<Hash, NodeMetadata> = metadata_vec.into_iter().map(|(k, v)| (Hash(k), v)).collect();
+                let root_hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let leaf_hashes_bytes: Vec<[u8; 32]> = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let depth = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let leaf_count = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let metadata_vec: Vec<([u8; 32], NodeMetadata)> = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                let node_metadata: std::collections::HashMap<Hash, NodeMetadata> = metadata_vec
+                    .into_iter()
+                    .map(|(k, v)| (Hash(k), v))
+                    .collect();
                 Ok(ContentTree {
                     root_hash: Hash(root_hash_bytes),
                     leaf_hashes: leaf_hashes_bytes.into_iter().map(Hash).collect(),
@@ -296,7 +340,7 @@ impl<'de> serde::Deserialize<'de> for ContentTree {
                     node_metadata,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -306,7 +350,7 @@ impl<'de> serde::Deserialize<'de> for ContentTree {
                 let mut depth = None;
                 let mut leaf_count = None;
                 let mut node_metadata = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::RootHash => {
@@ -341,17 +385,26 @@ impl<'de> serde::Deserialize<'de> for ContentTree {
                             }
                             // Deserialize Vec of tuples and convert to HashMap
                             let metadata_vec: Vec<([u8; 32], NodeMetadata)> = map.next_value()?;
-                            node_metadata = Some(metadata_vec.into_iter().map(|(k, v)| (Hash(k), v)).collect());
+                            node_metadata = Some(
+                                metadata_vec
+                                    .into_iter()
+                                    .map(|(k, v)| (Hash(k), v))
+                                    .collect(),
+                            );
                         }
                     }
                 }
-                
-                let root_hash = root_hash.ok_or_else(|| serde::de::Error::missing_field("root_hash"))?;
-                let leaf_hashes = leaf_hashes.ok_or_else(|| serde::de::Error::missing_field("leaf_hashes"))?;
+
+                let root_hash =
+                    root_hash.ok_or_else(|| serde::de::Error::missing_field("root_hash"))?;
+                let leaf_hashes =
+                    leaf_hashes.ok_or_else(|| serde::de::Error::missing_field("leaf_hashes"))?;
                 let depth = depth.ok_or_else(|| serde::de::Error::missing_field("depth"))?;
-                let leaf_count = leaf_count.ok_or_else(|| serde::de::Error::missing_field("leaf_count"))?;
-                let node_metadata = node_metadata.ok_or_else(|| serde::de::Error::missing_field("node_metadata"))?;
-                
+                let leaf_count =
+                    leaf_count.ok_or_else(|| serde::de::Error::missing_field("leaf_count"))?;
+                let node_metadata = node_metadata
+                    .ok_or_else(|| serde::de::Error::missing_field("node_metadata"))?;
+
                 Ok(ContentTree {
                     root_hash,
                     leaf_hashes,
@@ -361,8 +414,18 @@ impl<'de> serde::Deserialize<'de> for ContentTree {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("ContentTree", &["root_hash", "leaf_hashes", "depth", "leaf_count", "node_metadata"], ContentTreeVisitor)
+
+        deserializer.deserialize_struct(
+            "ContentTree",
+            &[
+                "root_hash",
+                "leaf_hashes",
+                "depth",
+                "leaf_count",
+                "node_metadata",
+            ],
+            ContentTreeVisitor,
+        )
     }
 }
 
@@ -504,7 +567,10 @@ impl serde::Serialize for ContentProof {
         let mut s = serializer.serialize_struct("ContentProof", 4)?;
         s.serialize_field("leaf_index", &self.leaf_index)?;
         s.serialize_field("leaf_hash", &self.leaf_hash.0)?;
-        s.serialize_field("siblings", &self.siblings.iter().map(|h| h.0).collect::<Vec<_>>())?;
+        s.serialize_field(
+            "siblings",
+            &self.siblings.iter().map(|h| h.0).collect::<Vec<_>>(),
+        )?;
         s.serialize_field("root_hash", &self.root_hash.0)?;
         s.end()
     }
@@ -515,7 +581,6 @@ impl<'de> serde::Deserialize<'de> for ContentProof {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -526,22 +591,30 @@ impl<'de> serde::Deserialize<'de> for ContentProof {
         }
 
         struct ContentProofVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for ContentProofVisitor {
             type Value = ContentProof;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct ContentProof")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let leaf_index = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let leaf_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let siblings_bytes: Vec<[u8; 32]> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let root_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let leaf_index = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let leaf_hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let siblings_bytes: Vec<[u8; 32]> = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let root_hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
                 Ok(ContentProof {
                     leaf_index,
                     leaf_hash: Hash(leaf_hash_bytes),
@@ -549,7 +622,7 @@ impl<'de> serde::Deserialize<'de> for ContentProof {
                     root_hash: Hash(root_hash_bytes),
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -558,7 +631,7 @@ impl<'de> serde::Deserialize<'de> for ContentProof {
                 let mut leaf_hash = None;
                 let mut siblings = None;
                 let mut root_hash = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::LeafIndex => {
@@ -590,12 +663,16 @@ impl<'de> serde::Deserialize<'de> for ContentProof {
                         }
                     }
                 }
-                
-                let leaf_index = leaf_index.ok_or_else(|| serde::de::Error::missing_field("leaf_index"))?;
-                let leaf_hash = leaf_hash.ok_or_else(|| serde::de::Error::missing_field("leaf_hash"))?;
-                let siblings = siblings.ok_or_else(|| serde::de::Error::missing_field("siblings"))?;
-                let root_hash = root_hash.ok_or_else(|| serde::de::Error::missing_field("root_hash"))?;
-                
+
+                let leaf_index =
+                    leaf_index.ok_or_else(|| serde::de::Error::missing_field("leaf_index"))?;
+                let leaf_hash =
+                    leaf_hash.ok_or_else(|| serde::de::Error::missing_field("leaf_hash"))?;
+                let siblings =
+                    siblings.ok_or_else(|| serde::de::Error::missing_field("siblings"))?;
+                let root_hash =
+                    root_hash.ok_or_else(|| serde::de::Error::missing_field("root_hash"))?;
+
                 Ok(ContentProof {
                     leaf_index,
                     leaf_hash,
@@ -604,8 +681,12 @@ impl<'de> serde::Deserialize<'de> for ContentProof {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("ContentProof", &["leaf_index", "leaf_hash", "siblings", "root_hash"], ContentProofVisitor)
+
+        deserializer.deserialize_struct(
+            "ContentProof",
+            &["leaf_index", "leaf_hash", "siblings", "root_hash"],
+            ContentProofVisitor,
+        )
     }
 }
 
@@ -770,7 +851,6 @@ impl<'de> serde::Deserialize<'de> for DisclosureProof {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -779,33 +859,37 @@ impl<'de> serde::Deserialize<'de> for DisclosureProof {
         }
 
         struct DisclosureProofVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for DisclosureProofVisitor {
             type Value = DisclosureProof;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct DisclosureProof")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let subtree_root_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let inclusion_proof = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let subtree_root_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let inclusion_proof = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
                 Ok(DisclosureProof {
                     subtree_root: Hash(subtree_root_bytes),
                     inclusion_proof,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
             {
                 let mut subtree_root = None;
                 let mut inclusion_proof = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::SubtreeRoot => {
@@ -823,18 +907,24 @@ impl<'de> serde::Deserialize<'de> for DisclosureProof {
                         }
                     }
                 }
-                
-                let subtree_root = subtree_root.ok_or_else(|| serde::de::Error::missing_field("subtree_root"))?;
-                let inclusion_proof = inclusion_proof.ok_or_else(|| serde::de::Error::missing_field("inclusion_proof"))?;
-                
+
+                let subtree_root =
+                    subtree_root.ok_or_else(|| serde::de::Error::missing_field("subtree_root"))?;
+                let inclusion_proof = inclusion_proof
+                    .ok_or_else(|| serde::de::Error::missing_field("inclusion_proof"))?;
+
                 Ok(DisclosureProof {
                     subtree_root,
                     inclusion_proof,
                 })
             }
         }
-        
-        deserializer.deserialize_struct("DisclosureProof", &["subtree_root", "inclusion_proof"], DisclosureProofVisitor)
+
+        deserializer.deserialize_struct(
+            "DisclosureProof",
+            &["subtree_root", "inclusion_proof"],
+            DisclosureProofVisitor,
+        )
     }
 }
 
@@ -892,7 +982,6 @@ impl<'de> serde::Deserialize<'de> for RedactedMerkleProof {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -902,28 +991,34 @@ impl<'de> serde::Deserialize<'de> for RedactedMerkleProof {
         }
 
         struct RedactedMerkleProofVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for RedactedMerkleProofVisitor {
             type Value = RedactedMerkleProof;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct RedactedMerkleProof")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let leaf_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let proof = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let redaction_method = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let leaf_hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let proof = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let redaction_method = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
                 Ok(RedactedMerkleProof {
                     leaf_hash: Hash(leaf_hash_bytes),
                     proof,
                     redaction_method,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -931,7 +1026,7 @@ impl<'de> serde::Deserialize<'de> for RedactedMerkleProof {
                 let mut leaf_hash = None;
                 let mut proof = None;
                 let mut redaction_method = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::LeafHash => {
@@ -955,11 +1050,13 @@ impl<'de> serde::Deserialize<'de> for RedactedMerkleProof {
                         }
                     }
                 }
-                
-                let leaf_hash = leaf_hash.ok_or_else(|| serde::de::Error::missing_field("leaf_hash"))?;
+
+                let leaf_hash =
+                    leaf_hash.ok_or_else(|| serde::de::Error::missing_field("leaf_hash"))?;
                 let proof = proof.ok_or_else(|| serde::de::Error::missing_field("proof"))?;
-                let redaction_method = redaction_method.ok_or_else(|| serde::de::Error::missing_field("redaction_method"))?;
-                
+                let redaction_method = redaction_method
+                    .ok_or_else(|| serde::de::Error::missing_field("redaction_method"))?;
+
                 Ok(RedactedMerkleProof {
                     leaf_hash,
                     proof,
@@ -967,8 +1064,12 @@ impl<'de> serde::Deserialize<'de> for RedactedMerkleProof {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("RedactedMerkleProof", &["leaf_hash", "proof", "redaction_method"], RedactedMerkleProofVisitor)
+
+        deserializer.deserialize_struct(
+            "RedactedMerkleProof",
+            &["leaf_hash", "proof", "redaction_method"],
+            RedactedMerkleProofVisitor,
+        )
     }
 }
 
@@ -1015,7 +1116,6 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -1026,22 +1126,30 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
         }
 
         struct EncryptedSubtreeProofVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for EncryptedSubtreeProofVisitor {
             type Value = EncryptedSubtreeProof;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct EncryptedSubtreeProof")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let encrypted_root_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let inclusion_proof = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let encryption_algorithm = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let key_id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let encrypted_root_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let inclusion_proof = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let encryption_algorithm = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let key_id = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
                 Ok(EncryptedSubtreeProof {
                     encrypted_root: Hash(encrypted_root_bytes),
                     inclusion_proof,
@@ -1049,7 +1157,7 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
                     key_id,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -1058,7 +1166,7 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
                 let mut inclusion_proof = None;
                 let mut encryption_algorithm = None;
                 let mut key_id = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::EncryptedRoot => {
@@ -1076,7 +1184,9 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
                         }
                         Field::EncryptionAlgorithm => {
                             if encryption_algorithm.is_some() {
-                                return Err(serde::de::Error::duplicate_field("encryption_algorithm"));
+                                return Err(serde::de::Error::duplicate_field(
+                                    "encryption_algorithm",
+                                ));
                             }
                             encryption_algorithm = Some(map.next_value()?);
                         }
@@ -1088,12 +1198,15 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
                         }
                     }
                 }
-                
-                let encrypted_root = encrypted_root.ok_or_else(|| serde::de::Error::missing_field("encrypted_root"))?;
-                let inclusion_proof = inclusion_proof.ok_or_else(|| serde::de::Error::missing_field("inclusion_proof"))?;
-                let encryption_algorithm = encryption_algorithm.ok_or_else(|| serde::de::Error::missing_field("encryption_algorithm"))?;
+
+                let encrypted_root = encrypted_root
+                    .ok_or_else(|| serde::de::Error::missing_field("encrypted_root"))?;
+                let inclusion_proof = inclusion_proof
+                    .ok_or_else(|| serde::de::Error::missing_field("inclusion_proof"))?;
+                let encryption_algorithm = encryption_algorithm
+                    .ok_or_else(|| serde::de::Error::missing_field("encryption_algorithm"))?;
                 let key_id = key_id.ok_or_else(|| serde::de::Error::missing_field("key_id"))?;
-                
+
                 Ok(EncryptedSubtreeProof {
                     encrypted_root,
                     inclusion_proof,
@@ -1102,8 +1215,17 @@ impl<'de> serde::Deserialize<'de> for EncryptedSubtreeProof {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("EncryptedSubtreeProof", &["encrypted_root", "inclusion_proof", "encryption_algorithm", "key_id"], EncryptedSubtreeProofVisitor)
+
+        deserializer.deserialize_struct(
+            "EncryptedSubtreeProof",
+            &[
+                "encrypted_root",
+                "inclusion_proof",
+                "encryption_algorithm",
+                "key_id",
+            ],
+            EncryptedSubtreeProofVisitor,
+        )
     }
 }
 

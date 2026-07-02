@@ -3,8 +3,8 @@
 //! This module now uses the canonical SecretHandle from csv-protocol
 //! to ensure consistency across the codebase.
 
-use csv_protocol::secret::{SecretHandle, SharedSecretHandle};
 use csv_keys::memory::SecretKey;
+use csv_protocol::secret::{SecretHandle, SharedSecretHandle};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -45,13 +45,7 @@ impl KeyStore {
     /// * `secret` - Secret key bytes (32 bytes for private key, 64 bytes for seed)
     /// * `purpose` - Key purpose (metadata only, not stored in SecretHandle)
     /// * `chain` - Chain identifier (metadata only, not stored in SecretHandle)
-    pub fn add_key(
-        &mut self,
-        id: String,
-        secret: Vec<u8>,
-        _purpose: KeyPurpose,
-        _chain: String,
-    ) {
+    pub fn add_key(&mut self, id: String, secret: Vec<u8>, _purpose: KeyPurpose, _chain: String) {
         // Determine if this is a 64-byte seed or 32-byte key
         let handle = if secret.len() == 64 {
             let mut seed_array = [0u8; 64];

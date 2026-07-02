@@ -18,10 +18,8 @@ pub async fn mint_sanad(
     source_seal_ref: Hash,
 ) -> Result<String, AptosError> {
     use aptos_sdk::{
-        account::Ed25519Account,
-        transaction::EntryFunction,
+        Aptos, AptosConfig, account::Ed25519Account, transaction::EntryFunction,
         types::MoveModuleId,
-        Aptos, AptosConfig,
     };
 
     // Create Aptos client with custom RPC URL
@@ -45,7 +43,7 @@ pub async fn mint_sanad(
     let key_array: [u8; 32] = key_bytes
         .try_into()
         .map_err(|_| AptosError::SerializationError("Invalid key length".to_string()))?;
-    
+
     // Create account from private key
     let account = Ed25519Account::from_private_key_hex(&hex::encode(key_array))
         .map_err(|e| AptosError::SerializationError(format!("Failed to create account: {}", e)))?;
@@ -54,7 +52,7 @@ pub async fn mint_sanad(
     // Function signature: mint_sanad(sanad_id: vector<u8>, commitment: vector<u8>, source_chain: u8, source_seal_ref: vector<u8>)
     let module_id = MoveModuleId::from_str_strict(&format!("{}::csv_seal", package_address))
         .map_err(|e| AptosError::RpcError(format!("Invalid module ID: {}", e)))?;
-    
+
     let payload = EntryFunction::new(
         module_id,
         "mint_sanad",
@@ -96,6 +94,6 @@ pub async fn mint_sanad(
     _source_seal_ref: Hash,
 ) -> Result<String, AptosError> {
     Err(AptosError::RpcError(
-        "Aptos RPC minting requires the 'rpc' feature to be enabled".to_string()
+        "Aptos RPC minting requires the 'rpc' feature to be enabled".to_string(),
     ))
 }

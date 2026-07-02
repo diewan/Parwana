@@ -140,9 +140,13 @@ pub struct SanadSealConfig {
     pub anchor_txid: String,
     /// Output index of the commitment in the anchor transaction
     pub vout: u32,
+    /// Tapret commitment (hex) embedded in the seal output's Taproot leaf.
+    /// Needed to reconstruct the key-path tweak when the seal is spent (lock).
+    #[serde(default)]
+    pub commitment: Option<String>,
 }
 
- impl Default for ChainConfig {
+impl Default for ChainConfig {
     fn default() -> Self {
         Self {
             rpc: RpcConfig::default(),

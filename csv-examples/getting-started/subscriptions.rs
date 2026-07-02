@@ -1,9 +1,9 @@
 use csv_hash::Hash;
 // Cross-Chain Subscriptions Example
-// 
+//
 // This example demonstrates how to create and manage subscription sanads
 // that can be transferred across chains.
-// 
+//
 // Run with: `cargo run --example subscriptions --features "all-chains,tokio"`
 
 use csv_sdk::prelude::*;
@@ -16,7 +16,8 @@ async fn main() -> Result<()> {
     let client = CsvClient::builder()
         .with_all_chains()
         .with_store_backend(StoreBackend::InMemory)
-        .build().await?;
+        .build()
+        .await?;
 
     println!("✓ Client initialized with all chains\n");
 
@@ -24,13 +25,32 @@ async fn main() -> Result<()> {
     println!("Creating subscription sanad on Bitcoin...");
     let commitment = Hash::from([1u8; 32]);
 
-    let sanad = client.sanads().create(&csv_protocol::SanadPayloadDescriptor::new(csv_protocol::SanadPayloadDescriptor::SCHEMA_ID, Hash::new([0u8; 32]), 1, commitment, None, Hash::new([0u8; 32]), Hash::new([0u8; 32])), commitment, csv_protocol::OwnershipProof { owner: vec![], proof: vec![], scheme: None }, &[], ChainId::new("bitcoin"))?;
+    let sanad = client.sanads().create(
+        &csv_protocol::SanadPayloadDescriptor::new(
+            csv_protocol::SanadPayloadDescriptor::SCHEMA_ID,
+            Hash::new([0u8; 32]),
+            1,
+            commitment,
+            None,
+            Hash::new([0u8; 32]),
+            Hash::new([0u8; 32]),
+        ),
+        commitment,
+        csv_protocol::OwnershipProof {
+            owner: vec![],
+            proof: vec![],
+            scheme: None,
+        },
+        &[],
+        ChainId::new("bitcoin"),
+    )?;
 
     println!("✓ Created sanad: {:?}\n", sanad.id);
 
     // Query the sanad
     println!("Querying sanad status...");
-    let sanad_id: csv_hash::SanadId = csv_protocol::wire::SanadIdWire::try_into(sanad.id.clone()).unwrap();
+    let sanad_id: csv_hash::SanadId =
+        csv_protocol::wire::SanadIdWire::try_into(sanad.id.clone()).unwrap();
     let found_sanad = client.sanads().get(&sanad_id)?;
     if let Some(found_sanad) = found_sanad {
         println!("✓ Found sanad: {:?}\n", found_sanad.id);
@@ -45,7 +65,10 @@ async fn main() -> Result<()> {
 
     let transfer_id = client
         .transfers()
-        .cross_chain(csv_protocol::wire::SanadIdWire::try_into(sanad.id.clone()).unwrap(), ChainId::new("ethereum"))
+        .cross_chain(
+            csv_protocol::wire::SanadIdWire::try_into(sanad.id.clone()).unwrap(),
+            ChainId::new("ethereum"),
+        )
         .to_address("0x1234567890abcdef".to_string())
         .execute()
         .await?;

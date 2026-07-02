@@ -50,7 +50,11 @@ impl SealPoint {
     ///
     /// # Errors
     /// Returns an error if the id exceeds the maximum allowed size
-    pub fn new(id: Vec<u8>, nonce: Option<u64>, version: Option<u64>) -> Result<Self, &'static str> {
+    pub fn new(
+        id: Vec<u8>,
+        nonce: Option<u64>,
+        version: Option<u64>,
+    ) -> Result<Self, &'static str> {
         if id.len() > MAX_SEAL_ID_SIZE {
             return Err("id exceeds maximum allowed size (1KB)");
         }
@@ -188,7 +192,7 @@ impl SealPoint {
         Ok(Self { id, nonce, version })
     }
 
-  /// Serialize to canonical bytes for hashing.
+    /// Serialize to canonical bytes for hashing.
     ///
     /// Format: `[id_len:u32 LE][id_bytes][nonce_present:u8][nonce:u64 LE if present][version_present:u8][version:u64 LE if present]`
     ///
@@ -240,7 +244,16 @@ impl SealPoint {
             if bytes.len() < pos + 8 {
                 return Err(anyhow::anyhow!("insufficient bytes for nonce"));
             }
-            let nonce_val = u64::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3], bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]]);
+            let nonce_val = u64::from_le_bytes([
+                bytes[pos],
+                bytes[pos + 1],
+                bytes[pos + 2],
+                bytes[pos + 3],
+                bytes[pos + 4],
+                bytes[pos + 5],
+                bytes[pos + 6],
+                bytes[pos + 7],
+            ]);
             pos += 8;
             Some(nonce_val)
         } else {
@@ -255,7 +268,16 @@ impl SealPoint {
             if bytes.len() < pos + 8 {
                 return Err(anyhow::anyhow!("insufficient bytes for version"));
             }
-            let version_val = u64::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3], bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]]);
+            let version_val = u64::from_le_bytes([
+                bytes[pos],
+                bytes[pos + 1],
+                bytes[pos + 2],
+                bytes[pos + 3],
+                bytes[pos + 4],
+                bytes[pos + 5],
+                bytes[pos + 6],
+                bytes[pos + 7],
+            ]);
             pos += 8;
             Some(version_val)
         } else {
@@ -404,7 +426,7 @@ impl CommitAnchor {
         })
     }
 
-   /// Serialize to canonical bytes for hashing.
+    /// Serialize to canonical bytes for hashing.
     ///
     /// Format: `[block_height:u64 LE][anchor_id_len:u32 LE][anchor_id][metadata_len:u32 LE][metadata]`
     ///
@@ -437,7 +459,9 @@ impl CommitAnchor {
         if bytes.len() < pos + 4 {
             return Err(anyhow::anyhow!("insufficient bytes for anchor_id_len"));
         }
-        let anchor_id_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        let anchor_id_len =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize;
         pos += 4;
         if bytes.len() < pos + anchor_id_len {
             return Err(anyhow::anyhow!("insufficient bytes for anchor_id"));
@@ -447,13 +471,19 @@ impl CommitAnchor {
         if bytes.len() < pos + 4 {
             return Err(anyhow::anyhow!("insufficient bytes for metadata_len"));
         }
-        let metadata_len = u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]) as usize;
+        let metadata_len =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize;
         pos += 4;
         if bytes.len() < pos + metadata_len {
             return Err(anyhow::anyhow!("insufficient bytes for metadata"));
         }
         let metadata = bytes[pos..pos + metadata_len].to_vec();
-        Ok(Self { block_height, anchor_id, metadata })
+        Ok(Self {
+            block_height,
+            anchor_id,
+            metadata,
+        })
     }
 }
 

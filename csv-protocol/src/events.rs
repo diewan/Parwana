@@ -15,8 +15,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use csv_hash::{Hash, SanadId};
 use crate::wire::{HashWire, SanadIdWire};
+use csv_hash::{Hash, SanadId};
 
 /// Standard event names in the CSV protocol
 pub mod event_names {
@@ -1060,9 +1060,17 @@ impl EventEncoder for EthereumEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(&e.seal_id.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.seal_id
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(&e.commitment.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.commitment
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),
@@ -1083,9 +1091,17 @@ impl EventEncoder for SolanaEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(&e.seal_id.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.seal_id
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(&e.commitment.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.commitment
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),
@@ -1106,9 +1122,17 @@ impl EventEncoder for SuiEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(&e.seal_id.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.seal_id
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(&e.commitment.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.commitment
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),
@@ -1129,9 +1153,17 @@ impl EventEncoder for AptosEventEncoder {
         match event {
             CanonicalEvent::SealCreated(e) => {
                 let mut data = Vec::new();
-                data.extend_from_slice(&e.seal_id.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.seal_id
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 data.extend_from_slice(&e.owner);
-                data.extend_from_slice(&e.commitment.as_bytes().map_err(EventEncodeError::EncodingFailed)?);
+                data.extend_from_slice(
+                    &e.commitment
+                        .as_bytes()
+                        .map_err(EventEncodeError::EncodingFailed)?,
+                );
                 Ok(data)
             }
             _ => Err(EventEncodeError::UnsupportedEventType),

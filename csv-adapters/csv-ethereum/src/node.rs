@@ -102,17 +102,17 @@ mod real_rpc_impl {
 
         /// Get the compressed public key (33 bytes) for the configured signer
         pub fn public_key(&self) -> Option<[u8; 33]> {
-            use secp256k1::{Secp256k1, SecretKey, PublicKey};
-            
+            use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
             self.signer.as_ref().map(|s| {
                 // Get the secret key bytes from the signer
                 let secret_key_bytes = s.credential().to_bytes();
-                let secret_key = SecretKey::from_slice(&secret_key_bytes)
-                    .expect("valid 32-byte secret key");
-                
+                let secret_key =
+                    SecretKey::from_slice(&secret_key_bytes).expect("valid 32-byte secret key");
+
                 let secp = Secp256k1::new();
                 let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-                
+
                 // serialize() returns 33 bytes (compressed format)
                 let pk_bytes = public_key.serialize();
                 let mut compressed = [0u8; 33];
@@ -424,11 +424,8 @@ mod real_rpc_impl {
                 .filter(|s| !s.is_empty() && *s != "null")
                 .and_then(|s| parse_hex_bytes20(s).ok());
 
-            let status_str = receipt["status"]
-                .as_str()
-                .ok_or("Missing status field")?;
-            let status = parse_hex_u64(status_str)
-                .map_err(|e| format!("Invalid status: {}", e))?;
+            let status_str = receipt["status"].as_str().ok_or("Missing status field")?;
+            let status = parse_hex_u64(status_str).map_err(|e| format!("Invalid status: {}", e))?;
 
             let block_number_str = receipt["blockNumber"]
                 .as_str()
@@ -441,11 +438,9 @@ mod real_rpc_impl {
                 .ok_or("Missing blockHash field")?;
             let block_hash = parse_hex_bytes32(block_hash).map_err(|e| e.to_string())?;
 
-            let gas_used_str = receipt["gasUsed"]
-                .as_str()
-                .ok_or("Missing gasUsed field")?;
-            let gas_used = parse_hex_u64(gas_used_str)
-                .map_err(|e| format!("Invalid gasUsed: {}", e))?;
+            let gas_used_str = receipt["gasUsed"].as_str().ok_or("Missing gasUsed field")?;
+            let gas_used =
+                parse_hex_u64(gas_used_str).map_err(|e| format!("Invalid gasUsed: {}", e))?;
 
             let success = status == 1;
 
@@ -642,9 +637,7 @@ mod real_rpc_impl {
             call: serde_json::Value,
             block: &str,
         ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-            let result = self
-                .rpc_call("eth_call", json!([call, block]))
-                .await?;
+            let result = self.rpc_call("eth_call", json!([call, block])).await?;
             let hex_str = result.as_str().ok_or("Invalid eth_call response")?;
             Ok(parse_hex_bytes(hex_str))
         }
@@ -653,9 +646,7 @@ mod real_rpc_impl {
             &self,
             filter: serde_json::Value,
         ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
-            let result = self
-                .rpc_call("eth_getLogs", json!([filter]))
-                .await?;
+            let result = self.rpc_call("eth_getLogs", json!([filter])).await?;
             result
                 .as_array()
                 .cloned()
@@ -676,24 +667,36 @@ mod real_rpc_impl {
         let start = std::time::Instant::now();
         let poll_interval = std::time::Duration::from_secs(2);
 
-        println!("[Ethereum] Waiting for transaction receipt (timeout: {}s)...", timeout_secs);
+        println!(
+            "[Ethereum] Waiting for transaction receipt (timeout: {}s)...",
+            timeout_secs
+        );
 
         loop {
             if let Some(receipt) = rpc.get_transaction_receipt(tx_hash).await? {
                 println!("[Ethereum] Receipt received:");
-                println!("[Ethereum]   Status: {}", if receipt.success { "SUCCESS" } else { "FAILED" });
+                println!(
+                    "[Ethereum]   Status: {}",
+                    if receipt.success { "SUCCESS" } else { "FAILED" }
+                );
                 println!("[Ethereum]   Block number: {}", receipt.block_number);
                 println!("[Ethereum]   Gas used: {}", receipt.gas_used);
                 println!("[Ethereum]   Logs count: {}", receipt.logs.len());
                 if !receipt.success {
-                    println!("[Ethereum]   Transaction reverted - this explains why there are no logs");
+                    println!(
+                        "[Ethereum]   Transaction reverted - this explains why there are no logs"
+                    );
                 }
                 return Ok(receipt);
             }
 
             // Check timeout
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs) {
-                return Err(format!("Transaction receipt not found after {} seconds", timeout_secs).into());
+                return Err(format!(
+                    "Transaction receipt not found after {} seconds",
+                    timeout_secs
+                )
+                .into());
             }
 
             // Wait before next poll
@@ -722,7 +725,10 @@ mod real_rpc_impl {
 
         println!("[Ethereum] Building transaction for create_seal...");
         println!("[Ethereum]   Seal ID: 0x{}", hex::encode(seal.seal_id));
-        println!("[Ethereum]   Sanad ID (state key): 0x{}", hex::encode(sanad_id));
+        println!(
+            "[Ethereum]   Sanad ID (state key): 0x{}",
+            hex::encode(sanad_id)
+        );
         println!("[Ethereum]   Commitment: 0x{}", hex::encode(commitment));
         println!("[Ethereum]   Chain ID: {}", chain_id);
 
@@ -733,7 +739,10 @@ mod real_rpc_impl {
         let calldata = CsvSealAbi::encode_create_seal(commitment, sanad_id);
 
         println!("[Ethereum]   Calldata length: {} bytes", calldata.len());
-        println!("[Ethereum]   Function selector: 0x{}", hex::encode(&calldata[..4]));
+        println!(
+            "[Ethereum]   Function selector: 0x{}",
+            hex::encode(&calldata[..4])
+        );
 
         // Step 2: Get current nonce using "pending" to account for transactions in mempool
         let signer_addr = format!("0x{}", hex::encode(signer.address()));
@@ -757,10 +766,13 @@ mod real_rpc_impl {
         println!("[Ethereum]   Max fee per gas: {} wei", max_fee_per_gas);
 
         // Step 4: Broadcast with retry logic for "replacement transaction underpriced" error
-        println!("[Ethereum]   Contract address: 0x{}", hex::encode(rpc.csv_seal_address));
+        println!(
+            "[Ethereum]   Contract address: 0x{}",
+            hex::encode(rpc.csv_seal_address)
+        );
         println!("[Ethereum]   Gas limit: 300,000");
         println!("[Ethereum] Broadcasting transaction...");
-        
+
         let mut current_max_fee = max_fee_per_gas;
         let mut retry_count = 0;
         let max_retries = 3;
@@ -793,11 +805,16 @@ mod real_rpc_impl {
             let tx_hex = format!("0x{}", hex::encode(&tx_bytes));
             match rpc.send_raw_tx_raw(&tx_hex).await {
                 Ok(hash_str) => {
-                    println!("[Ethereum] Transaction hash: 0x{}", hash_str.trim_start_matches("0x"));
+                    println!(
+                        "[Ethereum] Transaction hash: 0x{}",
+                        hash_str.trim_start_matches("0x")
+                    );
                     let bytes = hex::decode(hash_str.trim_start_matches("0x"))
                         .map_err(|e| format!("Invalid hex response: {}", e))?;
                     if bytes.len() != 32 {
-                        return Err(format!("Expected 32-byte hash, got {} bytes", bytes.len()).into());
+                        return Err(
+                            format!("Expected 32-byte hash, got {} bytes", bytes.len()).into()
+                        );
                     }
                     let mut arr = [0u8; 32];
                     arr.copy_from_slice(&bytes);
@@ -805,20 +822,24 @@ mod real_rpc_impl {
                 }
                 Err(e) => {
                     let error_str = e.to_string();
-                    if error_str.contains("replacement transaction underpriced") 
-                        || error_str.contains("underpriced") {
+                    if error_str.contains("replacement transaction underpriced")
+                        || error_str.contains("underpriced")
+                    {
                         retry_count += 1;
                         if retry_count >= max_retries {
                             return Err(format!(
                                 "Failed to send transaction after {} retries: {}",
                                 max_retries, e
-                            ).into());
+                            )
+                            .into());
                         }
-                        
+
                         // Bump gas price by 20% and retry
                         current_max_fee = current_max_fee.saturating_mul(12) / 10;
-                        println!("[Ethereum]   Retry {}/{}: Bumping gas price to {} wei", 
-                            retry_count, max_retries, current_max_fee);
+                        println!(
+                            "[Ethereum]   Retry {}/{}: Bumping gas price to {} wei",
+                            retry_count, max_retries, current_max_fee
+                        );
                         continue;
                     } else {
                         return Err(format!("Failed to send transaction: {}", e).into());
@@ -829,7 +850,7 @@ mod real_rpc_impl {
     }
 
     /// Legacy: Build and send a raw transaction that calls `lock_sanad` on the CSVSeal contract.
-   /// Expects pre-signed transaction bytes. For signing + sending, use `publish()`.
+    /// Expects pre-signed transaction bytes. For signing + sending, use `publish()`.
     pub async fn publish_seal_consumption(
         rpc: &dyn EthereumRpc,
         _seal: &EthereumSealPoint,
@@ -856,8 +877,14 @@ mod real_rpc_impl {
         let seal_used_sig = CsvSealAbi::seal_used_event_signature();
 
         println!("[Ethereum] Verifying create_seal events in receipt...");
-        println!("[Ethereum]   Expected sanad_id: 0x{}", hex::encode(sanad_id));
-        println!("[Ethereum]   Expected commitment: 0x{}", hex::encode(commitment));
+        println!(
+            "[Ethereum]   Expected sanad_id: 0x{}",
+            hex::encode(sanad_id)
+        );
+        println!(
+            "[Ethereum]   Expected commitment: 0x{}",
+            hex::encode(commitment)
+        );
 
         for log in receipt.logs.iter() {
             if log.address != csv_seal_address {
@@ -908,10 +935,22 @@ mod real_rpc_impl {
 
         println!("[Ethereum] Verifying events in receipt...");
         println!("[Ethereum]   Expected seal_id: 0x{}", hex::encode(seal_id));
-        println!("[Ethereum]   Expected commitment: 0x{}", hex::encode(commitment));
-        println!("[Ethereum]   Expected SanadLocked sig: 0x{}", hex::encode(sanad_locked_sig));
-        println!("[Ethereum]   Expected CrossChainLock sig: 0x{}", hex::encode(cross_chain_sig));
-        println!("[Ethereum]   Expected SealUsed sig: 0x{}", hex::encode(seal_used_sig));
+        println!(
+            "[Ethereum]   Expected commitment: 0x{}",
+            hex::encode(commitment)
+        );
+        println!(
+            "[Ethereum]   Expected SanadLocked sig: 0x{}",
+            hex::encode(sanad_locked_sig)
+        );
+        println!(
+            "[Ethereum]   Expected CrossChainLock sig: 0x{}",
+            hex::encode(cross_chain_sig)
+        );
+        println!(
+            "[Ethereum]   Expected SealUsed sig: 0x{}",
+            hex::encode(seal_used_sig)
+        );
         println!("[Ethereum]   Logs in receipt: {}", receipt.logs.len());
 
         for (i, log) in receipt.logs.iter().enumerate() {
@@ -923,7 +962,10 @@ mod real_rpc_impl {
             }
             println!("[Ethereum]     Data length: {} bytes", log.data.len());
             if !log.data.is_empty() {
-                println!("[Ethereum]     Data (first 64 bytes): 0x{}", hex::encode(&log.data[..log.data.len().min(64)]));
+                println!(
+                    "[Ethereum]     Data (first 64 bytes): 0x{}",
+                    hex::encode(&log.data[..log.data.len().min(64)])
+                );
             }
 
             if log.address != csv_seal_address {
@@ -1008,10 +1050,7 @@ mod receipt_tests {
         );
 
         assert!(verify_seal_consumption_in_receipt(
-            &receipt,
-            sanad_id,
-            commitment,
-            [3u8; 20],
+            &receipt, sanad_id, commitment, [3u8; 20],
         ));
     }
 
@@ -1025,10 +1064,7 @@ mod receipt_tests {
         );
 
         assert!(!verify_seal_consumption_in_receipt(
-            &receipt,
-            sanad_id,
-            [6u8; 32],
-            [3u8; 20],
+            &receipt, sanad_id, [6u8; 32], [3u8; 20],
         ));
     }
 }

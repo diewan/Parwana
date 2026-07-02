@@ -242,7 +242,9 @@ impl BitcoinRpc for TestBitcoinRpc {
         _vout: u32,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
         // For testing, return a dummy scriptPubKey
-        Ok(Some("5120ec0eaaefbcc12b0b0f13ae06f3c4190b047c469fa4ffa60df3a0319fd28f02fe".to_string()))
+        Ok(Some(
+            "5120ec0eaaefbcc12b0b0f13ae06f3c4190b047c469fa4ffa60df3a0319fd28f02fe".to_string(),
+        ))
     }
 
     async fn get_block_header(

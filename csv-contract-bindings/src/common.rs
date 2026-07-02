@@ -213,23 +213,45 @@ impl ContractAbi {
                 match item_type {
                     "function" => {
                         if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
-                            let inputs: Vec<MethodInput> = obj.get("inputs")
+                            let inputs: Vec<MethodInput> = obj
+                                .get("inputs")
                                 .and_then(|i| i.as_array())
-                                .map(|arr| arr.iter().filter_map(|inp| {
-                                    inp.as_object().map(|obj| MethodInput {
-                                        name: obj.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
-                                        r#type: obj.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                    })
-                                }).collect())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|inp| {
+                                            inp.as_object().map(|obj| MethodInput {
+                                                name: obj
+                                                    .get("name")
+                                                    .and_then(|n| n.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                r#type: obj
+                                                    .get("type")
+                                                    .and_then(|t| t.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                            })
+                                        })
+                                        .collect()
+                                })
                                 .unwrap_or_default();
 
-                            let outputs: Vec<MethodOutput> = obj.get("outputs")
+                            let outputs: Vec<MethodOutput> = obj
+                                .get("outputs")
                                 .and_then(|o| o.as_array())
-                                .map(|arr| arr.iter().filter_map(|out| {
-                                    out.as_object().map(|obj| MethodOutput {
-                                        r#type: obj.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                    })
-                                }).collect())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|out| {
+                                            out.as_object().map(|obj| MethodOutput {
+                                                r#type: obj
+                                                    .get("type")
+                                                    .and_then(|t| t.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                            })
+                                        })
+                                        .collect()
+                                })
                                 .unwrap_or_default();
 
                             methods.push(ContractMethod {
@@ -242,21 +264,40 @@ impl ContractAbi {
                     }
                     "event" => {
                         if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
-                            let inputs: Vec<EventInput> = obj.get("inputs")
+                            let inputs: Vec<EventInput> = obj
+                                .get("inputs")
                                 .and_then(|i| i.as_array())
-                                .map(|arr| arr.iter().filter_map(|inp| {
-                                    inp.as_object().map(|obj| EventInput {
-                                        name: obj.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
-                                        r#type: obj.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                        indexed: obj.get("indexed").and_then(|i| i.as_bool()).unwrap_or(false),
-                                    })
-                                }).collect())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|inp| {
+                                            inp.as_object().map(|obj| EventInput {
+                                                name: obj
+                                                    .get("name")
+                                                    .and_then(|n| n.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                r#type: obj
+                                                    .get("type")
+                                                    .and_then(|t| t.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                indexed: obj
+                                                    .get("indexed")
+                                                    .and_then(|i| i.as_bool())
+                                                    .unwrap_or(false),
+                                            })
+                                        })
+                                        .collect()
+                                })
                                 .unwrap_or_default();
 
                             events.push(ContractEvent {
                                 name: name.to_string(),
                                 signature: name.to_string(), // Simplified
-                                anonymous: obj.get("anonymous").and_then(|a| a.as_bool()).unwrap_or(false),
+                                anonymous: obj
+                                    .get("anonymous")
+                                    .and_then(|a| a.as_bool())
+                                    .unwrap_or(false),
                                 inputs,
                             });
                         }

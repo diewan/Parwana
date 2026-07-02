@@ -150,7 +150,9 @@ pub struct EthereumAnchor {
 impl EthereumAnchor {
     /// Create a new Ethereum anchor verifier.
     pub fn new(sync_committee_period: u64) -> Self {
-        Self { sync_committee_period }
+        Self {
+            sync_committee_period,
+        }
     }
 
     /// Verify Ethereum PoS finality using beacon chain sync committee.
@@ -195,9 +197,10 @@ impl EthereumAnchor {
 
                 // Verify finality epochs is reasonable (1-32)
                 if *finality_epochs == 0 || *finality_epochs > 32 {
-                    return Err(AnchorError::InvalidProofStructure(
-                        format!("Invalid finality epochs: {}", finality_epochs),
-                    ));
+                    return Err(AnchorError::InvalidProofStructure(format!(
+                        "Invalid finality epochs: {}",
+                        finality_epochs
+                    )));
                 }
 
                 // Verify view number is non-zero
@@ -526,7 +529,10 @@ mod tests {
 
         let proof = create_valid_inclusion_proof(verified.hash);
         let result = anchor.verify_inclusion(&proof, &verified);
-        assert!(result.is_ok(), "Valid inclusion proof should pass verification");
+        assert!(
+            result.is_ok(),
+            "Valid inclusion proof should pass verification"
+        );
     }
 
     #[test]

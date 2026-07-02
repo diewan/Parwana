@@ -98,12 +98,14 @@ impl TransferPhaseHandler for DefaultTransferHandler {
             None => {
                 let error = format!("No adapter registered for chain: {}", source_chain);
                 return Box::pin(async move { Err(error) });
-            },
+            }
         };
         let transfer_id = transfer_id.to_string();
         let lock_tx_hash = *lock_tx_hash;
         Box::pin(async move {
-            adapter.verify_lock_confirmed(&transfer_id, &lock_tx_hash).await
+            adapter
+                .verify_lock_confirmed(&transfer_id, &lock_tx_hash)
+                .await
         })
     }
 
@@ -119,13 +121,15 @@ impl TransferPhaseHandler for DefaultTransferHandler {
             None => {
                 let error = format!("No adapter registered for chain: {}", destination_chain);
                 return Box::pin(async move { Err(error) });
-            },
+            }
         };
         let transfer_id = transfer_id.to_string();
         let proof_payload = proof_payload.to_vec();
         let destination_owner = destination_owner.to_string();
         Box::pin(async move {
-            adapter.verify_proof_and_mint(&transfer_id, &proof_payload, &destination_owner).await
+            adapter
+                .verify_proof_and_mint(&transfer_id, &proof_payload, &destination_owner)
+                .await
         })
     }
 
@@ -140,13 +144,11 @@ impl TransferPhaseHandler for DefaultTransferHandler {
             None => {
                 let error = format!("No adapter registered for chain: {}", source_chain);
                 return Box::pin(async move { Err(error) });
-            },
+            }
         };
         let transfer_id = transfer_id.to_string();
         let lock_tx_hash = *lock_tx_hash;
-        Box::pin(async move {
-            adapter.check_finality(&transfer_id, &lock_tx_hash).await
-        })
+        Box::pin(async move { adapter.check_finality(&transfer_id, &lock_tx_hash).await })
     }
 
     fn execute_proof_building(
@@ -160,13 +162,11 @@ impl TransferPhaseHandler for DefaultTransferHandler {
             None => {
                 let error = format!("No adapter registered for chain: {}", source_chain);
                 return Box::pin(async move { Err(error) });
-            },
+            }
         };
         let transfer_id = transfer_id.to_string();
         let lock_tx_hash = *lock_tx_hash;
-        Box::pin(async move {
-            adapter.build_proof(&transfer_id, &lock_tx_hash).await
-        })
+        Box::pin(async move { adapter.build_proof(&transfer_id, &lock_tx_hash).await })
     }
 
     fn execute_mint_submitted(
@@ -179,12 +179,10 @@ impl TransferPhaseHandler for DefaultTransferHandler {
             None => {
                 let error = format!("No adapter registered for chain: {}", destination_chain);
                 return Box::pin(async move { Err(error) });
-            },
+            }
         };
         let transfer_id = transfer_id.to_string();
-        Box::pin(async move {
-            adapter.confirm_mint(&transfer_id).await
-        })
+        Box::pin(async move { adapter.confirm_mint(&transfer_id).await })
     }
 }
 

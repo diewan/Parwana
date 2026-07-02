@@ -72,7 +72,6 @@ impl<'de> serde::Deserialize<'de> for AttachmentRef {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -85,24 +84,36 @@ impl<'de> serde::Deserialize<'de> for AttachmentRef {
         }
 
         struct AttachmentRefVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for AttachmentRefVisitor {
             type Value = AttachmentRef;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct AttachmentRef")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let cid = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let media_type = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let size = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
-                let encryption_key_id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
-                let created_at = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
+                let cid = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let media_type = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let size = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let encryption_key_id = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                let created_at = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
                 Ok(AttachmentRef {
                     cid,
                     media_type,
@@ -112,7 +123,7 @@ impl<'de> serde::Deserialize<'de> for AttachmentRef {
                     created_at,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -123,7 +134,7 @@ impl<'de> serde::Deserialize<'de> for AttachmentRef {
                 let mut hash = None;
                 let mut encryption_key_id = None;
                 let mut created_at = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::Cid => {
@@ -165,13 +176,15 @@ impl<'de> serde::Deserialize<'de> for AttachmentRef {
                         }
                     }
                 }
-                
+
                 let cid = cid.ok_or_else(|| serde::de::Error::missing_field("cid"))?;
-                let media_type = media_type.ok_or_else(|| serde::de::Error::missing_field("media_type"))?;
+                let media_type =
+                    media_type.ok_or_else(|| serde::de::Error::missing_field("media_type"))?;
                 let size = size.ok_or_else(|| serde::de::Error::missing_field("size"))?;
                 let hash = hash.ok_or_else(|| serde::de::Error::missing_field("hash"))?;
-                let created_at = created_at.ok_or_else(|| serde::de::Error::missing_field("created_at"))?;
-                
+                let created_at =
+                    created_at.ok_or_else(|| serde::de::Error::missing_field("created_at"))?;
+
                 Ok(AttachmentRef {
                     cid,
                     media_type,
@@ -182,8 +195,19 @@ impl<'de> serde::Deserialize<'de> for AttachmentRef {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("AttachmentRef", &["cid", "media_type", "size", "hash", "encryption_key_id", "created_at"], AttachmentRefVisitor)
+
+        deserializer.deserialize_struct(
+            "AttachmentRef",
+            &[
+                "cid",
+                "media_type",
+                "size",
+                "hash",
+                "encryption_key_id",
+                "created_at",
+            ],
+            AttachmentRefVisitor,
+        )
     }
 }
 

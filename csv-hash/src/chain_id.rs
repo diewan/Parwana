@@ -10,9 +10,7 @@
 ///
 /// 1. Create a new `csv-{chain}` crate implementing `ChainBackend`
 /// 2. The chain ID is specified in the chain's configuration file
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChainId(pub String);
 

@@ -83,34 +83,32 @@ pub(crate) fn validate_field_value(
             })?;
             for constraint in constraints {
                 match constraint {
-                    FieldConstraint::MinLength(min)
-                        if s.len() < *min => {
-                            return Err(ValidationError::ConstraintViolation(
-                                name.to_string(),
-                                format!("Minimum length is {}, got {}", min, s.len()),
-                            ));
-                        }
-                    FieldConstraint::MaxLength(max)
-                        if s.len() > *max => {
-                            return Err(ValidationError::ConstraintViolation(
-                                name.to_string(),
-                                format!("Maximum length is {}, got {}", max, s.len()),
-                            ));
-                        }
+                    FieldConstraint::MinLength(min) if s.len() < *min => {
+                        return Err(ValidationError::ConstraintViolation(
+                            name.to_string(),
+                            format!("Minimum length is {}, got {}", min, s.len()),
+                        ));
+                    }
+                    FieldConstraint::MaxLength(max) if s.len() > *max => {
+                        return Err(ValidationError::ConstraintViolation(
+                            name.to_string(),
+                            format!("Maximum length is {}, got {}", max, s.len()),
+                        ));
+                    }
                     FieldConstraint::Pattern(pattern)
-                        if !s.contains(pattern.trim_matches('^').trim_matches('$')) => {
-                            return Err(ValidationError::ConstraintViolation(
-                                name.to_string(),
-                                format!("Does not match pattern: {}", pattern),
-                            ));
-                        }
-                    FieldConstraint::Allowed(allowed)
-                        if !allowed.contains(&s.to_string()) => {
-                            return Err(ValidationError::ConstraintViolation(
-                                name.to_string(),
-                                format!("Value '{}' is not in allowed set", s),
-                            ));
-                        }
+                        if !s.contains(pattern.trim_matches('^').trim_matches('$')) =>
+                    {
+                        return Err(ValidationError::ConstraintViolation(
+                            name.to_string(),
+                            format!("Does not match pattern: {}", pattern),
+                        ));
+                    }
+                    FieldConstraint::Allowed(allowed) if !allowed.contains(&s.to_string()) => {
+                        return Err(ValidationError::ConstraintViolation(
+                            name.to_string(),
+                            format!("Value '{}' is not in allowed set", s),
+                        ));
+                    }
                     _ => {}
                 }
             }
@@ -126,20 +124,18 @@ pub(crate) fn validate_field_value(
             if let Some(num) = value.as_u64() {
                 for constraint in constraints {
                     match constraint {
-                        FieldConstraint::MinValue(min)
-                            if num < *min => {
-                                return Err(ValidationError::ConstraintViolation(
-                                    name.to_string(),
-                                    format!("Minimum value is {}, got {}", min, num),
-                                ));
-                            }
-                        FieldConstraint::MaxValue(max)
-                            if num > *max => {
-                                return Err(ValidationError::ConstraintViolation(
-                                    name.to_string(),
-                                    format!("Maximum value is {}, got {}", max, num),
-                                ));
-                            }
+                        FieldConstraint::MinValue(min) if num < *min => {
+                            return Err(ValidationError::ConstraintViolation(
+                                name.to_string(),
+                                format!("Minimum value is {}, got {}", min, num),
+                            ));
+                        }
+                        FieldConstraint::MaxValue(max) if num > *max => {
+                            return Err(ValidationError::ConstraintViolation(
+                                name.to_string(),
+                                format!("Maximum value is {}, got {}", max, num),
+                            ));
+                        }
                         _ => {}
                     }
                 }

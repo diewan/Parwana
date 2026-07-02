@@ -8,7 +8,7 @@ use csv_hash::Hash;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use std::sync::Arc;
 
-use crate::{BitcoinRpc, BitcoinChainProofProvider};
+use crate::{BitcoinChainProofProvider, BitcoinRpc};
 
 /// Bitcoin adapter implementing adapter-core traits
 pub struct BitcoinAdapter {
@@ -27,28 +27,31 @@ impl ProofAdapter for BitcoinAdapter {
     async fn verify_proof_bundle(&self, bundle: &ProofBundle) -> AdapterResult<bool> {
         // Delegate to BitcoinChainProofProvider for production-grade verification
         let provider = BitcoinChainProofProvider::new(self.rpc.clone_boxed());
-        
+
         // Extract inclusion and finality proofs from the bundle
         let inclusion_proof = &bundle.inclusion_proof;
         let finality_proof = &bundle.finality_proof;
-        
+
         // Use anchor_id as the commitment hash for verification
         let anchor_id = &bundle.anchor_ref.anchor_id;
         if anchor_id.len() != 32 {
-            return Err(csv_adapter_core::AdapterError::SerializationError(
-                format!("anchor_id must be 32 bytes, got {}", anchor_id.len())
-            ));
+            return Err(csv_adapter_core::AdapterError::SerializationError(format!(
+                "anchor_id must be 32 bytes, got {}",
+                anchor_id.len()
+            )));
         }
         let mut hash_bytes = [0u8; 32];
         hash_bytes.copy_from_slice(anchor_id);
         let commitment_hash = Hash::new(hash_bytes);
-        
+
         provider
             .verify_proof_bundle_native(inclusion_proof, finality_proof, &commitment_hash)
-            .map_err(|e| csv_adapter_core::AdapterError::ProofVerificationFailed(format!(
-                "Proof verification failed: {}",
-                e
-            )))
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::ProofVerificationFailed(format!(
+                    "Proof verification failed: {}",
+                    e
+                ))
+            })
     }
 
     fn proof_type(&self) -> String {
@@ -74,10 +77,12 @@ impl MintAdapter for BitcoinAdapter {
             .rpc
             .create_op_return_transaction(commitment_bytes, fee_rate)
             .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
-                "Failed to create OP_RETURN transaction: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::RpcError(format!(
+                    "Failed to create OP_RETURN transaction: {}",
+                    e
+                ))
+            })?;
 
         Ok(Hash::from(txid))
     }
@@ -88,10 +93,12 @@ impl MintAdapter for BitcoinAdapter {
             .rpc
             .get_tx_confirmations(*tx_hash.as_bytes())
             .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
-                "Failed to get transaction confirmations from Bitcoin RPC: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::RpcError(format!(
+                    "Failed to get transaction confirmations from Bitcoin RPC: {}",
+                    e
+                ))
+            })?;
 
         if confirmations == 0 {
             Ok(MintStatus::Pending)
@@ -106,20 +113,20 @@ impl MintAdapter for BitcoinAdapter {
             .rpc
             .get_tx_confirmations(*tx_hash.as_bytes())
             .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
-                "Failed to get transaction confirmations from Bitcoin RPC: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::RpcError(format!(
+                    "Failed to get transaction confirmations from Bitcoin RPC: {}",
+                    e
+                ))
+            })?;
 
         // Get current block height to estimate block number
-        let current_height = self
-            .rpc
-            .get_block_count()
-            .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
+        let current_height = self.rpc.get_block_count().await.map_err(|e| {
+            csv_adapter_core::AdapterError::RpcError(format!(
                 "Failed to get block count from Bitcoin RPC: {}",
                 e
-            )))?;
+            ))
+        })?;
 
         // Get block hash for the transaction's block
         let block_height = if confirmations > 0 {
@@ -128,24 +135,20 @@ impl MintAdapter for BitcoinAdapter {
             current_height
         };
 
-        let block_hash = self
-            .rpc
-            .get_block_hash(block_height)
-            .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
+        let block_hash = self.rpc.get_block_hash(block_height).await.map_err(|e| {
+            csv_adapter_core::AdapterError::RpcError(format!(
                 "Failed to get block hash from Bitcoin RPC: {}",
                 e
-            )))?;
+            ))
+        })?;
 
         // Get block header for timestamp
-        let block_header = self
-            .rpc
-            .get_block_header(block_hash)
-            .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
+        let block_header = self.rpc.get_block_header(block_hash).await.map_err(|e| {
+            csv_adapter_core::AdapterError::RpcError(format!(
                 "Failed to get block header from Bitcoin RPC: {}",
                 e
-            )))?;
+            ))
+        })?;
 
         Ok(MintReceipt {
             tx_hash: *tx_hash,
@@ -159,13 +162,12 @@ impl MintAdapter for BitcoinAdapter {
 #[async_trait]
 impl ChainOps for BitcoinAdapter {
     async fn get_chain_height(&self) -> AdapterResult<u64> {
-        self.rpc
-            .get_block_count()
-            .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
+        self.rpc.get_block_count().await.map_err(|e| {
+            csv_adapter_core::AdapterError::RpcError(format!(
                 "Failed to get block count from Bitcoin RPC: {}",
                 e
-            )))
+            ))
+        })
     }
 
     async fn get_balance(&self, address: &str) -> AdapterResult<u64> {
@@ -173,10 +175,12 @@ impl ChainOps for BitcoinAdapter {
             .rpc
             .get_utxos_for_address(address.to_string())
             .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
-                "Failed to query UTXOs from Bitcoin RPC: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::RpcError(format!(
+                    "Failed to query UTXOs from Bitcoin RPC: {}",
+                    e
+                ))
+            })?;
 
         let total_balance: u64 = utxos.iter().map(|utxo| utxo.amount_sat).sum();
         Ok(total_balance)
@@ -187,10 +191,12 @@ impl ChainOps for BitcoinAdapter {
             .rpc
             .get_tx_confirmations(*tx_hash.as_bytes())
             .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
-                "Failed to get transaction confirmations from Bitcoin RPC: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::RpcError(format!(
+                    "Failed to get transaction confirmations from Bitcoin RPC: {}",
+                    e
+                ))
+            })?;
 
         if confirmations == 0 {
             Ok(TransactionStatus::Pending)
@@ -204,10 +210,12 @@ impl ChainOps for BitcoinAdapter {
             .rpc
             .send_raw_transaction(tx_bytes.to_vec())
             .await
-            .map_err(|e| csv_adapter_core::AdapterError::RpcError(format!(
-                "Failed to broadcast transaction via Bitcoin RPC: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                csv_adapter_core::AdapterError::RpcError(format!(
+                    "Failed to broadcast transaction via Bitcoin RPC: {}",
+                    e
+                ))
+            })?;
 
         Ok(Hash::from(txid))
     }

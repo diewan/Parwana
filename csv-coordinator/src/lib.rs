@@ -20,6 +20,6 @@ pub use negotiation::{
 };
 pub use router::{RouterError, TransferRouter};
 pub use wallet_factory::{
-    init_wallet_factory, get_wallet_factory, get_wallet_operations,
-    is_chain_registered, registered_chains,
+    get_wallet_factory, get_wallet_operations, init_wallet_factory, is_chain_registered,
+    registered_chains,
 };

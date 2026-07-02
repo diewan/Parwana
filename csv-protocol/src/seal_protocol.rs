@@ -78,16 +78,20 @@ impl CanonicalEncoding for DagSegment {
     {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => {
-                Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError)
-            }
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
 
 impl DagSegment {
     /// Create a new DAG segment
-    pub fn new(anchor_from: Hash, anchor_to: Hash, transition_data: Vec<u8>, proof: Vec<u8>) -> Self {
+    pub fn new(
+        anchor_from: Hash,
+        anchor_to: Hash,
+        transition_data: Vec<u8>,
+        proof: Vec<u8>,
+    ) -> Self {
         Self {
             anchor_from,
             anchor_to,

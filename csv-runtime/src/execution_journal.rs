@@ -30,8 +30,8 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use csv_wire::{HashWire, SanadIdWire};
 use csv_protocol::transfer_state::TransferStage;
+use csv_wire::{HashWire, SanadIdWire};
 use serde::{Deserialize, Serialize};
 
 /// Transfer context stored in journal entries for crash recovery.
@@ -407,7 +407,7 @@ mod tests {
                     phase: TransferStage::Initialized,
                     ts: SystemTime::now(),
                     outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+                    transfer_context: None,
                     attempt: 1,
                 })
                 .unwrap();
@@ -421,7 +421,7 @@ mod tests {
             phase: TransferStage::Initialized,
             ts: SystemTime::now(),
             outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         });
         assert_eq!(result, Err(JournalError::CapacityExceeded));
@@ -447,7 +447,7 @@ mod tests {
                     phase: TransferStage::ProofValidated,
                     ts: SystemTime::now(),
                     outcome: PhaseOutcome::Completed,
-                transfer_context: None,
+                    transfer_context: None,
                     attempt: 1,
                 })
                 .unwrap();

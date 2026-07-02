@@ -106,7 +106,10 @@ impl SecretHandle {
     /// The passphrase is stored in memory until the handle is dropped.
     /// For long-lived applications, consider using a hardware signer
     /// or remote signing service instead.
-    pub fn from_keystore(path: impl Into<PathBuf>, passphrase: csv_keys::memory::Passphrase) -> Self {
+    pub fn from_keystore(
+        path: impl Into<PathBuf>,
+        passphrase: csv_keys::memory::Passphrase,
+    ) -> Self {
         Self {
             source: SecretSource::Keystore {
                 path: path.into(),
@@ -274,7 +277,7 @@ mod tests {
         let handle = SecretHandle::from_key(key);
         let shared1 = SharedSecretHandle::new(handle);
         let shared2 = shared1.clone();
-        
+
         // Both should have the same bytes
         assert_eq!(shared1.as_bytes(), shared2.as_bytes());
     }

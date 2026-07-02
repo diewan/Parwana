@@ -50,13 +50,13 @@
 //!
 //! See [csv-docs/LAYERING.md](../../csv-docs/LAYERING.md) for detailed layer information.
 
+use csv_codec::{CanonicalEncoding, EncodingFormat};
 use csv_hash::Hash;
 use csv_hash::HashDomain;
 use csv_hash::canonical::to_canonical_cbor;
 use csv_hash::dag::DAGSegment;
 use csv_hash::seal::{CommitAnchor, SealPoint};
 use csv_hash::tagged_hash::tagged_hash;
-use csv_codec::{CanonicalEncoding, EncodingFormat};
 use serde::{Deserialize, Serialize};
 
 /// Hash function types supported by different chains
@@ -106,8 +106,8 @@ impl HashFunction {
                 Hash(output)
             }
             HashFunction::Sha256 => {
-                use sha2::Sha256;
                 use sha2::Digest;
+                use sha2::Sha256;
                 let mut hasher = Sha256::new();
                 hasher.update(bytes);
                 Hash(hasher.finalize().into())
@@ -120,8 +120,8 @@ impl HashFunction {
                 Hash(hasher.finalize().into())
             }
             HashFunction::DoubleSha256 => {
-                use sha2::Sha256;
                 use sha2::Digest;
+                use sha2::Sha256;
                 let mut hasher = Sha256::new();
                 hasher.update(bytes);
                 let first = hasher.finalize();
@@ -130,8 +130,8 @@ impl HashFunction {
                 Hash(hasher2.finalize().into())
             }
             HashFunction::Sha3_256 => {
-                use sha3::Sha3_256;
                 use sha3::Digest;
+                use sha3::Sha3_256;
                 let mut hasher = Sha3_256::new();
                 hasher.update(bytes);
                 Hash(hasher.finalize().into())
@@ -537,7 +537,6 @@ pub struct InclusionProof {
     pub source: String,
 }
 
-
 impl Default for InclusionProof {
     fn default() -> Self {
         Self {
@@ -558,14 +557,20 @@ impl CanonicalEncoding for InclusionProof {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
+            EncodingFormat::ManualBinary => self
+                .to_canonical_bytes()
+                .map_err(csv_codec::CodecError::SerializationError),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -594,20 +599,21 @@ impl InclusionProof {
     /// Deserialize from canonical bytes (manual implementation for L1 type)
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
         let mut pos = 0;
-        
+
         let proof_bytes_len = if bytes.len() >= pos + 4 {
-            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize
         } else {
             return Err("Insufficient bytes for proof_bytes length".to_string());
         };
         pos += 4;
-        
+
         if bytes.len() < pos + proof_bytes_len {
             return Err("Insufficient bytes for proof_bytes".to_string());
         }
         let proof_bytes = bytes[pos..pos + proof_bytes_len].to_vec();
         pos += proof_bytes_len;
-        
+
         if bytes.len() < pos + 32 {
             return Err("Insufficient bytes for block_hash".to_string());
         }
@@ -615,19 +621,37 @@ impl InclusionProof {
         block_hash_bytes.copy_from_slice(&bytes[pos..pos + 32]);
         let block_hash = Hash(block_hash_bytes);
         pos += 32;
-        
+
         if bytes.len() < pos + 8 {
             return Err("Insufficient bytes for position".to_string());
         }
-        let position = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]);
+        let position = u64::from_le_bytes([
+            bytes[pos],
+            bytes[pos + 1],
+            bytes[pos + 2],
+            bytes[pos + 3],
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]);
         pos += 8;
-        
+
         if bytes.len() < pos + 8 {
             return Err("Insufficient bytes for block_number".to_string());
         }
-        let block_number = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]);
+        let block_number = u64::from_le_bytes([
+            bytes[pos],
+            bytes[pos + 1],
+            bytes[pos + 2],
+            bytes[pos + 3],
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]);
         pos += 8;
-        
+
         if bytes.len() < pos + 32 {
             return Err("Insufficient bytes for leaf".to_string());
         }
@@ -635,7 +659,7 @@ impl InclusionProof {
         leaf_bytes.copy_from_slice(&bytes[pos..pos + 32]);
         let leaf = Hash(leaf_bytes);
         pos += 32;
-        
+
         if bytes.len() < pos + 32 {
             return Err("Insufficient bytes for root".to_string());
         }
@@ -643,14 +667,15 @@ impl InclusionProof {
         root_bytes.copy_from_slice(&bytes[pos..pos + 32]);
         let root = Hash(root_bytes);
         pos += 32;
-        
+
         let siblings_len = if bytes.len() >= pos + 4 {
-            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize
         } else {
             return Err("Insufficient bytes for siblings length".to_string());
         };
         pos += 4;
-        
+
         let mut siblings = Vec::with_capacity(siblings_len);
         for _ in 0..siblings_len {
             if bytes.len() < pos + 32 {
@@ -661,25 +686,36 @@ impl InclusionProof {
             siblings.push(Hash(sibling_bytes));
             pos += 32;
         }
-        
+
         if bytes.len() < pos + 8 {
             return Err("Insufficient bytes for leaf_index".to_string());
         }
-        let leaf_index = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]) as usize;
+        let leaf_index = u64::from_le_bytes([
+            bytes[pos],
+            bytes[pos + 1],
+            bytes[pos + 2],
+            bytes[pos + 3],
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]) as usize;
         pos += 8;
-        
+
         let source_len = if bytes.len() >= pos + 4 {
-            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize
         } else {
             return Err("Insufficient bytes for source length".to_string());
         };
         pos += 4;
-        
+
         if bytes.len() < pos + source_len {
             return Err("Insufficient bytes for source".to_string());
         }
-        let source = String::from_utf8(bytes[pos..pos + source_len].to_vec()).map_err(|e| format!("Invalid source string: {}", e))?;
-        
+        let source = String::from_utf8(bytes[pos..pos + source_len].to_vec())
+            .map_err(|e| format!("Invalid source string: {}", e))?;
+
         Ok(Self {
             proof_bytes,
             block_hash,
@@ -803,14 +839,20 @@ impl CanonicalEncoding for FinalityProof {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
+            EncodingFormat::ManualBinary => self
+                .to_canonical_bytes()
+                .map_err(csv_codec::CodecError::SerializationError),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -835,20 +877,21 @@ impl FinalityProof {
     /// Deserialize from canonical bytes (manual implementation for L1 type)
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
         let mut pos = 0;
-        
+
         let finality_data_len = if bytes.len() >= pos + 4 {
-            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize
         } else {
             return Err("Insufficient bytes for finality_data length".to_string());
         };
         pos += 4;
-        
+
         if bytes.len() < pos + finality_data_len {
             return Err("Insufficient bytes for finality_data".to_string());
         }
         let finality_data = bytes[pos..pos + finality_data_len].to_vec();
         pos += finality_data_len;
-        
+
         if bytes.len() < pos + 32 {
             return Err("Insufficient bytes for block_hash".to_string());
         }
@@ -856,50 +899,63 @@ impl FinalityProof {
         block_hash_bytes.copy_from_slice(&bytes[pos..pos + 32]);
         let block_hash = Hash(block_hash_bytes);
         pos += 32;
-        
+
         if bytes.len() < pos + 4 {
             return Err("Insufficient bytes for threshold".to_string());
         }
-        let threshold = u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]);
+        let threshold =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]);
         pos += 4;
-        
+
         if bytes.len() < pos + 8 {
             return Err("Insufficient bytes for confirmations".to_string());
         }
-        let confirmations = u64::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3], bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]]);
+        let confirmations = u64::from_le_bytes([
+            bytes[pos],
+            bytes[pos + 1],
+            bytes[pos + 2],
+            bytes[pos + 3],
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]);
         pos += 8;
-        
+
         let data_len = if bytes.len() >= pos + 4 {
-            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize
         } else {
             return Err("Insufficient bytes for data length".to_string());
         };
         pos += 4;
-        
+
         if bytes.len() < pos + data_len {
             return Err("Insufficient bytes for data".to_string());
         }
         let data = bytes[pos..pos + data_len].to_vec();
         pos += data_len;
-        
+
         let source_len = if bytes.len() >= pos + 4 {
-            u32::from_le_bytes([bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]]) as usize
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+                as usize
         } else {
             return Err("Insufficient bytes for source length".to_string());
         };
         pos += 4;
-        
+
         if bytes.len() < pos + source_len {
             return Err("Insufficient bytes for source".to_string());
         }
-        let source = String::from_utf8(bytes[pos..pos + source_len].to_vec()).map_err(|e| format!("Invalid source string: {}", e))?;
+        let source = String::from_utf8(bytes[pos..pos + source_len].to_vec())
+            .map_err(|e| format!("Invalid source string: {}", e))?;
         pos += source_len;
-        
+
         if bytes.len() < pos + 1 {
             return Err("Insufficient bytes for is_deterministic".to_string());
         }
         let is_deterministic = bytes[pos] == 1;
-        
+
         Ok(Self {
             finality_data,
             block_hash,
@@ -1295,14 +1351,20 @@ impl CanonicalEncoding for ProofBundle {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
+            EncodingFormat::ManualBinary => self
+                .to_canonical_bytes()
+                .map_err(csv_codec::CodecError::SerializationError),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError),
+            EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
+                .map_err(csv_codec::CodecError::DeserializationError),
         }
     }
 }
@@ -1312,22 +1374,22 @@ impl ProofBundle {
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.version.to_le_bytes());
-        
+
         // Serialize DAGSegment using its manual serialization
         let dag_bytes = self.transition_dag.to_canonical_bytes();
         bytes.extend_from_slice(&(dag_bytes.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&dag_bytes);
-        
+
         // Serialize signatures
         bytes.extend_from_slice(&(self.signatures.len() as u32).to_le_bytes());
         for sig in &self.signatures {
             bytes.extend_from_slice(&(sig.len() as u32).to_le_bytes());
             bytes.extend_from_slice(sig);
         }
-        
+
         // Serialize signature scheme
         bytes.push(self.signature_scheme as u8);
-        
+
         // Serialize seal_ref
         bytes.extend_from_slice(&(self.seal_ref.id.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&self.seal_ref.id);
@@ -1343,31 +1405,31 @@ impl ProofBundle {
         } else {
             bytes.push(0u8);
         }
-        
+
         // Serialize anchor_ref
         bytes.extend_from_slice(&(self.anchor_ref.anchor_id.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&self.anchor_ref.anchor_id);
         bytes.extend_from_slice(&self.anchor_ref.block_height.to_le_bytes());
         bytes.extend_from_slice(&(self.anchor_ref.metadata.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&self.anchor_ref.metadata);
-        
+
         // Serialize inclusion_proof
         let inc_bytes = self.inclusion_proof.to_canonical_bytes()?;
         bytes.extend_from_slice(&(inc_bytes.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&inc_bytes);
-        
+
         // Serialize finality_proof
         let fin_bytes = self.finality_proof.to_canonical_bytes()?;
         bytes.extend_from_slice(&(fin_bytes.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&fin_bytes);
-        
+
         Ok(bytes)
     }
 
     /// Deserialize from canonical bytes (manual implementation for L1 type)
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
         let mut pos = 0;
-        
+
         let version = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1377,7 +1439,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for version".to_string());
         };
-        
+
         let dag_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1387,15 +1449,16 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for DAG length".to_string());
         };
-        
+
         let transition_dag = if bytes.len() >= pos + dag_len {
             let dag_bytes = &bytes[pos..pos + dag_len];
             pos += dag_len;
-            DAGSegment::from_canonical_bytes(dag_bytes).map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))?
+            DAGSegment::from_canonical_bytes(dag_bytes)
+                .map_err(|e| format!("Failed to deserialize DAGSegment: {}", e))?
         } else {
             return Err("Insufficient bytes for DAG data".to_string());
         };
-        
+
         let sigs_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1405,7 +1468,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for signatures length".to_string());
         };
-        
+
         let mut signatures = Vec::with_capacity(sigs_len);
         for _ in 0..sigs_len {
             let sig_len = if bytes.len() >= pos + 4 {
@@ -1426,7 +1489,7 @@ impl ProofBundle {
             };
             signatures.push(sig);
         }
-        
+
         let signature_scheme = if bytes.len() > pos {
             let scheme = bytes[pos];
             pos += 1;
@@ -1438,7 +1501,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for signature scheme".to_string());
         };
-        
+
         let seal_id_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1448,7 +1511,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for seal id length".to_string());
         };
-        
+
         let seal_id = if bytes.len() >= pos + seal_id_len {
             let id_bytes = &bytes[pos..pos + seal_id_len];
             pos += seal_id_len;
@@ -1456,7 +1519,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for seal id data".to_string());
         };
-        
+
         let seal_nonce = if bytes.len() > pos {
             let has_nonce = bytes[pos] == 1;
             pos += 1;
@@ -1476,7 +1539,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for seal nonce flag".to_string());
         };
-        
+
         let seal_version = if bytes.len() > pos {
             let has_version = bytes[pos] == 1;
             pos += 1;
@@ -1496,7 +1559,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for seal version flag".to_string());
         };
-        
+
         let anchor_id_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1506,7 +1569,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for anchor id length".to_string());
         };
-        
+
         let anchor_id = if bytes.len() >= pos + anchor_id_len {
             let id_bytes = &bytes[pos..pos + anchor_id_len];
             pos += anchor_id_len;
@@ -1514,7 +1577,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for anchor id data".to_string());
         };
-        
+
         let block_height = if bytes.len() >= pos + 8 {
             let mut arr = [0u8; 8];
             arr.copy_from_slice(&bytes[pos..pos + 8]);
@@ -1524,7 +1587,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for block height".to_string());
         };
-        
+
         let metadata_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1534,7 +1597,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for metadata length".to_string());
         };
-        
+
         let metadata = if bytes.len() >= pos + metadata_len {
             let metadata_bytes = &bytes[pos..pos + metadata_len];
             pos += metadata_len;
@@ -1542,7 +1605,7 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for metadata data".to_string());
         };
-        
+
         let inc_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1552,15 +1615,16 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for inclusion proof length".to_string());
         };
-        
+
         let inclusion_proof = if bytes.len() >= pos + inc_len {
             let inc_bytes = &bytes[pos..pos + inc_len];
             pos += inc_len;
-            InclusionProof::from_canonical_bytes(inc_bytes).map_err(|e| format!("Failed to deserialize InclusionProof: {}", e))?
+            InclusionProof::from_canonical_bytes(inc_bytes)
+                .map_err(|e| format!("Failed to deserialize InclusionProof: {}", e))?
         } else {
             return Err("Insufficient bytes for inclusion proof data".to_string());
         };
-        
+
         let fin_len = if bytes.len() >= pos + 4 {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&bytes[pos..pos + 4]);
@@ -1570,14 +1634,15 @@ impl ProofBundle {
         } else {
             return Err("Insufficient bytes for finality proof length".to_string());
         };
-        
+
         let finality_proof = if bytes.len() >= pos + fin_len {
             let fin_bytes = &bytes[pos..pos + fin_len];
-            FinalityProof::from_canonical_bytes(fin_bytes).map_err(|e| format!("Failed to deserialize FinalityProof: {}", e))?
+            FinalityProof::from_canonical_bytes(fin_bytes)
+                .map_err(|e| format!("Failed to deserialize FinalityProof: {}", e))?
         } else {
             return Err("Insufficient bytes for finality proof data".to_string());
         };
-        
+
         Ok(Self {
             version,
             transition_dag,

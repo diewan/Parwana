@@ -173,14 +173,16 @@ impl Signer for MemorySigner {
 
 impl MemorySigner {
     fn sign_secp256k1(&self, message: &[u8]) -> Result<Signature, crate::error::WalletError> {
-        use secp256k1::{Message, SecretKey, Secp256k1};
+        use secp256k1::{Message, Secp256k1, SecretKey};
 
-        let secret_key = SecretKey::from_slice(self.secret_key.expose_secret())
-            .map_err(|e| crate::error::WalletError::SigningFailed(format!("Invalid secret key: {}", e)))?;
+        let secret_key = SecretKey::from_slice(self.secret_key.expose_secret()).map_err(|e| {
+            crate::error::WalletError::SigningFailed(format!("Invalid secret key: {}", e))
+        })?;
 
         let secp = Secp256k1::new();
-        let message = Message::from_digest_slice(message)
-            .map_err(|e| crate::error::WalletError::SigningFailed(format!("Invalid message: {}", e)))?;
+        let message = Message::from_digest_slice(message).map_err(|e| {
+            crate::error::WalletError::SigningFailed(format!("Invalid message: {}", e))
+        })?;
 
         let signature = secp.sign_ecdsa(&message, &secret_key);
         let signature_bytes = signature.serialize_compact().to_vec();
@@ -192,7 +194,7 @@ impl MemorySigner {
     }
 
     fn sign_ed25519(&self, message: &[u8]) -> Result<Signature, crate::error::WalletError> {
-        use ed25519_dalek::{SigningKey, Signer as EdSigner};
+        use ed25519_dalek::{Signer as EdSigner, SigningKey};
 
         let secret_bytes = self.secret_key.expose_secret();
         if secret_bytes.len() != 32 {

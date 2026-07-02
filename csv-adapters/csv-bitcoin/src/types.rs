@@ -23,7 +23,10 @@ pub enum UtxoProvenance {
 impl UtxoProvenance {
     /// Returns true if this UTXO can be selected as a transaction input
     pub fn is_spendable(&self) -> bool {
-        matches!(self, UtxoProvenance::RpcWallet | UtxoProvenance::ImportedFunding)
+        matches!(
+            self,
+            UtxoProvenance::RpcWallet | UtxoProvenance::ImportedFunding
+        )
     }
 }
 

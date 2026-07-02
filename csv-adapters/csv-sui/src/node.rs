@@ -2,8 +2,8 @@
 //!
 //! Implements Sui blockchain communication using the official sui-rust-sdk gRPC client.
 
-use sui_rpc::Client;
 use std::sync::Arc;
+use sui_rpc::Client;
 use tokio::sync::Mutex;
 
 /// Sui gRPC client wrapper

@@ -3,7 +3,7 @@
 //! This module provides strongly-typed EntryFunction payload builders for the
 //! csv-seal Move module, using proper BCS serialization and type-safe argument construction.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fmt;
 
 /// CSV Seal module address (configured at runtime)
@@ -53,9 +53,8 @@ impl EntryFunctionArgument {
                 // u8 must be serialized as a single byte to match Aptos REST API behavior
                 vec![*n]
             }
-            EntryFunctionArgument::Bytes(b) => {
-                aptos_bcs::to_bytes(b).unwrap_or_else(|e| panic!("Failed to serialize bytes: {}", e))
-            }
+            EntryFunctionArgument::Bytes(b) => aptos_bcs::to_bytes(b)
+                .unwrap_or_else(|e| panic!("Failed to serialize bytes: {}", e)),
         }
     }
 }
@@ -270,7 +269,14 @@ mod tests {
 
         assert_eq!(payload.function_short_name(), "consume_seal");
         assert_eq!(payload.arguments.len(), 1);
-        assert_eq!(payload.arguments[0].to_json_value().as_str().unwrap().starts_with("0x"), true);
+        assert_eq!(
+            payload.arguments[0]
+                .to_json_value()
+                .as_str()
+                .unwrap()
+                .starts_with("0x"),
+            true
+        );
         assert_eq!(payload.type_arguments.len(), 0);
     }
 
@@ -288,11 +294,17 @@ mod tests {
         // nonce (u64) → JSON string
         assert_eq!(payload.arguments[0].to_json_value().as_str().unwrap(), "42");
         // sanad_id (vector<u8>) → JSON hex string
-        assert_eq!(payload.arguments[1].to_json_value().as_str().unwrap(), format!("0x{}", hex::encode(sanad_id)));
+        assert_eq!(
+            payload.arguments[1].to_json_value().as_str().unwrap(),
+            format!("0x{}", hex::encode(sanad_id))
+        );
         // destination_chain (u8) → JSON number
         assert_eq!(payload.arguments[2].to_json_value().as_u64().unwrap(), 1);
         // destination_owner (vector<u8>) → JSON hex string
-        assert_eq!(payload.arguments[3].to_json_value().as_str().unwrap(), format!("0x{}", hex::encode(destination_owner)));
+        assert_eq!(
+            payload.arguments[3].to_json_value().as_str().unwrap(),
+            format!("0x{}", hex::encode(destination_owner))
+        );
     }
 
     #[test]

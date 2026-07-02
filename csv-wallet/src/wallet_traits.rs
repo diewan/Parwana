@@ -29,12 +29,7 @@ pub trait WalletOperations: Send + Sync {
     ///
     /// # Returns
     /// The derived address as a string
-    fn derive_address(
-        &self,
-        seed: &[u8],
-        account: u32,
-        index: u32,
-    ) -> Result<String>;
+    fn derive_address(&self, seed: &[u8], account: u32, index: u32) -> Result<String>;
 
     /// Get wallet balance
     ///

@@ -170,27 +170,27 @@ impl AptosNode {
     /// Parse a transaction from API response
     fn parse_transaction(result: &Value) -> RpcResult<AptosTransaction> {
         let hash = Self::required_hex_bytes(result, "hash")?;
-        
+
         // version is optional in some API responses (pending transactions)
         let version = if let Some(v) = result.get("version") {
             Self::parse_u64(v, "version")?
         } else {
             0
         };
-        
+
         // success is optional in some API responses (pending transactions)
         let success = if let Some(s) = result.get("success") {
             s.as_bool().unwrap_or(false)
         } else {
             false
         };
-        
+
         let vm_status = if let Some(v) = result.get("vm_status") {
             v.as_str().unwrap_or("unknown").to_string()
         } else {
             "unknown".to_string()
         };
-        
+
         // epoch and round are optional in some API responses
         let epoch = if let Some(e) = result.get("epoch") {
             Self::parse_u64(e, "epoch").unwrap_or(0)
@@ -202,13 +202,13 @@ impl AptosNode {
         } else {
             0
         };
-        
+
         let gas_used = if let Some(g) = result.get("gas_used") {
             Self::parse_u64(g, "gas_used")?
         } else {
             0
         };
-        
+
         // cumulative_gas_used is optional
         let cumulative_gas_used = if let Some(c) = result.get("cumulative_gas_used") {
             Self::parse_u64(c, "cumulative_gas_used").unwrap_or(0)
@@ -312,13 +312,19 @@ impl AptosLedgerReader for AptosNode {
                 oldest_ledger_version: Self::required_u64(&result, "oldest_ledger_version")?,
                 ledger_timestamp: Self::required_u64(&result, "ledger_timestamp")?,
                 oldest_transaction_timestamp: Self::parse_u64(
-                    result.get("oldest_transaction_timestamp").unwrap_or(&Value::Number(0.into())),
+                    result
+                        .get("oldest_transaction_timestamp")
+                        .unwrap_or(&Value::Number(0.into())),
                     "oldest_transaction_timestamp",
-                ).unwrap_or(0),
+                )
+                .unwrap_or(0),
                 epoch_start_timestamp: Self::parse_u64(
-                    result.get("epoch_start_timestamp").unwrap_or(&Value::Number(0.into())),
+                    result
+                        .get("epoch_start_timestamp")
+                        .unwrap_or(&Value::Number(0.into())),
                     "epoch_start_timestamp",
-                ).unwrap_or(0),
+                )
+                .unwrap_or(0),
             })
         })
     }
@@ -500,45 +506,68 @@ impl AptosTransactionReader for AptosNode {
                         "Timeout waiting for transaction confirmation after {} seconds. Hash: {}",
                         timeout.as_secs(),
                         hash_hex
-                    ).into());
+                    )
+                    .into());
                 }
 
                 log::debug!("Querying transaction by hash: {}", hash_hex);
-                
+
                 // Try the transactions_by_hash endpoint first
                 let result = self
                     .get(&format!("/transactions/by_hash/{}", hash_hex))
                     .await;
-                
+
                 match result {
                     Ok(result) => {
-                        log::debug!("Transaction query response: {}", serde_json::to_string(&result).unwrap_or_else(|_| "failed".to_string()));
-                        
+                        log::debug!(
+                            "Transaction query response: {}",
+                            serde_json::to_string(&result).unwrap_or_else(|_| "failed".to_string())
+                        );
+
                         // Check if transaction is found
                         if result.get("hash").is_some() {
                             // Try to parse the transaction
                             match Self::parse_transaction(&result) {
                                 Ok(tx) => {
-                                    log::debug!("Transaction parsed - success: {}, vm_status: {}", tx.success, tx.vm_status);
+                                    log::debug!(
+                                        "Transaction parsed - success: {}, vm_status: {}",
+                                        tx.success,
+                                        tx.vm_status
+                                    );
                                     // Transaction confirmed
                                     if tx.success {
-                                        log::debug!("Transaction confirmed successfully: {}", hash_hex);
+                                        log::debug!(
+                                            "Transaction confirmed successfully: {}",
+                                            hash_hex
+                                        );
                                         return Ok(tx);
                                     }
                                     // Pending states: "unknown" (pre-execution) or "pending" (being processed)
                                     if tx.vm_status == "unknown" || tx.vm_status == "pending" {
-                                        log::debug!("Transaction still pending (vm_status={}), continuing to wait", tx.vm_status);
+                                        log::debug!(
+                                            "Transaction still pending (vm_status={}), continuing to wait",
+                                            tx.vm_status
+                                        );
                                     } else {
-                                        return Err(format!("Transaction failed: {}", tx.vm_status).into());
+                                        return Err(format!(
+                                            "Transaction failed: {}",
+                                            tx.vm_status
+                                        )
+                                        .into());
                                     }
                                 }
                                 Err(e) => {
                                     // If parsing fails due to missing required fields, transaction might still be pending
                                     let error_str = e.to_string();
                                     log::warn!("Transaction parsing failed: {}", error_str);
-                                    if error_str.contains("missing") || error_str.contains("invalid") {
+                                    if error_str.contains("missing")
+                                        || error_str.contains("invalid")
+                                    {
                                         // Transaction is still pending, continue waiting
-                                        log::debug!("Transaction still pending ({}), continuing to wait", error_str);
+                                        log::debug!(
+                                            "Transaction still pending ({}), continuing to wait",
+                                            error_str
+                                        );
                                     } else {
                                         // Other parsing error, return it
                                         return Err(e);
@@ -596,7 +625,7 @@ impl AptosTransactionReader for AptosNode {
         Box::pin(async move { self.get_transaction(version).await })
     }
 
-     fn get_transaction_by_hash<'a>(
+    fn get_transaction_by_hash<'a>(
         &'a self,
         hash: &'a str,
     ) -> BoxFuture<'a, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
@@ -675,9 +704,11 @@ impl AptosSignerIdentity for AptosNode {
             if let Some(addr) = self.signer_address {
                 Ok(addr)
             } else {
-                Err("CapabilityUnavailable: sender_address requires a configured signer. \
+                Err(
+                    "CapabilityUnavailable: sender_address requires a configured signer. \
                  Use AptosNode::with_signer_address() to configure the signer address."
-                    .into())
+                        .into(),
+                )
             }
         })
     }
@@ -700,14 +731,29 @@ impl AptosTransactionSubmitter for AptosNode {
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
             log::debug!("AptosNode: Submitting transaction to /transactions endpoint");
-            log::debug!("AptosNode: Transaction payload: {}", serde_json::to_string_pretty(&signed_tx_json).unwrap_or_else(|_| "failed to serialize".to_string()));
+            log::debug!(
+                "AptosNode: Transaction payload: {}",
+                serde_json::to_string_pretty(&signed_tx_json)
+                    .unwrap_or_else(|_| "failed to serialize".to_string())
+            );
             let result = self.post("/transactions", &signed_tx_json).await?;
-            log::debug!("AptosNode: Received response: {}", serde_json::to_string_pretty(&result).unwrap_or_else(|_| "failed to serialize".to_string()));
+            log::debug!(
+                "AptosNode: Received response: {}",
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|_| "failed to serialize".to_string())
+            );
             if let Some(hash_hex) = result.get("hash").and_then(|h| h.as_str()) {
-                log::debug!("AptosNode: Transaction submitted successfully, hash: {}", hash_hex);
+                log::debug!(
+                    "AptosNode: Transaction submitted successfully, hash: {}",
+                    hash_hex
+                );
                 Ok(Self::parse_hex_bytes("hash", hash_hex)?)
             } else if let Some(error) = result.get("error_code") {
-                log::error!("AptosNode: Transaction submission failed: {} - {:?}", error, result.get("message"));
+                log::error!(
+                    "AptosNode: Transaction submission failed: {} - {:?}",
+                    error,
+                    result.get("message")
+                );
                 Err(format!(
                     "Aptos transaction submission failed: {} - {:?}",
                     error,

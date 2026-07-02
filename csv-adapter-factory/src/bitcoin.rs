@@ -1,18 +1,15 @@
 //! Bitcoin adapter factory implementation.
 
+use super::{AdapterConfig, AdapterFactory, AdapterResult, FactoryError, NetworkType};
 use async_trait::async_trait;
-use super::{AdapterFactory, AdapterConfig, AdapterResult, FactoryError, NetworkType};
-use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_adapter_core::ChainAdapter;
+use csv_protocol::chain_adapter_traits::ChainBackend;
 use std::sync::Arc;
 
 #[cfg(feature = "bitcoin")]
 use csv_bitcoin::{
-    config::BitcoinConfig,
-    ops::BitcoinBackend,
-    seal_protocol::BitcoinSealProtocol,
-    runtime_adapter::BitcoinRuntimeAdapter,
-    Network as BtcNetwork,
+    Network as BtcNetwork, config::BitcoinConfig, ops::BitcoinBackend,
+    runtime_adapter::BitcoinRuntimeAdapter, seal_protocol::BitcoinSealProtocol,
 };
 
 /// Bitcoin adapter factory.
@@ -34,21 +31,32 @@ impl AdapterFactory for BitcoinFactory {
         } else if config.secret_key.as_bytes().is_some() {
             config.secret_key.as_bytes().map(hex::encode)
         } else {
-            log::warn!("Factory: No seed or secret key provided, creating Bitcoin adapter in read-only mode");
+            log::warn!(
+                "Factory: No seed or secret key provided, creating Bitcoin adapter in read-only mode"
+            );
             None
         };
 
         // Select the highest priority endpoint that can serve Bitcoin queries.
         // The endpoint's declared `protocol` drives backend selection explicitly —
         // we do NOT sniff the URL string.
-        let rpc_endpoint = config.rpc_endpoints
+        let rpc_endpoint = config
+            .rpc_endpoints
             .iter()
-            .filter(|e| matches!(
-                e.protocol,
-                super::RpcProtocol::Rest | super::RpcProtocol::JsonRpc | super::RpcProtocol::Blockbook
-            ))
+            .filter(|e| {
+                matches!(
+                    e.protocol,
+                    super::RpcProtocol::Rest
+                        | super::RpcProtocol::JsonRpc
+                        | super::RpcProtocol::Blockbook
+                )
+            })
             .min_by_key(|e| e.priority)
-            .ok_or_else(|| FactoryError::InvalidConfig("No REST, JSON-RPC, or Blockbook endpoint found".to_string()))?;
+            .ok_or_else(|| {
+                FactoryError::InvalidConfig(
+                    "No REST, JSON-RPC, or Blockbook endpoint found".to_string(),
+                )
+            })?;
 
         let has_sanad_seals = !config.sanad_seals.is_empty();
 
@@ -65,9 +73,15 @@ impl AdapterFactory for BitcoinFactory {
         let indexer_url = if rpc_backend.is_rest() {
             Some(rpc_endpoint.url.clone())
         } else {
-            config.rpc_endpoints
+            config
+                .rpc_endpoints
                 .iter()
-                .filter(|e| matches!(e.protocol, super::RpcProtocol::Rest | super::RpcProtocol::Blockbook))
+                .filter(|e| {
+                    matches!(
+                        e.protocol,
+                        super::RpcProtocol::Rest | super::RpcProtocol::Blockbook
+                    )
+                })
                 .min_by_key(|e| e.priority)
                 .map(|e| e.url.clone())
         };
@@ -85,59 +99,65 @@ impl AdapterFactory for BitcoinFactory {
             seed,
             account: config.account,
             index: config.index,
-            utxos: config.utxos.into_iter().map(|u| csv_bitcoin::config::UtxoConfig {
-                txid: u.txid,
-                vout: u.vout,
-                value: u.value,
-                account: u.account,
-                index: u.index,
-                script_pubkey: u.script_pubkey,
-            }).collect(),
-            sanad_seals: config.sanad_seals.into_iter().map(|s| csv_bitcoin::config::SanadSealConfig {
-                sanad_id: s.sanad_id,
-                anchor_txid: s.anchor_txid,
-                vout: s.vout,
-            }).collect(),
+            utxos: config
+                .utxos
+                .into_iter()
+                .map(|u| csv_bitcoin::config::UtxoConfig {
+                    txid: u.txid,
+                    vout: u.vout,
+                    value: u.value,
+                    account: u.account,
+                    index: u.index,
+                    script_pubkey: u.script_pubkey,
+                })
+                .collect(),
+            sanad_seals: config
+                .sanad_seals
+                .into_iter()
+                .map(|s| csv_bitcoin::config::SanadSealConfig {
+                    sanad_id: s.sanad_id,
+                    anchor_txid: s.anchor_txid,
+                    vout: s.vout,
+                    commitment: s.commitment,
+                })
+                .collect(),
         };
 
         // Create ChainBackend from config first — this registers all sanad_seals.
         // Transport selection lives entirely in `BitcoinRpcBackend::build_rpc`.
-        let rpc_client = rpc_backend.build_rpc(
-            rpc_endpoint.url.clone(),
-            rpc_endpoint.api_key.clone(),
-        );
+        let rpc_client =
+            rpc_backend.build_rpc(rpc_endpoint.url.clone(), rpc_endpoint.api_key.clone());
 
-        let seal = BitcoinSealProtocol::from_config(btc_config, rpc_client)
-            .map_err(|e| FactoryError::CreationFailed(
-                format!("Failed to create BitcoinSealProtocol for ChainBackend: {}", e)
-            ))?;
+        let seal = BitcoinSealProtocol::from_config(btc_config, rpc_client).map_err(|e| {
+            FactoryError::CreationFailed(format!(
+                "Failed to create BitcoinSealProtocol for ChainBackend: {}",
+                e
+            ))
+        })?;
         let seal_arc = Arc::new(seal);
 
         // Load UTXO data for every registered sanad_seal from RPC (needed for spending)
-        if has_sanad_seals
-            && let Err(e) = seal_arc.load_sanad_seal_utxos().await {
-                log::warn!("Failed to load sanad seal UTXOs: {}", e);
-            }
+        if has_sanad_seals && let Err(e) = seal_arc.load_sanad_seal_utxos().await {
+            log::warn!("Failed to load sanad seal UTXOs: {}", e);
+        }
 
         let chain_backend: Arc<dyn ChainBackend> = Arc::new(
-            BitcoinBackend::from_seal_protocol(Arc::clone(&seal_arc))
-                .map_err(|e| FactoryError::CreationFailed(format!("Failed to create BitcoinBackend: {}", e)))?
+            BitcoinBackend::from_seal_protocol(Arc::clone(&seal_arc)).map_err(|e| {
+                FactoryError::CreationFailed(format!("Failed to create BitcoinBackend: {}", e))
+            })?,
         );
 
         // Create ChainAdapter from the SAME seal_arc — shares the wallet + sanad_seals
         let btc_network_for_runtime = network.to_bitcoin_network();
-        let rpc_adapter = rpc_backend.build_rpc(
-            rpc_endpoint.url.clone(),
-            rpc_endpoint.api_key.clone(),
-        );
+        let rpc_adapter =
+            rpc_backend.build_rpc(rpc_endpoint.url.clone(), rpc_endpoint.api_key.clone());
 
-        let chain_adapter: Box<dyn ChainAdapter> = Box::new(
-            BitcoinRuntimeAdapter::from_seal_protocol(
+        let chain_adapter: Box<dyn ChainAdapter> =
+            Box::new(BitcoinRuntimeAdapter::from_seal_protocol(
                 btc_network_for_runtime,
                 Arc::clone(&seal_arc),
                 rpc_adapter,
-            )
-        );
+            ));
 
         Ok(AdapterResult {
             chain_backend,

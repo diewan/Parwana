@@ -5,16 +5,15 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
-    CrossChainTransfer,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
 };
-use csv_protocol::finality::capabilities::{
-    ChainCapabilities, StateModel, FinalityModel, ProofModel, 
-    ReplayProtectionModel, ReorgRisk, ChainRole
-};
-use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::chain_adapter_traits::ChainBackend;
+use csv_protocol::finality::capabilities::{
+    ChainCapabilities, ChainRole, FinalityModel, ProofModel, ReorgRisk, ReplayProtectionModel,
+    StateModel,
+};
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
 use crate::ops::SolanaBackend;
@@ -77,17 +76,19 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         self.signature_scheme
     }
 
-    async fn lock_sanad(
-        &self,
-        transfer: &CrossChainTransfer,
-    ) -> Result<LockResult, AdapterError> {
+    async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError> {
         use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
 
-        let result = self.backend
-            .lock_sanad(&sanad_id, destination_chain, "0x0000000000000000000000000000000000000000000000000000000000000000")
+        let result = self
+            .backend
+            .lock_sanad(
+                &sanad_id,
+                destination_chain,
+                "0x0000000000000000000000000000000000000000000000000000000000000000",
+            )
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to lock sanad: {}", e)))?;
 
@@ -114,21 +115,30 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         use csv_protocol::proof_taxonomy::ProofBundle;
         use solana_sdk::instruction::Instruction;
-        use solana_sdk::transaction::Transaction;
         use solana_sdk::pubkey::Pubkey;
+        use solana_sdk::transaction::Transaction;
         use std::str::FromStr;
 
         // Deserialize the proof bundle
-        let proof_bundle = ProofBundle::from_canonical_bytes(proof_bundle).map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
-            .map_err(|e| AdapterError::Generic(format!("Failed to deserialize proof bundle: {}", e)))?;
+        let proof_bundle = ProofBundle::from_canonical_bytes(proof_bundle)
+            .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
+            .map_err(|e| {
+                AdapterError::Generic(format!("Failed to deserialize proof bundle: {}", e))
+            })?;
 
         // Get the program ID from backend seal_protocol config
         let program_id = Pubkey::from_str(&self.backend.seal_protocol().config.csv_program_id)
             .map_err(|e| AdapterError::Generic(format!("Invalid program ID: {}", e)))?;
 
         // Get the wallet for signing from backend seal_protocol
-        let wallet = self.backend.seal_protocol().wallet.as_ref()
-            .ok_or_else(|| AdapterError::Generic("Wallet not configured for mint operation".to_string()))?;
+        let wallet = self
+            .backend
+            .seal_protocol()
+            .wallet
+            .as_ref()
+            .ok_or_else(|| {
+                AdapterError::Generic("Wallet not configured for mint operation".to_string())
+            })?;
 
         // Build the mint instruction
         // The mint instruction should include:
@@ -146,11 +156,9 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         instruction_data.extend_from_slice(commitment_bytes);
 
         // Derive the PDA for the sanad account
-        let sanad_pda = Pubkey::create_with_seed(
-            &wallet.pubkey(),
-            &hex::encode(sanad_id_bytes),
-            &program_id,
-        ).map_err(|e| AdapterError::Generic(format!("Failed to derive PDA: {}", e)))?;
+        let sanad_pda =
+            Pubkey::create_with_seed(&wallet.pubkey(), &hex::encode(sanad_id_bytes), &program_id)
+                .map_err(|e| AdapterError::Generic(format!("Failed to derive PDA: {}", e)))?;
 
         // Build the instruction
         let instruction = Instruction {
@@ -158,14 +166,19 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             accounts: vec![
                 solana_sdk::instruction::AccountMeta::new(sanad_pda, false),
                 solana_sdk::instruction::AccountMeta::new(wallet.pubkey(), true),
-                solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::pubkey::Pubkey::from([0u8; 32]), false),
+                solana_sdk::instruction::AccountMeta::new_readonly(
+                    solana_sdk::pubkey::Pubkey::from([0u8; 32]),
+                    false,
+                ),
             ],
             data: instruction_data,
         };
 
         // Get recent blockhash from backend RPC
-        let recent_blockhash = self.backend.rpc().get_recent_blockhash()
-            .map_err(|e| AdapterError::Generic(format!("Failed to get recent blockhash: {}", e)))?;
+        let recent_blockhash =
+            self.backend.rpc().get_recent_blockhash().map_err(|e| {
+                AdapterError::Generic(format!("Failed to get recent blockhash: {}", e))
+            })?;
 
         // Build and sign the transaction
         let transaction = Transaction::new_signed_with_payer(
@@ -176,11 +189,17 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         );
 
         // Send the transaction
-        let signature = self.backend.rpc().send_transaction(&transaction)
+        let signature = self
+            .backend
+            .rpc()
+            .send_transaction(&transaction)
             .map_err(|e| AdapterError::Generic(format!("Failed to send transaction: {}", e)))?;
 
         // Get the block height - use slot as proxy since get_block_height not available in SolanaRpc
-        let block_height = self.backend.rpc().get_latest_slot()
+        let block_height = self
+            .backend
+            .rpc()
+            .get_latest_slot()
             .map_err(|e| AdapterError::Generic(format!("Failed to get slot: {}", e)))?;
 
         Ok(MintResult {
@@ -194,19 +213,19 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        use csv_protocol::seal_protocol::SealProtocol;
         use crate::types::{SolanaCommitAnchor, SolanaSealPoint};
+        use csv_protocol::seal_protocol::SealProtocol;
 
         // Delegate to the seal_protocol's build_proof_bundle which constructs
         // proper proof bundles with real transaction signatures
         let commitment = transfer.sanad_id;
-        
+
         // Create a SolanaCommitAnchor from the lock result
         let tx_hash_bytes = hex::decode(&lock_result.tx_hash)
             .map_err(|e| AdapterError::Generic(format!("Failed to decode tx hash: {}", e)))?;
         let mut anchor_tx_hash = [0u8; 64];
         anchor_tx_hash[..tx_hash_bytes.len()].copy_from_slice(&tx_hash_bytes);
-        
+
         let anchor = SolanaCommitAnchor {
             signature: solana_sdk::signature::Signature::from(anchor_tx_hash),
             slot: lock_result.block_height,
@@ -216,7 +235,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         // Get the first active seal from the seal protocol
         let active_seals = self.backend.seal_protocol().get_active_seals();
-        let _seal_point = active_seals.first()
+        let _seal_point = active_seals
+            .first()
             .cloned()
             .unwrap_or_else(|| SolanaSealPoint {
                 account: solana_sdk::pubkey::Pubkey::default(),
@@ -229,12 +249,14 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         let dag_segment = csv_protocol::seal_protocol::DagSegment::new(
             commitment, // anchor_from (source commitment)
             commitment, // anchor_to (destination commitment, same for now)
-            vec![], // transition_data (empty for now)
-            vec![], // proof (empty for now)
+            vec![],     // transition_data (empty for now)
+            vec![],     // proof (empty for now)
         );
 
         // Build the proof bundle using the seal protocol
-        let proof_bundle = self.backend.seal_protocol()
+        let proof_bundle = self
+            .backend
+            .seal_protocol()
             .build_proof_bundle(anchor, dag_segment)
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))?;
@@ -254,26 +276,35 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         let finality_proof = &proof_bundle.finality_proof;
         let commitment = &transfer.sanad_id;
 
-        let is_valid = self.backend
+        let is_valid = self
+            .backend
             .verify_proof_bundle(inclusion_proof, finality_proof, commitment)
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to verify proof bundle: {}", e)))?;
 
         if !is_valid {
-            return Err(AdapterError::Generic("Proof bundle validation failed".to_string()));
+            return Err(AdapterError::Generic(
+                "Proof bundle validation failed".to_string(),
+            ));
         }
 
         Ok(())
     }
 
-    async fn check_seal_registry(&self, seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
+    async fn check_seal_registry(
+        &self,
+        seal_id: &[u8],
+    ) -> Result<SealRegistryStatus, AdapterError> {
         use solana_sdk::pubkey::Pubkey;
         use std::str::FromStr;
 
         // Solana uses PDA accounts as seals - check if the seal account exists on-chain
         // Parse the seal_id as a Pubkey (32 bytes)
         if seal_id.len() != 32 {
-            return Err(AdapterError::Generic(format!("Invalid seal_id length: expected 32, got {}", seal_id.len())));
+            return Err(AdapterError::Generic(format!(
+                "Invalid seal_id length: expected 32, got {}",
+                seal_id.len()
+            )));
         }
 
         let mut pubkey_bytes = [0u8; 32];
@@ -281,9 +312,10 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         let seal_pubkey = Pubkey::new_from_array(pubkey_bytes);
 
         // Query the account via RPC
-        let account = self.backend.rpc()
-            .get_account(&seal_pubkey)
-            .map_err(|e| AdapterError::Generic(format!("Failed to query seal account: {}", e)))?;
+        let account =
+            self.backend.rpc().get_account(&seal_pubkey).map_err(|e| {
+                AdapterError::Generic(format!("Failed to query seal account: {}", e))
+            })?;
 
         // Check if account exists and has lamports (unspent)
         if account.lamports == 0 {
@@ -293,9 +325,11 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         // Check if the account is owned by the CSV program
         let program_id = Pubkey::from_str(&self.backend.seal_protocol().config.csv_program_id)
             .map_err(|e| AdapterError::Generic(format!("Invalid program ID: {}", e)))?;
-        
+
         if account.owner != program_id {
-            return Err(AdapterError::Generic("Seal account not owned by CSV program".to_string()));
+            return Err(AdapterError::Generic(
+                "Seal account not owned by CSV program".to_string(),
+            ));
         }
 
         Ok(SealRegistryStatus::Available)
@@ -305,7 +339,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         use csv_protocol::chain_adapter_traits::ChainQuery;
 
         // Get balance using the backend's ChainQuery implementation
-        let balance_info = self.backend
+        let balance_info = self
+            .backend
             .get_balance(address)
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get balance: {}", e)))?;

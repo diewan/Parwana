@@ -375,7 +375,8 @@ impl HasErrorSuggestion for CsvError {
             }),
             Self::CoordinatorNotAvailable(_) => Some(FixAction::CheckState {
                 url: "https://docs.csv.dev/runtime-coordinator".to_string(),
-                what: "Enable runtime-coordinator feature and configure TransferCoordinator".to_string(),
+                what: "Enable runtime-coordinator feature and configure TransferCoordinator"
+                    .to_string(),
             }),
             _ => None,
         }

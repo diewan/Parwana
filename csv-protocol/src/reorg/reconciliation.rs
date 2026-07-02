@@ -288,7 +288,10 @@ impl<B: ChainBackendForReconciliation> ReconciliationEngine<B> {
                     transfer_id: transfer_id.to_string(),
                     valid: false,
                     canonical_block_height: None,
-                    error: Some(format!("Block {} not found on canonical chain: {}", block_height, e)),
+                    error: Some(format!(
+                        "Block {} not found on canonical chain: {}",
+                        block_height, e
+                    )),
                 });
             }
         };
@@ -540,8 +543,12 @@ impl<B: ChainBackendForReconciliation + Default> Default for ReconciliationEngin
 #[allow(missing_docs)]
 pub struct MockChainBackend {
     block_hashes: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, Hash>>>,
-    commitments: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, std::collections::HashSet<[u8; 32]>>>>,
-    valid_proofs: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, crate::proof_taxonomy::InclusionProof>>>,
+    commitments: std::sync::Arc<
+        std::sync::Mutex<std::collections::BTreeMap<u64, std::collections::HashSet<[u8; 32]>>>,
+    >,
+    valid_proofs: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<u64, crate::proof_taxonomy::InclusionProof>>,
+    >,
     proof_verification: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, bool>>>,
 }
 
@@ -679,7 +686,10 @@ mod tests {
         Hash(bytes)
     }
 
-    fn make_valid_proof(block_height: u64, commitment: &Hash) -> crate::proof_taxonomy::InclusionProof {
+    fn make_valid_proof(
+        block_height: u64,
+        commitment: &Hash,
+    ) -> crate::proof_taxonomy::InclusionProof {
         crate::proof_taxonomy::InclusionProof {
             proof_bytes: vec![1u8, 2, 3, 4],
             block_hash: Hash([block_height as u8; 32]),
@@ -721,7 +731,12 @@ mod tests {
 
         let engine = ReconciliationEngine::new(backend);
         let result = engine
-            .revalidate_proof_for_transfer("transfer-1", 101, "proof_building", &make_commitment([3u8; 32]))
+            .revalidate_proof_for_transfer(
+                "transfer-1",
+                101,
+                "proof_building",
+                &make_commitment([3u8; 32]),
+            )
             .await
             .unwrap();
 
@@ -785,9 +800,12 @@ mod tests {
 
         let mut engine = ReconciliationEngine::new(backend);
         let event = make_reorg_event(105, 101);
-        let affected = vec![
-            ("transfer-1".to_string(), "proof_building".to_string(), 101, commitment),
-        ];
+        let affected = vec![(
+            "transfer-1".to_string(),
+            "proof_building".to_string(),
+            101,
+            commitment,
+        )];
 
         let result = engine.reconcile(&event, &affected, true).await;
 
@@ -811,9 +829,12 @@ mod tests {
 
         // Use a different commitment that doesn't exist in the block
         let bad_commitment = make_commitment([4u8; 32]);
-        let affected = vec![
-            ("transfer-1".to_string(), "proof_building".to_string(), 101, bad_commitment),
-        ];
+        let affected = vec![(
+            "transfer-1".to_string(),
+            "proof_building".to_string(),
+            101,
+            bad_commitment,
+        )];
 
         let result = engine.reconcile(&event, &affected, true).await;
 
@@ -832,9 +853,12 @@ mod tests {
 
         let mut engine = ReconciliationEngine::new(backend);
         let event = make_reorg_event(105, 101);
-        let affected = vec![
-            ("transfer-1".to_string(), "proof_building".to_string(), 101, commitment),
-        ];
+        let affected = vec![(
+            "transfer-1".to_string(),
+            "proof_building".to_string(),
+            101,
+            commitment,
+        )];
 
         let result = engine.reconcile(&event, &affected, false).await;
 
@@ -856,9 +880,12 @@ mod tests {
         // Transfer at height 100 has a block hash that doesn't match the canonical chain
         // so it should be compromised
         let commitment = make_commitment([3u8; 32]);
-        let affected = vec![
-            ("transfer-1".to_string(), "proof_building".to_string(), 100, commitment),
-        ];
+        let affected = vec![(
+            "transfer-1".to_string(),
+            "proof_building".to_string(),
+            100,
+            commitment,
+        )];
 
         let result = engine.reconcile(&event, &affected, false).await;
 
@@ -882,7 +909,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!result.valid, "Proof revalidation should fail when commitment is not in block");
+        assert!(
+            !result.valid,
+            "Proof revalidation should fail when commitment is not in block"
+        );
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("not found"));
     }

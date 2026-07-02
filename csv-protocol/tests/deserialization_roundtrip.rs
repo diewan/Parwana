@@ -5,10 +5,10 @@
 //! - FinalityProof
 //! - TransferState
 
-use csv_protocol::proof_taxonomy::{InclusionProof, FinalityProof};
-use csv_protocol::cross_chain::TransferState;
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint;
+use csv_protocol::cross_chain::TransferState;
+use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 
 #[test]
 fn test_inclusion_proof_roundtrip() {
@@ -136,9 +136,7 @@ fn test_transfer_state_proof_ready_with_bundle_roundtrip() {
 
 #[test]
 fn test_transfer_state_proof_ready_without_bundle_roundtrip() {
-    let original = TransferState::ProofReady {
-        bundle_bytes: None,
-    };
+    let original = TransferState::ProofReady { bundle_bytes: None };
 
     let bytes = original.to_canonical_bytes().unwrap();
     let restored = TransferState::from_canonical_bytes(&bytes).unwrap();
@@ -160,9 +158,7 @@ fn test_transfer_state_minting_with_tx_roundtrip() {
 
 #[test]
 fn test_transfer_state_minting_without_tx_roundtrip() {
-    let original = TransferState::Minting {
-        dest_tx: None,
-    };
+    let original = TransferState::Minting { dest_tx: None };
 
     let bytes = original.to_canonical_bytes().unwrap();
     let restored = TransferState::from_canonical_bytes(&bytes).unwrap();

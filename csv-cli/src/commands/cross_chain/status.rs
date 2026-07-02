@@ -24,11 +24,13 @@ pub async fn cmd_status(
     // Try to get canonical transfer state from runtime (CLI-STATE-001)
     // For now, we display local state but label it as non-canonical
     // Full runtime-backed transfer state requires csv-runtime TransferCoordinator integration
-    
+
     if let Some(transfer) = state.get_transfer(&transfer_id_hash.to_string()) {
         output::header("📋 Cross-Chain Transfer Report");
         output::info("Source: Local display cache (non-canonical)");
-        output::info("Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration");
+        output::info(
+            "Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration",
+        );
 
         output::kv("Transfer ID", &hex::encode(transfer.id.as_bytes()));
         output::kv("Sanad ID", &hex::encode(transfer.sanad_id.as_bytes()));
@@ -85,7 +87,9 @@ pub async fn cmd_status(
 pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateManager) -> Result<()> {
     output::header("Cross-Chain Transfers");
     output::info("Source: Local display cache (non-canonical)");
-    output::info("Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration");
+    output::info(
+        "Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration",
+    );
 
     let headers = vec!["Transfer ID", "From", "To", "Sanad ID", "Status"];
     let mut rows = Vec::new();

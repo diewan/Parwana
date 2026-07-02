@@ -21,25 +21,39 @@ use csv_keys::{Mnemonic, MnemonicType, restore_from_mnemonic as csv_restore_from
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
     /// Signature capability unavailable for the specified chain
-    #[error("Signature capability unavailable for chain '{0}'. Enable the 'wallet' feature and chain-specific features. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    #[error(
+        "Signature capability unavailable for chain '{0}'. Enable the 'wallet' feature and chain-specific features. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+    )]
     UnsupportedChain(String),
     /// Bitcoin signature capability unavailable
-    #[error("Bitcoin signature capability unavailable. Enable the 'wallet' and 'bitcoin' features.")]
+    #[error(
+        "Bitcoin signature capability unavailable. Enable the 'wallet' and 'bitcoin' features."
+    )]
     BitcoinUnavailable,
     /// Ethereum signature capability unavailable
-    #[error("Ethereum signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    #[error(
+        "Ethereum signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+    )]
     EthereumUnavailable,
     /// Solana signature capability unavailable
-    #[error("Solana signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    #[error(
+        "Solana signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+    )]
     SolanaUnavailable,
     /// Sui signature capability unavailable
-    #[error("Sui signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    #[error(
+        "Sui signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+    )]
     SuiUnavailable,
     /// Aptos signature capability unavailable
-    #[error("Aptos signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    #[error(
+        "Aptos signature capability unavailable. Enable the 'wallet' feature. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+    )]
     AptosUnavailable,
     /// Signature derivation failed
-    #[error("Signature derivation failed for chain '{0}'. Enable the 'wallet' feature and ensure valid BIP-44 seed. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter.")]
+    #[error(
+        "Signature derivation failed for chain '{0}'. Enable the 'wallet' feature and ensure valid BIP-44 seed. For transaction signing, use CsvClient::chain_runtime() with configured chain adapter."
+    )]
     DerivationFailed(String),
 }
 
@@ -313,7 +327,7 @@ impl Wallet {
 
             // Create extended private key from seed (network-agnostic bip32 crate)
             let xprv = XPrv::new(self.seed).ok();
-            
+
             if let Some(xprv) = xprv {
                 // Derive child key
                 let mut derived = xprv;
@@ -328,28 +342,28 @@ impl Wallet {
                     }
                 }
                 let derived = if success { Some(derived) } else { None };
-                
+
                 if let Some(derived) = derived {
                     // Get the private key bytes
                     let priv_key_bytes = derived.private_key().to_bytes();
-                    
+
                     // Create signing key
                     if let Ok(signing_key) = SigningKey::from_bytes(&priv_key_bytes) {
                         // Get public key
                         let verifying_key = signing_key.verifying_key();
                         let pub_key_bytes = verifying_key.to_sec1_bytes();
-                        
+
                         // Skip the first byte (0x04 prefix) and hash the rest
                         let pub_key_no_prefix = &pub_key_bytes[1..];
                         let hash = Keccak256::digest(pub_key_no_prefix);
-                        
+
                         // Take last 20 bytes
                         let address_bytes = &hash[hash.len() - 20..];
                         return format!("0x{}", hex::encode(address_bytes));
                     }
                 }
             }
-            
+
             // Fallback if derivation fails
             format!("0x{}", hex::encode(&self.seed[0..20]))
         }
@@ -371,18 +385,19 @@ impl Wallet {
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
         {
-            use csv_keys::bip44;
             use csv_hash::chain_id::ChainId;
+            use csv_keys::bip44;
 
             // Use csv-keys bip44 for consistent SLIP-10 derivation
             let chain_id = ChainId::new("sui");
             let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
-            
+
             if let Ok(key) = secret_key
-                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
-                    return address;
+                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+            {
+                return address;
             }
-            
+
             // Fallback if derivation fails
             format!("0x{}", hex::encode(&self.seed[..32]))
         }
@@ -404,18 +419,19 @@ impl Wallet {
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
         {
-            use csv_keys::bip44;
             use csv_hash::chain_id::ChainId;
+            use csv_keys::bip44;
 
             // Use csv-keys bip44 for consistent SLIP-10 derivation
             let chain_id = ChainId::new("aptos");
             let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
-            
+
             if let Ok(key) = secret_key
-                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
-                    return address;
+                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+            {
+                return address;
             }
-            
+
             // Fallback if derivation fails
             format!("0x{}", hex::encode(&self.seed[..32]))
         }
@@ -436,18 +452,19 @@ impl Wallet {
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
         {
-            use csv_keys::bip44;
             use csv_hash::chain_id::ChainId;
+            use csv_keys::bip44;
 
             // Use csv-keys bip44 for consistent SLIP-10 derivation
             let chain_id = ChainId::new("solana");
             let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
-            
+
             if let Ok(key) = secret_key
-                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id) {
-                    return address;
+                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+            {
+                return address;
             }
-            
+
             // Fallback if derivation fails
             format!("sol:{}", hex::encode(&self.seed[..32]))
         }
@@ -460,7 +477,12 @@ impl Wallet {
 
     // -- Signing methods --
 
-    fn sign_bitcoin(&self, _message: &[u8; 32], _account: u32, _index: u32) -> Result<Vec<u8>, WalletError> {
+    fn sign_bitcoin(
+        &self,
+        _message: &[u8; 32],
+        _account: u32,
+        _index: u32,
+    ) -> Result<Vec<u8>, WalletError> {
         // Bitcoin Taproot signing (Schnorr)
         #[cfg(all(feature = "bitcoin", feature = "wallet"))]
         {
@@ -477,12 +499,17 @@ impl Wallet {
 
     #[allow(clippy::unwrap_used)]
     #[allow(unused_variables)]
-    fn sign_ethereum(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
+    fn sign_ethereum(
+        &self,
+        message: &[u8; 32],
+        account: u32,
+        index: u32,
+    ) -> Result<Vec<u8>, WalletError> {
         // Ethereum ECDSA signing
         #[cfg(feature = "wallet")]
         {
             use bip32::{DerivationPath, XPrv};
-            use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+            use k256::ecdsa::{Signature, SigningKey, signature::Signer};
             use std::str::FromStr;
 
             // Derive the BIP-32 path
@@ -527,7 +554,12 @@ impl Wallet {
 
     #[allow(clippy::unwrap_used)]
     #[allow(unused_variables)]
-    fn sign_solana(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
+    fn sign_solana(
+        &self,
+        message: &[u8; 32],
+        account: u32,
+        index: u32,
+    ) -> Result<Vec<u8>, WalletError> {
         // Solana Ed25519 signing
         #[cfg(feature = "wallet")]
         {
@@ -576,7 +608,12 @@ impl Wallet {
 
     #[allow(clippy::unwrap_used)]
     #[allow(unused_variables)]
-    fn sign_sui(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
+    fn sign_sui(
+        &self,
+        message: &[u8; 32],
+        account: u32,
+        index: u32,
+    ) -> Result<Vec<u8>, WalletError> {
         // Sui Ed25519 signing
         #[cfg(feature = "wallet")]
         {
@@ -626,7 +663,12 @@ impl Wallet {
 
     #[allow(clippy::unwrap_used)]
     #[allow(unused_variables)]
-    fn sign_aptos(&self, message: &[u8; 32], account: u32, index: u32) -> Result<Vec<u8>, WalletError> {
+    fn sign_aptos(
+        &self,
+        message: &[u8; 32],
+        account: u32,
+        index: u32,
+    ) -> Result<Vec<u8>, WalletError> {
         // Aptos Ed25519 signing
         #[cfg(feature = "wallet")]
         {

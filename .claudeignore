@@ -1,0 +1,43 @@
+# NOTE: Claude Code's file/search tools already respect .gitignore
+
+# The 95G of build output lives in target/ and is gitignored, so it is
+
+# excluded automatically. This file documents additional large / generated
+
+# / vendored paths to avoid loading, for tooling that honors .claudeignore
+
+# Rust / build artifacts (also gitignored)
+
+target/
+**/target/
+**/build/
+**/out/
+**/cache/
+Cargo.lock
+
+# Vendored / third-party source
+
+third_party/
+**/lib/forge-std/
+**/forge-std/
+
+# Chain-specific generated artifacts
+
+.aptos/
+test-ledger/
+**/Move.lock
+
+# Node / JS tooling (if present)
+
+node_modules/
+dist/
+coverage/
+
+# Logs, env, editor
+
+*.log
+.env
+.env.*
+.idea/
+.vscode/
+.qwen/

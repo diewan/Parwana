@@ -44,7 +44,9 @@ impl TransferRouter {
         let cell = self
             .cells
             .get(&transfer.destination_chain.parse::<u32>().unwrap_or(0))
-            .ok_or(RouterError::UnknownChain(transfer.destination_chain.parse::<u32>().unwrap_or(0)))?;
+            .ok_or(RouterError::UnknownChain(
+                transfer.destination_chain.parse::<u32>().unwrap_or(0),
+            ))?;
 
         cell.submit(CellTask::Process(transfer))
             .await

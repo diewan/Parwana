@@ -4,8 +4,8 @@
 //! layer between chain-specific proof formats and the protocol's verification logic.
 //! Chain-specific fields remain in adapters and never leak into protocol/verifier.
 
-use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
 use csv_codec::CodecError;
+use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
 use std::collections::HashMap;
 
 /// Canonical proof — protocol-agnostic proof representation.
@@ -67,7 +67,10 @@ impl CanonicalEncoding for CanonicalProof {
         }
     }
 
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
             EncodingFormat::ManualBinary => Self::decode_manual(bytes),
@@ -105,7 +108,9 @@ impl CanonicalEncoding for CanonicalProof {
         for _ in 0..proof_nodes_count {
             let node_len = ManualEncoder::decode_u32_le(bytes, &mut pos)? as usize;
             if bytes.len() < pos + node_len {
-                return Err(CodecError::DeserializationError("Insufficient bytes for proof node".to_string()));
+                return Err(CodecError::DeserializationError(
+                    "Insufficient bytes for proof node".to_string(),
+                ));
             }
             proof_nodes.push(bytes[pos..pos + node_len].to_vec());
             pos += node_len;
@@ -115,7 +120,12 @@ impl CanonicalEncoding for CanonicalProof {
         for _ in 0..metadata_count {
             let key = ManualEncoder::decode_bytes(bytes, &mut pos)?;
             let value = ManualEncoder::decode_bytes(bytes, &mut pos)?;
-            metadata.insert(String::from_utf8(key).map_err(|e| CodecError::DeserializationError(format!("Invalid metadata key: {}", e)))?, value);
+            metadata.insert(
+                String::from_utf8(key).map_err(|e| {
+                    CodecError::DeserializationError(format!("Invalid metadata key: {}", e))
+                })?,
+                value,
+            );
         }
         Ok(Self {
             block_height,
@@ -159,7 +169,12 @@ impl CanonicalEncoding for CanonicalProof {
         for _ in 0..metadata_count {
             let key = ManualEncoder::decode_bytes(bytes, &mut pos)?;
             let value = ManualEncoder::decode_bytes(bytes, &mut pos)?;
-            metadata.insert(String::from_utf8(key).map_err(|e| CodecError::DeserializationError(format!("Invalid metadata key: {}", e)))?, value);
+            metadata.insert(
+                String::from_utf8(key).map_err(|e| {
+                    CodecError::DeserializationError(format!("Invalid metadata key: {}", e))
+                })?,
+                value,
+            );
         }
         Ok(Self {
             block_height,

@@ -273,11 +273,11 @@ fn golden_typed_hash_serialization() {
         "SealHash serialization must be deterministic"
     );
 }
-// 
+//
 // // ===========================================================================
 // // Golden Vector 9: Empty Collections
 // // ===========================================================================
-// 
+//
 #[test]
 fn golden_empty_collections() {
     // Empty vec

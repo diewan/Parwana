@@ -33,6 +33,32 @@ pub enum CrossChainAction {
         /// Override finality depth for source chain (for testing)
         #[arg(long)]
         finality_depth: Option<u64>,
+        /// Poll-and-block: after locking, wait for the source-chain lock to
+        /// reach finality and complete the transfer in this invocation. Without
+        /// this flag the transfer locks, journals, and returns immediately with
+        /// an "awaiting finality" status to be finished later via `resume`.
+        #[arg(long)]
+        wait: bool,
+        /// Poll interval in seconds while `--wait` is set.
+        #[arg(long, default_value_t = 60)]
+        poll_interval_secs: u64,
+        /// Give up waiting after this many seconds while `--wait` is set.
+        #[arg(long, default_value_t = 3600)]
+        timeout_secs: u64,
+    },
+    /// Resume a locked transfer that is awaiting finality (no re-lock)
+    Resume {
+        /// Transfer ID returned when the transfer was started
+        transfer_id: String,
+        /// Poll-and-block from here until the transfer completes.
+        #[arg(long)]
+        wait: bool,
+        /// Poll interval in seconds while `--wait` is set.
+        #[arg(long, default_value_t = 60)]
+        poll_interval_secs: u64,
+        /// Give up waiting after this many seconds while `--wait` is set.
+        #[arg(long, default_value_t = 3600)]
+        timeout_secs: u64,
     },
     /// Check transfer status
     Status {
@@ -67,8 +93,35 @@ pub async fn execute(
             sanad_id,
             dest_owner,
             finality_depth,
-        } => transfer::cmd_transfer(from, to, sanad_id, dest_owner, finality_depth, config, state).await,
-        CrossChainAction::Status { transfer_id } => status::cmd_status(transfer_id, config, state).await,
+            wait,
+            poll_interval_secs,
+            timeout_secs,
+        } => {
+            let opts = transfer::WaitOpts::new(wait, poll_interval_secs, timeout_secs);
+            transfer::cmd_transfer(
+                from,
+                to,
+                sanad_id,
+                dest_owner,
+                finality_depth,
+                opts,
+                config,
+                state,
+            )
+            .await
+        }
+        CrossChainAction::Resume {
+            transfer_id,
+            wait,
+            poll_interval_secs,
+            timeout_secs,
+        } => {
+            let opts = transfer::WaitOpts::new(wait, poll_interval_secs, timeout_secs);
+            transfer::cmd_resume(transfer_id, opts, config, state).await
+        }
+        CrossChainAction::Status { transfer_id } => {
+            status::cmd_status(transfer_id, config, state).await
+        }
         CrossChainAction::List { from, to } => status::cmd_list(from, to, state),
         CrossChainAction::Retry { transfer_id } => status::cmd_retry(transfer_id, config, state),
     }

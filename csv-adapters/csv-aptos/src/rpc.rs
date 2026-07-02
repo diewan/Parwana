@@ -216,7 +216,9 @@ impl AptosResource {
                     return Ok(num);
                 }
                 if let Some(str) = value.as_str() {
-                    return str.parse::<u64>().map_err(|e| format!("Failed to parse {} as u64: {}", field_name, e));
+                    return str
+                        .parse::<u64>()
+                        .map_err(|e| format!("Failed to parse {} as u64: {}", field_name, e));
                 }
             }
             return Err(format!("Field '{}' not found in JSON data", field_name));

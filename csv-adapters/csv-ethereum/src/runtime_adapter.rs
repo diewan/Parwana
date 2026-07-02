@@ -5,13 +5,13 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
-    CrossChainTransfer,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
+    TxFinality,
 };
-use csv_protocol::finality::ChainCapabilities;
-use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery};
+use csv_protocol::finality::ChainCapabilities;
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
 use crate::ops::EthereumBackend;
@@ -58,18 +58,20 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         self.signature_scheme
     }
 
-    async fn lock_sanad(
-        &self,
-        transfer: &CrossChainTransfer,
-    ) -> Result<LockResult, AdapterError> {
+    async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError> {
         // Use the backend's lock_sanad method which properly constructs and signs the transaction
         use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
 
-        let result = self.backend
-            .lock_sanad(&sanad_id, destination_chain, "0x0000000000000000000000000000000000000000")
+        let result = self
+            .backend
+            .lock_sanad(
+                &sanad_id,
+                destination_chain,
+                "0x0000000000000000000000000000000000000000",
+            )
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to lock sanad: {}", e)))?;
 
@@ -96,8 +98,12 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 
         // Parse proof bundle to extract commitment and state_root
         // The proof bundle is CBOR-encoded ProofBundle
-        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle = ProofBundle::from_canonical_bytes(proof_bundle).map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
-            .map_err(|e| AdapterError::Generic(format!("Failed to decode proof bundle: {}", e)))?;
+        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
+            ProofBundle::from_canonical_bytes(proof_bundle)
+                .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
+                .map_err(|e| {
+                    AdapterError::Generic(format!("Failed to decode proof bundle: {}", e))
+                })?;
 
         // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])
         let mut commitment_bytes = [0u8; 32];
@@ -108,8 +114,14 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         // Use the inclusion_proof directly
         let inclusion_proof = &proof_bundle.inclusion_proof;
 
-        let result = self.backend
-            .mint_sanad(source_chain, &sanad_id, inclusion_proof, "0x0000000000000000000000000000000000000000")
+        let result = self
+            .backend
+            .mint_sanad(
+                source_chain,
+                &sanad_id,
+                inclusion_proof,
+                "0x0000000000000000000000000000000000000000",
+            )
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to mint sanad: {}", e)))?;
 
@@ -153,14 +165,18 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             .rpc()
             .get_transaction_receipt(txid_array)
             .await
-            .map_err(|e| AdapterError::Generic(format!(
-                "Cannot build inclusion proof: failed to fetch receipt for {}: {}",
-                lock_result.tx_hash, e
-            )))?
-            .ok_or_else(|| AdapterError::Generic(format!(
-                "Cannot build inclusion proof: no receipt found for lock tx {}",
-                lock_result.tx_hash
-            )))?;
+            .map_err(|e| {
+                AdapterError::Generic(format!(
+                    "Cannot build inclusion proof: failed to fetch receipt for {}: {}",
+                    lock_result.tx_hash, e
+                ))
+            })?
+            .ok_or_else(|| {
+                AdapterError::Generic(format!(
+                    "Cannot build inclusion proof: no receipt found for lock tx {}",
+                    lock_result.tx_hash
+                ))
+            })?;
 
         if receipt.status != 1 {
             return Err(AdapterError::ProofVerificationFailed(format!(
@@ -188,14 +204,21 @@ impl ChainAdapter for EthereumRuntimeAdapter {
                     && log.topics[0] == sanad_locked_sig
                     && log.topics[1] == *sanad_id_bytes
             })
-            .ok_or_else(|| AdapterError::ProofVerificationFailed(format!(
-                "Cannot build inclusion proof: no SanadLocked log for sanad {} in tx {}",
-                hex::encode(sanad_id_bytes), lock_result.tx_hash
-            )))?;
+            .ok_or_else(|| {
+                AdapterError::ProofVerificationFailed(format!(
+                    "Cannot build inclusion proof: no SanadLocked log for sanad {} in tx {}",
+                    hex::encode(sanad_id_bytes),
+                    lock_result.tx_hash
+                ))
+            })?;
 
         // Real finality evidence: confirmation depth measured against current
         // tip, enforced against the chain's configured finality depth.
-        let current_height = self.backend.rpc().block_number().await
+        let current_height = self
+            .backend
+            .rpc()
+            .block_number()
+            .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get block number: {}", e)))?;
         let required_depth = self.capabilities.finality_depth;
         let confirmations = current_height.saturating_sub(receipt.block_number);
@@ -227,12 +250,9 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         )
         .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
 
-        let finality_proof = FinalityProof::new(
-            confirmations.to_le_bytes().to_vec(),
-            confirmations,
-            true,
-        )
-        .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+        let finality_proof =
+            FinalityProof::new(confirmations.to_le_bytes().to_vec(), confirmations, true)
+                .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
 
         // The anchor is bound to the Sanad ID being transferred (required by
         // downstream binding checks), with the lock txid/log index carried as
@@ -247,12 +267,8 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         )
         .map_err(|e| AdapterError::Generic(format!("Invalid anchor reference: {}", e)))?;
 
-        let seal_ref = CoreSealPoint::new(
-            txid_array.to_vec(),
-            Some(lock_log.log_index),
-            None,
-        )
-        .map_err(|e| AdapterError::Generic(format!("Invalid seal reference: {}", e)))?;
+        let seal_ref = CoreSealPoint::new(txid_array.to_vec(), Some(lock_log.log_index), None)
+            .map_err(|e| AdapterError::Generic(format!("Invalid seal reference: {}", e)))?;
 
         // Real authorizing signature over the DAG root commitment, signed by
         // this backend's configured Ethereum signer (the same key that
@@ -337,7 +353,11 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         // source chain's contract state.
         #[cfg(feature = "rpc")]
         {
-            match self.backend.is_sanad_locked(transfer.sanad_id.as_bytes()).await {
+            match self
+                .backend
+                .is_sanad_locked(transfer.sanad_id.as_bytes())
+                .await
+            {
                 Ok(true) => {}
                 Ok(false) => {
                     return Err(AdapterError::ProofVerificationFailed(
@@ -361,6 +381,58 @@ impl ChainAdapter for EthereumRuntimeAdapter {
                     .to_string(),
             ))
         }
+    }
+
+    async fn tx_finality(&self, tx_hash: &str) -> Result<TxFinality, AdapterError> {
+        // Decode the lock txid the same way `build_inclusion_proof` does.
+        let lock_tx_bytes = hex::decode(tx_hash.trim_start_matches("0x"))
+            .map_err(|e| AdapterError::Generic(format!("Invalid tx hash: {}", e)))?;
+        if lock_tx_bytes.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid tx hash length: expected 32 bytes, got {}",
+                lock_tx_bytes.len()
+            )));
+        }
+        let mut txid_array = [0u8; 32];
+        txid_array.copy_from_slice(&lock_tx_bytes);
+
+        // No receipt yet → transaction is still unconfirmed / pending.
+        let receipt = match self.backend.rpc().get_transaction_receipt(txid_array).await {
+            Ok(Some(receipt)) => receipt,
+            Ok(None) => {
+                return Ok(TxFinality {
+                    block_height: 0,
+                    confirmations: 0,
+                });
+            }
+            Err(e) => {
+                return Err(AdapterError::RpcError(format!(
+                    "Failed to fetch receipt for {}: {}",
+                    tx_hash, e
+                )));
+            }
+        };
+        if receipt.status != 1 {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Lock tx {} reverted (status={})",
+                tx_hash, receipt.status
+            )));
+        }
+
+        let tip = self
+            .backend
+            .rpc()
+            .block_number()
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to get block number: {}", e)))?;
+        // Match `build_inclusion_proof`'s `tip - block_number` convention so the
+        // runtime finality gate agrees with the proof builder's own depth check.
+        let confirmations = tip.saturating_sub(receipt.block_number);
+
+        Ok(TxFinality {
+            block_height: receipt.block_number,
+            confirmations,
+        })
     }
 
     async fn check_seal_registry(
@@ -408,10 +480,12 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 #[cfg(feature = "rpc")]
 fn build_ethereum_signature(backend: &EthereumBackend, message: &[u8]) -> Vec<Vec<u8>> {
     if let Ok(sig) = backend.sign_message(message) {
-        let pk = backend.rpc().as_any()
+        let pk = backend
+            .rpc()
+            .as_any()
             .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
             .and_then(|node| node.public_key());
-        
+
         if let Some(pk_bytes) = pk {
             let mut encoded = Vec::with_capacity(4 + pk_bytes.len() + sig.len());
             encoded.extend_from_slice(&(pk_bytes.len() as u32).to_le_bytes());
@@ -633,13 +707,8 @@ mod tests {
         use csv_hash::seal::{CommitAnchor, SealPoint};
         use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 
-        let inclusion_proof = InclusionProof::new(
-            vec![0xABu8; 32],
-            Hash::new([3u8; 32]),
-            100,
-            0,
-        )
-        .unwrap();
+        let inclusion_proof =
+            InclusionProof::new(vec![0xABu8; 32], Hash::new([3u8; 32]), 100, 0).unwrap();
         let finality_proof = FinalityProof::new(vec![], confirmations, true).unwrap();
         let anchor_ref = CommitAnchor::new(sanad_id.as_bytes().to_vec(), 100, vec![]).unwrap();
         let seal_ref = SealPoint::new(vec![0xAAu8; 32], Some(0), None).unwrap();
@@ -672,8 +741,13 @@ mod tests {
         // Proof bundle bound to a *different* sanad ID than the transfer.
         let proof_bundle = test_proof_bundle(Hash::new([9u8; 32]), 20);
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        assert!(result.is_err(), "must reject a proof bound to a different sanad");
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
+        assert!(
+            result.is_err(),
+            "must reject a proof bound to a different sanad"
+        );
     }
 
     #[tokio::test]
@@ -685,7 +759,9 @@ mod tests {
         // Only 5 confirmations, but Ethereum requires 15.
         let proof_bundle = test_proof_bundle(sanad_id, 5);
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
         assert!(
             result.is_err(),
             "must reject a proof bundle that has not reached the chain's finality depth"
@@ -726,7 +802,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
         assert!(
             result.is_err(),
             "must reject a proof bundle with empty inclusion proof bytes"

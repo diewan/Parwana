@@ -7,9 +7,9 @@
 #![allow(missing_docs)]
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
-    CrossChainTransfer, ChainCapabilityPort, ChainLockPort, ChainMintPort,
-    ChainSealRegistryPort, ChainProofPort, ChainReadPort, AdapterRegistry as AdapterRegistryTrait,
+    AdapterError, AdapterRegistry as AdapterRegistryTrait, ChainAdapter, ChainCapabilityPort,
+    ChainLockPort, ChainMintPort, ChainProofPort, ChainReadPort, ChainSealRegistryPort,
+    CrossChainTransfer, LockResult, MintResult, SealRegistryStatus, TxFinality,
 };
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::proof_taxonomy::ProofBundle;
@@ -132,6 +132,10 @@ impl ChainReadPort for AdapterRegistryImpl {
         self.adapter(chain_id)?.confirm_tx(tx_hash).await
     }
 
+    async fn tx_finality(&self, chain_id: &str, tx_hash: &str) -> Result<TxFinality, AdapterError> {
+        self.adapter(chain_id)?.tx_finality(tx_hash).await
+    }
+
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError> {
         self.adapter(chain_id)?.get_balance(address).await
     }
@@ -192,6 +196,10 @@ impl AdapterRegistryTrait for AdapterRegistryImpl {
 
     async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError> {
         ChainReadPort::confirm_tx(self, chain_id, tx_hash).await
+    }
+
+    async fn tx_finality(&self, chain_id: &str, tx_hash: &str) -> Result<TxFinality, AdapterError> {
+        ChainReadPort::tx_finality(self, chain_id, tx_hash).await
     }
 
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError> {
@@ -262,14 +270,18 @@ mod tests {
                 vec![],
                 vec![],
             );
-            let seal_point = SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None)
-                .map_err(|e| AdapterError::Generic(format!("Invalid seal point: {}", e)))?;
+            let seal_point =
+                SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None)
+                    .map_err(|e| AdapterError::Generic(format!("Invalid seal point: {}", e)))?;
             let commit_anchor = CommitAnchor::new(vec![1u8; 32], 100, vec![])
                 .map_err(|e| AdapterError::Generic(format!("Invalid commit anchor: {}", e)))?;
-            let inclusion_proof = InclusionProof::new(vec![], csv_hash::Hash::new([1u8; 32]), 100, 0)
-                .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
-            let finality_proof = csv_protocol::proof_taxonomy::FinalityProof::new(vec![1u8; 32], 6, true)
-                .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+            let inclusion_proof =
+                InclusionProof::new(vec![], csv_hash::Hash::new([1u8; 32]), 100, 0).map_err(
+                    |e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)),
+                )?;
+            let finality_proof =
+                csv_protocol::proof_taxonomy::FinalityProof::new(vec![1u8; 32], 6, true)
+                    .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
             let proof_bundle = ProofBundle::new(
                 DAGSegment::new(vec![node], csv_hash::Hash::new([1u8; 32])),
                 vec![vec![0u8; 64]],

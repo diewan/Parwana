@@ -240,8 +240,8 @@ impl ProofValidator {
     /// Uses ordered hashing: the smaller hash is always on the left.
     /// Uses the MerkleCombine domain to match MerkleTree::combine_children.
     fn hash_pair(left: &[u8; 32], right: &[u8; 32]) -> Hash {
-        use csv_hash::tagged_hash::tagged_hash;
         use csv_hash::HashDomain;
+        use csv_hash::tagged_hash::tagged_hash;
         // Ordered hashing: min || max
         let (lo, hi) = if left <= right {
             (left, right)
@@ -278,9 +278,9 @@ impl ValidationResult {
     pub fn failure_reason(&self) -> Option<&'static str> {
         match self {
             ValidationResult::Valid => None,
-            ValidationResult::InvalidInclusionProof => {
-                Some("Inclusion proof Merkle verification failed: computed root does not match expected root")
-            }
+            ValidationResult::InvalidInclusionProof => Some(
+                "Inclusion proof Merkle verification failed: computed root does not match expected root",
+            ),
             ValidationResult::InvalidFinalityProof => {
                 Some("Finality proof structural validation failed: missing required fields")
             }
@@ -294,9 +294,9 @@ impl ValidationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_hash::merkle::MerkleTree;
-    use csv_protocol::{SealPoint, CommitAnchor, signature::SignatureScheme};
     use csv_hash::dag::DAGSegment;
+    use csv_hash::merkle::MerkleTree;
+    use csv_protocol::{CommitAnchor, SealPoint, signature::SignatureScheme};
 
     #[test]
     fn test_validate_inclusion_empty_siblings_leaf_equals_root() {
@@ -468,9 +468,7 @@ mod tests {
     #[test]
     fn test_validate_inclusion_with_real_merkle_tree() {
         // Create a Merkle tree with 4 leaves
-        let leaves: Vec<Hash> = (0..4)
-            .map(|i| Hash::new([i as u8; 32]))
-            .collect();
+        let leaves: Vec<Hash> = (0..4).map(|i| Hash::new([i as u8; 32])).collect();
         let tree = MerkleTree::from_leaves(leaves.clone()).expect("Failed to create MerkleTree");
         let root = tree.root;
 
@@ -489,9 +487,7 @@ mod tests {
     #[test]
     fn test_validate_bundle_valid() {
         // Create a valid inclusion proof
-        let leaves: Vec<Hash> = (0..4)
-            .map(|i| Hash::new([i as u8; 32]))
-            .collect();
+        let leaves: Vec<Hash> = (0..4).map(|i| Hash::new([i as u8; 32])).collect();
         let tree = MerkleTree::from_leaves(leaves.clone()).expect("Failed to create MerkleTree");
         let root = tree.root;
 
@@ -556,8 +552,16 @@ mod tests {
     #[test]
     fn test_validation_result_failure_reasons() {
         assert!(ValidationResult::Valid.failure_reason().is_none());
-        assert!(ValidationResult::InvalidInclusionProof.failure_reason().is_some());
-        assert!(ValidationResult::InvalidFinalityProof.failure_reason().is_some());
+        assert!(
+            ValidationResult::InvalidInclusionProof
+                .failure_reason()
+                .is_some()
+        );
+        assert!(
+            ValidationResult::InvalidFinalityProof
+                .failure_reason()
+                .is_some()
+        );
         assert!(ValidationResult::InvalidMaterial.failure_reason().is_some());
     }
 }

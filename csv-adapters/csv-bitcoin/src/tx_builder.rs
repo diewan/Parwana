@@ -10,8 +10,7 @@
 use bitcoin::hashes::Hash as _;
 use bitcoin::{
     Address, Amount, ScriptBuf, Sequence, TxIn, TxOut, Txid, absolute::LockTime,
-    consensus::encode::serialize as tx_serialize,
-    key::TapTweak,
+    consensus::encode::serialize as tx_serialize, key::TapTweak,
 };
 
 use crate::tapret::TapretCommitment;
@@ -159,7 +158,7 @@ impl CommitmentTxBuilder {
             input_utxos.push(utxo.clone());
             total_input += utxo.amount_sat;
         }
-        
+
         // Recalculate fee with final input count
         let fee = self.calculate_fee(input_utxos.len(), output_count);
 
@@ -172,7 +171,9 @@ impl CommitmentTxBuilder {
         }
 
         // Calculate change amount (from all inputs)
-        let change_amount = total_input.saturating_sub(fee).saturating_sub(commitment_value_sat);
+        let change_amount = total_input
+            .saturating_sub(fee)
+            .saturating_sub(commitment_value_sat);
 
         if !self.is_above_dust(commitment_value_sat) {
             return Err(TxBuilderError::OutputBelowDust {
@@ -257,9 +258,12 @@ impl CommitmentTxBuilder {
         let prevouts: Vec<bitcoin::TxOut> = input_utxos
             .iter()
             .map(|utxo| {
-                let key = wallet.derive_key(&utxo.path).unwrap_or_else(|_| seal_key.clone());
+                let key = wallet
+                    .derive_key(&utxo.path)
+                    .unwrap_or_else(|_| seal_key.clone());
                 let derived_script_pubkey = key.address.script_pubkey();
-                let input_script_pubkey = utxo.script_pubkey
+                let input_script_pubkey = utxo
+                    .script_pubkey
                     .as_ref()
                     .unwrap_or(&derived_script_pubkey);
                 bitcoin::TxOut {
@@ -273,12 +277,14 @@ impl CommitmentTxBuilder {
 
         for (i, utxo) in input_utxos.iter().enumerate() {
             // Derive key for this input
-            let input_key = wallet.derive_key(&utxo.path)
-                .map_err(|e| TxBuilderError::WalletError(format!("Failed to derive key for input {}: {}", i, e)))?;
+            let input_key = wallet.derive_key(&utxo.path).map_err(|e| {
+                TxBuilderError::WalletError(format!("Failed to derive key for input {}: {}", i, e))
+            })?;
 
             // Get scriptPubKey for this input
             let derived_script_pubkey = input_key.address.script_pubkey();
-            let _input_script_pubkey = utxo.script_pubkey
+            let _input_script_pubkey = utxo
+                .script_pubkey
                 .as_ref()
                 .unwrap_or(&derived_script_pubkey);
 
@@ -301,7 +307,12 @@ impl CommitmentTxBuilder {
                     &bitcoin::sighash::Prevouts::All(&prevouts_ref[..]),
                     bitcoin::sighash::TapSighashType::Default,
                 )
-                .map_err(|e| TxBuilderError::SighashFailed(format!("Failed to create sighash for input {}: {}", i, e)))?;
+                .map_err(|e| {
+                    TxBuilderError::SighashFailed(format!(
+                        "Failed to create sighash for input {}: {}",
+                        i, e
+                    ))
+                })?;
 
             let mut sighash_bytes = [0u8; 32];
             sighash_bytes.copy_from_slice(sighash.as_ref());
@@ -309,14 +320,24 @@ impl CommitmentTxBuilder {
             // Sign with the tweaked keypair for key-path spending
             let schnorr_sig = wallet
                 .sign_taproot_keypath(&utxo.path, &sighash_bytes)
-                .map_err(|e| TxBuilderError::WalletError(format!("Failed to sign input {}: {}", i, e)))?;
+                .map_err(|e| {
+                    TxBuilderError::WalletError(format!("Failed to sign input {}: {}", i, e))
+                })?;
 
             // CRITICAL: Pre-broadcast local signature verification for BIP-341/BIP-86
             // Verify the signature is valid before attempting to broadcast
-            let msg = secp256k1::Message::from_digest_slice(&sighash_bytes)
-                .map_err(|e| TxBuilderError::WalletError(format!("Failed to create message for verification: {}", e)))?;
-            let secret_key = wallet.derive_private_key(&utxo.path)
-                .map_err(|e| TxBuilderError::WalletError(format!("Failed to derive secret key for verification: {}", e)))?;
+            let msg = secp256k1::Message::from_digest_slice(&sighash_bytes).map_err(|e| {
+                TxBuilderError::WalletError(format!(
+                    "Failed to create message for verification: {}",
+                    e
+                ))
+            })?;
+            let secret_key = wallet.derive_private_key(&utxo.path).map_err(|e| {
+                TxBuilderError::WalletError(format!(
+                    "Failed to derive secret key for verification: {}",
+                    e
+                ))
+            })?;
             let kp = secp256k1::Keypair::from_secret_key(secp, &secret_key);
             let tweaked_kp = kp.tap_tweak(secp, None);
 
@@ -576,7 +597,14 @@ mod tests {
         let wallet = SealWallet::generate_random(Network::Regtest);
         let path = Bip86Path::external(0, 0);
         let seal_utxo = make_utxo(path.clone(), 500);
-        wallet.add_utxo_with_provenance(seal_utxo.outpoint, seal_utxo.amount_sat, path, None, None, UtxoProvenance::RpcWallet);
+        wallet.add_utxo_with_provenance(
+            seal_utxo.outpoint,
+            seal_utxo.amount_sat,
+            path,
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
 
         let builder = CommitmentTxBuilder::new([0xAB; 32], 10);
         let result = builder.build_commitment_tx(&wallet, &seal_utxo, [0xCD; 32], None);
@@ -592,7 +620,8 @@ mod tests {
         let path2 = Bip86Path::external(0, 1);
 
         // Add a spendable UTXO
-        let spendable_txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x01; 32]));
+        let spendable_txid =
+            Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x01; 32]));
         let spendable_utxo = WalletUtxo {
             outpoint: OutPoint::new(spendable_txid, 0),
             amount_sat: 100_000,
@@ -603,10 +632,18 @@ mod tests {
             sanad_id: None,
             provenance: UtxoProvenance::RpcWallet,
         };
-        wallet.add_utxo_with_provenance(spendable_utxo.outpoint, spendable_utxo.amount_sat, spendable_utxo.path.clone(), None, None, UtxoProvenance::RpcWallet);
+        wallet.add_utxo_with_provenance(
+            spendable_utxo.outpoint,
+            spendable_utxo.amount_sat,
+            spendable_utxo.path.clone(),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
 
         // Add a SanadAnchor UTXO (should never be selected)
-        let anchor_txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x02; 32]));
+        let anchor_txid =
+            Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x02; 32]));
         let anchor_utxo = WalletUtxo {
             outpoint: OutPoint::new(anchor_txid, 0),
             amount_sat: 1_000_000,
@@ -617,7 +654,14 @@ mod tests {
             sanad_id: None,
             provenance: UtxoProvenance::SanadAnchor,
         };
-        wallet.add_utxo_with_provenance(anchor_utxo.outpoint, anchor_utxo.amount_sat, anchor_utxo.path.clone(), None, None, UtxoProvenance::SanadAnchor);
+        wallet.add_utxo_with_provenance(
+            anchor_utxo.outpoint,
+            anchor_utxo.amount_sat,
+            anchor_utxo.path.clone(),
+            None,
+            None,
+            UtxoProvenance::SanadAnchor,
+        );
 
         let builder = CommitmentTxBuilder::new([0xAB; 32], 10);
         let result = builder.build_commitment_tx(&wallet, &spendable_utxo, [0xCD; 32], None);
@@ -638,7 +682,8 @@ mod tests {
         let path2 = Bip86Path::external(0, 1);
 
         // Add a spendable UTXO
-        let spendable_txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x01; 32]));
+        let spendable_txid =
+            Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x01; 32]));
         let spendable_utxo = WalletUtxo {
             outpoint: OutPoint::new(spendable_txid, 0),
             amount_sat: 100_000,
@@ -649,10 +694,18 @@ mod tests {
             sanad_id: None,
             provenance: UtxoProvenance::RpcWallet,
         };
-        wallet.add_utxo_with_provenance(spendable_utxo.outpoint, spendable_utxo.amount_sat, spendable_utxo.path.clone(), None, None, UtxoProvenance::RpcWallet);
+        wallet.add_utxo_with_provenance(
+            spendable_utxo.outpoint,
+            spendable_utxo.amount_sat,
+            spendable_utxo.path.clone(),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
 
         // Add a ConsumedSeal UTXO (should never be selected)
-        let consumed_txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x03; 32]));
+        let consumed_txid =
+            Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0x03; 32]));
         let consumed_utxo = WalletUtxo {
             outpoint: OutPoint::new(consumed_txid, 0),
             amount_sat: 1_000_000,
@@ -663,7 +716,14 @@ mod tests {
             sanad_id: None,
             provenance: UtxoProvenance::ConsumedSeal,
         };
-        wallet.add_utxo_with_provenance(consumed_utxo.outpoint, consumed_utxo.amount_sat, consumed_utxo.path.clone(), None, None, UtxoProvenance::ConsumedSeal);
+        wallet.add_utxo_with_provenance(
+            consumed_utxo.outpoint,
+            consumed_utxo.amount_sat,
+            consumed_utxo.path.clone(),
+            None,
+            None,
+            UtxoProvenance::ConsumedSeal,
+        );
 
         let builder = CommitmentTxBuilder::new([0xAB; 32], 10);
         let result = builder.build_commitment_tx(&wallet, &spendable_utxo, [0xCD; 32], None);
@@ -690,7 +750,14 @@ mod tests {
         utxo.script_pubkey = Some(wrong_key.address.script_pubkey()); // Script from wrong path
         utxo.provenance = UtxoProvenance::RpcWallet;
 
-        wallet.add_utxo_with_provenance(utxo.outpoint, utxo.amount_sat, utxo.path.clone(), utxo.script_pubkey.clone(), None, UtxoProvenance::RpcWallet);
+        wallet.add_utxo_with_provenance(
+            utxo.outpoint,
+            utxo.amount_sat,
+            utxo.path.clone(),
+            utxo.script_pubkey.clone(),
+            None,
+            UtxoProvenance::RpcWallet,
+        );
 
         let builder = CommitmentTxBuilder::new([0xAB; 32], 10);
         let result = builder.build_commitment_tx(&wallet, &utxo, [0xCD; 32], None);

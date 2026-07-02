@@ -92,12 +92,20 @@ impl SlotProof {
         let mut proof_data = Vec::with_capacity(128);
         proof_data.extend_from_slice(&self.slot.to_le_bytes());
         proof_data.extend_from_slice(self.signature.as_ref());
-        let block_hash: Hash = self.block_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        let block_hash: Hash = self
+            .block_hash
+            .clone()
+            .try_into()
+            .unwrap_or_else(|_| Hash::zero());
         proof_data.extend_from_slice(block_hash.as_bytes());
         proof_data.extend_from_slice(&self.confirmations.to_le_bytes());
         proof_data.push(if self.finalized { 1u8 } else { 0u8 });
         proof_data.extend_from_slice(commitment.as_bytes());
-        let instruction_data_hash: Hash = self.instruction_data_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        let instruction_data_hash: Hash = self
+            .instruction_data_hash
+            .clone()
+            .try_into()
+            .unwrap_or_else(|_| Hash::zero());
         proof_data.extend_from_slice(instruction_data_hash.as_bytes());
 
         // Position equals slot for Solana slot-based proofs
@@ -188,7 +196,11 @@ impl AccountProof {
         let mut hasher = Sha256::new();
         hasher.update(&self.data);
         let computed_hash = Hash::new(hasher.finalize().into());
-        let data_hash: Hash = self.data_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        let data_hash: Hash = self
+            .data_hash
+            .clone()
+            .try_into()
+            .unwrap_or_else(|_| Hash::zero());
         computed_hash == data_hash
     }
 }
@@ -217,7 +229,11 @@ impl MultiAccountProof {
         hasher.update([if finalized { 1u8 } else { 0u8 }]);
         for account in &accounts {
             hasher.update(account.pubkey.as_ref());
-            let data_hash: Hash = account.data_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+            let data_hash: Hash = account
+                .data_hash
+                .clone()
+                .try_into()
+                .unwrap_or_else(|_| Hash::zero());
             hasher.update(data_hash.as_bytes());
         }
         let slot_hash = HashWire::from(Hash::new(hasher.finalize().into()));

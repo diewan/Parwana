@@ -11,7 +11,7 @@ use csv_wallet::wallet_traits::WalletOperations;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use secp256k1::{Secp256k1, SecretKey, PublicKey as SecpPublicKey};
+use secp256k1::{PublicKey as SecpPublicKey, Secp256k1, SecretKey};
 
 #[cfg(feature = "rpc")]
 use k256::ecdsa::SigningKey;
@@ -68,9 +68,9 @@ impl EthereumWalletOperations {
     /// Get the RPC client if configured
     #[cfg(feature = "rpc")]
     fn rpc_client(&self) -> Result<&Arc<ReqwestClient>, WalletError> {
-        self.rpc_client.as_ref().ok_or_else(|| {
-            WalletError::RpcNotConfigured("Ethereum".to_string())
-        })
+        self.rpc_client
+            .as_ref()
+            .ok_or_else(|| WalletError::RpcNotConfigured("Ethereum".to_string()))
     }
 }
 
@@ -118,33 +118,33 @@ impl WalletOperations for EthereumWalletOperations {
         {
             let client = self.rpc_client()?;
             let url = self.network.rpc_url();
-            
+
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_getBalance",
                 "params": [address, "latest"],
                 "id": 1
             });
-            
+
             let response = client
                 .post(url)
                 .json(&request)
                 .send()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to get balance: {}", e)))?;
-            
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             let balance = data["result"]
                 .as_str()
                 .ok_or_else(|| WalletError::RpcError("No balance in response".to_string()))?;
-            
+
             Ok(balance.to_string())
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Ethereum".to_string()))
@@ -165,19 +165,21 @@ impl WalletOperations for EthereumWalletOperations {
             }
 
             // Derive secp256k1 private key from seed
-            let secret_key = SecretKey::from_slice(&seed_array[..32])
-                .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive private key: {}", e)))?;
-            
+            let secret_key = SecretKey::from_slice(&seed_array[..32]).map_err(|e| {
+                WalletError::KeyDerivation(format!("Failed to derive private key: {}", e))
+            })?;
+
             let secp = Secp256k1::new();
             let _public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
-            
+
             // Sign the transaction data (simplified - in production would use proper Ethereum transaction signing)
-            let signing_key = SigningKey::from_slice(&seed_array[..32])
-                .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive signing key: {}", e)))?;
-            
+            let signing_key = SigningKey::from_slice(&seed_array[..32]).map_err(|e| {
+                WalletError::KeyDerivation(format!("Failed to derive signing key: {}", e))
+            })?;
+
             use k256::ecdsa::signature::Signer;
             let signature: k256::ecdsa::Signature = signing_key.sign(tx_data);
-            
+
             Ok(signature.to_bytes().to_vec())
         }
 
@@ -192,84 +194,95 @@ impl WalletOperations for EthereumWalletOperations {
         {
             let client = self.rpc_client()?;
             let url = self.network.rpc_url();
-            
+
             let tx_hex = hex::encode(signed_tx);
-            
+
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_sendRawTransaction",
                 "params": [format!("0x{}", tx_hex)],
                 "id": 1
             });
-            
-            let response = client
-                .post(url)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
-            
+
+            let response = client.post(url).json(&request).send().await.map_err(|e| {
+                WalletError::RpcError(format!("Failed to broadcast transaction: {}", e))
+            })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
-            let tx_hash = data["result"]
-                .as_str()
-                .ok_or_else(|| WalletError::RpcError("No transaction hash in response".to_string()))?;
-            
+
+            let tx_hash = data["result"].as_str().ok_or_else(|| {
+                WalletError::RpcError("No transaction hash in response".to_string())
+            })?;
+
             Ok(tx_hash.to_string())
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Ethereum".to_string()))
         }
     }
 
-    async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
+    async fn get_transaction_status(
+        &self,
+        tx_hash: &str,
+    ) -> Result<HashMap<String, String>, WalletError> {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
             let url = self.network.rpc_url();
-            
+
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_getTransactionReceipt",
                 "params": [tx_hash],
                 "id": 1
             });
-            
-            let response = client
-                .post(url)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to get transaction: {}", e)))?;
-            
+
+            let response =
+                client.post(url).json(&request).send().await.map_err(|e| {
+                    WalletError::RpcError(format!("Failed to get transaction: {}", e))
+                })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             let mut status = HashMap::new();
             status.insert("txid".to_string(), tx_hash.to_string());
-            
+
             if let Some(receipt) = data["result"].as_object() {
                 let success = receipt["status"]
                     .as_str()
                     .map(|s| s == "0x1")
                     .unwrap_or(false);
-                status.insert("status".to_string(), if success { "success".to_string() } else { "failed".to_string() });
-                status.insert("block_number".to_string(), receipt["blockNumber"].as_str().unwrap_or("0").to_string());
-                status.insert("gas_used".to_string(), receipt["gasUsed"].as_str().unwrap_or("0").to_string());
+                status.insert(
+                    "status".to_string(),
+                    if success {
+                        "success".to_string()
+                    } else {
+                        "failed".to_string()
+                    },
+                );
+                status.insert(
+                    "block_number".to_string(),
+                    receipt["blockNumber"].as_str().unwrap_or("0").to_string(),
+                );
+                status.insert(
+                    "gas_used".to_string(),
+                    receipt["gasUsed"].as_str().unwrap_or("0").to_string(),
+                );
             } else {
                 status.insert("status".to_string(), "pending".to_string());
             }
-            
+
             Ok(status)
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Ethereum".to_string()))

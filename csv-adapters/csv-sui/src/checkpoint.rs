@@ -40,10 +40,7 @@ impl CheckpointInfo {
 #[async_trait]
 pub trait CheckpointVerifierTrait: Send + Sync {
     /// Check if a checkpoint is certified.
-    async fn is_checkpoint_certified(
-        &self,
-        checkpoint_seq: u64,
-    ) -> SuiResult<CheckpointInfo>;
+    async fn is_checkpoint_certified(&self, checkpoint_seq: u64) -> SuiResult<CheckpointInfo>;
 
     /// Check if a transaction's checkpoint is finalized.
     async fn is_tx_finalized(&self, tx_checkpoint: u64) -> SuiResult<bool>;
@@ -101,42 +98,51 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
     ///
     /// # Returns
     /// `Ok(CheckpointInfo)` with certification details, or `Err` on failure.
-    async fn is_checkpoint_certified(
-        &self,
-        checkpoint_seq: u64,
-    ) -> SuiResult<CheckpointInfo> {
+    async fn is_checkpoint_certified(&self, checkpoint_seq: u64) -> SuiResult<CheckpointInfo> {
         let client = self.node.client();
         let mut client_guard = client.lock().await;
-        
+
         // Use sui-rust-sdk to get checkpoint by sequence number
         use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
-        
+
         let checkpoint_request = GetCheckpointRequest::by_sequence_number(checkpoint_seq);
-        
+
         let checkpoint_response = (*client_guard)
             .ledger_client()
             .get_checkpoint(checkpoint_request)
             .await
             .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get checkpoint: {}", e)))?;
-        
+
         let checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
             SuiError::CheckpointFailed("Checkpoint not found in response".to_string())
         })?;
-        
-        let digest_bytes = checkpoint.digest.map(|d| hex::decode(d.trim_start_matches("0x"))).unwrap_or(Ok(vec![])).unwrap_or_default();
+
+        let digest_bytes = checkpoint
+            .digest
+            .map(|d| hex::decode(d.trim_start_matches("0x")))
+            .unwrap_or(Ok(vec![]))
+            .unwrap_or_default();
         let mut digest = [0u8; 32];
         if digest_bytes.len() >= 32 {
             digest.copy_from_slice(&digest_bytes[..32]);
         }
-        
-        let epoch = checkpoint.summary.as_ref().and_then(|s| s.epoch).unwrap_or(0);
+
+        let epoch = checkpoint
+            .summary
+            .as_ref()
+            .and_then(|s| s.epoch)
+            .unwrap_or(0);
         let is_certified = checkpoint.signature.is_some();
-        
+
         Ok(CheckpointInfo {
             sequence_number: checkpoint.sequence_number.unwrap_or(0),
             epoch,
             digest,
-            total_transactions: checkpoint.summary.as_ref().and_then(|s| s.total_network_transactions).unwrap_or(0),
+            total_transactions: checkpoint
+                .summary
+                .as_ref()
+                .and_then(|s| s.total_network_transactions)
+                .unwrap_or(0),
             is_certified,
         })
     }
@@ -151,22 +157,24 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
     async fn latest_certified_checkpoint(&self) -> SuiResult<Option<u64>> {
         let client = self.node.client();
         let mut client_guard = client.lock().await;
-        
+
         // Use sui-rust-sdk to get latest checkpoint
         use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
-        
+
         let checkpoint_request = GetCheckpointRequest::latest();
-        
+
         let checkpoint_response = (*client_guard)
             .ledger_client()
             .get_checkpoint(checkpoint_request)
             .await
-            .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e)))?;
-        
+            .map_err(|e| {
+                SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e))
+            })?;
+
         let latest_checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
             SuiError::CheckpointFailed("Checkpoint not found in response".to_string())
         })?;
-        
+
         Ok(Some(latest_checkpoint.sequence_number.unwrap_or(0)))
     }
 
@@ -174,23 +182,29 @@ impl CheckpointVerifierTrait for CheckpointVerifier {
     async fn current_epoch(&self) -> SuiResult<u64> {
         let client = self.node.client();
         let mut client_guard = client.lock().await;
-        
+
         // Use sui-rust-sdk to get latest checkpoint
         use sui_rpc::proto::sui::rpc::v2::GetCheckpointRequest;
-        
+
         let checkpoint_request = GetCheckpointRequest::latest();
-        
+
         let checkpoint_response = (*client_guard)
             .ledger_client()
             .get_checkpoint(checkpoint_request)
             .await
-            .map_err(|e| SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e)))?;
-        
+            .map_err(|e| {
+                SuiError::CheckpointFailed(format!("Failed to get latest checkpoint: {}", e))
+            })?;
+
         let latest_checkpoint = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
             SuiError::CheckpointFailed("Checkpoint not found in response".to_string())
         })?;
-        
-        Ok(latest_checkpoint.summary.as_ref().and_then(|s| s.epoch).unwrap_or(0))
+
+        Ok(latest_checkpoint
+            .summary
+            .as_ref()
+            .and_then(|s| s.epoch)
+            .unwrap_or(0))
     }
 
     /// Verify that an epoch boundary has passed.
@@ -204,6 +218,8 @@ impl Default for CheckpointVerifier {
     fn default() -> Self {
         // Default requires a node, so this is a placeholder
         // In practice, users should call CheckpointVerifier::new(node)
-        panic!("CheckpointVerifier::default() requires a SuiNode. Use CheckpointVerifier::new(node) instead.")
+        panic!(
+            "CheckpointVerifier::default() requires a SuiNode. Use CheckpointVerifier::new(node) instead."
+        )
     }
 }

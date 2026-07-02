@@ -7,8 +7,10 @@ use async_trait::async_trait;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as ProtocolResult;
 use csv_protocol::signature::SignatureScheme;
-use csv_wallet::{Signer, SignerRef, Signature as WalletSignature, WalletError, Result as WalletResult};
-use secrecy::{SecretVec, ExposeSecret};
+use csv_wallet::{
+    Result as WalletResult, Signature as WalletSignature, Signer, SignerRef, WalletError,
+};
+use secrecy::{ExposeSecret, SecretVec};
 use std::fmt;
 
 /// Ethereum Signer implementation using csv-wallet Signer trait
@@ -35,10 +37,10 @@ impl EthereumSigner {
         let secp = secp256k1::Secp256k1::new();
         let secret_key_obj = secp256k1::SecretKey::from_slice(&secret_key)
             .map_err(|e| ProtocolError::InvalidInput(format!("Invalid private key: {}", e)))?;
-        
+
         let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key_obj);
         let public_key_bytes = public_key.serialize_uncompressed();
-        
+
         // Derive Ethereum address from public key (last 20 bytes of keccak256 hash)
         use sha3::{Digest, Keccak256};
         let hash = Keccak256::digest(&public_key_bytes[1..]); // Skip uncompressed prefix
@@ -61,19 +63,22 @@ impl EthereumSigner {
 #[async_trait]
 impl Signer for EthereumSigner {
     async fn sign(&self, message: &[u8]) -> WalletResult<WalletSignature> {
-        use secp256k1::{Secp256k1, SecretKey, Message};
-        
+        use secp256k1::{Message, Secp256k1, SecretKey};
+
         let secret_key = SecretKey::from_slice(self.secret_key.expose_secret())
             .map_err(|e| WalletError::Signing(format!("Invalid secret key: {}", e)))?;
-        
+
         let secp = Secp256k1::new();
         let msg = Message::from_digest_slice(message)
             .map_err(|e| WalletError::Signing(format!("Invalid message: {}", e)))?;
-        
+
         let signature = secp.sign_ecdsa(&msg, &secret_key);
         let sig_bytes = signature.serialize_compact();
-        
-        Ok(WalletSignature::new(sig_bytes.to_vec(), SignatureScheme::Secp256k1))
+
+        Ok(WalletSignature::new(
+            sig_bytes.to_vec(),
+            SignatureScheme::Secp256k1,
+        ))
     }
 
     fn public_key(&self) -> &[u8] {
@@ -201,7 +206,9 @@ pub fn verify_ethereum_signature(
 }
 
 /// Verify multiple Ethereum signatures
-pub fn verify_ethereum_signatures(signatures: &[(Vec<u8>, Vec<u8>, Vec<u8>)]) -> ProtocolResult<()> {
+pub fn verify_ethereum_signatures(
+    signatures: &[(Vec<u8>, Vec<u8>, Vec<u8>)],
+) -> ProtocolResult<()> {
     if signatures.is_empty() {
         return Err(ProtocolError::SignatureVerificationFailed(
             "No signatures to verify".to_string(),

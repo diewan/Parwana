@@ -7,31 +7,31 @@
 //! Protocol traits, not concrete adapter types.
 
 use async_trait::async_trait;
-use csv_protocol::chain_adapter_traits::ChainBackend;
-use csv_protocol::secret::SharedSecretHandle;
 use csv_adapter_core::ChainAdapter;
 use csv_hash::chain_id::ChainId;
+use csv_protocol::chain_adapter_traits::ChainBackend;
+use csv_protocol::secret::SharedSecretHandle;
 use std::sync::Arc;
 
+#[cfg(feature = "aptos")]
+mod aptos;
 mod bitcoin;
 #[cfg(feature = "ethereum")]
 mod ethereum;
-#[cfg(feature = "sui")]
-mod sui;
-#[cfg(feature = "aptos")]
-mod aptos;
 #[cfg(feature = "solana")]
 mod solana;
+#[cfg(feature = "sui")]
+mod sui;
 
+#[cfg(feature = "aptos")]
+pub use aptos::AptosFactory;
 pub use bitcoin::BitcoinFactory;
 #[cfg(feature = "ethereum")]
 pub use ethereum::EthereumFactory;
-#[cfg(feature = "sui")]
-pub use sui::SuiFactory;
-#[cfg(feature = "aptos")]
-pub use aptos::AptosFactory;
 #[cfg(feature = "solana")]
 pub use solana::SolanaFactory;
+#[cfg(feature = "sui")]
+pub use sui::SuiFactory;
 
 /// Configuration for creating a chain adapter.
 ///
@@ -129,6 +129,9 @@ pub struct SanadSealConfig {
     pub anchor_txid: String,
     /// Output index
     pub vout: u32,
+    /// Tapret commitment (hex) embedded in the seal output's Taproot leaf.
+    /// Needed to reconstruct the key-path tweak when the seal is spent (lock).
+    pub commitment: Option<String>,
 }
 
 /// Network type.
@@ -161,13 +164,13 @@ pub trait AdapterFactory: Send + Sync {
 pub enum FactoryError {
     #[error("Unsupported chain: {0}")]
     UnsupportedChain(String),
-    
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
-    
+
     #[error("Adapter creation failed: {0}")]
     CreationFailed(String),
-    
+
     #[error("Feature not enabled: {0}")]
     FeatureNotEnabled(String),
 }
@@ -192,8 +195,13 @@ impl FactoryRegistry {
     }
 
     /// Create adapters for a chain.
-    pub async fn create(&self, chain_id: &str, config: AdapterConfig) -> Result<AdapterResult, FactoryError> {
-        let factory = self.factories
+    pub async fn create(
+        &self,
+        chain_id: &str,
+        config: AdapterConfig,
+    ) -> Result<AdapterResult, FactoryError> {
+        let factory = self
+            .factories
             .get(chain_id)
             .ok_or_else(|| FactoryError::UnsupportedChain(chain_id.to_string()))?;
         factory.create_adapter(config).await

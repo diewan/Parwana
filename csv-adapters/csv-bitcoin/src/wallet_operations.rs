@@ -6,8 +6,8 @@
 use crate::rpc::BitcoinRpc;
 use crate::wallet::{Bip86Path, SealWallet};
 use async_trait::async_trait;
-use bitcoin::{hashes::Hash, Network as BtcNetwork, OutPoint, Txid};
-use bitcoin::secp256k1::{Secp256k1, SecretKey, PublicKey as SecpPublicKey};
+use bitcoin::secp256k1::{PublicKey as SecpPublicKey, Secp256k1, SecretKey};
+use bitcoin::{Network as BtcNetwork, OutPoint, Txid, hashes::Hash};
 use csv_hash::chain_id::ChainId;
 use csv_wallet::error::WalletError;
 use csv_wallet::wallet_traits::WalletOperations;
@@ -92,9 +92,9 @@ impl BitcoinWalletOperations {
     /// Get the HTTP client if configured
     #[cfg(any(feature = "rpc", feature = "signet-rest"))]
     fn http_client(&self) -> Result<&Arc<ReqwestClient>, WalletError> {
-        self.http_client.as_ref().ok_or_else(|| {
-            WalletError::RpcNotConfigured("Bitcoin".to_string())
-        })
+        self.http_client
+            .as_ref()
+            .ok_or_else(|| WalletError::RpcNotConfigured("Bitcoin".to_string()))
     }
 }
 
@@ -104,12 +104,7 @@ impl WalletOperations for BitcoinWalletOperations {
         ChainId::new("bitcoin")
     }
 
-    fn derive_address(
-        &self,
-        seed: &[u8],
-        account: u32,
-        index: u32,
-    ) -> Result<String, WalletError> {
+    fn derive_address(&self, seed: &[u8], account: u32, index: u32) -> Result<String, WalletError> {
         // Convert seed slice to array
         let mut seed_array = [0u8; 64];
         if seed.len() >= 64 {
@@ -136,25 +131,26 @@ impl WalletOperations for BitcoinWalletOperations {
         {
             let client = self.http_client()?;
             let url = format!("{}/address/{}", self.network.esplora_url(), _address);
-            
+
             let response = client
                 .get(&url)
                 .send()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to get balance: {}", e)))?;
-            
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
-            let balance = data["chain_stats"].get("funded_txo_sum")
+
+            let balance = data["chain_stats"]
+                .get("funded_txo_sum")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            
+
             Ok(balance.to_string())
         }
-        
+
         #[cfg(not(any(feature = "rpc", feature = "signet-rest")))]
         {
             Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
@@ -173,17 +169,18 @@ impl WalletOperations for BitcoinWalletOperations {
         }
 
         // Derive secp256k1 private key from seed
-        let secret_key = SecretKey::from_slice(&seed_array[..32])
-            .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive private key: {}", e)))?;
-        
+        let secret_key = SecretKey::from_slice(&seed_array[..32]).map_err(|e| {
+            WalletError::KeyDerivation(format!("Failed to derive private key: {}", e))
+        })?;
+
         let secp = Secp256k1::new();
         let _public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
-        
+
         // Sign the transaction data (simplified - in production would use proper Bitcoin transaction signing)
         let message = secp256k1::Message::from_digest_slice(tx_data)
             .map_err(|e| WalletError::Signing(format!("Failed to create message: {}", e)))?;
         let signature = secp.sign_ecdsa(&message, &secret_key);
-        
+
         Ok(signature.serialize_compact().to_vec())
     }
 
@@ -192,62 +189,74 @@ impl WalletOperations for BitcoinWalletOperations {
         {
             let client = self.http_client()?;
             let url = format!("{}/tx", self.network.esplora_url());
-            
+
             let tx_hex = hex::encode(_signed_tx);
-            
-            let response = client
-                .post(&url)
-                .body(tx_hex)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
-            
+
+            let response = client.post(&url).body(tx_hex).send().await.map_err(|e| {
+                WalletError::RpcError(format!("Failed to broadcast transaction: {}", e))
+            })?;
+
             let txid: String = response
                 .text()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             Ok(txid)
         }
-        
+
         #[cfg(not(any(feature = "rpc", feature = "signet-rest")))]
         {
             Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
         }
     }
 
-
-    async fn get_transaction_status(&self, _tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
+    async fn get_transaction_status(
+        &self,
+        _tx_hash: &str,
+    ) -> Result<HashMap<String, String>, WalletError> {
         #[cfg(any(feature = "rpc", feature = "signet-rest"))]
         {
             let client = self.http_client()?;
             let url = format!("{}/tx/{}", self.network.esplora_url(), _tx_hash);
-            
-            let response = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to get transaction: {}", e)))?;
-            
+
+            let response =
+                client.get(&url).send().await.map_err(|e| {
+                    WalletError::RpcError(format!("Failed to get transaction: {}", e))
+                })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             let mut status = HashMap::new();
             status.insert("txid".to_string(), _tx_hash.to_string());
-            status.insert("status".to_string(), data["status"].get("confirmed")
-                .and_then(|v| v.as_bool())
-                .map(|c| if c { "confirmed".to_string() } else { "pending".to_string() })
-                .unwrap_or("unknown".to_string()));
-            status.insert("block_height".to_string(), data["status"].get("block_height")
-                .and_then(|v| v.as_u64())
-                .map(|h| h.to_string())
-                .unwrap_or_default());
-            
+            status.insert(
+                "status".to_string(),
+                data["status"]
+                    .get("confirmed")
+                    .and_then(|v| v.as_bool())
+                    .map(|c| {
+                        if c {
+                            "confirmed".to_string()
+                        } else {
+                            "pending".to_string()
+                        }
+                    })
+                    .unwrap_or("unknown".to_string()),
+            );
+            status.insert(
+                "block_height".to_string(),
+                data["status"]
+                    .get("block_height")
+                    .and_then(|v| v.as_u64())
+                    .map(|h| h.to_string())
+                    .unwrap_or_default(),
+            );
+
             Ok(status)
         }
-        
+
         #[cfg(not(any(feature = "rpc", feature = "signet-rest")))]
         {
             Err(WalletError::RpcNotConfigured("Bitcoin".to_string()))
@@ -283,7 +292,8 @@ impl WalletOperations for BitcoinWalletOperations {
         {
             let _ = (seed, account, rpc_url, indexer_kind);
             Err(WalletError::RpcError(
-                "UTXO scanning requires the `signet-rest` feature (REST indexer client)".to_string(),
+                "UTXO scanning requires the `signet-rest` feature (REST indexer client)"
+                    .to_string(),
             ))
         }
     }
@@ -318,7 +328,9 @@ impl BitcoinWalletOperations {
         if seed.len() >= 64 {
             seed_array.copy_from_slice(&seed[..64]);
         } else {
-            return Err(WalletError::KeyDerivation("Seed must be at least 64 bytes".to_string()));
+            return Err(WalletError::KeyDerivation(
+                "Seed must be at least 64 bytes".to_string(),
+            ));
         }
 
         let wallet = SealWallet::from_seed(&seed_array, btc_network)
@@ -327,9 +339,9 @@ impl BitcoinWalletOperations {
         let mut wallet_utxos = Vec::new();
 
         for index in 0..gap_limit as u32 {
-            let key = wallet
-                .get_funding_address(account, index)
-                .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive address: {}", e)))?;
+            let key = wallet.get_funding_address(account, index).map_err(|e| {
+                WalletError::KeyDerivation(format!("Failed to derive address: {}", e))
+            })?;
             let address_str = key.address.to_string();
 
             // Address→UTXO discovery goes through the injected REST indexer client.
@@ -466,7 +478,9 @@ impl BitcoinWalletOperations {
         if seed.len() >= 64 {
             seed_array.copy_from_slice(&seed[..64]);
         } else {
-            return Err(WalletError::KeyDerivation("Seed must be at least 64 bytes".to_string()));
+            return Err(WalletError::KeyDerivation(
+                "Seed must be at least 64 bytes".to_string(),
+            ));
         }
 
         let wallet = SealWallet::from_seed(&seed_array, btc_network)
@@ -485,9 +499,9 @@ impl BitcoinWalletOperations {
         let mut last_rpc_error: Option<String> = None;
 
         for index in 0..gap_limit as u32 {
-            let key = wallet
-                .get_funding_address(account, index)
-                .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive address: {}", e)))?;
+            let key = wallet.get_funding_address(account, index).map_err(|e| {
+                WalletError::KeyDerivation(format!("Failed to derive address: {}", e))
+            })?;
             let address_str = key.address.to_string();
             addresses_checked += 1;
 
@@ -578,19 +592,35 @@ mod tests {
         async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Err("unreachable".into())
         }
-        async fn get_block_hash(&self, _height: u64) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_block_hash(
+            &self,
+            _height: u64,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             Err("unreachable".into())
         }
-        async fn is_utxo_unspent(&self, _txid: [u8; 32], _vout: u32) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        async fn is_utxo_unspent(
+            &self,
+            _txid: [u8; 32],
+            _vout: u32,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
             Err("unreachable".into())
         }
-        async fn send_raw_transaction(&self, _tx: Vec<u8>) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        async fn send_raw_transaction(
+            &self,
+            _tx: Vec<u8>,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             Err("unreachable".into())
         }
-        async fn get_tx_confirmations(&self, _txid: [u8; 32]) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_tx_confirmations(
+            &self,
+            _txid: [u8; 32],
+        ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Err("unreachable".into())
         }
-        async fn get_utxos_for_address(&self, _address: String) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_utxos_for_address(
+            &self,
+            _address: String,
+        ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
             Err("indexer unreachable: connection refused".into())
         }
         fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync> {

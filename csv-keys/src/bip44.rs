@@ -186,7 +186,8 @@ fn derive_secp256k1(seed: &[u8; 64], path: &DerivationPath) -> Result<SecretKey,
 
     // Create master extended private key from seed using BIP-32 (network-agnostic)
     // This matches the Wallet SDK's derivation method
-    let xprv = XPrv::new(seed).ok()
+    let xprv = XPrv::new(seed)
+        .ok()
         .ok_or_else(|| Bip44Error::DerivationFailed("Failed to create master key".to_string()))?;
 
     // Build BIP-32 derivation path string from components
@@ -205,8 +206,9 @@ fn derive_secp256k1(seed: &[u8; 64], path: &DerivationPath) -> Result<SecretKey,
     // Derive the child key using proper BIP-32 hierarchy
     let mut derived = xprv;
     for child in bip32_path {
-        derived = derived.derive_child(child)
-            .map_err(|e| Bip44Error::DerivationFailed(format!("Failed to derive child key: {}", e)))?;
+        derived = derived.derive_child(child).map_err(|e| {
+            Bip44Error::DerivationFailed(format!("Failed to derive child key: {}", e))
+        })?;
     }
 
     // Extract the 32-byte secret key from the extended private key
@@ -252,7 +254,10 @@ fn derive_ed25519(seed: &[u8; 64], path: &DerivationPath) -> Result<SecretKey, B
 /// Derive a child Ed25519 key using SLIP-10 hierarchy.
 ///
 /// Iteratively derives each level of the path: purpose' → coin_type' → account' → change → address_index
-fn derive_ed25519_child(master_key: &[u8; 32], path: &DerivationPath) -> Result<[u8; 32], Bip44Error> {
+fn derive_ed25519_child(
+    master_key: &[u8; 32],
+    path: &DerivationPath,
+) -> Result<[u8; 32], Bip44Error> {
     use hmac::{Hmac, Mac};
     use sha2::Sha512;
 
@@ -546,11 +551,11 @@ mod tests {
     #[test]
     fn test_secp256k1_derivation_consistency() {
         let seed = [0xABu8; 64];
-        
+
         // Derive the same key twice - should produce identical results
         let key1 = derive_key(&seed, &ChainId::new("ethereum"), 0, 0).unwrap();
         let key2 = derive_key(&seed, &ChainId::new("ethereum"), 0, 0).unwrap();
-        
+
         assert_eq!(
             key1.as_bytes(),
             key2.as_bytes(),
@@ -561,11 +566,11 @@ mod tests {
     #[test]
     fn test_secp256k1_different_paths_produce_different_keys() {
         let seed = [0xCDu8; 64];
-        
+
         let key0 = derive_key(&seed, &ChainId::new("ethereum"), 0, 0).unwrap();
         let key1 = derive_key(&seed, &ChainId::new("ethereum"), 0, 1).unwrap();
         let key2 = derive_key(&seed, &ChainId::new("ethereum"), 1, 0).unwrap();
-        
+
         assert_ne!(
             key0.as_bytes(),
             key1.as_bytes(),
@@ -586,10 +591,10 @@ mod tests {
     #[test]
     fn test_ed25519_derivation_consistency() {
         let seed = [0xEFu8; 64];
-        
+
         let key1 = derive_key(&seed, &ChainId::new("solana"), 0, 0).unwrap();
         let key2 = derive_key(&seed, &ChainId::new("solana"), 0, 0).unwrap();
-        
+
         assert_eq!(
             key1.as_bytes(),
             key2.as_bytes(),
@@ -600,10 +605,10 @@ mod tests {
     #[test]
     fn test_ed25519_different_paths_produce_different_keys() {
         let seed = [0x12u8; 64];
-        
+
         let key0 = derive_key(&seed, &ChainId::new("sui"), 0, 0).unwrap();
         let key1 = derive_key(&seed, &ChainId::new("sui"), 0, 1).unwrap();
-        
+
         assert_ne!(
             key0.as_bytes(),
             key1.as_bytes(),
@@ -626,7 +631,7 @@ mod tests {
         // Derive m/44'/0'/0'/0/0 (Bitcoin BIP-44)
         let path = DerivationPath::new_bip44(0, 0, 0, 0);
         let key = derive_secp256k1(&seed, &path).unwrap();
-        
+
         // Verify the key is deterministic by deriving again
         let key2 = derive_secp256k1(&seed, &path).unwrap();
         assert_eq!(key.as_bytes(), key2.as_bytes());

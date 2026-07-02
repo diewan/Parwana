@@ -5,16 +5,15 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
-    CrossChainTransfer,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
 };
-use csv_protocol::finality::capabilities::{
-    ChainCapabilities, StateModel, FinalityModel, ProofModel, 
-    ReplayProtectionModel, ReorgRisk, ChainRole
-};
-use csv_protocol::signature::SignatureScheme;
-use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::chain_adapter_traits::ChainBackend;
+use csv_protocol::finality::capabilities::{
+    ChainCapabilities, ChainRole, FinalityModel, ProofModel, ReorgRisk, ReplayProtectionModel,
+    StateModel,
+};
+use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
 use crate::ops::SuiBackend;
@@ -77,18 +76,20 @@ impl ChainAdapter for SuiRuntimeAdapter {
         self.signature_scheme
     }
 
-    async fn lock_sanad(
-        &self,
-        transfer: &CrossChainTransfer,
-    ) -> Result<LockResult, AdapterError> {
+    async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError> {
         // Use the backend's lock_sanad method which properly constructs and signs the transaction
         use csv_protocol::chain_adapter_traits::ChainSanadOps;
 
         let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
         let destination_chain = &transfer.destination_chain;
 
-        let result = self.backend
-            .lock_sanad(&sanad_id, destination_chain, "0x0000000000000000000000000000000000000000000000000000000000000000")
+        let result = self
+            .backend
+            .lock_sanad(
+                &sanad_id,
+                destination_chain,
+                "0x0000000000000000000000000000000000000000000000000000000000000000",
+            )
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to lock sanad: {}", e)))?;
 
@@ -114,8 +115,12 @@ impl ChainAdapter for SuiRuntimeAdapter {
         let source_chain = &transfer.source_chain;
 
         // Parse proof bundle to extract needed fields
-        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle = ProofBundle::from_canonical_bytes(proof_bundle).map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
-            .map_err(|e| AdapterError::Generic(format!("Failed to decode proof bundle: {}", e)))?;
+        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
+            ProofBundle::from_canonical_bytes(proof_bundle)
+                .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
+                .map_err(|e| {
+                    AdapterError::Generic(format!("Failed to decode proof bundle: {}", e))
+                })?;
 
         // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])
         let mut commitment_bytes = [0u8; 32];
@@ -126,8 +131,14 @@ impl ChainAdapter for SuiRuntimeAdapter {
         // Use the inclusion_proof directly
         let inclusion_proof = &proof_bundle.inclusion_proof;
 
-        let result = self.backend
-            .mint_sanad(source_chain, &sanad_id, inclusion_proof, "0x0000000000000000000000000000000000000000000000000000000000000000")
+        let result = self
+            .backend
+            .mint_sanad(
+                source_chain,
+                &sanad_id,
+                inclusion_proof,
+                "0x0000000000000000000000000000000000000000000000000000000000000000",
+            )
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to mint sanad: {}", e)))?;
 
@@ -155,15 +166,22 @@ impl ChainAdapter for SuiRuntimeAdapter {
         // Build inclusion proof using the backend
         use csv_protocol::chain_adapter_traits::ChainProofProvider;
 
-        let inclusion_proof = self.backend
-            .build_inclusion_proof(&transfer.sanad_id, lock_result.block_height, lock_tx_hash.as_bytes())
+        let inclusion_proof = self
+            .backend
+            .build_inclusion_proof(
+                &transfer.sanad_id,
+                lock_result.block_height,
+                lock_tx_hash.as_bytes(),
+            )
             .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build inclusion proof: {}", e)))?;
+            .map_err(|e| {
+                AdapterError::Generic(format!("Failed to build inclusion proof: {}", e))
+            })?;
 
         // Convert to ProofBundle - need to construct it properly
         // For now, return a minimal ProofBundle with the inclusion proof
-        use csv_protocol::proof_taxonomy::{FinalityProof};
         use csv_hash::seal::{CommitAnchor, SealPoint};
+        use csv_protocol::proof_taxonomy::FinalityProof;
 
         let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)
             .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
@@ -171,7 +189,8 @@ impl ChainAdapter for SuiRuntimeAdapter {
             lock_tx_hash.as_bytes().to_vec(),
             lock_result.block_height,
             vec![],
-        ).map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
+        )
+        .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
         // Create a canonical ProofLeafV1 for this transfer
         use csv_protocol::proof_taxonomy::ProofLeafV1;
@@ -181,19 +200,14 @@ impl ChainAdapter for SuiRuntimeAdapter {
             transfer.sanad_id,
             lock_tx_hash, // Use the lock transaction hash as commitment
         );
-        let leaf_hash = proof_leaf.hash()
-            .map_err(|e| AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e)))?;
+        let leaf_hash = proof_leaf.hash().map_err(|e| {
+            AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e))
+        })?;
 
         // Create a minimal DAG with one node using the canonical proof leaf hash
         let root_commitment = csv_hash::Hash::new([9u8; 32]);
-        let node = csv_hash::dag::DAGNode::new(
-            leaf_hash,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        );
-        
+        let node = csv_hash::dag::DAGNode::new(leaf_hash, vec![], vec![], vec![], vec![]);
+
         Ok(ProofBundle {
             version: 1,
             transition_dag: csv_hash::dag::DAGSegment::new(vec![node], root_commitment),
@@ -218,19 +232,25 @@ impl ChainAdapter for SuiRuntimeAdapter {
         let finality_proof = &proof_bundle.finality_proof;
         let commitment = &transfer.sanad_id;
 
-        let is_valid = self.backend
+        let is_valid = self
+            .backend
             .verify_proof_bundle(inclusion_proof, finality_proof, commitment)
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to verify proof bundle: {}", e)))?;
 
         if !is_valid {
-            return Err(AdapterError::Generic("Proof bundle validation failed".to_string()));
+            return Err(AdapterError::Generic(
+                "Proof bundle validation failed".to_string(),
+            ));
         }
 
         Ok(())
     }
 
-    async fn check_seal_registry(&self, seal_id: &[u8]) -> Result<SealRegistryStatus, AdapterError> {
+    async fn check_seal_registry(
+        &self,
+        seal_id: &[u8],
+    ) -> Result<SealRegistryStatus, AdapterError> {
         // Sui uses object-based seals - check if the seal object exists on-chain
         // Convert seal_id to object ID for querying
         if seal_id.len() != 32 {
@@ -275,7 +295,8 @@ impl ChainAdapter for SuiRuntimeAdapter {
         use csv_protocol::chain_adapter_traits::ChainQuery;
 
         // Get balance using the backend's ChainQuery implementation
-        let balance_info = self.backend
+        let balance_info = self
+            .backend
             .get_balance(address)
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get balance: {}", e)))?;

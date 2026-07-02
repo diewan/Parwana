@@ -78,9 +78,7 @@ impl Transition {
     pub fn assigned_seals(&self) -> Vec<SealPoint> {
         self.owned_outputs
             .iter()
-            .filter_map(|o| {
-                o.seal.clone().try_into().ok()
-            })
+            .filter_map(|o| o.seal.clone().try_into().ok())
             .collect()
     }
 

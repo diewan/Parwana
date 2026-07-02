@@ -77,13 +77,17 @@ pub fn verify_storage_proof(
     // The storage_proof is a Merkle proof from storage_root to the storage slot
     // Convert expected_value U256 to bytes for verification
     let expected_value_bytes = expected_value.to_be_bytes_vec();
-    let storage_proof_valid =
-        match verify_proof(storage_root, storage_key_nibbles, Some(expected_value_bytes), storage_proof) {
-            Ok(()) => true,
-            Err(ProofVerificationError::RootMismatch { .. }) => false,
-            Err(ProofVerificationError::ValueMismatch { .. }) => false,
-            Err(_) => false,
-        };
+    let storage_proof_valid = match verify_proof(
+        storage_root,
+        storage_key_nibbles,
+        Some(expected_value_bytes),
+        storage_proof,
+    ) {
+        Ok(()) => true,
+        Err(ProofVerificationError::RootMismatch { .. }) => false,
+        Err(ProofVerificationError::ValueMismatch { .. }) => false,
+        Err(_) => false,
+    };
 
     if !storage_proof_valid {
         return false;
@@ -113,7 +117,7 @@ pub fn verify_storage_proof(
 fn extract_storage_root_from_account_proof(account_proof: &[Bytes]) -> Option<B256> {
     // The account proof is a list of MPT nodes. The last node should contain
     // the RLP-encoded account data. We need to find and decode it.
-    
+
     // Try to decode each proof node to find the account data
     for node in account_proof {
         // Try to decode as RLP list (account structure)
@@ -126,7 +130,7 @@ fn extract_storage_root_from_account_proof(account_proof: &[Bytes]) -> Option<B2
             }
         }
     }
-    
+
     None
 }
 
@@ -150,7 +154,7 @@ impl Decodable for AccountRlp {
         let balance = <U256 as Decodable>::decode(buf)?;
         let storage_root = <B256 as Decodable>::decode(buf)?;
         let code_hash = <B256 as Decodable>::decode(buf)?;
-        
+
         Ok(AccountRlp {
             nonce,
             balance,

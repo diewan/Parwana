@@ -32,7 +32,7 @@ pub use mint::mint_sanad_from_hex_key;
 pub use rpc::SolanaRpc;
 pub use seal_protocol::SolanaSealProtocol;
 pub use types::{SolanaCommitAnchor, SolanaFinalityProof, SolanaInclusionProof, SolanaSealPoint};
-pub use wallet::{ProgramWallet, SolanaWalletError, SolanaSigner};
+pub use wallet::{ProgramWallet, SolanaSigner, SolanaWalletError};
 
 // Ops exports
 pub use ops::SolanaBackend;

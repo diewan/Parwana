@@ -887,21 +887,23 @@ impl AdapterBuilder {
         use csv_sui::seal_protocol::SuiSealProtocol;
 
         let seal =
-            SuiSealProtocol::from_config(config.clone(), Arc::clone(&node)).map_err(|e| CsvError::ProtocolError {
-                chain: ChainId::new("sui"),
-                message: format!("Failed to create Sui seal protocol: {}", e),
+            SuiSealProtocol::from_config(config.clone(), Arc::clone(&node)).map_err(|e| {
+                CsvError::ProtocolError {
+                    chain: ChainId::new("sui"),
+                    message: format!("Failed to create Sui seal protocol: {}", e),
+                }
             })?;
 
         // Configure signing key if private key is provided in config
         let operations = if let Some(private_key) = config.signer_private_key {
             let key_bytes = private_key.expose_secret();
             let signing_key = ed25519_dalek::SigningKey::from_bytes(key_bytes);
-            SuiBackend::from_seal_protocol_with_key(Arc::new(seal), node, signing_key).map_err(|e| {
-                CsvError::ProtocolError {
+            SuiBackend::from_seal_protocol_with_key(Arc::new(seal), node, signing_key).map_err(
+                |e| CsvError::ProtocolError {
                     chain: ChainId::new("sui"),
                     message: format!("Failed to create Sui chain operations: {}", e),
-                }
-            })?
+                },
+            )?
         } else {
             SuiBackend::from_seal_protocol(Arc::new(seal), node).map_err(|e| {
                 CsvError::ProtocolError {
@@ -924,11 +926,12 @@ impl AdapterBuilder {
         use csv_aptos::ops::AptosBackend;
         use csv_aptos::seal_protocol::AptosSealProtocol;
 
-        let mut seal =
-            AptosSealProtocol::from_config(config.clone(), rpc).map_err(|e| CsvError::ProtocolError {
+        let mut seal = AptosSealProtocol::from_config(config.clone(), rpc).map_err(|e| {
+            CsvError::ProtocolError {
                 chain: ChainId::new("aptos"),
                 message: format!("Failed to create Aptos seal protocol: {}", e),
-            })?;
+            }
+        })?;
 
         // Configure signing key if private key is provided in config
         if let Some(ref private_key) = config.private_key {
@@ -1005,7 +1008,10 @@ impl AdapterBuilder {
                     log::info!("Successfully loaded {} sanad_seal UTXOs from RPC", count);
                 }
                 Err(e) => {
-                    log::warn!("Failed to load sanad_seal UTXOs from RPC: {} (continuing anyway)", e);
+                    log::warn!(
+                        "Failed to load sanad_seal UTXOs from RPC: {} (continuing anyway)",
+                        e
+                    );
                 }
             }
         }

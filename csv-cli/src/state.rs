@@ -12,8 +12,8 @@ mod encrypt;
 
 pub use csv_store::state::{
     Chain, ContractRecord, GasAccount, SanadRecord, SanadStatus, SealRecord, TransactionRecord,
-    TransactionStatus, TransactionType, TransferRecord, TransferStatus, UnifiedStorage,
-    WalletAccount, UtxoRecord,
+    TransactionStatus, TransactionType, TransferRecord, TransferStatus, UnifiedStorage, UtxoRecord,
+    WalletAccount,
 };
 
 // Unified state manager for CLI

@@ -32,7 +32,8 @@ pub const NUMS_INTERNAL_KEY: [u8; 32] = [
 
 /// The NUMS internal key as an `XOnlyPublicKey`.
 pub fn nums_internal_key() -> XOnlyPublicKey {
-    XOnlyPublicKey::from_slice(&NUMS_INTERNAL_KEY).expect("NUMS_INTERNAL_KEY is a valid x-only point")
+    XOnlyPublicKey::from_slice(&NUMS_INTERNAL_KEY)
+        .expect("NUMS_INTERNAL_KEY is a valid x-only point")
 }
 
 /// Build the CSV-refund leaf script: `<timeout_blocks> OP_CSV OP_DROP

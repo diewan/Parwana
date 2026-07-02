@@ -85,7 +85,9 @@ impl ChainDiscovery {
     /// * `config` - The chain configuration
     pub fn register_chain(&self, config: ChainConfig) -> Result<(), ChainDiscoveryError> {
         let chain_id = ChainId::new(&config.id);
-        let mut configs = self.chain_configs.write()
+        let mut configs = self
+            .chain_configs
+            .write()
             .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
         configs.insert(chain_id, config);
         Ok(())
@@ -98,8 +100,13 @@ impl ChainDiscovery {
     ///
     /// # Returns
     /// The chain configuration if found
-    pub fn get_config(&self, chain_id: &ChainId) -> Result<Option<ChainConfig>, ChainDiscoveryError> {
-        let configs = self.chain_configs.read()
+    pub fn get_config(
+        &self,
+        chain_id: &ChainId,
+    ) -> Result<Option<ChainConfig>, ChainDiscoveryError> {
+        let configs = self
+            .chain_configs
+            .read()
             .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
         Ok(configs.get(chain_id).cloned())
     }
@@ -112,9 +119,12 @@ impl ChainDiscovery {
     /// # Returns
     /// The first RPC URL if available
     pub fn get_rpc_url(&self, chain_id: &ChainId) -> Result<Option<String>, ChainDiscoveryError> {
-        let configs = self.chain_configs.read()
+        let configs = self
+            .chain_configs
+            .read()
             .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
-        Ok(configs.get(chain_id)
+        Ok(configs
+            .get(chain_id)
             .and_then(|config| config.rpc_urls.first().cloned()))
     }
 
@@ -123,7 +133,9 @@ impl ChainDiscovery {
     /// # Returns
     /// Iterator over all chain configurations
     pub fn all_configs(&self) -> Result<Vec<ChainConfig>, ChainDiscoveryError> {
-        let configs = self.chain_configs.read()
+        let configs = self
+            .chain_configs
+            .read()
             .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
         Ok(configs.values().cloned().collect())
     }
@@ -133,9 +145,12 @@ impl ChainDiscovery {
     /// # Returns
     /// Iterator over enabled chain IDs
     pub fn enabled_chains(&self) -> Result<Vec<ChainId>, ChainDiscoveryError> {
-        let configs = self.chain_configs.read()
+        let configs = self
+            .chain_configs
+            .read()
             .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
-        Ok(configs.iter()
+        Ok(configs
+            .iter()
             .filter(|(_, config)| config.enabled)
             .map(|(chain_id, _)| chain_id.clone())
             .collect())
@@ -149,9 +164,12 @@ impl ChainDiscovery {
     /// # Returns
     /// True if the chain is available and enabled
     pub fn is_chain_enabled(&self, chain_id: &ChainId) -> Result<bool, ChainDiscoveryError> {
-        let configs = self.chain_configs.read()
+        let configs = self
+            .chain_configs
+            .read()
             .map_err(|e| ChainDiscoveryError::LockPoisoned(e.to_string()))?;
-        Ok(configs.get(chain_id)
+        Ok(configs
+            .get(chain_id)
             .map(|config| config.enabled)
             .unwrap_or(false))
     }
@@ -165,7 +183,7 @@ impl ChainDiscovery {
     /// Number of chains loaded
     pub fn load_from_directory(&self, directory: &Path) -> Result<usize, ChainDiscoveryError> {
         let chains_dir = directory;
-        
+
         if !chains_dir.exists() {
             return Err(ChainDiscoveryError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -206,52 +224,69 @@ impl ChainDiscovery {
     /// Parsed chain configuration
     pub fn load_from_toml(&self, path: &Path) -> Result<ChainConfig, ChainDiscoveryError> {
         let content = std::fs::read_to_string(path)?;
-        let value: toml::Value = toml::from_str(&content)
-            .map_err(|e| ChainDiscoveryError::TomlParse(e.to_string()))?;
+        let value: toml::Value =
+            toml::from_str(&content).map_err(|e| ChainDiscoveryError::TomlParse(e.to_string()))?;
 
         // Extract fields manually to avoid complex nested structure deserialization
-        let id = value.get("chain_id")
+        let id = value
+            .get("chain_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChainDiscoveryError::TomlParse("Missing chain_id".to_string()))?
             .to_string();
 
-        let name = value.get("chain_name")
+        let name = value
+            .get("chain_name")
             .and_then(|v| v.as_str())
             .unwrap_or(&id)
             .to_string();
 
-        let network = value.get("default_network")
+        let network = value
+            .get("default_network")
             .and_then(|v| v.as_str())
             .unwrap_or("mainnet")
             .to_string();
 
-        let rpc_urls = value.get("rpc_endpoints")
+        let rpc_urls = value
+            .get("rpc_endpoints")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let block_explorer_urls = value.get("block_explorer_urls")
+        let block_explorer_urls = value
+            .get("block_explorer_urls")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let start_block = value.get("start_block")
+        let start_block = value
+            .get("start_block")
             .and_then(|v| v.as_integer())
             .unwrap_or(0) as u64;
 
         // Try to get contract_address from top level or custom_settings
-        let contract_address = value.get("contract_address")
+        let contract_address = value
+            .get("contract_address")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| {
-                value.get("custom_settings")
+                value
+                    .get("custom_settings")
                     .and_then(|v| v.as_table())
                     .and_then(|table| table.get("contract_address"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
             });
 
-        let enabled = value.get("enabled")
+        let enabled = value
+            .get("enabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 

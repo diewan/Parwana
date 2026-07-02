@@ -172,7 +172,8 @@ impl ReplayDatabase for RocksDbReplayDb {
         entry: &CrossChainRegistryEntry,
     ) -> Result<(), ReplayDbError> {
         let key = entry.sanad_id.as_bytes();
-        let val = entry.to_canonical_bytes()
+        let val = entry
+            .to_canonical_bytes()
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
         self.db
             .put_cf(self.cf_transfers()?, key, val)
@@ -188,8 +189,9 @@ impl ReplayDatabase for RocksDbReplayDb {
         {
             let (_key, value) = result
                 .map_err(|e| ReplayDbError::Storage(format!("RocksDB iterator error: {e}")))?;
-            let entry: CrossChainRegistryEntry = CrossChainRegistryEntry::from_canonical_bytes(&value)
-                .map_err(|e| ReplayDbError::Storage(format!("Deserialization error: {e}")))?;
+            let entry: CrossChainRegistryEntry =
+                CrossChainRegistryEntry::from_canonical_bytes(&value)
+                    .map_err(|e| ReplayDbError::Storage(format!("Deserialization error: {e}")))?;
             transfers.push(entry);
         }
         Ok(transfers)

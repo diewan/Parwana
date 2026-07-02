@@ -372,40 +372,47 @@ async fn execute_transfer_phase(
 ) -> Result<TransferStage, String> {
     match &transfer.stage {
         TransferStage::LockConfirmed => {
-            handler.execute_lock_confirmed(
-                &transfer.transfer_id,
-                &transfer.lock_tx_hash,
-                &transfer.source_chain,
-            ).await
+            handler
+                .execute_lock_confirmed(
+                    &transfer.transfer_id,
+                    &transfer.lock_tx_hash,
+                    &transfer.source_chain,
+                )
+                .await
         }
         TransferStage::ProofValidated => {
             let proof_payload = transfer.proof_payload.as_deref().unwrap_or(&[]);
-            handler.execute_proof_validated(
-                &transfer.transfer_id,
-                proof_payload,
-                &transfer.destination_chain,
-                &transfer.destination_owner,
-            ).await
+            handler
+                .execute_proof_validated(
+                    &transfer.transfer_id,
+                    proof_payload,
+                    &transfer.destination_chain,
+                    &transfer.destination_owner,
+                )
+                .await
         }
         TransferStage::AwaitingFinality => {
-            handler.execute_awaiting_finality(
-                &transfer.transfer_id,
-                &transfer.source_chain,
-                &transfer.lock_tx_hash,
-            ).await
+            handler
+                .execute_awaiting_finality(
+                    &transfer.transfer_id,
+                    &transfer.source_chain,
+                    &transfer.lock_tx_hash,
+                )
+                .await
         }
         TransferStage::ProofBuilding => {
-            handler.execute_proof_building(
-                &transfer.transfer_id,
-                &transfer.lock_tx_hash,
-                &transfer.source_chain,
-            ).await
+            handler
+                .execute_proof_building(
+                    &transfer.transfer_id,
+                    &transfer.lock_tx_hash,
+                    &transfer.source_chain,
+                )
+                .await
         }
         TransferStage::MintSubmitted => {
-            handler.execute_mint_submitted(
-                &transfer.transfer_id,
-                &transfer.destination_chain,
-            ).await
+            handler
+                .execute_mint_submitted(&transfer.transfer_id, &transfer.destination_chain)
+                .await
         }
         TransferStage::MintConfirmed => {
             // Transfer is complete
@@ -502,7 +509,11 @@ mod tests {
             ));
 
             let result = cell.submit(task).await;
-            assert!(result.is_ok(), "Task {} should be submitted successfully", i);
+            assert!(
+                result.is_ok(),
+                "Task {} should be submitted successfully",
+                i
+            );
         }
 
         // Give the worker time to process

@@ -50,7 +50,11 @@ use crate::wallet::WalletManager;
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 #[cfg(feature = "runtime-coordinator")]
-use csv_adapter_factory::{AdapterFactory, AdapterConfig, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol, BitcoinFactory, EthereumFactory, SuiFactory, AptosFactory, SolanaFactory, AdapterResult as FactoryAdapterResult};
+use csv_adapter_factory::{
+    AdapterConfig, AdapterFactory, AdapterResult as FactoryAdapterResult, AptosFactory,
+    BitcoinFactory, EthereumFactory, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol,
+    SolanaFactory, SuiFactory,
+};
 use csv_protocol::secret::SharedSecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
@@ -82,10 +86,7 @@ impl StoreHandle {
     }
 
     /// Get a Sanad by its ID.
-    pub fn get_sanad(
-        &self,
-        sanad_id: &str,
-    ) -> Result<Option<SanadRecord>, CsvError> {
+    pub fn get_sanad(&self, sanad_id: &str) -> Result<Option<SanadRecord>, CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
                 .get_sanad(sanad_id)
@@ -103,11 +104,7 @@ impl StoreHandle {
     }
 
     /// Mark a Sanad as consumed.
-    pub fn consume_sanad(
-        &mut self,
-        sanad_id: &str,
-        consumed_at: u64,
-    ) -> Result<(), CsvError> {
+    pub fn consume_sanad(&mut self, sanad_id: &str, consumed_at: u64) -> Result<(), CsvError> {
         match self {
             StoreHandle::InMemory(store) => store
                 .consume_sanad(sanad_id, consumed_at)
@@ -182,7 +179,8 @@ pub struct CsvClient {
     #[cfg(feature = "runtime-coordinator")]
     pub(crate) transfer_coordinator: Option<Arc<TransferCoordinator>>,
     /// Private keys for chain adapters (chain name -> typed SharedSecretHandle)
-    pub(crate) private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
+    pub(crate) private_keys:
+        Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
 }
 
 impl CsvClient {
@@ -321,7 +319,10 @@ impl CsvClient {
     /// client.register_adapter(bitcoin_adapter)?;
     /// # Ok::<_, csv_sdk::CsvError>(())
     /// ```
-    pub fn register_adapter(&self, adapter: Box<dyn csv_adapter_core::ChainAdapter>) -> Result<(), CsvError> {
+    pub fn register_adapter(
+        &self,
+        adapter: Box<dyn csv_adapter_core::ChainAdapter>,
+    ) -> Result<(), CsvError> {
         self.adapter_registry
             .lock()
             .map_err(|e| CsvError::Generic(format!("Failed to lock adapter registry: {}", e)))?
@@ -367,15 +368,27 @@ impl CsvClient {
     /// Register a sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups.
     /// This is needed because the wallet is created fresh each time and doesn't persist UTXOs.
     #[cfg(feature = "bitcoin")]
-    pub fn register_sanad_seal(&self, chain: &str, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) -> Result<(), CsvError> {
-
-        if let Some(adapter) = self.adapter_registry.lock().map_err(|e| CsvError::ProtocolError {
-            chain: csv_hash::ChainId::new(chain),
-            message: format!("Failed to lock adapter registry: {}", e),
-        })?.get(chain)
-            && let Some(sanad_ops) = (**adapter).as_any().downcast_ref::<csv_bitcoin::BitcoinChainSanadOps>() {
-                sanad_ops.register_sanad_seal(sanad_id, txid, vout);
-                return Ok(());
+    pub fn register_sanad_seal(
+        &self,
+        chain: &str,
+        sanad_id: [u8; 32],
+        txid: Vec<u8>,
+        vout: u32,
+    ) -> Result<(), CsvError> {
+        if let Some(adapter) = self
+            .adapter_registry
+            .lock()
+            .map_err(|e| CsvError::ProtocolError {
+                chain: csv_hash::ChainId::new(chain),
+                message: format!("Failed to lock adapter registry: {}", e),
+            })?
+            .get(chain)
+            && let Some(sanad_ops) = (**adapter)
+                .as_any()
+                .downcast_ref::<csv_bitcoin::BitcoinChainSanadOps>()
+        {
+            sanad_ops.register_sanad_seal(sanad_id, txid, vout);
+            return Ok(());
         }
         Err(CsvError::ProtocolError {
             chain: csv_hash::ChainId::new(chain),
@@ -431,7 +444,9 @@ impl CsvClient {
         chain: ChainId,
         _config: &crate::config::Config,
         network: NetworkType,
-        private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
+        private_keys: Option<
+            std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>,
+        >,
     ) -> Result<Option<AdapterResult>, CsvError> {
         let _builder = crate::runtime::AdapterBuilder::new();
         let _is_testnet = matches!(network, NetworkType::Testnet);
@@ -447,8 +462,9 @@ impl CsvClient {
                     .filter(|url| !url.is_empty())
                     .unwrap_or_else(|| {
                         if _is_testnet {
-                            std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC")
-                                .unwrap_or_else(|_| "https://bitcoin-signet.g.alchemy.com/v2/".to_string())
+                            std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC").unwrap_or_else(|_| {
+                                "https://bitcoin-signet.g.alchemy.com/v2/".to_string()
+                            })
                         } else {
                             std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
                                 .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string())
@@ -463,7 +479,12 @@ impl CsvClient {
                     log::info!("SDK: Chain config has {} UTXOs", cc.utxos.len());
                     // Convert UTXO records from SDK config to Bitcoin adapter config
                     for utxo in &cc.utxos {
-                        log::info!("SDK: Converting UTXO: txid={}, vout={}, value={}", utxo.txid, utxo.vout, utxo.value);
+                        log::info!(
+                            "SDK: Converting UTXO: txid={}, vout={}, value={}",
+                            utxo.txid,
+                            utxo.vout,
+                            utxo.value
+                        );
                         utxos.push(csv_adapter_factory::UtxoConfig {
                             txid: utxo.txid.clone(),
                             vout: utxo.vout,
@@ -473,20 +494,24 @@ impl CsvClient {
                             script_pubkey: utxo.script_pubkey.clone(),
                         });
                     }
-                    log::info!("SDK: Converted {} UTXOs to Bitcoin adapter config", utxos.len());
+                    log::info!(
+                        "SDK: Converted {} UTXOs to Bitcoin adapter config",
+                        utxos.len()
+                    );
                     // Convert sanad seal records from SDK config to Bitcoin adapter config
                     for seal in &cc.sanad_seals {
                         sanad_seals.push(csv_adapter_factory::SanadSealConfig {
                             sanad_id: seal.sanad_id.clone(),
                             anchor_txid: seal.anchor_txid.clone(),
                             vout: seal.vout,
+                            commitment: seal.commitment.clone(),
                         });
                     }
                 }
 
                 // Extract Bitcoin seed from chain config if available (64-byte BIP-39 seed)
                 let bitcoin_seed_hex = chain_config.and_then(|c| c.seed.clone());
-                
+
                 // Extract Bitcoin private key from private_keys if available (32-byte)
                 let bitcoin_private_key = private_keys
                     .as_ref()
@@ -529,7 +554,10 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: bitcoin_private_key.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: bitcoin_private_key
+                        .and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok())
+                        .map(SharedSecretHandle::from_bytes)
+                        .unwrap_or_default(),
                     seed: bitcoin_seed_hex,
                     account: chain_config.map(|c| c.account).unwrap_or(0),
                     index: chain_config.map(|c| c.index).unwrap_or(0),
@@ -541,11 +569,12 @@ impl CsvClient {
 
                 // Use factory to create adapter
                 let factory = BitcoinFactory;
-                let result = factory.create_adapter(adapter_config).await
-                    .map_err(|e| CsvError::ProtocolError {
+                let result = factory.create_adapter(adapter_config).await.map_err(|e| {
+                    CsvError::ProtocolError {
                         chain: chain.clone(),
                         message: format!("Factory failed to create Bitcoin adapter: {}", e),
-                    })?;
+                    }
+                })?;
 
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if result.chain_adapter.is_some() {
@@ -575,7 +604,7 @@ impl CsvClient {
                         }
                     });
                 let chain_config = _config.chains.get("ethereum");
-                
+
                 let address = chain_config
                     .and_then(|chain| chain.contract_address.as_deref())
                     .ok_or_else(|| {
@@ -583,7 +612,7 @@ impl CsvClient {
                             "Ethereum seal contract address must be configured".to_string(),
                         )
                     })?;
-                
+
                 // Extract Ethereum private key from private_keys if available
                 let eth_private_key = private_keys
                     .as_ref()
@@ -609,7 +638,10 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: eth_private_key.and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: eth_private_key
+                        .and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok())
+                        .map(SharedSecretHandle::from_bytes)
+                        .unwrap_or_default(),
                     seed: None,
                     account: 0,
                     index: 0,
@@ -621,11 +653,12 @@ impl CsvClient {
 
                 // Use factory to create adapter
                 let factory = EthereumFactory;
-                let result = factory.create_adapter(adapter_config).await
-                    .map_err(|e| CsvError::ProtocolError {
+                let result = factory.create_adapter(adapter_config).await.map_err(|e| {
+                    CsvError::ProtocolError {
                         chain: chain.clone(),
                         message: format!("Factory failed to create Ethereum adapter: {}", e),
-                    })?;
+                    }
+                })?;
 
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if result.chain_adapter.is_some() {
@@ -691,10 +724,12 @@ impl CsvClient {
                     .and_then(|keys| keys.get("ethereum"))
                     .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
                 if let Some(private_key) = eth_private_key {
-                    rpc = rpc.with_signer(private_key).map_err(|e| CsvError::ProtocolError {
-                        chain: ChainId::new("ethereum"),
-                        message: format!("Failed to configure Ethereum signer: {}", e),
-                    })?;
+                    rpc = rpc
+                        .with_signer(private_key)
+                        .map_err(|e| CsvError::ProtocolError {
+                            chain: ChainId::new("ethereum"),
+                            message: format!("Failed to configure Ethereum signer: {}", e),
+                        })?;
                 }
                 _builder
                     .ethereum_from_config(
@@ -721,15 +756,13 @@ impl CsvClient {
                         }
                     });
                 let chain_config = _config.chains.get("sui");
-                
+
                 let contract_address = chain_config
                     .and_then(|chain| chain.contract_address.as_deref())
                     .ok_or_else(|| {
-                        CsvError::ConfigError(
-                            "Sui seal package ID must be configured".to_string(),
-                        )
+                        CsvError::ConfigError("Sui seal package ID must be configured".to_string())
                     })?;
-                
+
                 // Extract Sui private key from private_keys if available
                 let sui_private_key = private_keys
                     .as_ref()
@@ -755,7 +788,11 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: sui_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: sui_private_key
+                        .as_ref()
+                        .and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok())
+                        .map(SharedSecretHandle::from_bytes)
+                        .unwrap_or_default(),
                     seed: None,
                     account: 0,
                     index: 0,
@@ -767,11 +804,12 @@ impl CsvClient {
 
                 // Use factory to create adapter
                 let factory = SuiFactory;
-                let result = factory.create_adapter(adapter_config).await
-                    .map_err(|e| CsvError::ProtocolError {
+                let result = factory.create_adapter(adapter_config).await.map_err(|e| {
+                    CsvError::ProtocolError {
                         chain: chain.clone(),
                         message: format!("Factory failed to create Sui adapter: {}", e),
-                    })?;
+                    }
+                })?;
 
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if result.chain_adapter.is_some() {
@@ -823,30 +861,34 @@ impl CsvClient {
                         sui_config.signer_private_key = Some(key_bytes.clone());
                         if key_bytes.len() == 32 {
                             use ed25519_dalek::SigningKey;
-                            let key_array: [u8; 32] = key_bytes
-                                .try_into()
-                                .map_err(|_| CsvError::ConfigError(
-                                    "Invalid Sui private key length".to_string()
-                                ))?;
+                            let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
+                                CsvError::ConfigError("Invalid Sui private key length".to_string())
+                            })?;
                             let signing_key = SigningKey::from_bytes(&key_array);
                             let public_key = signing_key.verifying_key();
                             let pubkey_bytes = public_key.as_bytes();
-                            
+
                             // Sui address is derived from public key using Blake2b with 0x00 prefix
-                            use blake2::Digest as Blake2Digest;
                             use blake2::Blake2b;
+                            use blake2::Digest as Blake2Digest;
                             let mut hasher = Blake2b::new();
                             hasher.update([0x00]); // Sui address prefix
                             hasher.update(pubkey_bytes);
                             let hash: [u8; 32] = hasher.finalize().into();
                             let signer_addr = format!("0x{}", hex::encode(hash));
                             sui_config.signer_address = Some(signer_addr.clone());
-                            
+
                             // Parse signer address bytes for RPC client
-                            let signer_addr_bytes = hex::decode(signer_addr.trim_start_matches("0x"))
-                                .map_err(|e| CsvError::ConfigError(format!("Invalid signer address: {}", e)))?;
-                            let signer_addr_array: [u8; 32] = signer_addr_bytes.try_into()
-                                .map_err(|_| CsvError::ConfigError("Signer address must be 32 bytes".to_string()))?;
+                            let signer_addr_bytes =
+                                hex::decode(signer_addr.trim_start_matches("0x")).map_err(|e| {
+                                    CsvError::ConfigError(format!("Invalid signer address: {}", e))
+                                })?;
+                            let signer_addr_array: [u8; 32] =
+                                signer_addr_bytes.try_into().map_err(|_| {
+                                    CsvError::ConfigError(
+                                        "Signer address must be 32 bytes".to_string(),
+                                    )
+                                })?;
                             Some(signer_addr_array)
                         } else {
                             None
@@ -858,11 +900,12 @@ impl CsvClient {
                     sui_config.signer_private_key = None;
                     None
                 };
-                
+
                 // Create SuiNode
-                let node = csv_sui::node::SuiNode::new(&rpc_url)
-                    .map_err(|e| CsvError::ConfigError(format!("Failed to create Sui node: {}", e)))?;
-                
+                let node = csv_sui::node::SuiNode::new(&rpc_url).map_err(|e| {
+                    CsvError::ConfigError(format!("Failed to create Sui node: {}", e))
+                })?;
+
                 _builder
                     .sui_from_config(sui_config, std::sync::Arc::new(node))
                     .await
@@ -884,7 +927,7 @@ impl CsvClient {
                         }
                     });
                 let chain_config = _config.chains.get("aptos");
-                
+
                 // Extract Aptos private key from private_keys if available
                 let aptos_private_key = private_keys
                     .as_ref()
@@ -927,7 +970,11 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: aptos_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: aptos_private_key
+                        .as_ref()
+                        .and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok())
+                        .map(SharedSecretHandle::from_bytes)
+                        .unwrap_or_default(),
                     seed: None,
                     account: 0,
                     index: 0,
@@ -939,11 +986,12 @@ impl CsvClient {
 
                 // Use factory to create adapter
                 let factory = AptosFactory;
-                let result = factory.create_adapter(adapter_config).await
-                    .map_err(|e| CsvError::ProtocolError {
+                let result = factory.create_adapter(adapter_config).await.map_err(|e| {
+                    CsvError::ProtocolError {
                         chain: chain.clone(),
                         message: format!("Factory failed to create Aptos adapter: {}", e),
-                    })?;
+                    }
+                })?;
 
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if result.chain_adapter.is_some() {
@@ -966,7 +1014,7 @@ impl CsvClient {
                             "https://api.mainnet.aptoslabs.com/v1".to_string()
                         }
                     });
-                
+
                 // Derive signer address from private key if available
                 // In Aptos, address = last 32 bytes of sha3-256(public_key + 0x00)
                 let aptos_private_key = private_keys
@@ -979,17 +1027,23 @@ impl CsvClient {
                         if key_bytes.len() == 32 {
                             use ed25519_dalek::SigningKey;
                             use sha3::{Digest, Sha3_256};
-                            log::info!("SDK LAYER: Private key (first 8 bytes): 0x{}", hex::encode(&key_bytes[..8]));
-                            let key_array: [u8; 32] = key_bytes
-                                .try_into()
-                                .map_err(|_| CsvError::ConfigError(
-                                    "Invalid Aptos private key length".to_string()
-                                ))?;
+                            log::info!(
+                                "SDK LAYER: Private key (first 8 bytes): 0x{}",
+                                hex::encode(&key_bytes[..8])
+                            );
+                            let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
+                                CsvError::ConfigError(
+                                    "Invalid Aptos private key length".to_string(),
+                                )
+                            })?;
                             let signing_key = SigningKey::from_bytes(&key_array);
                             let public_key = signing_key.verifying_key();
                             let public_key_bytes = public_key.as_bytes();
 
-                            log::info!("SDK LAYER: Public key (first 8 bytes): 0x{}", hex::encode(&public_key_bytes[..8]));
+                            log::info!(
+                                "SDK LAYER: Public key (first 8 bytes): 0x{}",
+                                hex::encode(&public_key_bytes[..8])
+                            );
 
                             // Aptos address derivation: sha3-256(public_key || 0x00), take last 32 bytes
                             let mut hasher = Sha3_256::new();
@@ -999,7 +1053,10 @@ impl CsvClient {
                             let mut addr_array = [0u8; 32];
                             addr_array.copy_from_slice(&hash[..32]);
 
-                            log::info!("SDK LAYER: Derived Aptos signer address: 0x{}", hex::encode(addr_array));
+                            log::info!(
+                                "SDK LAYER: Derived Aptos signer address: 0x{}",
+                                hex::encode(addr_array)
+                            );
                             Some(addr_array)
                         } else {
                             None
@@ -1010,7 +1067,7 @@ impl CsvClient {
                 } else {
                     None
                 };
-                
+
                 let mut aptos_config = csv_aptos::AptosConfig {
                     network: if _is_testnet {
                         csv_aptos::config::AptosNetwork::Testnet
@@ -1018,7 +1075,12 @@ impl CsvClient {
                         csv_aptos::config::AptosNetwork::Mainnet
                     },
                     rpc_url: rpc_url.clone(),
-                    secret_key: aptos_private_key.as_ref().and_then(|k| hex::decode(k.trim_start_matches("0x")).ok()).and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: aptos_private_key
+                        .as_ref()
+                        .and_then(|k| hex::decode(k.trim_start_matches("0x")).ok())
+                        .and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok())
+                        .map(SharedSecretHandle::from_bytes)
+                        .unwrap_or_default(),
                     ..Default::default()
                 };
                 // Set module_address from config if available
@@ -1029,14 +1091,14 @@ impl CsvClient {
                 {
                     aptos_config.seal_contract.module_address = contract_address;
                 }
-                
+
                 // Create AptosNode with signer address if available
                 let rpc = if let Some(signer_addr) = signer_address {
                     csv_aptos::node::AptosNode::with_signer_address(&rpc_url, signer_addr)
                 } else {
                     csv_aptos::node::AptosNode::new(&rpc_url)
                 };
-                
+
                 _builder
                     .aptos_from_config(
                         aptos_config,
@@ -1061,7 +1123,7 @@ impl CsvClient {
                         }
                     });
                 let chain_config = _config.chains.get("solana");
-                
+
                 let program_id = chain_config
                     .and_then(|chain| chain.program_id.as_deref())
                     .or_else(|| chain_config.and_then(|chain| chain.contract_address.as_deref()))
@@ -1070,7 +1132,7 @@ impl CsvClient {
                             "Solana CSV program ID must be configured".to_string(),
                         )
                     })?;
-                
+
                 // Extract Solana private key from private_keys if available
                 let solana_private_key = private_keys
                     .as_ref()
@@ -1096,7 +1158,11 @@ impl CsvClient {
                     chain_id: chain.clone(),
                     network: factory_network,
                     rpc_endpoints: vec![rpc_endpoint],
-                    secret_key: solana_private_key.as_ref().and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok()).map(SharedSecretHandle::from_bytes).unwrap_or_default(),
+                    secret_key: solana_private_key
+                        .as_ref()
+                        .and_then(|bytes| bytes.as_slice().try_into().map(|arr: [u8; 32]| arr).ok())
+                        .map(SharedSecretHandle::from_bytes)
+                        .unwrap_or_default(),
                     seed: None,
                     account: 0,
                     index: 0,
@@ -1108,11 +1174,12 @@ impl CsvClient {
 
                 // Use factory to create adapter
                 let factory = SolanaFactory;
-                let result = factory.create_adapter(adapter_config).await
-                    .map_err(|e| CsvError::ProtocolError {
+                let result = factory.create_adapter(adapter_config).await.map_err(|e| {
+                    CsvError::ProtocolError {
                         chain: chain.clone(),
                         message: format!("Factory failed to create Solana adapter: {}", e),
-                    })?;
+                    }
+                })?;
 
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if result.chain_adapter.is_some() {
@@ -1140,7 +1207,7 @@ impl CsvClient {
                 } else {
                     csv_solana::config::Network::Mainnet
                 };
-                
+
                 // Convert hex private key to base58 keypair for Solana
                 let solana_private_key = private_keys
                     .as_ref()
@@ -1151,19 +1218,19 @@ impl CsvClient {
                     if let Ok(key_bytes) = hex::decode(cleaned) {
                         if key_bytes.len() == 32 {
                             use ed25519_dalek::SigningKey;
-                            let key_array: [u8; 32] = key_bytes
-                                .try_into()
-                                .map_err(|_| CsvError::ConfigError(
-                                    "Invalid Solana private key length".to_string()
-                                ))?;
+                            let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
+                                CsvError::ConfigError(
+                                    "Invalid Solana private key length".to_string(),
+                                )
+                            })?;
                             let signing_key = SigningKey::from_bytes(&key_array);
                             let public_key = signing_key.verifying_key();
-                            
+
                             // Solana keypair is 64 bytes: [secret_key(32) || public_key(32)]
                             let mut keypair_bytes = [0u8; 64];
                             keypair_bytes[..32].copy_from_slice(&key_array);
                             keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
-                            
+
                             // Encode in base58
                             Some(bs58::encode(keypair_bytes).into_string())
                         } else {
@@ -1175,7 +1242,7 @@ impl CsvClient {
                 } else {
                     None
                 };
-                
+
                 let program_id_from_config = _config
                     .chains
                     .get("solana")
@@ -1185,7 +1252,10 @@ impl CsvClient {
                             "Solana CSV program ID must be configured".to_string(),
                         )
                     })?;
-                log::info!("SDK: Solana program_id from config: {}", program_id_from_config);
+                log::info!(
+                    "SDK: Solana program_id from config: {}",
+                    program_id_from_config
+                );
 
                 let sol_config = csv_solana::config::SolanaConfig {
                     network: sol_network,
@@ -1197,7 +1267,10 @@ impl CsvClient {
                     timeout_seconds: 30,
                 };
                 let rpc = Box::new(csv_solana::node::SolanaNode::new(&rpc_url));
-                _builder.solana_from_config(sol_config, rpc).await.map(|backend| Some(AdapterBuildResult::Legacy(backend)))
+                _builder
+                    .solana_from_config(sol_config, rpc)
+                    .await
+                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
             }
             _ => Ok(None), // Skip unsupported chains
         }
@@ -1254,7 +1327,8 @@ pub(crate) struct ClientRef {
     pub(crate) chain_runtime: Option<crate::runtime::ChainRuntime>,
     /// Private keys for chain adapters (chain name -> typed SharedSecretHandle)
     #[allow(dead_code)]
-    pub(crate) private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
+    pub(crate) private_keys:
+        Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
 }
 
 impl ClientRef {

@@ -276,7 +276,8 @@ impl DeploymentConfig {
     /// Convert private_key String to typed SecretHandle (zeroize-on-drop)
     /// This should be called immediately after deserialization to ensure secrets are never exposed as raw strings
     pub fn to_secret_handle(&self) -> SecretHandle {
-        let bytes = hex::decode(&self.private_key).unwrap_or_else(|_| self.private_key.as_bytes().to_vec());
+        let bytes =
+            hex::decode(&self.private_key).unwrap_or_else(|_| self.private_key.as_bytes().to_vec());
         // Pad or truncate to 32 bytes for SecretKey
         let mut key_bytes = [0u8; 32];
         let len = bytes.len().min(32);

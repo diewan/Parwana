@@ -184,7 +184,8 @@ impl ReplayDatabase for PostgresReplayDb {
         entry: &CrossChainRegistryEntry,
     ) -> Result<(), ReplayDbError> {
         let sanad_hex = hex::encode(entry.sanad_id.as_bytes());
-        let entry_bytes = entry.to_canonical_bytes()
+        let entry_bytes = entry
+            .to_canonical_bytes()
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
         let entry_hex = hex::encode(&entry_bytes);
 
@@ -213,8 +214,9 @@ impl ReplayDatabase for PostgresReplayDb {
         for (_sanad_hex, entry_hex) in rows {
             let entry_bytes = hex::decode(&entry_hex)
                 .map_err(|e| ReplayDbError::Storage(format!("Hex decode error: {e}")))?;
-            let entry: CrossChainRegistryEntry = CrossChainRegistryEntry::from_canonical_bytes(&entry_bytes)
-                .map_err(|e| ReplayDbError::Storage(format!("Deserialization error: {e}")))?;
+            let entry: CrossChainRegistryEntry =
+                CrossChainRegistryEntry::from_canonical_bytes(&entry_bytes)
+                    .map_err(|e| ReplayDbError::Storage(format!("Deserialization error: {e}")))?;
             transfers.push(entry);
         }
         Ok(transfers)

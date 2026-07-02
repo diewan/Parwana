@@ -122,6 +122,10 @@ pub struct SealWallet {
     next_index: Mutex<HashMap<u32, u32>>,
     /// Explicit sanad_id -> seal mapping for cross-chain lock lookups
     sanad_seals: Mutex<HashMap<[u8; 32], (Vec<u8>, u32)>>,
+    /// sanad_id -> tapret commitment embedded in the seal output's Taproot
+    /// leaf. Required to reconstruct the key-path tweak when spending the seal
+    /// (the output key is `internal + TapTweak(internal || merkle(commitment))`).
+    sanad_commitments: Mutex<HashMap<[u8; 32], [u8; 32]>>,
 }
 
 impl SealWallet {
@@ -155,6 +159,7 @@ impl SealWallet {
             secp,
             next_index: Mutex::new(HashMap::new()),
             sanad_seals: Mutex::new(HashMap::new()),
+            sanad_commitments: Mutex::new(HashMap::new()),
         })
     }
 
@@ -217,16 +222,37 @@ impl SealWallet {
         Ok(hex::encode(secret_key.secret_bytes()))
     }
 
-    /// Produce a 64-byte Schnorr signature for the given sighash using the tweaked key.
+    /// Produce a 64-byte Schnorr signature for the given sighash using the
+    /// BIP-86 key-path tweak (merkle root = None). Use this only for plain
+    /// key-path outputs whose taproot key commits to no script tree.
     pub fn sign_taproot_keypath(
         &self,
         path: &Bip86Path,
         sighash: &[u8; 32],
     ) -> Result<Vec<u8>, WalletError> {
+        self.sign_taproot_keypath_with_merkle(path, sighash, None)
+    }
+
+    /// Produce a 64-byte Schnorr key-path signature tweaked by an explicit
+    /// Taproot merkle root.
+    ///
+    /// Tapret commitment seals are P2TR outputs whose output key is
+    /// `P + t·G` where `t = TapTweak(P || merkle_root)` and `merkle_root`
+    /// commits to the tapret OP_RETURN leaf. Signing such an output with the
+    /// plain BIP-86 tweak (`merkle_root = None`, as `sign_taproot_keypath`
+    /// does) signs for the wrong output key and yields an invalid Schnorr
+    /// signature that the network rejects. Pass the seal's real merkle root
+    /// here so the tweak matches the on-chain output key.
+    pub fn sign_taproot_keypath_with_merkle(
+        &self,
+        path: &Bip86Path,
+        sighash: &[u8; 32],
+        merkle_root: Option<bitcoin::taproot::TapNodeHash>,
+    ) -> Result<Vec<u8>, WalletError> {
         let secret_key = self.derive_private_key(path)?;
         let kp = secp256k1::Keypair::from_secret_key(&self.secp, &secret_key);
         // TapTweak: kp -> secp256k1::TweakedKeypair
-        let tweaked_kp = kp.tap_tweak(&self.secp, None);
+        let tweaked_kp = kp.tap_tweak(&self.secp, merkle_root);
         let msg = secp256k1::Message::from_digest_slice(sighash)
             .map_err(|e| WalletError::SigningFailed(e.to_string()))?;
         let sig = self
@@ -288,14 +314,43 @@ impl SealWallet {
     }
 
     pub fn add_utxo(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path) {
-        self.add_utxo_with_provenance(outpoint, amount_sat, path, None, None, UtxoProvenance::Unknown);
+        self.add_utxo_with_provenance(
+            outpoint,
+            amount_sat,
+            path,
+            None,
+            None,
+            UtxoProvenance::Unknown,
+        );
     }
 
-    pub fn add_utxo_with_scriptpubkey(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>) {
-        self.add_utxo_with_provenance(outpoint, amount_sat, path, script_pubkey, sanad_id, UtxoProvenance::RpcWallet);
+    pub fn add_utxo_with_scriptpubkey(
+        &self,
+        outpoint: OutPoint,
+        amount_sat: u64,
+        path: Bip86Path,
+        script_pubkey: Option<ScriptBuf>,
+        sanad_id: Option<[u8; 32]>,
+    ) {
+        self.add_utxo_with_provenance(
+            outpoint,
+            amount_sat,
+            path,
+            script_pubkey,
+            sanad_id,
+            UtxoProvenance::RpcWallet,
+        );
     }
 
-    pub fn add_utxo_with_provenance(&self, outpoint: OutPoint, amount_sat: u64, path: Bip86Path, script_pubkey: Option<ScriptBuf>, sanad_id: Option<[u8; 32]>, provenance: UtxoProvenance) {
+    pub fn add_utxo_with_provenance(
+        &self,
+        outpoint: OutPoint,
+        amount_sat: u64,
+        path: Bip86Path,
+        script_pubkey: Option<ScriptBuf>,
+        sanad_id: Option<[u8; 32]>,
+        provenance: UtxoProvenance,
+    ) {
         self.utxos.lock().unwrap_or_else(|e| e.into_inner()).insert(
             outpoint,
             WalletUtxo {
@@ -334,7 +389,9 @@ impl SealWallet {
         // Mark the UTXO as SanadAnchor to prevent spending
         let txid_array: [u8; 32] = txid.clone().try_into().unwrap_or([0u8; 32]);
         let outpoint = OutPoint {
-            txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array(txid_array)),
+            txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array(
+                txid_array,
+            )),
             vout,
         };
         let mut utxos = self.utxos.lock().unwrap_or_else(|e| e.into_inner());
@@ -351,6 +408,24 @@ impl SealWallet {
     /// Get the sanad_seals map for lookup by seal_protocol
     pub fn get_sanad_seals(&self) -> std::sync::MutexGuard<'_, HashMap<[u8; 32], (Vec<u8>, u32)>> {
         self.sanad_seals.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Record the tapret commitment embedded in a sanad's seal output, so the
+    /// key-path tweak can be reconstructed when the seal is later spent.
+    pub fn register_sanad_commitment(&self, sanad_id: [u8; 32], commitment: [u8; 32]) {
+        self.sanad_commitments
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(sanad_id, commitment);
+    }
+
+    /// Look up the tapret commitment for a sanad's seal output, if known.
+    pub fn get_sanad_commitment(&self, sanad_id: &[u8; 32]) -> Option<[u8; 32]> {
+        self.sanad_commitments
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(sanad_id)
+            .copied()
     }
 
     pub fn select_utxos(&self, target_sat: u64) -> Result<Vec<WalletUtxo>, WalletError> {
@@ -453,10 +528,7 @@ impl SealWallet {
 
     /// Clear all UTXOs from the wallet (for refreshing from chain)
     pub fn clear_utxos(&self) {
-        self.utxos
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        self.utxos.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Scan the blockchain for UTXOs belonging to this wallet's addresses
@@ -493,7 +565,14 @@ impl SealWallet {
                     } else {
                         consecutive_empty = 0;
                         for (outpoint, amount) in utxos {
-                            self.add_utxo_with_provenance(outpoint, amount, path.clone(), None, None, UtxoProvenance::RpcWallet);
+                            self.add_utxo_with_provenance(
+                                outpoint,
+                                amount,
+                                path.clone(),
+                                None,
+                                None,
+                                UtxoProvenance::RpcWallet,
+                            );
                             discovered_count += 1;
                         }
                     }
@@ -525,7 +604,14 @@ impl SealWallet {
 
         // Verify the outpoint belongs to this address
         // (In production, you'd verify the script_pubkey matches)
-        self.add_utxo_with_provenance(outpoint, amount_sat, path, None, None, UtxoProvenance::ImportedFunding);
+        self.add_utxo_with_provenance(
+            outpoint,
+            amount_sat,
+            path,
+            None,
+            None,
+            UtxoProvenance::ImportedFunding,
+        );
         Ok(())
     }
 }
@@ -625,9 +711,30 @@ mod tests {
         let t1 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
         let t2 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([2u8; 32]));
         let t3 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([3u8; 32]));
-        w.add_utxo_with_provenance(OutPoint::new(t1, 0), 50_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
-        w.add_utxo_with_provenance(OutPoint::new(t2, 0), 30_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
-        w.add_utxo_with_provenance(OutPoint::new(t3, 0), 20_000, path, None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(
+            OutPoint::new(t1, 0),
+            50_000,
+            path.clone(),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
+        w.add_utxo_with_provenance(
+            OutPoint::new(t2, 0),
+            30_000,
+            path.clone(),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
+        w.add_utxo_with_provenance(
+            OutPoint::new(t3, 0),
+            20_000,
+            path,
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
         let sel = w.select_utxos(70_000).unwrap();
         assert_eq!(sel.len(), 2);
         assert_eq!(sel.iter().map(|u| u.amount_sat).sum::<u64>(), 80_000);
@@ -641,11 +748,32 @@ mod tests {
         let t2 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([2u8; 32]));
         let t3 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([3u8; 32]));
         // Add spendable UTXO
-        w.add_utxo_with_provenance(OutPoint::new(t1, 0), 50_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(
+            OutPoint::new(t1, 0),
+            50_000,
+            path.clone(),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
         // Add SanadAnchor (non-spendable)
-        w.add_utxo_with_provenance(OutPoint::new(t2, 0), 100_000, path.clone(), None, None, UtxoProvenance::SanadAnchor);
+        w.add_utxo_with_provenance(
+            OutPoint::new(t2, 0),
+            100_000,
+            path.clone(),
+            None,
+            None,
+            UtxoProvenance::SanadAnchor,
+        );
         // Add ConsumedSeal (non-spendable)
-        w.add_utxo_with_provenance(OutPoint::new(t3, 0), 100_000, path, None, None, UtxoProvenance::ConsumedSeal);
+        w.add_utxo_with_provenance(
+            OutPoint::new(t3, 0),
+            100_000,
+            path,
+            None,
+            None,
+            UtxoProvenance::ConsumedSeal,
+        );
 
         // Should only select the spendable UTXO, not the SanadAnchor or ConsumedSeal
         let sel = w.select_utxos(30_000).unwrap();
@@ -661,9 +789,23 @@ mod tests {
         let t1 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
         let t2 = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([2u8; 32]));
         // Add spendable UTXO
-        w.add_utxo_with_provenance(OutPoint::new(t1, 0), 50_000, path.clone(), None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(
+            OutPoint::new(t1, 0),
+            50_000,
+            path.clone(),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
         // Add Unknown (non-spendable)
-        w.add_utxo_with_provenance(OutPoint::new(t2, 0), 100_000, path, None, None, UtxoProvenance::Unknown);
+        w.add_utxo_with_provenance(
+            OutPoint::new(t2, 0),
+            100_000,
+            path,
+            None,
+            None,
+            UtxoProvenance::Unknown,
+        );
 
         // Should only select the spendable UTXO, not the Unknown
         let sel = w.select_utxos(30_000).unwrap();
@@ -674,7 +816,14 @@ mod tests {
     fn test_wallet_insufficient_funds() {
         let w = SealWallet::generate_random(Network::Signet);
         let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
-        w.add_utxo_with_provenance(OutPoint::new(txid, 0), 10_000, Bip86Path::external(0, 0), None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(
+            OutPoint::new(txid, 0),
+            10_000,
+            Bip86Path::external(0, 0),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
         assert!(w.select_utxos(20_000).is_err());
     }
     #[test]
@@ -682,7 +831,14 @@ mod tests {
         let w = SealWallet::generate_random(Network::Signet);
         let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([1u8; 32]));
         let op = OutPoint::new(txid, 0);
-        w.add_utxo_with_provenance(op, 100_000, Bip86Path::external(0, 0), None, None, UtxoProvenance::RpcWallet);
+        w.add_utxo_with_provenance(
+            op,
+            100_000,
+            Bip86Path::external(0, 0),
+            None,
+            None,
+            UtxoProvenance::RpcWallet,
+        );
         assert_eq!(w.balance(), 100_000);
         w.reserve_utxos(&[op], "test");
         assert_eq!(w.balance(), 0);

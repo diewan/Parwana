@@ -30,17 +30,19 @@ impl BlsVerifier {
     ) -> Result<(), AnchorError> {
         #[cfg(feature = "bls")]
         {
-            use blst::{min_sig::Signature, min_sig::PublicKey, BLST_ERROR};
+            use blst::{BLST_ERROR, min_sig::PublicKey, min_sig::Signature};
 
             // Parse the signature (48 bytes for BLS12-381 min_sig)
             if signature.len() != 48 {
-                return Err(AnchorError::InvalidSignature(
-                    format!("Invalid signature length: expected 48, got {}", signature.len())
-                ));
+                return Err(AnchorError::InvalidSignature(format!(
+                    "Invalid signature length: expected 48, got {}",
+                    signature.len()
+                )));
             }
 
-            let sig = Signature::from_bytes(signature)
-                .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse signature: {:?}", e)))?;
+            let sig = Signature::from_bytes(signature).map_err(|e| {
+                AnchorError::InvalidSignature(format!("Failed to parse signature: {:?}", e))
+            })?;
 
             // Aggregate the public keys of all signers for efficient BLS verification
             // This is the production approach using true BLS aggregation
@@ -51,18 +53,22 @@ impl BlsVerifier {
             for signer_pubkey in signers {
                 // BLS public keys are 48 bytes (min_pk variant, G1 points)
                 if signer_pubkey.len() != 48 {
-                    return Err(AnchorError::InvalidSignature(
-                        format!("Invalid public key length: expected 48, got {}", signer_pubkey.len())
-                    ));
+                    return Err(AnchorError::InvalidSignature(format!(
+                        "Invalid public key length: expected 48, got {}",
+                        signer_pubkey.len()
+                    )));
                 }
 
-                let pubkey = PublicKey::from_bytes(signer_pubkey)
-                    .map_err(|e| AnchorError::InvalidSignature(format!("Failed to parse public key: {:?}", e)))?;
+                let pubkey = PublicKey::from_bytes(signer_pubkey).map_err(|e| {
+                    AnchorError::InvalidSignature(format!("Failed to parse public key: {:?}", e))
+                })?;
                 pubkeys.push(pubkey);
             }
 
             if pubkeys.is_empty() {
-                return Err(AnchorError::InvalidSignature("No signers provided".to_string()));
+                return Err(AnchorError::InvalidSignature(
+                    "No signers provided".to_string(),
+                ));
             }
 
             // Verify the signature against the first public key (simplified verification)
@@ -72,7 +78,7 @@ impl BlsVerifier {
 
             if result != BLST_ERROR::BLST_SUCCESS {
                 return Err(AnchorError::InvalidSignature(
-                    "BLS aggregate signature verification failed".to_string()
+                    "BLS aggregate signature verification failed".to_string(),
                 ));
             }
 
@@ -82,17 +88,24 @@ impl BlsVerifier {
             }
 
             // Check that signers represent >= threshold fraction of voting power
-            let total_power: u64 = validator_set.validators.iter().map(|v| v.voting_power).sum();
+            let total_power: u64 = validator_set
+                .validators
+                .iter()
+                .map(|v| v.voting_power)
+                .sum();
             if total_power == 0 {
-                return Err(AnchorError::InvalidSignature("Total voting power is zero".to_string()));
+                return Err(AnchorError::InvalidSignature(
+                    "Total voting power is zero".to_string(),
+                ));
             }
 
             let fraction = total_voting_power as f32 / total_power as f32;
             if fraction < threshold {
-                return Err(AnchorError::InvalidSignature(
-                    format!("Insufficient voting power: signers represent {:.2}% of voting power, required {:.2}%", 
-                            fraction * 100.0, threshold * 100.0)
-                ));
+                return Err(AnchorError::InvalidSignature(format!(
+                    "Insufficient voting power: signers represent {:.2}% of voting power, required {:.2}%",
+                    fraction * 100.0,
+                    threshold * 100.0
+                )));
             }
 
             Ok(())
@@ -101,7 +114,7 @@ impl BlsVerifier {
         #[cfg(not(feature = "bls"))]
         {
             Err(AnchorError::InvalidSignature(
-                "BLS signature verification requires the 'bls' feature to be enabled".to_string()
+                "BLS signature verification requires the 'bls' feature to be enabled".to_string(),
             ))
         }
     }
@@ -169,15 +182,21 @@ impl CryptographicAnchor for AptosAnchor {
 
         // Check that the proof has the required components
         if proof.key.is_empty() {
-            return Err(AnchorError::InvalidInclusionProof("Key is empty".to_string()));
+            return Err(AnchorError::InvalidInclusionProof(
+                "Key is empty".to_string(),
+            ));
         }
 
         if proof.value.is_empty() {
-            return Err(AnchorError::InvalidInclusionProof("Value is empty".to_string()));
+            return Err(AnchorError::InvalidInclusionProof(
+                "Value is empty".to_string(),
+            ));
         }
 
         if proof.proof.is_empty() {
-            return Err(AnchorError::InvalidInclusionProof("No proof nodes provided".to_string()));
+            return Err(AnchorError::InvalidInclusionProof(
+                "No proof nodes provided".to_string(),
+            ));
         }
 
         // Reconstruct the Merkle root from the key-value pair and proof nodes

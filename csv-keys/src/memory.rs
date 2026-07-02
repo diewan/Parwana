@@ -3,7 +3,7 @@
 //! This module provides types that securely hold cryptographic key material
 //! and automatically clear memory when dropped.
 
-use secrecy::{Secret, ExposeSecret, Zeroize};
+use secrecy::{ExposeSecret, Secret, Zeroize};
 use zeroize::ZeroizeOnDrop;
 
 /// A 32-byte secret key that is automatically zeroed when dropped.

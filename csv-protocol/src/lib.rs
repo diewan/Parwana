@@ -22,7 +22,6 @@ pub mod deployment_manifest;
 pub mod deterministic_recovery;
 pub mod envelope;
 pub mod error;
-pub mod wire;
 pub mod events;
 pub mod failure_domains;
 pub mod lease;
@@ -30,12 +29,13 @@ pub mod proof_taxonomy;
 pub mod proof_validation;
 pub mod proof_verification;
 pub mod sanad;
-pub mod secret;
 pub mod seal;
 pub mod seal_protocol;
+pub mod secret;
 pub mod signature;
 pub mod verification_levels;
 pub mod verification_results;
+pub mod wire;
 
 // State machine modules
 pub mod state_machine;
@@ -111,7 +111,9 @@ pub use verification_levels::VerificationLevel;
 pub use cross_chain::HashEntry;
 
 // Re-export sanad types
-pub use sanad::{OwnershipProof, SCHEMA_VERSION, Sanad, SanadEnvelope, SanadId, SanadPayloadDescriptor, Schema};
+pub use sanad::{
+    OwnershipProof, SCHEMA_VERSION, Sanad, SanadEnvelope, SanadId, SanadPayloadDescriptor, Schema,
+};
 
 // Re-export seal types
 pub use seal::{CommitAnchor, SealPoint};
@@ -126,7 +128,7 @@ pub use commitment::Commitment;
 pub use envelope::{CanonicalSanadEnvelope, TypeId, decode_envelope};
 
 // Re-export proof types (excluding FinalityProof to avoid conflict with finality module)
-pub use proof_taxonomy::{InclusionProof, ProofBundle, HashFunction, ProofLeafV1};
+pub use proof_taxonomy::{HashFunction, InclusionProof, ProofBundle, ProofLeafV1};
 
 // Re-export transfer state types
 pub use transfer_state::TransferStage;

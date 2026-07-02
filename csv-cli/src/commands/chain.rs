@@ -81,7 +81,12 @@ pub async fn execute(action: ChainAction, config: &Config) -> Result<()> {
         ChainAction::SetRpc { chain, url } => cmd_set_rpc(chain, url, config),
         ChainAction::SetNetwork { chain, network } => cmd_set_network(chain, network, config),
         ChainAction::SetContract { chain, address } => cmd_set_contract(chain, address, config),
-        ChainAction::Readiness { chain, account, index, json } => cmd_readiness(&chain, account, index, json, config).await,
+        ChainAction::Readiness {
+            chain,
+            account,
+            index,
+            json,
+        } => cmd_readiness(&chain, account, index, json, config).await,
         ChainAction::Capabilities { chain, json } => cmd_capabilities(chain, json, config).await,
     }
 }
@@ -214,13 +219,19 @@ fn expand_path(path: &str) -> String {
     path.to_string()
 }
 
-async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, config: &Config) -> Result<()> {
+async fn cmd_readiness(
+    chain: &Chain,
+    account: u32,
+    index: u32,
+    json: bool,
+    config: &Config,
+) -> Result<()> {
     let _chain_config = config.chain(chain)?;
 
     // Use the runtime to check readiness
+    use csv_hash::ChainId;
     use csv_sdk::CsvClient;
     use csv_sdk::StoreBackend;
-    use csv_hash::ChainId;
 
     // Map CLI Chain to protocol ChainId
     let core_chain = ChainId::new(chain.as_str());
@@ -255,7 +266,9 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
         utxos: vec![],
         sanad_seals: vec![],
     };
-    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+    sdk_config
+        .chains
+        .insert(chain.as_str().to_string(), sdk_chain_config);
 
     // Build CSV client without private keys (readiness check doesn't need signing)
     let client = CsvClient::builder()
@@ -269,7 +282,10 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
     let runtime = client.chain_runtime();
 
     // Check readiness via the chain backend
-    match runtime.check_readiness(core_chain.clone(), account, index).await {
+    match runtime
+        .check_readiness(core_chain.clone(), account, index)
+        .await
+    {
         Ok(readiness) => {
             if json {
                 // Output as JSON
@@ -299,12 +315,42 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
                 output::kv("Account", &account.to_string());
                 output::kv("Index", &index.to_string());
 
-                output::kv("Derived Signer Address", readiness.signer_address.as_deref().unwrap_or("N/A"));
-                output::kv("Balance Address", readiness.balance_address.as_deref().unwrap_or("N/A"));
-                output::kv("Signer Configured", if readiness.signer_configured { "Yes" } else { "No" });
-                output::kv("Write Capable", if readiness.write_capable { "Yes" } else { "No" });
-                output::kv("Contract/Program Configured", if readiness.contract_configured { "Yes" } else { "No" });
-                output::kv("Account Exists", if readiness.account_exists { "Yes" } else { "No" });
+                output::kv(
+                    "Derived Signer Address",
+                    readiness.signer_address.as_deref().unwrap_or("N/A"),
+                );
+                output::kv(
+                    "Balance Address",
+                    readiness.balance_address.as_deref().unwrap_or("N/A"),
+                );
+                output::kv(
+                    "Signer Configured",
+                    if readiness.signer_configured {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
+                output::kv(
+                    "Write Capable",
+                    if readiness.write_capable { "Yes" } else { "No" },
+                );
+                output::kv(
+                    "Contract/Program Configured",
+                    if readiness.contract_configured {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
+                output::kv(
+                    "Account Exists",
+                    if readiness.account_exists {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
 
                 if let Some(balance) = readiness.native_balance {
                     output::kv("Native Balance", &balance.to_string());
@@ -318,10 +364,38 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
                     output::kv("Estimated Minimum Fee", "N/A");
                 }
 
-                output::kv("Sanad Create Supported", if readiness.sanad_create_supported { "Yes" } else { "No" });
-                output::kv("Proof Generation Supported", if readiness.proof_generation_supported { "Yes" } else { "No" });
-                output::kv("Cross-Chain Source Supported", if readiness.cross_chain_source_supported { "Yes" } else { "No" });
-                output::kv("Cross-Chain Destination Supported", if readiness.cross_chain_destination_supported { "Yes" } else { "No" });
+                output::kv(
+                    "Sanad Create Supported",
+                    if readiness.sanad_create_supported {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
+                output::kv(
+                    "Proof Generation Supported",
+                    if readiness.proof_generation_supported {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
+                output::kv(
+                    "Cross-Chain Source Supported",
+                    if readiness.cross_chain_source_supported {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
+                output::kv(
+                    "Cross-Chain Destination Supported",
+                    if readiness.cross_chain_destination_supported {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                );
 
                 // Overall readiness assessment
                 let ready_for_writes = readiness.signer_configured && readiness.write_capable;
@@ -330,7 +404,9 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
                 } else {
                     output::warn("Chain is NOT ready for write operations");
                     if !readiness.signer_configured {
-                        output::info("  - Signer not configured (use 'csv wallet init' or 'csv wallet import')");
+                        output::info(
+                            "  - Signer not configured (use 'csv wallet init' or 'csv wallet import')",
+                        );
                     }
                     if !readiness.write_capable {
                         output::info("  - Write capability not available");
@@ -351,7 +427,9 @@ async fn cmd_readiness(chain: &Chain, account: u32, index: u32, json: bool, conf
                 println!("{}", serde_json::to_string_pretty(&json_output)?);
             } else {
                 output::error(&format!("Failed to check readiness: {}", e));
-                output::info("This may indicate the chain adapter is not properly configured or RPC is unavailable");
+                output::info(
+                    "This may indicate the chain adapter is not properly configured or RPC is unavailable",
+                );
                 println!();
             }
         }
@@ -431,14 +509,27 @@ async fn cmd_capabilities(chain: Option<Chain>, json: bool, config: &Config) -> 
             capabilities_array.push(chain_caps);
         }
 
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "capabilities": capabilities_array }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "capabilities": capabilities_array })
+            )?
+        );
     } else {
         // Output as human-readable table
         output::header("Chain Capabilities Matrix");
 
         let headers = vec![
-            "Chain", "Network", "RPC", "Contract", "State Model", "Finality",
-            "Proof Model", "Reorg Risk", "Chain Role", "Can Mint"
+            "Chain",
+            "Network",
+            "RPC",
+            "Contract",
+            "State Model",
+            "Finality",
+            "Proof Model",
+            "Reorg Risk",
+            "Chain Role",
+            "Can Mint",
         ];
         let mut rows = Vec::new();
 
@@ -476,24 +567,37 @@ async fn cmd_capabilities(chain: Option<Chain>, json: bool, config: &Config) -> 
             rows.push(vec![
                 format!("{}", chain),
                 chain_config.network.to_string(),
-                if !chain_config.rpc_url.is_empty() { "✓" } else { "✗" }.to_string(),
+                if !chain_config.rpc_url.is_empty() {
+                    "✓"
+                } else {
+                    "✗"
+                }
+                .to_string(),
                 if chain_config.contract_address.is_some() || chain_config.program_id.is_some() {
                     "✓"
                 } else {
                     "✗"
-                }.to_string(),
+                }
+                .to_string(),
                 format!("{:?}", caps.state_model),
                 format!("{:?}", caps.finality_model),
                 format!("{:?}", caps.proof_model),
                 format!("{:?}", caps.reorg_risk),
                 format!("{:?}", caps.chain_role),
-                if caps.can_authorize_mint() { "Yes" } else { "No" }.to_string(),
+                if caps.can_authorize_mint() {
+                    "Yes"
+                } else {
+                    "No"
+                }
+                .to_string(),
             ]);
         }
 
         output::table(&headers, &rows);
         println!();
-        output::info("Use 'csv chain readiness --chain <chain> --json' for detailed runtime readiness checks");
+        output::info(
+            "Use 'csv chain readiness --chain <chain> --json' for detailed runtime readiness checks",
+        );
     }
 
     Ok(())

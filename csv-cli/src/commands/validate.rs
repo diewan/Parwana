@@ -115,12 +115,15 @@ fn cmd_proof(
 
     // Parse proof bundle from canonical bytes (not JSON)
     // Note: Proof files should be stored in binary canonical format, not JSON
-    let proof_bytes = hex::decode(proof.get("data")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim_start_matches("0x"))
-        .map_err(|e| anyhow::anyhow!("Invalid proof data hex: {}", e))?;
-    
+    let proof_bytes = hex::decode(
+        proof
+            .get("data")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim_start_matches("0x"),
+    )
+    .map_err(|e| anyhow::anyhow!("Invalid proof data hex: {}", e))?;
+
     let proof_bundle = ProofBundle::from_canonical_bytes(&proof_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to parse proof bundle: {}", e))?;
 
@@ -208,8 +211,8 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
     output::header("Offline Proof Verification");
 
     // Read and parse proof bundle from file
-    let content = std::fs::read(&file)
-        .map_err(|e| anyhow::anyhow!("Failed to read proof file: {}", e))?;
+    let content =
+        std::fs::read(&file).map_err(|e| anyhow::anyhow!("Failed to read proof file: {}", e))?;
 
     // Parse proof bundle from canonical bytes (not JSON)
     // Note: Proof files should be stored in binary canonical format, not JSON

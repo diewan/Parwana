@@ -9,7 +9,6 @@
 //! - Salt affects the ID (prevents collision when same commitment used with different salts)
 /// - Descriptor hash binds content metadata to the ID
 /// - Domain separation prevents cross-protocol replay
-
 use crate::{Hash, tagged_hash_str};
 
 /// Preimage for Sanad ID derivation.
@@ -291,11 +290,7 @@ mod tests {
 
     #[test]
     fn test_sanad_id_preimage_canonical_bytes() {
-        let preimage = SanadIdPreimage::new(
-            [1u8; 32],
-            [2u8; 32],
-            vec![3u8; 16],
-        );
+        let preimage = SanadIdPreimage::new([1u8; 32], [2u8; 32], vec![3u8; 16]);
         let bytes = preimage.to_canonical_bytes();
         assert_eq!(bytes.len(), 64 + 16);
         assert_eq!(&bytes[0..32], &[1u8; 32]);
@@ -305,11 +300,7 @@ mod tests {
 
     #[test]
     fn test_sanad_id_from_domain_canonical() {
-        let preimage = SanadIdPreimage::new(
-            [1u8; 32],
-            [2u8; 32],
-            vec![3u8; 16],
-        );
+        let preimage = SanadIdPreimage::new([1u8; 32], [2u8; 32], vec![3u8; 16]);
         let id = SanadId::from_domain_canonical(&preimage);
         // Verify the ID is non-zero
         assert_ne!(id.as_bytes(), &[0u8; 32]);
@@ -383,7 +374,10 @@ mod tests {
         let id2 = SanadId::from_domain_canonical(&preimage2);
 
         // Identical inputs MUST produce identical IDs
-        assert_eq!(id1, id2, "Identical inputs must produce identical Sanad IDs");
+        assert_eq!(
+            id1, id2,
+            "Identical inputs must produce identical Sanad IDs"
+        );
     }
 
     #[test]
@@ -398,7 +392,10 @@ mod tests {
         let id2 = SanadId::from_domain_canonical(&preimage);
 
         // Both methods must produce the same ID
-        assert_eq!(id1, id2, "from_descriptor_commitment_salt must use from_domain_canonical");
+        assert_eq!(
+            id1, id2,
+            "from_descriptor_commitment_salt must use from_domain_canonical"
+        );
     }
 
     #[test]
@@ -496,7 +493,10 @@ mod tests {
         let double_encoded = hex::encode(id1.as_bytes());
         assert_eq!(double_encoded.len(), 64);
         let id2 = SanadId::parse_hex(&double_encoded).unwrap();
-        assert_eq!(id1, id2, "hex::encode(sanad_id.as_bytes()) should produce parseable hex");
+        assert_eq!(
+            id1, id2,
+            "hex::encode(sanad_id.as_bytes()) should produce parseable hex"
+        );
 
         // The real regression test: if someone treats the hex string as ASCII and hex-encodes THAT,
         // they would get 128 chars (64 ASCII chars encoded as hex = 128 hex chars)
@@ -518,7 +518,11 @@ mod tests {
     #[test]
     fn test_parse_hex_roundtrip() {
         // Test that we can parse a Sanad ID that was previously displayed as hex
-        let original = SanadId::new([0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99]);
+        let original = SanadId::new([
+            0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+            0x32, 0x10, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            0x66, 0x77, 0x88, 0x99,
+        ]);
         let hex_display = hex::encode(original.as_bytes());
         let parsed = SanadId::parse_hex(&hex_display).unwrap();
         assert_eq!(original, parsed);

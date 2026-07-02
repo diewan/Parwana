@@ -3,7 +3,9 @@
 //! Tests lease edge cases and adversarial scenarios to ensure
 //! exactly one coordinator is active for each transfer.
 
-use csv_runtime::distributed_coordinator_lease::{CoordinatorId, CoordinatorLease, InMemoryLease, LeaseError};
+use csv_runtime::distributed_coordinator_lease::{
+    CoordinatorId, CoordinatorLease, InMemoryLease, LeaseError,
+};
 use std::time::Duration;
 use tokio::time::sleep;
 

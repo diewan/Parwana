@@ -205,7 +205,9 @@ impl ChainQuery for AptosBackend {
             .rpc()
             .get_transaction_by_hash(hash)
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction by hash: {}", e)))?
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to get transaction by hash: {}", e))
+            })?
             .ok_or_else(|| ChainOpError::RpcError("Transaction not found".to_string()))?;
 
         Ok(self.tx_to_info(&tx))
@@ -645,7 +647,7 @@ impl ChainProofProvider for AptosBackend {
 
 #[async_trait]
 impl ChainSanadOps for AptosBackend {
-     async fn create_sanad(
+    async fn create_sanad(
         &self,
         owner: &str,
         asset_class: &str,
@@ -673,28 +675,40 @@ impl ChainSanadOps for AptosBackend {
         };
         let commitment = Hash::new(commitment_bytes);
 
-        let seal = self.seal_protocol
-            .create_seal(None)
-            .await
-            .map_err(|e| ChainOpError::TransactionError(format!("Failed to create seal: {}", e)))?;
+        let seal =
+            self.seal_protocol.create_seal(None).await.map_err(|e| {
+                ChainOpError::TransactionError(format!("Failed to create seal: {}", e))
+            })?;
 
-        log::debug!("APTOS: Creating sanad with seal at {}", format_address(seal.account_address));
+        log::debug!(
+            "APTOS: Creating sanad with seal at {}",
+            format_address(seal.account_address)
+        );
 
         #[cfg(feature = "rpc")]
         {
-            let (_signed_tx, _event_data) = self.seal_protocol
+            let (_signed_tx, _event_data) = self
+                .seal_protocol
                 .build_and_sign_entry_function(&seal, commitment_bytes)
                 .await
-                .map_err(|e| ChainOpError::TransactionError(format!("Failed to build transaction: {}", e)))?;
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!("Failed to build transaction: {}", e))
+                })?;
 
             log::debug!("APTOS: Built and signed create_sanad transaction");
 
-            let tx_hash = self.rpc
+            let tx_hash = self
+                .rpc
                 .submit_signed_transaction(_signed_tx)
                 .await
-                .map_err(|e| ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e)))?;
+                .map_err(|e| {
+                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
+                })?;
 
-            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!(
+                "APTOS: Transaction submitted with hash: {}",
+                hex::encode(tx_hash)
+            );
         }
 
         #[cfg(not(feature = "rpc"))]
@@ -702,7 +716,8 @@ impl ChainSanadOps for AptosBackend {
             let _ = (&seal, commitment_bytes);
             return Err(ChainOpError::FeatureNotEnabled(
                 "Sanad creation requires RPC feature for transaction signing. \
-                 Enable with --features rpc".to_string(),
+                 Enable with --features rpc"
+                    .to_string(),
             ));
         }
 
@@ -718,7 +733,8 @@ impl ChainSanadOps for AptosBackend {
                 "asset_id": asset_id,
                 "seal_address": format_address(seal.account_address),
                 "seal_resource_type": seal.resource_type,
-            })).unwrap_or_default(),
+            }))
+            .unwrap_or_default(),
         })
     }
 
@@ -731,13 +747,16 @@ impl ChainSanadOps for AptosBackend {
 
         #[cfg(feature = "rpc")]
         {
-            use csv_protocol::chain_adapter_traits::SanadOperation;
             use crate::types::AptosSealPoint;
+            use csv_protocol::chain_adapter_traits::SanadOperation;
 
             // The sanad_id is the commitment hash
             let commitment = *sanad_id.as_bytes();
 
-            log::debug!("APTOS: Consuming sanad with commitment: {}", hex::encode(commitment));
+            log::debug!(
+                "APTOS: Consuming sanad with commitment: {}",
+                hex::encode(commitment)
+            );
 
             // Create a seal point - for consume, the seal is at the signer's address
             // The actual address will be derived from the signing key in build_and_sign_entry_function
@@ -771,7 +790,10 @@ impl ChainSanadOps for AptosBackend {
                     ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
                 })?;
 
-            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!(
+                "APTOS: Transaction submitted with hash: {}",
+                hex::encode(tx_hash)
+            );
 
             // Wait for transaction confirmation
             log::debug!("APTOS: Waiting for transaction confirmation");
@@ -837,8 +859,9 @@ impl ChainSanadOps for AptosBackend {
 
             // Parse owner key for signing (expecting hex-encoded 32-byte address)
             let owner_key_id_clean = owner_key_id.trim_start_matches("0x");
-            let owner_bytes = hex::decode(owner_key_id_clean)
-                .map_err(|_| ChainOpError::InvalidInput("Invalid owner key ID format".to_string()))?;
+            let owner_bytes = hex::decode(owner_key_id_clean).map_err(|_| {
+                ChainOpError::InvalidInput("Invalid owner key ID format".to_string())
+            })?;
 
             if owner_bytes.len() != 32 {
                 return Err(ChainOpError::InvalidInput(
@@ -846,19 +869,25 @@ impl ChainSanadOps for AptosBackend {
                 ));
             }
 
-            let _owner_address: [u8; 32] = owner_bytes
-                .try_into()
-                .map_err(|_| ChainOpError::InvalidInput("Invalid owner address format".to_string()))?;
+            let _owner_address: [u8; 32] = owner_bytes.try_into().map_err(|_| {
+                ChainOpError::InvalidInput("Invalid owner address format".to_string())
+            })?;
 
             // The sanad_id is the commitment hash
             let commitment = *sanad_id.as_bytes();
 
-            log::debug!("APTOS: Locking sanad with commitment: {}", hex::encode(commitment));
+            log::debug!(
+                "APTOS: Locking sanad with commitment: {}",
+                hex::encode(commitment)
+            );
             log::debug!("APTOS: Destination chain: {}", destination_chain);
 
             // Query the seal resource from on-chain instead of using in-memory registry
             // The seal was created via CLI and may not be in the in-memory registry
-            let account_address = self.seal_protocol.signing_key.as_ref()
+            let account_address = self
+                .seal_protocol
+                .signing_key
+                .as_ref()
                 .map(|key| {
                     use sha3::{Digest, Sha3_256};
                     let public_key = key.verifying_key().to_bytes();
@@ -869,12 +898,18 @@ impl ChainSanadOps for AptosBackend {
                     addr.copy_from_slice(&hash[..32]);
                     addr
                 })
-                .ok_or_else(|| ChainOpError::InvalidInput("No signing key configured".to_string()))?;
+                .ok_or_else(|| {
+                    ChainOpError::InvalidInput("No signing key configured".to_string())
+                })?;
 
             // Query the seal resource from on-chain
-            let seal = self.seal_protocol.get_seal_from_chain(account_address)
+            let seal = self
+                .seal_protocol
+                .get_seal_from_chain(account_address)
                 .await
-                .map_err(|e| ChainOpError::InvalidInput(format!("Failed to query seal from chain: {}", e)))?;
+                .map_err(|e| {
+                    ChainOpError::InvalidInput(format!("Failed to query seal from chain: {}", e))
+                })?;
 
             // Get the nonce from the seal
             let nonce = seal.nonce;
@@ -886,24 +921,29 @@ impl ChainSanadOps for AptosBackend {
                 "ethereum" => 3u8,
                 "solana" => 4u8,
                 "bitcoin" => 5u8,
-                _ => return Err(ChainOpError::InvalidInput(
-                    format!("Invalid destination chain: {}", destination_chain)
-                )),
+                _ => {
+                    return Err(ChainOpError::InvalidInput(format!(
+                        "Invalid destination chain: {}",
+                        destination_chain
+                    )));
+                }
             };
 
             // Build the lock_sanad entry function payload
             let entry_function_builder = crate::entry_function::EntryFunctionBuilder::new(
-                self.seal_protocol.config().seal_contract.module_address.clone()
+                self.seal_protocol
+                    .config()
+                    .seal_contract
+                    .module_address
+                    .clone(),
             );
-            let payload = entry_function_builder.lock_sanad(
-                nonce,
-                commitment,
-                dest_chain_u8,
-                _owner_address,
-            );
+            let payload =
+                entry_function_builder.lock_sanad(nonce, commitment, dest_chain_u8, _owner_address);
 
             // Sign the transaction
-            let signed_tx = self.seal_protocol.sign_entry_function_payload(payload)
+            let signed_tx = self
+                .seal_protocol
+                .sign_entry_function_payload(payload)
                 .await
                 .map_err(|e| {
                     ChainOpError::TransactionError(format!(
@@ -924,7 +964,10 @@ impl ChainSanadOps for AptosBackend {
                     ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
                 })?;
 
-            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!(
+                "APTOS: Transaction submitted with hash: {}",
+                hex::encode(tx_hash)
+            );
 
             // Wait for transaction confirmation
             log::debug!("APTOS: Waiting for transaction confirmation");
@@ -957,7 +1000,8 @@ impl ChainSanadOps for AptosBackend {
                 metadata: serde_json::to_vec(&serde_json::json!({
                     "destination_chain": destination_chain,
                     "seal_address": hex::encode(seal.account_address),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
@@ -989,8 +1033,9 @@ impl ChainSanadOps for AptosBackend {
 
             // Parse new owner address (expecting hex-encoded 32-byte Aptos address)
             let new_owner_clean = new_owner.trim_start_matches("0x");
-            let owner_bytes = hex::decode(new_owner_clean)
-                .map_err(|_| ChainOpError::InvalidInput("Invalid owner address format".to_string()))?;
+            let owner_bytes = hex::decode(new_owner_clean).map_err(|_| {
+                ChainOpError::InvalidInput("Invalid owner address format".to_string())
+            })?;
 
             if owner_bytes.len() != 32 {
                 return Err(ChainOpError::InvalidInput(
@@ -998,9 +1043,9 @@ impl ChainSanadOps for AptosBackend {
                 ));
             }
 
-            let _owner_address: [u8; 32] = owner_bytes
-                .try_into()
-                .map_err(|_| ChainOpError::InvalidInput("Invalid owner address array".to_string()))?;
+            let _owner_address: [u8; 32] = owner_bytes.try_into().map_err(|_| {
+                ChainOpError::InvalidInput("Invalid owner address array".to_string())
+            })?;
 
             // Verify the lock proof has valid structure
             if lock_proof.proof_bytes.is_empty() {
@@ -1016,16 +1061,21 @@ impl ChainSanadOps for AptosBackend {
             }
 
             log::debug!("APTOS: Minting sanad from source chain: {}", source_chain);
-            log::debug!("APTOS: Source sanad ID: {}", hex::encode(source_sanad_id.as_bytes()));
+            log::debug!(
+                "APTOS: Source sanad ID: {}",
+                hex::encode(source_sanad_id.as_bytes())
+            );
 
             // Find the seal resource for this sanad from active seals, or create one if none exist
-            let seal = if let Some(seal) = self.seal_protocol.get_active_seals().into_iter().last() {
+            let seal = if let Some(seal) = self.seal_protocol.get_active_seals().into_iter().last()
+            {
                 seal
             } else {
                 // Auto-create a seal if none exist
                 log::debug!("APTOS: No active seals found, creating a new seal");
-                let seal = self.seal_protocol.create_seal(None).await
-                    .map_err(|e| ChainOpError::TransactionError(format!("Failed to create seal: {}", e)))?;
+                let seal = self.seal_protocol.create_seal(None).await.map_err(|e| {
+                    ChainOpError::TransactionError(format!("Failed to create seal: {}", e))
+                })?;
 
                 // Wait a moment for the seal creation transaction to be processed
                 // This avoids SEQUENCE_NUMBER_TOO_OLD errors by allowing the sequence number to increment
@@ -1050,9 +1100,12 @@ impl ChainSanadOps for AptosBackend {
                 "aptos" => 2,
                 "ethereum" => 3,
                 "solana" => 4,
-                _ => return Err(ChainOpError::InvalidInput(format!(
-                    "Invalid source chain: {}", source_chain
-                ))),
+                _ => {
+                    return Err(ChainOpError::InvalidInput(format!(
+                        "Invalid source chain: {}",
+                        source_chain
+                    )));
+                }
             };
 
             // Get module address from seal protocol
@@ -1069,7 +1122,7 @@ impl ChainSanadOps for AptosBackend {
                 arr
             } else {
                 return Err(ChainOpError::InvalidInput(
-                    "Lock proof too short for source_seal_ref".to_string()
+                    "Lock proof too short for source_seal_ref".to_string(),
                 ));
             };
 
@@ -1077,16 +1130,17 @@ impl ChainSanadOps for AptosBackend {
 
             // Parse lock proof into explicit fields required by Move entry function
             // This rejects short proofs and extracts state_root and leaf_position properly
-            let parsed_proof = ParsedLockProof::parse(&lock_proof.proof_bytes)
-                .map_err(|e| ChainOpError::InvalidInput(format!("Failed to parse lock proof: {}", e)))?;
+            let parsed_proof = ParsedLockProof::parse(&lock_proof.proof_bytes).map_err(|e| {
+                ChainOpError::InvalidInput(format!("Failed to parse lock proof: {}", e))
+            })?;
 
             let state_root = parsed_proof.state_root;
             let leaf_position = parsed_proof.leaf_position;
 
             // Build the payload with all required parameters
             let payload = builder.mint_sanad(
-                *source_sanad_id.as_bytes(),  // sanad_id
-                commitment,                   // commitment
+                *source_sanad_id.as_bytes(), // sanad_id
+                commitment,                  // commitment
                 state_root,                  // state_root parsed from lock proof
                 source_chain_u8,             // source_chain
                 source_seal_ref_array,       // source_seal_ref
@@ -1118,7 +1172,10 @@ impl ChainSanadOps for AptosBackend {
                     ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
                 })?;
 
-            log::debug!("APTOS: Transaction submitted with hash: {}", hex::encode(tx_hash));
+            log::debug!(
+                "APTOS: Transaction submitted with hash: {}",
+                hex::encode(tx_hash)
+            );
 
             // Wait for transaction confirmation
             log::debug!("APTOS: Waiting for transaction confirmation");
@@ -1152,7 +1209,8 @@ impl ChainSanadOps for AptosBackend {
                     "source_chain": source_chain,
                     "new_owner": new_owner,
                     "seal_address": hex::encode(seal.account_address),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
@@ -1238,10 +1296,14 @@ impl ChainSanadOps for AptosBackend {
             // Try to query the sanad resource from the account
             let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
             let resource_type = format!("0x{}::sanad::Sanad", hex::encode(module_addr));
-            match self.rpc().get_resource(address_bytes, &resource_type, None).await {
+            match self
+                .rpc()
+                .get_resource(address_bytes, &resource_type, None)
+                .await
+            {
                 Ok(Some(_)) => "active",
                 Ok(None) => "consumed",
-                Err(_) => "unknown"
+                Err(_) => "unknown",
             }
         } else {
             "consumed"
@@ -1334,8 +1396,12 @@ impl SanadStateReader for AptosBackend {
         // Note: Aptos RPC doesn't have get_account_resources, use get_resource for specific types
         let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
         let resource_type = format!("0x{}::sanad::Sanad", hex::encode(module_addr));
-        
-        match self.rpc().get_resource(address_bytes, &resource_type, None).await {
+
+        match self
+            .rpc()
+            .get_resource(address_bytes, &resource_type, None)
+            .await
+        {
             Ok(Some(_resource)) => {
                 // Parse the resource data to extract state information
                 // The resource data is BCS-encoded; we need to parse it properly
@@ -1344,7 +1410,8 @@ impl SanadStateReader for AptosBackend {
                 return Err(ChainOpError::CapabilityUnavailable(
                     "Sanad resource parsing is not yet implemented for Aptos. \
                      The resource exists but cannot be parsed into canonical state. \
-                     This requires BCS decoding of the Move resource structure.".to_string()
+                     This requires BCS decoding of the Move resource structure."
+                        .to_string(),
                 ));
             }
             Ok(None) => {
@@ -1363,11 +1430,14 @@ impl SanadStateReader for AptosBackend {
             }
             Err(e) => {
                 // Failed to query resources - propagate the error instead of returning fabricated state
-                return Err(ChainOpError::RpcError(format!("Failed to query account resources: {}", e)));
+                return Err(ChainOpError::RpcError(format!(
+                    "Failed to query account resources: {}",
+                    e
+                )));
             }
         }
     }
-    
+
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
         // For Aptos, seal state is derived from the resource state
         // Query the seal resource to determine if it's been consumed
@@ -1382,15 +1452,20 @@ impl SanadStateReader for AptosBackend {
         // Query the seal resource to check seal state
         let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
         let resource_type = format!("0x{}::seal::Seal", hex::encode(module_addr));
-        
-        match self.rpc().get_resource(address_bytes, &resource_type, None).await {
+
+        match self
+            .rpc()
+            .get_resource(address_bytes, &resource_type, None)
+            .await
+        {
             Ok(Some(_resource)) => {
                 // Seal resource exists - check if consumed
                 // For now, return an error indicating that resource parsing is not yet implemented
                 return Err(ChainOpError::CapabilityUnavailable(
                     "Seal resource parsing is not yet implemented for Aptos. \
                      The resource exists but cannot be parsed into canonical state. \
-                     This requires BCS decoding of the Move resource structure.".to_string()
+                     This requires BCS decoding of the Move resource structure."
+                        .to_string(),
                 ));
             }
             Ok(None) => {
@@ -1405,12 +1480,18 @@ impl SanadStateReader for AptosBackend {
             }
             Err(e) => {
                 // Failed to query resources
-                return Err(ChainOpError::RpcError(format!("Failed to query seal resource: {}", e)));
+                return Err(ChainOpError::RpcError(format!(
+                    "Failed to query seal resource: {}",
+                    e
+                )));
             }
         }
     }
-    
-    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+
+    async fn trace_sanad(
+        &self,
+        _sanad_id: &SanadId,
+    ) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
         // Query events from Aptos for this sanad_id
         // This would require querying the event logs from the contract
         Ok(vec![])
@@ -1421,7 +1502,12 @@ impl SanadStateReader for AptosBackend {
 impl ChainReadinessCheck for AptosBackend {
     async fn check_readiness(&self, _account: u32, _index: u32) -> ChainOpResult<ChainReadiness> {
         // Check if module is configured
-        let contract_configured = !self.seal_protocol.config().seal_contract.module_address.is_empty();
+        let contract_configured = !self
+            .seal_protocol
+            .config()
+            .seal_contract
+            .module_address
+            .is_empty();
 
         // Check if signer is actually configured by checking the config
         let signer_configured = self.seal_protocol.config().private_key.is_some();

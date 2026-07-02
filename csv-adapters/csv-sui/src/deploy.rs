@@ -85,8 +85,8 @@ impl PackageDeployer {
         gas_budget: u64,
     ) -> Result<PackageDeployment, SuiError> {
         use ed25519_dalek::Signer;
-        use sui_transaction_builder::TransactionBuilder;
         use sui_sdk_types::Address;
+        use sui_transaction_builder::TransactionBuilder;
 
         let signing_key = self.signing_key.as_ref().ok_or_else(|| {
             SuiError::ConfigurationError(
@@ -100,14 +100,15 @@ impl PackageDeployer {
         let pubkey_bytes = public_key.as_bytes();
 
         // Sui address is derived from public key using Blake2b with 0x00 prefix
-        use blake2::Digest as Blake2Digest;
         use blake2::Blake2b;
+        use blake2::Digest as Blake2Digest;
         let mut hasher = Blake2b::new();
         hasher.update([0x00]); // Sui address prefix
         hasher.update(pubkey_bytes);
         let hash: [u8; 32] = hasher.finalize().into();
-        let sender_address = Address::from_bytes(&hash)
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to derive address: {}", e)))?;
+        let sender_address = Address::from_bytes(&hash).map_err(|e| {
+            SuiError::ConfigurationError(format!("Failed to derive address: {}", e))
+        })?;
 
         let client = self.node.client();
         let _client_guard = client.lock().await;
@@ -115,10 +116,14 @@ impl PackageDeployer {
         // Fetch gas objects for the sender address
         let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
             .await
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to fetch gas objects: {}", e)))?;
+            .map_err(|e| {
+                SuiError::ConfigurationError(format!("Failed to fetch gas objects: {}", e))
+            })?;
 
         if gas_objects.is_empty() {
-            return Err(SuiError::ConfigurationError("No gas objects found".to_string()));
+            return Err(SuiError::ConfigurationError(
+                "No gas objects found".to_string(),
+            ));
         }
 
         // Build the transaction using sui-transaction-builder
@@ -131,17 +136,18 @@ impl PackageDeployer {
         tx_builder.publish(vec![package_bytes.to_vec()], vec![]);
 
         // Build the transaction data
-        let tx_data = tx_builder
-            .try_build()
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to build transaction: {}", e)))?;
+        let tx_data = tx_builder.try_build().map_err(|e| {
+            SuiError::ConfigurationError(format!("Failed to build transaction: {}", e))
+        })?;
 
         // Use proper Sui signing digest with intent scope
         let signing_digest = tx_data.signing_digest();
         let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
 
         // Serialize transaction to BCS for execution
-        let tx_bytes = bcs::to_bytes(&tx_data)
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to serialize transaction: {}", e)))?;
+        let tx_bytes = bcs::to_bytes(&tx_data).map_err(|e| {
+            SuiError::ConfigurationError(format!("Failed to serialize transaction: {}", e))
+        })?;
 
         // Execute the transaction via sui-rpc
         let client = self.node.client();
@@ -159,14 +165,19 @@ impl PackageDeployer {
         // Build the UserSignature using sui-sdk-types SimpleSignature
         // This properly BCS-encodes the signature with the correct structure
         let pubkey_bytes = public_key.as_bytes().to_vec();
-        let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|e| SuiError::ConfigurationError(format!("Invalid signature bytes: {:?}", e)))?;
-        let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|e| SuiError::ConfigurationError(format!("Invalid public key bytes: {:?}", e)))?;
+        let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|e| {
+            SuiError::ConfigurationError(format!("Invalid signature bytes: {:?}", e))
+        })?;
+        let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|e| {
+            SuiError::ConfigurationError(format!("Invalid public key bytes: {:?}", e))
+        })?;
         let simple_sig = SimpleSignature::Ed25519 {
             signature: sig_array.into(),
             public_key: pubkey_array.into(),
         };
-        let sig_bcs = bcs::to_bytes(&simple_sig)
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to serialize signature: {}", e)))?;
+        let sig_bcs = bcs::to_bytes(&simple_sig).map_err(|e| {
+            SuiError::ConfigurationError(format!("Failed to serialize signature: {}", e))
+        })?;
         let mut user_signature = UserSignature::default();
         user_signature.bcs = Some(sig_bcs.into());
 
@@ -180,14 +191,18 @@ impl PackageDeployer {
             .execution_client()
             .execute_transaction(execute_request)
             .await
-            .map_err(|e| SuiError::ConfigurationError(format!("Failed to execute transaction: {}", e)))?;
+            .map_err(|e| {
+                SuiError::ConfigurationError(format!("Failed to execute transaction: {}", e))
+            })?;
 
-        let executed_tx = execution_response.into_inner().transaction
-            .ok_or_else(|| SuiError::ConfigurationError("No transaction in response".to_string()))?;
+        let executed_tx = execution_response.into_inner().transaction.ok_or_else(|| {
+            SuiError::ConfigurationError("No transaction in response".to_string())
+        })?;
 
         // Extract the transaction digest from the response
-        let tx_digest_str = executed_tx.digest
-            .ok_or_else(|| SuiError::ConfigurationError("No transaction digest in response".to_string()))?;
+        let tx_digest_str = executed_tx.digest.ok_or_else(|| {
+            SuiError::ConfigurationError("No transaction digest in response".to_string())
+        })?;
         let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
             .map_err(|e| SuiError::ConfigurationError(format!("Invalid digest hex: {}", e)))?;
         let mut digest_array = [0u8; 32];
@@ -204,9 +219,14 @@ impl PackageDeployer {
 
         // Extract gas used from effects if available
         let gas_used = if let Some(effects) = executed_tx.effects {
-            effects.gas_used.map(|g| {
-                g.computation_cost.unwrap_or(0) + g.storage_cost.unwrap_or(0) + g.non_refundable_storage_fee.unwrap_or(0)
-            }).unwrap_or(gas_budget)
+            effects
+                .gas_used
+                .map(|g| {
+                    g.computation_cost.unwrap_or(0)
+                        + g.storage_cost.unwrap_or(0)
+                        + g.non_refundable_storage_fee.unwrap_or(0)
+                })
+                .unwrap_or(gas_budget)
         } else {
             gas_budget
         };

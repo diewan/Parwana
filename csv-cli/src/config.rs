@@ -312,7 +312,8 @@ impl Config {
                     // don't silently scan against a JSON-RPC rpc_url. Only fill
                     // when unset — an explicit user value always wins.
                     if existing_chain_config.indexer_url.is_none() {
-                        existing_chain_config.indexer_url = default_chain_config.indexer_url.clone();
+                        existing_chain_config.indexer_url =
+                            default_chain_config.indexer_url.clone();
                         changed = true;
                     }
                     if existing_chain_config.indexer_backend.is_none() {

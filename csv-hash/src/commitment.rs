@@ -188,7 +188,7 @@ impl Commitment {
         Hash::new(csv_tagged_hash("seal-id", &seal_bytes))
     }
 
-   /// Serialize to canonical bytes for hashing.
+    /// Serialize to canonical bytes for hashing.
     ///
     /// Format: `[version][protocol_id][mpc_root][contract_id][previous_commitment][transition_payload_hash][seal_id][domain_separator]`
     ///

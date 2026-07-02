@@ -6,21 +6,17 @@
 
 use async_trait::async_trait;
 use csv_hash::Hash;
-use csv_wire::HashWire;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::{error::ProtocolError, seal_protocol::SealProtocol, signature::SignatureScheme};
+use csv_wire::HashWire;
 use sha2::{Digest, Sha256};
+use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
-use solana_sdk::instruction::Instruction;
 use std::str::FromStr;
 
 // System instruction data for CreateAccount
-fn create_account_instruction_data(
-    lamports: u64,
-    space: u64,
-    owner: &Pubkey,
-) -> Vec<u8> {
+fn create_account_instruction_data(lamports: u64, space: u64, owner: &Pubkey) -> Vec<u8> {
     let mut data = Vec::with_capacity(4 + 8 + 8 + 32);
     data.extend_from_slice(&0u32.to_le_bytes()); // CreateAccount discriminator
     data.extend_from_slice(&lamports.to_le_bytes());
@@ -150,9 +146,15 @@ impl SolanaSealProtocol {
     /// Derive the Anchor `SanadAccount` PDA from the on-chain seeds.
     fn derive_seal_pda(&self, sanad_id: &Hash, owner: &Pubkey) -> SolanaResult<Pubkey> {
         let program_id = self.csv_program_id()?;
-        log::info!("SOLANA ADAPTER: Deriving PDA with program_id: {}", program_id);
+        log::info!(
+            "SOLANA ADAPTER: Deriving PDA with program_id: {}",
+            program_id
+        );
         log::info!("SOLANA ADAPTER: Owner pubkey: {}", owner);
-        log::info!("SOLANA ADAPTER: Sanad ID: 0x{}", hex::encode(sanad_id.as_bytes()));
+        log::info!(
+            "SOLANA ADAPTER: Sanad ID: 0x{}",
+            hex::encode(sanad_id.as_bytes())
+        );
         let (pda, bump) = Pubkey::find_program_address(
             &[b"sanad", owner.as_ref(), sanad_id.as_bytes()],
             &program_id,
@@ -281,14 +283,17 @@ impl SealProtocol for SolanaSealProtocol {
         );
 
         let rpc = self.check_rpc()?;
-        let recent_blockhash = rpc.get_recent_blockhash()
+        let recent_blockhash = rpc
+            .get_recent_blockhash()
             .map_err(|e| SolanaError::Rpc(format!("Failed to get recent blockhash: {}", e)))?;
 
         // Build create_seal instruction with commitment as both sanad_id and commitment fields
         let mut hasher = sha2::Sha256::new();
         hasher.update(b"global:create_seal");
         let discriminator_hash = hasher.finalize();
-        let anchor_discriminator: [u8; 8] = discriminator_hash[0..8].try_into().expect("slice length matches array size");
+        let anchor_discriminator: [u8; 8] = discriminator_hash[0..8]
+            .try_into()
+            .expect("slice length matches array size");
 
         let mut instruction_data = Vec::with_capacity(8 + 32 + 32 + 32);
         instruction_data.extend_from_slice(&anchor_discriminator);
@@ -314,12 +319,14 @@ impl SealProtocol for SolanaSealProtocol {
         let mut transaction = solana_sdk::transaction::Transaction::new_unsigned(message);
         transaction.sign(&[&wallet.keypair], recent_blockhash);
 
-        let signature = rpc.send_transaction(&transaction)
-            .map_err(|e| SolanaError::Rpc(format!("Failed to send create_seal transaction: {}", e)))?;
+        let signature = rpc.send_transaction(&transaction).map_err(|e| {
+            SolanaError::Rpc(format!("Failed to send create_seal transaction: {}", e))
+        })?;
         rpc.wait_for_confirmation(&signature)
             .map_err(|e| SolanaError::Rpc(format!("Transaction confirmation failed: {}", e)))?;
 
-        let slot = rpc.get_latest_slot()
+        let slot = rpc
+            .get_latest_slot()
             .map_err(|e| SolanaError::Rpc(format!("Failed to get slot: {}", e)))?;
 
         // Store seal in active_seals with seed = commitment bytes
@@ -410,7 +417,8 @@ impl SealProtocol for SolanaSealProtocol {
         }
 
         // Get the actual block hash from the slot using RPC
-        let block_hash = rpc.get_block_hash(anchor_ref.slot)
+        let block_hash = rpc
+            .get_block_hash(anchor_ref.slot)
             .map_err(|e| SolanaError::Rpc(format!("Failed to get block hash: {}", e)))?;
 
         let proof = SolanaFinalityProof {
@@ -562,7 +570,11 @@ impl SealProtocol for SolanaSealProtocol {
         };
 
         // Create finality proof - Solana has deterministic finality after 31 slots
-        let block_hash: Hash = solana_finality.block_hash.clone().try_into().unwrap_or_else(|_| Hash::zero());
+        let block_hash: Hash = solana_finality
+            .block_hash
+            .clone()
+            .try_into()
+            .unwrap_or_else(|_| Hash::zero());
         let finality_proof = unsafe {
             csv_protocol::proof_taxonomy::FinalityProof::new_unchecked(
                 block_hash.as_bytes().to_vec(),
@@ -583,8 +595,8 @@ impl SealProtocol for SolanaSealProtocol {
             node_id,
             segment.transition_data.clone(),
             vec![segment.proof.clone()], // Use proof as signature
-            vec![], // No witnesses for single transition
-            vec![segment.anchor_from], // Parent is the source anchor
+            vec![],                      // No witnesses for single transition
+            vec![segment.anchor_from],   // Parent is the source anchor
         );
 
         // Compute root_commitment from the node

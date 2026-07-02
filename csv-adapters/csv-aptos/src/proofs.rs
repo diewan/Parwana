@@ -47,11 +47,9 @@ impl ParsedLockProof {
         let mut state_root = [0u8; 32];
         state_root.copy_from_slice(&proof_bytes[0..32]);
 
-        let leaf_position = u64::from_le_bytes(
-            proof_bytes[32..40]
-                .try_into()
-                .map_err(|_| AptosError::InvalidProofFormat("Failed to parse leaf_position".to_string()))?,
-        );
+        let leaf_position = u64::from_le_bytes(proof_bytes[32..40].try_into().map_err(|_| {
+            AptosError::InvalidProofFormat("Failed to parse leaf_position".to_string())
+        })?);
 
         let proof_data = proof_bytes[40..].to_vec();
 
@@ -481,18 +479,18 @@ mod tests {
     fn test_parsed_lock_proof_valid() {
         // Create a valid proof with state_root (32 bytes) + leaf_position (8 bytes) + proof_data
         let mut proof_bytes = Vec::with_capacity(48);
-        
+
         // state_root (32 bytes)
         proof_bytes.extend_from_slice(&[1u8; 32]);
-        
+
         // leaf_position (8 bytes, little-endian u64 = 42)
         proof_bytes.extend_from_slice(&42u64.to_le_bytes());
-        
+
         // proof_data (8 bytes)
         proof_bytes.extend_from_slice(&[2u8; 8]);
-        
+
         let parsed = ParsedLockProof::parse(&proof_bytes).unwrap();
-        
+
         assert_eq!(parsed.state_root, [1u8; 32]);
         assert_eq!(parsed.leaf_position, 42);
         assert_eq!(parsed.proof_data, vec![2u8; 8]);
@@ -502,9 +500,9 @@ mod tests {
     fn test_parsed_lock_proof_too_short() {
         // Proof too short (less than 40 bytes)
         let proof_bytes = vec![1u8; 39];
-        
+
         let result = ParsedLockProof::parse(&proof_bytes);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             AptosError::InvalidProofFormat(msg) => {
@@ -519,17 +517,17 @@ mod tests {
     fn test_parsed_lock_proof_exact_minimum() {
         // Proof with exactly 40 bytes (minimum valid length)
         let mut proof_bytes = Vec::with_capacity(40);
-        
+
         // state_root (32 bytes)
         proof_bytes.extend_from_slice(&[1u8; 32]);
-        
+
         // leaf_position (8 bytes)
         proof_bytes.extend_from_slice(&0u64.to_le_bytes());
-        
+
         // No proof_data (valid, just empty)
-        
+
         let parsed = ParsedLockProof::parse(&proof_bytes).unwrap();
-        
+
         assert_eq!(parsed.state_root, [1u8; 32]);
         assert_eq!(parsed.leaf_position, 0);
         assert!(parsed.proof_data.is_empty());
@@ -542,10 +540,10 @@ mod tests {
             leaf_position: 12345,
             proof_data: vec![9u8; 16],
         };
-        
+
         let bytes = original.to_proof_bytes();
         let parsed = ParsedLockProof::parse(&bytes).unwrap();
-        
+
         assert_eq!(parsed.state_root, original.state_root);
         assert_eq!(parsed.leaf_position, original.leaf_position);
         assert_eq!(parsed.proof_data, original.proof_data);

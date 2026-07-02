@@ -343,24 +343,20 @@ mod tests {
 
     #[test]
     fn test_validate_resource_limits_payload_too_large() {
-        let result = validate_resource_limits(
-            limits::MAX_PAYLOAD_SIZE + 1,
-            10,
-            100,
-            5,
-        );
-        assert!(matches!(result, Err(SchemaError::ResourceLimitExceeded { .. })));
+        let result = validate_resource_limits(limits::MAX_PAYLOAD_SIZE + 1, 10, 100, 5);
+        assert!(matches!(
+            result,
+            Err(SchemaError::ResourceLimitExceeded { .. })
+        ));
     }
 
     #[test]
     fn test_validate_resource_limits_merkle_depth_too_deep() {
-        let result = validate_resource_limits(
-            1024,
-            limits::MAX_MERKLE_DEPTH + 1,
-            100,
-            5,
-        );
-        assert!(matches!(result, Err(SchemaError::ResourceLimitExceeded { .. })));
+        let result = validate_resource_limits(1024, limits::MAX_MERKLE_DEPTH + 1, 100, 5);
+        assert!(matches!(
+            result,
+            Err(SchemaError::ResourceLimitExceeded { .. })
+        ));
     }
 
     #[test]
@@ -394,17 +390,20 @@ mod tests {
         let descriptor_hash = [1u8; 32];
         let payload_hash = [2u8; 32];
 
-        assert!(validate_schema(SchemaValidationParams {
-            schema_id: "csv.sanad.content.v1",
-            version: 1,
-            codec: 1, // CBOR
-            descriptor_hash: &descriptor_hash,
-            payload_hash: &payload_hash,
-            payload_size: 1024,
-            merkle_depth: 10,
-            leaf_count: 100,
-            attachment_count: 5,
-        }).is_ok());
+        assert!(
+            validate_schema(SchemaValidationParams {
+                schema_id: "csv.sanad.content.v1",
+                version: 1,
+                codec: 1, // CBOR
+                descriptor_hash: &descriptor_hash,
+                payload_hash: &payload_hash,
+                payload_size: 1024,
+                merkle_depth: 10,
+                leaf_count: 100,
+                attachment_count: 5,
+            })
+            .is_ok()
+        );
     }
 
     #[test]
@@ -412,33 +411,39 @@ mod tests {
         let descriptor_hash = [1u8; 32];
         let payload_hash = [2u8; 32];
 
-        assert!(validate_schema(SchemaValidationParams {
-            schema_id: "invalid",
-            version: 1,
-            codec: 1,
-            descriptor_hash: &descriptor_hash,
-            payload_hash: &payload_hash,
-            payload_size: 1024,
-            merkle_depth: 10,
-            leaf_count: 100,
-            attachment_count: 5,
-        }).is_err());
+        assert!(
+            validate_schema(SchemaValidationParams {
+                schema_id: "invalid",
+                version: 1,
+                codec: 1,
+                descriptor_hash: &descriptor_hash,
+                payload_hash: &payload_hash,
+                payload_size: 1024,
+                merkle_depth: 10,
+                leaf_count: 100,
+                attachment_count: 5,
+            })
+            .is_err()
+        );
     }
 
     #[test]
     fn test_validate_schema_full_zero_hash() {
         let zero_hash = [0u8; 32];
 
-        assert!(validate_schema(SchemaValidationParams {
-            schema_id: "csv.sanad.v1",
-            version: 1,
-            codec: 1,
-            descriptor_hash: &zero_hash,
-            payload_hash: &zero_hash,
-            payload_size: 1024,
-            merkle_depth: 10,
-            leaf_count: 100,
-            attachment_count: 5,
-        }).is_err());
+        assert!(
+            validate_schema(SchemaValidationParams {
+                schema_id: "csv.sanad.v1",
+                version: 1,
+                codec: 1,
+                descriptor_hash: &zero_hash,
+                payload_hash: &zero_hash,
+                payload_size: 1024,
+                merkle_depth: 10,
+                leaf_count: 100,
+                attachment_count: 5,
+            })
+            .is_err()
+        );
     }
 }

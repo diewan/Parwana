@@ -61,7 +61,11 @@ impl MempoolSignetRpc {
         // Strip trailing slashes to avoid double slashes in URL construction
         let base_url = base_url.trim_end_matches('/').to_string();
 
-        Self { client, base_url, api_key }
+        Self {
+            client,
+            base_url,
+            api_key,
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -112,18 +116,26 @@ impl MempoolSignetRpc {
                 request = request.header("x-api-key", key);
             }
 
-       match request.send().await {
+            match request.send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| e.into())?;
-                    return serde_json::from_str::<T>(&text).map_err(|e| {
-                        e.into()
-                    });
+                    let text = resp
+                        .text()
+                        .await
+                        .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| e.into())?;
+                    return serde_json::from_str::<T>(&text).map_err(|e| e.into());
                 }
                 Ok(resp) => {
                     let status = resp.status();
-                    let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                        format!("HTTP {} at {}: failed to read error text: {}", status, url, e).into()
-                    })?;
+                    let error_text = resp
+                        .text()
+                        .await
+                        .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                            format!(
+                                "HTTP {} at {}: failed to read error text: {}",
+                                status, url, e
+                            )
+                            .into()
+                        })?;
                     // 4xx is a permanent error (wrong path/endpoint, bad address,
                     // not-found) — retrying with exponential backoff just wastes
                     // ~14s per request. Fail fast; only retry transient 5xx/network.
@@ -540,13 +552,17 @@ impl BitcoinRpc for MempoolSignetRpc {
         let txid_hex = hex::encode(display_txid);
         let url = format!("{}/tx/{}", self.base_url, txid_hex);
 
-        log::debug!("Fetching scriptPubKey for txid: {}, vout: {}, URL: {}", txid_hex, vout, url);
+        log::debug!(
+            "Fetching scriptPubKey for txid: {}, vout: {}, URL: {}",
+            txid_hex,
+            vout,
+            url
+        );
 
-        let tx_detail: TxDetail = self.get_with_retry(&url).await
-            .map_err(|e| {
-                log::error!("Failed to fetch tx details for txid {}: {}", txid_hex, e);
-                e
-            })?;
+        let tx_detail: TxDetail = self.get_with_retry(&url).await.map_err(|e| {
+            log::error!("Failed to fetch tx details for txid {}: {}", txid_hex, e);
+            e
+        })?;
 
         if let Some(output) = tx_detail.vout.get(vout as usize) {
             Ok(Some(output.scriptpubkey.clone()))
@@ -568,13 +584,17 @@ impl BitcoinRpc for MempoolSignetRpc {
         let txid_hex = hex::encode(display_txid);
         let url = format!("{}/tx/{}", self.base_url, txid_hex);
 
-        log::debug!("Fetching UTXO details for txid: {}, vout: {}, URL: {}", txid_hex, vout, url);
+        log::debug!(
+            "Fetching UTXO details for txid: {}, vout: {}, URL: {}",
+            txid_hex,
+            vout,
+            url
+        );
 
-        let tx_detail: TxDetail = self.get_with_retry(&url).await
-            .map_err(|e| {
-                log::error!("Failed to fetch tx details for txid {}: {}", txid_hex, e);
-                e
-            })?;
+        let tx_detail: TxDetail = self.get_with_retry(&url).await.map_err(|e| {
+            log::error!("Failed to fetch tx details for txid {}: {}", txid_hex, e);
+            e
+        })?;
 
         if let Some(output) = tx_detail.vout.get(vout as usize) {
             Ok(Some(crate::rpc::UtxoDetails {

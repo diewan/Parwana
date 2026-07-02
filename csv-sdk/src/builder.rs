@@ -20,6 +20,7 @@
 //! ```
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::local_store::InMemorySealStore;
@@ -32,11 +33,17 @@ use crate::wallet::Wallet;
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 #[cfg(feature = "runtime-coordinator")]
+use csv_runtime::event_bus::EventBus;
+#[cfg(all(feature = "runtime-coordinator", target_arch = "wasm32"))]
+use csv_runtime::{event_persistence::InMemoryEventStore, execution_journal::InMemoryJournal};
+#[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
 use csv_runtime::{
-    event_bus::EventBus, event_persistence::InMemoryEventStore, execution_journal::InMemoryJournal,
+    event_persistence::RocksDbEventStore, execution_journal::RocksDbExecutionJournal,
 };
-#[cfg(feature = "runtime-coordinator")]
+#[cfg(all(feature = "runtime-coordinator", target_arch = "wasm32"))]
 use csv_storage::InMemoryReplayDb;
+#[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
+use csv_storage::RocksDbReplayDb;
 #[cfg(feature = "runtime-coordinator")]
 use csv_verifier::CanonicalVerifierImpl;
 
@@ -54,7 +61,8 @@ struct BuilderState {
     wallet: Option<Wallet>,
     store_backend: Option<StoreBackend>,
     config: Option<Config>,
-    private_keys: Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
+    private_keys:
+        Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
     #[cfg(feature = "runtime-coordinator")]
     enable_runtime_coordinator: bool,
 }
@@ -175,7 +183,10 @@ impl ClientBuilder {
     ///     .build()?;
     /// # Ok::<_, csv_sdk::CsvError>(())
     /// ```
-    pub fn with_private_keys(mut self, keys: std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>) -> Self {
+    pub fn with_private_keys(
+        mut self,
+        keys: std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>,
+    ) -> Self {
         self.state.private_keys = Some(keys);
         self
     }
@@ -249,11 +260,9 @@ impl ClientBuilder {
         // Initialize runtime coordinator if enabled
         #[cfg(feature = "runtime-coordinator")]
         let transfer_coordinator = if self.state.enable_runtime_coordinator {
-            // Initialize runtime components
-            let replay_db = Box::new(InMemoryReplayDb::new()) as Box<dyn csv_storage::ReplayDatabase>;
+            // Initialize runtime components.
+            let (replay_db, event_store, execution_journal) = Self::runtime_stores(&config)?;
             let event_bus = EventBus::new();
-            let event_store = Box::new(InMemoryEventStore::new()) as Box<dyn csv_runtime::EventStore>;
-            let execution_journal = Box::new(InMemoryJournal::new(10000)) as Box<dyn csv_runtime::ExecutionJournal>;
             let verifier = CanonicalVerifierImpl::default();
 
             // For single-instance deployments (CLI, SDK), do not configure a distributed coordinator lease.
@@ -266,7 +275,8 @@ impl ClientBuilder {
                 event_store,
                 execution_journal,
                 verifier,
-                Box::new(csv_runtime::distributed_coordinator_lease::InMemoryLease::new()) as Box<dyn csv_runtime::CoordinatorLease>,
+                Box::new(csv_runtime::distributed_coordinator_lease::InMemoryLease::new())
+                    as Box<dyn csv_runtime::CoordinatorLease>,
             );
 
             // Clear coordinator lease for single-instance deployments to skip the distributed lease check
@@ -294,14 +304,27 @@ impl ClientBuilder {
                 &config,
                 network_type,
                 self.state.private_keys.clone(),
-            ).await? {
-                chain_runtime.register_adapter(chain.clone(), result.chain_backend.clone()).await;
-                log::info!("Automatically initialized ChainBackend for chain: {:?}", chain);
-                
+            )
+            .await?
+            {
+                chain_runtime
+                    .register_adapter(chain.clone(), result.chain_backend.clone())
+                    .await;
+                log::info!(
+                    "Automatically initialized ChainBackend for chain: {:?}",
+                    chain
+                );
+
                 // Register ChainAdapter in adapter_registry for TransferCoordinator
                 if let Some(chain_adapter) = result.chain_adapter {
-                    let _ = adapter_registry.lock().unwrap_or_else(|e| e.into_inner()).register_adapter(chain_adapter);
-                    log::info!("Automatically registered ChainAdapter for chain: {:?}", chain);
+                    let _ = adapter_registry
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .register_adapter(chain_adapter);
+                    log::info!(
+                        "Automatically registered ChainAdapter for chain: {:?}",
+                        chain
+                    );
                 }
             }
         }
@@ -313,9 +336,16 @@ impl ClientBuilder {
                 &config,
                 network_type,
                 self.state.private_keys.clone(),
-            ).await? {
-                chain_runtime.register_adapter(chain.clone(), result.clone()).await;
-                log::info!("Automatically initialized ChainBackend for chain: {:?}", chain);
+            )
+            .await?
+            {
+                chain_runtime
+                    .register_adapter(chain.clone(), result.clone())
+                    .await;
+                log::info!(
+                    "Automatically initialized ChainBackend for chain: {:?}",
+                    chain
+                );
             }
         }
 
@@ -331,6 +361,86 @@ impl ClientBuilder {
             #[cfg(feature = "runtime-coordinator")]
             transfer_coordinator,
         })
+    }
+
+    #[cfg(feature = "runtime-coordinator")]
+    fn runtime_stores(
+        config: &Config,
+    ) -> Result<
+        (
+            Box<dyn csv_storage::ReplayDatabase>,
+            Box<dyn csv_runtime::EventStore>,
+            Box<dyn csv_runtime::ExecutionJournal>,
+        ),
+        CsvError,
+    > {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let runtime_dir = Self::runtime_data_dir(config);
+            std::fs::create_dir_all(&runtime_dir).map_err(|e| {
+                CsvError::StoreError(format!(
+                    "failed to create runtime data directory {}: {e}",
+                    runtime_dir.display()
+                ))
+            })?;
+
+            let replay_path = runtime_dir.join("replay");
+            let events_path = runtime_dir.join("events");
+            let journal_path = runtime_dir.join("journal");
+
+            let replay_db = RocksDbReplayDb::open(&replay_path.to_string_lossy())
+                .map_err(|e| CsvError::StoreError(format!("failed to open replay DB: {e}")))?;
+            let event_store = RocksDbEventStore::open(&events_path.to_string_lossy())
+                .map_err(|e| CsvError::StoreError(format!("failed to open event store: {e}")))?;
+            let execution_journal = RocksDbExecutionJournal::open(&journal_path.to_string_lossy())
+                .map_err(|e| {
+                    CsvError::StoreError(format!("failed to open execution journal: {e}"))
+                })?;
+
+            Ok((
+                Box::new(replay_db) as Box<dyn csv_storage::ReplayDatabase>,
+                Box::new(event_store) as Box<dyn csv_runtime::EventStore>,
+                Box::new(execution_journal) as Box<dyn csv_runtime::ExecutionJournal>,
+            ))
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = config;
+            Ok((
+                Box::new(InMemoryReplayDb::new()) as Box<dyn csv_storage::ReplayDatabase>,
+                Box::new(InMemoryEventStore::new()) as Box<dyn csv_runtime::EventStore>,
+                Box::new(InMemoryJournal::new(10000)) as Box<dyn csv_runtime::ExecutionJournal>,
+            ))
+        }
+    }
+
+    #[cfg(feature = "runtime-coordinator")]
+    fn runtime_data_dir(config: &Config) -> PathBuf {
+        let base = config
+            .data_dir
+            .as_deref()
+            .map(Self::expand_path)
+            .unwrap_or_else(|| {
+                let mut path = Config::default_path();
+                path.pop();
+                path.push("data");
+                path
+            });
+
+        base.join("runtime")
+    }
+
+    #[cfg(feature = "runtime-coordinator")]
+    fn expand_path(path: &str) -> PathBuf {
+        if let Some(stripped) = path.strip_prefix("~/") {
+            #[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
+            if let Some(home) = dirs::home_dir() {
+                return home.join(stripped);
+            }
+        }
+
+        PathBuf::from(path)
     }
 
     /// Check that the required feature flag is enabled for a chain.

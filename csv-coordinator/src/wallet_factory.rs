@@ -16,7 +16,7 @@ static WALLET_FACTORY: RwLock<Option<Arc<WalletFactory>>> = RwLock::new(None);
 /// wallet operations for each supported chain.
 pub fn init_wallet_factory() -> Arc<WalletFactory> {
     let mut factory_guard = WALLET_FACTORY.write().unwrap();
-    
+
     if let Some(factory) = factory_guard.as_ref() {
         Arc::clone(factory)
     } else {
@@ -33,7 +33,9 @@ pub fn init_wallet_factory() -> Arc<WalletFactory> {
         // Register Ethereum operations if available
         #[cfg(feature = "ethereum")]
         {
-            use csv_ethereum::wallet_operations::{EthereumWalletOperations, Network as EthNetwork};
+            use csv_ethereum::wallet_operations::{
+                EthereumWalletOperations, Network as EthNetwork,
+            };
             let ethereum_ops = Box::new(EthereumWalletOperations::new(EthNetwork::Test));
             factory.register(ethereum_ops);
         }
@@ -41,7 +43,7 @@ pub fn init_wallet_factory() -> Arc<WalletFactory> {
         // Register Sui operations if available
         #[cfg(feature = "sui")]
         {
-            use csv_sui::wallet_operations::{SuiWalletOperations, Network as SuiNetwork};
+            use csv_sui::wallet_operations::{Network as SuiNetwork, SuiWalletOperations};
             let sui_ops = Box::new(SuiWalletOperations::new(SuiNetwork::Test));
             factory.register(sui_ops);
         }
@@ -57,7 +59,7 @@ pub fn init_wallet_factory() -> Arc<WalletFactory> {
         // Register Solana operations if available
         #[cfg(feature = "solana")]
         {
-            use csv_solana::wallet_operations::{SolanaWalletOperations, Network as SolNetwork};
+            use csv_solana::wallet_operations::{Network as SolNetwork, SolanaWalletOperations};
             let solana_ops = Box::new(SolanaWalletOperations::new(SolNetwork::Test));
             factory.register(solana_ops);
         }

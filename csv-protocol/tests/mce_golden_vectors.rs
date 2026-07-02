@@ -4,7 +4,7 @@
 //! These serve as cross-language regression tests for contract implementations.
 
 use csv_hash::Hash;
-use csv_protocol::proof_taxonomy::{ProofLeafV1, HashFunction};
+use csv_protocol::proof_taxonomy::{HashFunction, ProofLeafV1};
 
 /// Test vector 1: Ethereum → Solana transfer with minimal fields
 #[test]
@@ -29,16 +29,25 @@ fn test_vector_1_ethereum_to_solana_minimal() {
     // rest: zeros (32 bytes × 7 = 224 bytes)
 
     let expected_prefix = [
-        0x63, 0x73, 0x76, 0x2e, 0x70, 0x72, 0x6f, 0x6f, 0x66, 0x2e, 0x6c, 0x65, 0x61, 0x66, 0x2e, 0x76, 0x31, // domain tag
+        0x63, 0x73, 0x76, 0x2e, 0x70, 0x72, 0x6f, 0x6f, 0x66, 0x2e, 0x6c, 0x65, 0x61, 0x66, 0x2e,
+        0x76, 0x31, // domain tag
         0x01, 0x00, 0x00, 0x00, // version
         0x00, // source_chain (ethereum)
         0x01, // destination_chain (solana)
     ];
-    assert_eq!(&mce[..23], &expected_prefix, "MCE prefix must match expected");
+    assert_eq!(
+        &mce[..23],
+        &expected_prefix,
+        "MCE prefix must match expected"
+    );
 
     // Verify sanad_id and commitment are in correct positions
     assert_eq!(&mce[23..55], &[0x11u8; 32], "sanad_id must be at offset 23");
-    assert_eq!(&mce[55..87], &[0x22u8; 32], "commitment must be at offset 55");
+    assert_eq!(
+        &mce[55..87],
+        &[0x22u8; 32],
+        "commitment must be at offset 55"
+    );
 
     // Expected leaf hash per chain (computed from MCE preimage)
     let eth_hash = leaf.hash_with_function(HashFunction::Keccak256).unwrap();
@@ -78,14 +87,46 @@ fn test_vector_2_bitcoin_to_sui_full() {
 
     // Verify all hash fields are in correct positions
     assert_eq!(&mce[23..55], &[0xaau8; 32], "sanad_id must be at offset 23");
-    assert_eq!(&mce[55..87], &[0xbbu8; 32], "commitment must be at offset 55");
-    assert_eq!(&mce[87..119], &[0xccu8; 32], "content_descriptor_hash must be at offset 87");
-    assert_eq!(&mce[119..151], &[0xddu8; 32], "source_seal_ref_hash must be at offset 119");
-    assert_eq!(&mce[151..183], &[0xeeu8; 32], "destination_owner_hash must be at offset 151");
-    assert_eq!(&mce[183..215], &[0xffu8; 32], "nullifier must be at offset 183");
-    assert_eq!(&mce[215..247], &[0x01u8; 32], "lock_event_id must be at offset 215");
-    assert_eq!(&mce[247..279], &[0x02u8; 32], "metadata_hash must be at offset 247");
-    assert_eq!(&mce[279..311], &[0x03u8; 32], "proof_policy_hash must be at offset 279");
+    assert_eq!(
+        &mce[55..87],
+        &[0xbbu8; 32],
+        "commitment must be at offset 55"
+    );
+    assert_eq!(
+        &mce[87..119],
+        &[0xccu8; 32],
+        "content_descriptor_hash must be at offset 87"
+    );
+    assert_eq!(
+        &mce[119..151],
+        &[0xddu8; 32],
+        "source_seal_ref_hash must be at offset 119"
+    );
+    assert_eq!(
+        &mce[151..183],
+        &[0xeeu8; 32],
+        "destination_owner_hash must be at offset 151"
+    );
+    assert_eq!(
+        &mce[183..215],
+        &[0xffu8; 32],
+        "nullifier must be at offset 183"
+    );
+    assert_eq!(
+        &mce[215..247],
+        &[0x01u8; 32],
+        "lock_event_id must be at offset 215"
+    );
+    assert_eq!(
+        &mce[247..279],
+        &[0x02u8; 32],
+        "metadata_hash must be at offset 247"
+    );
+    assert_eq!(
+        &mce[279..311],
+        &[0x03u8; 32],
+        "proof_policy_hash must be at offset 279"
+    );
 
     // Expected leaf hash per chain
     let btc_hash = leaf.hash_with_function(HashFunction::DoubleSha256).unwrap();
@@ -118,9 +159,21 @@ fn test_vector_3_aptos_to_ethereum_mixed() {
 
     // Verify populated fields
     assert_eq!(&mce[23..55], &[0x33u8; 32], "sanad_id must be at offset 23");
-    assert_eq!(&mce[55..87], &[0x44u8; 32], "commitment must be at offset 55");
-    assert_eq!(&mce[183..215], &[0x55u8; 32], "nullifier must be at offset 183");
-    assert_eq!(&mce[279..311], &[0x66u8; 32], "proof_policy_hash must be at offset 279");
+    assert_eq!(
+        &mce[55..87],
+        &[0x44u8; 32],
+        "commitment must be at offset 55"
+    );
+    assert_eq!(
+        &mce[183..215],
+        &[0x55u8; 32],
+        "nullifier must be at offset 183"
+    );
+    assert_eq!(
+        &mce[279..311],
+        &[0x66u8; 32],
+        "proof_policy_hash must be at offset 279"
+    );
 
     // Expected leaf hash per chain
     let aptos_hash = leaf.hash_with_function(HashFunction::Sha3_256).unwrap();
@@ -147,7 +200,11 @@ fn test_vector_4_solana_to_bitcoin_version() {
     assert_eq!(mce.len(), 311, "MCE preimage must be exactly 311 bytes");
 
     // Verify version encoding
-    assert_eq!(&mce[17..21], [0x01, 0x00, 0x00, 0x00], "version must be little-endian u32");
+    assert_eq!(
+        &mce[17..21],
+        [0x01, 0x00, 0x00, 0x00],
+        "version must be little-endian u32"
+    );
 
     // Verify chain IDs
     assert_eq!(mce[21], 0x01, "source_chain must be solana (1)");
@@ -174,7 +231,7 @@ fn test_vector_5_cross_chain_verification() {
     );
 
     let mce = leaf.to_canonical_bytes();
-    
+
     // All chains must produce the same MCE preimage
     assert_eq!(mce.len(), 311);
 
@@ -186,10 +243,22 @@ fn test_vector_5_cross_chain_verification() {
     let aptos_hash = leaf.hash_with_function(HashFunction::Sha3_256).unwrap();
 
     // Verify hashes are different (different hash functions)
-    assert_ne!(eth_hash, sol_hash, "Different hash functions must produce different hashes");
-    assert_ne!(sol_hash, sui_hash, "Different hash functions must produce different hashes");
-    assert_ne!(sui_hash, btc_hash, "Different hash functions must produce different hashes");
-    assert_ne!(btc_hash, aptos_hash, "Different hash functions must produce different hashes");
+    assert_ne!(
+        eth_hash, sol_hash,
+        "Different hash functions must produce different hashes"
+    );
+    assert_ne!(
+        sol_hash, sui_hash,
+        "Different hash functions must produce different hashes"
+    );
+    assert_ne!(
+        sui_hash, btc_hash,
+        "Different hash functions must produce different hashes"
+    );
+    assert_ne!(
+        btc_hash, aptos_hash,
+        "Different hash functions must produce different hashes"
+    );
 
     println!("Test Vector 5 - Cross-chain verification:");
     println!("  MCE preimage (hex): {:02x?}", &mce[..64]);
@@ -217,6 +286,9 @@ fn test_mce_determinism() {
         Hash([0x22; 32]),
     );
 
-    assert_eq!(leaf1.to_canonical_bytes(), leaf2.to_canonical_bytes(), 
-               "MCE must be deterministic for identical inputs");
+    assert_eq!(
+        leaf1.to_canonical_bytes(),
+        leaf2.to_canonical_bytes(),
+        "MCE must be deterministic for identical inputs"
+    );
 }

@@ -108,13 +108,14 @@ impl EthereumBackend {
         // publish() to work, which downcasts to EthereumNode. No mock fallback: if this
         // fails, construction fails closed with a typed error.
         let csv_seal_address = config.contract_address.unwrap_or([0u8; 20]);
-        let seal = EthereumSealProtocol::from_config(config.clone(), rpc.clone_boxed(), csv_seal_address)
-            .map_err(|e| {
-                ChainOpError::RpcError(format!(
-                    "Failed to construct Ethereum seal protocol from RPC/config: {}",
-                    e
-                ))
-            })?;
+        let seal =
+            EthereumSealProtocol::from_config(config.clone(), rpc.clone_boxed(), csv_seal_address)
+                .map_err(|e| {
+                    ChainOpError::RpcError(format!(
+                        "Failed to construct Ethereum seal protocol from RPC/config: {}",
+                        e
+                    ))
+                })?;
 
         Ok(Self {
             rpc,
@@ -155,8 +156,7 @@ impl EthereumBackend {
     fn contract(&self) -> ChainOpResult<[u8; 20]> {
         self.contract_address.ok_or_else(|| {
             ChainOpError::InvalidInput(
-                "Seal contract address not configured. Set it with with_contract()"
-                    .to_string(),
+                "Seal contract address not configured. Set it with with_contract()".to_string(),
             )
         })
     }
@@ -238,12 +238,24 @@ impl EthereumBackend {
     fn _decode_event_type(&self, topic: &str) -> String {
         // Map common event signatures to human-readable names
         match topic {
-            t if t.contains("SanadCreated") || t.contains("sanadcreated") => "SanadCreated".to_string(),
-            t if t.contains("SanadConsumed") || t.contains("sanadconsumed") => "SanadConsumed".to_string(),
-            t if t.contains("SanadLocked") || t.contains("sanadlocked") => "SanadLocked".to_string(),
-            t if t.contains("SanadMinted") || t.contains("sanadminted") => "SanadMinted".to_string(),
-            t if t.contains("SanadRefunded") || t.contains("sanadrefunded") => "SanadRefunded".to_string(),
-            t if t.contains("SanadTransferred") || t.contains("sanadtransferred") => "SanadTransferred".to_string(),
+            t if t.contains("SanadCreated") || t.contains("sanadcreated") => {
+                "SanadCreated".to_string()
+            }
+            t if t.contains("SanadConsumed") || t.contains("sanadconsumed") => {
+                "SanadConsumed".to_string()
+            }
+            t if t.contains("SanadLocked") || t.contains("sanadlocked") => {
+                "SanadLocked".to_string()
+            }
+            t if t.contains("SanadMinted") || t.contains("sanadminted") => {
+                "SanadMinted".to_string()
+            }
+            t if t.contains("SanadRefunded") || t.contains("sanadrefunded") => {
+                "SanadRefunded".to_string()
+            }
+            t if t.contains("SanadTransferred") || t.contains("sanadtransferred") => {
+                "SanadTransferred".to_string()
+            }
             _ => "Unknown".to_string(),
         }
     }
@@ -310,7 +322,7 @@ impl EthereumBackend {
         Keccak256::digest(input).into()
     }
 
-   /// Check if a sanad is locked on-chain by querying getLockInfo
+    /// Check if a sanad is locked on-chain by querying getLockInfo
     #[cfg(feature = "rpc")]
     pub async fn is_sanad_locked(&self, sanad_id: &[u8]) -> ChainOpResult<bool> {
         let contract_addr = self.contract().map_err(|e| {
@@ -323,15 +335,17 @@ impl EthereumBackend {
 
         let encoded = hex::encode(calldata.abi_encode());
 
-        let result = self.rpc().eth_call(
-            serde_json::json!({
-                "to": format!("0x{}", hex::encode(contract_addr)),
-                "data": format!("0x{}", encoded)
-            }),
-            "latest",
-        ).await.map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to call getLockInfo: {}", e))
-        })?;
+        let result = self
+            .rpc()
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract_addr)),
+                    "data": format!("0x{}", encoded)
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to call getLockInfo: {}", e)))?;
 
         // Decode the response: (bytes32 commitment, uint256 timestamp, uint8 destinationChain, bool refunded)
         // If commitment is all zeros, the sanad is not locked
@@ -422,8 +436,7 @@ impl EthereumBackend {
                 Err(e) => {
                     let error_str = e.to_string();
                     if error_str.contains("replacement transaction underpriced")
-                        || error_str.contains("underpriced")
-                        && retry_count < max_retries - 1
+                        || error_str.contains("underpriced") && retry_count < max_retries - 1
                     {
                         // Bump gas price by 10% and retry
                         current_max_fee = (current_max_fee as u128).saturating_mul(110) / 100;
@@ -1149,8 +1162,7 @@ impl ChainSanadOps for EthereumBackend {
         // minting a fresh identity from nothing.
         if asset_id.is_empty() {
             return Err(ChainOpError::InvalidInput(
-                "asset_id must not be empty: it is used to derive the Sanad commitment"
-                    .to_string(),
+                "asset_id must not be empty: it is used to derive the Sanad commitment".to_string(),
             ));
         }
         let seal_id = self.keccak256(format!("csv.sanad.create.{}", asset_id).as_bytes());
@@ -1213,7 +1225,11 @@ impl ChainSanadOps for EthereumBackend {
             // CSVSeal.sol). A zero nullifier is a valid, contract-supported input: the
             // contract only registers a nullifier mapping entry when it is non-zero.
             let nullifier = [0u8; 32];
-            let calldata = self._encode_call_2args("consume_seal(bytes32,bytes32)", sanad_id_bytes, &nullifier);
+            let calldata = self._encode_call_2args(
+                "consume_seal(bytes32,bytes32)",
+                sanad_id_bytes,
+                &nullifier,
+            );
 
             let tx_hash = self
                 .build_sign_and_send_transaction(contract, &calldata, owner_key_id)
@@ -1230,7 +1246,8 @@ impl ChainSanadOps for EthereumBackend {
                 metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "consume",
                     "contract": hex::encode(contract),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
@@ -1269,35 +1286,35 @@ impl ChainSanadOps for EthereumBackend {
                 hasher.update(b"csv.chain.bitcoin");
                 hasher.finalize(&mut output);
                 output
-            },
+            }
             "ethereum" => {
                 let mut hasher = Keccak::v256();
                 let mut output = [0u8; 32];
                 hasher.update(b"csv.chain.ethereum");
                 hasher.finalize(&mut output);
                 output
-            },
+            }
             "sui" => {
                 let mut hasher = Keccak::v256();
                 let mut output = [0u8; 32];
                 hasher.update(b"csv.chain.sui");
                 hasher.finalize(&mut output);
                 output
-            },
+            }
             "aptos" => {
                 let mut hasher = Keccak::v256();
                 let mut output = [0u8; 32];
                 hasher.update(b"csv.chain.aptos");
                 hasher.finalize(&mut output);
                 output
-            },
+            }
             "solana" => {
                 let mut hasher = Keccak::v256();
                 let mut output = [0u8; 32];
                 hasher.update(b"csv.chain.solana");
                 hasher.finalize(&mut output);
                 output
-            },
+            }
             _ => [0u8; 32], // Default to zero hash for unknown chains
         };
 
@@ -1308,7 +1325,9 @@ impl ChainSanadOps for EthereumBackend {
             let call = lock_sanadCall {
                 sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
                 commitment: alloy_primitives::FixedBytes::<32>::from_slice(commitment),
-                destinationChain: alloy_primitives::FixedBytes::<32>::from_slice(&destination_chain_hash),
+                destinationChain: alloy_primitives::FixedBytes::<32>::from_slice(
+                    &destination_chain_hash,
+                ),
                 destinationOwner: alloy_primitives::Bytes::from(owner_addr.to_vec()),
             };
 
@@ -1333,7 +1352,8 @@ impl ChainSanadOps for EthereumBackend {
                     "operation": "lock",
                     "destination_chain": destination_chain,
                     "contract": hex::encode(contract),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
@@ -1400,7 +1420,8 @@ impl ChainSanadOps for EthereumBackend {
                     "source_chain": source_chain,
                     "new_owner": new_owner,
                     "contract": hex::encode(contract),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
@@ -1456,7 +1477,8 @@ impl ChainSanadOps for EthereumBackend {
                 metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "refund",
                     "contract": hex::encode(contract),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
@@ -1497,9 +1519,8 @@ impl ChainSanadOps for EthereumBackend {
 
         #[cfg(feature = "rpc")]
         {
-            let selector = self._keccak256(
-                b"record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)",
-            );
+            let selector = self
+                ._keccak256(b"record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)");
             let mut calldata = Vec::with_capacity(4 + 6 * 32);
             calldata.extend_from_slice(&selector[..4]);
             calldata.extend_from_slice(&sanad_id_bytes);
@@ -1526,13 +1547,23 @@ impl ChainSanadOps for EthereumBackend {
                 metadata: serde_json::to_vec(&serde_json::json!({
                     "operation": "record_metadata",
                     "contract": hex::encode(contract),
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             })
         }
 
         #[cfg(not(feature = "rpc"))]
         {
-            let _ = (contract, sanad_id_bytes, asset_class, proof_system, asset_id, metadata_hash, proof_root, owner_key_id);
+            let _ = (
+                contract,
+                sanad_id_bytes,
+                asset_class,
+                proof_system,
+                asset_id,
+                metadata_hash,
+                proof_root,
+                owner_key_id,
+            );
             Err(ChainOpError::FeatureNotEnabled(
                 "Metadata recording requires the 'rpc' feature for transaction signing. \
                  Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
@@ -1596,7 +1627,10 @@ fn parse_metadata_hash_field(metadata: &serde_json::Value, field: &str) -> Chain
         None => Ok([0u8; 32]),
         Some(hex_str) => {
             let bytes = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| {
-                ChainOpError::InvalidInput(format!("Invalid hex for metadata field '{}': {}", field, e))
+                ChainOpError::InvalidInput(format!(
+                    "Invalid hex for metadata field '{}': {}",
+                    field, e
+                ))
             })?;
             if bytes.len() != 32 {
                 return Err(ChainOpError::InvalidInput(format!(
@@ -1651,9 +1685,9 @@ impl EthereumBackend {
             })?;
 
         let hash = alloy_primitives::FixedBytes::<32>::from_slice(message);
-        let signature = signer.sign_hash_sync(&hash).map_err(|e| {
-            ChainOpError::SigningError(format!("Failed to sign message: {}", e))
-        })?;
+        let signature = signer
+            .sign_hash_sync(&hash)
+            .map_err(|e| ChainOpError::SigningError(format!("Failed to sign message: {}", e)))?;
 
         Ok(signature.as_bytes().to_vec())
     }
@@ -1817,7 +1851,9 @@ impl SanadStateReader for EthereumBackend {
         let created_at = self
             ._query_uint256_slot(&contract_address, "sanadCreatedAt(bytes32)", sanad_id_bytes)
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadCreatedAt: {}", e)))?;
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to query sanadCreatedAt: {}", e))
+            })?;
 
         let locked_at = self
             ._query_uint256_slot(&contract_address, "sanadLockedAt(bytes32)", sanad_id_bytes)
@@ -1825,9 +1861,15 @@ impl SanadStateReader for EthereumBackend {
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadLockedAt: {}", e)))?;
 
         let consumed_at = self
-            ._query_uint256_slot(&contract_address, "sanadConsumedAt(bytes32)", sanad_id_bytes)
+            ._query_uint256_slot(
+                &contract_address,
+                "sanadConsumedAt(bytes32)",
+                sanad_id_bytes,
+            )
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadConsumedAt: {}", e)))?;
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to query sanadConsumedAt: {}", e))
+            })?;
 
         let minted_at = self
             ._query_uint256_slot(&contract_address, "sanadMintedAt(bytes32)", sanad_id_bytes)
@@ -1835,9 +1877,15 @@ impl SanadStateReader for EthereumBackend {
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadMintedAt: {}", e)))?;
 
         let refunded_at = self
-            ._query_uint256_slot(&contract_address, "sanadRefundedAt(bytes32)", sanad_id_bytes)
+            ._query_uint256_slot(
+                &contract_address,
+                "sanadRefundedAt(bytes32)",
+                sanad_id_bytes,
+            )
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadRefundedAt: {}", e)))?;
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to query sanadRefundedAt: {}", e))
+            })?;
 
         // The contract's `nullifiers` mapping is keyed by the nullifier hash, which
         // is not recoverable from sanad state alone (it is revealed at mint/consume
@@ -1851,10 +1899,26 @@ impl SanadStateReader for EthereumBackend {
             commitment,
             nullifier,
             created_at: created_at as i64,
-            locked_at: if locked_at > 0 { Some(locked_at as i64) } else { None },
-            consumed_at: if consumed_at > 0 { Some(consumed_at as i64) } else { None },
-            minted_at: if minted_at > 0 { Some(minted_at as i64) } else { None },
-            refunded_at: if refunded_at > 0 { Some(refunded_at as i64) } else { None },
+            locked_at: if locked_at > 0 {
+                Some(locked_at as i64)
+            } else {
+                None
+            },
+            consumed_at: if consumed_at > 0 {
+                Some(consumed_at as i64)
+            } else {
+                None
+            },
+            minted_at: if minted_at > 0 {
+                Some(minted_at as i64)
+            } else {
+                None
+            },
+            refunded_at: if refunded_at > 0 {
+                Some(refunded_at as i64)
+            } else {
+                None
+            },
         })
     }
 
@@ -1938,17 +2002,15 @@ impl SanadStateReader for EthereumBackend {
         // Query contract events for this sanad_id using eth_getLogs
         let logs = self
             .rpc
-            .eth_get_logs(
-                serde_json::json!({
-                    "fromBlock": "0x0",
-                    "toBlock": "latest",
-                    "address": format!("0x{}", hex::encode(contract_address)),
-                    "topics": [
-                        null,
-                        format!("0x{}", sanad_id_hex)
-                    ]
-                }),
-            )
+            .eth_get_logs(serde_json::json!({
+                "fromBlock": "0x0",
+                "toBlock": "latest",
+                "address": format!("0x{}", hex::encode(contract_address)),
+                "topics": [
+                    null,
+                    format!("0x{}", sanad_id_hex)
+                ]
+            }))
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to query event logs: {}", e)))?;
 
@@ -1990,14 +2052,15 @@ impl ChainReadinessCheck for EthereumBackend {
         // Derive signer address from private key if available
         let signer_address = if signer_configured {
             if let Some(ref secret_key) = self.seal_protocol.config().private_key {
-                use secp256k1::{Secp256k1, SecretKey, PublicKey};
+                use secp256k1::{PublicKey, Secp256k1, SecretKey};
                 let secp = Secp256k1::new();
                 let key_bytes = secret_key.expose_secret();
-                let secret_key_obj = SecretKey::from_slice(key_bytes)
-                    .map_err(|e| ChainOpError::InvalidInput(format!("Invalid secret key: {}", e)))?;
+                let secret_key_obj = SecretKey::from_slice(key_bytes).map_err(|e| {
+                    ChainOpError::InvalidInput(format!("Invalid secret key: {}", e))
+                })?;
                 let public_key = PublicKey::from_secret_key(&secp, &secret_key_obj);
                 let public_key_bytes = public_key.serialize_uncompressed();
-                
+
                 // Derive Ethereum address from public key (last 20 bytes of keccak256 hash)
                 use tiny_keccak::{Hasher, Keccak};
                 let mut hasher = Keccak::v256();
@@ -2061,7 +2124,7 @@ impl ChainReadinessCheck for EthereumBackend {
         // Estimate minimum fee (gas price * gas limit for simple tx)
         let estimated_fee = match self.rpc.get_gas_price().await {
             Ok(gas_price) => Some(gas_price.saturating_mul(21000)), // 21000 gas for simple transfer
-            Err(_) => Some(20_000_000_000), // 20 gwei fallback
+            Err(_) => Some(20_000_000_000),                         // 20 gwei fallback
         };
 
         // Ethereum supports sanad creation (via seal contract)
@@ -2215,7 +2278,12 @@ mod tests {
     async fn test_create_sanad_rejects_empty_asset_id() {
         let ops = test_ops_with_contract(Some([0x11u8; 20]));
         let result = ops
-            .create_sanad("0x0000000000000000000000000000000000000000", "fungible", "", serde_json::json!({}))
+            .create_sanad(
+                "0x0000000000000000000000000000000000000000",
+                "fungible",
+                "",
+                serde_json::json!({}),
+            )
             .await;
         assert!(result.is_err());
     }
@@ -2224,7 +2292,12 @@ mod tests {
     async fn test_create_sanad_rejects_malformed_owner() {
         let ops = test_ops_with_contract(Some([0x11u8; 20]));
         let result = ops
-            .create_sanad("not-an-address", "fungible", "asset-1", serde_json::json!({}))
+            .create_sanad(
+                "not-an-address",
+                "fungible",
+                "asset-1",
+                serde_json::json!({}),
+            )
             .await;
         assert!(result.is_err());
     }
@@ -2233,7 +2306,12 @@ mod tests {
     async fn test_create_sanad_requires_contract_configured() {
         let ops = test_ops_with_contract(None);
         let result = ops
-            .create_sanad("0x0000000000000000000000000000000000000000", "fungible", "asset-1", serde_json::json!({}))
+            .create_sanad(
+                "0x0000000000000000000000000000000000000000",
+                "fungible",
+                "asset-1",
+                serde_json::json!({}),
+            )
             .await;
         assert!(result.is_err());
     }

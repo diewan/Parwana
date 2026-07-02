@@ -49,7 +49,12 @@ struct ProofSummary {
 }
 
 impl ProofSummary {
-    fn from_bundle(chain: &str, sanad_id: &str, bundle: &ProofBundle, artifact_bytes: usize) -> Self {
+    fn from_bundle(
+        chain: &str,
+        sanad_id: &str,
+        bundle: &ProofBundle,
+        artifact_bytes: usize,
+    ) -> Self {
         Self {
             chain: chain.to_string(),
             sanad_id: sanad_id.to_string(),
@@ -266,8 +271,12 @@ async fn cmd_generate(
     output::progress(4, 4, "Finalizing...");
 
     if json_summary {
-        let summary =
-            ProofSummary::from_bundle(chain.as_str(), &sanad_id, &proof_bundle, artifact_bytes.len());
+        let summary = ProofSummary::from_bundle(
+            chain.as_str(),
+            &sanad_id,
+            &proof_bundle,
+            artifact_bytes.len(),
+        );
         if let Some(path) = &output {
             let payload = serde_json::to_vec_pretty(&summary)?;
             std::fs::write(path, &payload)?;
@@ -338,7 +347,10 @@ async fn cmd_verify(
     let sanad_id = SanadId::from_bytes(&proof_bundle.seal_ref.id);
 
     output::kv("Seal ID", &hex::encode(&proof_bundle.seal_ref.id));
-    output::kv("Anchor Block Height", &proof_bundle.anchor_ref.block_height.to_string());
+    output::kv(
+        "Anchor Block Height",
+        &proof_bundle.anchor_ref.block_height.to_string(),
+    );
 
     output::progress(1, 4, "Building CSV client...");
 

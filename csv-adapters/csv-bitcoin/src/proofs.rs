@@ -22,10 +22,10 @@ use crate::types::BitcoinInclusionProof;
 /// Uses tagged hashing with domain "csv.proof.leaf.v1" for canonical encoding
 pub fn hash_proof_leaf_v1(leaf: &ProofLeafV1) -> [u8; 32] {
     use sha2::{Digest, Sha256};
-    
+
     // Domain separator for tagged hashing
     let domain = b"csv.proof.leaf.v1";
-    
+
     // Serialize all fields in canonical order
     let mut data = Vec::new();
     data.extend_from_slice(domain);
@@ -41,18 +41,18 @@ pub fn hash_proof_leaf_v1(leaf: &ProofLeafV1) -> [u8; 32] {
     data.extend_from_slice(leaf.lock_event_id.as_ref());
     data.extend_from_slice(leaf.metadata_hash.as_ref());
     data.extend_from_slice(leaf.proof_policy_hash.as_ref());
-    
+
     // Use double_sha256 (Bitcoin's native hash)
     // First SHA256
     let mut hasher1 = Sha256::new();
     hasher1.update(&data);
     let first = hasher1.finalize();
-    
+
     // Second SHA256 (double)
     let mut hasher2 = Sha256::new();
     hasher2.update(first.as_slice());
     let result = hasher2.finalize();
-    
+
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(&result);
     bytes

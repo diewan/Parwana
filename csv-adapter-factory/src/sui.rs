@@ -1,19 +1,15 @@
 //! Sui adapter factory implementation.
 
+use super::{AdapterConfig, AdapterFactory, AdapterResult, FactoryError, NetworkType};
 use async_trait::async_trait;
-use super::{AdapterFactory, AdapterConfig, AdapterResult, FactoryError, NetworkType};
-use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_adapter_core::ChainAdapter;
+use csv_protocol::chain_adapter_traits::ChainBackend;
 use std::sync::Arc;
 
 #[cfg(feature = "sui")]
 use csv_sui::{
-    config::SuiConfig,
-    ops::SuiBackend,
-    node::SuiNode,
-    config::SuiNetwork,
-    runtime_adapter::SuiRuntimeAdapter,
-    seal_protocol::SuiSealProtocol,
+    config::SuiConfig, config::SuiNetwork, node::SuiNode, ops::SuiBackend,
+    runtime_adapter::SuiRuntimeAdapter, seal_protocol::SuiSealProtocol,
 };
 
 /// Sui adapter factory.
@@ -29,7 +25,8 @@ impl AdapterFactory for SuiFactory {
         };
 
         // Select the highest priority gRPC endpoint (Sui uses gRPC)
-        let grpc_endpoint = config.rpc_endpoints
+        let grpc_endpoint = config
+            .rpc_endpoints
             .iter()
             .filter(|e| e.protocol == super::RpcProtocol::Grpc)
             .min_by_key(|e| e.priority)
@@ -77,14 +74,15 @@ impl AdapterFactory for SuiFactory {
         };
 
         // Create RPC client
-        let node = Arc::new(
-            SuiNode::new(&grpc_endpoint.url)
-                .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui RPC client: {}", e)))?
-        );
+        let node = Arc::new(SuiNode::new(&grpc_endpoint.url).map_err(|e| {
+            FactoryError::CreationFailed(format!("Failed to create Sui RPC client: {}", e))
+        })?);
 
         // Create seal protocol (signer is now in config, not passed separately)
         let seal_protocol = SuiSealProtocol::from_config(sui_config.clone(), node.clone())
-            .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui seal protocol: {}", e)))?;
+            .map_err(|e| {
+                FactoryError::CreationFailed(format!("Failed to create Sui seal protocol: {}", e))
+            })?;
 
         // Log signer status
         if sui_config.signer_private_key.is_some() {
@@ -95,16 +93,15 @@ impl AdapterFactory for SuiFactory {
 
         // Create backend - seal_protocol already has the signer from config
         let sui_backend = Arc::new(
-            SuiBackend::from_seal_protocol(Arc::new(seal_protocol), node.clone())
-                .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e)))?
+            SuiBackend::from_seal_protocol(Arc::new(seal_protocol), node.clone()).map_err(|e| {
+                FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e))
+            })?,
         );
-        
+
         let chain_backend: Arc<dyn ChainBackend> = sui_backend.clone();
 
         // Create ChainAdapter for TransferCoordinator using SuiRuntimeAdapter
-        let chain_adapter: Box<dyn ChainAdapter> = Box::new(
-            SuiRuntimeAdapter::new(sui_backend)
-        );
+        let chain_adapter: Box<dyn ChainAdapter> = Box::new(SuiRuntimeAdapter::new(sui_backend));
 
         Ok(AdapterResult {
             chain_backend,

@@ -26,13 +26,15 @@ use crate::runtime::ChainRuntime;
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 #[cfg(feature = "runtime-coordinator")]
-use csv_runtime::TransferCoordinator;
-#[cfg(feature = "runtime-coordinator")]
 use csv_adapter_core::CrossChainTransfer;
 #[cfg(feature = "runtime-coordinator")]
-use csv_runtime::user_runtime_lease::{RuntimeExecutionContext, TransferLease};
+use csv_runtime::TransferCoordinator;
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::policy::RuntimePolicy;
+#[cfg(feature = "runtime-coordinator")]
+use csv_runtime::user_runtime_lease::{
+    MAX_LEASE_DURATION_SECS, RuntimeExecutionContext, TransferLease,
+};
 
 /// Filter options for listing transfers.
 #[derive(Debug, Clone, Default)]
@@ -121,7 +123,10 @@ impl TransferManager {
     }
 
     /// Set the adapter registry for cross-chain transfers.
-    pub(crate) fn with_adapter_registry(mut self, registry: Arc<std::sync::Mutex<AdapterRegistryImpl>>) -> Self {
+    pub(crate) fn with_adapter_registry(
+        mut self,
+        registry: Arc<std::sync::Mutex<AdapterRegistryImpl>>,
+    ) -> Self {
         self.adapter_registry = registry;
         self
     }
@@ -215,6 +220,65 @@ impl TransferManager {
 
         Ok(result)
     }
+
+    /// Advance an already-locked transfer without re-locking it.
+    ///
+    /// This is the resume driver: it delegates to the coordinator's resumable
+    /// core, which gates on real source-chain confirmations. For a lock that has
+    /// not yet reached finality it returns [`TransferOutcome::Pending`] (not an
+    /// error), so a caller can report "awaiting finality — N/M confs" and
+    /// re-invoke later. The on-chain lock is never re-broadcast.
+    ///
+    /// `sanad_id`, `from_chain`, and `to_chain` come from the caller's own
+    /// transfer record; the coordinator authorises resume against the journaled
+    /// stage, so the lock is never re-executed.
+    #[cfg(feature = "runtime-coordinator")]
+    #[allow(clippy::await_holding_lock)]
+    pub async fn resume(
+        &self,
+        transfer_id: &str,
+        sanad_id: SanadId,
+        from_chain: ChainId,
+        to_chain: ChainId,
+    ) -> Result<TransferOutcome, CsvError> {
+        let coordinator = self.coordinator.as_ref().ok_or_else(|| {
+            CsvError::CoordinatorNotAvailable(
+                "runtime-coordinator feature enabled but coordinator not available".to_string(),
+            )
+        })?;
+
+        let adapter_registry = self.adapter_registry.lock().map_err(|e| {
+            CsvError::RuntimeError(format!("Failed to lock adapter registry: {}", e))
+        })?;
+
+        let runtime_ctx = build_runtime_ctx(&sanad_id, Some(&self.config))?;
+
+        let outcome = coordinator
+            .resume_transfer_outcome(transfer_id, &*adapter_registry, runtime_ctx)
+            .await
+            .map_err(|e| CsvError::RuntimeError(format!("Transfer resume failed: {}", e)))?;
+
+        Ok(match outcome {
+            csv_runtime::TransferOutcome::Completed(receipt) => {
+                TransferOutcome::Completed(TransferReceipt {
+                    transfer_id: receipt.transfer_id,
+                    replay_id: receipt.replay_id,
+                    source_chain: from_chain,
+                    destination_chain: to_chain,
+                    lock_tx_hash: receipt.lock_tx_hash,
+                    mint_tx_hash: receipt.mint_tx_hash,
+                })
+            }
+            csv_runtime::TransferOutcome::Pending {
+                confirmations,
+                required,
+            } => TransferOutcome::Pending {
+                transfer_id: transfer_id.to_string(),
+                confirmations,
+                required,
+            },
+        })
+    }
 }
 
 /// The faithful runtime receipt for a completed cross-chain transfer.
@@ -245,6 +309,28 @@ impl std::fmt::Display for TransferReceipt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.transfer_id)
     }
+}
+
+/// Outcome of a single transfer advance, surfaced faithfully from the runtime
+/// coordinator's [`csv_runtime::TransferOutcome`].
+///
+/// A `Pending` result is not an error: the lock is on-chain and journaled, and
+/// the transfer will complete once the source-chain lock reaches the required
+/// confirmation depth. The two CLI drivers build on this: poll-and-block loops
+/// until `Completed`; resume returns `Pending` and re-invokes later.
+#[derive(Debug, Clone)]
+pub enum TransferOutcome {
+    /// Transfer completed: destination mint confirmed.
+    Completed(TransferReceipt),
+    /// Lock is on-chain but not yet at the required finality depth.
+    Pending {
+        /// Runtime-assigned transfer identifier (needed to resume later).
+        transfer_id: String,
+        /// Confirmations observed on the source-chain lock.
+        confirmations: u64,
+        /// Confirmation depth required by the source chain.
+        required: u64,
+    },
 }
 
 /// A record of a cross-chain transfer.
@@ -374,6 +460,33 @@ impl TransferBuilder {
     /// with replay protection, durable recovery, and canonical verification.
     #[allow(clippy::await_holding_lock)]
     pub async fn execute(self) -> Result<TransferReceipt, CsvError> {
+        match self.execute_outcome().await? {
+            TransferOutcome::Completed(receipt) => Ok(receipt),
+            TransferOutcome::Pending {
+                confirmations,
+                required,
+                ..
+            } => Err(CsvError::RuntimeError(format!(
+                "transfer awaiting finality: {}/{} confirmations",
+                confirmations, required
+            ))),
+        }
+    }
+
+    /// Execute the cross-chain transfer, returning a [`TransferOutcome`].
+    ///
+    /// Unlike [`TransferBuilder::execute`], a lock that has not yet reached
+    /// finality is returned as [`TransferOutcome::Pending`] (not an error). This
+    /// is the single-shot primitive both CLI drivers build on:
+    /// - resume (default): call once; on `Pending`, print status and return.
+    /// - poll-and-block (`--wait`): call once, then loop
+    ///   [`TransferManager::resume`] until `Completed`.
+    ///
+    /// This method performs the on-chain lock exactly once. To advance an
+    /// already-locked transfer without re-locking, use
+    /// [`TransferManager::resume`].
+    #[allow(clippy::await_holding_lock)]
+    pub async fn execute_outcome(self) -> Result<TransferOutcome, CsvError> {
         let _to_address = self.to_address.as_ref().ok_or_else(|| {
             CsvError::BuilderError(
                 "Destination address is required. Use .to_address() to set it.".to_string(),
@@ -384,9 +497,13 @@ impl TransferBuilder {
         {
             // Use TransferCoordinator if available
             if let Some(manager) = self.manager {
-                log::info!("TransferBuilder: TransferManager found, checking for TransferCoordinator");
+                log::info!(
+                    "TransferBuilder: TransferManager found, checking for TransferCoordinator"
+                );
                 if let Some(coordinator) = manager.coordinator.as_ref() {
-                    log::info!("TransferBuilder: TransferCoordinator available, executing real transfer");
+                    log::info!(
+                        "TransferBuilder: TransferCoordinator available, executing real transfer"
+                    );
                     // Get adapter registry from the manager
                     let adapter_registry = manager.adapter_registry();
                     #[allow(clippy::await_holding_lock)]
@@ -395,8 +512,9 @@ impl TransferBuilder {
                     })?;
 
                     // Create a CrossChainTransfer
+                    let transfer_id = uuid::Uuid::new_v4().to_string();
                     let transfer = CrossChainTransfer {
-                        id: uuid::Uuid::new_v4().to_string(),
+                        id: transfer_id.clone(),
                         source_chain: self.from_chain.to_string(),
                         destination_chain: self.to_chain.to_string(),
                         lock_tx_hash: vec![], // Will be filled by coordinator
@@ -405,51 +523,52 @@ impl TransferBuilder {
                         transition_id: uuid::Uuid::new_v4().to_string().into(),
                     };
 
-                    // Create runtime execution context with lease
-                    let runtime_id = uuid::Uuid::new_v4();
-                    let now = std::time::SystemTime::now();
-                    let duration = std::time::Duration::from_secs(300); // 5 minutes
-                    let lease = TransferLease::acquire(
-                        self.sanad_id.clone().into(),
-                        runtime_id,
-                        1,
-                        now,
-                        duration,
-                    )
-                    .map_err(|e| CsvError::RuntimeError(format!("Failed to acquire lease: {}", e)))?;
+                    let runtime_ctx = build_runtime_ctx(&self.sanad_id, self.config.as_deref())?;
 
-                    // Create RuntimePolicy with finality depth overrides from config
-                    let mut policy = RuntimePolicy::default();
-                    if let Some(config) = &self.config {
-                        // Apply finality depth overrides from config for each chain
-                        for (chain_name, chain_config) in &config.chains {
-                            policy.set_finality_depth(chain_name.clone(), chain_config.finality_depth as u64);
-                        }
-                    }
-
-                    let runtime_ctx = RuntimeExecutionContext {
-                        runtime_instance: runtime_id,
-                        lease,
-                        policy,
-                    };
-
-                    // Execute transfer through coordinator
-                    let receipt = coordinator
-                        .execute(transfer, &*adapter_registry, runtime_ctx)
+                    // Execute transfer through the resumable coordinator core.
+                    let outcome = coordinator
+                        .execute_outcome(transfer, &*adapter_registry, runtime_ctx)
                         .await
-                        .map_err(|e| CsvError::RuntimeError(format!("Transfer execution failed: {}", e)))?;
+                        .map_err(|e| {
+                            CsvError::RuntimeError(format!("Transfer execution failed: {}", e))
+                        })?;
 
-                    log::info!("TransferBuilder: Transfer executed successfully, transfer_id={}", receipt.transfer_id);
-                    return Ok(TransferReceipt {
-                        transfer_id: receipt.transfer_id,
-                        replay_id: receipt.replay_id,
-                        source_chain: self.from_chain,
-                        destination_chain: self.to_chain,
-                        lock_tx_hash: receipt.lock_tx_hash,
-                        mint_tx_hash: receipt.mint_tx_hash,
+                    return Ok(match outcome {
+                        csv_runtime::TransferOutcome::Completed(receipt) => {
+                            log::info!(
+                                "TransferBuilder: Transfer completed, transfer_id={}",
+                                receipt.transfer_id
+                            );
+                            TransferOutcome::Completed(TransferReceipt {
+                                transfer_id: receipt.transfer_id,
+                                replay_id: receipt.replay_id,
+                                source_chain: self.from_chain,
+                                destination_chain: self.to_chain,
+                                lock_tx_hash: receipt.lock_tx_hash,
+                                mint_tx_hash: receipt.mint_tx_hash,
+                            })
+                        }
+                        csv_runtime::TransferOutcome::Pending {
+                            confirmations,
+                            required,
+                        } => {
+                            log::info!(
+                                "TransferBuilder: Transfer {} locked, awaiting finality {}/{}",
+                                transfer_id,
+                                confirmations,
+                                required
+                            );
+                            TransferOutcome::Pending {
+                                transfer_id,
+                                confirmations,
+                                required,
+                            }
+                        }
                     });
                 } else {
-                    log::warn!("TransferBuilder: TransferCoordinator not available in TransferManager");
+                    log::warn!(
+                        "TransferBuilder: TransferCoordinator not available in TransferManager"
+                    );
                 }
             } else {
                 log::warn!("TransferBuilder: TransferManager not available");
@@ -466,6 +585,42 @@ impl TransferBuilder {
             "runtime-coordinator feature not enabled - transfers require the runtime-coordinator feature flag".to_string()
         ));
     }
+}
+
+/// Build a runtime execution context (lease + policy) for a transfer sanad.
+///
+/// The lease TTL is capped by csv-runtime. Poll-and-block and explicit resume
+/// drivers re-acquire a fresh context on each advance.
+#[cfg(feature = "runtime-coordinator")]
+fn build_runtime_ctx(
+    sanad_id: &SanadId,
+    config: Option<&crate::config::Config>,
+) -> Result<RuntimeExecutionContext, CsvError> {
+    // Derive a deterministic runtime identity from the sanad so that the initial
+    // execute and every subsequent in-process resume share the same lease owner
+    // and epoch. The coordinator accepts a same-owner/same-epoch lease, which is
+    // what lets a poll-and-block loop advance the transfer repeatedly without
+    // being rejected as a competing runtime (single-writer per transfer).
+    let mut owner_bytes = [0u8; 16];
+    owner_bytes.copy_from_slice(&sanad_id.as_bytes()[..16]);
+    let runtime_id = uuid::Uuid::from_bytes(owner_bytes);
+    let now = std::time::SystemTime::now();
+    let duration = std::time::Duration::from_secs(MAX_LEASE_DURATION_SECS);
+    let lease = TransferLease::acquire(sanad_id.clone().into(), runtime_id, 1, now, duration)
+        .map_err(|e| CsvError::RuntimeError(format!("Failed to acquire lease: {}", e)))?;
+
+    let mut policy = RuntimePolicy::default();
+    if let Some(config) = config {
+        for (chain_name, chain_config) in &config.chains {
+            policy.set_finality_depth(chain_name.clone(), chain_config.finality_depth as u64);
+        }
+    }
+
+    Ok(RuntimeExecutionContext {
+        runtime_instance: runtime_id,
+        lease,
+        policy,
+    })
 }
 
 #[allow(dead_code)]

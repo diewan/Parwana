@@ -557,10 +557,10 @@ pub struct CanonicalLifecycleEvent {
 pub trait SanadStateReader: Send + Sync {
     /// Get the canonical state of a Sanad
     async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState>;
-    
+
     /// Get the canonical state of a Seal
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState>;
-    
+
     /// Trace the full lifecycle of a Sanad
     async fn trace_sanad(&self, sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>>;
 }
@@ -589,7 +589,14 @@ pub struct CanonicalSealState {
 /// Use `CapabilityUnavailable` error for operations not supported on a chain.
 #[async_trait]
 pub trait ChainBackend:
-    ChainQuery + ChainSigner + ChainBroadcaster + ChainDeployer + ChainProofProvider + ChainSanadOps + SanadStateReader + ChainReadinessCheck
+    ChainQuery
+    + ChainSigner
+    + ChainBroadcaster
+    + ChainDeployer
+    + ChainProofProvider
+    + ChainSanadOps
+    + SanadStateReader
+    + ChainReadinessCheck
 {
     /// Get the chain identifier
     fn chain_id(&self) -> &'static str;
@@ -714,20 +721,14 @@ pub struct ChainReadiness {
 #[async_trait]
 pub trait ChainReadinessCheck: Send + Sync {
     /// Check chain readiness for the given account and index
-    async fn check_readiness(
-        &self,
-        account: u32,
-        index: u32,
-    ) -> ChainOpResult<ChainReadiness>;
+    async fn check_readiness(&self, account: u32, index: u32) -> ChainOpResult<ChainReadiness>;
 
     /// Quick check if chain is ready for write operations
     ///
     /// Returns true if all critical checks pass (signer configured, write capable, account exists).
     async fn is_write_ready(&self, account: u32, index: u32) -> ChainOpResult<bool> {
         let readiness = self.check_readiness(account, index).await?;
-        Ok(readiness.signer_configured
-            && readiness.write_capable
-            && readiness.account_exists)
+        Ok(readiness.signer_configured && readiness.write_capable && readiness.account_exists)
     }
 }
 

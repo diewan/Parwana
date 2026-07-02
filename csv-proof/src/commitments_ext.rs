@@ -287,11 +287,16 @@ impl CanonicalEncoding for ProofMetadata {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_canonical_bytes().map_err(csv_codec::CodecError::SerializationError),
+            EncodingFormat::ManualBinary => self
+                .to_canonical_bytes()
+                .map_err(csv_codec::CodecError::SerializationError),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
             EncodingFormat::ManualBinary => Self::from_canonical_bytes(bytes)
@@ -304,20 +309,20 @@ impl ProofMetadata {
     /// Encode using MCE format (fixed-width byte concatenation)
     fn encode_mce(&self) -> csv_codec::CodecResult<Vec<u8>> {
         // MCE format for ProofMetadata - same as manual binary for now
-        self.to_canonical_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e.to_string()))
+        self.to_canonical_bytes()
+            .map_err(|e| csv_codec::CodecError::SerializationError(e.to_string()))
     }
-    
+
     /// Decode using MCE format
     fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
         // MCE format for ProofMetadata - same as manual binary for now
-        Self::from_canonical_bytes(bytes)
-            .map_err(csv_codec::CodecError::DeserializationError)
+        Self::from_canonical_bytes(bytes).map_err(csv_codec::CodecError::DeserializationError)
     }
 
     /// Serialize to canonical bytes (manual implementation for L2 type)
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, String> {
         let mut bytes = Vec::new();
-        
+
         match self.inclusion_proof_type {
             Some(t) => {
                 bytes.push(1u8);
@@ -325,7 +330,7 @@ impl ProofMetadata {
             }
             None => bytes.push(0u8),
         }
-        
+
         match self.finality_proof_type {
             Some(t) => {
                 bytes.push(1u8);
@@ -333,7 +338,7 @@ impl ProofMetadata {
             }
             None => bytes.push(0u8),
         }
-        
+
         match self.commitment_scheme {
             Some(s) => {
                 bytes.push(1u8);
@@ -341,7 +346,7 @@ impl ProofMetadata {
             }
             None => bytes.push(0u8),
         }
-        
+
         match self.proof_size_bytes {
             Some(size) => {
                 bytes.push(1u8);
@@ -349,7 +354,7 @@ impl ProofMetadata {
             }
             None => bytes.push(0u8),
         }
-        
+
         match self.confirmations {
             Some(conf) => {
                 bytes.push(1u8);
@@ -357,10 +362,10 @@ impl ProofMetadata {
             }
             None => bytes.push(0u8),
         }
-        
+
         bytes.extend_from_slice(&(self.extra.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&self.extra);
-        
+
         Ok(bytes)
     }
 
@@ -380,7 +385,10 @@ impl ProofMetadata {
             }
             let val = bytes[cursor];
             cursor += 1;
-            Some(val.try_into().map_err(|_| "Invalid inclusion_proof_type value".to_string())?)
+            Some(
+                val.try_into()
+                    .map_err(|_| "Invalid inclusion_proof_type value".to_string())?,
+            )
         } else {
             None
         };
@@ -397,7 +405,10 @@ impl ProofMetadata {
             }
             let val = bytes[cursor];
             cursor += 1;
-            Some(val.try_into().map_err(|_| "Invalid finality_proof_type value".to_string())?)
+            Some(
+                val.try_into()
+                    .map_err(|_| "Invalid finality_proof_type value".to_string())?,
+            )
         } else {
             None
         };
@@ -414,7 +425,10 @@ impl ProofMetadata {
             }
             let val = bytes[cursor];
             cursor += 1;
-            Some(val.try_into().map_err(|_| "Invalid commitment_scheme value".to_string())?)
+            Some(
+                val.try_into()
+                    .map_err(|_| "Invalid commitment_scheme value".to_string())?,
+            )
         } else {
             None
         };
@@ -522,14 +536,20 @@ impl CanonicalEncoding for EnhancedCommitment {
     fn encode(&self, format: EncodingFormat) -> csv_codec::CodecResult<Vec<u8>> {
         match format {
             EncodingFormat::MCE => self.encode_mce(),
-            EncodingFormat::ManualBinary => self.to_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e.to_string())),
+            EncodingFormat::ManualBinary => self
+                .to_bytes()
+                .map_err(|e| csv_codec::CodecError::SerializationError(e.to_string())),
         }
     }
-    
-    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self> where Self: Sized {
+
+    fn decode(bytes: &[u8], format: EncodingFormat) -> csv_codec::CodecResult<Self>
+    where
+        Self: Sized,
+    {
         match format {
             EncodingFormat::MCE => Self::decode_mce(bytes),
-            EncodingFormat::ManualBinary => Self::from_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
+            EncodingFormat::ManualBinary => Self::from_bytes(bytes)
+                .map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string())),
         }
     }
 }
@@ -538,13 +558,15 @@ impl EnhancedCommitment {
     /// Encode using MCE format (fixed-width byte concatenation)
     fn encode_mce(&self) -> csv_codec::CodecResult<Vec<u8>> {
         // MCE format for EnhancedCommitment - same as manual binary for now
-        self.to_bytes().map_err(|e| csv_codec::CodecError::SerializationError(e.to_string()))
+        self.to_bytes()
+            .map_err(|e| csv_codec::CodecError::SerializationError(e.to_string()))
     }
-    
+
     /// Decode using MCE format
     fn decode_mce(bytes: &[u8]) -> csv_codec::CodecResult<Self> {
         // MCE format for EnhancedCommitment - same as manual binary for now
-        Self::from_bytes(bytes).map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string()))
+        Self::from_bytes(bytes)
+            .map_err(|e| csv_codec::CodecError::DeserializationError(e.to_string()))
     }
 
     /// Create a new enhanced commitment with default metadata
@@ -649,12 +671,12 @@ impl EnhancedCommitment {
         bytes.push(self.commitment_scheme as u8);
         bytes.push(self.inclusion_proof_type as u8);
         bytes.push(self.finality_proof_type as u8);
-        
+
         // Serialize proof_metadata
         let metadata_bytes = self.proof_metadata.to_canonical_bytes()?;
         bytes.extend_from_slice(&(metadata_bytes.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&metadata_bytes);
-        
+
         Ok(bytes)
     }
 
@@ -730,7 +752,8 @@ impl EnhancedCommitment {
             return Err("Insufficient bytes for commitment_scheme".into());
         }
         let commitment_scheme_val = bytes[cursor];
-        let commitment_scheme = commitment_scheme_val.try_into()
+        let commitment_scheme = commitment_scheme_val
+            .try_into()
             .map_err(|_| "Invalid commitment_scheme value".to_string())?;
         cursor += 1;
 
@@ -739,7 +762,8 @@ impl EnhancedCommitment {
             return Err("Insufficient bytes for inclusion_proof_type".into());
         }
         let inclusion_proof_type_val = bytes[cursor];
-        let inclusion_proof_type = inclusion_proof_type_val.try_into()
+        let inclusion_proof_type = inclusion_proof_type_val
+            .try_into()
             .map_err(|_| "Invalid inclusion_proof_type value".to_string())?;
         cursor += 1;
 
@@ -748,7 +772,8 @@ impl EnhancedCommitment {
             return Err("Insufficient bytes for finality_proof_type".into());
         }
         let finality_proof_type_val = bytes[cursor];
-        let finality_proof_type = finality_proof_type_val.try_into()
+        let finality_proof_type = finality_proof_type_val
+            .try_into()
             .map_err(|_| "Invalid finality_proof_type value".to_string())?;
         cursor += 1;
 
@@ -765,8 +790,9 @@ impl EnhancedCommitment {
         if cursor + metadata_len > bytes.len() {
             return Err("Insufficient bytes for proof_metadata".into());
         }
-        let proof_metadata = ProofMetadata::from_canonical_bytes(&bytes[cursor..cursor + metadata_len])
-            .map_err(|e| format!("Failed to deserialize proof_metadata: {}", e))?;
+        let proof_metadata =
+            ProofMetadata::from_canonical_bytes(&bytes[cursor..cursor + metadata_len])
+                .map_err(|e| format!("Failed to deserialize proof_metadata: {}", e))?;
 
         Ok(Self {
             version,

@@ -2,10 +2,12 @@
 
 use csv_hash::Hash;
 use csv_proof::{
-    commitments_ext::{CommitmentScheme, EnhancedCommitment, FinalityProofType, InclusionProofType, ProofMetadata},
     CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
     Proof, ProofCategory, ProofDag, ProofId, ProofNode, ProofPhase, ReplayProof, TransitionProof,
     ZKProof,
+    commitments_ext::{
+        CommitmentScheme, EnhancedCommitment, FinalityProofType, InclusionProofType, ProofMetadata,
+    },
 };
 
 fn test_hash() -> Hash {
@@ -748,8 +750,14 @@ fn test_proof_metadata_roundtrip() {
     let bytes = original.to_canonical_bytes().unwrap();
     let deserialized = ProofMetadata::from_canonical_bytes(&bytes).unwrap();
 
-    assert_eq!(original.inclusion_proof_type, deserialized.inclusion_proof_type);
-    assert_eq!(original.finality_proof_type, deserialized.finality_proof_type);
+    assert_eq!(
+        original.inclusion_proof_type,
+        deserialized.inclusion_proof_type
+    );
+    assert_eq!(
+        original.finality_proof_type,
+        deserialized.finality_proof_type
+    );
     assert_eq!(original.commitment_scheme, deserialized.commitment_scheme);
     assert_eq!(original.proof_size_bytes, deserialized.proof_size_bytes);
     assert_eq!(original.confirmations, deserialized.confirmations);
@@ -770,8 +778,14 @@ fn test_proof_metadata_roundtrip_with_none_fields() {
     let bytes = original.to_canonical_bytes().unwrap();
     let deserialized = ProofMetadata::from_canonical_bytes(&bytes).unwrap();
 
-    assert_eq!(original.inclusion_proof_type, deserialized.inclusion_proof_type);
-    assert_eq!(original.finality_proof_type, deserialized.finality_proof_type);
+    assert_eq!(
+        original.inclusion_proof_type,
+        deserialized.inclusion_proof_type
+    );
+    assert_eq!(
+        original.finality_proof_type,
+        deserialized.finality_proof_type
+    );
     assert_eq!(original.commitment_scheme, deserialized.commitment_scheme);
     assert_eq!(original.proof_size_bytes, deserialized.proof_size_bytes);
     assert_eq!(original.confirmations, deserialized.confirmations);
@@ -792,7 +806,8 @@ fn test_enhanced_commitment_roundtrip() {
         CommitmentScheme::HashBased,
         InclusionProofType::Merkle,
         FinalityProofType::Checkpoint,
-    ).with_proof_metadata(1024, 10);
+    )
+    .with_proof_metadata(1024, 10);
 
     let bytes = original.to_bytes().unwrap();
     let deserialized = EnhancedCommitment::from_bytes(&bytes).unwrap();
@@ -801,19 +816,49 @@ fn test_enhanced_commitment_roundtrip() {
     assert_eq!(original.protocol_id, deserialized.protocol_id);
     assert_eq!(original.mpc_root, deserialized.mpc_root);
     assert_eq!(original.contract_id, deserialized.contract_id);
-    assert_eq!(original.previous_commitment, deserialized.previous_commitment);
-    assert_eq!(original.transition_payload_hash, deserialized.transition_payload_hash);
+    assert_eq!(
+        original.previous_commitment,
+        deserialized.previous_commitment
+    );
+    assert_eq!(
+        original.transition_payload_hash,
+        deserialized.transition_payload_hash
+    );
     assert_eq!(original.seal_id, deserialized.seal_id);
     assert_eq!(original.domain_separator, deserialized.domain_separator);
     assert_eq!(original.commitment_scheme, deserialized.commitment_scheme);
-    assert_eq!(original.inclusion_proof_type, deserialized.inclusion_proof_type);
-    assert_eq!(original.finality_proof_type, deserialized.finality_proof_type);
-    assert_eq!(original.proof_metadata.inclusion_proof_type, deserialized.proof_metadata.inclusion_proof_type);
-    assert_eq!(original.proof_metadata.finality_proof_type, deserialized.proof_metadata.finality_proof_type);
-    assert_eq!(original.proof_metadata.commitment_scheme, deserialized.proof_metadata.commitment_scheme);
-    assert_eq!(original.proof_metadata.proof_size_bytes, deserialized.proof_metadata.proof_size_bytes);
-    assert_eq!(original.proof_metadata.confirmations, deserialized.proof_metadata.confirmations);
-    assert_eq!(original.proof_metadata.extra, deserialized.proof_metadata.extra);
+    assert_eq!(
+        original.inclusion_proof_type,
+        deserialized.inclusion_proof_type
+    );
+    assert_eq!(
+        original.finality_proof_type,
+        deserialized.finality_proof_type
+    );
+    assert_eq!(
+        original.proof_metadata.inclusion_proof_type,
+        deserialized.proof_metadata.inclusion_proof_type
+    );
+    assert_eq!(
+        original.proof_metadata.finality_proof_type,
+        deserialized.proof_metadata.finality_proof_type
+    );
+    assert_eq!(
+        original.proof_metadata.commitment_scheme,
+        deserialized.proof_metadata.commitment_scheme
+    );
+    assert_eq!(
+        original.proof_metadata.proof_size_bytes,
+        deserialized.proof_metadata.proof_size_bytes
+    );
+    assert_eq!(
+        original.proof_metadata.confirmations,
+        deserialized.proof_metadata.confirmations
+    );
+    assert_eq!(
+        original.proof_metadata.extra,
+        deserialized.proof_metadata.extra
+    );
 }
 
 #[test]

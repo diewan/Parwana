@@ -5,13 +5,16 @@
 //!
 //! Generated from: csv-contracts/ethereum/contracts/out/CSVSeal.sol/CSVSeal.json
 
-use crate::abi_constitution::{AbiConstitution, ContractAbi as AbiConstitutionAbi, EventAbi, FunctionAbi, ParameterAbi};
+use crate::abi_constitution::{
+    AbiConstitution, ContractAbi as AbiConstitutionAbi, EventAbi, FunctionAbi, ParameterAbi,
+};
 use crate::common::{ContractAbi, ContractAddress, FunctionSelector};
 use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 
 /// CSVSeal contract ABI (canonical version)
-pub const CSV_SEAL_ABI: &str = include_str!("../../csv-contracts/ethereum/contracts/out/CSVSeal.sol/CSVSeal.json");
+pub const CSV_SEAL_ABI: &str =
+    include_str!("../../csv-contracts/ethereum/contracts/out/CSVSeal.sol/CSVSeal.json");
 
 /// CSVSeal contract methods (canonical snake_case naming)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,12 +74,16 @@ impl CsvSealMethod {
             Self::CreateSeal => "create_seal(bytes32,bytes32)",
             Self::ConsumeSeal => "consume_seal(bytes32,bytes32)",
             Self::LockSanad => "lock_sanad(bytes32,bytes32,bytes32,bytes)",
-            Self::MintSanad => "mint_sanad(bytes32,bytes32,bytes32,bytes32,bytes,bytes,bytes32,uint256)",
+            Self::MintSanad => {
+                "mint_sanad(bytes32,bytes32,bytes32,bytes32,bytes,bytes,bytes32,uint256)"
+            }
             Self::RefundSanad => "refund_sanad(bytes32,bytes32)",
             Self::TransferSanad => "transfer_sanad(bytes32,address)",
             Self::RegisterNullifier => "register_nullifier(bytes32,bytes32,bytes32)",
             Self::AnchorCommitment => "anchor_commitment(bytes32,bytes32)",
-            Self::RecordSanadMetadata => "record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)",
+            Self::RecordSanadMetadata => {
+                "record_sanad_metadata(bytes32,uint8,bytes32,bytes32,uint8,bytes32)"
+            }
             Self::UpdateProofRoot => "update_proof_root(bytes32)",
             Self::GetSanadState => "get_sanad_state(bytes32)",
             Self::GetSealState => "get_seal_state(bytes32)",
@@ -280,33 +287,61 @@ impl CsvSealContract {
         // Convert common::ContractAbi to abi_constitution::ContractAbi
         let constitution_abi = AbiConstitutionAbi {
             name: self.abi.name.clone(),
-            functions: self.abi.methods.iter().map(|m| FunctionAbi {
-                name: m.signature.clone(),
-                inputs: m.inputs.iter().map(|i| ParameterAbi {
-                    name: i.name.clone(),
-                    param_type: i.r#type.clone(),
-                    indexed: false,
-                }).collect(),
-                outputs: m.outputs.iter().map(|o| ParameterAbi {
-                    name: String::new(),
-                    param_type: o.r#type.clone(),
-                    indexed: false,
-                }).collect(),
-                payable: false,
-            }).collect(),
-            events: self.abi.events.iter().map(|e| EventAbi {
-                name: e.name.clone(),
-                indexed: e.inputs.iter().filter(|i| i.indexed).map(|i| ParameterAbi {
-                    name: i.name.clone(),
-                    param_type: i.r#type.clone(),
-                    indexed: true,
-                }).collect(),
-                non_indexed: e.inputs.iter().filter(|i| !i.indexed).map(|i| ParameterAbi {
-                    name: i.name.clone(),
-                    param_type: i.r#type.clone(),
-                    indexed: false,
-                }).collect(),
-            }).collect(),
+            functions: self
+                .abi
+                .methods
+                .iter()
+                .map(|m| FunctionAbi {
+                    name: m.signature.clone(),
+                    inputs: m
+                        .inputs
+                        .iter()
+                        .map(|i| ParameterAbi {
+                            name: i.name.clone(),
+                            param_type: i.r#type.clone(),
+                            indexed: false,
+                        })
+                        .collect(),
+                    outputs: m
+                        .outputs
+                        .iter()
+                        .map(|o| ParameterAbi {
+                            name: String::new(),
+                            param_type: o.r#type.clone(),
+                            indexed: false,
+                        })
+                        .collect(),
+                    payable: false,
+                })
+                .collect(),
+            events: self
+                .abi
+                .events
+                .iter()
+                .map(|e| EventAbi {
+                    name: e.name.clone(),
+                    indexed: e
+                        .inputs
+                        .iter()
+                        .filter(|i| i.indexed)
+                        .map(|i| ParameterAbi {
+                            name: i.name.clone(),
+                            param_type: i.r#type.clone(),
+                            indexed: true,
+                        })
+                        .collect(),
+                    non_indexed: e
+                        .inputs
+                        .iter()
+                        .filter(|i| !i.indexed)
+                        .map(|i| ParameterAbi {
+                            name: i.name.clone(),
+                            param_type: i.r#type.clone(),
+                            indexed: false,
+                        })
+                        .collect(),
+                })
+                .collect(),
             errors: vec![],
         };
         let result = constitution.check_compliance(&constitution_abi);
@@ -361,7 +396,12 @@ mod tests {
             CsvSealMethod::RefundSanad,
         ] {
             let selector = method.selector();
-            assert_ne!(selector.0, [0u8; 4], "Selector for {} should not be zero", method.name());
+            assert_ne!(
+                selector.0,
+                [0u8; 4],
+                "Selector for {} should not be zero",
+                method.name()
+            );
         }
     }
 

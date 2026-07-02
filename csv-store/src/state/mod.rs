@@ -53,7 +53,9 @@ pub use domain::{
 pub use storage::StateStorage;
 /// Backward compatibility alias
 pub type UnifiedStorage = StateStorage;
-pub use wallet::{FaucetConfig, GasAccount, SanadSealRecord, UtxoRecord, WalletAccount, WalletConfig};
+pub use wallet::{
+    FaucetConfig, GasAccount, SanadSealRecord, UtxoRecord, WalletAccount, WalletConfig,
+};
 
 /// Version of the state format.
 pub const STATE_VERSION: u32 = 1;

@@ -51,7 +51,11 @@ impl BlockbookRpc {
             .expect("Failed to create HTTP client");
         // Strip trailing slashes to avoid `//api/v2` when composing paths.
         let base_url = base_url.trim_end_matches('/').to_string();
-        Self { client, base_url, api_key }
+        Self {
+            client,
+            base_url,
+            api_key,
+        }
     }
 
     /// GET a JSON document with retry + exponential backoff on transient errors.
@@ -75,16 +79,22 @@ impl BlockbookRpc {
 
             match request.send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| e.into())?;
-                    return serde_json::from_str::<T>(&text)
-                        .map_err(|e| format!("failed to parse Blockbook response from {}: {}", url, e).into());
+                    let text = resp
+                        .text()
+                        .await
+                        .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| e.into())?;
+                    return serde_json::from_str::<T>(&text).map_err(|e| {
+                        format!("failed to parse Blockbook response from {}: {}", url, e).into()
+                    });
                 }
                 Ok(resp) => {
                     let status = resp.status();
                     // 4xx (bad address, not found) is permanent — don't retry.
                     if status.is_client_error() {
                         let body = resp.text().await.unwrap_or_default();
-                        return Err(format!("Blockbook HTTP {} at {}: {}", status, url, body).into());
+                        return Err(
+                            format!("Blockbook HTTP {} at {}: {}", status, url, body).into()
+                        );
                     }
                     last_err = Some(format!("Blockbook HTTP {} at {}", status, url).into());
                 }
@@ -125,10 +135,10 @@ impl BitcoinRpc for BlockbookRpc {
         utxos
             .into_iter()
             .map(|u| {
-                let mut txid_bytes = hex::decode(&u.txid)
-                    .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                        format!("invalid txid hex '{}': {}", u.txid, e).into()
-                    })?;
+                let mut txid_bytes =
+                    hex::decode(&u.txid).map_err::<Box<dyn std::error::Error + Send + Sync>, _>(
+                        |e| format!("invalid txid hex '{}': {}", u.txid, e).into(),
+                    )?;
                 if txid_bytes.len() != 32 {
                     return Err(format!("txid '{}' is not 32 bytes", u.txid).into());
                 }
@@ -138,9 +148,12 @@ impl BitcoinRpc for BlockbookRpc {
                 let mut txid = [0u8; 32];
                 txid.copy_from_slice(&txid_bytes);
 
-                let amount_sat = u.value.parse::<u64>().map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                    format!("invalid satoshi value '{}': {}", u.value, e).into()
-                })?;
+                let amount_sat = u
+                    .value
+                    .parse::<u64>()
+                    .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                        format!("invalid satoshi value '{}': {}", u.value, e).into()
+                    })?;
 
                 Ok(UtxoInfo {
                     txid,
@@ -170,9 +183,12 @@ impl BitcoinRpc for BlockbookRpc {
         let Some(output) = tx.vout.into_iter().find(|o| o.n == vout) else {
             return Ok(None);
         };
-        let value = output.value.parse::<u64>().map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-            format!("invalid satoshi value '{}': {}", output.value, e).into()
-        })?;
+        let value = output
+            .value
+            .parse::<u64>()
+            .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                format!("invalid satoshi value '{}': {}", output.value, e).into()
+            })?;
         Ok(Some(UtxoDetails {
             txid,
             vout,
@@ -227,9 +243,12 @@ impl BitcoinRpc for BlockbookRpc {
         // Target 2 blocks; result is BTC per 1000 vbytes as a decimal string.
         let url = format!("{}/api/v2/estimatefee/2", self.base_url);
         let resp: BlockbookEstimateFee = self.get_json(&url).await?;
-        let btc_per_kvb: f64 = resp.result.parse().map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-            format!("invalid estimatefee result '{}': {}", resp.result, e).into()
-        })?;
+        let btc_per_kvb: f64 = resp
+            .result
+            .parse()
+            .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                format!("invalid estimatefee result '{}': {}", resp.result, e).into()
+            })?;
         // BTC/kvB → sat/vB: * 1e8 sat/BTC / 1000 vB/kvB. Clamp to a sane range.
         let sat_per_vb = (btc_per_kvb * 100_000_000.0 / 1000.0).round() as i64;
         Ok(sat_per_vb.clamp(1, 10_000) as u64)
@@ -387,8 +406,7 @@ mod tests {
         let status: BlockbookStatus =
             serde_json::from_str(r#"{"backend":{"blocks":250000}}"#).unwrap();
         assert_eq!(status.backend.blocks, 250000);
-        let idx: BlockbookBlockIndex =
-            serde_json::from_str(r#"{"blockHash":"00ff"}"#).unwrap();
+        let idx: BlockbookBlockIndex = serde_json::from_str(r#"{"blockHash":"00ff"}"#).unwrap();
         assert_eq!(idx.block_hash, "00ff");
     }
 }

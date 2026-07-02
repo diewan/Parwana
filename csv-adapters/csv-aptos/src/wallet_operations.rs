@@ -64,9 +64,9 @@ impl AptosWalletOperations {
     /// Get the RPC client if configured
     #[cfg(feature = "rpc")]
     fn rpc_client(&self) -> Result<&Arc<ReqwestClient>, WalletError> {
-        self.rpc_client.as_ref().ok_or_else(|| {
-            WalletError::RpcNotConfigured("Aptos".to_string())
-        })
+        self.rpc_client
+            .as_ref()
+            .ok_or_else(|| WalletError::RpcNotConfigured("Aptos".to_string()))
     }
 }
 
@@ -76,12 +76,7 @@ impl WalletOperations for AptosWalletOperations {
         ChainId::new("aptos")
     }
 
-    fn derive_address(
-        &self,
-        seed: &[u8],
-        account: u32,
-        index: u32,
-    ) -> Result<String, WalletError> {
+    fn derive_address(&self, seed: &[u8], account: u32, index: u32) -> Result<String, WalletError> {
         // Convert seed slice to array
         let mut seed_array = [0u8; 64];
         if seed.len() >= 64 {
@@ -114,25 +109,23 @@ impl WalletOperations for AptosWalletOperations {
         {
             let client = self.rpc_client()?;
             let url = format!("{}/accounts/{}", self.network.rpc_url(), address);
-            
+
             let response = client
                 .get(&url)
                 .send()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to get balance: {}", e)))?;
-            
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
-            let balance = data["coin"]["value"]
-                .as_str()
-                .unwrap_or("0");
-            
+
+            let balance = data["coin"]["value"].as_str().unwrap_or("0");
+
             Ok(balance.to_string())
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Aptos".to_string()))
@@ -151,14 +144,14 @@ impl WalletOperations for AptosWalletOperations {
         }
 
         // Derive Ed25519 signing key from seed
-        use ed25519_dalek::{SigningKey, Signature, Signer};
-        let signing_key: SigningKey = seed_array[..32]
-            .try_into()
-            .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive signing key: {:?}", e)))?;
-        
+        use ed25519_dalek::{Signature, Signer, SigningKey};
+        let signing_key: SigningKey = seed_array[..32].try_into().map_err(|e| {
+            WalletError::KeyDerivation(format!("Failed to derive signing key: {:?}", e))
+        })?;
+
         // Sign the transaction data
         let signature: Signature = signing_key.sign(tx_data);
-        
+
         Ok(signature.to_bytes().to_vec())
     }
 
@@ -167,62 +160,78 @@ impl WalletOperations for AptosWalletOperations {
         {
             let client = self.rpc_client()?;
             let url = format!("{}/transactions", self.network.rpc_url());
-            
+
             let response = client
                 .post(&url)
                 .header("Content-Type", "application/x.aptos.signed_transaction+bcs")
                 .body(signed_tx.to_vec())
                 .send()
                 .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
-            
+                .map_err(|e| {
+                    WalletError::RpcError(format!("Failed to broadcast transaction: {}", e))
+                })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
-            let tx_hash = data["hash"]
-                .as_str()
-                .ok_or_else(|| WalletError::RpcError("No transaction hash in response".to_string()))?;
-            
+
+            let tx_hash = data["hash"].as_str().ok_or_else(|| {
+                WalletError::RpcError("No transaction hash in response".to_string())
+            })?;
+
             Ok(tx_hash.to_string())
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Aptos".to_string()))
         }
     }
 
-    async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
+    async fn get_transaction_status(
+        &self,
+        tx_hash: &str,
+    ) -> Result<HashMap<String, String>, WalletError> {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
-            let url = format!("{}/transactions/by_hash/{}", self.network.rpc_url(), tx_hash);
-            
-            let response = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to get transaction: {}", e)))?;
-            
+            let url = format!(
+                "{}/transactions/by_hash/{}",
+                self.network.rpc_url(),
+                tx_hash
+            );
+
+            let response =
+                client.get(&url).send().await.map_err(|e| {
+                    WalletError::RpcError(format!("Failed to get transaction: {}", e))
+                })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             let mut status = HashMap::new();
             status.insert("txid".to_string(), tx_hash.to_string());
-            
-            let success = data["success"]
-                .as_bool()
-                .unwrap_or(false);
-            status.insert("status".to_string(), if success { "success".to_string() } else { "failed".to_string() });
-            status.insert("vm_status".to_string(), data["vm_status"].as_str().unwrap_or("unknown").to_string());
-            
+
+            let success = data["success"].as_bool().unwrap_or(false);
+            status.insert(
+                "status".to_string(),
+                if success {
+                    "success".to_string()
+                } else {
+                    "failed".to_string()
+                },
+            );
+            status.insert(
+                "vm_status".to_string(),
+                data["vm_status"].as_str().unwrap_or("unknown").to_string(),
+            );
+
             Ok(status)
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Aptos".to_string()))

@@ -62,7 +62,11 @@ pub async fn execute(
     }
 }
 
-async fn cmd_create(chain: Chain, value: Option<u64>, state: &mut UnifiedStateManager) -> Result<()> {
+async fn cmd_create(
+    chain: Chain,
+    value: Option<u64>,
+    state: &mut UnifiedStateManager,
+) -> Result<()> {
     output::header(&format!("Creating Seal on {}", chain));
 
     let core_chain = to_protocol_chain(chain.clone());
@@ -157,12 +161,20 @@ fn generate_commitment() -> [u8; 32] {
     bytes
 }
 
-async fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateManager) -> Result<()> {
+async fn cmd_consume(
+    chain: Chain,
+    seal_ref: String,
+    state: &mut UnifiedStateManager,
+) -> Result<()> {
     output::header(&format!("Consuming Seal on {}", chain));
 
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid seal reference: {}", e))?;
-    let seal_hash = csv_hash::Hash::new(seal_bytes[..32.min(seal_bytes.len())].try_into().unwrap_or([0u8; 32]));
+    let seal_hash = csv_hash::Hash::new(
+        seal_bytes[..32.min(seal_bytes.len())]
+            .try_into()
+            .unwrap_or([0u8; 32]),
+    );
     let seal_hex = hex::encode(&seal_bytes);
 
     let core_chain = to_protocol_chain(chain.clone());
@@ -206,7 +218,8 @@ async fn cmd_consume(chain: Chain, seal_ref: String, state: &mut UnifiedStateMan
             return Err(anyhow::anyhow!(
                 "Chain adapter not available for {}: {}. \
                  Cannot determine canonical seal state without chain access.",
-                chain, e
+                chain,
+                e
             ));
         }
     }
@@ -248,7 +261,11 @@ async fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager)
 
     let seal_bytes = hex::decode(seal_ref.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid seal reference: {}", e))?;
-    let seal_hash = csv_hash::Hash::new(seal_bytes[..32.min(seal_bytes.len())].try_into().unwrap_or([0u8; 32]));
+    let seal_hash = csv_hash::Hash::new(
+        seal_bytes[..32.min(seal_bytes.len())]
+            .try_into()
+            .unwrap_or([0u8; 32]),
+    );
 
     let core_chain = to_protocol_chain(chain.clone());
 
@@ -260,7 +277,7 @@ async fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager)
         .map_err(|e| anyhow::anyhow!("Failed to create CSV client: {}", e))?;
 
     let runtime = client.chain_runtime();
-    
+
     // Query canonical seal state via ChainBackend (fail closed if unavailable)
     match runtime.get_adapter(core_chain.clone()).await {
         Ok(adapter) => {
@@ -305,7 +322,8 @@ async fn cmd_verify(chain: Chain, seal_ref: String, state: &UnifiedStateManager)
             return Err(anyhow::anyhow!(
                 "Chain adapter not available for {}: {}. \
                  Cannot determine canonical seal state without chain access.",
-                chain, e
+                chain,
+                e
             ));
         }
     }

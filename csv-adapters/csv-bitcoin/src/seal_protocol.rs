@@ -94,82 +94,134 @@ impl BitcoinSealProtocol {
             let seed_bytes = hex::decode(seed_hex.trim_start_matches("0x"))
                 .map_err(|e| BitcoinError::RpcError(format!("Invalid seed hex: {}", e)))?;
             if seed_bytes.len() != 64 {
-                return Err(BitcoinError::RpcError(
-                    format!("Seed must be 64 bytes (128 hex chars), got {} bytes", seed_bytes.len())
-                ));
+                return Err(BitcoinError::RpcError(format!(
+                    "Seed must be 64 bytes (128 hex chars), got {} bytes",
+                    seed_bytes.len()
+                )));
             }
             let mut seed_array = [0u8; 64];
             seed_array.copy_from_slice(&seed_bytes);
             let wallet = SealWallet::from_seed(&seed_array, config.network.to_bitcoin_network())
-                .map_err(|e| BitcoinError::RpcError(format!("Wallet creation from seed failed: {}", e)))?;
+                .map_err(|e| {
+                    BitcoinError::RpcError(format!("Wallet creation from seed failed: {}", e))
+                })?;
 
             // Load UTXOs from config if available
             log::info!("Bitcoin: Loading {} UTXOs from config", config.utxos.len());
             for utxo_config in &config.utxos {
                 if let Ok(txid_bytes) = hex::decode(&utxo_config.txid) {
                     if txid_bytes.len() == 32 {
-                        log::info!("Bitcoin: Loading UTXO from config: txid={}, vout={}", utxo_config.txid, utxo_config.vout);
+                        log::info!(
+                            "Bitcoin: Loading UTXO from config: txid={}, vout={}",
+                            utxo_config.txid,
+                            utxo_config.vout
+                        );
                         // Use txid as-is from config (display format)
                         // Txid::from_raw_hash expects internal byte order, so we need to reverse
                         let mut txid_array = [0u8; 32];
                         txid_array.copy_from_slice(&txid_bytes);
                         txid_array.reverse(); // Convert display to internal byte order for Txid
-                        log::info!("Bitcoin: Reversed txid for wallet: {}", hex::encode(&txid_array));
+                        log::info!(
+                            "Bitcoin: Reversed txid for wallet: {}",
+                            hex::encode(&txid_array)
+                        );
                         let hash = bitcoin::hashes::Hash::from_byte_array(txid_array);
                         let outpoint = bitcoin::OutPoint {
                             txid: bitcoin::Txid::from_raw_hash(hash),
                             vout: utxo_config.vout,
                         };
-                        log::info!("Bitcoin: Created OutPoint: txid={}, vout={}", hex::encode(outpoint.txid.as_byte_array()), outpoint.vout);
-                        let path = crate::wallet::Bip86Path::external(utxo_config.account, utxo_config.index);
+                        log::info!(
+                            "Bitcoin: Created OutPoint: txid={}, vout={}",
+                            hex::encode(outpoint.txid.as_byte_array()),
+                            outpoint.vout
+                        );
+                        let path = crate::wallet::Bip86Path::external(
+                            utxo_config.account,
+                            utxo_config.index,
+                        );
 
                         // Decode scriptPubKey if available
-                        let script_pubkey = utxo_config.script_pubkey.as_ref()
+                        let script_pubkey = utxo_config
+                            .script_pubkey
+                            .as_ref()
                             .and_then(|spk_hex| hex::decode(spk_hex).ok())
                             .map(bitcoin::ScriptBuf::from);
 
-                        wallet.add_utxo_with_scriptpubkey(outpoint, utxo_config.value, path, script_pubkey, None);
-                        log::info!("Bitcoin: Added UTXO to wallet: txid={}, vout={}, value={}", hex::encode(outpoint.txid.as_byte_array()), outpoint.vout, utxo_config.value);
+                        wallet.add_utxo_with_scriptpubkey(
+                            outpoint,
+                            utxo_config.value,
+                            path,
+                            script_pubkey,
+                            None,
+                        );
+                        log::info!(
+                            "Bitcoin: Added UTXO to wallet: txid={}, vout={}, value={}",
+                            hex::encode(outpoint.txid.as_byte_array()),
+                            outpoint.vout,
+                            utxo_config.value
+                        );
                     }
                 }
             }
             log::info!("Bitcoin: Wallet now has {} UTXOs", wallet.utxo_count());
 
             // Load sanad_id -> seal mappings from config
-            log::info!("Bitcoin: Loading {} sanad_seals from config", config.sanad_seals.len());
+            log::info!(
+                "Bitcoin: Loading {} sanad_seals from config",
+                config.sanad_seals.len()
+            );
             for seal_config in &config.sanad_seals {
-                log::info!("Bitcoin: Loading sanad_seal: sanad_id={}, anchor_txid={}, vout={}",
-                    seal_config.sanad_id, seal_config.anchor_txid, seal_config.vout);
-                   if let Ok(sanad_bytes) = hex::decode(&seal_config.sanad_id) {
-                        if sanad_bytes.len() == 32 {
-                            let mut sanad_id = [0u8; 32];
-                            sanad_id.copy_from_slice(&sanad_bytes);
-                            if let Ok(txid_bytes) = hex::decode(&seal_config.anchor_txid) {
-                                // anchor_txid in config (and in SanadSealRecord) is already stored in
-                                // internal byte order: it is hex(CommitAnchor.anchor_id), and the
-                                // anchor_id ultimately comes from send_raw_transaction(), which reverses
-                                // the node's display txid to internal order before returning it. The
-                                // sanad_seals HashMap must also hold internal-byte-order bytes so that
-                                // Txid::from_byte_array() and UTXO lookups work correctly, so store the
-                                // config bytes as-is (do NOT reverse — that double-flip was BTC byte-order
-                                // bug making the map hold display order and breaking lock/refund spends).
-                                wallet.register_sanad_seal(sanad_id, txid_bytes, seal_config.vout);
-                                log::info!("Bitcoin: Registered sanad_seal for sanad_id={}", hex::encode(sanad_id));
+                log::info!(
+                    "Bitcoin: Loading sanad_seal: sanad_id={}, anchor_txid={}, vout={}",
+                    seal_config.sanad_id,
+                    seal_config.anchor_txid,
+                    seal_config.vout
+                );
+                if let Ok(sanad_bytes) = hex::decode(&seal_config.sanad_id) {
+                    if sanad_bytes.len() == 32 {
+                        let mut sanad_id = [0u8; 32];
+                        sanad_id.copy_from_slice(&sanad_bytes);
+                        if let Ok(txid_bytes) = hex::decode(&seal_config.anchor_txid) {
+                            // anchor_txid in config (and in SanadSealRecord) is already stored in
+                            // internal byte order: it is hex(CommitAnchor.anchor_id), and the
+                            // anchor_id ultimately comes from send_raw_transaction(), which reverses
+                            // the node's display txid to internal order before returning it. The
+                            // sanad_seals HashMap must also hold internal-byte-order bytes so that
+                            // Txid::from_byte_array() and UTXO lookups work correctly, so store the
+                            // config bytes as-is (do NOT reverse — that double-flip was BTC byte-order
+                            // bug making the map hold display order and breaking lock/refund spends).
+                            wallet.register_sanad_seal(sanad_id, txid_bytes, seal_config.vout);
+                            log::info!(
+                                "Bitcoin: Registered sanad_seal for sanad_id={}",
+                                hex::encode(sanad_id)
+                            );
+                            // Record the tapret commitment so the key-path
+                            // tweak can be rebuilt when this seal is spent.
+                            if let Some(commitment_hex) = &seal_config.commitment {
+                                if let Ok(cb) = hex::decode(commitment_hex) {
+                                    if cb.len() == 32 {
+                                        let mut commitment = [0u8; 32];
+                                        commitment.copy_from_slice(&cb);
+                                        wallet.register_sanad_commitment(sanad_id, commitment);
+                                    }
+                                }
                             }
                         }
                     }
+                }
             }
 
             wallet
         } else if let Some(xpub_str) = &config.xpub {
-            SealWallet::from_xpub(xpub_str, config.network.to_bitcoin_network())
-                .map_err(|e| {
-                    BitcoinError::RpcError(format!("Wallet creation from xpub failed: {}", e))
-                })?
+            SealWallet::from_xpub(xpub_str, config.network.to_bitcoin_network()).map_err(|e| {
+                BitcoinError::RpcError(format!("Wallet creation from xpub failed: {}", e))
+            })?
         } else {
             // Read-only mode: generate a random wallet for address derivation only
             // This allows readiness checks and queries without requiring seed/xpub
-            log::warn!("BitcoinSealProtocol: No seed or xpub provided, creating read-only adapter with random wallet (signing unavailable)");
+            log::warn!(
+                "BitcoinSealProtocol: No seed or xpub provided, creating read-only adapter with random wallet (signing unavailable)"
+            );
             SealWallet::generate_random(config.network.to_bitcoin_network())
         };
 
@@ -257,9 +309,10 @@ impl BitcoinSealProtocol {
     /// This is required because sanad_seals config only stores the mapping (sanad_id -> txid/vout)
     /// but not the actual UTXO data needed for spending.
     pub async fn load_sanad_seal_utxos(&self) -> Result<usize, BitcoinError> {
-        let rpc = self.rpc.as_ref().ok_or_else(|| {
-            BitcoinError::RpcError("No RPC client configured".to_string())
-        })?;
+        let rpc = self
+            .rpc
+            .as_ref()
+            .ok_or_else(|| BitcoinError::RpcError("No RPC client configured".to_string()))?;
 
         let seals: Vec<_> = {
             let guard = self.wallet.get_sanad_seals();
@@ -270,13 +323,19 @@ impl BitcoinSealProtocol {
         for (sanad_id, (txid_bytes, vout)) in &seals {
             let txid_array: [u8; 32] = txid_bytes.clone().try_into().unwrap_or([0u8; 32]);
             let outpoint = bitcoin::OutPoint {
-                txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_byte_array(txid_array)),
+                txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_byte_array(
+                    txid_array,
+                )),
                 vout: *vout,
             };
 
             // Check if UTXO is already in wallet
             if self.wallet.get_utxo(&outpoint).is_some() {
-                log::debug!("UTXO {}:{} already in wallet, skipping fetch", hex::encode(txid_bytes), vout);
+                log::debug!(
+                    "UTXO {}:{} already in wallet, skipping fetch",
+                    hex::encode(txid_bytes),
+                    vout
+                );
                 continue;
             }
 
@@ -294,7 +353,8 @@ impl BitcoinSealProtocol {
                         .map(bitcoin::ScriptBuf::from);
 
                     // Add UTXO as SanadAnchor (not spendable - belongs to different address)
-                    let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index);
+                    let path =
+                        crate::wallet::Bip86Path::external(self.config.account, self.config.index);
                     self.wallet.add_utxo_with_provenance(
                         outpoint,
                         utxo_details.value,
@@ -303,17 +363,28 @@ impl BitcoinSealProtocol {
                         Some(*sanad_id),
                         crate::types::UtxoProvenance::SanadAnchor,
                     );
-                    log::info!("Bitcoin: Added UTXO {}:{} to wallet from RPC as SanadAnchor (value={} sat)",
-                        hex::encode(txid_bytes), vout, utxo_details.value);
+                    log::info!(
+                        "Bitcoin: Added UTXO {}:{} to wallet from RPC as SanadAnchor (value={} sat)",
+                        hex::encode(txid_bytes),
+                        vout,
+                        utxo_details.value
+                    );
                     loaded_count += 1;
                 }
                 Ok(None) => {
-                    log::warn!("UTXO {}:{} not found on-chain (may be spent or unconfirmed)",
-                        hex::encode(txid_bytes), vout);
+                    log::warn!(
+                        "UTXO {}:{} not found on-chain (may be spent or unconfirmed)",
+                        hex::encode(txid_bytes),
+                        vout
+                    );
                 }
                 Err(e) => {
-                    log::warn!("Failed to fetch UTXO {}:{} from RPC: {}",
-                        hex::encode(txid_bytes), vout, e);
+                    log::warn!(
+                        "Failed to fetch UTXO {}:{} from RPC: {}",
+                        hex::encode(txid_bytes),
+                        vout,
+                        e
+                    );
                 }
             }
         }
@@ -324,20 +395,24 @@ impl BitcoinSealProtocol {
     /// Fetch regular UTXOs from RPC for the current wallet address
     /// This is called when the adapter is initialized with a seed but no UTXOs in config
     pub async fn load_wallet_utxos(&self) -> Result<usize, BitcoinError> {
-        let rpc = self.rpc.as_ref().ok_or_else(|| {
-            BitcoinError::RpcError("No RPC client configured".to_string())
-        })?;
+        let rpc = self
+            .rpc
+            .as_ref()
+            .ok_or_else(|| BitcoinError::RpcError("No RPC client configured".to_string()))?;
 
         // Derive the current address
         let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index);
-        let key = self.wallet.derive_key(&path)
+        let key = self
+            .wallet
+            .derive_key(&path)
             .map_err(|e| BitcoinError::RpcError(format!("Failed to derive key: {}", e)))?;
         let address = key.address.to_string();
         log::info!("Bitcoin: Fetching UTXOs from RPC for address: {}", address);
 
         // Fetch UTXOs from RPC
-        let rpc_utxos = rpc.get_utxos_for_address(address).await
-            .map_err(|e| BitcoinError::RpcError(format!("Failed to fetch UTXOs from RPC: {}", e)))?;
+        let rpc_utxos = rpc.get_utxos_for_address(address).await.map_err(|e| {
+            BitcoinError::RpcError(format!("Failed to fetch UTXOs from RPC: {}", e))
+        })?;
 
         log::info!("Bitcoin: Fetched {} UTXOs from RPC", rpc_utxos.len());
         let mut loaded_count = 0;
@@ -367,11 +442,20 @@ impl BitcoinSealProtocol {
             let script_pubkey = match rpc.get_utxo_scriptpubkey(utxo.txid, utxo.vout).await {
                 Ok(Some(spk)) => Some(spk),
                 Ok(None) => {
-                    log::warn!("No scriptPubKey for UTXO {}:{}, skipping", hex::encode(utxo.txid), utxo.vout);
+                    log::warn!(
+                        "No scriptPubKey for UTXO {}:{}, skipping",
+                        hex::encode(utxo.txid),
+                        utxo.vout
+                    );
                     continue;
                 }
                 Err(e) => {
-                    log::warn!("Failed to fetch scriptPubKey for UTXO {}:{}: {}, skipping", hex::encode(utxo.txid), utxo.vout, e);
+                    log::warn!(
+                        "Failed to fetch scriptPubKey for UTXO {}:{}: {}, skipping",
+                        hex::encode(utxo.txid),
+                        utxo.vout,
+                        e
+                    );
                     continue;
                 }
             };
@@ -384,9 +468,19 @@ impl BitcoinSealProtocol {
                 .and_then(|spk_hex| hex::decode(&spk_hex).ok())
                 .map(bitcoin::ScriptBuf::from);
 
-            self.wallet.add_utxo_with_scriptpubkey(outpoint, utxo.amount_sat, path.clone(), script_pubkey_buf, None);
-            log::info!("Bitcoin: Added RPC UTXO to wallet: txid={}, vout={}, value={}",
-                hex::encode(outpoint.txid.as_byte_array()), outpoint.vout, utxo.amount_sat);
+            self.wallet.add_utxo_with_scriptpubkey(
+                outpoint,
+                utxo.amount_sat,
+                path.clone(),
+                script_pubkey_buf,
+                None,
+            );
+            log::info!(
+                "Bitcoin: Added RPC UTXO to wallet: txid={}, vout={}, value={}",
+                hex::encode(outpoint.txid.as_byte_array()),
+                outpoint.vout,
+                utxo.amount_sat
+            );
             loaded_count += 1;
         }
 
@@ -434,7 +528,10 @@ impl BitcoinSealProtocol {
     }
 
     /// Add UTXOs to the wallet from persisted state
-    pub fn add_utxos_from_state(&mut self, utxos: Vec<(bitcoin::OutPoint, u64, crate::wallet::Bip86Path)>) {
+    pub fn add_utxos_from_state(
+        &mut self,
+        utxos: Vec<(bitcoin::OutPoint, u64, crate::wallet::Bip86Path)>,
+    ) {
         for (outpoint, value, path) in utxos {
             self.wallet.add_utxo(outpoint, value, path);
         }
@@ -454,7 +551,10 @@ impl BitcoinSealProtocol {
             .next_seal_index
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let path = crate::wallet::Bip86Path::external(self.config.account, self.config.index + *next_index);
+        let path = crate::wallet::Bip86Path::external(
+            self.config.account,
+            self.config.index + *next_index,
+        );
 
         // Derive the Taproot key for this path
         let key = self
@@ -539,12 +639,18 @@ impl BitcoinSealProtocol {
             match self.load_wallet_utxos().await {
                 Ok(count) => {
                     if count > 0 {
-                        log::info!("Loaded {} UTXOs for current address, skipping gap scan", count);
+                        log::info!(
+                            "Loaded {} UTXOs for current address, skipping gap scan",
+                            count
+                        );
                         return Ok(count);
                     }
                 }
                 Err(e) => {
-                    log::warn!("Failed to load UTXOs for current address: {}, proceeding with gap scan", e);
+                    log::warn!(
+                        "Failed to load UTXOs for current address: {}, proceeding with gap scan",
+                        e
+                    );
                 }
             }
         }
@@ -552,11 +658,13 @@ impl BitcoinSealProtocol {
         let wallet = &self.wallet;
         wallet.clear_utxos();
 
-      let mut discovered_count = 0;
+        let mut discovered_count = 0;
         let mut consecutive_empty = 0;
 
         for index in 0..gap_limit {
-            let derived = self.wallet.derive_key(&crate::wallet::Bip86Path::external(account, index as u32))
+            let derived = self
+                .wallet
+                .derive_key(&crate::wallet::Bip86Path::external(account, index as u32))
                 .map_err(|e| ProtocolError::Generic(format!("Key derivation failed: {}", e)))?;
 
             let address_str = derived.address.to_string();
@@ -577,7 +685,8 @@ impl BitcoinSealProtocol {
                             reversed.reverse();
                             let txid = bitcoin::Txid::from_byte_array(reversed);
                             let outpoint = bitcoin::OutPoint::new(txid, utxo.vout);
-                            self.wallet.add_utxo(outpoint, utxo.amount_sat, derived.path.clone());
+                            self.wallet
+                                .add_utxo(outpoint, utxo.amount_sat, derived.path.clone());
                             discovered_count += 1;
                         }
                     }
@@ -680,17 +789,27 @@ impl BitcoinSealProtocol {
     /// First checks explicit sanad_seals map, then falls back to UTXO scan.
     pub fn find_seal_for_sanad(&self, sanad_id: &SanadId) -> Option<BitcoinSealPoint> {
         let sanad_bytes = sanad_id.as_bytes();
-        log::info!("find_seal_for_sanad: looking for sanad_id={}", hex::encode(sanad_bytes));
+        log::info!(
+            "find_seal_for_sanad: looking for sanad_id={}",
+            hex::encode(sanad_bytes)
+        );
 
         // First check explicit sanad_seals map
         let seals = self.wallet.get_sanad_seals();
-        log::info!("find_seal_for_sanad: sanad_seals map has {} entries", seals.len());
+        log::info!(
+            "find_seal_for_sanad: sanad_seals map has {} entries",
+            seals.len()
+        );
         for (k, _v) in seals.iter() {
             log::info!("find_seal_for_sanad: map key={}", hex::encode(k));
         }
-        
+
         if let Some((txid, vout)) = seals.get(sanad_bytes) {
-            log::info!("find_seal_for_sanad: found in map, txid={}, vout={}", hex::encode(txid), vout);
+            log::info!(
+                "find_seal_for_sanad: found in map, txid={}, vout={}",
+                hex::encode(txid),
+                vout
+            );
             let mut txid_array = [0u8; 32];
             txid_array.copy_from_slice(&txid[..32]);
             return Some(BitcoinSealPoint {
@@ -754,10 +873,8 @@ impl SealProtocol for BitcoinSealProtocol {
         if let Some(rpc) = &self.rpc {
             // Find the UTXO matching this seal in the wallet
             // seal.txid is in internal byte order (from fund_seal -> outpoint.txid.to_byte_array())
-            let outpoint = bitcoin::OutPoint::new(
-                bitcoin::Txid::from_byte_array(seal.txid),
-                seal.vout,
-            );
+            let outpoint =
+                bitcoin::OutPoint::new(bitcoin::Txid::from_byte_array(seal.txid), seal.vout);
             let utxo = self.wallet.get_utxo(&outpoint).ok_or_else(|| {
                 ProtocolError::PublishFailed(format!(
                     "UTXO {}:{} not found in wallet",
@@ -773,13 +890,17 @@ impl SealProtocol for BitcoinSealProtocol {
                     if !unspent {
                         return Err(Box::new(ProtocolError::PublishFailed(format!(
                             "UTXO {}:{} is already spent or missing on-chain. Please refresh UTXOs with 'csv wallet scan' or fund the address.",
-                            hex::encode(outpoint.txid), outpoint.vout
+                            hex::encode(outpoint.txid),
+                            outpoint.vout
                         ))));
                     }
                     true
                 }
                 Err(e) => {
-                    log::warn!("Failed to check UTXO status before broadcast (transaction may not be indexed yet): {}. Proceeding with broadcast attempt.", e);
+                    log::warn!(
+                        "Failed to check UTXO status before broadcast (transaction may not be indexed yet): {}. Proceeding with broadcast attempt.",
+                        e
+                    );
                     true // Assume unspent and proceed
                 }
             };
@@ -797,11 +918,17 @@ impl SealProtocol for BitcoinSealProtocol {
                     Some(spk)
                 }
                 Ok(None) => {
-                    log::warn!("ScriptPubKey not found for vout {} - using wallet data", seal.vout);
+                    log::warn!(
+                        "ScriptPubKey not found for vout {} - using wallet data",
+                        seal.vout
+                    );
                     None
                 }
                 Err(e) => {
-                    log::warn!("Failed to fetch scriptPubKey from RPC (transaction may not be indexed yet): {}. Skipping validation and using wallet data.", e);
+                    log::warn!(
+                        "Failed to fetch scriptPubKey from RPC (transaction may not be indexed yet): {}. Skipping validation and using wallet data.",
+                        e
+                    );
                     None
                 }
             };
@@ -886,12 +1013,15 @@ impl SealProtocol for BitcoinSealProtocol {
             ProtocolError::InclusionProofFailed(format!("Failed to get block hash: {}", e))
         })?;
 
-        let inclusion = rpc.get_inclusion_proof(anchor.txid, block_hash).await.map_err(|e| {
-            Box::new(ProtocolError::InclusionProofFailed(format!(
-                "Cannot verify inclusion: chain capability unavailable ({})",
-                e
-            ))) as Box<dyn std::error::Error>
-        })?;
+        let inclusion = rpc
+            .get_inclusion_proof(anchor.txid, block_hash)
+            .await
+            .map_err(|e| {
+                Box::new(ProtocolError::InclusionProofFailed(format!(
+                    "Cannot verify inclusion: chain capability unavailable ({})",
+                    e
+                ))) as Box<dyn std::error::Error>
+            })?;
 
         Ok(inclusion)
     }
@@ -1014,7 +1144,10 @@ impl SealProtocol for BitcoinSealProtocol {
                     log::info!("Wallet is empty, attempting to fetch UTXOs from RPC");
                     match self.load_wallet_utxos().await {
                         Ok(count) if count > 0 => {
-                            log::info!("Successfully loaded {} UTXOs from RPC, retrying seal creation", count);
+                            log::info!(
+                                "Successfully loaded {} UTXOs from RPC, retrying seal creation",
+                                count
+                            );
                             // Retry UTXO selection after loading from RPC
                             let utxos = self.wallet.list_utxos();
                             if let Some(utxo) = utxos.first() {
@@ -1030,7 +1163,10 @@ impl SealProtocol for BitcoinSealProtocol {
                             log::warn!("No UTXOs found on RPC for this address");
                         }
                         Err(e) => {
-                            log::warn!("Failed to load UTXOs from RPC: {}, falling back to derived seal", e);
+                            log::warn!(
+                                "Failed to load UTXOs from RPC: {}, falling back to derived seal",
+                                e
+                            );
                         }
                     }
                 }
@@ -1210,28 +1346,45 @@ mod tests {
         async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Ok(self.block_count)
         }
-        async fn get_block_hash(&self, height: u64) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_block_hash(
+            &self,
+            height: u64,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             let mut hash = [0u8; 32];
             hash[..8].copy_from_slice(&height.to_le_bytes());
             Ok(hash)
         }
-        async fn is_utxo_unspent(&self, _txid: [u8; 32], _vout: u32) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        async fn is_utxo_unspent(
+            &self,
+            _txid: [u8; 32],
+            _vout: u32,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
             Ok(true)
         }
-        async fn send_raw_transaction(&self, _tx_bytes: Vec<u8>) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        async fn send_raw_transaction(
+            &self,
+            _tx_bytes: Vec<u8>,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             Err("InclusionCapableRpc cannot broadcast transactions".into())
         }
-        async fn get_tx_confirmations(&self, _txid: [u8; 32]) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_tx_confirmations(
+            &self,
+            _txid: [u8; 32],
+        ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Ok(0)
         }
-        async fn get_utxos_for_address(&self, _address: String) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_utxos_for_address(
+            &self,
+            _address: String,
+        ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
         async fn get_inclusion_proof(
             &self,
             _txid: [u8; 32],
             block_hash: [u8; 32],
-        ) -> Result<crate::types::BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<crate::types::BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>>
+        {
             Ok(crate::types::BitcoinInclusionProof::new(
                 self.merkle_branch.clone(),
                 block_hash,
@@ -1251,7 +1404,10 @@ mod tests {
         let adapter = test_adapter();
         let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
         let result = adapter.verify_inclusion(anchor).await;
-        assert!(result.is_err(), "verify_inclusion without RPC must fail closed, not fabricate an empty proof");
+        assert!(
+            result.is_err(),
+            "verify_inclusion without RPC must fail closed, not fabricate an empty proof"
+        );
     }
 
     #[tokio::test]
@@ -1265,7 +1421,10 @@ mod tests {
             .with_rpc(Box::new(crate::rpc::TestBitcoinRpc::new(200)));
         let anchor = BitcoinCommitAnchor::new([1u8; 32], 0, 100);
         let result = adapter.verify_inclusion(anchor).await;
-        assert!(result.is_err(), "verify_inclusion must fail closed when RPC cannot supply real Merkle evidence");
+        assert!(
+            result.is_err(),
+            "verify_inclusion must fail closed when RPC cannot supply real Merkle evidence"
+        );
     }
 
     #[tokio::test]
@@ -1293,9 +1452,18 @@ mod tests {
             .await
             .expect("inclusion-capable RPC should allow real proof construction");
 
-        assert!(!bundle.transition_dag.nodes.is_empty(), "DAG must not be empty");
-        assert!(!bundle.signatures.is_empty(), "signatures must not be empty");
-        assert!(!bundle.inclusion_proof.proof_bytes.is_empty(), "inclusion proof bytes must not be empty");
+        assert!(
+            !bundle.transition_dag.nodes.is_empty(),
+            "DAG must not be empty"
+        );
+        assert!(
+            !bundle.signatures.is_empty(),
+            "signatures must not be empty"
+        );
+        assert!(
+            !bundle.inclusion_proof.proof_bytes.is_empty(),
+            "inclusion proof bytes must not be empty"
+        );
     }
 
     #[tokio::test]
@@ -1312,7 +1480,10 @@ mod tests {
             vec![0xBBu8; 8],
         );
         let result = adapter.build_proof_bundle(anchor, transition_dag).await;
-        assert!(result.is_err(), "build_proof_bundle must fail closed without real Merkle evidence");
+        assert!(
+            result.is_err(),
+            "build_proof_bundle must fail closed without real Merkle evidence"
+        );
     }
 
     #[tokio::test]
@@ -1381,8 +1552,7 @@ mod tests {
 
     #[test]
     fn rpc_internal_txid_round_trips_to_display_outpoint() {
-        let display =
-            "8d981f37959fc264935325da7ff575215084d7e58193ff66e7932204d63382b8";
+        let display = "8d981f37959fc264935325da7ff575215084d7e58193ff66e7932204d63382b8";
         let mut internal: [u8; 32] = hex::decode(display).unwrap().try_into().unwrap();
         internal.reverse();
 

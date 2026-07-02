@@ -7,7 +7,11 @@ use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as ProtocolResult;
 
 /// Verify a Bitcoin ECDSA signature
-pub fn verify_bitcoin_signature(signature: &[u8], public_key: &[u8], message: &[u8]) -> ProtocolResult<()> {
+pub fn verify_bitcoin_signature(
+    signature: &[u8],
+    public_key: &[u8],
+    message: &[u8],
+) -> ProtocolResult<()> {
     if message.len() != 32 {
         return Err(ProtocolError::SignatureVerificationFailed(format!(
             "Message must be 32 bytes, got {}",

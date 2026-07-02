@@ -149,8 +149,15 @@ where
         tx_hasher.update(seal.height.to_le_bytes());
         let tx_hash: [u8; 32] = tx_hasher.finalize().into();
 
-        log::info!("CELESTIA: Derived block hash for height {}: 0x{}", seal.height, hex::encode(block_hash));
-        log::info!("CELESTIA: Derived tx hash from proof_id: 0x{}", hex::encode(tx_hash));
+        log::info!(
+            "CELESTIA: Derived block hash for height {}: 0x{}",
+            seal.height,
+            hex::encode(block_hash)
+        );
+        log::info!(
+            "CELESTIA: Derived tx hash from proof_id: 0x{}",
+            hex::encode(tx_hash)
+        );
 
         // Create the anchor
         let anchor = CelestiaAnchor::new(
@@ -229,20 +236,22 @@ where
         commitment_hasher.update(b"CSV-CELESTIA-SEAL-");
         commitment_hasher.update(self.namespace.as_bytes());
         commitment_hasher.update(height.to_le_bytes());
-        commitment_hasher.update(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-            .to_le_bytes());
+        commitment_hasher.update(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
         let commitment: [u8; 32] = commitment_hasher.finalize().into();
 
-        log::info!("CELESTIA: Derived commitment for seal at height {}: 0x{}", height, hex::encode(commitment));
-
-        let proof_id = ProofId::new(
+        log::info!(
+            "CELESTIA: Derived commitment for seal at height {}: 0x{}",
             height,
-            self.namespace,
-            commitment,
+            hex::encode(commitment)
         );
+
+        let proof_id = ProofId::new(height, self.namespace, commitment);
 
         let seal = CelestiaSealPoint::new(proof_id, height);
         Ok(seal)
@@ -286,11 +295,11 @@ where
         let seal_ref =
             csv_hash::seal::SealPoint::new(anchor.location.to_bytes(), Some(anchor.height), None)
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!("Invalid seal: {}", e),
-                    )) as Box<dyn std::error::Error>
-                })?;
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Invalid seal: {}", e),
+                )) as Box<dyn std::error::Error>
+            })?;
 
         let anchor_ref = csv_hash::seal::CommitAnchor::new(
             anchor.tx_hash.to_vec(),
@@ -350,8 +359,8 @@ where
             node_id,
             transition_dag.transition_data.clone(),
             vec![transition_dag.proof.clone()], // Use proof as signature
-            vec![], // No witnesses for single transition
-            vec![transition_dag.anchor_from], // Parent is the source anchor
+            vec![],                             // No witnesses for single transition
+            vec![transition_dag.anchor_from],   // Parent is the source anchor
         );
 
         // Compute root_commitment from the node
@@ -359,15 +368,21 @@ where
         let dag_segment = DAGSegment::new(vec![dag_node], root_commitment);
 
         // Extract signatures from DAG node
-        let signatures: Vec<Vec<u8>> = dag_segment.nodes
+        let signatures: Vec<Vec<u8>> = dag_segment
+            .nodes
             .iter()
             .flat_map(|node| node.signatures.clone())
             .collect();
 
         if signatures.is_empty() {
-            log::warn!("CELESTIA: No signatures found in DAGSegment - proof bundle may not be verifiable");
+            log::warn!(
+                "CELESTIA: No signatures found in DAGSegment - proof bundle may not be verifiable"
+            );
         } else {
-            log::info!("CELESTIA: Extracted {} signatures from DAGSegment", signatures.len());
+            log::info!(
+                "CELESTIA: Extracted {} signatures from DAGSegment",
+                signatures.len()
+            );
         }
 
         csv_protocol::proof_taxonomy::ProofBundle::with_signature_scheme(

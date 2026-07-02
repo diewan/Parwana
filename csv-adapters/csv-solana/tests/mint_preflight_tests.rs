@@ -35,13 +35,17 @@ async fn test_preflight_check_success() {
 #[test]
 fn test_seal_account_size_constant() {
     // Verify the seal account size constant is reasonable
-    // Seal account size: sanad_id (32) + commitment (32) + state_root (32) + 
+    // Seal account size: sanad_id (32) + commitment (32) + state_root (32) +
     // source_chain (1) + source_seal_ref (32) + discriminator (8) + owner (32) + bump (1)
     const EXPECTED_MIN_SIZE: usize = 32 + 32 + 32 + 1 + 32 + 8 + 32 + 1;
     const ACTUAL_SIZE: usize = 200;
-    
-    assert!(ACTUAL_SIZE >= EXPECTED_MIN_SIZE, 
-        "Seal account size {} should be at least {} bytes", ACTUAL_SIZE, EXPECTED_MIN_SIZE);
+
+    assert!(
+        ACTUAL_SIZE >= EXPECTED_MIN_SIZE,
+        "Seal account size {} should be at least {} bytes",
+        ACTUAL_SIZE,
+        EXPECTED_MIN_SIZE
+    );
 }
 
 #[test]
@@ -49,8 +53,14 @@ fn test_transaction_fee_constant() {
     // Verify the transaction fee constant is reasonable
     // Typical Solana transaction fee is ~5000 lamports
     const TRANSACTION_FEE_LAMPORTS: u64 = 5000;
-    
-    assert!(TRANSACTION_FEE_LAMPORTS > 0, "Transaction fee must be positive");
-    assert!(TRANSACTION_FEE_LAMPORTS < 1_000_000, 
-        "Transaction fee {} lamports seems too high", TRANSACTION_FEE_LAMPORTS);
+
+    assert!(
+        TRANSACTION_FEE_LAMPORTS > 0,
+        "Transaction fee must be positive"
+    );
+    assert!(
+        TRANSACTION_FEE_LAMPORTS < 1_000_000,
+        "Transaction fee {} lamports seems too high",
+        TRANSACTION_FEE_LAMPORTS
+    );
 }

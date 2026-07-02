@@ -1,12 +1,13 @@
 //! Wallet manager for unified wallet operations
 
 use crate::error::{Result, WalletError};
-use crate::keystore::{KeyStore, KeyPurpose};
+use crate::keystore::{KeyPurpose, KeyStore};
 use crate::signer::{MemorySigner, Signer, SignerRef};
 use csv_hash::chain_id::ChainId;
 use csv_keys::{
-    Mnemonic, MnemonicType, Passphrase, Seed, derive_key,
+    Mnemonic, MnemonicType, Passphrase, Seed,
     bip44::{derive_address_from_key, derive_all_chain_keys},
+    derive_key,
 };
 use csv_protocol::secret::SharedSecretHandle;
 use csv_protocol::signature::SignatureScheme;
@@ -70,27 +71,26 @@ impl WalletManager {
     fn derive_public_key(secret_key: &[u8], scheme: SignatureScheme) -> Result<Vec<u8>> {
         match scheme {
             SignatureScheme::Secp256k1 => {
-                use secp256k1::{SecretKey, PublicKey, Secp256k1};
-                let sk = SecretKey::from_slice(secret_key)
-                    .map_err(|e| WalletError::KeyDerivation(format!("Invalid secp256k1 secret key: {}", e)))?;
+                use secp256k1::{PublicKey, Secp256k1, SecretKey};
+                let sk = SecretKey::from_slice(secret_key).map_err(|e| {
+                    WalletError::KeyDerivation(format!("Invalid secp256k1 secret key: {}", e))
+                })?;
                 let secp = Secp256k1::new();
                 let pk = PublicKey::from_secret_key(&secp, &sk);
                 Ok(pk.serialize().to_vec())
             }
             SignatureScheme::Ed25519 => {
                 use ed25519_dalek::{SigningKey, VerifyingKey};
-                let sk = SigningKey::from_bytes(
-                    secret_key.try_into().map_err(|_| {
-                        WalletError::KeyDerivation("Invalid Ed25519 secret key: must be 32 bytes".to_string())
-                    })?,
-                );
+                let sk = SigningKey::from_bytes(secret_key.try_into().map_err(|_| {
+                    WalletError::KeyDerivation(
+                        "Invalid Ed25519 secret key: must be 32 bytes".to_string(),
+                    )
+                })?);
                 Ok(VerifyingKey::from(&sk).to_bytes().to_vec())
             }
-            SignatureScheme::MlDsa65 => {
-                Err(WalletError::KeyDerivation(
-                    "ML-DSA-65 public key derivation not yet implemented".to_string(),
-                ))
-            }
+            SignatureScheme::MlDsa65 => Err(WalletError::KeyDerivation(
+                "ML-DSA-65 public key derivation not yet implemented".to_string(),
+            )),
         }
     }
 
@@ -109,18 +109,20 @@ impl WalletManager {
         passphrase: Option<&str>,
     ) -> Result<Self> {
         // Parse mnemonic and derive seed using csv-keys
-        let seed = csv_keys::restore_from_mnemonic(mnemonic, passphrase)
-            .map_err(|e| WalletError::KeyGeneration(format!("Failed to restore from mnemonic: {}", e)))?;
-        
+        let seed = csv_keys::restore_from_mnemonic(mnemonic, passphrase).map_err(|e| {
+            WalletError::KeyGeneration(format!("Failed to restore from mnemonic: {}", e))
+        })?;
+
         let wallet = Self::new(config);
-        
+
         // Derive keys for each configured chain
         let mut signers_map = HashMap::new();
         for chain in &wallet.config.chains {
             let chain_id = ChainId::new(chain);
-            let key = derive_key(seed.as_bytes(), &chain_id, 0, 0)
-                .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive key for {}: {}", chain, e)))?;
-            
+            let key = derive_key(seed.as_bytes(), &chain_id, 0, 0).map_err(|e| {
+                WalletError::KeyDerivation(format!("Failed to derive key for {}: {}", chain, e))
+            })?;
+
             // Store the key in the keystore
             let mut keystore = wallet.keystore.write().unwrap();
             keystore.add_key(
@@ -129,7 +131,7 @@ impl WalletManager {
                 KeyPurpose::Signing,
                 chain.clone(),
             );
-            
+
             // Determine signature scheme for this chain
             let scheme = match chain.as_str() {
                 "ethereum" => SignatureScheme::Secp256k1,
@@ -139,10 +141,10 @@ impl WalletManager {
                 "aptos" => SignatureScheme::Ed25519,
                 _ => SignatureScheme::Secp256k1,
             };
-            
+
             // Derive the real public key from the secret key
             let public_key = Self::derive_public_key(&key.to_vec(), scheme)?;
-            
+
             let signer = Arc::new(MemorySigner::new(
                 format!("{}:0:0", chain),
                 chain.clone(),
@@ -150,10 +152,10 @@ impl WalletManager {
                 public_key,
                 scheme,
             ));
-            
+
             signers_map.insert(chain.clone(), signer);
         }
-        
+
         // Insert all signers at once
         {
             let mut signers = wallet.signers.write().unwrap();
@@ -161,7 +163,7 @@ impl WalletManager {
                 signers.insert(chain, signer);
             }
         }
-        
+
         Ok(wallet)
     }
 
@@ -176,7 +178,7 @@ impl WalletManager {
         // Generate mnemonic using csv-keys
         let mnemonic = Mnemonic::generate(MnemonicType::Words24);
         let phrase = mnemonic.as_str().to_string();
-        
+
         let wallet = Self::from_mnemonic(config, &phrase, None)?;
         Ok((wallet, phrase))
     }
@@ -226,7 +228,8 @@ impl WalletManager {
     pub async fn sign(&self, chain: &str, message: &[u8]) -> Result<crate::signer::Signature> {
         let signer = {
             let signers = self.signers.read().unwrap();
-            signers.get(chain)
+            signers
+                .get(chain)
                 .ok_or_else(|| WalletError::UnsupportedChain(chain.to_string()))?
                 .clone()
         };
@@ -250,7 +253,7 @@ impl WalletManager {
 /// This is useful for CLI operations where the mnemonic/seed is already available.
 pub mod address {
     use super::*;
-    use csv_keys::bip44::{derive_all_chain_keys, derive_address_from_key};
+    use csv_keys::bip44::{derive_address_from_key, derive_all_chain_keys};
 
     /// Derive a funding address for a specific chain from seed
     ///
@@ -297,11 +300,14 @@ pub mod address {
     }
 }
 
-
 /// Wallet interface for chain-agnostic operations
 pub trait Wallet: Send + Sync {
     /// Sign a message
-    fn sign(&self, chain: &str, message: &[u8]) -> impl std::future::Future<Output = Result<crate::signer::Signature>> + Send;
+    fn sign(
+        &self,
+        chain: &str,
+        message: &[u8],
+    ) -> impl std::future::Future<Output = Result<crate::signer::Signature>> + Send;
 
     /// Get public key for a chain
     fn public_key(&self, chain: &str) -> Result<Vec<u8>>;
@@ -311,14 +317,19 @@ pub trait Wallet: Send + Sync {
 }
 
 impl Wallet for WalletManager {
-    fn sign(&self, chain: &str, message: &[u8]) -> impl std::future::Future<Output = Result<crate::signer::Signature>> + Send {
+    fn sign(
+        &self,
+        chain: &str,
+        message: &[u8],
+    ) -> impl std::future::Future<Output = Result<crate::signer::Signature>> + Send {
         let chain = chain.to_string();
         let message = message.to_vec();
         let signers = self.signers.clone();
         async move {
             let signer = {
                 let signers = signers.read().unwrap();
-                signers.get(&chain)
+                signers
+                    .get(&chain)
                     .cloned()
                     .ok_or(WalletError::UnsupportedChain(chain))?
             };
@@ -328,7 +339,8 @@ impl Wallet for WalletManager {
 
     fn public_key(&self, chain: &str) -> Result<Vec<u8>> {
         let signers = self.signers.read().unwrap();
-        let signer = signers.get(chain)
+        let signer = signers
+            .get(chain)
             .ok_or_else(|| WalletError::UnsupportedChain(chain.to_string()))?;
         Ok(signer.public_key().to_vec())
     }
@@ -376,13 +388,19 @@ mod tests {
 
         // get_signer should return Some(Arc<dyn Signer>) for configured chains
         let signer = wallet.get_signer("ethereum");
-        assert!(signer.is_some(), "get_signer should return Some for ethereum");
+        assert!(
+            signer.is_some(),
+            "get_signer should return Some for ethereum"
+        );
 
         let signer = signer.unwrap();
         // Verify the signer has a real public key (not all zeros)
         let pk = signer.public_key();
         assert!(!pk.is_empty(), "Public key should not be empty");
-        assert!(pk.iter().any(|&b| b != 0), "Public key should not be all zeros");
+        assert!(
+            pk.iter().any(|&b| b != 0),
+            "Public key should not be all zeros"
+        );
     }
 
     #[test]
@@ -394,7 +412,10 @@ mod tests {
 
         // get_signer should return None for unsupported chains
         let signer = wallet.get_signer("bitcoin");
-        assert!(signer.is_none(), "get_signer should return None for unsupported chain");
+        assert!(
+            signer.is_none(),
+            "get_signer should return None for unsupported chain"
+        );
     }
 
     #[test]
@@ -407,8 +428,15 @@ mod tests {
         // Ethereum signer (secp256k1) should have a 33-byte compressed public key
         let eth_signer = wallet.get_signer("ethereum").unwrap();
         let eth_pk = eth_signer.public_key();
-        assert_eq!(eth_pk.len(), 33, "secp256k1 compressed public key should be 33 bytes");
-        assert!(eth_pk[0] == 0x02 || eth_pk[0] == 0x03, "secp256k1 compressed key should start with 0x02 or 0x03");
+        assert_eq!(
+            eth_pk.len(),
+            33,
+            "secp256k1 compressed public key should be 33 bytes"
+        );
+        assert!(
+            eth_pk[0] == 0x02 || eth_pk[0] == 0x03,
+            "secp256k1 compressed key should start with 0x02 or 0x03"
+        );
 
         // Solana signer (ed25519) should have a 32-byte public key
         let sol_signer = wallet.get_signer("solana").unwrap();
@@ -429,12 +457,18 @@ mod tests {
 
         // Sign with ethereum (secp256k1) - requires 32-byte hash
         let eth_sig = wallet.sign("ethereum", &message_32).await.unwrap();
-        assert!(!eth_sig.bytes.is_empty(), "secp256k1 signature should not be empty");
+        assert!(
+            !eth_sig.bytes.is_empty(),
+            "secp256k1 signature should not be empty"
+        );
         assert_eq!(eth_sig.scheme, SignatureScheme::Secp256k1);
 
         // Sign with solana (ed25519) - accepts arbitrary length
         let sol_sig = wallet.sign("solana", message_ed).await.unwrap();
-        assert!(!sol_sig.bytes.is_empty(), "Ed25519 signature should not be empty");
+        assert!(
+            !sol_sig.bytes.is_empty(),
+            "Ed25519 signature should not be empty"
+        );
         assert_eq!(sol_sig.scheme, SignatureScheme::Ed25519);
     }
 
@@ -528,6 +562,9 @@ mod tests {
         let signer2 = wallet.get_signer("ethereum").unwrap();
 
         // They should be the same Arc (same strong count)
-        assert!(Arc::ptr_eq(&signer1, &signer2), "get_signer should return cloned Arc pointing to same signer");
+        assert!(
+            Arc::ptr_eq(&signer1, &signer2),
+            "get_signer should return cloned Arc pointing to same signer"
+        );
     }
 }

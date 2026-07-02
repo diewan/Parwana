@@ -192,28 +192,32 @@ pub mod real_rpc_impl {
             })
         }
 
-        fn get_block(&self, slot: u64) -> SolanaResult<Option<solana_transaction_status::EncodedConfirmedBlock>> {
+        fn get_block(
+            &self,
+            slot: u64,
+        ) -> SolanaResult<Option<solana_transaction_status::EncodedConfirmedBlock>> {
             use solana_transaction_status::EncodedConfirmedBlock;
-            
+
             // Get the block using the RPC client with the correct method
-            let ui_block = self.client
-                .get_block(slot)
-                .map_err(|e| SolanaError::Rpc(format!("Failed to get block at slot {}: {}", slot, e)))?;
+            let ui_block = self.client.get_block(slot).map_err(|e| {
+                SolanaError::Rpc(format!("Failed to get block at slot {}: {}", slot, e))
+            })?;
 
             // Convert UiConfirmedBlock to EncodedConfirmedBlock
             // This requires proper encoding of transactions
-            let transactions: Vec<solana_transaction_status::EncodedTransactionWithStatusMeta> = ui_block
-                .transactions
-                .into_iter()
-                .map(|tx| {
-                    // Convert EncodedTransactionWithMeta to EncodedTransactionWithStatusMeta
-                    solana_transaction_status::EncodedTransactionWithStatusMeta {
-                        transaction: tx.transaction,
-                        meta: tx.meta,
-                        version: tx.version,
-                    }
-                })
-                .collect();
+            let transactions: Vec<solana_transaction_status::EncodedTransactionWithStatusMeta> =
+                ui_block
+                    .transactions
+                    .into_iter()
+                    .map(|tx| {
+                        // Convert EncodedTransactionWithMeta to EncodedTransactionWithStatusMeta
+                        solana_transaction_status::EncodedTransactionWithStatusMeta {
+                            transaction: tx.transaction,
+                            meta: tx.meta,
+                            version: tx.version,
+                        }
+                    })
+                    .collect();
 
             let encoded_block = EncodedConfirmedBlock {
                 blockhash: ui_block.blockhash,
@@ -231,15 +235,15 @@ pub mod real_rpc_impl {
 
         fn get_block_hash(&self, slot: u64) -> SolanaResult<solana_sdk::hash::Hash> {
             // Get the block to extract its hash
-            let block = self.client
-                .get_block(slot)
-                .map_err(|e| SolanaError::Rpc(format!("Failed to get block at slot {}: {}", slot, e)))?;
+            let block = self.client.get_block(slot).map_err(|e| {
+                SolanaError::Rpc(format!("Failed to get block at slot {}: {}", slot, e))
+            })?;
 
             // Convert String blockhash to Hash
             let hash_bytes = bs58::decode(&block.blockhash)
                 .into_vec()
                 .map_err(|e| SolanaError::Rpc(format!("Failed to decode blockhash: {}", e)))?;
-            
+
             let mut hash_array = [0u8; 32];
             hash_array.copy_from_slice(&hash_bytes);
             Ok(solana_sdk::hash::Hash::new_from_array(hash_array))

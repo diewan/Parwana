@@ -8,9 +8,11 @@ use async_trait::async_trait;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as ProtocolResult;
 use csv_protocol::signature::SignatureScheme;
-use csv_wallet::{Signer, SignerRef, Signature as WalletSignature, WalletError, Result as WalletResult};
+use csv_wallet::{
+    Result as WalletResult, Signature as WalletSignature, Signer, SignerRef, WalletError,
+};
 use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
-use secrecy::{SecretVec, ExposeSecret};
+use secrecy::{ExposeSecret, SecretVec};
 use std::fmt;
 
 /// Sui Signer implementation using csv-wallet Signer trait
@@ -33,11 +35,13 @@ impl SuiSigner {
             ));
         }
 
-        let secret_bytes: [u8; 32] = secret_key.clone().try_into()
+        let secret_bytes: [u8; 32] = secret_key
+            .clone()
+            .try_into()
             .map_err(|_| ProtocolError::InvalidInput("Invalid secret key data".to_string()))?;
 
         let signing_key = SigningKey::from_bytes(&secret_bytes);
-        
+
         let verifying_key = signing_key.verifying_key();
         let public_key = verifying_key.to_bytes().to_vec();
 
@@ -57,11 +61,15 @@ impl SuiSigner {
 #[async_trait]
 impl Signer for SuiSigner {
     async fn sign(&self, message: &[u8]) -> WalletResult<WalletSignature> {
-        let secret_bytes: [u8; 32] = self.secret_key.expose_secret().as_slice().try_into()
+        let secret_bytes: [u8; 32] = self
+            .secret_key
+            .expose_secret()
+            .as_slice()
+            .try_into()
             .map_err(|_| WalletError::InvalidFormat("Invalid secret key data".to_string()))?;
 
         let signing_key = SigningKey::from_bytes(&secret_bytes);
-        
+
         let signature = signing_key.sign(message);
         let sig_bytes = signature.to_bytes().to_vec();
 
@@ -107,7 +115,11 @@ impl fmt::Debug for SuiSigner {
 ///
 /// # Returns
 /// Ok(()) if signature is valid, Err otherwise
-pub fn verify_sui_signature(signature: &[u8], public_key: &[u8], message: &[u8]) -> ProtocolResult<()> {
+pub fn verify_sui_signature(
+    signature: &[u8],
+    public_key: &[u8],
+    message: &[u8],
+) -> ProtocolResult<()> {
     // Validate inputs
     if signature.len() != 64 {
         return Err(ProtocolError::SignatureVerificationFailed(format!(

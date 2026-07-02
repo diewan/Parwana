@@ -4,8 +4,8 @@
 //! that are used in L3 storage layers (checkpoints, persistence). L0 types themselves
 //! do not have serde derives to enforce canonical encoding in protocol-critical paths.
 
-use csv_hash::{Commitment, Hash, SanadId};
 use csv_hash::seal::SealPoint;
+use csv_hash::{Commitment, Hash, SanadId};
 use serde::{Deserialize, Serialize};
 
 /// Wire format for hash (hex-encoded string for serde serialization).
@@ -171,8 +171,7 @@ impl TryFrom<SealPointWire> for SealPoint {
 
     fn try_from(wire: SealPointWire) -> Result<Self, String> {
         let id = hex::decode(&wire.id).map_err(|e| format!("Invalid seal point id hex: {}", e))?;
-        
-        SealPoint::new(id, wire.nonce, wire.version)
-            .map_err(|e| e.to_string())
+
+        SealPoint::new(id, wire.nonce, wire.version).map_err(|e| e.to_string())
     }
 }

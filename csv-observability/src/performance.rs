@@ -12,7 +12,9 @@ pub struct PerformanceStats {
 
 impl PerformanceStats {
     pub fn average_latency_ms(&self) -> u64 {
-        self.total_latency_ms.checked_div(self.operations).unwrap_or(0)
+        self.total_latency_ms
+            .checked_div(self.operations)
+            .unwrap_or(0)
     }
 }
 

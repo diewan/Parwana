@@ -32,7 +32,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::Initialized,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -47,7 +47,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::Initialized,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Completed,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -62,7 +62,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::LockConfirmed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -77,7 +77,7 @@ async fn test_journal_records_all_phase_transitions() {
             phase: TransferStage::LockConfirmed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Completed,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -109,7 +109,7 @@ async fn test_journal_identifies_incomplete_transfers() {
             phase: TransferStage::Initialized,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -129,7 +129,7 @@ async fn test_journal_records_failed_phase() {
     let replay_id = replay_id(3);
 
     // Record phase: LockConfirmed (Failed)
-         journal
+    journal
         .record(TransferPhaseEntry {
             transfer_id: transfer_id.clone(),
             replay_id: csv_wire::HashWire::from(replay_id.0.clone()),
@@ -205,7 +205,7 @@ async fn test_journal_multiple_transfers() {
             phase: TransferStage::Completed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Completed,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -222,7 +222,7 @@ async fn test_journal_multiple_transfers() {
             phase: TransferStage::LockConfirmed,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -239,7 +239,7 @@ async fn test_journal_multiple_transfers() {
             phase: TransferStage::ProofBuilding,
             ts: std::time::SystemTime::now(),
             outcome: PhaseOutcome::Entered,
-                transfer_context: None,
+            transfer_context: None,
             attempt: 1,
         })
         .unwrap();
@@ -284,7 +284,7 @@ async fn test_journal_capacity_enforcement() {
         phase: TransferStage::Initialized,
         ts: std::time::SystemTime::now(),
         outcome: PhaseOutcome::Completed,
-                transfer_context: None,
+        transfer_context: None,
         attempt: 1,
     });
 
@@ -304,7 +304,8 @@ async fn test_recovery_with_deterministic_proof_fixture() {
     let proof_bundle = TestProofBundle::minimal();
     let proof_payload = csv_codec::to_canonical_cbor(&proof_bundle).unwrap();
     // Compute proof hash using tagged hash (same as transfer_coordinator does)
-    let proof_hash = csv_hash::csv_tagged_hash("csv.execution-journal.proof-payload.v1", &proof_payload);
+    let proof_hash =
+        csv_hash::csv_tagged_hash("csv.execution-journal.proof-payload.v1", &proof_payload);
 
     // Record phase: ProofBuilding with persisted proof payload
     journal
@@ -330,11 +331,14 @@ async fn test_recovery_with_deterministic_proof_fixture() {
     assert_eq!(incomplete.len(), 1);
     assert_eq!(incomplete[0].transfer_id, transfer_id);
     assert_eq!(incomplete[0].phase, TransferStage::ProofBuilding);
-    
+
     // Verify the proof payload can be deserialized
-    let recovered_bundle: csv_protocol::proof_taxonomy::ProofBundle = 
+    let recovered_bundle: csv_protocol::proof_taxonomy::ProofBundle =
         csv_codec::from_canonical_cbor(&proof_payload).unwrap();
-    
+
     // Verify the recovered bundle has valid structure (access field directly)
-    assert_eq!(recovered_bundle.inclusion_proof.block_number, proof_bundle.inclusion_proof.block_number);
+    assert_eq!(
+        recovered_bundle.inclusion_proof.block_number,
+        proof_bundle.inclusion_proof.block_number
+    );
 }

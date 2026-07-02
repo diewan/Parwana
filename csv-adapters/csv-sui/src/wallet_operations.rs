@@ -12,13 +12,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(feature = "rpc")]
+use base64::Engine;
+#[cfg(feature = "rpc")]
+use ed25519_dalek::{Signature, Signer, SigningKey};
+#[cfg(feature = "rpc")]
 use reqwest::Client as ReqwestClient;
 #[cfg(feature = "rpc")]
 use serde_json::Value;
-#[cfg(feature = "rpc")]
-use ed25519_dalek::{SigningKey, Signature, Signer};
-#[cfg(feature = "rpc")]
-use base64::Engine;
 
 /// Network type for wallet operations
 #[derive(Debug, Clone, Copy)]
@@ -68,9 +68,9 @@ impl SuiWalletOperations {
     /// Get the RPC client if configured
     #[cfg(feature = "rpc")]
     fn rpc_client(&self) -> Result<&Arc<ReqwestClient>, WalletError> {
-        self.rpc_client.as_ref().ok_or_else(|| {
-            WalletError::RpcNotConfigured("Sui".to_string())
-        })
+        self.rpc_client
+            .as_ref()
+            .ok_or_else(|| WalletError::RpcNotConfigured("Sui".to_string()))
     }
 }
 
@@ -118,25 +118,25 @@ impl WalletOperations for SuiWalletOperations {
         {
             let client = self.rpc_client()?;
             let url = format!("{}/{}", self.network.rpc_url(), address);
-            
+
             let response = client
                 .get(&url)
                 .send()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to get balance: {}", e)))?;
-            
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             let balance = data["totalBalance"]
                 .as_str()
                 .ok_or_else(|| WalletError::RpcError("No balance in response".to_string()))?;
-            
+
             Ok(balance.to_string())
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Sui".to_string()))
@@ -155,13 +155,13 @@ impl WalletOperations for SuiWalletOperations {
         }
 
         // Derive Ed25519 signing key from seed
-        let signing_key: SigningKey = seed_array[..32]
-            .try_into()
-            .map_err(|e| WalletError::KeyDerivation(format!("Failed to derive signing key: {:?}", e)))?;
-        
+        let signing_key: SigningKey = seed_array[..32].try_into().map_err(|e| {
+            WalletError::KeyDerivation(format!("Failed to derive signing key: {:?}", e))
+        })?;
+
         // Sign the transaction data
         let signature: Signature = signing_key.sign(tx_data);
-        
+
         Ok(signature.to_bytes().to_vec())
     }
 
@@ -170,75 +170,85 @@ impl WalletOperations for SuiWalletOperations {
         {
             let client = self.rpc_client()?;
             let url = format!("{}/transactions", self.network.rpc_url());
-            
+
             let tx_base64 = base64::engine::general_purpose::STANDARD.encode(signed_tx);
-            
+
             let request = serde_json::json!({
                 "txBytes": tx_base64
             });
-            
-            let response = client
-                .post(&url)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to broadcast transaction: {}", e)))?;
-            
+
+            let response = client.post(&url).json(&request).send().await.map_err(|e| {
+                WalletError::RpcError(format!("Failed to broadcast transaction: {}", e))
+            })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
-            let tx_digest = data["digest"]
-                .as_str()
-                .ok_or_else(|| WalletError::RpcError("No transaction digest in response".to_string()))?;
-            
+
+            let tx_digest = data["digest"].as_str().ok_or_else(|| {
+                WalletError::RpcError("No transaction digest in response".to_string())
+            })?;
+
             Ok(tx_digest.to_string())
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Sui".to_string()))
         }
     }
 
-    async fn get_transaction_status(&self, tx_hash: &str) -> Result<HashMap<String, String>, WalletError> {
+    async fn get_transaction_status(
+        &self,
+        tx_hash: &str,
+    ) -> Result<HashMap<String, String>, WalletError> {
         #[cfg(feature = "rpc")]
         {
             let client = self.rpc_client()?;
             let url = format!("{}/transactions/{}", self.network.rpc_url(), tx_hash);
-            
-            let response = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| WalletError::RpcError(format!("Failed to get transaction: {}", e)))?;
-            
+
+            let response =
+                client.get(&url).send().await.map_err(|e| {
+                    WalletError::RpcError(format!("Failed to get transaction: {}", e))
+                })?;
+
             let data: Value = response
                 .json()
                 .await
                 .map_err(|e| WalletError::RpcError(format!("Failed to parse response: {}", e)))?;
-            
+
             let mut status = HashMap::new();
             status.insert("txid".to_string(), tx_hash.to_string());
-            
+
             if let Some(effects) = data.get("effects") {
                 let success = effects["status"]
                     .as_str()
                     .map(|s| s == "success")
                     .unwrap_or(false);
-                status.insert("status".to_string(), if success { "success".to_string() } else { "failed".to_string() });
-                status.insert("error".to_string(), effects["status"].get("error")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or_default()
-                    .to_string());
+                status.insert(
+                    "status".to_string(),
+                    if success {
+                        "success".to_string()
+                    } else {
+                        "failed".to_string()
+                    },
+                );
+                status.insert(
+                    "error".to_string(),
+                    effects["status"]
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                );
             } else {
                 status.insert("status".to_string(), "pending".to_string());
             }
-            
+
             Ok(status)
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err(WalletError::RpcNotConfigured("Sui".to_string()))

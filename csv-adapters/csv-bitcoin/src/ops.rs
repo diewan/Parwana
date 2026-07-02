@@ -135,6 +135,13 @@ impl ChainQuery for BitcoinChainQuery {
 
         let mut txid_array = [0u8; 32];
         txid_array.copy_from_slice(&txid_bytes);
+        // `tx_hash` is a display-order (big-endian) txid string, but the
+        // BitcoinRpc contract expects `txid` in internal byte order (every impl
+        // reverses it back to display before hitting the wire). Reverse here so
+        // the REST/JSON-RPC query targets the real transaction instead of its
+        // byte-reversed non-existent twin (which silently returns 0 confirmations
+        // -> Pending -> "No valid UTXOs after runtime validation").
+        txid_array.reverse();
 
         // Get confirmations via RPC
         let confirmations = self
@@ -169,17 +176,28 @@ impl ChainQuery for BitcoinChainQuery {
         let tx_info = self.get_transaction(tx_hash).await?;
 
         match tx_info.status {
-            csv_protocol::chain_adapter_traits::TransactionStatus::Pending => Ok(FinalityStatus::Pending),
-            csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed { block_height, .. } => {
+            csv_protocol::chain_adapter_traits::TransactionStatus::Pending => {
+                Ok(FinalityStatus::Pending)
+            }
+            csv_protocol::chain_adapter_traits::TransactionStatus::Confirmed {
+                block_height,
+                ..
+            } => {
                 // Treat confirmed as finalized for Bitcoin (6+ confirmations)
                 Ok(FinalityStatus::Finalized {
                     block_height,
                     finality_block: block_height,
                 })
             }
-            csv_protocol::chain_adapter_traits::TransactionStatus::Failed { .. } => Ok(FinalityStatus::Orphaned),
-            csv_protocol::chain_adapter_traits::TransactionStatus::Dropped => Ok(FinalityStatus::Orphaned),
-            csv_protocol::chain_adapter_traits::TransactionStatus::Unknown => Ok(FinalityStatus::Pending),
+            csv_protocol::chain_adapter_traits::TransactionStatus::Failed { .. } => {
+                Ok(FinalityStatus::Orphaned)
+            }
+            csv_protocol::chain_adapter_traits::TransactionStatus::Dropped => {
+                Ok(FinalityStatus::Orphaned)
+            }
+            csv_protocol::chain_adapter_traits::TransactionStatus::Unknown => {
+                Ok(FinalityStatus::Pending)
+            }
         }
     }
 
@@ -811,7 +829,9 @@ impl BitcoinChainSanadOps {
 
     /// Register an explicit sanad_id -> seal mapping for cross-chain lock lookups
     pub fn register_sanad_seal(&self, sanad_id: [u8; 32], txid: Vec<u8>, vout: u32) {
-        self.adapter.wallet.register_sanad_seal(sanad_id, txid, vout);
+        self.adapter
+            .wallet
+            .register_sanad_seal(sanad_id, txid, vout);
     }
 
     /// Create with RPC client for broadcasting
@@ -894,21 +914,26 @@ impl BitcoinChainSanadOps {
         })?;
 
         // Get the first input's outpoint to find the corresponding UTXO
-        let input_outpoint = &tx.input.first()
+        let input_outpoint = &tx
+            .input
+            .first()
             .ok_or_else(|| ChainOpError::InvalidInput("Transaction has no inputs".to_string()))?
             .previous_output;
 
         // Find the UTXO in the wallet
-        let utxo = wallet.get_utxo(input_outpoint)
-            .ok_or_else(|| ChainOpError::InvalidInput(
-                format!("UTXO {}:{} not found in wallet", input_outpoint.txid, input_outpoint.vout)
-            ))?;
+        let utxo = wallet.get_utxo(input_outpoint).ok_or_else(|| {
+            ChainOpError::InvalidInput(format!(
+                "UTXO {}:{} not found in wallet",
+                input_outpoint.txid, input_outpoint.vout
+            ))
+        })?;
 
         // Rebuild the same script-path-only Taproot tree used to construct
         // the lock output (see build_lock_transaction / lock_script) so we
         // can compute the correct leaf script and control block for a CSV
         // script-path spend. This output has no key-path spend at all.
-        let derived_key = wallet.derive_key(&utxo.path)
+        let derived_key = wallet
+            .derive_key(&utxo.path)
             .map_err(|e| ChainOpError::SigningError(format!("Failed to derive key: {}", e)))?;
         let (leaf_script, spend_info) = crate::lock_script::build_lock_taproot(
             wallet.secp(),
@@ -916,17 +941,20 @@ impl BitcoinChainSanadOps {
             LOCK_CSV_TIMEOUT_BLOCKS as u32,
         );
         let control_block = spend_info
-            .control_block(&(leaf_script.clone(), bitcoin::taproot::LeafVersion::TapScript))
-            .ok_or_else(|| ChainOpError::SigningError(
-                "Failed to build control block for lock script".to_string()
-            ))?;
+            .control_block(&(
+                leaf_script.clone(),
+                bitcoin::taproot::LeafVersion::TapScript,
+            ))
+            .ok_or_else(|| {
+                ChainOpError::SigningError(
+                    "Failed to build control block for lock script".to_string(),
+                )
+            })?;
 
         // Use the actual scriptPubKey from the UTXO if available, falling
         // back to recomputing the CSV taproot output script.
         let derived_spk = bitcoin::ScriptBuf::new_p2tr_tweaked(spend_info.output_key());
-        let input_script_pubkey = utxo.script_pubkey
-            .as_ref()
-            .unwrap_or(&derived_spk);
+        let input_script_pubkey = utxo.script_pubkey.as_ref().unwrap_or(&derived_spk);
 
         let leaf_hash = bitcoin::taproot::TapLeafHash::from_script(
             &leaf_script,
@@ -984,8 +1012,12 @@ impl BitcoinChainSanadOps {
     ) -> Result<bitcoin::Transaction, String> {
         // Get the UTXO from the wallet to know the amount and owning key path
         let wallet = &self.adapter.wallet;
-        let utxo = wallet.get_utxo(&seal_outpoint)
-            .ok_or_else(|| format!("UTXO {}:{} not found in wallet", seal_outpoint.txid, seal_outpoint.vout))?;
+        let utxo = wallet.get_utxo(&seal_outpoint).ok_or_else(|| {
+            format!(
+                "UTXO {}:{} not found in wallet",
+                seal_outpoint.txid, seal_outpoint.vout
+            )
+        })?;
 
         // Calculate fee (1 input, 2 outputs)
         let fee = 500; // Simple fee estimate for lock transaction
@@ -1004,7 +1036,8 @@ impl BitcoinChainSanadOps {
         // sole spending path is `<144> OP_CSV OP_DROP <owner_pubkey>
         // OP_CHECKSIG` — consensus-enforced by BIP-68/112, not just the
         // application-level check in refund_sanad. See lock_script.rs.
-        let derived_key = wallet.derive_key(&utxo.path)
+        let derived_key = wallet
+            .derive_key(&utxo.path)
             .map_err(|e| format!("Failed to derive lock output key: {}", e))?;
         let (_leaf_script, spend_info) = crate::lock_script::build_lock_taproot(
             wallet.secp(),
@@ -1055,25 +1088,28 @@ impl BitcoinChainSanadOps {
         })?;
 
         // Get the first input's outpoint to find the corresponding UTXO
-        let input_outpoint = &tx.input.first()
+        let input_outpoint = &tx
+            .input
+            .first()
             .ok_or_else(|| ChainOpError::InvalidInput("Transaction has no inputs".to_string()))?
             .previous_output;
 
         // Find the UTXO in the wallet
-        let utxo = wallet.get_utxo(input_outpoint)
-            .ok_or_else(|| ChainOpError::InvalidInput(
-                format!("UTXO {}:{} not found in wallet", input_outpoint.txid, input_outpoint.vout)
-            ))?;
+        let utxo = wallet.get_utxo(input_outpoint).ok_or_else(|| {
+            ChainOpError::InvalidInput(format!(
+                "UTXO {}:{} not found in wallet",
+                input_outpoint.txid, input_outpoint.vout
+            ))
+        })?;
 
         // Calculate sighash for the transaction
-        let derived_key = wallet.derive_key(&utxo.path)
+        let derived_key = wallet
+            .derive_key(&utxo.path)
             .map_err(|e| ChainOpError::SigningError(format!("Failed to derive key: {}", e)))?;
 
         // Use the actual scriptPubKey from the UTXO if available
         let derived_spk = derived_key.address.script_pubkey();
-        let input_script_pubkey = utxo.script_pubkey
-            .as_ref()
-            .unwrap_or(&derived_spk);
+        let input_script_pubkey = utxo.script_pubkey.as_ref().unwrap_or(&derived_spk);
 
         let sighash = bitcoin::sighash::SighashCache::new(&tx)
             .taproot_key_spend_signature_hash(
@@ -1089,9 +1125,67 @@ impl BitcoinChainSanadOps {
         let mut sighash_bytes = [0u8; 32];
         sighash_bytes.copy_from_slice(sighash.as_ref());
 
-        // Sign with the wallet
+        // The seal being spent is a Tapret commitment output: its Taproot output
+        // key commits to an OP_RETURN tapret leaf, so the key-path tweak must
+        // include that leaf's merkle root. Signing with the plain BIP-86 tweak
+        // (merkle root = None) signs for the funding key instead of the seal's
+        // output key, producing a signature the network rejects as
+        // "mempool-script-verify-flag-failed (Invalid Schnorr signature)".
+        //
+        // Rebuild the exact tapret spend info the seal was created with
+        // (protocol_id = network magic, commitment = the seal's stored sanad_id)
+        // and fail closed unless the reconstructed output key reproduces the
+        // on-chain scriptPubKey, so we never broadcast an invalid signature.
+        // Resolve the tapret commitment for this seal. After a state reload the
+        // UTXO's `sanad_id` field holds the real sanad id, so consult the
+        // sanad_id -> commitment map; on the in-memory create path the field
+        // already holds the commitment itself, so fall back to it.
+        let seal_commitment = utxo
+            .sanad_id
+            .and_then(|sid| wallet.get_sanad_commitment(&sid))
+            .or(utxo.sanad_id);
+        let merkle_root = if let Some(commitment) = seal_commitment {
+            // protocol_id = network magic (mirrors BitcoinSealProtocol::new,
+            // which builds it from the crate Network's magic_bytes()).
+            let magic = match wallet.network() {
+                bitcoin::Network::Bitcoin => [0xf9, 0xbe, 0xb4, 0xd9],
+                bitcoin::Network::Signet => [0x0a, 0x03, 0xcf, 0x40],
+                bitcoin::Network::Regtest => [0xfa, 0xbf, 0xb5, 0xda],
+                // Testnet (and any future testnet variants) use the testnet magic.
+                _ => [0x0b, 0x11, 0x09, 0x07],
+            };
+            let mut protocol_id = [0u8; 32];
+            protocol_id[..4].copy_from_slice(&magic);
+            let leaf =
+                crate::tapret::TapretCommitment::new(protocol_id, csv_hash::Hash::new(commitment))
+                    .leaf_script();
+            let secp = bitcoin::secp256k1::Secp256k1::new();
+            let spend_info = bitcoin::taproot::TaprootBuilder::new()
+                .add_leaf(0, leaf)
+                .map_err(|e| {
+                    ChainOpError::SigningError(format!("Tapret add_leaf failed: {:?}", e))
+                })?
+                .finalize(&secp, derived_key.internal_xonly)
+                .map_err(|_| {
+                    ChainOpError::SigningError("Tapret spend-info finalize failed".to_string())
+                })?;
+            let rebuilt_spk = bitcoin::ScriptBuf::new_p2tr_tweaked(spend_info.output_key());
+            if &rebuilt_spk != input_script_pubkey {
+                return Err(ChainOpError::SigningError(format!(
+                    "Refusing to broadcast lock tx: reconstructed tapret output key {} does not \
+                     match seal scriptPubKey {}; cannot produce a valid key-path signature",
+                    rebuilt_spk.to_hex_string(),
+                    input_script_pubkey.to_hex_string(),
+                )));
+            }
+            spend_info.merkle_root()
+        } else {
+            None
+        };
+
+        // Sign with the wallet using the tapret-aware key-path tweak
         let schnorr_sig = wallet
-            .sign_taproot_keypath(&utxo.path, &sighash_bytes)
+            .sign_taproot_keypath_with_merkle(&utxo.path, &sighash_bytes, merkle_root)
             .map_err(|e| ChainOpError::SigningError(format!("Signing failed: {}", e)))?;
 
         // Build the witness
@@ -1189,14 +1283,14 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         let commitment = Hash::new(commitment_bytes);
 
         let wallet = &self.adapter.wallet;
-        
+
         // Scan for UTXOs if RPC is available (fail-closed if not)
         if let Some(_rpc) = &self.rpc {
             if let Err(e) = self.adapter.scan_wallet_for_utxos(0, 20).await {
                 log::warn!("Failed to refresh UTXOs before sanad creation: {}", e);
             }
         }
-        
+
         let available_utxos = wallet.list_utxos();
         let spendable: Vec<_> = available_utxos
             .iter()
@@ -1212,10 +1306,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         // Try UTXOs in order until one succeeds (fail-closed behavior)
         let mut last_error = None;
         for (_attempt, selected) in spendable.iter().enumerate() {
-            let outpoint = bitcoin::OutPoint::new(
-                selected.outpoint.txid,
-                selected.outpoint.vout,
-            );
+            let outpoint = bitcoin::OutPoint::new(selected.outpoint.txid, selected.outpoint.vout);
 
             // Verify UTXO is unspent on-chain before attempting to use it
             if let Some(rpc) = &self.rpc {
@@ -1225,16 +1316,22 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                         // UTXO is unspent, proceed
                     }
                     Ok(false) => {
-                        log::warn!("UTXO {}:{} is already spent on-chain, trying next UTXO", 
-                            hex::encode(txid_bytes), outpoint.vout);
-                        last_error = Some(ChainOpError::TransactionError(
-                            format!("UTXO {}:{} is already spent", hex::encode(txid_bytes), outpoint.vout)
-                        ));
+                        log::warn!(
+                            "UTXO {}:{} is already spent on-chain, trying next UTXO",
+                            hex::encode(txid_bytes),
+                            outpoint.vout
+                        );
+                        last_error = Some(ChainOpError::TransactionError(format!(
+                            "UTXO {}:{} is already spent",
+                            hex::encode(txid_bytes),
+                            outpoint.vout
+                        )));
                         continue;
                     }
                     Err(e) => {
                         log::warn!("Failed to check UTXO status: {}, trying next UTXO", e);
-                        last_error = Some(ChainOpError::RpcError(format!("UTXO check failed: {}", e)));
+                        last_error =
+                            Some(ChainOpError::RpcError(format!("UTXO check failed: {}", e)));
                         continue;
                     }
                 }
@@ -1244,9 +1341,16 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             let (seal, _path) = match self.adapter.fund_seal(outpoint) {
                 Ok(result) => result,
                 Err(e) => {
-                    log::warn!("Failed to fund seal from UTXO {}:{}: {}, trying next UTXO",
-                        hex::encode(outpoint.txid), outpoint.vout, e);
-                    last_error = Some(ChainOpError::TransactionError(format!("Failed to fund seal: {}", e)));
+                    log::warn!(
+                        "Failed to fund seal from UTXO {}:{}: {}, trying next UTXO",
+                        hex::encode(outpoint.txid),
+                        outpoint.vout,
+                        e
+                    );
+                    last_error = Some(ChainOpError::TransactionError(format!(
+                        "Failed to fund seal: {}",
+                        e
+                    )));
                     continue;
                 }
             };
@@ -1255,12 +1359,23 @@ impl ChainSanadOps for BitcoinChainSanadOps {
             // identifies the sanad by its commitment (see SanadId(commitment)
             // below), so the sanad_id passed here is the commitment. Bitcoin's
             // SealProtocol::publish ignores it (no contract mapping).
-            let anchor = match self.adapter.publish(commitment, seal.clone(), commitment).await {
+            let anchor = match self
+                .adapter
+                .publish(commitment, seal.clone(), commitment)
+                .await
+            {
                 Ok(anchor) => anchor,
                 Err(e) => {
-                    log::warn!("Failed to publish commitment with UTXO {}:{}: {}, trying next UTXO",
-                        hex::encode(outpoint.txid), outpoint.vout, e);
-                    last_error = Some(ChainOpError::TransactionError(format!("Failed to publish commitment: {}", e)));
+                    log::warn!(
+                        "Failed to publish commitment with UTXO {}:{}: {}, trying next UTXO",
+                        hex::encode(outpoint.txid),
+                        outpoint.vout,
+                        e
+                    );
+                    last_error = Some(ChainOpError::TransactionError(format!(
+                        "Failed to publish commitment: {}",
+                        e
+                    )));
                     continue;
                 }
             };
@@ -1283,14 +1398,15 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                     "seal_outpoint": format!("{}:{}", seal_txid, seal_vout),
                     "seal_nonce": seal_nonce,
                     "description": metadata,
-                })).unwrap_or_default(),
+                }))
+                .unwrap_or_default(),
             });
         }
 
         // All UTXOs failed - return the last error
-        Err(last_error.unwrap_or_else(|| ChainOpError::InvalidInput(
-            "No UTXOs could be used for sanad creation".to_string()
-        )))
+        Err(last_error.unwrap_or_else(|| {
+            ChainOpError::InvalidInput("No UTXOs could be used for sanad creation".to_string())
+        }))
     }
 
     async fn consume_sanad(
@@ -1412,11 +1528,9 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                         crate::types::UtxoProvenance::ConsumedSeal,
                     );
                 }
-                self.adapter.wallet.register_sanad_seal(
-                    *sanad_id.as_bytes(),
-                    lock_txid_bytes,
-                    0,
-                );
+                self.adapter
+                    .wallet
+                    .register_sanad_seal(*sanad_id.as_bytes(), lock_txid_bytes, 0);
             }
             _ => {
                 log::warn!(
@@ -1439,7 +1553,8 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                 "destination_chain": destination_chain,
                 "lock_type": "utxo_csv",
                 "timeout_blocks": LOCK_CSV_TIMEOUT_BLOCKS,
-            })).unwrap_or_default(),
+            }))
+            .unwrap_or_default(),
         })
     }
 
@@ -1531,7 +1646,8 @@ impl ChainSanadOps for BitcoinChainSanadOps {
                 "lock_txid": hex::encode(lock_seal_txid),
                 "lock_vout": lock_seal_vout,
                 "refund_height": refund_height,
-            })).unwrap_or_default(),
+            }))
+            .unwrap_or_default(),
         })
     }
 
@@ -1542,8 +1658,9 @@ impl ChainSanadOps for BitcoinChainSanadOps {
         owner_key_id: &str,
     ) -> ChainOpResult<SanadOperationResult> {
         // Convert metadata to Vec<u8> for storage
-        let _metadata_bytes = serde_json::to_vec(&metadata)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
+        let _metadata_bytes = serde_json::to_vec(&metadata).map_err(|e| {
+            ChainOpError::InvalidInput(format!("Failed to serialize metadata: {}", e))
+        })?;
         // Record metadata for a sanad using OP_RETURN
         // This creates a transaction with metadata in the witness or OP_RETURN
 
@@ -1862,12 +1979,13 @@ impl BitcoinBackend {
             .is_utxo_unspent(txid_bytes, funding_utxo.outpoint.vout)
             .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to check UTXO status: {}", e)))?;
-        
+
         if !is_unspent {
-            return Err(ChainOpError::InvalidInput(
-                format!("Selected UTXO {}:{} is already spent or does not exist", 
-                    hex::encode(funding_utxo.outpoint.txid), funding_utxo.outpoint.vout)
-            ));
+            return Err(ChainOpError::InvalidInput(format!(
+                "Selected UTXO {}:{} is already spent or does not exist",
+                hex::encode(funding_utxo.outpoint.txid),
+                funding_utxo.outpoint.vout
+            )));
         }
 
         // Build the publication transaction from an actual wallet UTXO. The
@@ -2176,11 +2294,11 @@ impl ChainSanadOps for BitcoinBackend {
         let commitment = Hash::new(commitment_bytes);
 
         let wallet = &self.seal_protocol.wallet;
-        
+
         if let Err(e) = self.seal_protocol.scan_wallet_for_utxos(0, 20).await {
             log::warn!("Failed to refresh UTXOs before sanad creation: {}", e);
         }
-        
+
         let available_utxos = wallet.list_utxos();
         let spendable: Vec<_> = available_utxos
             .iter()
@@ -2194,12 +2312,11 @@ impl ChainSanadOps for BitcoinBackend {
         }
 
         let selected = &spendable[0];
-        let outpoint = bitcoin::OutPoint::new(
-            selected.outpoint.txid,
-            selected.outpoint.vout,
-        );
+        let outpoint = bitcoin::OutPoint::new(selected.outpoint.txid, selected.outpoint.vout);
 
-        let (seal, _path) = self.seal_protocol.fund_seal(outpoint)
+        let (seal, _path) = self
+            .seal_protocol
+            .fund_seal(outpoint)
             .map_err(|e| ChainOpError::TransactionError(format!("Failed to fund seal: {}", e)))?;
 
         let seal_txid = hex::encode(seal.txid);
@@ -2209,10 +2326,13 @@ impl ChainSanadOps for BitcoinBackend {
         // Adapter-level create helper: the sanad is identified by its commitment
         // (see SanadId(commitment) below), so the sanad_id passed here is the
         // commitment. Bitcoin's SealProtocol::publish ignores it.
-        let anchor = self.seal_protocol
+        let anchor = self
+            .seal_protocol
             .publish(commitment, seal, commitment)
             .await
-            .map_err(|e| ChainOpError::TransactionError(format!("Failed to publish commitment: {}", e)))?;
+            .map_err(|e| {
+                ChainOpError::TransactionError(format!("Failed to publish commitment: {}", e))
+            })?;
 
         Ok(SanadOperationResult {
             sanad_id: SanadId(commitment),
@@ -2226,7 +2346,8 @@ impl ChainSanadOps for BitcoinBackend {
                 "asset_id": asset_id,
                 "seal_outpoint": format!("{}:{}", seal_txid, seal_vout),
                 "seal_nonce": seal_nonce,
-            })).unwrap_or_default(),
+            }))
+            .unwrap_or_default(),
         })
     }
 
@@ -2787,13 +2908,16 @@ impl SanadStateReader for BitcoinBackend {
         // mappings (config.sanad_seals). Without a known anchor there is no on-chain
         // reference to validate against, so we fail closed rather than fabricate a
         // state — callers then fall back to their explicitly non-canonical local cache.
-        let seal = self.seal_protocol.find_seal_for_sanad(sanad_id).ok_or_else(|| {
-            ChainOpError::CapabilityUnavailable(format!(
-                "No known anchor for sanad {} (register its seal via config.sanad_seals). \
+        let seal = self
+            .seal_protocol
+            .find_seal_for_sanad(sanad_id)
+            .ok_or_else(|| {
+                ChainOpError::CapabilityUnavailable(format!(
+                    "No known anchor for sanad {} (register its seal via config.sanad_seals). \
                  Cannot determine canonical Bitcoin state without an on-chain reference.",
-                hex::encode(sanad_id.as_bytes())
-            ))
-        })?;
+                    hex::encode(sanad_id.as_bytes())
+                ))
+            })?;
 
         // is_utxo_unspent uses gettxout (the live UTXO set), which works on pruned /
         // non-txindex providers and returns false for spent or unmined outputs.
@@ -2801,12 +2925,18 @@ impl SanadStateReader for BitcoinBackend {
             .rpc
             .is_utxo_unspent(seal.txid, seal.vout)
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to query seal UTXO status: {}", e)))?;
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to query seal UTXO status: {}", e))
+            })?;
 
         // Seal still live in the UTXO set -> Active. Seal spent -> the sanad has been
         // consumed/transferred out of that output. Bitcoin carries no on-chain lock
         // metadata, so Locked/Minted/Transferred cannot be distinguished from here.
-        let state = if unspent { 2 /* Active */ } else { 4 /* Consumed */ };
+        let state = if unspent {
+            2 /* Active */
+        } else {
+            4 /* Consumed */
+        };
 
         Ok(CanonicalSanadState {
             state,
@@ -2820,7 +2950,7 @@ impl SanadStateReader for BitcoinBackend {
             refunded_at: None,
         })
     }
-    
+
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
         // For Bitcoin, seal state is derived from the UTXO
         // The seal_id contains the txid and vout of the UTXO
@@ -2829,17 +2959,20 @@ impl SanadStateReader for BitcoinBackend {
                 "Invalid seal_id: all zeros".to_string(),
             ));
         }
-        
+
         // Try to get the txid from the seal_id (first 32 bytes)
         let txid = *seal_id.as_bytes();
-        
+
         // Check if the UTXO is spent by checking confirmations
-        let confirmations = self.rpc.get_tx_confirmations(txid).await
+        let confirmations = self
+            .rpc
+            .get_tx_confirmations(txid)
+            .await
             .map_err(|e| ChainOpError::RpcError(format!("Failed to check UTXO: {}", e)))?;
-        
+
         // If confirmations is 0 or error, the UTXO may be spent or non-existent
         let is_spent = confirmations == 0;
-        
+
         Ok(CanonicalSealState {
             state: if is_spent { 1 } else { 0 }, // 0=Created, 1=Consumed
             owner: "unknown".to_string(),
@@ -2848,8 +2981,11 @@ impl SanadStateReader for BitcoinBackend {
             consumed_at: if is_spent { Some(0) } else { None },
         })
     }
-    
-    async fn trace_sanad(&self, _sanad_id: &SanadId) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
+
+    async fn trace_sanad(
+        &self,
+        _sanad_id: &SanadId,
+    ) -> ChainOpResult<Vec<CanonicalLifecycleEvent>> {
         // Query transaction history for this sanad_id
         // This would require querying the Bitcoin blockchain
         Ok(vec![])
@@ -2860,11 +2996,19 @@ impl SanadStateReader for BitcoinBackend {
 impl ChainReadinessCheck for BitcoinBackend {
     async fn check_readiness(&self, account: u32, index: u32) -> ChainOpResult<ChainReadiness> {
         // Check if wallet has seed configured by attempting to derive an address
-        let signer_configured = self.seal_protocol.wallet.get_funding_address(account, index).is_ok();
+        let signer_configured = self
+            .seal_protocol
+            .wallet
+            .get_funding_address(account, index)
+            .is_ok();
 
         // Derive signer address using get_funding_address
         let signer_address = if signer_configured {
-            match self.seal_protocol.wallet.get_funding_address(account, index) {
+            match self
+                .seal_protocol
+                .wallet
+                .get_funding_address(account, index)
+            {
                 Ok(key) => Some(key.address.to_string()),
                 Err(_) => None,
             }
@@ -2940,9 +3084,9 @@ impl ChainReadinessCheck for BitcoinBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BitcoinConfig;
     use crate::rpc::TestBitcoinRpc;
     use crate::seal_protocol::BitcoinSealProtocol;
-    use crate::config::BitcoinConfig;
     use bitcoin::Network;
 
     #[tokio::test]
@@ -2951,23 +3095,24 @@ mod tests {
         let config = BitcoinConfig::default();
         let wallet = crate::wallet::SealWallet::generate_random(Network::Signet);
         let rpc = Box::new(TestBitcoinRpc::new(100));
-        
+
         let seal_protocol = BitcoinSealProtocol::with_wallet(config, wallet)
             .expect("Failed to create seal protocol")
             .with_rpc(rpc.clone_boxed());
-        
-        let sanad_ops = BitcoinChainSanadOps::from_arc(Arc::new(seal_protocol))
-            .with_rpc(rpc);
-        
+
+        let sanad_ops = BitcoinChainSanadOps::from_arc(Arc::new(seal_protocol)).with_rpc(rpc);
+
         // This test requires actual UTXOs in the wallet - for unit testing we verify
         // the logic structure is correct
-        let result = sanad_ops.create_sanad(
-            "test_owner",
-            "btc",
-            "satoshi",
-            serde_json::json!({"description": "test sanad"}),
-        ).await;
-        
+        let result = sanad_ops
+            .create_sanad(
+                "test_owner",
+                "btc",
+                "satoshi",
+                serde_json::json!({"description": "test sanad"}),
+            )
+            .await;
+
         // Expected to fail without UTXOs, but should return proper error
         assert!(result.is_err() || result.is_ok());
     }
@@ -2979,21 +3124,17 @@ mod tests {
         let config = BitcoinConfig::default();
         let wallet = crate::wallet::SealWallet::generate_random(Network::Signet);
         let rpc = Box::new(TestBitcoinRpc::new(100));
-        
+
         let seal_protocol = BitcoinSealProtocol::with_wallet(config, wallet)
             .expect("Failed to create seal protocol")
             .with_rpc(rpc.clone_boxed());
-        
-        let sanad_ops = BitcoinChainSanadOps::from_arc(Arc::new(seal_protocol))
-            .with_rpc(rpc);
-        
-        let result = sanad_ops.create_sanad(
-            "test_owner",
-            "btc",
-            "satoshi",
-            serde_json::json!({}),
-        ).await;
-        
+
+        let sanad_ops = BitcoinChainSanadOps::from_arc(Arc::new(seal_protocol)).with_rpc(rpc);
+
+        let result = sanad_ops
+            .create_sanad("test_owner", "btc", "satoshi", serde_json::json!({}))
+            .await;
+
         // Should fail with proper error when no UTXOs available
         match result {
             Err(ChainOpError::InvalidInput(msg)) => {
@@ -3012,23 +3153,19 @@ mod tests {
         let config = BitcoinConfig::default();
         let wallet = crate::wallet::SealWallet::generate_random(Network::Signet);
         let rpc = Box::new(TestBitcoinRpc::new(100));
-        
+
         let seal_protocol = BitcoinSealProtocol::with_wallet(config, wallet)
             .expect("Failed to create seal protocol")
             .with_rpc(rpc.clone_boxed());
-        
-        let sanad_ops = BitcoinChainSanadOps::from_arc(Arc::new(seal_protocol))
-            .with_rpc(rpc);
-        
+
+        let sanad_ops = BitcoinChainSanadOps::from_arc(Arc::new(seal_protocol)).with_rpc(rpc);
+
         // The implementation has retry logic in the for loop
         // This test verifies the structure is in place
-        let result = sanad_ops.create_sanad(
-            "test_owner",
-            "btc",
-            "satoshi",
-            serde_json::json!({}),
-        ).await;
-        
+        let result = sanad_ops
+            .create_sanad("test_owner", "btc", "satoshi", serde_json::json!({}))
+            .await;
+
         // Verify it doesn't panic and handles the case gracefully
         let _ = result;
     }
@@ -3037,12 +3174,12 @@ mod tests {
     fn test_commitment_generation_deterministic() {
         // Test that commitment generation is deterministic for same inputs
         use sha2::{Digest, Sha256};
-        
+
         let owner = "test_owner";
         let asset_class = "btc";
         let asset_id = "satoshi";
         let metadata = serde_json::json!({"description": "test"});
-        
+
         let commitment_bytes: [u8; 32] = {
             let mut hasher = Sha256::new();
             hasher.update(b"commitment-");
@@ -3054,7 +3191,7 @@ mod tests {
             }
             hasher.finalize().into()
         };
-        
+
         // Verify commitment is not all zeros
         assert_ne!(commitment_bytes, [0u8; 32]);
     }
@@ -3066,10 +3203,10 @@ mod tests {
         // This is verified by checking that fund_seal checks the registry
         let config = BitcoinConfig::default();
         let wallet = crate::wallet::SealWallet::generate_random(Network::Signet);
-        
+
         let seal_protocol = BitcoinSealProtocol::with_wallet(config, wallet)
             .expect("Failed to create seal protocol");
-        
+
         // The seal_registry is initialized and will prevent replay
         // We verify the protocol has the registry by checking it can be created
         // The actual replay prevention is tested in the create_sanad flow

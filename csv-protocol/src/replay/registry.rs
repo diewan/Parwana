@@ -393,7 +393,13 @@ impl NullifierRegistry {
 
     /// Register a replay nullifier.
     pub fn register(&mut self, nullifier: ReplayNullifier) -> Result<(), ReplayError> {
-        let nullifier_key: String = hex::encode(nullifier.nullifier.as_bytes().unwrap_or_else(|_| vec![0u8; 32]).as_slice());
+        let nullifier_key: String = hex::encode(
+            nullifier
+                .nullifier
+                .as_bytes()
+                .unwrap_or_else(|_| vec![0u8; 32])
+                .as_slice(),
+        );
 
         // Check if nullifier already exists
         if self.nullifiers.contains_key(&nullifier_key) {
@@ -405,7 +411,13 @@ impl NullifierRegistry {
             .insert(nullifier_key.clone(), nullifier.clone());
 
         // Add to sanad ID index
-        let sanad_key: String = hex::encode(nullifier.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]).as_slice());
+        let sanad_key: String = hex::encode(
+            nullifier
+                .sanad_id
+                .as_bytes()
+                .unwrap_or_else(|_| vec![0u8; 32])
+                .as_slice(),
+        );
         self.by_sanad_id
             .entry(sanad_key)
             .or_default()
@@ -484,7 +496,13 @@ impl NullifierRegistry {
     fn remove(&mut self, nullifier_key: &str) {
         if let Some(nullifier) = self.nullifiers.remove(nullifier_key) {
             // Remove from sanad ID index
-            let sanad_key: String = hex::encode(nullifier.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]).as_slice());
+            let sanad_key: String = hex::encode(
+                nullifier
+                    .sanad_id
+                    .as_bytes()
+                    .unwrap_or_else(|_| vec![0u8; 32])
+                    .as_slice(),
+            );
             if let Some(keys) = self.by_sanad_id.get_mut(&sanad_key) {
                 keys.retain(|k| k != nullifier_key);
                 if keys.is_empty() {
@@ -560,12 +578,20 @@ impl ReplayConstitutionValidator {
     /// Validate that a replay nullifier follows the constitution.
     pub fn validate_nullifier(nullifier: &ReplayNullifier) -> Result<(), ReplayError> {
         // Check nullifier is not zero
-        if nullifier.nullifier == (HashWire { bytes: hex::encode([0u8; 32]) }) {
+        if nullifier.nullifier
+            == (HashWire {
+                bytes: hex::encode([0u8; 32]),
+            })
+        {
             return Err(ReplayError::InvalidNullifier);
         }
 
         // Check sanad ID is not zero
-        if nullifier.sanad_id == (HashWire { bytes: hex::encode([0u8; 32]) }) {
+        if nullifier.sanad_id
+            == (HashWire {
+                bytes: hex::encode([0u8; 32]),
+            })
+        {
             return Err(ReplayError::InvalidNullifier);
         }
 
@@ -580,8 +606,14 @@ impl ReplayConstitutionValidator {
         }
 
         // Check nullifier hash matches computed value
-        let sanad_id_bytes = nullifier.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
-        let source_seal_ref_bytes = nullifier.source_seal_ref.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
+        let sanad_id_bytes = nullifier
+            .sanad_id
+            .as_bytes()
+            .unwrap_or_else(|_| vec![0u8; 32]);
+        let source_seal_ref_bytes = nullifier
+            .source_seal_ref
+            .as_bytes()
+            .unwrap_or_else(|_| vec![0u8; 32]);
         let mut sanad_id_arr = [0u8; 32];
         let mut source_seal_ref_arr = [0u8; 32];
         if sanad_id_bytes.len() == 32 {
@@ -590,7 +622,7 @@ impl ReplayConstitutionValidator {
         if source_seal_ref_bytes.len() == 32 {
             source_seal_ref_arr.copy_from_slice(&source_seal_ref_bytes);
         }
-        
+
         let computed = ReplayNullifier::compute_nullifier(
             Hash::new(sanad_id_arr),
             nullifier.source_chain,

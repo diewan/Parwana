@@ -21,10 +21,10 @@ impl TestProofBundle {
         // Use valid test data that passes validation
         let proof_bytes = vec![1u8; 32]; // Proof bytes that will be used in both anchor and inclusion
         let inclusion_proof = InclusionProof::new(
-            proof_bytes.clone(),      // Proof bytes
-            Hash::new([2u8; 32]),    // Valid commitment hash
-            100,                     // Valid block height
-            0,                       // Valid transaction index
+            proof_bytes.clone(),  // Proof bytes
+            Hash::new([2u8; 32]), // Valid commitment hash
+            100,                  // Valid block height
+            0,                    // Valid transaction index
         )
         .expect("Valid inclusion proof data");
 
@@ -36,13 +36,7 @@ impl TestProofBundle {
         .expect("Valid finality proof data");
 
         // Create a valid DAG with at least one node
-        let dag_node = DAGNode::new(
-            Hash::new([8u8; 32]),
-            vec![],
-            vec![],
-            vec![vec![]],
-            vec![],
-        );
+        let dag_node = DAGNode::new(Hash::new([8u8; 32]), vec![], vec![], vec![vec![]], vec![]);
         let root_commitment = Hash::new([4u8; 32]);
         let transition_dag = DAGSegment::new(vec![dag_node], root_commitment);
         let seal_ref = SealPoint::new(vec![5u8; 32], Some(42), None).unwrap();
@@ -69,13 +63,13 @@ impl TestProofBundle {
 /// Format: [pk_len (4 bytes LE)] [public_key (pk_len bytes)] [signature (remaining bytes)]
 fn create_valid_signature(commitment: &Hash) -> Vec<u8> {
     use ed25519_dalek::{Signer, SigningKey};
-    
+
     // Use a deterministic keypair for reproducible test signatures
     let signing_key_bytes = [1u8; 32]; // Fixed seed for deterministic key
     let signing_key = SigningKey::from_bytes(&signing_key_bytes);
     let verifying_key = signing_key.verifying_key();
     let signature = signing_key.sign(commitment.as_bytes());
-    
+
     // Format: [pk_len (4 bytes LE)] [public_key (32 bytes)] [signature (64 bytes)]
     let mut sig_bytes = Vec::with_capacity(4 + 32 + 64);
     sig_bytes.extend_from_slice(&32u32.to_le_bytes());
@@ -127,24 +121,22 @@ impl TestAdapter {
     ///
     /// # Warning
     /// This uses fake proof bytes (0xA5 repeated) and should only be used in tests.
-    pub fn build_fake_inclusion_proof(
-        sanad_id: &csv_hash::Hash,
-    ) -> Result<ProofBundle, String> {
+    pub fn build_fake_inclusion_proof(sanad_id: &csv_hash::Hash) -> Result<ProofBundle, String> {
         let root_commitment = csv_hash::Hash::new([9u8; 32]);
-        
+
         // Use deterministic ed25519 signature for consistency
         use ed25519_dalek::{Signer, SigningKey};
-        
+
         let signing_key_bytes = [2u8; 32]; // Different fixed seed
         let signing_key = SigningKey::from_bytes(&signing_key_bytes);
         let verifying_key = signing_key.verifying_key();
         let signature = signing_key.sign(root_commitment.as_bytes());
-        
+
         let mut encoded_signature = Vec::with_capacity(4 + 32 + 64);
         encoded_signature.extend_from_slice(&32u32.to_le_bytes());
         encoded_signature.extend_from_slice(verifying_key.as_bytes());
         encoded_signature.extend_from_slice(signature.to_bytes().as_slice());
-        
+
         let proof_bytes = vec![0xA5u8; 32]; // Fake proof bytes for testing only
         let node = DAGNode::new(
             csv_hash::Hash::new([1u8; 32]),
@@ -160,8 +152,7 @@ impl TestAdapter {
             SealPoint::new(sanad_id.as_bytes().to_vec(), Some(0), None).unwrap(),
             // anchor_ref.metadata must match inclusion_proof.proof_bytes
             CommitAnchor::new(vec![1u8; 32], 100, proof_bytes.clone()).unwrap(),
-            InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0)
-                .unwrap(),
+            InclusionProof::new(proof_bytes, csv_hash::Hash::new([0xBBu8; 32]), 100, 0).unwrap(),
             FinalityProof::new(vec![0u8; 32], 6, true).unwrap(),
         )
         .map_err(|e| e.to_string())

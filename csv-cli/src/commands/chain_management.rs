@@ -1,10 +1,10 @@
 //! CLI commands for chain management and validation.
 
 use clap::Subcommand;
-use std::sync::{Arc, RwLock};
-use csv_runtime::chain_discovery::ChainDiscovery;
-use csv_runtime::adapter_registry::AdapterRegistryImpl;
 use csv_hash::chain_id::ChainId;
+use csv_runtime::adapter_registry::AdapterRegistryImpl;
+use csv_runtime::chain_discovery::ChainDiscovery;
+use std::sync::{Arc, RwLock};
 
 /// Chain management commands
 #[derive(Debug, Subcommand)]
@@ -44,55 +44,61 @@ impl ChainCommands {
     /// Execute the chain management command
     pub async fn execute(&self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            ChainCommands::List => {
-                self.list_chains().await
-            }
-            ChainCommands::Show { chain_id } => {
-                self.show_chain(chain_id).await
-            }
-            ChainCommands::Discover { directory } => {
-                self.discover_chains(directory).await
-            }
-            ChainCommands::Validate { directory } => {
-                self.validate_chains(directory).await
-            }
-            ChainCommands::CreateTemplate { chain_id, chain_name, output_dir } => {
-                self.create_template(chain_id, chain_name, output_dir).await
-            }
+            ChainCommands::List => self.list_chains().await,
+            ChainCommands::Show { chain_id } => self.show_chain(chain_id).await,
+            ChainCommands::Discover { directory } => self.discover_chains(directory).await,
+            ChainCommands::Validate { directory } => self.validate_chains(directory).await,
+            ChainCommands::CreateTemplate {
+                chain_id,
+                chain_name,
+                output_dir,
+            } => self.create_template(chain_id, chain_name, output_dir).await,
         }
     }
-    
+
     /// List all supported chains
     async fn list_chains(&self) -> Result<(), Box<dyn std::error::Error>> {
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let discovery = ChainDiscovery::new(adapter_registry);
-        
-        let chains = discovery.all_configs()
+
+        let chains = discovery
+            .all_configs()
             .map_err(|e| format!("Failed to get chain configs: {}", e))?;
-        
+
         if chains.is_empty() {
-            println!("No chains registered. Use 'csv chain-management discover' to load chains from configuration.");
+            println!(
+                "No chains registered. Use 'csv chain-management discover' to load chains from configuration."
+            );
             return Ok(());
         }
-        
+
         println!("Supported chains:");
         for config in chains {
-            println!("  {} ({}) - {}", config.id, config.name, 
-                if config.enabled { "[enabled]" } else { "[disabled]" });
+            println!(
+                "  {} ({}) - {}",
+                config.id,
+                config.name,
+                if config.enabled {
+                    "[enabled]"
+                } else {
+                    "[disabled]"
+                }
+            );
         }
-        
+
         Ok(())
     }
-    
+
     /// Show details for a specific chain
     async fn show_chain(&self, chain_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let discovery = ChainDiscovery::new(adapter_registry);
-        
+
         let _chain_id = ChainId::new(chain_id);
-        let config = discovery.get_config(&_chain_id)
+        let config = discovery
+            .get_config(&_chain_id)
             .map_err(|e| format!("Failed to get chain config: {}", e))?;
-        
+
         if let Some(cfg) = config {
             println!("Chain Details:");
             println!("  ID: {}", cfg.id);
@@ -106,53 +112,56 @@ impl ChainCommands {
         } else {
             println!("Chain '{}' not found.", chain_id);
         }
-        
+
         Ok(())
     }
-    
+
     /// Discover and load chains from configuration directory
     async fn discover_chains(&self, directory: &str) -> Result<(), Box<dyn std::error::Error>> {
         let chains_dir = std::path::Path::new(directory);
-        
+
         if !chains_dir.exists() {
             return Err(format!("Chains directory '{}' does not exist", directory).into());
         }
-        
+
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let discovery = ChainDiscovery::new(adapter_registry);
-        
+
         // Use the new load_from_directory method that properly parses TOML files
         match discovery.load_from_directory(chains_dir) {
             Ok(count) => {
-                println!("Discovered {} chain configurations from '{}'", count, directory);
+                println!(
+                    "Discovered {} chain configurations from '{}'",
+                    count, directory
+                );
             }
             Err(e) => {
                 return Err(format!("Failed to load chain configurations: {}", e).into());
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate chain configuration files
     async fn validate_chains(&self, directory: &str) -> Result<(), Box<dyn std::error::Error>> {
         let chains_dir = std::path::Path::new(directory);
-        
+
         if !chains_dir.exists() {
             return Err(format!("Chains directory '{}' does not exist", directory).into());
         }
-        
+
         let adapter_registry = Arc::new(RwLock::new(AdapterRegistryImpl::new()));
         let _discovery = ChainDiscovery::new(adapter_registry);
-        
+
         let entries = std::fs::read_dir(chains_dir)?;
         let mut valid_count = 0;
         let mut invalid_count = 0;
-        
+
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("toml") {
                 // Basic validation: check if file is readable TOML
                 match std::fs::read_to_string(&path) {
@@ -167,22 +176,30 @@ impl ChainCommands {
                 }
             }
         }
-        
-        println!("\nValidation complete: {} valid, {} invalid", valid_count, invalid_count);
-        
+
+        println!(
+            "\nValidation complete: {} valid, {} invalid",
+            valid_count, invalid_count
+        );
+
         Ok(())
     }
-    
+
     /// Create a new chain configuration template
-    async fn create_template(&self, chain_id: &str, chain_name: &str, output_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn create_template(
+        &self,
+        chain_id: &str,
+        chain_name: &str,
+        output_dir: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let output_path = std::path::Path::new(output_dir);
-        
+
         if !output_path.exists() {
             std::fs::create_dir_all(output_path)?;
         }
-        
+
         let template = format!(
-r#"[chain]
+            r#"[chain]
 id = "{}"
 name = "{}"
 network = "mainnet"
@@ -192,12 +209,12 @@ enabled = true
 "#,
             chain_id, chain_name
         );
-        
+
         let file_path = output_path.join(format!("{}.toml", chain_id));
         std::fs::write(&file_path, template)?;
-        
+
         println!("Created chain template at: {}", file_path.display());
-        
+
         Ok(())
     }
 }

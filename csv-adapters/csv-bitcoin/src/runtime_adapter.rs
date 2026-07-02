@@ -7,12 +7,12 @@
 use bitcoin::Network;
 use bitcoin_hashes::Hash as BitcoinHash;
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, LockResult, MintResult, SealRegistryStatus,
-    CrossChainTransfer,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
+    TxFinality,
 };
 use csv_protocol::finality::ChainCapabilities;
-use csv_protocol::signature::SignatureScheme;
 use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::signature::SignatureScheme;
 use std::sync::Arc;
 
 use crate::ops::BitcoinChainSanadOps;
@@ -49,35 +49,37 @@ impl BitcoinRuntimeAdapter {
             _ => "bitcoin".to_string(),
         };
 
-          let seal_protocol = BitcoinSealProtocol::with_wallet(
-             crate::config::BitcoinConfig {
-                 network: match network {
-                     Network::Bitcoin => crate::config::Network::Mainnet,
-                     Network::Testnet => crate::config::Network::Testnet,
-                     Network::Signet => crate::config::Network::Signet,
-                     Network::Regtest => crate::config::Network::Regtest,
-                     _ => crate::config::Network::Signet,
-                 },
-                 finality_depth: 6,
-                 publication_timeout_seconds: 3600,
-                 rpc_url: String::new(),
-                 rpc_backend: crate::config::BitcoinRpcBackend::MempoolRest,
-                 indexer_url: None,
-                 api_key: None,
-                 xpub: None,
-                 private_key: None,
-                 seed: None,
-                 account: 0,
-                 index: 0,
-                 utxos: Vec::new(),
-                 sanad_seals: Vec::new(),
-             },
-             wallet,
-         ).expect("Failed to create seal protocol");
+        let seal_protocol = BitcoinSealProtocol::with_wallet(
+            crate::config::BitcoinConfig {
+                network: match network {
+                    Network::Bitcoin => crate::config::Network::Mainnet,
+                    Network::Testnet => crate::config::Network::Testnet,
+                    Network::Signet => crate::config::Network::Signet,
+                    Network::Regtest => crate::config::Network::Regtest,
+                    _ => crate::config::Network::Signet,
+                },
+                finality_depth: 6,
+                publication_timeout_seconds: 3600,
+                rpc_url: String::new(),
+                rpc_backend: crate::config::BitcoinRpcBackend::MempoolRest,
+                indexer_url: None,
+                api_key: None,
+                xpub: None,
+                private_key: None,
+                seed: None,
+                account: 0,
+                index: 0,
+                utxos: Vec::new(),
+                sanad_seals: Vec::new(),
+            },
+            wallet,
+        )
+        .expect("Failed to create seal protocol");
 
         let seal_protocol = Arc::new(seal_protocol);
-        let sanad_ops = Arc::new(BitcoinChainSanadOps::from_arc(Arc::clone(&seal_protocol))
-            .with_rpc(rpc.clone_boxed()));
+        let sanad_ops = Arc::new(
+            BitcoinChainSanadOps::from_arc(Arc::clone(&seal_protocol)).with_rpc(rpc.clone_boxed()),
+        );
 
         Self {
             chain_id,
@@ -107,9 +109,8 @@ impl BitcoinRuntimeAdapter {
 
         // Wrap the shared seal protocol in a ChainSanadOps instance.
         // BitcoinChainSanadOps::from_arc reuses the Arc without cloning the wallet data.
-        let sanad_ops = Arc::new(
-            BitcoinChainSanadOps::from_arc(Arc::clone(&seal)).with_rpc(rpc.clone_boxed()),
-        );
+        let sanad_ops =
+            Arc::new(BitcoinChainSanadOps::from_arc(Arc::clone(&seal)).with_rpc(rpc.clone_boxed()));
 
         Self {
             chain_id,
@@ -135,10 +136,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         SignatureScheme::Secp256k1
     }
 
-    async fn lock_sanad(
-        &self,
-        transfer: &CrossChainTransfer,
-    ) -> Result<LockResult, AdapterError> {
+    async fn lock_sanad(&self, transfer: &CrossChainTransfer) -> Result<LockResult, AdapterError> {
         use csv_hash::sanad::SanadId;
 
         // Extract sanad_id from transfer and convert to SanadId
@@ -151,13 +149,19 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         let seal_protocol = self.sanad_ops.seal_protocol();
         let wallet = &seal_protocol.wallet;
         let path = crate::wallet::Bip86Path::external(0, 0);
-        let owner_key_id = wallet.get_owner_key_hex(&path)
+        let owner_key_id = wallet
+            .get_owner_key_hex(&path)
             .map_err(|e| AdapterError::Generic(format!("Failed to derive owner key: {}", e)))?;
 
         // Delegate to BitcoinChainSanadOps::lock_sanad for actual transaction building and broadcasting
-        let result = csv_protocol::chain_adapter_traits::ChainSanadOps::lock_sanad(&*self.sanad_ops, &sanad_id, destination_chain, &owner_key_id)
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Lock sanad failed: {}", e)))?;
+        let result = csv_protocol::chain_adapter_traits::ChainSanadOps::lock_sanad(
+            &*self.sanad_ops,
+            &sanad_id,
+            destination_chain,
+            &owner_key_id,
+        )
+        .await
+        .map_err(|e| AdapterError::Generic(format!("Lock sanad failed: {}", e)))?;
 
         Ok(LockResult {
             tx_hash: result.transaction_hash,
@@ -172,7 +176,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
     ) -> Result<MintResult, AdapterError> {
         // Bitcoin cannot mint sanads (no smart contracts)
         Err(AdapterError::Generic(
-            "Bitcoin does not support minting sanads (no smart contracts)".to_string()
+            "Bitcoin does not support minting sanads (no smart contracts)".to_string(),
         ))
     }
 
@@ -202,20 +206,33 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         // genuine SPV inclusion proof (Merkle branch + position). If the RPC
         // backend cannot produce real Merkle evidence, fail closed instead of
         // shipping an empty/fabricated proof.
-        let block_hash = self.rpc.get_block_hash(lock_result.block_height).await
-            .map_err(|e| AdapterError::Generic(format!(
-                "Cannot build inclusion proof: failed to fetch block hash at height {}: {}",
-                lock_result.block_height, e
-            )))?;
+        let block_hash = self
+            .rpc
+            .get_block_hash(lock_result.block_height)
+            .await
+            .map_err(|e| {
+                AdapterError::Generic(format!(
+                    "Cannot build inclusion proof: failed to fetch block hash at height {}: {}",
+                    lock_result.block_height, e
+                ))
+            })?;
 
-        let btc_inclusion = self.rpc.get_inclusion_proof(txid_array, block_hash).await
-            .map_err(|e| AdapterError::Generic(format!(
-                "Cannot build inclusion proof: chain capability unavailable ({})",
-                e
-            )))?;
+        let btc_inclusion = self
+            .rpc
+            .get_inclusion_proof(txid_array, block_hash)
+            .await
+            .map_err(|e| {
+                AdapterError::Generic(format!(
+                    "Cannot build inclusion proof: chain capability unavailable ({})",
+                    e
+                ))
+            })?;
 
         // Real finality evidence: confirmation depth measured against current tip.
-        let current_height = self.rpc.get_block_count().await
+        let current_height = self
+            .rpc
+            .get_block_count()
+            .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get block count: {}", e)))?;
         let required_depth = 6u32; // Bitcoin standard finality depth
         let confirmations = current_height.saturating_sub(lock_result.block_height);
@@ -245,12 +262,9 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         )
         .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
 
-        let finality_proof = FinalityProof::new(
-            confirmations.to_le_bytes().to_vec(),
-            confirmations,
-            true,
-        )
-        .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+        let finality_proof =
+            FinalityProof::new(confirmations.to_le_bytes().to_vec(), confirmations, true)
+                .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
 
         // The anchor is bound to the Sanad ID being transferred (required by
         // `verify_proof_binding`), with the lock txid/height carried as metadata.
@@ -264,8 +278,12 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         )
         .map_err(|e| AdapterError::Generic(format!("Invalid anchor reference: {}", e)))?;
 
-        let seal_ref = CoreSealPoint::new(txid_array.to_vec(), Some(transfer.lock_output_index as u64), None)
-            .map_err(|e| AdapterError::Generic(format!("Invalid seal reference: {}", e)))?;
+        let seal_ref = CoreSealPoint::new(
+            txid_array.to_vec(),
+            Some(transfer.lock_output_index as u64),
+            None,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid seal reference: {}", e)))?;
 
         // Real authorizing signature: sign the DAG root commitment with the
         // wallet key that authorized the lock transaction (account 0, index 0,
@@ -274,11 +292,13 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         let wallet = &self.seal_protocol.wallet;
         let path = crate::wallet::Bip86Path::external(0, 0);
         let root_commitment = *transfer.sanad_id.as_bytes();
-        let signature = wallet.sign_with_key(&path, &root_commitment)
+        let signature = wallet
+            .sign_with_key(&path, &root_commitment)
             .map_err(|e| AdapterError::Generic(format!("Failed to sign proof bundle: {}", e)))?;
         let public_key = {
-            let secret_key = wallet.derive_private_key(&path)
-                .map_err(|e| AdapterError::Generic(format!("Failed to derive signing key: {}", e)))?;
+            let secret_key = wallet.derive_private_key(&path).map_err(|e| {
+                AdapterError::Generic(format!("Failed to derive signing key: {}", e))
+            })?;
             bitcoin::secp256k1::PublicKey::from_secret_key(wallet.secp(), &secret_key)
         };
         let pk_bytes = public_key.serialize();
@@ -322,7 +342,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
 
         // Extract inclusion proof from the bundle
         let inclusion_proof = &proof_bundle.inclusion_proof;
-        
+
         // Convert core inclusion proof to Bitcoin-specific type
         let btc_inclusion_proof = BitcoinInclusionProof {
             merkle_branch: self.extract_merkle_branch(&inclusion_proof.proof_bytes)?,
@@ -347,22 +367,28 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
 
         // Verify SPV merkle proof - ensures transaction is in the block
         // This provides cryptographic proof that the lock transaction was mined
-        let block_header_data = self.get_block_header(btc_inclusion_proof.block_height).await?;
+        let block_header_data = self
+            .get_block_header(btc_inclusion_proof.block_height)
+            .await?;
         if !verify_spv_proof_with_header(&txid_array, &block_header_data, &btc_inclusion_proof) {
             return Err(AdapterError::ProofVerificationFailed(
-                "SPV merkle proof verification failed".to_string()
+                "SPV merkle proof verification failed".to_string(),
             ));
         }
 
         // Enforce confirmation depth - prevents reorgs below finality
-        let current_height = self.rpc.get_block_count().await
+        let current_height = self
+            .rpc
+            .get_block_count()
+            .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get block count: {}", e)))?;
         let required_depth = 6; // Bitcoin standard finality depth
         let confirmations = current_height.saturating_sub(btc_inclusion_proof.block_height);
-        
+
         if confirmations < required_depth as u64 {
             return Err(AdapterError::ProofVerificationFailed(format!(
-                "Insufficient confirmations: got {}, need {}", confirmations, required_depth
+                "Insufficient confirmations: got {}, need {}",
+                confirmations, required_depth
             )));
         }
 
@@ -374,27 +400,81 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         // The same UTXO must never authorize two destination mints
         let outpoint = self.extract_utxo_outpoint(transfer)?;
         let txid_bytes = *outpoint.txid.as_byte_array();
-        let is_unspent = self.rpc.is_utxo_unspent(txid_bytes, outpoint.vout).await
+        let is_unspent = self
+            .rpc
+            .is_utxo_unspent(txid_bytes, outpoint.vout)
+            .await
             .map_err(|e| AdapterError::Generic(format!("Failed to check UTXO status: {}", e)))?;
-        
+
         if !is_unspent {
             return Err(AdapterError::ProofVerificationFailed(
-                "UTXO has already been spent - double-spend detected".to_string()
+                "UTXO has already been spent - double-spend detected".to_string(),
             ));
         }
 
         Ok(())
     }
 
-    async fn check_seal_registry(&self, _seal_id: &[u8])
-    -> Result<SealRegistryStatus, AdapterError> {
+    async fn check_seal_registry(
+        &self,
+        _seal_id: &[u8],
+    ) -> Result<SealRegistryStatus, AdapterError> {
         // Bitcoin doesn't have a seal registry (UTXO model)
         Ok(SealRegistryStatus::Available)
     }
 
+    async fn tx_finality(&self, tx_hash: &str) -> Result<TxFinality, AdapterError> {
+        // Decode the lock txid the same way `build_inclusion_proof` does, so the
+        // bytes we feed `get_tx_confirmations` are in the byte order the RPC
+        // backend expects (internal order; the mempool backend reverses to
+        // display form itself).
+        let bytes = hex::decode(tx_hash.trim_start_matches("0x"))
+            .map_err(|e| AdapterError::Generic(format!("Invalid tx hash: {}", e)))?;
+        if bytes.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid tx hash length: expected 32 bytes, got {}",
+                bytes.len()
+            )));
+        }
+        let mut txid = [0u8; 32];
+        txid.copy_from_slice(&bytes);
+
+        // `get_tx_confirmations` returns the Bitcoin-native depth (tip-height+1),
+        // and 0 while the tx is still unconfirmed / in the mempool.
+        let real_confirmations = self.rpc.get_tx_confirmations(txid).await.map_err(|e| {
+            AdapterError::RpcError(format!("Failed to get tx confirmations: {}", e))
+        })?;
+        if real_confirmations == 0 {
+            return Ok(TxFinality {
+                block_height: 0,
+                confirmations: 0,
+            });
+        }
+
+        let tip = self
+            .rpc
+            .get_block_count()
+            .await
+            .map_err(|e| AdapterError::RpcError(format!("Failed to get block count: {}", e)))?;
+
+        // Recover the true confirming height so callers can fetch the exact block
+        // the tx was mined in (get_tx_confirmations == tip - height + 1).
+        let block_height = tip.saturating_sub(real_confirmations.saturating_sub(1));
+
+        // Report confirmations using the same `tip - block_height` convention the
+        // proof/validation paths use, so the runtime finality gate can never pass
+        // while `build_inclusion_proof` would still reject for insufficient depth.
+        let confirmations = tip.saturating_sub(block_height);
+
+        Ok(TxFinality {
+            block_height,
+            confirmations,
+        })
+    }
+
     async fn get_balance(&self, _address: &str) -> Result<String, AdapterError> {
         Err(AdapterError::Generic(
-            "Bitcoin balance query not yet implemented".to_string()
+            "Bitcoin balance query not yet implemented".to_string(),
         ))
     }
 
@@ -405,41 +485,49 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
 
 // Helper methods for validate_source_proof (public for testing)
 impl BitcoinRuntimeAdapter {
-
     /// Extract merkle branch from core inclusion proof bytes
     fn extract_merkle_branch(&self, proof_bytes: &[u8]) -> Result<Vec<[u8; 32]>, AdapterError> {
         let metadata_size = 32 + 8 + 8; // block_hash (32) + tx_index (8) + block_height (8)
         if proof_bytes.len() < metadata_size {
             return Ok(vec![]);
         }
-        
+
         let branch_data_len = proof_bytes.len() - metadata_size;
         let mut merkle_branch = Vec::new();
         let mut pos = 0;
-        
+
         while pos + 32 <= branch_data_len {
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&proof_bytes[pos..pos + 32]);
             merkle_branch.push(hash);
             pos += 32;
         }
-        
+
         Ok(merkle_branch)
     }
 
     /// Get block header data for a given block height
     async fn get_block_header(&self, block_height: u64) -> Result<Vec<u8>, AdapterError> {
-        let block_hash = self.rpc.get_block_hash(block_height).await
+        let block_hash = self
+            .rpc
+            .get_block_hash(block_height)
+            .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get block hash: {}", e)))?;
-        
-        let block_header = self.rpc.get_raw_block_header(block_hash).await
+
+        let block_header = self
+            .rpc
+            .get_raw_block_header(block_hash)
+            .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get block header: {}", e)))?;
-        
+
         Ok(block_header)
     }
 
     /// Extract UTXO outpoint from transfer
-    fn extract_utxo_outpoint(&self, transfer: &CrossChainTransfer) -> Result<bitcoin::OutPoint, AdapterError> {
+    fn extract_utxo_outpoint(
+        &self,
+        transfer: &CrossChainTransfer,
+    ) -> Result<bitcoin::OutPoint, AdapterError> {
         // `lock_tx_hash` is already the raw 32-byte txid, not a hex string
         // (see `validate_source_proof` above for the same fix and rationale).
         if transfer.lock_tx_hash.len() != 32 {
@@ -453,27 +541,29 @@ impl BitcoinRuntimeAdapter {
 
         // Convert to internal byte order for Bitcoin Txid
         txid_array.reverse();
-        
-        let txid = bitcoin::Txid::from_raw_hash(
-            bitcoin::hashes::Hash::from_byte_array(txid_array)
-        );
-        
+
+        let txid = bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_byte_array(txid_array));
+
         Ok(bitcoin::OutPoint::new(txid, transfer.lock_output_index))
     }
 
     /// Verify proof binds all required fields for cross-chain transfer
-    fn verify_proof_binding(&self, transfer: &CrossChainTransfer, proof_bundle: &ProofBundle) -> Result<(), AdapterError> {
+    fn verify_proof_binding(
+        &self,
+        transfer: &CrossChainTransfer,
+        proof_bundle: &ProofBundle,
+    ) -> Result<(), AdapterError> {
         // Verify Sanad ID is bound in the proof
         if proof_bundle.anchor_ref.anchor_id != transfer.sanad_id.as_bytes().to_vec() {
             return Err(AdapterError::ProofVerificationFailed(
-                "Proof Sanad ID does not match transfer Sanad ID".to_string()
+                "Proof Sanad ID does not match transfer Sanad ID".to_string(),
             ));
         }
 
         // Verify destination chain is consistent
         // The proof should encode the destination chain to prevent cross-chain replay
         // This is checked by the CanonicalVerifier in TransferCoordinator
-        
+
         Ok(())
     }
 }
@@ -491,7 +581,7 @@ mod tests {
     fn test_transition_dag(root: Hash) -> csv_hash::dag::DAGSegment {
         let node = csv_hash::dag::DAGNode::new(
             root,
-            vec![0xABu8; 32],   // bytecode (stand-in for the lock txid)
+            vec![0xABu8; 32],       // bytecode (stand-in for the lock txid)
             vec![vec![0xCDu8; 68]], // non-empty test signature bytes (pk_len-prefixed encoding)
             vec![vec![0xEFu8; 4]],  // non-empty witness data
             vec![],
@@ -513,28 +603,45 @@ mod tests {
         async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Ok(self.block_count)
         }
-        async fn get_block_hash(&self, height: u64) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_block_hash(
+            &self,
+            height: u64,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             let mut hash = [0u8; 32];
             hash[..8].copy_from_slice(&height.to_le_bytes());
             Ok(hash)
         }
-        async fn is_utxo_unspent(&self, _txid: [u8; 32], _vout: u32) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        async fn is_utxo_unspent(
+            &self,
+            _txid: [u8; 32],
+            _vout: u32,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
             Ok(true)
         }
-        async fn send_raw_transaction(&self, _tx_bytes: Vec<u8>) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+        async fn send_raw_transaction(
+            &self,
+            _tx_bytes: Vec<u8>,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
             Err("InclusionCapableRpc cannot broadcast transactions".into())
         }
-        async fn get_tx_confirmations(&self, _txid: [u8; 32]) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_tx_confirmations(
+            &self,
+            _txid: [u8; 32],
+        ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
             Ok(0)
         }
-        async fn get_utxos_for_address(&self, _address: String) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_utxos_for_address(
+            &self,
+            _address: String,
+        ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
         async fn get_inclusion_proof(
             &self,
             txid: [u8; 32],
             block_hash: [u8; 32],
-        ) -> Result<crate::types::BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<crate::types::BitcoinInclusionProof, Box<dyn std::error::Error + Send + Sync>>
+        {
             let _ = txid;
             Ok(crate::types::BitcoinInclusionProof::new(
                 self.merkle_branch.clone(),
@@ -575,7 +682,10 @@ mod tests {
         };
 
         let result = adapter.build_inclusion_proof(&transfer, &lock_result).await;
-        assert!(result.is_err(), "must fail closed when chain cannot supply real merkle inclusion evidence");
+        assert!(
+            result.is_err(),
+            "must fail closed when chain cannot supply real merkle inclusion evidence"
+        );
     }
 
     #[tokio::test]
@@ -606,20 +716,38 @@ mod tests {
             block_height: 100,
         };
 
-        let bundle = adapter.build_inclusion_proof(&transfer, &lock_result).await
+        let bundle = adapter
+            .build_inclusion_proof(&transfer, &lock_result)
+            .await
             .expect("inclusion-capable RPC should allow real proof construction");
 
         // Forbidden patterns this ticket targets: empty DAG, empty signatures,
         // zero/placeholder anchor binding.
-        assert!(!bundle.transition_dag.nodes.is_empty(), "DAG must not be empty");
-        assert!(!bundle.signatures.is_empty(), "signatures must not be empty");
-        assert!(!bundle.inclusion_proof.proof_bytes.is_empty(), "inclusion proof bytes must not be empty");
-        assert_eq!(bundle.anchor_ref.anchor_id, transfer.sanad_id.as_bytes().to_vec(), "anchor must bind to the real Sanad ID");
+        assert!(
+            !bundle.transition_dag.nodes.is_empty(),
+            "DAG must not be empty"
+        );
+        assert!(
+            !bundle.signatures.is_empty(),
+            "signatures must not be empty"
+        );
+        assert!(
+            !bundle.inclusion_proof.proof_bytes.is_empty(),
+            "inclusion proof bytes must not be empty"
+        );
+        assert_eq!(
+            bundle.anchor_ref.anchor_id,
+            transfer.sanad_id.as_bytes().to_vec(),
+            "anchor must bind to the real Sanad ID"
+        );
 
         // The signature must actually verify under the bundle's own scheme,
         // proving it is real cryptographic authorization, not filler bytes.
         for sig_bytes in &bundle.signatures {
-            assert!(sig_bytes.len() > 4, "encoded signature must carry a public key + signature payload");
+            assert!(
+                sig_bytes.len() > 4,
+                "encoded signature must carry a public key + signature payload"
+            );
         }
     }
 
@@ -663,11 +791,12 @@ mod tests {
 
         // Create a minimal proof bundle with SPV data
         let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
-            vec![], // empty merkle branch for single-tx block
+            vec![],               // empty merkle branch for single-tx block
             Hash::new([3u8; 32]), // block_hash
-            0, // position
-            100, // block_height
-        ).unwrap();
+            0,                    // position
+            100,                  // block_height
+        )
+        .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 100u64.to_le_bytes().to_vec(),
@@ -681,9 +810,10 @@ mod tests {
 
         let anchor_ref = csv_hash::seal::CommitAnchor::new(
             vec![2u8; 32], // anchor_id (sanad_id)
-            100, // block_height
-            vec![], // metadata
-        ).unwrap();
+            100,           // block_height
+            vec![],        // metadata
+        )
+        .unwrap();
 
         let proof_bundle = ProofBundle {
             version: 1,
@@ -696,10 +826,16 @@ mod tests {
             transition_dag: test_transition_dag(Hash::new([2u8; 32])),
         };
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
         // SPV passed, but the UTXO was never marked unspent in the test RPC,
         // so this must still fail closed on the double-spend check.
-        assert!(result.is_err(), "expected rejection: SPV-valid but unmarked (spent) UTXO must not pass, got {:?}", result);
+        assert!(
+            result.is_err(),
+            "expected rejection: SPV-valid but unmarked (spent) UTXO must not pass, got {:?}",
+            result
+        );
         let err_string = result.unwrap_err().to_string();
         assert!(
             err_string.contains("double-spend") || err_string.contains("spent"),
@@ -731,12 +867,9 @@ mod tests {
             transition_id: vec![1u8; 32],
         };
 
-        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
-            vec![],
-            Hash::new([3u8; 32]),
-            0,
-            100,
-        ).unwrap();
+        let inclusion_proof =
+            csv_protocol::proof_taxonomy::InclusionProof::new(vec![], Hash::new([3u8; 32]), 0, 100)
+                .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 100u64.to_le_bytes().to_vec(),
@@ -748,11 +881,7 @@ mod tests {
             is_deterministic: false,
         };
 
-        let anchor_ref = csv_hash::seal::CommitAnchor::new(
-            vec![2u8; 32],
-            100,
-            vec![],
-        ).unwrap();
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(vec![2u8; 32], 100, vec![]).unwrap();
 
         let proof_bundle = ProofBundle {
             version: 1,
@@ -765,8 +894,14 @@ mod tests {
             transition_dag: test_transition_dag(Hash::new([2u8; 32])),
         };
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        assert!(result.is_ok(), "expected success: SPV-valid, finalized, unspent UTXO, got {:?}", result);
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
+        assert!(
+            result.is_ok(),
+            "expected success: SPV-valid, finalized, unspent UTXO, got {:?}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -795,12 +930,9 @@ mod tests {
             transition_id: vec![1u8; 32],
         };
 
-        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
-            vec![],
-            Hash::new([3u8; 32]),
-            0,
-            100,
-        ).unwrap();
+        let inclusion_proof =
+            csv_protocol::proof_taxonomy::InclusionProof::new(vec![], Hash::new([3u8; 32]), 0, 100)
+                .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 100u64.to_le_bytes().to_vec(),
@@ -812,11 +944,7 @@ mod tests {
             is_deterministic: false,
         };
 
-        let anchor_ref = csv_hash::seal::CommitAnchor::new(
-            vec![2u8; 32],
-            100,
-            vec![],
-        ).unwrap();
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(vec![2u8; 32], 100, vec![]).unwrap();
 
         let proof_bundle = ProofBundle {
             version: 1,
@@ -829,8 +957,14 @@ mod tests {
             transition_dag: test_transition_dag(Hash::new([2u8; 32])),
         };
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        assert!(result.is_err(), "replayed proof for a consumed UTXO must be rejected, got {:?}", result);
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
+        assert!(
+            result.is_err(),
+            "replayed proof for a consumed UTXO must be rejected, got {:?}",
+            result
+        );
         let err_string = result.unwrap_err().to_string();
         assert!(
             err_string.contains("double-spend") || err_string.contains("spent"),
@@ -862,7 +996,8 @@ mod tests {
             Hash::new([3u8; 32]),
             0,
             100, // block_height 100, current height 105 = 5 confirmations
-        ).unwrap();
+        )
+        .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 5u64.to_le_bytes().to_vec(),
@@ -874,11 +1009,7 @@ mod tests {
             is_deterministic: false,
         };
 
-        let anchor_ref = csv_hash::seal::CommitAnchor::new(
-            vec![2u8; 32],
-            100,
-            vec![],
-        ).unwrap();
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(vec![2u8; 32], 100, vec![]).unwrap();
 
         let proof_bundle = ProofBundle {
             version: 1,
@@ -891,7 +1022,9 @@ mod tests {
             transition_dag: test_transition_dag(Hash::new([2u8; 32])),
         };
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
         // Should fail due to insufficient confirmations (need 6, got 5)
         assert!(result.is_err());
     }
@@ -921,7 +1054,8 @@ mod tests {
             Hash::new([3u8; 32]),
             0,
             100, // block_height 100, current height 106 = 6 confirmations
-        ).unwrap();
+        )
+        .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 6u64.to_le_bytes().to_vec(),
@@ -933,11 +1067,7 @@ mod tests {
             is_deterministic: false,
         };
 
-        let anchor_ref = csv_hash::seal::CommitAnchor::new(
-            vec![2u8; 32],
-            100,
-            vec![],
-        ).unwrap();
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(vec![2u8; 32], 100, vec![]).unwrap();
 
         let proof_bundle = ProofBundle {
             version: 1,
@@ -950,11 +1080,17 @@ mod tests {
             transition_dag: test_transition_dag(Hash::new([2u8; 32])),
         };
 
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
         // Confirmations are sufficient and SPV passes, but the UTXO was
         // never marked unspent in this test's RPC, so this must still fail
         // closed on the double-spend check rather than succeed.
-        assert!(result.is_err(), "expected rejection on unmarked (spent) UTXO despite sufficient confirmations, got {:?}", result);
+        assert!(
+            result.is_err(),
+            "expected rejection on unmarked (spent) UTXO despite sufficient confirmations, got {:?}",
+            result
+        );
         let err_string = result.unwrap_err().to_string();
         assert!(
             err_string.contains("double-spend") || err_string.contains("spent"),
@@ -987,12 +1123,9 @@ mod tests {
             transition_id: vec![1u8; 32],
         };
 
-        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
-            vec![],
-            Hash::new([3u8; 32]),
-            0,
-            100,
-        ).unwrap();
+        let inclusion_proof =
+            csv_protocol::proof_taxonomy::InclusionProof::new(vec![], Hash::new([3u8; 32]), 0, 100)
+                .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 100u64.to_le_bytes().to_vec(),
@@ -1004,11 +1137,7 @@ mod tests {
             is_deterministic: false,
         };
 
-        let anchor_ref = csv_hash::seal::CommitAnchor::new(
-            vec![2u8; 32],
-            100,
-            vec![],
-        ).unwrap();
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(vec![2u8; 32], 100, vec![]).unwrap();
 
         let proof_bundle = ProofBundle {
             version: 1,
@@ -1025,8 +1154,14 @@ mod tests {
         // lock tx is reported as already spent - this is the replay/double-
         // mint guard: a Bitcoin lock UTXO that has already been consumed
         // must not be usable to authorize a second destination mint.
-        let result = adapter.validate_source_proof(&transfer, &proof_bundle).await;
-        assert!(result.is_err(), "expected validate_source_proof to reject a spent/already-consumed UTXO, got {:?}", result);
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
+        assert!(
+            result.is_err(),
+            "expected validate_source_proof to reject a spent/already-consumed UTXO, got {:?}",
+            result
+        );
         let err_string = result.unwrap_err().to_string();
         assert!(
             err_string.contains("double-spend") || err_string.contains("spent"),
@@ -1057,14 +1192,12 @@ mod tests {
             vec![3u8; 32], // Different Sanad ID in proof
             100,
             vec![],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
-            vec![],
-            Hash::new([4u8; 32]),
-            0,
-            100,
-        ).unwrap();
+        let inclusion_proof =
+            csv_protocol::proof_taxonomy::InclusionProof::new(vec![], Hash::new([4u8; 32]), 0, 100)
+                .unwrap();
 
         let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
             finality_data: 100u64.to_le_bytes().to_vec(),

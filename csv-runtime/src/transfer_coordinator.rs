@@ -8,7 +8,6 @@
 
 #![allow(missing_docs)]
 
-use csv_adapter_core::{AdapterRegistry, CrossChainTransfer};
 use crate::distributed_coordinator_lease::{CoordinatorId, CoordinatorLease};
 use crate::error::TransferCoordinatorError;
 use crate::event_bus::{EventBus, TransferEvent};
@@ -20,6 +19,7 @@ use crate::execution_journal::ExecutionJournal;
 #[cfg(test)]
 use crate::execution_journal::InMemoryJournal;
 use crate::recovery::{CheckpointManager, TransferStage};
+use csv_adapter_core::{AdapterRegistry, CrossChainTransfer, TxFinality};
 use csv_admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
@@ -58,7 +58,9 @@ fn runtime_signature_scheme(
     Ok(scheme)
 }
 
-fn replay_id_from_hash(replay_id: csv_hash::ReplayIdHash) -> csv_protocol::proof_taxonomy::ReplayId {
+fn replay_id_from_hash(
+    replay_id: csv_hash::ReplayIdHash,
+) -> csv_protocol::proof_taxonomy::ReplayId {
     csv_protocol::proof_taxonomy::ReplayId {
         version: csv_protocol::proof_taxonomy::ReplayId::CURRENT_VERSION,
         id: *replay_id.0.as_bytes(),
@@ -149,6 +151,29 @@ fn registry_entry_to_transfer(
     }
 }
 
+/// Outcome of a single transfer advance.
+///
+/// The transfer state machine is resumable: after the lock is on-chain, every
+/// step is idempotent and journaled. A single `advance` either completes the
+/// transfer (`Completed`) or reports that the lock has not yet reached the
+/// required finality depth (`Pending`) — the latter is a normal, non-error
+/// result that both the poll-and-block driver (loop until `Completed`) and the
+/// resume driver (return and re-invoke later) build on.
+#[derive(Debug, Clone)]
+pub enum TransferOutcome {
+    /// The transfer completed: destination mint confirmed, replay entry consumed.
+    Completed(TransferReceipt),
+    /// The lock has not yet reached the required confirmation depth. The lock is
+    /// on-chain and journaled; re-invoking `advance`/resume later will progress
+    /// it once confirmations accrue. Never re-locks.
+    Pending {
+        /// Confirmations observed on the source-chain lock transaction.
+        confirmations: u64,
+        /// Confirmation depth required by the source chain's finality policy.
+        required: u64,
+    },
+}
+
 /// Receipt returned after a successful transfer
 #[derive(Debug, Clone)]
 pub struct TransferReceipt {
@@ -188,8 +213,9 @@ pub struct TransferCoordinator {
     /// Admission controller for bounded runtime work
     admission_controller: AdmissionController,
     /// Current lease observed for each transfer in this coordinator process.
-    active_execution_leases:
-        std::sync::Mutex<std::collections::HashMap<csv_hash::SanadId, crate::user_runtime_lease::TransferLease>>,
+    active_execution_leases: std::sync::Mutex<
+        std::collections::HashMap<csv_hash::SanadId, crate::user_runtime_lease::TransferLease>,
+    >,
 }
 
 impl TransferCoordinator {
@@ -335,8 +361,10 @@ impl TransferCoordinator {
             .active_execution_leases
             .lock()
             .map_err(|e| TransferCoordinatorError::LeaseViolation(e.to_string()))?;
-        let transfer_id: csv_hash::SanadId = lease.transfer_id.clone().try_into()
-            .map_err(|_| TransferCoordinatorError::LeaseViolation("Invalid transfer ID".to_string()))?;
+        let transfer_id: csv_hash::SanadId =
+            lease.transfer_id.clone().try_into().map_err(|_| {
+                TransferCoordinatorError::LeaseViolation("Invalid transfer ID".to_string())
+            })?;
         if let Some(current) = active.get(&transfer_id) {
             if lease.epoch < current.epoch {
                 return Err(TransferCoordinatorError::LeaseViolation(
@@ -385,12 +413,62 @@ impl TransferCoordinator {
     /// 3. Destination chain capabilities permit mint
     ///
     /// This function is the only authority path permitted to request a destination mint.
+    ///
+    /// Backward-compatible blocking entry point: a lock that has not yet reached
+    /// finality is surfaced as [`TransferCoordinatorError::FinalityFailed`]. New
+    /// callers that want to drive the poll-and-block or resume flows should use
+    /// [`TransferCoordinator::execute_outcome`], which returns a first-class
+    /// [`TransferOutcome::Pending`] instead of an error.
     pub async fn execute(
         &self,
         transfer: CrossChainTransfer,
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        match self
+            .execute_outcome(transfer, adapter_registry, runtime_ctx)
+            .await?
+        {
+            TransferOutcome::Completed(receipt) => Ok(receipt),
+            TransferOutcome::Pending {
+                confirmations,
+                required,
+            } => Err(TransferCoordinatorError::FinalityFailed(format!(
+                "lock has {} confirmations, {} required",
+                confirmations, required
+            ))),
+        }
+    }
+
+    /// Query the real confirmation status of the transfer's source-chain lock
+    /// transaction. This is the single finality primitive shared by the fresh
+    /// execution path and every resume path, so the "is the lock final?" decision
+    /// can never diverge between them.
+    async fn lock_finality_status(
+        &self,
+        transfer: &CrossChainTransfer,
+        adapter_registry: &dyn AdapterRegistry,
+    ) -> Result<TxFinality, TransferCoordinatorError> {
+        let lock_tx_hex = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
+        adapter_registry
+            .tx_finality(&transfer.source_chain, &lock_tx_hex)
+            .await
+            .map_err(|e| TransferCoordinatorError::FinalityFailed(e.to_string()))
+    }
+
+    /// Execute a cross-chain transfer, returning a [`TransferOutcome`].
+    ///
+    /// This is the resumable core: it locks (if not already locked), journals,
+    /// and then gates proof-building on real source-chain confirmations. When the
+    /// lock has not yet reached `finality_depth`, it returns
+    /// [`TransferOutcome::Pending`] rather than building a proof against an
+    /// unmined transaction.
+    pub async fn execute_outcome(
+        &self,
+        transfer: CrossChainTransfer,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
+    ) -> Result<TransferOutcome, TransferCoordinatorError> {
         // Assert lease ownership invariant
         self.assert_single_active_coordinator(&transfer.id).await?;
 
@@ -403,7 +481,12 @@ impl TransferCoordinator {
                 runtime_ctx.lease.owner_runtime_id, runtime_ctx.runtime_instance
             )));
         }
-        let lease_transfer_id: csv_protocol::sanad::SanadId = runtime_ctx.lease.transfer_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+        let lease_transfer_id: csv_protocol::sanad::SanadId = runtime_ctx
+            .lease
+            .transfer_id
+            .clone()
+            .try_into()
+            .unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
         if lease_transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
             return Err(TransferCoordinatorError::LeaseViolation(
                 "Lease does not authorize the transfer sanad".to_string(),
@@ -456,10 +539,7 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
         // Atomic idempotent consume-if-unconsumed: prevents duplicate mints
-        let consume_result = self
-            .replay_db
-            .consume_if_unconsumed(&replay_id.0)
-            .await;
+        let consume_result = self.replay_db.consume_if_unconsumed(&replay_id.0).await;
         match consume_result {
             Ok(()) => {}
             Err(e) => match e {
@@ -467,7 +547,9 @@ impl TransferCoordinator {
                     // Append ReplayDetected event to EventStore (durable write FIRST)
                     if let Err(e) = self.event_store.append(
                         &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                            csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
+                            csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
+                                *transfer.sanad_id.as_bytes(),
+                            )),
                             crate::event_envelope::EventType::from_static(
                                 crate::event_envelope::EventType::TRANSFER_REPLAY_DETECTED,
                             ),
@@ -518,7 +600,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(msg.clone()),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ReplayDbError(msg.to_string()));
@@ -536,7 +618,7 @@ impl TransferCoordinator {
                                 "Replay ID not found".to_string(),
                             ),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ReplayDbError(
@@ -571,7 +653,8 @@ impl TransferCoordinator {
             Some(transfer_to_registry_entry(&transfer)?)
         };
         if let Some(entry) = registry_entry
-            && let Err(e) = self.replay_db.store_transfer_entry(&entry).await {
+            && let Err(e) = self.replay_db.store_transfer_entry(&entry).await
+        {
             return Err(TransferCoordinatorError::RuntimeError(format!(
                 "Failed to persist transfer entry: {}",
                 e
@@ -720,7 +803,7 @@ impl TransferCoordinator {
             }
         }
 
-        let lock_result = lock_result.ok_or_else(|| {
+        let mut lock_result = lock_result.ok_or_else(|| {
             let _ = self
                 .execution_journal
                 .record(crate::execution_journal::TransferPhaseEntry {
@@ -737,7 +820,7 @@ impl TransferCoordinator {
                             .unwrap_or_else(|| "Unknown error".to_string()),
                     ),
                     attempt: 1,
-                transfer_context: None,
+                    transfer_context: None,
                 });
             TransferCoordinatorError::LockFailed(
                 last_error
@@ -765,7 +848,9 @@ impl TransferCoordinator {
         // Persist transfer entry with lock_tx_hash now available
         let mut updated_transfer = transfer.clone();
         updated_transfer.lock_tx_hash = hex::decode(lock_result.tx_hash.trim_start_matches("0x"))
-            .map_err(|e| TransferCoordinatorError::InvalidTxHash(format!("Failed to decode lock tx hash: {}", e)))?;
+            .map_err(|e| {
+            TransferCoordinatorError::InvalidTxHash(format!("Failed to decode lock tx hash: {}", e))
+        })?;
         let registry_entry = transfer_to_registry_entry(&updated_transfer)?;
         if let Err(e) = self.replay_db.store_transfer_entry(&registry_entry).await {
             return Err(TransferCoordinatorError::RuntimeError(format!(
@@ -773,6 +858,12 @@ impl TransferCoordinator {
                 e
             )));
         }
+
+        // From here on, use the transfer with the real lock_tx_hash populated.
+        // The SDK submits an empty lock_tx_hash (the coordinator fills it after
+        // the lock broadcasts), so proof-building and source-proof validation
+        // MUST see the populated 32-byte txid, not the original empty vector.
+        let transfer = updated_transfer;
 
         // Create checkpoint after lock confirmed
         self.checkpoint_manager
@@ -802,7 +893,9 @@ impl TransferCoordinator {
         // Append AwaitingFinality event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
             &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
+                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
+                    *transfer.sanad_id.as_bytes(),
+                )),
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_FINALITY_AWAITED,
                 ),
@@ -841,7 +934,7 @@ impl TransferCoordinator {
         ));
 
         // Use runtime policy for finality depth, not adapter's local policy
-        let _required_finality = runtime_ctx
+        let required_finality = runtime_ctx
             .policy
             .finality_depth_for_chain(&transfer.source_chain)
             .ok_or_else(|| {
@@ -851,12 +944,15 @@ impl TransferCoordinator {
                 ))
             })?;
 
-        // Hard-fail finality check: abort transfer if observed block height
-        // does not meet the required finality depth for the source chain.
-        // Finality is never optional, regardless of runtime mode.
-        runtime_ctx
-            .policy
-            .check_finality_threshold(&transfer.source_chain, lock_result.block_height)
+        // Real finality gate: query the actual confirmation depth of the lock
+        // transaction on the source chain. If it has not yet reached
+        // `required_finality`, return Pending — the lock is on-chain and
+        // journaled at AwaitingFinality, so a later advance/resume progresses it
+        // once confirmations accrue. This replaces the old vacuous height check
+        // that let execution march into proof-building against an unmined tx.
+        let finality = self
+            .lock_finality_status(&transfer, adapter_registry)
+            .await
             .map_err(|e| {
                 let _ =
                     self.execution_journal
@@ -869,10 +965,28 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         });
-                TransferCoordinatorError::FinalityFailed(e)
+                e
             })?;
+
+        if finality.confirmations < required_finality {
+            tracing::info!(
+                "Transfer {} awaiting finality: {}/{} confirmations",
+                transfer.id,
+                finality.confirmations,
+                required_finality
+            );
+            return Ok(TransferOutcome::Pending {
+                confirmations: finality.confirmations,
+                required: required_finality,
+            });
+        }
+
+        // Correct the lock height to the true confirming block so the inclusion
+        // proof is built against the block the tx was actually mined in (the
+        // adapter's lock step reports the tip-at-broadcast height, not this).
+        lock_result.block_height = finality.block_height;
 
         // Record phase entry: AwaitingFinality (Completed)
         self.execution_journal
@@ -908,7 +1022,9 @@ impl TransferCoordinator {
         // Append BuildingProof event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
             &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
+                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
+                    *transfer.sanad_id.as_bytes(),
+                )),
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_PROOF_BUILT,
                 ),
@@ -971,10 +1087,8 @@ impl TransferCoordinator {
                     e
                 ))
             })?;
-        let seal_is_consumed = matches!(
-            seal_status,
-            csv_adapter_core::SealRegistryStatus::Consumed
-        );
+        let seal_is_consumed =
+            matches!(seal_status, csv_adapter_core::SealRegistryStatus::Consumed);
         let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
 
         let required_confirmations = runtime_ctx
@@ -1026,7 +1140,7 @@ impl TransferCoordinator {
                                     .join("; "),
                             ),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ProofVerificationFailed(
@@ -1042,7 +1156,9 @@ impl TransferCoordinator {
                 // Append ProofVerified event to EventStore (durable write FIRST)
                 if let Err(e) = self.event_store.append(
                     &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                        csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
+                        csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
+                            *transfer.sanad_id.as_bytes(),
+                        )),
                         crate::event_envelope::EventType::from_static(
                             crate::event_envelope::EventType::TRANSFER_PROOF_VERIFIED,
                         ),
@@ -1088,7 +1204,7 @@ impl TransferCoordinator {
                         ts: std::time::SystemTime::now(),
                         outcome: crate::execution_journal::PhaseOutcome::Completed,
                         attempt: 1,
-                transfer_context: None,
+                        transfer_context: None,
                     })
                     .map_err(|e| {
                         TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e))
@@ -1106,7 +1222,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         });
                 return Err(TransferCoordinatorError::ProofVerificationFailed(
                     e.to_string(),
@@ -1115,10 +1231,9 @@ impl TransferCoordinator {
         }
 
         // Serialize proof bundle for minting using canonical CBOR
-        let proof_bundle_bytes =
-            proof_bundle.to_canonical_bytes().map_err(|e| {
-                TransferCoordinatorError::ProofBuildFailed(format!("Serialization failed: {}", e))
-            })?;
+        let proof_bundle_bytes = proof_bundle.to_canonical_bytes().map_err(|e| {
+            TransferCoordinatorError::ProofBuildFailed(format!("Serialization failed: {}", e))
+        })?;
         let proof_hash = proof_payload_hash(&proof_bundle_bytes);
 
         // Persist verified proof material before any destination-chain mutation.
@@ -1167,7 +1282,7 @@ impl TransferCoordinator {
                                 "Circuit breaker is open".to_string(),
                             ),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         });
                 let typed_replay_id = replay_id_from_hash(csv_hash::ReplayIdHash(replay_id));
                 let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
@@ -1241,7 +1356,7 @@ impl TransferCoordinator {
                             ts: std::time::SystemTime::now(),
                             outcome: crate::execution_journal::PhaseOutcome::Failed(error.clone()),
                             attempt: 1,
-                transfer_context: None,
+                            transfer_context: None,
                         });
                 let typed_replay_id = replay_id_from_hash(csv_hash::ReplayIdHash(replay_id));
                 let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
@@ -1320,7 +1435,9 @@ impl TransferCoordinator {
         // Append Complete event to EventStore (durable write FIRST)
         if let Err(e) = self.event_store.append(
             &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(*transfer.sanad_id.as_bytes())),
+                csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
+                    *transfer.sanad_id.as_bytes(),
+                )),
                 crate::event_envelope::EventType::from_static(
                     crate::event_envelope::EventType::TRANSFER_COMPLETE,
                 ),
@@ -1380,12 +1497,12 @@ impl TransferCoordinator {
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
-        Ok(TransferReceipt {
+        Ok(TransferOutcome::Completed(TransferReceipt {
             transfer_id: transfer.id,
             replay_id,
             lock_tx_hash: lock_result.tx_hash,
             mint_tx_hash: mint_result.tx_hash,
-        })
+        }))
     }
 
     /// Subscribe to transfer events
@@ -1559,18 +1676,27 @@ impl TransferCoordinator {
                     transfer
                 } else if let Some(ctx) = recovery_entry.transfer_context {
                     // Reconstruct transfer from journal context
-                    tracing::info!("Reconstructing transfer from journal context for LockConfirmed recovery");
+                    tracing::info!(
+                        "Reconstructing transfer from journal context for LockConfirmed recovery"
+                    );
                     CrossChainTransfer {
                         id: transfer_id.to_string(),
                         source_chain: ctx.source_chain.clone(),
                         destination_chain: ctx.destination_chain.clone(),
                         lock_tx_hash: {
-                            let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                            let hash: csv_hash::Hash = ctx
+                                .lock_tx_hash
+                                .clone()
+                                .try_into()
+                                .unwrap_or_else(|_| csv_hash::Hash::zero());
                             hash.as_slice().to_vec()
                         },
                         lock_output_index: 0,
                         sanad_id: {
-                            let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                            let sanad_id: csv_protocol::sanad::SanadId =
+                                ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                    csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                });
                             sanad_id.0
                         },
                         transition_id: vec![],
@@ -1588,17 +1714,21 @@ impl TransferCoordinator {
                 // Check for persisted proof checkpoint before regenerating
                 if let Some(proof_payload) = &recovery_entry.proof_payload {
                     if !proof_payload.is_empty() {
-                        tracing::info!("Resuming from ProofBuilding - using persisted proof checkpoint");
+                        tracing::info!(
+                            "Resuming from ProofBuilding - using persisted proof checkpoint"
+                        );
                         // Proof was already built and persisted, skip regeneration
                         let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
-                            csv_protocol::proof_taxonomy::ProofBundle::from_canonical_bytes(proof_payload)
-                                .map_err(|e| {
-                                    TransferCoordinatorError::ProofVerificationFailed(format!(
-                                        "Persisted proof checkpoint is malformed: {}",
-                                        e
-                                    ))
-                                })?;
-                        
+                            csv_protocol::proof_taxonomy::ProofBundle::from_canonical_bytes(
+                                proof_payload,
+                            )
+                            .map_err(|e| {
+                                TransferCoordinatorError::ProofVerificationFailed(format!(
+                                    "Persisted proof checkpoint is malformed: {}",
+                                    e
+                                ))
+                            })?;
+
                         // Reconstruct transfer from journal context if needed
                         let transfer = if let Some(transfer) = cached_transfer {
                             transfer
@@ -1608,12 +1738,19 @@ impl TransferCoordinator {
                                 source_chain: ctx.source_chain.clone(),
                                 destination_chain: ctx.destination_chain.clone(),
                                 lock_tx_hash: {
-                                    let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                                    let hash: csv_hash::Hash = ctx
+                                        .lock_tx_hash
+                                        .clone()
+                                        .try_into()
+                                        .unwrap_or_else(|_| csv_hash::Hash::zero());
                                     hash.as_bytes().to_vec()
                                 },
                                 lock_output_index: 0,
                                 sanad_id: {
-                                    let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                                    let sanad_id: csv_protocol::sanad::SanadId =
+                                        ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                            csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                        });
                                     sanad_id.0
                                 },
                                 transition_id: vec![],
@@ -1624,14 +1761,15 @@ impl TransferCoordinator {
                                     .to_string(),
                             ));
                         };
-                        
+
                         // Verify the persisted proof and proceed to mint
-                        let lock_tx_hash = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
+                        let lock_tx_hash =
+                            hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
                         let confirmed_lock = adapter_registry
                             .confirm_tx(&transfer.source_chain, &lock_tx_hash)
                             .await
                             .map_err(|e| TransferCoordinatorError::FinalityFailed(e.to_string()))?;
-                        
+
                         self.verify_recovery_proof(
                             &transfer,
                             &proof_bundle,
@@ -1640,9 +1778,14 @@ impl TransferCoordinator {
                             &runtime_ctx,
                         )
                         .await?;
-                        
-                        self.execute_from_proof(transfer, proof_payload.clone(), adapter_registry, runtime_ctx)
-                            .await
+
+                        self.execute_from_proof(
+                            transfer,
+                            proof_payload.clone(),
+                            adapter_registry,
+                            runtime_ctx,
+                        )
+                        .await
                     } else {
                         // No persisted proof, need to regenerate
                         let transfer = if let Some(transfer) = cached_transfer {
@@ -1653,12 +1796,19 @@ impl TransferCoordinator {
                                 source_chain: ctx.source_chain.clone(),
                                 destination_chain: ctx.destination_chain.clone(),
                                 lock_tx_hash: {
-                                    let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                                    let hash: csv_hash::Hash = ctx
+                                        .lock_tx_hash
+                                        .clone()
+                                        .try_into()
+                                        .unwrap_or_else(|_| csv_hash::Hash::zero());
                                     hash.as_bytes().to_vec()
                                 },
                                 lock_output_index: 0,
                                 sanad_id: {
-                                    let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                                    let sanad_id: csv_protocol::sanad::SanadId =
+                                        ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                            csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                        });
                                     sanad_id.0
                                 },
                                 transition_id: vec![],
@@ -1682,12 +1832,19 @@ impl TransferCoordinator {
                             source_chain: ctx.source_chain.clone(),
                             destination_chain: ctx.destination_chain.clone(),
                             lock_tx_hash: {
-                                let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                                let hash: csv_hash::Hash = ctx
+                                    .lock_tx_hash
+                                    .clone()
+                                    .try_into()
+                                    .unwrap_or_else(|_| csv_hash::Hash::zero());
                                 hash.as_bytes().to_vec()
                             },
                             lock_output_index: 0,
                             sanad_id: {
-                                let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                                let sanad_id: csv_protocol::sanad::SanadId =
+                                    ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                        csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                    });
                                 sanad_id.0
                             },
                             transition_id: vec![],
@@ -1731,18 +1888,27 @@ impl TransferCoordinator {
                 let transfer = if let Some(transfer) = cached_transfer {
                     transfer
                 } else if let Some(ctx) = recovery_entry.transfer_context {
-                    tracing::info!("Reconstructing transfer from journal context for AwaitingFinality recovery");
+                    tracing::info!(
+                        "Reconstructing transfer from journal context for AwaitingFinality recovery"
+                    );
                     CrossChainTransfer {
                         id: transfer_id.to_string(),
                         source_chain: ctx.source_chain.clone(),
                         destination_chain: ctx.destination_chain.clone(),
                         lock_tx_hash: {
-                            let hash: csv_hash::Hash = ctx.lock_tx_hash.clone().try_into().unwrap_or_else(|_| csv_hash::Hash::zero());
+                            let hash: csv_hash::Hash = ctx
+                                .lock_tx_hash
+                                .clone()
+                                .try_into()
+                                .unwrap_or_else(|_| csv_hash::Hash::zero());
                             hash.as_bytes().to_vec()
                         },
                         lock_output_index: 0,
                         sanad_id: {
-                            let sanad_id: csv_protocol::sanad::SanadId = ctx.sanad_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+                            let sanad_id: csv_protocol::sanad::SanadId =
+                                ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                    csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                });
                             sanad_id.0
                         },
                         transition_id: vec![],
@@ -1797,6 +1963,91 @@ impl TransferCoordinator {
         }
     }
 
+    /// Resume a transfer, returning a [`TransferOutcome`].
+    ///
+    /// This is the resume driver used by non-blocking callers (a CLI `resume`
+    /// subcommand, a web wallet refresh, a background worker). For a lock that is
+    /// on-chain but not yet final it returns [`TransferOutcome::Pending`] instead
+    /// of an error, so the caller can report "awaiting finality — N/M confs" and
+    /// re-invoke later. It never re-locks: the lock is gated on the journal stage
+    /// (`LockConfirmed`/`AwaitingFinality`) and driven by the shared finality
+    /// core. All other stages delegate to [`TransferCoordinator::resume_transfer`]
+    /// and are reported as `Completed`.
+    pub async fn resume_transfer_outcome(
+        &self,
+        transfer_id: &str,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
+    ) -> Result<TransferOutcome, TransferCoordinatorError> {
+        self.assert_single_active_coordinator(transfer_id).await?;
+
+        let recovery_entry = self
+            .execution_journal
+            .latest_entry(transfer_id)
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?
+            .ok_or(TransferCoordinatorError::NotFound)?;
+
+        match recovery_entry.phase {
+            crate::recovery::TransferStage::LockConfirmed
+            | crate::recovery::TransferStage::AwaitingFinality
+            | crate::recovery::TransferStage::LockSubmitted => {
+                let transfers = self.replay_db.load_all_transfers().await.map_err(|e| {
+                    TransferCoordinatorError::RuntimeError(format!(
+                        "Failed to load transfers: {}",
+                        e
+                    ))
+                })?;
+                let cached_transfer = transfers
+                    .iter()
+                    .find(|entry| {
+                        entry.transfer_id == transfer_id
+                            || (entry.transfer_id.is_empty()
+                                && hex::encode(entry.sanad_id.as_bytes()) == transfer_id)
+                    })
+                    .map(|entry| registry_entry_to_transfer(entry, transfer_id.to_string()));
+
+                let transfer = if let Some(transfer) = cached_transfer {
+                    transfer
+                } else if let Some(ctx) = recovery_entry.transfer_context {
+                    CrossChainTransfer {
+                        id: transfer_id.to_string(),
+                        source_chain: ctx.source_chain.clone(),
+                        destination_chain: ctx.destination_chain.clone(),
+                        lock_tx_hash: {
+                            let hash: csv_hash::Hash = ctx
+                                .lock_tx_hash
+                                .clone()
+                                .try_into()
+                                .unwrap_or_else(|_| csv_hash::Hash::zero());
+                            hash.as_bytes().to_vec()
+                        },
+                        lock_output_index: 0,
+                        sanad_id: {
+                            let sanad_id: csv_protocol::sanad::SanadId =
+                                ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                    csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                });
+                            sanad_id.0
+                        },
+                        transition_id: vec![],
+                    }
+                } else {
+                    return Err(TransferCoordinatorError::RuntimeError(
+                        "Cannot resume from lock phase - transfer context missing from journal"
+                            .to_string(),
+                    ));
+                };
+
+                self.execute_from_lock_outcome(transfer, adapter_registry, runtime_ctx)
+                    .await
+            }
+            _ => self
+                .resume_transfer(transfer_id, adapter_registry, runtime_ctx)
+                .await
+                .map(TransferOutcome::Completed),
+        }
+    }
+
     /// Execute transfer from lock phase (skip lock, go to proof generation).
     ///
     /// This helper method is used for crash recovery when the lock transaction
@@ -1825,7 +2076,12 @@ impl TransferCoordinator {
                 "Recovery requires an active lease owned by the calling runtime".to_string(),
             ));
         }
-        let lease_transfer_id: csv_protocol::sanad::SanadId = runtime_ctx.lease.transfer_id.clone().try_into().unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
+        let lease_transfer_id: csv_protocol::sanad::SanadId = runtime_ctx
+            .lease
+            .transfer_id
+            .clone()
+            .try_into()
+            .unwrap_or_else(|_| csv_protocol::sanad::SanadId(csv_hash::Hash::zero()));
         if lease_transfer_id.as_bytes() != transfer.sanad_id.as_bytes() {
             return Err(TransferCoordinatorError::LeaseViolation(
                 "Recovery lease does not authorize the transfer sanad".to_string(),
@@ -1878,10 +2134,8 @@ impl TransferCoordinator {
                     e
                 ))
             })?;
-        let seal_is_consumed = matches!(
-            seal_status,
-            csv_adapter_core::SealRegistryStatus::Consumed
-        );
+        let seal_is_consumed =
+            matches!(seal_status, csv_adapter_core::SealRegistryStatus::Consumed);
         let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
         let required_confirmations = runtime_ctx
             .policy
@@ -1967,18 +2221,48 @@ impl TransferCoordinator {
         adapter_registry: &dyn AdapterRegistry,
         runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
     ) -> Result<TransferReceipt, TransferCoordinatorError> {
+        match self
+            .execute_from_lock_outcome(transfer, adapter_registry, runtime_ctx)
+            .await?
+        {
+            TransferOutcome::Completed(receipt) => Ok(receipt),
+            TransferOutcome::Pending {
+                confirmations,
+                required,
+            } => Err(TransferCoordinatorError::FinalityFailed(format!(
+                "lock has {} confirmations, {} required",
+                confirmations, required
+            ))),
+        }
+    }
+
+    /// Resume execution from a confirmed (or pending) lock, returning a
+    /// [`TransferOutcome`].
+    ///
+    /// This is the resume-driver core: it never re-locks (the lock is already
+    /// on-chain), gates proof-building on real source-chain confirmations, and
+    /// returns [`TransferOutcome::Pending`] when the lock has not yet reached the
+    /// required depth. Idempotency of the mint is guaranteed by the replay
+    /// entry → Consumed promotion downstream.
+    pub async fn execute_from_lock_outcome(
+        &self,
+        transfer: CrossChainTransfer,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: crate::user_runtime_lease::RuntimeExecutionContext,
+    ) -> Result<TransferOutcome, TransferCoordinatorError> {
         let replay_id = self
             .validate_recovery_context(&transfer, &runtime_ctx)
             .await?;
-        let lock_tx_hash = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
-        let confirmed_lock = adapter_registry
-            .confirm_tx(&transfer.source_chain, &lock_tx_hash)
-            .await
-            .map_err(|e| TransferCoordinatorError::LockFailed(e.to_string()))?;
-        let lock_result = csv_adapter_core::LockResult {
-            tx_hash: confirmed_lock.tx_hash,
-            block_height: confirmed_lock.block_height,
-        };
+
+        let required_finality = runtime_ctx
+            .policy
+            .finality_depth_for_chain(&transfer.source_chain)
+            .ok_or_else(|| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "No finality depth configured for chain: {}",
+                    transfer.source_chain
+                ))
+            })?;
 
         // Build transfer context for crash recovery
         let sanad_bytes: [u8; 32] = {
@@ -2012,10 +2296,28 @@ impl TransferCoordinator {
                 transfer_context: Some(transfer_context.clone()),
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
-        runtime_ctx
-            .policy
-            .check_finality_threshold(&transfer.source_chain, lock_result.block_height)
-            .map_err(TransferCoordinatorError::FinalityFailed)?;
+
+        // Real finality gate (same primitive as the fresh execution path).
+        let finality = self
+            .lock_finality_status(&transfer, adapter_registry)
+            .await?;
+        if finality.confirmations < required_finality {
+            tracing::info!(
+                "Transfer {} awaiting finality (resume): {}/{} confirmations",
+                transfer.id,
+                finality.confirmations,
+                required_finality
+            );
+            return Ok(TransferOutcome::Pending {
+                confirmations: finality.confirmations,
+                required: required_finality,
+            });
+        }
+
+        let lock_result = csv_adapter_core::LockResult {
+            tx_hash: hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes()),
+            block_height: finality.block_height,
+        };
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
@@ -2085,8 +2387,10 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
-        self.execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
-            .await
+        let receipt = self
+            .execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
+            .await?;
+        Ok(TransferOutcome::Completed(receipt))
     }
 
     /// Execute transfer from proof phase (skip proof generation, go to mint).
@@ -2127,15 +2431,16 @@ impl TransferCoordinator {
                         e
                     ))
                 })?;
-        let lock_tx_hash = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
-        let confirmed_lock = adapter_registry
-            .confirm_tx(&transfer.source_chain, &lock_tx_hash)
-            .await
-            .map_err(|e| TransferCoordinatorError::FinalityFailed(e.to_string()))?;
+        // Re-derive the true confirming height of the lock via the shared
+        // finality primitive (source chains such as Bitcoin do not implement the
+        // generic confirm_tx read port).
+        let finality = self
+            .lock_finality_status(&transfer, adapter_registry)
+            .await?;
         self.verify_recovery_proof(
             &transfer,
             &proof_bundle,
-            confirmed_lock.block_height,
+            finality.block_height,
             adapter_registry,
             &runtime_ctx,
         )
@@ -2258,7 +2563,7 @@ impl TransferCoordinator {
                     e
                 ))
             })?;
-    self.execution_journal
+        self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
                 transfer_id: transfer.id.clone(),
                 replay_id: replay_id_wire.clone(),
@@ -2400,11 +2705,11 @@ pub trait RecoveryContextProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_adapter_core::{
-        ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer,
-        LockResult, MintResult, SealRegistryStatus,
-    };
     use crate::adapter_registry::AdapterRegistryImpl;
+    use csv_adapter_core::{
+        ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer, LockResult, MintResult,
+        SealRegistryStatus,
+    };
     use csv_protocol::finality::ChainCapabilities;
     use csv_protocol::proof_taxonomy::{InclusionProof, ProofBundle};
     use csv_storage::ReplayDatabase;
@@ -2438,9 +2743,7 @@ mod tests {
             }
         }
 
-        fn build_fake_inclusion_proof(
-            sanad_id: &csv_hash::Hash,
-        ) -> Result<ProofBundle, String> {
+        fn build_fake_inclusion_proof(sanad_id: &csv_hash::Hash) -> Result<ProofBundle, String> {
             // Use deterministic proof fixture from csv-testkit
             let mut bundle = csv_testkit::fixtures::TestProofBundle::minimal();
             // Update the seal_ref to match the sanad_id
@@ -2545,10 +2848,7 @@ mod tests {
         async fn check_seal_registry(
             &self,
             _seal_id: &[u8],
-        ) -> Result<
-            csv_adapter_core::SealRegistryStatus,
-            csv_adapter_core::AdapterError,
-        > {
+        ) -> Result<csv_adapter_core::SealRegistryStatus, csv_adapter_core::AdapterError> {
             Ok(csv_adapter_core::SealRegistryStatus::Available)
         }
 
@@ -2963,10 +3263,8 @@ mod tests {
             async fn check_seal_registry(
                 &self,
                 _s: &[u8],
-            ) -> Result<
-                csv_adapter_core::SealRegistryStatus,
-                csv_adapter_core::AdapterError,
-            > {
+            ) -> Result<csv_adapter_core::SealRegistryStatus, csv_adapter_core::AdapterError>
+            {
                 Err(csv_adapter_core::AdapterError::Generic(
                     "Celestia has no transfer seal registry".to_string(),
                 ))

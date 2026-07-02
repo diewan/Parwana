@@ -154,10 +154,18 @@ impl<'de> serde::Deserialize<'de> for MintReceipt {
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let tx_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let block_number = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let timestamp = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let gas_used = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let tx_hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let block_number = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let timestamp = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let gas_used = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
                 Ok(MintReceipt {
                     tx_hash: Hash(tx_hash_bytes),
                     block_number,
@@ -206,9 +214,12 @@ impl<'de> serde::Deserialize<'de> for MintReceipt {
                 }
 
                 let tx_hash = tx_hash.ok_or_else(|| serde::de::Error::missing_field("tx_hash"))?;
-                let block_number = block_number.ok_or_else(|| serde::de::Error::missing_field("block_number"))?;
-                let timestamp = timestamp.ok_or_else(|| serde::de::Error::missing_field("timestamp"))?;
-                let gas_used = gas_used.ok_or_else(|| serde::de::Error::missing_field("gas_used"))?;
+                let block_number =
+                    block_number.ok_or_else(|| serde::de::Error::missing_field("block_number"))?;
+                let timestamp =
+                    timestamp.ok_or_else(|| serde::de::Error::missing_field("timestamp"))?;
+                let gas_used =
+                    gas_used.ok_or_else(|| serde::de::Error::missing_field("gas_used"))?;
 
                 Ok(MintReceipt {
                     tx_hash,
@@ -219,7 +230,11 @@ impl<'de> serde::Deserialize<'de> for MintReceipt {
             }
         }
 
-        deserializer.deserialize_struct("MintReceipt", &["tx_hash", "block_number", "timestamp", "gas_used"], MintReceiptVisitor)
+        deserializer.deserialize_struct(
+            "MintReceipt",
+            &["tx_hash", "block_number", "timestamp", "gas_used"],
+            MintReceiptVisitor,
+        )
     }
 }
 
@@ -322,13 +337,27 @@ impl<'de> serde::Deserialize<'de> for CrossChainTransfer {
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let source_chain = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let destination_chain = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let lock_tx_hash = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
-                let lock_output_index = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
-                let sanad_id_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
-                let transition_id = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(6, &self))?;
+                let id = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let source_chain = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let destination_chain = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let lock_tx_hash = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let lock_output_index = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                let sanad_id_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
+                let transition_id = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(6, &self))?;
                 Ok(CrossChainTransfer {
                     id,
                     source_chain,
@@ -401,12 +430,18 @@ impl<'de> serde::Deserialize<'de> for CrossChainTransfer {
                 }
 
                 let id = id.ok_or_else(|| serde::de::Error::missing_field("id"))?;
-                let source_chain = source_chain.ok_or_else(|| serde::de::Error::missing_field("source_chain"))?;
-                let destination_chain = destination_chain.ok_or_else(|| serde::de::Error::missing_field("destination_chain"))?;
-                let lock_tx_hash = lock_tx_hash.ok_or_else(|| serde::de::Error::missing_field("lock_tx_hash"))?;
-                let lock_output_index = lock_output_index.ok_or_else(|| serde::de::Error::missing_field("lock_output_index"))?;
-                let sanad_id = sanad_id.ok_or_else(|| serde::de::Error::missing_field("sanad_id"))?;
-                let transition_id = transition_id.ok_or_else(|| serde::de::Error::missing_field("transition_id"))?;
+                let source_chain =
+                    source_chain.ok_or_else(|| serde::de::Error::missing_field("source_chain"))?;
+                let destination_chain = destination_chain
+                    .ok_or_else(|| serde::de::Error::missing_field("destination_chain"))?;
+                let lock_tx_hash =
+                    lock_tx_hash.ok_or_else(|| serde::de::Error::missing_field("lock_tx_hash"))?;
+                let lock_output_index = lock_output_index
+                    .ok_or_else(|| serde::de::Error::missing_field("lock_output_index"))?;
+                let sanad_id =
+                    sanad_id.ok_or_else(|| serde::de::Error::missing_field("sanad_id"))?;
+                let transition_id = transition_id
+                    .ok_or_else(|| serde::de::Error::missing_field("transition_id"))?;
 
                 Ok(CrossChainTransfer {
                     id,
@@ -420,7 +455,19 @@ impl<'de> serde::Deserialize<'de> for CrossChainTransfer {
             }
         }
 
-        deserializer.deserialize_struct("CrossChainTransfer", &["id", "source_chain", "destination_chain", "lock_tx_hash", "lock_output_index", "sanad_id", "transition_id"], CrossChainTransferVisitor)
+        deserializer.deserialize_struct(
+            "CrossChainTransfer",
+            &[
+                "id",
+                "source_chain",
+                "destination_chain",
+                "lock_tx_hash",
+                "lock_output_index",
+                "sanad_id",
+                "transition_id",
+            ],
+            CrossChainTransferVisitor,
+        )
     }
 }
 
@@ -440,6 +487,23 @@ pub struct MintResult {
     pub tx_hash: String,
     /// Block height of the mint
     pub block_height: u64,
+}
+
+/// Confirmation status of an on-chain transaction.
+///
+/// Used by the runtime finality gate to decide whether a locked transaction has
+/// reached the required confirmation depth before an inclusion proof is built.
+#[derive(Debug, Clone)]
+pub struct TxFinality {
+    /// Height of the block that includes the transaction.
+    ///
+    /// This MUST be the true confirming height (so `get_block_hash(block_height)`
+    /// returns the block the tx was mined in). It is `0` when the transaction is
+    /// still unconfirmed / in the mempool.
+    pub block_height: u64,
+    /// Number of confirmations, measured with the same `tip - block_height`
+    /// convention used by the proof builders. `0` when unconfirmed.
+    pub confirmations: u64,
 }
 
 /// Status of a seal in the registry.
@@ -523,6 +587,12 @@ pub trait ChainReadPort: Send + Sync {
     /// Confirm a transaction on the chain.
     async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError>;
 
+    /// Query the confirmation status of a transaction.
+    ///
+    /// Returns the true confirming height and confirmation count so the runtime
+    /// finality gate can decide whether an inclusion proof can be built.
+    async fn tx_finality(&self, chain_id: &str, tx_hash: &str) -> Result<TxFinality, AdapterError>;
+
     /// Get the balance for an address on the chain.
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError>;
 }
@@ -577,6 +647,9 @@ pub trait AdapterRegistry: Send + Sync {
 
     /// Confirm a transaction on the chain.
     async fn confirm_tx(&self, chain_id: &str, tx_hash: &str) -> Result<MintResult, AdapterError>;
+
+    /// Query the confirmation status of a transaction on the chain.
+    async fn tx_finality(&self, chain_id: &str, tx_hash: &str) -> Result<TxFinality, AdapterError>;
 
     /// Get the balance for an address on the chain.
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError>;
@@ -635,6 +708,22 @@ pub trait ChainAdapter: Send + Sync {
             "confirm_tx is not implemented for transaction {}",
             tx_hash
         )))
+    }
+
+    /// Query the confirmation status of a transaction on the chain.
+    ///
+    /// The default implementation delegates to [`ChainAdapter::confirm_tx`]:
+    /// a successful confirmation is treated as final (`confirmations = u64::MAX`),
+    /// which preserves the pre-existing behaviour for adapters that only track a
+    /// binary confirmed/unconfirmed status. Chains with a real confirmation-depth
+    /// model (Bitcoin, Ethereum) override this to return an accurate count so the
+    /// runtime finality gate can enforce `finality_depth`.
+    async fn tx_finality(&self, tx_hash: &str) -> Result<TxFinality, AdapterError> {
+        let confirmed = self.confirm_tx(tx_hash).await?;
+        Ok(TxFinality {
+            block_height: confirmed.block_height,
+            confirmations: u64::MAX,
+        })
     }
 
     /// Get the balance for an address on the chain.

@@ -171,7 +171,6 @@ impl<'de> serde::Deserialize<'de> for RightsTransfer {
     where
         D: serde::Deserializer<'de>,
     {
-        
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -183,23 +182,33 @@ impl<'de> serde::Deserialize<'de> for RightsTransfer {
         }
 
         struct RightsTransferVisitor;
-        
+
         impl<'de> serde::de::Visitor<'de> for RightsTransferVisitor {
             type Value = RightsTransfer;
-            
+
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct RightsTransfer")
             }
-            
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let content_hash_bytes: [u8; 32] = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let from = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let to = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let new_rights = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
-                let authorization_proof = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
+                let content_hash_bytes: [u8; 32] = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let from = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let to = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let new_rights = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+                let authorization_proof = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
                 Ok(RightsTransfer {
                     content_hash: Hash(content_hash_bytes),
                     from,
@@ -208,7 +217,7 @@ impl<'de> serde::Deserialize<'de> for RightsTransfer {
                     authorization_proof,
                 })
             }
-            
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -218,7 +227,7 @@ impl<'de> serde::Deserialize<'de> for RightsTransfer {
                 let mut to = None;
                 let mut new_rights = None;
                 let mut authorization_proof = None;
-                
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::ContentHash => {
@@ -248,19 +257,24 @@ impl<'de> serde::Deserialize<'de> for RightsTransfer {
                         }
                         Field::AuthorizationProof => {
                             if authorization_proof.is_some() {
-                                return Err(serde::de::Error::duplicate_field("authorization_proof"));
+                                return Err(serde::de::Error::duplicate_field(
+                                    "authorization_proof",
+                                ));
                             }
                             authorization_proof = Some(map.next_value()?);
                         }
                     }
                 }
-                
-                let content_hash = content_hash.ok_or_else(|| serde::de::Error::missing_field("content_hash"))?;
+
+                let content_hash =
+                    content_hash.ok_or_else(|| serde::de::Error::missing_field("content_hash"))?;
                 let from = from.ok_or_else(|| serde::de::Error::missing_field("from"))?;
                 let to = to.ok_or_else(|| serde::de::Error::missing_field("to"))?;
-                let new_rights = new_rights.ok_or_else(|| serde::de::Error::missing_field("new_rights"))?;
-                let authorization_proof = authorization_proof.ok_or_else(|| serde::de::Error::missing_field("authorization_proof"))?;
-                
+                let new_rights =
+                    new_rights.ok_or_else(|| serde::de::Error::missing_field("new_rights"))?;
+                let authorization_proof = authorization_proof
+                    .ok_or_else(|| serde::de::Error::missing_field("authorization_proof"))?;
+
                 Ok(RightsTransfer {
                     content_hash,
                     from,
@@ -270,7 +284,17 @@ impl<'de> serde::Deserialize<'de> for RightsTransfer {
                 })
             }
         }
-        
-        deserializer.deserialize_struct("RightsTransfer", &["content_hash", "from", "to", "new_rights", "authorization_proof"], RightsTransferVisitor)
+
+        deserializer.deserialize_struct(
+            "RightsTransfer",
+            &[
+                "content_hash",
+                "from",
+                "to",
+                "new_rights",
+                "authorization_proof",
+            ],
+            RightsTransferVisitor,
+        )
     }
 }

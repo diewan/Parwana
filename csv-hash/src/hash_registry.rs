@@ -345,7 +345,9 @@ impl HashDomain {
             | Self::CommitmentSeal
             | Self::CommitmentDomain => DomainCategory::Commitment,
             Self::SanadId | Self::Nullifier | Self::ReplayIdV1 => DomainCategory::Identity,
-            Self::VerificationProofV1 | Self::VerificationResult | Self::ProofLeafV1 => DomainCategory::Verification,
+            Self::VerificationProofV1 | Self::VerificationResult | Self::ProofLeafV1 => {
+                DomainCategory::Verification
+            }
             Self::StealthAddressV1 | Self::StealthNonceV1 | Self::EphemeralPointV1 => {
                 DomainCategory::Stealth
             }

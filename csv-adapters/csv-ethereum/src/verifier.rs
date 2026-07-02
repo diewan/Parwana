@@ -2,8 +2,8 @@
 
 use csv_hash::Hash;
 use csv_protocol::verification_results::{
-    InclusionStrength, FinalityStrength, VerificationAssurance, VerifiedComponents,
-    VerificationFailure, VerificationResult
+    FinalityStrength, InclusionStrength, VerificationAssurance, VerificationFailure,
+    VerificationResult, VerifiedComponents,
 };
 
 use crate::config::EthereumConfig;
@@ -48,13 +48,15 @@ impl EthereumVerifier {
         &self,
         seal_id: Hash,
     ) -> Result<VerificationResult, Box<dyn std::error::Error>> {
+        use crate::bindings::csv_lock::CSVLock;
         use alloy_primitives::{Address, FixedBytes};
         use alloy_sol_types::SolCall;
-        use crate::bindings::csv_lock::CSVLock;
 
         // Construct the isSealUsed call
         let seal_id_fixed = FixedBytes::from(*seal_id.as_bytes());
-        let call = CSVLock::isSealUsedCall { sealId: seal_id_fixed };
+        let call = CSVLock::isSealUsedCall {
+            sealId: seal_id_fixed,
+        };
 
         // Encode the call
         let call_data = call.abi_encode();
@@ -67,10 +69,14 @@ impl EthereumVerifier {
         });
 
         // Execute the call on-chain
-        let result = self.rpc.eth_call(call_params, "latest").await
+        let result = self
+            .rpc
+            .eth_call(call_params, "latest")
+            .await
             .map_err(|e| {
                 Box::new(EthereumError::RpcError(format!(
-                    "Failed to call isSealUsed on contract: {}", e
+                    "Failed to call isSealUsed on contract: {}",
+                    e
                 ))) as Box<dyn std::error::Error>
             })?;
 
@@ -78,7 +84,7 @@ impl EthereumVerifier {
         // The ABI encoding of bool is 32 bytes, 0x00...00 for false, 0x01...00 for true
         if result.len() < 32 {
             return Err(Box::new(EthereumError::RpcError(
-                "Invalid response length from isSealUsed".to_string()
+                "Invalid response length from isSealUsed".to_string(),
             )) as Box<dyn std::error::Error>);
         }
 
@@ -116,7 +122,7 @@ impl EthereumVerifier {
         _seal_id: Hash,
     ) -> Result<VerificationResult, Box<dyn std::error::Error>> {
         Err(Box::new(EthereumError::RpcError(
-            "On-chain seal registry verification requires RPC feature".to_string()
+            "On-chain seal registry verification requires RPC feature".to_string(),
         )) as Box<dyn std::error::Error>)
     }
 }

@@ -30,9 +30,7 @@ use crate::checkpoint::{CheckpointVerifier, CheckpointVerifierTrait};
 use crate::config::SuiConfig;
 use crate::error::{SuiError, SuiResult};
 use crate::node::SuiNode;
-use crate::proofs::{
-    CommitmentEventBuilder,
-};
+use crate::proofs::CommitmentEventBuilder;
 use crate::seal::SealRegistry;
 use crate::types::{SuiCommitAnchor, SuiFinalityProof, SuiInclusionProof, SuiSealPoint};
 
@@ -105,11 +103,12 @@ impl SuiSealProtocol {
         );
         let event_builder = CommitmentEventBuilder::new(package_id, event_type);
 
-        let checkpoint_verifier = CheckpointVerifier::with_config(config.checkpoint.clone(), Arc::clone(&node));
+        let checkpoint_verifier =
+            CheckpointVerifier::with_config(config.checkpoint.clone(), Arc::clone(&node));
 
         // Extract signing key from config if available
         #[cfg(feature = "rpc")]
-     let signing_key = if let Some(private_key) = &config.signer_private_key {
+        let signing_key = if let Some(private_key) = &config.signer_private_key {
             let private_key_bytes = private_key.expose_secret();
             Some(ed25519_dalek::SigningKey::from_bytes(private_key_bytes))
         } else {
@@ -155,9 +154,9 @@ impl SuiSealProtocol {
         use ed25519_dalek::SigningKey;
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
         let key_bytes = signing_key.to_bytes();
-        
+
         let secret_key = csv_keys::memory::SecretKey::new(key_bytes);
-        
+
         // Derive signer address from private key
         let key_bytes = secret_key.expose_secret();
         use blake2::Blake2b;
@@ -166,7 +165,7 @@ impl SuiSealProtocol {
         hasher.update(key_bytes);
         let hash: [u8; 32] = hasher.finalize().into();
         let signer_address = Some(format!("0x{}", hex::encode(hash)));
-        
+
         let config = SuiConfig {
             seal_contract: crate::config::SealContractConfig {
                 package_id: Some(
@@ -179,7 +178,7 @@ impl SuiSealProtocol {
             signer_address,
             ..Default::default()
         };
-        
+
         let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443")?);
         Self::from_config(config, node)
     }
@@ -227,9 +226,10 @@ impl SuiSealProtocol {
             .await
             .map_err(|e| SuiError::ObjectUsed(format!("Failed to get object: {}", e)))?;
 
-        let object = object_response.into_inner().object.ok_or_else(|| {
-            SuiError::ObjectUsed("Object not found".to_string())
-        })?;
+        let object = object_response
+            .into_inner()
+            .object
+            .ok_or_else(|| SuiError::ObjectUsed("Object not found".to_string()))?;
 
         // Verify object version matches
         if let Some(obj_version) = object.version {
@@ -242,14 +242,18 @@ impl SuiSealProtocol {
         }
 
         // Return the digest if available
-        object.digest.ok_or_else(|| {
-            SuiError::ObjectUsed("Object digest not found".to_string())
-        })
+        object
+            .digest
+            .ok_or_else(|| SuiError::ObjectUsed("Object digest not found".to_string()))
     }
 
     /// Verify that a seal object is available before consumption.
     async fn verify_seal_available(&self, seal: &SuiSealPoint) -> SuiResult<()> {
-        log::info!("SUI: verify_seal_available called for object {} with version {}", format_object_id(seal.object_id), seal.version);
+        log::info!(
+            "SUI: verify_seal_available called for object {} with version {}",
+            format_object_id(seal.object_id),
+            seal.version
+        );
 
         // Check registry first
         {
@@ -267,39 +271,41 @@ impl SuiSealProtocol {
         {
             use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
             use sui_sdk_types::Address;
-            use tokio::time::{sleep, Duration};
+            use tokio::time::{Duration, sleep};
 
             let object_id = Address::from_bytes(seal.object_id)
                 .map_err(|e| SuiError::ObjectUsed(format!("Invalid object ID: {}", e)))?;
 
             let client = self.node.client();
-            
+
             // Retry mechanism with exponential backoff
             let mut retries = 0;
             let max_retries = 5;
             let base_delay = Duration::from_millis(500);
-            
+
             loop {
                 let mut client_guard = client.lock().await;
                 let request = GetObjectRequest::new(&object_id);
 
-                let object_response = (*client_guard)
-                    .ledger_client()
-                    .get_object(request)
-                    .await;
+                let object_response = (*client_guard).ledger_client().get_object(request).await;
 
                 match object_response {
                     Ok(response) => {
-                        let object = response.into_inner().object.ok_or_else(|| {
-                            SuiError::ObjectUsed("Object not found".to_string())
-                        })?;
+                        let object = response
+                            .into_inner()
+                            .object
+                            .ok_or_else(|| SuiError::ObjectUsed("Object not found".to_string()))?;
 
                         // Check if object exists - simplified since deleted field doesn't exist in proto
                         if object.object_id.is_none() {
                             if retries < max_retries {
                                 retries += 1;
                                 let delay = base_delay * 2_u32.pow(retries - 1);
-                                log::info!("SUI: Object not found, retry {} in {:?}", retries, delay);
+                                log::info!(
+                                    "SUI: Object not found, retry {} in {:?}",
+                                    retries,
+                                    delay
+                                );
                                 drop(client_guard);
                                 sleep(delay).await;
                                 continue;
@@ -322,25 +328,39 @@ impl SuiSealProtocol {
                             }
                         }
 
-                        log::info!("SUI: Object {} verified as available on-chain", format_object_id(seal.object_id));
+                        log::info!(
+                            "SUI: Object {} verified as available on-chain",
+                            format_object_id(seal.object_id)
+                        );
                         break;
                     }
                     Err(e) => {
                         if retries < max_retries {
                             retries += 1;
                             let delay = base_delay * 2_u32.pow(retries - 1);
-                            log::info!("SUI: Failed to get object: {}, retry {} in {:?}", e, retries, delay);
+                            log::info!(
+                                "SUI: Failed to get object: {}, retry {} in {:?}",
+                                e,
+                                retries,
+                                delay
+                            );
                             drop(client_guard);
                             sleep(delay).await;
                             continue;
                         } else {
-                            return Err(SuiError::ObjectUsed(format!("Failed to get object after {} retries: {}", max_retries, e)));
+                            return Err(SuiError::ObjectUsed(format!(
+                                "Failed to get object after {} retries: {}",
+                                max_retries, e
+                            )));
                         }
                     }
                 }
             }
 
-            log::info!("SUI: Object {} verified as available on-chain", format_object_id(seal.object_id));
+            log::info!(
+                "SUI: Object {} verified as available on-chain",
+                format_object_id(seal.object_id)
+            );
         }
 
         #[cfg(not(feature = "rpc"))]
@@ -363,7 +383,9 @@ impl SuiSealProtocol {
         use ed25519_dalek::Signer;
         use sui_sdk_types::Address;
 
-        let signing_key = self.signing_key.as_ref()
+        let signing_key = self
+            .signing_key
+            .as_ref()
             .ok_or("Signing key not configured. Set signer_private_key in SuiConfig.")?;
 
         // Derive the sender address from the signing key
@@ -376,14 +398,18 @@ impl SuiSealProtocol {
         hasher.update([0x00]); // Sui address prefix
         hasher.update(pubkey_bytes);
         let hash: [u8; 32] = hasher.finalize().into();
-        let sender_address = Address::from_bytes(hash)
-            .map_err(|e| format!("Failed to derive address: {}", e))?;
+        let sender_address =
+            Address::from_bytes(hash).map_err(|e| format!("Failed to derive address: {}", e))?;
 
         // Get the package ID from config
-        let package_id_str = self.config.seal_contract.package_id.as_ref()
+        let package_id_str = self
+            .config
+            .seal_contract
+            .package_id
+            .as_ref()
             .ok_or("Package ID not configured")?;
-        let package_id_bytes = parse_object_id(package_id_str)
-            .map_err(|e| format!("Invalid package ID: {}", e))?;
+        let package_id_bytes =
+            parse_object_id(package_id_str).map_err(|e| format!("Invalid package ID: {}", e))?;
         let package_id = Address::from_bytes(package_id_bytes)
             .map_err(|e| format!("Invalid package ID: {}", e))?;
         let module_name = self.config.seal_contract.module_name.clone();
@@ -400,8 +426,10 @@ impl SuiSealProtocol {
         // Add the MoveCall
         let function = sui_transaction_builder::Function::new(
             package_id,
-            sui_sdk_types::Identifier::new(&module_name).map_err(|e| format!("Invalid module name: {}", e))?,
-            sui_sdk_types::Identifier::new(&function_name).map_err(|e| format!("Invalid function name: {}", e))?,
+            sui_sdk_types::Identifier::new(&module_name)
+                .map_err(|e| format!("Invalid module name: {}", e))?,
+            sui_sdk_types::Identifier::new(&function_name)
+                .map_err(|e| format!("Invalid function name: {}", e))?,
         );
         let seal_object_arg = tx_builder.object(sui_transaction_builder::ObjectInput::owned(
             seal_object_id,
@@ -440,32 +468,38 @@ impl SuiSealProtocol {
 
         // Use sui-rust-sdk to verify the event
         use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
-        
+
         let client = self.node.client();
         let mut client_guard = client.lock().await;
-        
-        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest)
-            .map_err(|e| ProtocolError::InclusionProofFailed(format!("Invalid tx digest: {}", e)))?;
-        
+
+        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest).map_err(|e| {
+            ProtocolError::InclusionProofFailed(format!("Invalid tx digest: {}", e))
+        })?;
+
         let request = GetTransactionRequest::new(&tx_digest);
-        
+
         let tx_response = (*client_guard)
             .ledger_client()
             .get_transaction(request)
             .await
-            .map_err(|e| ProtocolError::InclusionProofFailed(format!("Failed to get transaction: {}", e)))?;
-        
+            .map_err(|e| {
+                ProtocolError::InclusionProofFailed(format!("Failed to get transaction: {}", e))
+            })?;
+
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
             ProtocolError::InclusionProofFailed("Transaction not found in response".to_string())
         })?;
-        
+
         // Check if the event exists in the transaction
         let tx_events = tx.events.as_ref().ok_or_else(|| {
             ProtocolError::InclusionProofFailed("Transaction has no events".to_string())
         })?;
-        
-    let event_found = tx_events.events.iter().any(|event| {
-            let type_match = event.event_type.as_ref().is_some_and(|t| t == &self.event_builder.event_type);
+
+        let event_found = tx_events.events.iter().any(|event| {
+            let type_match = event
+                .event_type
+                .as_ref()
+                .is_some_and(|t| t == &self.event_builder.event_type);
             let json_match = event.json.as_ref().is_some_and(|j| {
                 // prost_types::Value doesn't implement serde::Serialize directly
                 // Compare the struct type and kind for basic matching
@@ -474,7 +508,7 @@ impl SuiSealProtocol {
             });
             type_match && json_match
         });
-        
+
         if !event_found {
             return Err(ProtocolError::InclusionProofFailed(
                 "Event verification failed: commitment mismatch".to_string(),
@@ -498,8 +532,14 @@ impl SealProtocol for SuiSealProtocol {
         seal: Self::SealPoint,
         _sanad_id: Hash,
     ) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
-        log::info!("SUI: Publishing commitment via seal object {}", format_object_id(seal.object_id));
-        log::info!("SUI: Commitment hash: 0x{}", hex::encode(commitment.as_bytes()));
+        log::info!(
+            "SUI: Publishing commitment via seal object {}",
+            format_object_id(seal.object_id)
+        );
+        log::info!(
+            "SUI: Commitment hash: 0x{}",
+            hex::encode(commitment.as_bytes())
+        );
         log::info!("SUI: Seal digest in publish method: '{}'", seal.digest);
 
         // Verify seal is available
@@ -516,8 +556,13 @@ impl SealProtocol for SuiSealProtocol {
 
             // If digest is empty, fetch it from the chain
             let seal_digest = if seal.digest.is_empty() {
-                log::info!("SUI: Digest is empty, fetching from chain for object {} version {}", format_object_id(seal.object_id), seal.version);
-                self.fetch_object_digest(seal.object_id, seal.version).await?
+                log::info!(
+                    "SUI: Digest is empty, fetching from chain for object {} version {}",
+                    format_object_id(seal.object_id),
+                    seal.version
+                );
+                self.fetch_object_digest(seal.object_id, seal.version)
+                    .await?
             } else {
                 seal.digest.clone()
             };
@@ -542,7 +587,11 @@ impl SealProtocol for SuiSealProtocol {
                 .map_err(|e| format!("Failed to derive address: {}", e))?;
 
             // Get the package ID from config
-            let package_id_str = self.config.seal_contract.package_id.as_ref()
+            let package_id_str = self
+                .config
+                .seal_contract
+                .package_id
+                .as_ref()
                 .ok_or("Package ID not configured")?;
             let package_id_bytes = parse_object_id(package_id_str)
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
@@ -568,7 +617,8 @@ impl SealProtocol for SuiSealProtocol {
             let function = sui_transaction_builder::Function::new(
                 package_id,
                 Identifier::new(&module_name).map_err(|e| format!("Invalid module name: {}", e))?,
-                Identifier::new("consume_seal").map_err(|e| format!("Invalid function name: {}", e))?,
+                Identifier::new("consume_seal")
+                    .map_err(|e| format!("Invalid function name: {}", e))?,
             );
             log::info!("SUI: Using digest for transaction: {}", &seal_digest);
             let seal_digest_str = seal_digest.clone();
@@ -579,7 +629,11 @@ impl SealProtocol for SuiSealProtocol {
                     d
                 }
                 Err(e) => {
-                    log::warn!("SUI: Failed to parse digest from base58 '{}': {}, using ZERO digest", &seal_digest_str, e);
+                    log::warn!(
+                        "SUI: Failed to parse digest from base58 '{}': {}, using ZERO digest",
+                        &seal_digest_str,
+                        e
+                    );
                     sui_sdk_types::Digest::ZERO
                 }
             };
@@ -592,7 +646,8 @@ impl SealProtocol for SuiSealProtocol {
             tx_builder.move_call(function, vec![seal_object_arg, commitment_arg]);
 
             // Build the transaction data
-            let tx_data = tx_builder.try_build()
+            let tx_data = tx_builder
+                .try_build()
                 .map_err(|e| format!("Failed to build transaction: {}", e))?;
 
             // Use proper Sui signing digest with intent scope
@@ -608,7 +663,9 @@ impl SealProtocol for SuiSealProtocol {
             let mut client_guard = client.lock().await;
 
             // Build the ExecuteTransactionRequest
-            use sui_rpc::proto::sui::rpc::v2::{ExecuteTransactionRequest, Transaction, UserSignature};
+            use sui_rpc::proto::sui::rpc::v2::{
+                ExecuteTransactionRequest, Transaction, UserSignature,
+            };
             use sui_sdk_types::SimpleSignature;
 
             // Convert the transaction data to sui-sdk-types Transaction
@@ -618,7 +675,9 @@ impl SealProtocol for SuiSealProtocol {
 
             // Build the UserSignature using sui-sdk-types SimpleSignature
             // This properly BCS-encodes the signature with the correct structure
-            let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|e| format!("Invalid signature bytes: {:?}", e))?;
+            let sig_array: [u8; 64] = sig_bytes
+                .try_into()
+                .map_err(|e| format!("Invalid signature bytes: {:?}", e))?;
             let pubkey_array: [u8; 32] = *pubkey_bytes;
             let simple_sig = SimpleSignature::Ed25519 {
                 signature: sig_array.into(),
@@ -639,14 +698,29 @@ impl SealProtocol for SuiSealProtocol {
                 .execution_client()
                 .execute_transaction(execute_request)
                 .await
-                .map_err(|e| Box::new(ProtocolError::PublishFailed(format!("Failed to execute transaction: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+                .map_err(|e| {
+                    Box::new(ProtocolError::PublishFailed(format!(
+                        "Failed to execute transaction: {}",
+                        e
+                    ))) as Box<dyn std::error::Error + 'static>
+                })?;
 
-            let executed_tx = execution_response.into_inner().transaction
-                .ok_or_else(|| Box::new(ProtocolError::PublishFailed("No transaction in response".to_string())) as Box<dyn std::error::Error + 'static>)?;
+            let executed_tx = execution_response.into_inner().transaction.ok_or_else(|| {
+                Box::new(ProtocolError::PublishFailed(
+                    "No transaction in response".to_string(),
+                )) as Box<dyn std::error::Error + 'static>
+            })?;
 
-            log::info!("SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}", executed_tx.digest, executed_tx.checkpoint);
-            log::info!("SUI: Transaction effects present: {}", executed_tx.effects.is_some());
-            
+            log::info!(
+                "SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}",
+                executed_tx.digest,
+                executed_tx.checkpoint
+            );
+            log::info!(
+                "SUI: Transaction effects present: {}",
+                executed_tx.effects.is_some()
+            );
+
             // Check transaction status and return error if failed
             if let Some(ref effects) = executed_tx.effects {
                 log::info!("SUI: Effects status: {:?}", effects.status);
@@ -658,7 +732,8 @@ impl SealProtocol for SuiSealProtocol {
                             } else {
                                 "Transaction execution failed (unknown error)".to_string()
                             };
-                            return Err(Box::new(ProtocolError::PublishFailed(error_msg)) as Box<dyn std::error::Error + 'static>);
+                            return Err(Box::new(ProtocolError::PublishFailed(error_msg))
+                                as Box<dyn std::error::Error + 'static>);
                         }
                     }
                 }
@@ -676,8 +751,13 @@ impl SealProtocol for SuiSealProtocol {
                 let digest: [u8; 32] = hasher.finalize().into();
                 hex::encode(digest)
             };
-            let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
-                .map_err(|e| Box::new(ProtocolError::PublishFailed(format!("Invalid digest hex: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+            let digest_bytes =
+                hex::decode(tx_digest_str.trim_start_matches("0x")).map_err(|e| {
+                    Box::new(ProtocolError::PublishFailed(format!(
+                        "Invalid digest hex: {}",
+                        e
+                    ))) as Box<dyn std::error::Error + 'static>
+                })?;
             let mut digest_array = [0u8; 32];
             digest_array.copy_from_slice(&digest_bytes[..32]);
 
@@ -686,7 +766,11 @@ impl SealProtocol for SuiSealProtocol {
             // We'll use the transaction's checkpoint if available, or default to 0
             let checkpoint = executed_tx.checkpoint.unwrap_or(0);
 
-            log::info!("SUI: Transaction executed successfully (digest: 0x{}, checkpoint: {})", hex::encode(digest_array), checkpoint);
+            log::info!(
+                "SUI: Transaction executed successfully (digest: 0x{}, checkpoint: {})",
+                hex::encode(digest_array),
+                checkpoint
+            );
 
             // Mark seal as used in local registry
             {
@@ -716,36 +800,36 @@ impl SealProtocol for SuiSealProtocol {
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
-                        
         let client = self.node.client();
         let mut client_guard = client.lock().await;
-        
-        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest)
-            .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("Invalid tx digest: {}", e),
-                )) as Box<dyn std::error::Error>
-            })?;
-        
+
+        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest).map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid tx digest: {}", e),
+            )) as Box<dyn std::error::Error>
+        })?;
+
         let request = sui_rpc::proto::sui::rpc::v2::GetTransactionRequest::new(&tx_digest);
-        
+
         let tx_response = (*client_guard)
             .ledger_client()
-    .get_transaction(request)
+            .get_transaction(request)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::other(format!("Failed to get transaction: {}", e)))
-                    as Box<dyn std::error::Error>
+                Box::new(std::io::Error::other(format!(
+                    "Failed to get transaction: {}",
+                    e
+                ))) as Box<dyn std::error::Error>
             })?;
-        
+
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Transaction not found".to_string(),
             )) as Box<dyn std::error::Error>
         })?;
-        
+
         // Build inclusion proof with checkpoint information
         let checkpoint_hash = if let Some(digest) = tx.digest {
             let decoded = hex::decode(digest.trim_start_matches("0x")).unwrap_or_default();
@@ -757,7 +841,7 @@ impl SealProtocol for SuiSealProtocol {
         } else {
             [0u8; 32]
         };
-        
+
         Ok(SuiInclusionProof {
             object_proof: vec![], // Sui doesn't use Merkle proofs for object inclusion
             checkpoint_hash,
@@ -826,9 +910,9 @@ impl SealProtocol for SuiSealProtocol {
         } // Lock is released here
 
         // Check on-chain object state using sui-rust-sdk
-        self.verify_seal_available(&seal).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error>
-        })?;
+        self.verify_seal_available(&seal)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
         // Mark seal as used in local registry
         {
@@ -850,7 +934,9 @@ impl SealProtocol for SuiSealProtocol {
             use ed25519_dalek::Signer;
             use sui_sdk_types::{Address, Identifier};
 
-            let signing_key = self.signing_key.as_ref()
+            let signing_key = self
+                .signing_key
+                .as_ref()
                 .ok_or("Signing key not configured. Set signer_private_key in SuiConfig.")?;
 
             // Derive the sender address from the signing key
@@ -867,7 +953,11 @@ impl SealProtocol for SuiSealProtocol {
                 .map_err(|e| format!("Failed to derive address: {}", e))?;
 
             // Get the package ID from config
-            let package_id_str = self.config.seal_contract.package_id.as_ref()
+            let package_id_str = self
+                .config
+                .seal_contract
+                .package_id
+                .as_ref()
                 .ok_or("Package ID not configured")?;
             let package_id_bytes = parse_object_id(package_id_str)
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
@@ -891,9 +981,10 @@ impl SealProtocol for SuiSealProtocol {
             let function = sui_transaction_builder::Function::new(
                 package_id,
                 Identifier::new(&module_name).map_err(|e| format!("Invalid module name: {}", e))?,
-                Identifier::new("create_seal").map_err(|e| format!("Invalid function name: {}", e))?,
+                Identifier::new("create_seal")
+                    .map_err(|e| format!("Invalid function name: {}", e))?,
             );
-            
+
             // Generate required parameters from value
             let nonce = value.unwrap_or(0);
 
@@ -909,11 +1000,13 @@ impl SealProtocol for SuiSealProtocol {
             state_root_hasher.update(package_id_bytes);
             state_root_hasher.update(sender_address.as_bytes());
             state_root_hasher.update(&nonce.to_le_bytes());
-            state_root_hasher.update(&std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-                .to_le_bytes());
+            state_root_hasher.update(
+                &std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+                    .to_le_bytes(),
+            );
             let state_root: [u8; 32] = state_root_hasher.finalize().into();
 
             // 2. Derive sanad_id from package_id and sender address (unique identifier for this seal creation)
@@ -933,9 +1026,18 @@ impl SealProtocol for SuiSealProtocol {
             commitment_hasher.update(sender_address.as_bytes());
             let commitment: [u8; 32] = commitment_hasher.finalize().into();
 
-            log::info!("SUI: Derived sanad_id from package and sender: 0x{}", hex::encode(sanad_id));
-            log::info!("SUI: Derived commitment from transaction context: 0x{}", hex::encode(commitment));
-            log::info!("SUI: Fetched state_root from latest checkpoint: 0x{}", hex::encode(state_root));
+            log::info!(
+                "SUI: Derived sanad_id from package and sender: 0x{}",
+                hex::encode(sanad_id)
+            );
+            log::info!(
+                "SUI: Derived commitment from transaction context: 0x{}",
+                hex::encode(commitment)
+            );
+            log::info!(
+                "SUI: Fetched state_root from latest checkpoint: 0x{}",
+                hex::encode(state_root)
+            );
 
             let sanad_id_vec = sanad_id.to_vec();
             let commitment_vec = commitment.to_vec();
@@ -946,14 +1048,24 @@ impl SealProtocol for SuiSealProtocol {
             let state_root_arg = tx_builder.pure(&state_root_vec);
             let nonce_arg = tx_builder.pure(&nonce);
             let owner_arg = tx_builder.pure(&sender_address);
-            let seal_result = tx_builder.move_call(function, vec![sanad_id_arg, commitment_arg, state_root_arg, nonce_arg, owner_arg]);
-            
+            let seal_result = tx_builder.move_call(
+                function,
+                vec![
+                    sanad_id_arg,
+                    commitment_arg,
+                    state_root_arg,
+                    nonce_arg,
+                    owner_arg,
+                ],
+            );
+
             // Transfer the returned Seal object to the sender
             let address_arg = tx_builder.pure(&sender_address);
             tx_builder.transfer_objects(vec![seal_result], address_arg);
 
             // Build the transaction data
-            let tx_data = tx_builder.try_build()
+            let tx_data = tx_builder
+                .try_build()
                 .map_err(|e| format!("Failed to build transaction: {}", e))?;
 
             // Use proper Sui signing digest with intent scope
@@ -969,7 +1081,9 @@ impl SealProtocol for SuiSealProtocol {
             let mut client_guard = client.lock().await;
 
             // Build the ExecuteTransactionRequest
-            use sui_rpc::proto::sui::rpc::v2::{ExecuteTransactionRequest, Transaction, UserSignature};
+            use sui_rpc::proto::sui::rpc::v2::{
+                ExecuteTransactionRequest, Transaction, UserSignature,
+            };
             use sui_sdk_types::SimpleSignature;
 
             // Convert the transaction data to sui-sdk-types Transaction
@@ -980,8 +1094,12 @@ impl SealProtocol for SuiSealProtocol {
             // Build the UserSignature using sui-sdk-types SimpleSignature
             // This properly BCS-encodes the signature with the correct structure
             let pubkey_bytes = public_key.as_bytes().to_vec();
-            let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|e| format!("Invalid signature bytes: {:?}", e))?;
-            let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|e| format!("Invalid public key bytes: {:?}", e))?;
+            let sig_array: [u8; 64] = sig_bytes
+                .try_into()
+                .map_err(|e| format!("Invalid signature bytes: {:?}", e))?;
+            let pubkey_array: [u8; 32] = pubkey_bytes
+                .try_into()
+                .map_err(|e| format!("Invalid public key bytes: {:?}", e))?;
             let simple_sig = SimpleSignature::Ed25519 {
                 signature: sig_array.into(),
                 public_key: pubkey_array.into(),
@@ -1003,26 +1121,47 @@ impl SealProtocol for SuiSealProtocol {
                 .await
                 .map_err(|e| format!("Failed to execute transaction: {}", e))?;
 
-            let executed_tx = execution_response.into_inner().transaction
+            let executed_tx = execution_response
+                .into_inner()
+                .transaction
                 .ok_or("No transaction in response")?;
 
-            log::info!("SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}", executed_tx.digest, executed_tx.checkpoint);
-            log::info!("SUI: Transaction effects present: {}", executed_tx.effects.is_some());
+            log::info!(
+                "SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}",
+                executed_tx.digest,
+                executed_tx.checkpoint
+            );
+            log::info!(
+                "SUI: Transaction effects present: {}",
+                executed_tx.effects.is_some()
+            );
             if let Some(ref effects) = executed_tx.effects {
                 log::info!("SUI: Effects status: {:?}", effects.status);
             }
 
             // Extract the created object ID from the transaction effects
             // The effects should contain the created seal object
-            let (object_id, object_version, object_digest) = if let Some(effects) = executed_tx.effects {
+            let (object_id, object_version, object_digest) = if let Some(effects) =
+                executed_tx.effects
+            {
                 // Look for created objects in changed_objects
-                log::info!("SUI: changed_objects count: {}", effects.changed_objects.len());
+                log::info!(
+                    "SUI: changed_objects count: {}",
+                    effects.changed_objects.len()
+                );
                 let mut created_object_id = None;
                 let mut created_object_version = None;
                 let mut created_object_digest = None;
                 for (idx, changed_obj) in effects.changed_objects.iter().enumerate() {
-                    log::info!("SUI: changed_objects[{}]: object_id={:?}, input_state={:?}, output_state={:?}, output_version={:?}, output_digest={:?}",
-                        idx, changed_obj.object_id, changed_obj.input_state, changed_obj.output_state, changed_obj.output_version, changed_obj.output_digest);
+                    log::info!(
+                        "SUI: changed_objects[{}]: object_id={:?}, input_state={:?}, output_state={:?}, output_version={:?}, output_digest={:?}",
+                        idx,
+                        changed_obj.object_id,
+                        changed_obj.input_state,
+                        changed_obj.output_state,
+                        changed_obj.output_version,
+                        changed_obj.output_digest
+                    );
                     // Check if this is a newly created object (input_state is DOES_NOT_EXIST/1)
                     // and output_state indicates it was modified/created
                     if let Some(input_state) = changed_obj.input_state {
@@ -1032,7 +1171,12 @@ impl SealProtocol for SuiSealProtocol {
                             created_object_id = changed_obj.object_id.clone();
                             created_object_version = changed_obj.output_version;
                             created_object_digest = changed_obj.output_digest.clone();
-                            log::info!("SUI: Found created object with ID: {:?}, version: {:?}, digest: {:?}", created_object_id, created_object_version, created_object_digest);
+                            log::info!(
+                                "SUI: Found created object with ID: {:?}, version: {:?}, digest: {:?}",
+                                created_object_id,
+                                created_object_version,
+                                created_object_digest
+                            );
                             break;
                         }
                     }
@@ -1064,12 +1208,16 @@ impl SealProtocol for SuiSealProtocol {
                     let digest: [u8; 32] = hasher.finalize().into();
                     let mut id = [0u8; 32];
                     id.copy_from_slice(&digest);
-                    log::info!("SUI: No created object found in effects, using computed digest as fallback");
+                    log::info!(
+                        "SUI: No created object found in effects, using computed digest as fallback"
+                    );
                     (id, 1, String::new())
                 }
             } else {
                 // Fallback: use transaction digest as object ID
-                let tx_digest_str = executed_tx.digest.ok_or("No transaction digest in response")?;
+                let tx_digest_str = executed_tx
+                    .digest
+                    .ok_or("No transaction digest in response")?;
                 let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
                     .map_err(|e| format!("Invalid digest hex: {}", e))?;
                 let mut id = [0u8; 32];
@@ -1084,7 +1232,11 @@ impl SealProtocol for SuiSealProtocol {
                     .unwrap_or(0)
             });
 
-            log::info!("SUI: Created seal object {} with version {} on-chain", format_object_id(object_id), object_version);
+            log::info!(
+                "SUI: Created seal object {} with version {} on-chain",
+                format_object_id(object_id),
+                object_version
+            );
             log::info!("SUI: Storing digest in SuiSealPoint: '{}'", object_digest);
 
             Ok(SuiSealPoint {
@@ -1108,8 +1260,12 @@ impl SealProtocol for SuiSealProtocol {
         transition_payload_hash: Hash,
         seal_point: &Self::SealPoint,
     ) -> Hash {
-        let core_seal = CoreSealPoint::new(seal_point.object_id.to_vec(), Some(seal_point.version), Some(seal_point.version))
-            .expect("valid seal reference");
+        let core_seal = CoreSealPoint::new(
+            seal_point.object_id.to_vec(),
+            Some(seal_point.version),
+            Some(seal_point.version),
+        )
+        .expect("valid seal reference");
         Commitment::simple(
             contract_id,
             previous_commitment,
@@ -1128,7 +1284,7 @@ impl SealProtocol for SuiSealProtocol {
             "Rollback requested for anchor at checkpoint {}",
             anchor.checkpoint
         );
-        
+
         // Clear the seal from registry
         let mut registry = self.seal_registry.lock().await;
         let dummy_seal = SuiSealPoint::new(anchor.object_id, 0, String::new(), 0);
@@ -1148,18 +1304,27 @@ impl SealProtocol for SuiSealProtocol {
     }
 
     #[cfg(feature = "rpc")]
-    async fn build_proof_bundle(&self, anchor: Self::CommitAnchor, _extra_data: csv_protocol::seal_protocol::DagSegment) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
-        use csv_protocol::proof_taxonomy::{ProofBundle, InclusionProof, FinalityProof};
-        use csv_hash::dag::DAGSegment;
-        use csv_hash::seal::{SealPoint, CommitAnchor};
+    async fn build_proof_bundle(
+        &self,
+        anchor: Self::CommitAnchor,
+        _extra_data: csv_protocol::seal_protocol::DagSegment,
+    ) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>>
+    {
         use csv_hash::Hash;
+        use csv_hash::dag::DAGSegment;
+        use csv_hash::seal::{CommitAnchor, SealPoint};
+        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
 
         // Get transaction to extract checkpoint hash for inclusion proof
         let client = self.node.client();
         let mut client_guard = client.lock().await;
 
-        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest)
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("Invalid tx digest: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor.tx_digest).map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid tx digest: {}", e),
+            )) as Box<dyn std::error::Error + 'static>
+        })?;
 
         let request = sui_rpc::proto::sui::rpc::v2::GetTransactionRequest::new(&tx_digest);
 
@@ -1167,10 +1332,18 @@ impl SealProtocol for SuiSealProtocol {
             .ledger_client()
             .get_transaction(request)
             .await
-            .map_err(|e| Box::new(std::io::Error::other(format!("Failed to get transaction: {}", e))) as Box<dyn std::error::Error + 'static>)?;
+            .map_err(|e| {
+                Box::new(std::io::Error::other(format!(
+                    "Failed to get transaction: {}",
+                    e
+                ))) as Box<dyn std::error::Error + 'static>
+            })?;
 
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
-            Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "Transaction not found".to_string())) as Box<dyn std::error::Error + 'static>
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Transaction not found".to_string(),
+            )) as Box<dyn std::error::Error + 'static>
         })?;
 
         // Extract checkpoint hash from transaction
@@ -1191,31 +1364,39 @@ impl SealProtocol for SuiSealProtocol {
             checkpoint_hash,
             anchor.checkpoint,
             0, // Transaction index within checkpoint (not applicable for Sui)
-        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
+        )
+        .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build finality proof by checking if checkpoint is certified
-        let is_certified = self.checkpoint_verifier.is_checkpoint_certified(anchor.checkpoint).await
+        let is_certified = self
+            .checkpoint_verifier
+            .is_checkpoint_certified(anchor.checkpoint)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + 'static>)?;
 
         let finality_proof = FinalityProof::new(
             vec![], // Sui uses checkpoint certification signatures
             anchor.checkpoint,
             is_certified.is_finalized(),
-        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
+        )
+        .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build DAG segment (empty for Sui as it doesn't use DAG-based consensus)
         let dag_segment = DAGSegment::new(vec![], Hash::zero());
 
         // Build seal point from SuiCommitAnchor
         let seal_point = SealPoint::new(anchor.object_id.to_vec(), Some(anchor.checkpoint), None)
-            .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
+            .map_err(|e| {
+            Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>
+        })?;
 
         // Build commit anchor from SuiCommitAnchor
         let commit_anchor = CommitAnchor::new(
             anchor.tx_digest.to_vec(),
             anchor.checkpoint,
             vec![], // Additional data (empty for now)
-        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
+        )
+        .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)?;
 
         // Build the proof bundle
         ProofBundle::new(
@@ -1225,11 +1406,17 @@ impl SealProtocol for SuiSealProtocol {
             commit_anchor,
             inclusion_proof,
             finality_proof,
-        ).map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)
+        )
+        .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + 'static>)
     }
 
     #[cfg(not(feature = "rpc"))]
-    async fn build_proof_bundle(&self, _anchor: Self::CommitAnchor, _extra_data: csv_protocol::seal_protocol::DagSegment) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>> {
+    async fn build_proof_bundle(
+        &self,
+        _anchor: Self::CommitAnchor,
+        _extra_data: csv_protocol::seal_protocol::DagSegment,
+    ) -> Result<csv_protocol::proof_taxonomy::ProofBundle, Box<dyn std::error::Error + 'static>>
+    {
         Err("RPC feature not enabled".into())
     }
 }

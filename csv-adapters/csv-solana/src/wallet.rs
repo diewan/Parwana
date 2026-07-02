@@ -2,8 +2,10 @@
 
 use async_trait::async_trait;
 use csv_protocol::signature::SignatureScheme;
-use csv_wallet::{Signer, SignerRef, Signature as WalletSignature, WalletError, Result as WalletResult};
-use secrecy::{SecretVec, ExposeSecret};
+use csv_wallet::{
+    Result as WalletResult, Signature as WalletSignature, Signer, SignerRef, WalletError,
+};
+use secrecy::{ExposeSecret, SecretVec};
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer as SolanaSignerTrait},
@@ -29,9 +31,7 @@ impl SolanaSigner {
     /// * `secret_key` - 64-byte keypair (32 bytes secret + 32 bytes public)
     pub fn new(id: String, secret_key: Vec<u8>) -> SolanaResult<Self> {
         if secret_key.len() != 64 {
-            return Err(SolanaError::Wallet(
-                "Keypair must be 64 bytes".to_string(),
-            ));
+            return Err(SolanaError::Wallet("Keypair must be 64 bytes".to_string()));
         }
 
         let secret_bytes: [u8; 32] = secret_key[..32]

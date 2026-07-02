@@ -119,7 +119,7 @@ in-memory = []
 cross-chain-persist = ["dep:csv-storage", "dep:sqlx", "dep:chrono"]
 
 # Runtime coordinator integration (full TransferCoordinator support)
-runtime-coordinator = ["dep:csv-storage", "tokio", "dep:csv-adapter-factory", "csv-adapter-factory/bitcoin", "csv-adapter-factory/ethereum", "csv-adapter-factory/sui", "csv-adapter-factory/aptos", "csv-adapter-factory/solana"]
+runtime-coordinator = ["dep:csv-storage", "csv-storage/rocksdb", "csv-runtime/persistent", "tokio", "dep:csv-adapter-factory", "csv-adapter-factory/bitcoin", "csv-adapter-factory/ethereum", "csv-adapter-factory/sui", "csv-adapter-factory/aptos", "csv-adapter-factory/solana"]
 
 # Wallet / crypto
 wallet = ["dep:csv-keys", "dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]

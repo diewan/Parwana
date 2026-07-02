@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 use crate::rpc::{BitcoinRpc, BlockHeader, UtxoDetails, UtxoInfo};
@@ -84,16 +84,25 @@ impl BitcoinJsonRpc {
 
             match req.send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                        format!("Failed to read JSON-RPC response body: {}", e).into()
-                    })?;
+                    let text = resp
+                        .text()
+                        .await
+                        .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                            format!("Failed to read JSON-RPC response body: {}", e).into()
+                        })?;
 
-                    let response: JsonRpcResponse<T> = serde_json::from_str(&text).map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                        format!("Failed to parse JSON-RPC response: {}", e).into()
-                    })?;
+                    let response: JsonRpcResponse<T> = serde_json::from_str(&text).map_err::<Box<
+                        dyn std::error::Error + Send + Sync,
+                    >, _>(
+                        |e| format!("Failed to parse JSON-RPC response: {}", e).into(),
+                    )?;
 
                     if let Some(error) = response.error {
-                        return Err(format!("JSON-RPC error: {}", error.message.unwrap_or_else(|| "unknown error".to_string())).into());
+                        return Err(format!(
+                            "JSON-RPC error: {}",
+                            error.message.unwrap_or_else(|| "unknown error".to_string())
+                        )
+                        .into());
                     }
 
                     // Handle result: if T is Option<U>, allow None (JSON null)
@@ -117,22 +126,34 @@ impl BitcoinJsonRpc {
                 }
                 Ok(resp) => {
                     let status = resp.status();
-                    let error_text = resp.text().await.map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
-                        format!("HTTP {} at {}: failed to read error text: {}", status, self.rpc_url, e).into()
-                    })?;
-                    
+                    let error_text = resp
+                        .text()
+                        .await
+                        .map_err::<Box<dyn std::error::Error + Send + Sync>, _>(|e| {
+                            format!(
+                                "HTTP {} at {}: failed to read error text: {}",
+                                status, self.rpc_url, e
+                            )
+                            .into()
+                        })?;
+
                     // Classify errors: permanent vs transient
                     // Permanent errors should not be retried
-                    let is_permanent = status.is_client_error() && 
-                        (status == reqwest::StatusCode::METHOD_NOT_ALLOWED ||
-                         status == reqwest::StatusCode::NOT_FOUND ||
-                         status == reqwest::StatusCode::BAD_REQUEST);
-                    
+                    let is_permanent = status.is_client_error()
+                        && (status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                            || status == reqwest::StatusCode::NOT_FOUND
+                            || status == reqwest::StatusCode::BAD_REQUEST);
+
                     if is_permanent {
-                        return Err(format!("Permanent HTTP {} at {}: {}", status, self.rpc_url, error_text).into());
+                        return Err(format!(
+                            "Permanent HTTP {} at {}: {}",
+                            status, self.rpc_url, error_text
+                        )
+                        .into());
                     }
-                    
-                    last_err = Some(format!("HTTP {} at {}: {}", status, self.rpc_url, error_text).into());
+
+                    last_err =
+                        Some(format!("HTTP {} at {}: {}", status, self.rpc_url, error_text).into());
                 }
                 Err(e) => {
                     // Network errors are typically transient (timeouts, connection issues)
@@ -172,14 +193,13 @@ impl BitcoinRpc for BitcoinJsonRpc {
         let mut display_txid = txid;
         display_txid.reverse();
         let txid_hex = hex::encode(display_txid);
-        
+
         // Skip getrawtransaction check - some RPC providers (like Alchemy) don't index all transactions
         // gettxout is sufficient to check if an output is unspent and works even for unindexed transactions
         // gettxout returns null if the output is spent or doesn't exist
-        let txout_result: Option<Value> = self.call("gettxout", vec![
-            Value::from(txid_hex),
-            Value::from(vout),
-        ]).await?;
+        let txout_result: Option<Value> = self
+            .call("gettxout", vec![Value::from(txid_hex), Value::from(vout)])
+            .await?;
 
         Ok(txout_result.is_some())
     }
@@ -189,9 +209,11 @@ impl BitcoinRpc for BitcoinJsonRpc {
         tx_bytes: Vec<u8>,
     ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let tx_hex = hex::encode(&tx_bytes);
-        
-        let txid_hex: String = self.call("sendrawtransaction", vec![Value::from(tx_hex.clone())]).await?;
-        
+
+        let txid_hex: String = self
+            .call("sendrawtransaction", vec![Value::from(tx_hex.clone())])
+            .await?;
+
         let txid_bytes = hex::decode(txid_hex.trim())?;
         let mut result = [0u8; 32];
         // RPC returns txid in display format (reversed bytes)
@@ -209,13 +231,18 @@ impl BitcoinRpc for BitcoinJsonRpc {
         let mut display_txid = txid;
         display_txid.reverse();
         let txid_hex = hex::encode(display_txid);
-        
+
         // Use getrawtransaction with verbose=true instead of gettransaction
         // gettransaction is wallet-specific and doesn't work with non-wallet RPC providers
-        let tx: Value = self.call("getrawtransaction", vec![
-            Value::from(txid_hex),
-            Value::from(true), // verbose=true
-        ]).await?;
+        let tx: Value = self
+            .call(
+                "getrawtransaction",
+                vec![
+                    Value::from(txid_hex),
+                    Value::from(true), // verbose=true
+                ],
+            )
+            .await?;
 
         if let Some(confirmations) = tx.get("confirmations").and_then(|c: &Value| c.as_u64()) {
             return Ok(confirmations);
@@ -228,40 +255,47 @@ impl BitcoinRpc for BitcoinJsonRpc {
         address: String,
     ) -> Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
         // Try listunspent first (for Bitcoin Core and compatible endpoints)
-        let listunspent_result: Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> = async {
-            let utxos: Vec<Value> = self.call("listunspent", vec![
-                Value::from(0), // minconf
-                Value::from(9999999), // maxconf
-                Value::from(vec![Value::from(address.clone())]),
-            ]).await?;
+        let listunspent_result: Result<Vec<UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> =
+            async {
+                let utxos: Vec<Value> = self
+                    .call(
+                        "listunspent",
+                        vec![
+                            Value::from(0),       // minconf
+                            Value::from(9999999), // maxconf
+                            Value::from(vec![Value::from(address.clone())]),
+                        ],
+                    )
+                    .await?;
 
-            let _current_height = self.get_block_count().await.unwrap_or(0);
-            let result: Vec<UtxoInfo> = utxos
-                .into_iter()
-                .filter_map(|u| {
-                    let txid_hex = u.get("txid")?.as_str()?;
-                    let vout = u.get("vout")?.as_u64()? as u32;
-                    let amount_sat = u.get("amount")?.as_f64()? as u64 * 100_000_000; // Convert BTC to satoshis
-                    let confirmations = u.get("confirmations")?.as_u64().unwrap_or(0);
-                    
-                    let txid_bytes = hex::decode(txid_hex).ok()?;
-                    let mut txid = [0u8; 32];
-                    // listunspent returns txids in display format (reversed bytes)
-                    // Reverse to get internal byte order for consistent storage
-                    txid.copy_from_slice(&txid_bytes);
-                    txid.reverse();
-                    
-                    Some(UtxoInfo {
-                        txid,
-                        vout,
-                        amount_sat,
-                        confirmations,
+                let _current_height = self.get_block_count().await.unwrap_or(0);
+                let result: Vec<UtxoInfo> = utxos
+                    .into_iter()
+                    .filter_map(|u| {
+                        let txid_hex = u.get("txid")?.as_str()?;
+                        let vout = u.get("vout")?.as_u64()? as u32;
+                        let amount_sat = u.get("amount")?.as_f64()? as u64 * 100_000_000; // Convert BTC to satoshis
+                        let confirmations = u.get("confirmations")?.as_u64().unwrap_or(0);
+
+                        let txid_bytes = hex::decode(txid_hex).ok()?;
+                        let mut txid = [0u8; 32];
+                        // listunspent returns txids in display format (reversed bytes)
+                        // Reverse to get internal byte order for consistent storage
+                        txid.copy_from_slice(&txid_bytes);
+                        txid.reverse();
+
+                        Some(UtxoInfo {
+                            txid,
+                            vout,
+                            amount_sat,
+                            confirmations,
+                        })
                     })
-                })
-                .collect();
-            
-            Ok(result)
-        }.await;
+                    .collect();
+
+                Ok(result)
+            }
+            .await;
 
         // `listunspent` only works on a Bitcoin Core node that has this address
         // imported into a server-side wallet. Hosted JSON-RPC providers (Alchemy,
@@ -290,12 +324,17 @@ impl BitcoinRpc for BitcoinJsonRpc {
         let mut display_txid = txid;
         display_txid.reverse();
         let txid_hex = hex::encode(display_txid);
-        
+
         // Get transaction with verbose output
-        let tx: Value = self.call("getrawtransaction", vec![
-            Value::from(txid_hex.clone()),
-            Value::from(true), // verbose=true
-        ]).await?;
+        let tx: Value = self
+            .call(
+                "getrawtransaction",
+                vec![
+                    Value::from(txid_hex.clone()),
+                    Value::from(true), // verbose=true
+                ],
+            )
+            .await?;
 
         if let Some(vout_array) = tx.get("vout").and_then(|v| v.as_array()) {
             if let Some(output) = vout_array.get(vout as usize) {
@@ -306,7 +345,7 @@ impl BitcoinRpc for BitcoinJsonRpc {
                 }
             }
         }
-        
+
         Ok(None)
     }
 
@@ -325,17 +364,17 @@ impl BitcoinRpc for BitcoinJsonRpc {
         // non-existent seal anchor is rejected here instead of failing opaquely at
         // broadcast with `bad-txns-inputs-missingorspent`. It also works on pruned /
         // non-txindex providers (e.g. Alchemy) and carries value + scriptPubKey.
-        let txout: Option<Value> = self.call("gettxout", vec![
-            Value::from(txid_hex),
-            Value::from(vout),
-        ]).await?;
+        let txout: Option<Value> = self
+            .call("gettxout", vec![Value::from(txid_hex), Value::from(vout)])
+            .await?;
 
         let Some(output) = txout else {
             // Output spent or unknown to the node's UTXO set.
             return Ok(None);
         };
 
-        let script_pubkey = output.get("scriptPubKey")
+        let script_pubkey = output
+            .get("scriptPubKey")
             .and_then(|spk| spk.get("hex"))
             .and_then(|h| h.as_str());
         let value_btc = output.get("value").and_then(|v| v.as_f64());
@@ -360,22 +399,30 @@ impl BitcoinRpc for BitcoinJsonRpc {
         let mut display_hash = block_hash;
         display_hash.reverse();
         let block_hash_hex = hex::encode(display_hash);
-        
-        // Use getblockheader RPC call with verbose=true to get full header info
-        let header: Value = self.call("getblockheader", vec![
-            Value::from(block_hash_hex),
-            Value::from(true), // verbose=true
-        ]).await?;
 
-        let height = header.get("height")
+        // Use getblockheader RPC call with verbose=true to get full header info
+        let header: Value = self
+            .call(
+                "getblockheader",
+                vec![
+                    Value::from(block_hash_hex),
+                    Value::from(true), // verbose=true
+                ],
+            )
+            .await?;
+
+        let height = header
+            .get("height")
             .and_then(|h| h.as_u64())
             .ok_or("Missing height in block header")?;
-        
-        let timestamp = header.get("time")
+
+        let timestamp = header
+            .get("time")
             .and_then(|t| t.as_u64())
             .ok_or("Missing time in block header")? as u32;
-        
-        let version = header.get("version")
+
+        let version = header
+            .get("version")
             .and_then(|v| v.as_i64())
             .ok_or("Missing version in block header")? as i32;
 
@@ -396,7 +443,7 @@ impl BitcoinRpc for BitcoinJsonRpc {
         // - UTXO selection (need access to wallet UTXOs)
         // - Transaction building (need to construct proper Bitcoin transaction)
         // - Signing (need access to private keys)
-        // 
+        //
         // BitcoinJsonRpc is a pure RPC client without wallet capabilities.
         // Use BitcoinSealProtocol with SealWallet for transaction creation.
         Err("OP_RETURN transaction creation requires wallet integration. Use BitcoinSealProtocol with SealWallet or tx_builder::CommitmentTxBuilder for transaction creation.".into())
@@ -434,4 +481,3 @@ struct JsonRpcError {
     #[serde(default)]
     message: Option<String>,
 }
-

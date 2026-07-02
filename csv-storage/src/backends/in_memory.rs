@@ -113,7 +113,8 @@ impl ReplayDatabase for InMemoryReplayDb {
         entry: &CrossChainRegistryEntry,
     ) -> Result<(), ReplayDbError> {
         let key = hex::encode(entry.sanad_id.as_bytes());
-        let val = entry.to_canonical_bytes()
+        let val = entry
+            .to_canonical_bytes()
             .map_err(|e| ReplayDbError::Storage(format!("Serialization error: {e}")))?;
         let mut entries = self
             .transfer_entries

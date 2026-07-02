@@ -166,10 +166,7 @@ pub fn execute(action: ContentAction, _config: &Config) -> Result<()> {
             key_id,
             algorithm,
         } => cmd_encrypt(&tree, &key_id, &algorithm),
-        ContentAction::Decrypt {
-            envelope,
-            key_id,
-        } => cmd_decrypt(&envelope, &key_id),
+        ContentAction::Decrypt { envelope, key_id } => cmd_decrypt(&envelope, &key_id),
         ContentAction::Disclose { tree, include } => cmd_disclose(&tree, &include),
         ContentAction::Attach { action } => cmd_attach(action),
         ContentAction::Participants { action } => cmd_participants(action),
@@ -447,7 +444,10 @@ fn cmd_decrypt(envelope_file: &str, key_id: &str) -> Result<()> {
     // Reconstruct nonce
     let nonce_bytes = &envelope.descriptor.nonce;
     if nonce_bytes.len() != 12 {
-        return Err(anyhow::anyhow!("Invalid nonce length: expected 12, got {}", nonce_bytes.len()));
+        return Err(anyhow::anyhow!(
+            "Invalid nonce length: expected 12, got {}",
+            nonce_bytes.len()
+        ));
     }
     let nonce: GenericArray<u8, <Aes256Gcm as AeadCore>::NonceSize> =
         *GenericArray::from_slice(nonce_bytes);
@@ -562,18 +562,14 @@ fn cmd_attach_add(tree_file: &str, file: &str, media_type_str: &str) -> Result<(
 
     let media_type = parse_media_type(media_type_str)?;
 
-    let _attachment = AttachmentRef::new(
-        file,
-        media_type,
-        file_data.len() as u64,
-        file_hash.hash(),
-    )
-    .with_created_at(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-    );
+    let _attachment =
+        AttachmentRef::new(file, media_type, file_data.len() as u64, file_hash.hash())
+            .with_created_at(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
 
     output::kv("File", file);
     output::kv("Media Type", media_type_str);

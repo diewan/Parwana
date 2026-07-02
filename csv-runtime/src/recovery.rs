@@ -94,12 +94,18 @@ impl ReplayCheckpoint {
 
     /// Get consumed replay IDs as ReplayIdHash
     pub fn get_consumed_as_replay_ids(&self) -> Vec<csv_hash::ReplayIdHash> {
-        self.consumed_replay_ids.iter().map(|&h| csv_hash::ReplayIdHash(h)).collect()
+        self.consumed_replay_ids
+            .iter()
+            .map(|&h| csv_hash::ReplayIdHash(h))
+            .collect()
     }
 
     /// Get pending replay IDs as ReplayIdHash
     pub fn get_pending_as_replay_ids(&self) -> Vec<csv_hash::ReplayIdHash> {
-        self.pending_replay_ids.iter().map(|&h| csv_hash::ReplayIdHash(h)).collect()
+        self.pending_replay_ids
+            .iter()
+            .map(|&h| csv_hash::ReplayIdHash(h))
+            .collect()
     }
 }
 

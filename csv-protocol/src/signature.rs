@@ -13,8 +13,8 @@
 //! (Secp256k1, Ed25519) are forgeable by 2030+ quantum adversaries.
 //! Long-lived proof bundles must use ML-DSA-65.
 
-use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
 use csv_codec::CodecError;
+use csv_codec::manual_encoder::{CanonicalEncoding, EncodingFormat, ManualEncoder};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ProtocolError, Result as ProtocolResult};
@@ -175,21 +175,24 @@ impl Signature {
                 // Derive secp256k1 public key from secret key
                 #[cfg(feature = "secp256k1")]
                 {
-                    use secp256k1::SecretKey;
                     use secp256k1::PublicKey;
                     use secp256k1::Secp256k1;
+                    use secp256k1::SecretKey;
                     let secp = Secp256k1::new();
-                    let sk = SecretKey::from_slice(secret_key)
-                        .map_err(|e| ProtocolError::SignatureVerificationFailed(
-                            format!("Invalid secp256k1 secret key: {}", e)
-                        ))?;
+                    let sk = SecretKey::from_slice(secret_key).map_err(|e| {
+                        ProtocolError::SignatureVerificationFailed(format!(
+                            "Invalid secp256k1 secret key: {}",
+                            e
+                        ))
+                    })?;
                     let pk = PublicKey::from_secret_key(&secp, &sk);
                     pk.serialize().to_vec()
                 }
                 #[cfg(not(feature = "secp256k1"))]
                 {
                     return Err(ProtocolError::SignatureVerificationFailed(
-                        "secp256k1 support requires the 'secp256k1' feature to be enabled".to_string()
+                        "secp256k1 support requires the 'secp256k1' feature to be enabled"
+                            .to_string(),
                     ));
                 }
             }
@@ -201,7 +204,7 @@ impl Signature {
                     use ed25519_dalek::VerifyingKey;
                     let sk = SigningKey::from_bytes(secret_key.try_into().map_err(|_| {
                         ProtocolError::SignatureVerificationFailed(
-                            "Invalid Ed25519 secret key: must be 32 bytes".to_string()
+                            "Invalid Ed25519 secret key: must be 32 bytes".to_string(),
                         )
                     })?);
                     VerifyingKey::from(&sk).to_bytes().to_vec()
@@ -209,7 +212,7 @@ impl Signature {
                 #[cfg(not(feature = "ed25519"))]
                 {
                     return Err(ProtocolError::SignatureVerificationFailed(
-                        "Ed25519 support requires the 'ed25519' feature to be enabled".to_string()
+                        "Ed25519 support requires the 'ed25519' feature to be enabled".to_string(),
                     ));
                 }
             }
@@ -222,7 +225,7 @@ impl Signature {
 
                     if secret_key.len() < 32 {
                         return Err(ProtocolError::SignatureVerificationFailed(
-                            "Invalid ML-DSA-65 secret key: must be at least 32 bytes".to_string()
+                            "Invalid ML-DSA-65 secret key: must be at least 32 bytes".to_string(),
                         ));
                     }
 
@@ -232,7 +235,7 @@ impl Signature {
                 #[cfg(not(feature = "pq"))]
                 {
                     return Err(ProtocolError::SignatureVerificationFailed(
-                        "ML-DSA-65 support requires the 'pq' feature to be enabled".to_string()
+                        "ML-DSA-65 support requires the 'pq' feature to be enabled".to_string(),
                     ));
                 }
             }
@@ -381,11 +384,9 @@ fn verify_ed25519(signature: &[u8], public_key: &[u8], message: &[u8]) -> Result
     })?);
 
     // Verify signature
-    verifying_key
-        .verify(message, &sig)
-        .map_err(|e| {
-            ProtocolError::SignatureVerificationFailed(format!("Ed25519 verification failed: {}", e))
-        })?;
+    verifying_key.verify(message, &sig).map_err(|e| {
+        ProtocolError::SignatureVerificationFailed(format!("Ed25519 verification failed: {}", e))
+    })?;
 
     Ok(())
 }
@@ -473,7 +474,7 @@ pub fn sign_ml_dsa65(message: &[u8], secret_key: &[u8]) -> Result<Vec<u8>> {
 /// * `message` - The message that was signed (unused with bound signature format)
 #[cfg(feature = "pq")]
 fn verify_ml_dsa65(signature: &[u8], public_key: &[u8], _message: &[u8]) -> Result<()> {
-    use pqcrypto_dilithium::dilithium3::{open, SignedMessage};
+    use pqcrypto_dilithium::dilithium3::{SignedMessage, open};
     use pqcrypto_traits::sign::{PublicKey, SignedMessage as SignedMessageTrait};
 
     // Validate public key size
@@ -814,7 +815,11 @@ mod tests {
         let result = sig.verify(SignatureScheme::MlDsa65);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("1952"), "Error should mention expected public key length 1952, got: {}", err);
+        assert!(
+            err.contains("1952"),
+            "Error should mention expected public key length 1952, got: {}",
+            err
+        );
     }
 
     #[cfg(feature = "pq")]
@@ -834,7 +839,11 @@ mod tests {
         let result = sig.verify(SignatureScheme::MlDsa65);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("3309"), "Error should mention expected signature length 3309, got: {}", err);
+        assert!(
+            err.contains("3309"),
+            "Error should mention expected signature length 3309, got: {}",
+            err
+        );
     }
 
     #[cfg(not(feature = "pq"))]
@@ -845,7 +854,11 @@ mod tests {
         let result = Signature::sign(SignatureScheme::MlDsa65, &secret_key, message);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("pq"), "Error should mention pq feature requirement: {}", err);
+        assert!(
+            err.contains("pq"),
+            "Error should mention pq feature requirement: {}",
+            err
+        );
     }
 
     #[cfg(not(feature = "pq"))]
@@ -855,6 +868,10 @@ mod tests {
         let result = sig.verify(SignatureScheme::MlDsa65);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("pq"), "Error should mention pq feature requirement: {}", err);
+        assert!(
+            err.contains("pq"),
+            "Error should mention pq feature requirement: {}",
+            err
+        );
     }
 }

@@ -127,42 +127,42 @@ impl StateProofVerifierTrait for StateProofVerifier {
     /// Verify that an object exists on-chain.
     async fn verify_object_exists(node: &Arc<SuiNode>, object_id: [u8; 32]) -> SuiResult<bool> {
         use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
-        
+
         let client = node.client();
         let mut client_guard = client.lock().await;
-        
+
         let addr = sui_sdk_types::Address::from_bytes(object_id)
             .map_err(|e| SuiError::StateProofFailed(format!("Invalid object ID: {}", e)))?;
-        
+
         let request = GetObjectRequest::new(&addr);
-        
+
         let object_response = (*client_guard)
             .ledger_client()
             .get_object(request)
             .await
             .map_err(|e| SuiError::StateProofFailed(format!("Failed to get object: {}", e)))?;
-        
+
         Ok(object_response.into_inner().object.is_some())
     }
 
     /// Verify that an object has been consumed (deleted).
     async fn verify_object_consumed(node: &Arc<SuiNode>, object_id: [u8; 32]) -> SuiResult<bool> {
         use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
-        
+
         let client = node.client();
         let mut client_guard = client.lock().await;
-        
+
         let addr = sui_sdk_types::Address::from_bytes(object_id)
             .map_err(|e| SuiError::StateProofFailed(format!("Invalid object ID: {}", e)))?;
-        
+
         let request = GetObjectRequest::new(&addr);
-        
+
         let object_response = (*client_guard)
             .ledger_client()
             .get_object(request)
             .await
             .map_err(|e| SuiError::StateProofFailed(format!("Failed to get object: {}", e)))?;
-        
+
         // Object is consumed if it doesn't exist or is wrapped/deleted
         Ok(object_response.into_inner().object.is_none())
     }
@@ -174,29 +174,29 @@ impl StateProofVerifierTrait for StateProofVerifier {
         _object_id: [u8; 32],
     ) -> SuiResult<bool> {
         use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
-        
+
         let client = node.client();
         let mut client_guard = client.lock().await;
-        
+
         let digest = sui_sdk_types::Digest::from_bytes(tx_digest)
             .map_err(|e| SuiError::StateProofFailed(format!("Invalid tx digest: {}", e)))?;
-        
+
         let request = GetTransactionRequest::new(&digest);
-        
+
         let tx_response = (*client_guard)
             .ledger_client()
             .get_transaction(request)
             .await
             .map_err(|e| SuiError::StateProofFailed(format!("Failed to get transaction: {}", e)))?;
-        
+
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
             SuiError::StateProofFailed("Transaction not found in response".to_string())
         })?;
-        
+
         // Check if the object ID appears in the transaction's input objects
         // Note: The sui-rpc API may have changed, so we check if the transaction exists
         let consumed = tx.transaction.is_some();
-        
+
         Ok(consumed)
     }
 }
@@ -224,30 +224,31 @@ impl EventProofVerifierTrait for EventProofVerifier {
         _expected_event_data: &[u8],
     ) -> SuiResult<bool> {
         use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
-        
+
         let client = node.client();
         let mut client_guard = client.lock().await;
-        
+
         let digest = sui_sdk_types::Digest::from_bytes(tx_digest)
             .map_err(|e| SuiError::EventProofFailed(format!("Invalid tx digest: {}", e)))?;
-        
+
         let request = GetTransactionRequest::new(&digest);
-        
+
         let tx_response = (*client_guard)
             .ledger_client()
             .get_transaction(request)
             .await
             .map_err(|e| SuiError::EventProofFailed(format!("Failed to get transaction: {}", e)))?;
-        
+
         let tx = tx_response.into_inner().transaction.ok_or_else(|| {
             SuiError::EventProofFailed("Transaction not found in response".to_string())
         })?;
-        
+
         // Check if any event matches the expected event data
-        let tx_events = tx.events.as_ref().ok_or_else(|| {
-            SuiError::EventProofFailed("Transaction has no events".to_string())
-        })?;
-        
+        let tx_events = tx
+            .events
+            .as_ref()
+            .ok_or_else(|| SuiError::EventProofFailed("Transaction has no events".to_string()))?;
+
         let event_found = tx_events.events.iter().any(|event| {
             // Compare event type and parsed JSON data
             if let Some(ref event_type) = event.event_type {
@@ -266,7 +267,7 @@ impl EventProofVerifierTrait for EventProofVerifier {
             }
             false
         });
-        
+
         Ok(event_found)
     }
 }

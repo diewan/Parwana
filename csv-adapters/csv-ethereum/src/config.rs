@@ -1,8 +1,8 @@
 //! Ethereum adapter configuration
 
 use csv_keys::memory::SecretKey;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Configuration for the Ethereum anchor layer
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,9 +43,13 @@ where
     let opt_str: Option<String> = Option::deserialize(deserializer)?;
     match opt_str {
         Some(s) => {
-            let bytes = hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
+            let bytes =
+                hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
             if bytes.len() != 32 {
-                return Err(D::Error::custom(format!("private key must be 32 bytes, got {}", bytes.len())));
+                return Err(D::Error::custom(format!(
+                    "private key must be 32 bytes, got {}",
+                    bytes.len()
+                )));
             }
             let mut key_bytes = [0u8; 32];
             key_bytes.copy_from_slice(&bytes);

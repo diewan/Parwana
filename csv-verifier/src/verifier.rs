@@ -566,8 +566,9 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         let hash_fn = leaf.native_hash_function();
 
         // Compute the leaf hash using the chain's native hash function
-        let computed_hash = leaf.hash_with_function(hash_fn)
-            .map_err(|e| ProtocolError::InvalidInput(format!("Failed to compute leaf hash: {}", e)))?;
+        let computed_hash = leaf.hash_with_function(hash_fn).map_err(|e| {
+            ProtocolError::InvalidInput(format!("Failed to compute leaf hash: {}", e))
+        })?;
 
         // Verify the computed hash matches the expected hash
         if computed_hash == *expected_hash {

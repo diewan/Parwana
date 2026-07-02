@@ -41,17 +41,19 @@ pub async fn mint_sanad(
     }
 
     // Parse the package ID
-    let package_id = sui_sdk_types::Address::from_bytes(&parse_object_id(package_id)
-        .map_err(|e| SuiError::TransactionFailed(format!("Invalid package ID: {}", e)))?)
-        .map_err(|e| SuiError::TransactionFailed(format!("Invalid package ID: {}", e)))?;
+    let package_id = sui_sdk_types::Address::from_bytes(
+        &parse_object_id(package_id)
+            .map_err(|e| SuiError::TransactionFailed(format!("Invalid package ID: {}", e)))?,
+    )
+    .map_err(|e| SuiError::TransactionFailed(format!("Invalid package ID: {}", e)))?;
 
     // Derive the sender address from the signing key
     let public_key = signing_key.verifying_key();
     let pubkey_bytes = public_key.as_bytes();
 
     // Sui address is derived from public key using Blake2b with 0x00 prefix
-    use blake2::Digest as Blake2Digest;
     use blake2::Blake2b;
+    use blake2::Digest as Blake2Digest;
     let mut hasher = Blake2b::new();
     hasher.update([0x00]); // Sui address prefix
     hasher.update(pubkey_bytes);
@@ -68,7 +70,9 @@ pub async fn mint_sanad(
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to fetch gas objects: {}", e)))?;
 
     if gas_objects.is_empty() {
-        return Err(SuiError::TransactionFailed("No gas objects found".to_string()));
+        return Err(SuiError::TransactionFailed(
+            "No gas objects found".to_string(),
+        ));
     }
 
     // Build the transaction using sui-transaction-builder
@@ -89,11 +93,17 @@ pub async fn mint_sanad(
     let source_seal_ref_arg = tx_builder.pure(source_seal_ref.as_bytes());
     tx_builder.move_call(
         function,
-        vec![sanad_id_arg, commitment_arg, source_chain_arg, source_seal_ref_arg],
+        vec![
+            sanad_id_arg,
+            commitment_arg,
+            source_chain_arg,
+            source_seal_ref_arg,
+        ],
     );
 
     // Build the transaction data
-    let tx_data = tx_builder.try_build()
+    let tx_data = tx_builder
+        .try_build()
         .map_err(|e| SuiError::TransactionFailed(format!("Failed to build transaction: {}", e)))?;
 
     // Use proper Sui signing digest with intent scope
@@ -101,8 +111,9 @@ pub async fn mint_sanad(
     let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
 
     // Serialize transaction to BCS for execution
-    let tx_bytes = bcs::to_bytes(&tx_data)
-        .map_err(|e| SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e)))?;
+    let tx_bytes = bcs::to_bytes(&tx_data).map_err(|e| {
+        SuiError::TransactionFailed(format!("Failed to serialize transaction: {}", e))
+    })?;
 
     // Execute the transaction via sui-rpc
     let client = node.client();

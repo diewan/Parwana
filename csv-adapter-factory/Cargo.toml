@@ -27,7 +27,7 @@ blake2 = { version = "0.10", optional = true }
 
 [features]
 bitcoin = ["csv-bitcoin"]
-ethereum = ["csv-ethereum"]
+ethereum = ["csv-ethereum", "csv-ethereum/rpc"]
 solana = ["csv-solana", "ed25519-dalek", "bs58"]
 sui = ["csv-sui", "ed25519-dalek", "blake2"]
 aptos = ["csv-aptos"]

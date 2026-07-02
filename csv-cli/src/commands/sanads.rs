@@ -304,10 +304,7 @@ async fn cmd_create(
     }
 
     // For contract chains (Ethereum, Solana, Sui, Aptos), check contract deployment
-    let is_contract_chain = matches!(
-        chain.as_str(),
-        "ethereum" | "solana" | "sui" | "aptos"
-    );
+    let is_contract_chain = matches!(chain.as_str(), "ethereum" | "solana" | "sui" | "aptos");
     if is_contract_chain && !readiness.contract_configured {
         output::error("Chain readiness check failed: Contract/program not deployed or configured");
         output::info(&format!(
@@ -549,9 +546,15 @@ async fn cmd_create(
             output::info("Scanning for UTXOs...");
             let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
             let scanned_utxos = if let Some(ops) = wallet_ops {
-                ops.scan_utxos(&seed_array, account, index, &scan_url, indexer_kind.as_deref())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
+                ops.scan_utxos(
+                    &seed_array,
+                    account,
+                    index,
+                    &scan_url,
+                    indexer_kind.as_deref(),
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
             } else {
                 output::warning("Wallet operations not available, skipping UTXO scan");
                 Vec::new()
@@ -668,6 +671,12 @@ async fn cmd_create(
                 sanad_id: s.sanad_id.clone(),
                 anchor_txid: s.anchor_txid.clone(),
                 vout: s.vout,
+                commitment: state
+                    .storage
+                    .sanads
+                    .iter()
+                    .find(|r| r.id == s.sanad_id)
+                    .map(|r| r.commitment.clone()),
             })
             .collect(),
     };
@@ -1113,7 +1122,10 @@ async fn cmd_create(
     // persists a SanadRecord with SanadStatus::Active or claims a seal/anchor
     // exists, because no commitment was actually published anywhere
     // (SANAD-CREATE-001).
-    if matches!(create_request.publish_policy, csv_sdk::sanads::PublishPolicy::DraftOnly) {
+    if matches!(
+        create_request.publish_policy,
+        csv_sdk::sanads::PublishPolicy::DraftOnly
+    ) {
         let draft = client
             .sanads()
             .create_draft(&create_request, commitment, ownership_proof, &salt)
@@ -1149,9 +1161,11 @@ async fn cmd_create(
         ownership_proof,
         &salt,
         seal.to_vec(),
-        anchor
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("Internal error: publish policy requires an anchor but none was produced"))?,
+        anchor.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Internal error: publish policy requires an anchor but none was produced"
+            )
+        })?,
         false,
     ) {
         Ok(result) => {
@@ -1214,13 +1228,15 @@ async fn cmd_create(
                 // Manual registration is no longer needed and causes "adapter not found" warnings
 
                 // Persist the mapping to state for cross-run lookups
-                state.storage.wallet.sanad_seals.push(
-                    csv_store::state::wallet::SanadSealRecord {
+                state
+                    .storage
+                    .wallet
+                    .sanad_seals
+                    .push(csv_store::state::wallet::SanadSealRecord {
                         sanad_id: sanad_id_hex.clone(),
                         anchor_txid: anchor_txid_hex.clone(),
                         vout: output_index,
-                    },
-                );
+                    });
                 state.save()?;
                 log::info!(
                     "Persisted sanad seal to state: sanad_id={}, txid={}, vout={}",
@@ -1259,12 +1275,14 @@ async fn cmd_create(
 }
 
 fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
-    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_parsed =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
     let sanad_id_hash = Hash::new(*sanad_id_parsed.as_bytes());
 
     output::header(&format!("Sanad: {}", hex::encode(sanad_id_hash.as_bytes())));
-    output::info("Source: local display cache (non-canonical). Use 'csv sanad state' for canonical on-chain state.");
+    output::info(
+        "Source: local display cache (non-canonical). Use 'csv sanad state' for canonical on-chain state.",
+    );
 
     if let Some(tracked) = state.get_sanad(&sanad_id_hash.to_hex()) {
         output::kv("Chain", tracked.chain.as_ref());
@@ -1351,7 +1369,9 @@ async fn cmd_list(
     if update {
         output::info("Querying on-chain status for all sanads...");
     } else {
-        output::info("Source: local display cache (non-canonical). Use --update to query canonical chain state, or 'csv sanad state' for a single Sanad.");
+        output::info(
+            "Source: local display cache (non-canonical). Use --update to query canonical chain state, or 'csv sanad state' for a single Sanad.",
+        );
     }
 
     let headers = vec!["Sanad ID", "Chain", "State"];
@@ -1428,8 +1448,8 @@ async fn cmd_list(
 fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> Result<()> {
     // Validate via the canonical parser so malformed IDs are rejected here
     // rather than silently passed through to the (unimplemented) local path.
-    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_parsed =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
 
     output::header(&format!("Transferring Sanad to {}", to));
     output::kv("Sanad ID", &hex::encode(sanad_id_parsed.as_bytes()));
@@ -1447,8 +1467,8 @@ async fn cmd_consume(
     output::header(&format!("Consuming Sanad on {}", chain));
 
     // Parse sanad_id from hex using canonical parser
-    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_parsed =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
 
     output::kv("Sanad ID", &hex::encode(sanad_id_parsed.as_bytes()));
 
@@ -1593,8 +1613,8 @@ fn cmd_remove(sanad_id: Option<String>, all: bool, state: &mut UnifiedStateManag
     // Parse sanad_id using the canonical parser so 0x/non-0x forms, invalid
     // length, and non-hex input are all rejected consistently with the other
     // sanad subcommands (create/show/consume/state/trace).
-    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_parsed =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
     let normalized_id = hex::encode(sanad_id_parsed.as_bytes());
 
     // Check if sanad exists
@@ -1618,8 +1638,8 @@ async fn cmd_state(
     config: &Config,
     state: &UnifiedStateManager,
 ) -> Result<()> {
-    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_parsed =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
     let sanad_id_hash = csv_hash::Hash::new(*sanad_id_parsed.as_bytes());
     let sanad_id_hex = sanad_id_hash.to_hex();
 
@@ -1628,7 +1648,7 @@ async fn cmd_state(
 
     // Use runtime-backed canonical state query (CLI-STATE-001)
     let core_chain = csv_hash::ChainId::new(chain.as_str());
-    
+
     // Build SDK client for runtime access
     let sdk_config = build_sdk_config_from_cli_config(config, &chain, state)?;
     let client = csv_sdk::CsvClient::builder()
@@ -1640,7 +1660,7 @@ async fn cmd_state(
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     let runtime = client.chain_runtime();
-    
+
     // Query canonical state via ChainBackend (fail closed if unavailable)
     match runtime.get_adapter(core_chain.clone()).await {
         Ok(adapter) => {
@@ -1710,7 +1730,8 @@ async fn cmd_state(
             return Err(anyhow::anyhow!(
                 "Chain adapter not available for {}: {}. \
                  Cannot determine canonical state without chain access.",
-                chain, e
+                chain,
+                e
             ));
         }
     }
@@ -1736,8 +1757,8 @@ async fn cmd_trace(
     config: &Config,
     state: &UnifiedStateManager,
 ) -> Result<()> {
-    let sanad_id_parsed = SanadId::parse_hex(&sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let sanad_id_parsed =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
     let sanad_id_hash = csv_hash::Hash::new(*sanad_id_parsed.as_bytes());
     let sanad_id_hex = sanad_id_hash.to_hex();
 
@@ -1746,7 +1767,7 @@ async fn cmd_trace(
 
     // Use runtime-backed canonical trace query (CLI-STATE-001)
     let core_chain = csv_hash::ChainId::new(chain.as_str());
-    
+
     // Build SDK client for runtime access
     let sdk_config = build_sdk_config_from_cli_config(config, &chain, state)?;
     let client = csv_sdk::CsvClient::builder()
@@ -1758,16 +1779,21 @@ async fn cmd_trace(
         .map_err(|e| anyhow::anyhow!("Failed to build CSV client: {}", e))?;
 
     let runtime = client.chain_runtime();
-    
+
     // Query canonical trace via ChainBackend (fail closed if unavailable)
     match runtime.get_adapter(core_chain.clone()).await {
         Ok(adapter) => {
             match adapter.trace_sanad(&sanad_id_parsed).await {
                 Ok(events) => {
                     if events.is_empty() {
-                        output::info("No lifecycle events found on-chain. This Sanad may not exist yet.");
+                        output::info(
+                            "No lifecycle events found on-chain. This Sanad may not exist yet.",
+                        );
                     } else {
-                        output::info(&format!("Found {} canonical lifecycle event(s)", events.len()));
+                        output::info(&format!(
+                            "Found {} canonical lifecycle event(s)",
+                            events.len()
+                        ));
                         println!();
 
                         for event in &events {
@@ -1801,7 +1827,8 @@ async fn cmd_trace(
             return Err(anyhow::anyhow!(
                 "Chain adapter not available for {}: {}. \
                  Cannot determine canonical trace without chain access.",
-                chain, e
+                chain,
+                e
             ));
         }
     }
@@ -1851,7 +1878,8 @@ async fn query_sanad_on_chain_state(
         Err(e) => {
             log::warn!(
                 "Chain adapter not available for {}: {}. Cannot determine canonical state.",
-                chain, e
+                chain,
+                e
             );
             return None;
         }
@@ -1886,7 +1914,8 @@ async fn query_sanad_on_chain_state(
         Err(e) => {
             log::warn!(
                 "Failed to query canonical sanad state from chain {}: {}. Cannot return canonical state without on-chain validation.",
-                chain, e
+                chain,
+                e
             );
             None
         }
@@ -1902,7 +1931,7 @@ fn build_sdk_config_from_cli_config(
 ) -> Result<csv_sdk::config::Config, anyhow::Error> {
     let chain_cfg = config.chain(chain)?;
     let identity = WalletIdentity::from_state(state)?;
-    
+
     let mut sdk_config = csv_sdk::config::Config {
         network: match chain_cfg.network {
             crate::config::Network::Test => csv_sdk::config::Network::Testnet,
@@ -1947,13 +1976,21 @@ fn build_sdk_config_from_cli_config(
                     sanad_id: s.sanad_id.clone(),
                     anchor_txid: s.anchor_txid.clone(),
                     vout: s.vout,
+                    commitment: state
+                        .storage
+                        .sanads
+                        .iter()
+                        .find(|r| r.id == s.sanad_id)
+                        .map(|r| r.commitment.clone()),
                 })
                 .collect()
         } else {
             vec![]
         },
     };
-    sdk_config.chains.insert(chain.as_str().to_string(), sdk_chain_config);
+    sdk_config
+        .chains
+        .insert(chain.as_str().to_string(), sdk_chain_config);
 
     Ok(sdk_config)
 }
@@ -2043,8 +2080,7 @@ mod state_tests {
 mod id_normalization_tests {
     use super::*;
 
-    const VALID_HEX: &str =
-        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+    const VALID_HEX: &str = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
 
     /// The canonical lookup key (as stored in `SanadRecord.id`) must be
     /// identical regardless of `0x` prefix, matching how `cmd_create` stores

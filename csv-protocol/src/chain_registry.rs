@@ -202,7 +202,7 @@ impl ChainRegistry {
     pub fn load_from_dir(dir: &Path) -> Result<Self, anyhow::Error> {
         let mut registry = Self::new();
         registry.config_dir = Some(dir.to_path_buf());
-        
+
         if !dir.exists() {
             return Ok(registry);
         }
@@ -210,7 +210,7 @@ impl ChainRegistry {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().is_some_and(|ext| ext == "toml")
                 && let Ok(config) = ChainConfig::from_toml(&path)
             {
@@ -288,7 +288,7 @@ mod tests {
             wallet: WalletConfig::default(),
             custom_settings: HashMap::new(),
         };
-        
+
         registry.register_chain(config);
         assert!(!registry.is_empty());
         assert_eq!(registry.len(), 1);
@@ -316,7 +316,7 @@ mod tests {
             wallet: WalletConfig::default(),
             custom_settings: HashMap::new(),
         };
-        
+
         assert!(config.supports("zk_proofs"));
         assert!(!config.supports("light_client_proofs"));
         assert!(!config.supports("nonexistent_feature"));

@@ -1,19 +1,15 @@
 //! Ethereum adapter factory implementation.
 
+use super::{AdapterConfig, AdapterFactory, AdapterResult, FactoryError, NetworkType};
 use async_trait::async_trait;
-use super::{AdapterFactory, AdapterConfig, AdapterResult, FactoryError, NetworkType};
-use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_adapter_core::ChainAdapter;
+use csv_protocol::chain_adapter_traits::ChainBackend;
 use std::sync::Arc;
 
 #[cfg(feature = "ethereum")]
 use csv_ethereum::{
-    config::EthereumConfig,
-    ops::EthereumBackend,
-    rpc::EthereumRpc,
-    runtime_adapter::EthereumRuntimeAdapter,
-    node::EthereumNode,
-    config::Network as EthNetwork,
+    config::EthereumConfig, config::Network as EthNetwork, node::EthereumNode,
+    ops::EthereumBackend, rpc::EthereumRpc, runtime_adapter::EthereumRuntimeAdapter,
 };
 
 /// Ethereum adapter factory.
@@ -29,7 +25,8 @@ impl AdapterFactory for EthereumFactory {
         };
 
         // Select the highest priority REST endpoint (Ethereum uses JSON-RPC)
-        let rest_endpoint = config.rpc_endpoints
+        let rest_endpoint = config
+            .rpc_endpoints
             .iter()
             .filter(|e| e.protocol == super::RpcProtocol::JsonRpc)
             .min_by_key(|e| e.priority)
@@ -41,10 +38,12 @@ impl AdapterFactory for EthereumFactory {
 
         // Parse contract address if provided
         let contract_address = if let Some(ref addr) = config.contract_address {
-            let address_bytes = hex::decode(addr.trim_start_matches("0x"))
-                .map_err(|e| FactoryError::InvalidConfig(format!("Invalid contract address: {}", e)))?;
-            let addr_array: [u8; 20] = address_bytes.try_into()
-                .map_err(|_| FactoryError::InvalidConfig("Contract address must be 20 bytes".to_string()))?;
+            let address_bytes = hex::decode(addr.trim_start_matches("0x")).map_err(|e| {
+                FactoryError::InvalidConfig(format!("Invalid contract address: {}", e))
+            })?;
+            let addr_array: [u8; 20] = address_bytes.try_into().map_err(|_| {
+                FactoryError::InvalidConfig("Contract address must be 20 bytes".to_string())
+            })?;
             Some(addr_array)
         } else {
             None
@@ -55,7 +54,11 @@ impl AdapterFactory for EthereumFactory {
 
         let eth_config = EthereumConfig {
             network,
-            finality_depth: if config.network == NetworkType::Testnet { 15 } else { 12 },
+            finality_depth: if config.network == NetworkType::Testnet {
+                15
+            } else {
+                12
+            },
             use_checkpoint_finality: config.network == NetworkType::Mainnet,
             rpc_url: rest_endpoint.url.clone(),
             private_key: None, // SharedSecretHandle is not compatible with Option<SecretKey>
@@ -66,7 +69,9 @@ impl AdapterFactory for EthereumFactory {
         let contract_addr_for_rpc = contract_address.unwrap_or([0u8; 20]);
         let mut rpc = EthereumNode::new(&rest_endpoint.url, contract_addr_for_rpc)
             .await
-            .map_err(|e| FactoryError::CreationFailed(format!("Failed to create Ethereum RPC client: {}", e)))?;
+            .map_err(|e| {
+                FactoryError::CreationFailed(format!("Failed to create Ethereum RPC client: {}", e))
+            })?;
 
         // Add signer if private key is provided
         if let Some(key_bytes) = secret_key.as_bytes() {
@@ -78,19 +83,21 @@ impl AdapterFactory for EthereumFactory {
 
         // Create ChainBackend. Fails closed (no mock fallback) if construction fails.
         let eth_backend = Arc::new(
-            EthereumBackend::new(Box::new(rpc) as Box<dyn EthereumRpc>, eth_config)
-                .map_err(|e| FactoryError::CreationFailed(format!(
-                    "Failed to construct Ethereum chain backend: {}",
-                    e
-                )))?
+            EthereumBackend::new(Box::new(rpc) as Box<dyn EthereumRpc>, eth_config).map_err(
+                |e| {
+                    FactoryError::CreationFailed(format!(
+                        "Failed to construct Ethereum chain backend: {}",
+                        e
+                    ))
+                },
+            )?,
         );
-        
+
         let chain_backend: Arc<dyn ChainBackend> = eth_backend.clone();
 
         // Create ChainAdapter for TransferCoordinator using EthereumRuntimeAdapter
-        let chain_adapter: Box<dyn ChainAdapter> = Box::new(
-            EthereumRuntimeAdapter::new(eth_backend)
-        );
+        let chain_adapter: Box<dyn ChainAdapter> =
+            Box::new(EthereumRuntimeAdapter::new(eth_backend));
 
         Ok(AdapterResult {
             chain_backend,

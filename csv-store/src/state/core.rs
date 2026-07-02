@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 
 // Import deployment manifest reader
 use csv_protocol::deployment_manifest::{
-    get_aptos_contract_address,
-    get_ethereum_contract_address,
-    get_solana_program_id,
+    get_aptos_contract_address, get_ethereum_contract_address, get_solana_program_id,
     get_sui_package_id,
 };
 
@@ -148,8 +146,9 @@ impl ChainConfig {
                 indexer_url: None,
                 indexer_backend: None,
                 network: *network,
-                contract_address: Some(get_sui_package_id()
-                    .unwrap_or_else(|_| "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string())),
+                contract_address: Some(get_sui_package_id().unwrap_or_else(|_| {
+                    "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21".to_string()
+                })),
                 chain_id: None,
                 finality_depth: 1,
                 default_fee: Some(1000),
@@ -164,8 +163,9 @@ impl ChainConfig {
                 indexer_url: None,
                 indexer_backend: None,
                 network: *network,
-                contract_address: Some(get_aptos_contract_address()
-                    .unwrap_or_else(|_| "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string())),
+                contract_address: Some(get_aptos_contract_address().unwrap_or_else(|_| {
+                    "0x9d4c8ad9b8f58c73c73327833a4bda650c590091f130b2ec1293f086cf02ed50".to_string()
+                })),
                 chain_id: None,
                 finality_depth: 100,
                 default_fee: Some(100),
@@ -184,8 +184,9 @@ impl ChainConfig {
                 chain_id: None,
                 finality_depth: 32,
                 default_fee: Some(5000),
-                program_id: Some(get_solana_program_id()
-                    .unwrap_or_else(|_| "HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string())),
+                program_id: Some(get_solana_program_id().unwrap_or_else(|_| {
+                    "HdxSFwzk2v6JMm3w55MW1EuMeNcM9gTC4ETFMKqYyy6m".to_string()
+                })),
             },
             _ => Self {
                 rpc_url: String::new(),

@@ -33,30 +33,15 @@ const SILENT_CRYPTO_DEFAULT_PATTERNS: &[&str] = &[
     ".unwrap_or_default()",
 ];
 
-const FORBIDDEN_PLACEHOLDER_PATTERNS: &[&str] = &[
-    "todo!()",
-    "todo! (",
-    "unimplemented!()",
-    "unimplemented! (",
-];
+const FORBIDDEN_PLACEHOLDER_PATTERNS: &[&str] =
+    &["todo!()", "todo! (", "unimplemented!()", "unimplemented! ("];
 
-const FORBIDDEN_PANIC_PATTERNS: &[&str] = &[
-    "panic!()",
-    "panic! (",
-    "unreachable!()",
-    "unreachable! (",
-];
+const FORBIDDEN_PANIC_PATTERNS: &[&str] =
+    &["panic!()", "panic! (", "unreachable!()", "unreachable! ("];
 
-const FORBIDDEN_UNWRAP_PATTERNS: &[&str] = &[
-    ".unwrap()",
-    ".unwrap (",
-    ".expect(",
-    ".expect (",
-];
+const FORBIDDEN_UNWRAP_PATTERNS: &[&str] = &[".unwrap()", ".unwrap (", ".expect(", ".expect ("];
 
-const FORBIDDEN_ZERO_HASH_PATTERNS: &[&str] = &[
-    "Hash::new([0u8; 32])",
-];
+const FORBIDDEN_ZERO_HASH_PATTERNS: &[&str] = &["Hash::new([0u8; 32])"];
 
 // Natural-language log/comment signatures of the runtime mock-fallback antipattern
 // fixed under PROD-FAILCLOSED-001 (adapter constructors silently substituting a
@@ -96,11 +81,16 @@ fn authority_crates_do_not_depend_on_chain_adapters() {
         let active_content = strip_toml_comments(&content);
         for marker in ADAPTER_DEP_MARKERS {
             // Allow csv-adapter-core as it's a shared library, not a chain-specific adapter
-            if (*marker == "../csv-adapters/" || *marker == "csv-adapters/") && active_content.contains("csv-adapter-core") {
+            if (*marker == "../csv-adapters/" || *marker == "csv-adapters/")
+                && active_content.contains("csv-adapter-core")
+            {
                 // Check if it's specifically csv-adapter-core (allowed) or other adapters (not allowed)
-                if active_content.contains("csv-adapter-core") && !active_content.contains("csv-bitcoin")
-                    && !active_content.contains("csv-ethereum") && !active_content.contains("csv-solana")
-                    && !active_content.contains("csv-sui") && !active_content.contains("csv-aptos")
+                if active_content.contains("csv-adapter-core")
+                    && !active_content.contains("csv-bitcoin")
+                    && !active_content.contains("csv-ethereum")
+                    && !active_content.contains("csv-solana")
+                    && !active_content.contains("csv-sui")
+                    && !active_content.contains("csv-aptos")
                     && !active_content.contains("csv-celestia")
                 {
                     continue; // csv-adapter-core is allowed
@@ -533,8 +523,10 @@ fn canonical_hashing_paths_do_not_use_serde_json_serialization() {
 #[test]
 fn production_adapters_have_no_mock_fallback_on_construction_failure() {
     let root = workspace_root();
-    let findings =
-        scan_files_excluding_test_blocks(&root.join("csv-adapters"), PRODUCTION_MOCK_FALLBACK_PATTERNS);
+    let findings = scan_files_excluding_test_blocks(
+        &root.join("csv-adapters"),
+        PRODUCTION_MOCK_FALLBACK_PATTERNS,
+    );
     assert!(
         findings.is_empty(),
         "chain adapter constructors must fail closed with a typed error, not fall back to a mock RPC/seal protocol on error (see PROD-FAILCLOSED-001):\n{}",
@@ -604,8 +596,7 @@ fn collect_placeholder_stub_findings(path: &Path, findings: &mut Vec<String>) {
             continue;
         }
 
-        let mut depth: i64 =
-            line.matches('{').count() as i64 - line.matches('}').count() as i64;
+        let mut depth: i64 = line.matches('{').count() as i64 - line.matches('}').count() as i64;
         let mut body_stmts: Vec<&str> = Vec::new();
         let mut j = idx + 1;
         while j < lines.len() && depth > 0 {

@@ -38,13 +38,13 @@ pub mod event_envelope;
 pub mod event_persistence;
 pub mod execution_journal;
 pub mod failure_domain;
-pub mod user_runtime_lease;
 pub mod policy;
 pub mod queue;
 pub mod recovery;
 pub mod replay_database;
 pub mod runtime_mode;
 pub mod transfer_coordinator;
+pub mod user_runtime_lease;
 
 // Wallet operations (facade over chain adapters)
 pub mod wallet;
@@ -52,13 +52,13 @@ pub mod wallet;
 // Legacy re-exports (orchestration only)
 pub use adapter_registry::AdapterRegistryImpl;
 pub use chain_discovery::{ChainConfig, ChainDiscovery};
-pub use csv_adapter_core::{
-    ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort,
-    ChainProofPort, ChainReadPort, ChainSealRegistryPort,
-};
 pub use config::{
     CircuitBreakerConfig, ConfigValidationError, LeaseConfig, OperationalConfig, RetryConfig,
     RpcConfig, TimeoutConfig,
+};
+pub use csv_adapter_core::{
+    ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort, ChainProofPort, ChainReadPort,
+    ChainSealRegistryPort,
 };
 pub use error::{RuntimeError, TransferCoordinatorError};
 pub use event_bus::{EventBus, TransferEvent};
@@ -69,10 +69,6 @@ pub use execution_journal::{
     ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry,
 };
 pub use failure_domain::{ClassifiedError, FailureDomain};
-pub use user_runtime_lease::{
-    DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,
-    RuntimeExecutionContext, RuntimeId, TransferLease,
-};
 pub use policy::RuntimePolicy;
 pub use queue::{TaskQueue, TaskQueueError};
 pub use recovery::{
@@ -83,7 +79,13 @@ pub use runtime_mode::{
     CircuitBreaker, CircuitBreakerConfig as RuntimeCircuitBreakerConfig, CircuitBreakerState,
     HealthMonitor, HealthStatus, RuntimeMode,
 };
-pub use transfer_coordinator::{RecoveryContextProvider, TransferCoordinator};
+pub use transfer_coordinator::{
+    RecoveryContextProvider, TransferCoordinator, TransferOutcome, TransferReceipt,
+};
+pub use user_runtime_lease::{
+    DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,
+    RuntimeExecutionContext, RuntimeId, TransferLease,
+};
 
 // Coordinator lease re-exports
 pub use distributed_coordinator_lease::{

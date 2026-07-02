@@ -316,10 +316,7 @@ impl EventStore for InMemoryEventStore {
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        let events = guard
-            .get(&aggregate_id_wire)
-            .cloned()
-            .unwrap_or_default();
+        let events = guard.get(&aggregate_id_wire).cloned().unwrap_or_default();
 
         let result: Vec<_> = events
             .into_iter()
@@ -356,11 +353,11 @@ impl EventStore for InMemoryEventStore {
             .events
             .lock()
             .map_err(|e| EventStoreError::LockError(e.to_string()))?;
-        guard.keys()
+        guard
+            .keys()
             .map(|w| {
                 let wire = w.clone();
-                csv_protocol::sanad::SanadId::try_from(wire)
-                    .map_err(EventStoreError::Serialization)
+                csv_protocol::sanad::SanadId::try_from(wire).map_err(EventStoreError::Serialization)
             })
             .collect::<Result<Vec<_>, _>>()
     }
@@ -378,7 +375,7 @@ impl EventStore for InMemoryEventStore {
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<(), EventStoreError> {
         let wire_id: SanadIdWire = aggregate_id.clone().into();
-        
+
         let mut events_guard = self
             .events
             .lock()
@@ -411,7 +408,8 @@ pub struct RocksDbEventStore {
 impl RocksDbEventStore {
     /// Open a RocksDB-backed event store at the given filesystem path.
     pub fn open(path: &str) -> Result<Self, String> {
-        let opts = rocksdb::Options::default();
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(true);
         match rocksdb::DB::open(&opts, path) {
             Ok(db) => Ok(Self { db }),
             Err(e) => Err(e.to_string()),

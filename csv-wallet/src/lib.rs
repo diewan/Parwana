@@ -22,18 +22,18 @@
 #![allow(unused_imports)]
 
 pub mod error;
+pub mod keystore;
 pub mod signer;
 pub mod wallet;
-pub mod keystore;
 pub mod wallet_traits;
 
 // Re-export commonly used types
-pub use error::{WalletError, Result};
-pub use signer::{Signer, SignerRef, Signature};
-pub use wallet::{Wallet, WalletManager, WalletConfig};
+pub use error::{Result, WalletError};
+pub use keystore::{KeyPurpose, KeyStore};
+pub use signer::{Signature, Signer, SignerRef};
 pub use wallet::address; // Static address derivation functions
-pub use keystore::{KeyStore, KeyPurpose};
+pub use wallet::{Wallet, WalletConfig, WalletManager};
 // Re-export canonical secret types from csv-protocol
 pub use csv_protocol::secret::{SecretHandle, SharedSecretHandle};
-pub use wallet_traits::{WalletOperations, WalletFactory};
 pub use csv_protocol::signature::SignatureScheme;
+pub use wallet_traits::{WalletFactory, WalletOperations};

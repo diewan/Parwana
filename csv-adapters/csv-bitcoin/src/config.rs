@@ -1,8 +1,8 @@
 //! Bitcoin adapter configuration
 
 use csv_keys::memory::SecretKey;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Configuration for the Bitcoin anchor layer
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,9 +72,13 @@ where
     let opt_str: Option<String> = Option::deserialize(deserializer)?;
     match opt_str {
         Some(s) => {
-            let bytes = hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
+            let bytes =
+                hex::decode(&s).map_err(|e| D::Error::custom(format!("invalid hex: {}", e)))?;
             if bytes.len() != 32 {
-                return Err(D::Error::custom(format!("key must be 32 bytes, got {}", bytes.len())));
+                return Err(D::Error::custom(format!(
+                    "key must be 32 bytes, got {}",
+                    bytes.len()
+                )));
             }
             let mut key_bytes = [0u8; 32];
             key_bytes.copy_from_slice(&bytes);
@@ -110,10 +114,14 @@ pub struct SanadSealConfig {
     pub anchor_txid: String,
     /// Output index of the commitment in the anchor transaction
     pub vout: u32,
+    /// Tapret commitment (hex) embedded in the seal output's Taproot leaf.
+    /// Needed to reconstruct the key-path tweak when the seal is spent (lock).
+    #[serde(default)]
+    pub commitment: Option<String>,
 }
 
 /// Bitcoin RPC backend type
-/// 
+///
 /// This enum explicitly specifies which transport protocol the RPC endpoint uses.
 /// Different backends have different API semantics and response formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,15 +174,13 @@ impl BitcoinRpcBackend {
         api_key: Option<String>,
     ) -> Box<dyn crate::rpc::BitcoinRpc + Send + Sync> {
         match self {
-            Self::BitcoinCoreJsonRpc => {
-                Box::new(crate::json_rpc::BitcoinJsonRpc::new(url))
-            }
-            Self::BlockstreamRest | Self::MempoolRest => {
-                Box::new(crate::mempool_rpc::MempoolSignetRpc::with_url_and_key(url, api_key))
-            }
-            Self::BlockbookRest => {
-                Box::new(crate::blockbook_rpc::BlockbookRpc::with_url_and_key(url, api_key))
-            }
+            Self::BitcoinCoreJsonRpc => Box::new(crate::json_rpc::BitcoinJsonRpc::new(url)),
+            Self::BlockstreamRest | Self::MempoolRest => Box::new(
+                crate::mempool_rpc::MempoolSignetRpc::with_url_and_key(url, api_key),
+            ),
+            Self::BlockbookRest => Box::new(crate::blockbook_rpc::BlockbookRpc::with_url_and_key(
+                url, api_key,
+            )),
         }
     }
 }

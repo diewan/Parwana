@@ -17,9 +17,9 @@
 //! - Timestamp and sequence number
 //! - Checksum for integrity verification
 
-use csv_hash::Hash;
-use crate::wire::{HashWire, SanadIdWire};
 use crate::transfer_state::TransferStage;
+use crate::wire::{HashWire, SanadIdWire};
+use csv_hash::Hash;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -484,62 +484,52 @@ mod tests {
             .unwrap();
         let recovered = manager.recover().unwrap();
 
-    assert_eq!(recovered.checkpoint.sequence, 1);
-     }
+        assert_eq!(recovered.checkpoint.sequence, 1);
+    }
 
-     #[test]
-     fn test_execute_from_lock_recovery() {
-         let ctx = execute_from_lock_recovery(
-             "test-transfer-1",
-             Some(vec![1, 2, 3]),
-             Hash::new([1u8; 32]),
-         );
+    #[test]
+    fn test_execute_from_lock_recovery() {
+        let ctx = execute_from_lock_recovery(
+            "test-transfer-1",
+            Some(vec![1, 2, 3]),
+            Hash::new([1u8; 32]),
+        );
 
-         assert_eq!(ctx.transfer_id, "test-transfer-1");
-         assert_eq!(ctx.resume_stage, TransferStage::AwaitingFinality);
-         assert_eq!(ctx.proof_payload, Some(vec![1, 2, 3]));
-         assert!(ctx.lock_tx_hash.is_some());
-         assert!(ctx.mint_tx_hash.is_none());
-     }
+        assert_eq!(ctx.transfer_id, "test-transfer-1");
+        assert_eq!(ctx.resume_stage, TransferStage::AwaitingFinality);
+        assert_eq!(ctx.proof_payload, Some(vec![1, 2, 3]));
+        assert!(ctx.lock_tx_hash.is_some());
+        assert!(ctx.mint_tx_hash.is_none());
+    }
 
-     #[test]
-     fn test_execute_from_proof_recovery() {
-         let ctx = execute_from_proof_recovery(
-             "test-transfer-2",
-             vec![4, 5, 6],
-             Hash::new([2u8; 32]),
-         );
+    #[test]
+    fn test_execute_from_proof_recovery() {
+        let ctx =
+            execute_from_proof_recovery("test-transfer-2", vec![4, 5, 6], Hash::new([2u8; 32]));
 
-         assert_eq!(ctx.transfer_id, "test-transfer-2");
-         assert_eq!(ctx.resume_stage, TransferStage::MintSubmitted);
-         assert_eq!(ctx.proof_payload, Some(vec![4, 5, 6]));
-         assert!(ctx.lock_tx_hash.is_some());
-     }
+        assert_eq!(ctx.transfer_id, "test-transfer-2");
+        assert_eq!(ctx.resume_stage, TransferStage::MintSubmitted);
+        assert_eq!(ctx.proof_payload, Some(vec![4, 5, 6]));
+        assert!(ctx.lock_tx_hash.is_some());
+    }
 
-     #[test]
-     fn test_execute_awaiting_finality_recovery() {
-         let ctx = execute_awaiting_finality_recovery(
-             "test-transfer-3",
-             12345,
-             Hash::new([3u8; 32]),
-         );
+    #[test]
+    fn test_execute_awaiting_finality_recovery() {
+        let ctx =
+            execute_awaiting_finality_recovery("test-transfer-3", 12345, Hash::new([3u8; 32]));
 
-         assert_eq!(ctx.transfer_id, "test-transfer-3");
-         assert_eq!(ctx.resume_stage, TransferStage::AwaitingFinality);
-         assert_eq!(ctx.proof_height, Some(12345));
-     }
+        assert_eq!(ctx.transfer_id, "test-transfer-3");
+        assert_eq!(ctx.resume_stage, TransferStage::AwaitingFinality);
+        assert_eq!(ctx.proof_height, Some(12345));
+    }
 
-     #[test]
-     fn test_execute_proof_building_recovery() {
-         let ctx = execute_proof_building_recovery(
-             "test-transfer-4",
-             None,
-             Hash::new([4u8; 32]),
-         );
+    #[test]
+    fn test_execute_proof_building_recovery() {
+        let ctx = execute_proof_building_recovery("test-transfer-4", None, Hash::new([4u8; 32]));
 
-         assert_eq!(ctx.transfer_id, "test-transfer-4");
-         assert_eq!(ctx.resume_stage, TransferStage::ProofBuilding);
-     }
+        assert_eq!(ctx.transfer_id, "test-transfer-4");
+        assert_eq!(ctx.resume_stage, TransferStage::ProofBuilding);
+    }
 }
 
 // ==================== Recovery Path Implementations ====================

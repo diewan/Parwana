@@ -143,7 +143,10 @@ impl AptosSealProtocol {
         if private_key_bytes.len() != 32 {
             return Err("Private key must be 32 bytes".into());
         }
-        let key_array: [u8; 32] = private_key_bytes.clone().try_into().map_err(|_| "Failed to parse private key")?;
+        let key_array: [u8; 32] = private_key_bytes
+            .clone()
+            .try_into()
+            .map_err(|_| "Failed to parse private key")?;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_array);
 
         // Derive Aptos account address from signing key
@@ -155,7 +158,8 @@ impl AptosSealProtocol {
         sender_address.copy_from_slice(&hash[..32]);
 
         // Create RPC client with signer address
-        let rpc: Box<dyn AptosRpc> = Box::new(AptosNode::with_signer_address(rpc_url, sender_address));
+        let rpc: Box<dyn AptosRpc> =
+            Box::new(AptosNode::with_signer_address(rpc_url, sender_address));
 
         // Create seal protocol and attach signing key
         let mut seal = Self::from_config(config, rpc)?;
@@ -231,7 +235,10 @@ impl AptosSealProtocol {
         let exists = {
             // Verify seal resource exists on-chain before consumption
             // This ensures the seal was properly created and deployed
-            let seal_resource_type = format!("{}::CSVSeal::Seal", self.config.seal_contract.module_address);
+            let seal_resource_type = format!(
+                "{}::CSVSeal::Seal",
+                self.config.seal_contract.module_address
+            );
             StateProofVerifier::verify_resource_exists_async(
                 seal.account_address,
                 &seal_resource_type,
@@ -293,13 +300,13 @@ impl AptosSealProtocol {
         let module_id = MoveModuleId::new(module_addr, module_name);
 
         // BCS-encode nonce as u64
-        let nonce_arg = aptos_bcs::to_bytes(&nonce)
-            .map_err(|e| format!("Failed to serialize nonce: {}", e))?;
+        let nonce_arg =
+            aptos_bcs::to_bytes(&nonce).map_err(|e| format!("Failed to serialize nonce: {}", e))?;
 
         let entry_function = EntryFunction::new(
             module_id,
             "consume_seal",
-            vec![],                      // type arguments
+            vec![],                          // type arguments
             vec![nonce_arg, commitment_arg], // arguments: nonce (u64) and commitment (vector<u8>)
         );
 
@@ -508,9 +515,13 @@ impl AptosSealProtocol {
             let max_retries = 3;
             let mut retry_count = 0;
             let sequence_number;
-            
+
             loop {
-                log::debug!("APTOS: Fetching account sequence number (attempt {}/{})", retry_count + 1, max_retries);
+                log::debug!(
+                    "APTOS: Fetching account sequence number (attempt {}/{})",
+                    retry_count + 1,
+                    max_retries
+                );
                 match self.rpc.get_account_sequence_number(sender).await {
                     Ok(seq) => {
                         sequence_number = seq;
@@ -520,14 +531,18 @@ impl AptosSealProtocol {
                     Err(e) => {
                         retry_count += 1;
                         if retry_count >= max_retries {
-                            return Err(format!("Failed to get sequence number after {} attempts: {}", max_retries, e).into());
+                            return Err(format!(
+                                "Failed to get sequence number after {} attempts: {}",
+                                max_retries, e
+                            )
+                            .into());
                         }
                         log::warn!("APTOS: Failed to get sequence number, retrying in 1 second...");
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     }
                 }
             }
-            
+
             log::debug!("APTOS: Fetching ledger info");
             let ledger = self
                 .rpc
@@ -671,9 +686,13 @@ impl AptosSealProtocol {
             let max_retries = 3;
             let mut retry_count = 0;
             let sequence_number;
-            
+
             loop {
-                log::debug!("APTOS: Fetching account sequence number (attempt {}/{})", retry_count + 1, max_retries);
+                log::debug!(
+                    "APTOS: Fetching account sequence number (attempt {}/{})",
+                    retry_count + 1,
+                    max_retries
+                );
                 match self.rpc.get_account_sequence_number(sender).await {
                     Ok(seq) => {
                         sequence_number = seq;
@@ -683,14 +702,18 @@ impl AptosSealProtocol {
                     Err(e) => {
                         retry_count += 1;
                         if retry_count >= max_retries {
-                            return Err(format!("Failed to get sequence number after {} attempts: {}", max_retries, e).into());
+                            return Err(format!(
+                                "Failed to get sequence number after {} attempts: {}",
+                                max_retries, e
+                            )
+                            .into());
                         }
                         log::warn!("APTOS: Failed to get sequence number, retrying in 1 second...");
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     }
                 }
             }
-            
+
             log::debug!("APTOS: Fetching ledger info");
             let ledger = self
                 .rpc
@@ -746,7 +769,11 @@ impl AptosSealProtocol {
 
         // Serialize the SignedTransaction to JSON using the SDK's format
         // Arguments are converted to JSON using their explicit type mappings.
-        let json_args: Vec<serde_json::Value> = payload.arguments.iter().map(|a| a.to_json_value()).collect();
+        let json_args: Vec<serde_json::Value> = payload
+            .arguments
+            .iter()
+            .map(|a| a.to_json_value())
+            .collect();
         let signed_tx = serde_json::json!({
             "sender": sender_hex,
             "sequence_number": sequence_number.to_string(),
@@ -838,12 +865,15 @@ impl SealProtocol for AptosSealProtocol {
             // (creates AnchorData, emits SanadConsumed event) when the sanad is locked
             // for cross-chain transfer. Calling consume_seal here would mark the seal
             // as consumed before lock_sanad, causing ESealAlreadyConsumed errors.
-            log::debug!("APTOS: Skipping consume_seal during publish - lock_sanad will handle commitment publishing");
+            log::debug!(
+                "APTOS: Skipping consume_seal during publish - lock_sanad will handle commitment publishing"
+            );
 
             // SECURITY CRITICAL: Fetch actual ledger version from chain instead of using placeholder
             // The anchor version must reflect the actual blockchain state at the time of commitment
-            let ledger_info = self.rpc.get_ledger_info().await
-                .map_err(|e| ProtocolError::NetworkError(format!("Failed to fetch ledger info: {}", e)))?;
+            let ledger_info = self.rpc.get_ledger_info().await.map_err(|e| {
+                ProtocolError::NetworkError(format!("Failed to fetch ledger info: {}", e))
+            })?;
             let ledger_version = ledger_info.ledger_version;
 
             // Return anchor with actual ledger version
@@ -1023,7 +1053,10 @@ impl SealProtocol for AptosSealProtocol {
         #[cfg(all(feature = "rpc", not(test)))]
         {
             // With collection-based seals, check if SealCollection exists
-            let seal_collection_type = format!("{}::CSVSeal::SealCollection", self.config.seal_contract.module_address);
+            let seal_collection_type = format!(
+                "{}::CSVSeal::SealCollection",
+                self.config.seal_contract.module_address
+            );
             let collection_exists = StateProofVerifier::verify_resource_exists_async(
                 seal.account_address,
                 &seal_collection_type,
@@ -1048,11 +1081,7 @@ impl SealProtocol for AptosSealProtocol {
             // Query the SealCollection to check if the requested nonce exists and is unconsumed
             let seal_collection_data = self
                 .rpc
-                .get_resource(
-                    seal.account_address,
-                    &seal_collection_type,
-                    None,
-                )
+                .get_resource(seal.account_address, &seal_collection_type, None)
                 .await
                 .map_err(|e| {
                     ProtocolError::NetworkError(format!(
@@ -1060,18 +1089,20 @@ impl SealProtocol for AptosSealProtocol {
                         e
                     ))
                 })?
-                .ok_or_else(|| ProtocolError::SealReplay(
-                    "Seal collection resource not found".to_string()
-                ))?;
+                .ok_or_else(|| {
+                    ProtocolError::SealReplay("Seal collection resource not found".to_string())
+                })?;
 
             // Parse the next_nonce from the collection data
             // If the seal's nonce is >= next_nonce, it has been consumed
             let next_nonce = seal_collection_data
                 .parse_u64_field("next_nonce")
-                .map_err(|e| ProtocolError::SerializationError(format!(
-                    "Failed to parse next_nonce from seal collection: {}",
-                    e
-                )))?;
+                .map_err(|e| {
+                    ProtocolError::SerializationError(format!(
+                        "Failed to parse next_nonce from seal collection: {}",
+                        e
+                    ))
+                })?;
 
             if seal.nonce >= next_nonce {
                 return Err(Box::new(ProtocolError::SealReplay(format!(
@@ -1082,7 +1113,8 @@ impl SealProtocol for AptosSealProtocol {
 
             log::debug!(
                 "APTOS: Verified seal nonce {} is available (next_nonce: {})",
-                seal.nonce, next_nonce
+                seal.nonce,
+                next_nonce
             );
         }
 
@@ -1103,7 +1135,7 @@ impl SealProtocol for AptosSealProtocol {
         Ok(())
     }
 
-   async fn create_seal(
+    async fn create_seal(
         &self,
         value: Option<u64>,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
@@ -1168,10 +1200,23 @@ impl SealProtocol for AptosSealProtocol {
         let nonce = if self.signing_key.is_some() {
             // Initialize seal collection if needed
             // The resource type format is: 0xADDRESS::MODULE::STRUCT
-            let seal_collection_type = format!("0x{}::CSVSeal::SealCollection", 
-                self.config.seal_contract.module_address.strip_prefix("0x").unwrap_or(&self.config.seal_contract.module_address));
-            log::debug!("APTOS: Checking for seal collection resource type: {}", seal_collection_type);
-            match self.rpc.get_resource(addr, &seal_collection_type, None).await {
+            let seal_collection_type = format!(
+                "0x{}::CSVSeal::SealCollection",
+                self.config
+                    .seal_contract
+                    .module_address
+                    .strip_prefix("0x")
+                    .unwrap_or(&self.config.seal_contract.module_address)
+            );
+            log::debug!(
+                "APTOS: Checking for seal collection resource type: {}",
+                seal_collection_type
+            );
+            match self
+                .rpc
+                .get_resource(addr, &seal_collection_type, None)
+                .await
+            {
                 Ok(None) => {
                     log::debug!("APTOS: Initializing seal collection (REQUIRED)");
                     self.init_seal_collection(addr).await.map_err(|e| {
@@ -1185,23 +1230,42 @@ impl SealProtocol for AptosSealProtocol {
                     log::debug!("APTOS: Seal collection already exists");
                 }
                 Err(e) => {
-                    log::warn!("APTOS: Failed to check seal collection: {}, assuming it exists", e);
+                    log::warn!(
+                        "APTOS: Failed to check seal collection: {}, assuming it exists",
+                        e
+                    );
                 }
             }
 
             let mut effective_nonce = nonce;
-            
+
             // With collection-based seals, check if AnchorData exists for the nonce
             // If AnchorData exists, the seal was already consumed, so increment nonce
-            let anchor_data_collection_type = format!("0x{}::CSVSeal::AnchorDataCollection", 
-                self.config.seal_contract.module_address.strip_prefix("0x").unwrap_or(&self.config.seal_contract.module_address));
-            log::debug!("APTOS: Checking for anchor collection resource type: {}", anchor_data_collection_type);
-            match self.rpc.get_resource(addr, &anchor_data_collection_type, None).await {
+            let anchor_data_collection_type = format!(
+                "0x{}::CSVSeal::AnchorDataCollection",
+                self.config
+                    .seal_contract
+                    .module_address
+                    .strip_prefix("0x")
+                    .unwrap_or(&self.config.seal_contract.module_address)
+            );
+            log::debug!(
+                "APTOS: Checking for anchor collection resource type: {}",
+                anchor_data_collection_type
+            );
+            match self
+                .rpc
+                .get_resource(addr, &anchor_data_collection_type, None)
+                .await
+            {
                 Ok(Some(_collection)) => {
                     // AnchorDataCollection exists, check if AnchorData for this nonce exists
                     // Note: We can't directly query SmartTable entries via RPC, so we'll try create_seal
                     // and handle the EAnchorDataExists error by incrementing nonce
-                    log::debug!("APTOS: AnchorDataCollection exists, will attempt to create seal with nonce {}", effective_nonce);
+                    log::debug!(
+                        "APTOS: AnchorDataCollection exists, will attempt to create seal with nonce {}",
+                        effective_nonce
+                    );
                 }
                 Ok(None) => {
                     // AnchorDataCollection doesn't exist, need to initialize it (REQUIRED)
@@ -1214,32 +1278,44 @@ impl SealProtocol for AptosSealProtocol {
                     })?;
                 }
                 Err(e) => {
-                    log::warn!("APTOS: Failed to check anchor collection: {}, assuming it exists", e);
+                    log::warn!(
+                        "APTOS: Failed to check anchor collection: {}, assuming it exists",
+                        e
+                    );
                 }
             }
 
             log::debug!("APTOS: Deploying seal on-chain via create_seal entry function");
-            
+
             // Retry loop for EAnchorDataExists error
             let max_retries = 5;
             let mut retry_count = 0;
             loop {
                 match self.deploy_seal_on_chain(addr, effective_nonce).await {
                     Ok(()) => {
-                        log::debug!("APTOS: Seal deployed on-chain successfully with nonce {}", effective_nonce);
+                        log::debug!(
+                            "APTOS: Seal deployed on-chain successfully with nonce {}",
+                            effective_nonce
+                        );
                         break;
                     }
                     Err(e) => {
                         let error_str = e.to_string();
                         if error_str.contains("EAnchorDataExists") && retry_count < max_retries {
-                            log::warn!("APTOS: AnchorData already exists for nonce {}, incrementing and retrying (attempt {}/{})", effective_nonce, retry_count + 1, max_retries);
+                            log::warn!(
+                                "APTOS: AnchorData already exists for nonce {}, incrementing and retrying (attempt {}/{})",
+                                effective_nonce,
+                                retry_count + 1,
+                                max_retries
+                            );
                             effective_nonce = effective_nonce.saturating_add(1);
                             retry_count += 1;
                         } else {
                             return Err(Box::new(ProtocolError::PublishFailed(format!(
                                 "Failed to deploy seal on-chain: {}",
                                 e
-                            ))) as Box<dyn std::error::Error>);
+                            )))
+                                as Box<dyn std::error::Error>);
                         }
                     }
                 }
@@ -1249,7 +1325,14 @@ impl SealProtocol for AptosSealProtocol {
             nonce
         };
 
-        Ok(AptosSealPoint::new(addr, format!("{}::CSVSeal::Seal", self.config.seal_contract.module_address), nonce))
+        Ok(AptosSealPoint::new(
+            addr,
+            format!(
+                "{}::CSVSeal::Seal",
+                self.config.seal_contract.module_address
+            ),
+            nonce,
+        ))
     }
 
     fn hash_commitment(
@@ -1259,9 +1342,12 @@ impl SealProtocol for AptosSealProtocol {
         transition_payload_hash: Hash,
         seal_point: &Self::SealPoint,
     ) -> Hash {
-        let core_seal =
-            CoreSealPoint::new(seal_point.account_address.to_vec(), Some(seal_point.nonce), None)
-                .expect("valid seal reference");
+        let core_seal = CoreSealPoint::new(
+            seal_point.account_address.to_vec(),
+            Some(seal_point.nonce),
+            None,
+        )
+        .expect("valid seal reference");
         Commitment::simple(
             contract_id,
             previous_commitment,
@@ -1317,8 +1403,8 @@ impl SealProtocol for AptosSealProtocol {
             node_id,
             transition_dag.transition_data.clone(),
             vec![transition_dag.proof.clone()], // Use proof as signature
-            vec![], // No witnesses for single transition
-            vec![transition_dag.anchor_from], // Parent is the source anchor
+            vec![],                             // No witnesses for single transition
+            vec![transition_dag.anchor_from],   // Parent is the source anchor
         );
 
         // Compute root_commitment from the node
@@ -1326,15 +1412,21 @@ impl SealProtocol for AptosSealProtocol {
         let dag_segment = csv_hash::dag::DAGSegment::new(vec![dag_node], root_commitment);
 
         // Extract signatures from DAG node
-        let signatures: Vec<Vec<u8>> = dag_segment.nodes
+        let signatures: Vec<Vec<u8>> = dag_segment
+            .nodes
             .iter()
             .flat_map(|node| node.signatures.clone())
             .collect();
 
         if signatures.is_empty() {
-            log::warn!("APTOS: No signatures found in transition_dag - proof bundle may not be verifiable");
+            log::warn!(
+                "APTOS: No signatures found in transition_dag - proof bundle may not be verifiable"
+            );
         } else {
-            log::info!("APTOS: Extracted {} signatures from DAGSegment", signatures.len());
+            log::info!(
+                "APTOS: Extracted {} signatures from DAGSegment",
+                signatures.len()
+            );
         }
 
         ProofBundle::with_signature_scheme(
@@ -1457,7 +1549,10 @@ impl AptosSealProtocol {
 
     /// Query the seal resource from on-chain for a given account address.
     #[cfg(feature = "rpc")]
-    pub async fn get_seal_from_chain(&self, account_address: [u8; 32]) -> Result<AptosSealPoint, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_seal_from_chain(
+        &self,
+        account_address: [u8; 32],
+    ) -> Result<AptosSealPoint, Box<dyn std::error::Error + Send + Sync>> {
         use crate::types::AptosSealPoint;
 
         let module_address = &self.config.seal_contract.module_address;
@@ -1481,7 +1576,9 @@ impl AptosSealProtocol {
             .map_err(|e| format!("Failed to query seal resource: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Failed to query seal resource: HTTP {}", response.status()).into());
+            return Err(
+                format!("Failed to query seal resource: HTTP {}", response.status()).into(),
+            );
         }
 
         let resources: serde_json::Value = response
@@ -1502,13 +1599,17 @@ impl AptosSealProtocol {
                     log::debug!("APTOS: Found matching resource type");
                     if let Some(data) = resource.get("data") {
                         // next_nonce might be a string or a number
-                        let next_nonce = data.get("next_nonce")
+                        let next_nonce = data
+                            .get("next_nonce")
                             .and_then(|n| n.as_str())
                             .and_then(|s| s.parse::<u64>().ok())
                             .or_else(|| data.get("next_nonce").and_then(|n| n.as_u64()));
-                        
+
                         if let Some(next_nonce) = next_nonce {
-                            log::debug!("APTOS: Found SealCollection with next_nonce {}", next_nonce);
+                            log::debug!(
+                                "APTOS: Found SealCollection with next_nonce {}",
+                                next_nonce
+                            );
                             // The seal nonce should be next_nonce - 1 for the most recent unconsumed seal
                             // This is the correct production behavior for sequential nonce allocation
                             let nonce = if next_nonce > 0 { next_nonce - 1 } else { 0 };
@@ -1608,7 +1709,10 @@ impl AptosSealProtocol {
             .await
             .map_err(|e| format!("Failed to submit init_seal_collection transaction: {}", e))?;
 
-        log::debug!("APTOS: init_seal_collection transaction submitted: 0x{}", hex::encode(tx_hash));
+        log::debug!(
+            "APTOS: init_seal_collection transaction submitted: 0x{}",
+            hex::encode(tx_hash)
+        );
         Ok(())
     }
 
@@ -1694,7 +1798,10 @@ impl AptosSealProtocol {
             .await
             .map_err(|e| format!("Failed to submit init_anchor_collection transaction: {}", e))?;
 
-        log::debug!("APTOS: init_anchor_collection transaction submitted: 0x{}", hex::encode(tx_hash));
+        log::debug!(
+            "APTOS: init_anchor_collection transaction submitted: 0x{}",
+            hex::encode(tx_hash)
+        );
         Ok(())
     }
 
@@ -1764,7 +1871,8 @@ impl AptosSealProtocol {
             .map_err(|e| format!("Invalid module name: {}", e))?;
         let module_id = MoveModuleId::new(module_addr, module_name);
 
-        let entry_function = EntryFunction::new(module_id, "init_anchor_collection", vec![], vec![]);
+        let entry_function =
+            EntryFunction::new(module_id, "init_anchor_collection", vec![], vec![]);
 
         let sender_addr = AccountAddress::new(sender);
         let payload = TransactionPayload::EntryFunction(entry_function);
@@ -1871,7 +1979,7 @@ impl AptosSealProtocol {
         // Wait for the transaction to be confirmed before returning
         log::debug!("APTOS: Waiting for create_seal transaction confirmation...");
         log::debug!("APTOS: Transaction hash: 0x{}", hex::encode(tx_hash));
-        
+
         // Use Aptos SDK's FullnodeClient for transaction confirmation
         #[cfg(feature = "rpc")]
         {
@@ -1879,20 +1987,33 @@ impl AptosSealProtocol {
             use aptos_sdk::config::AptosConfig;
             use aptos_sdk::types::HashValue;
             use std::time::Duration;
-            
+
             let config = AptosConfig::custom(&self.config.rpc_url)
                 .map_err(|e| format!("Failed to create AptosConfig: {}", e))?;
             let client = FullnodeClient::new(config)
                 .map_err(|e| format!("Failed to create FullnodeClient: {}", e))?;
             let hash_value = HashValue::new(tx_hash);
-            
-            match client.wait_for_transaction(&hash_value, Some(Duration::from_secs(20))).await {
+
+            match client
+                .wait_for_transaction(&hash_value, Some(Duration::from_secs(20)))
+                .await
+            {
                 Ok(response) => {
                     let inner = response.into_inner();
-                    let success = inner.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let vm_status = inner.get("vm_status").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    
-                    log::debug!("APTOS: Transaction response received - success: {}, vm_status: {}", success, vm_status);
+                    let success = inner
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let vm_status = inner
+                        .get("vm_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+
+                    log::debug!(
+                        "APTOS: Transaction response received - success: {}, vm_status: {}",
+                        success,
+                        vm_status
+                    );
                     if success {
                         log::debug!("APTOS: create_seal transaction confirmed successfully");
                         Ok(())
@@ -1900,12 +2021,10 @@ impl AptosSealProtocol {
                         Err(format!("create_seal transaction failed: {}", vm_status).into())
                     }
                 }
-                Err(e) => {
-                    Err(format!("Failed to wait for transaction confirmation: {}", e).into())
-                }
+                Err(e) => Err(format!("Failed to wait for transaction confirmation: {}", e).into()),
             }
         }
-        
+
         #[cfg(not(feature = "rpc"))]
         {
             Err("RPC feature not enabled for transaction confirmation".into())
@@ -1972,7 +2091,11 @@ mod tests {
     async fn test_create_seal() {
         let adapter = test_adapter();
         let seal = adapter.create_seal(None).await.unwrap();
-        assert!(seal.nonce > 0, "nonce should be a positive timestamp, got {}", seal.nonce);
+        assert!(
+            seal.nonce > 0,
+            "nonce should be a positive timestamp, got {}",
+            seal.nonce
+        );
     }
 
     #[tokio::test]
@@ -2115,7 +2238,10 @@ mod tests {
 
         let seal = AptosSealPoint::new([1u8; 32], resource_type.clone(), 0);
         let commitment = Hash::new([1u8; 32]);
-        adapter.publish(commitment, seal.clone(), commitment).await.unwrap();
+        adapter
+            .publish(commitment, seal.clone(), commitment)
+            .await
+            .unwrap();
 
         // Try to publish again with same seal
         let commitment2 = Hash::new([2u8; 32]);
