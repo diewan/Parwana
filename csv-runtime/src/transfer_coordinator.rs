@@ -167,6 +167,8 @@ pub enum TransferOutcome {
     /// on-chain and journaled; re-invoking `advance`/resume later will progress
     /// it once confirmations accrue. Never re-locks.
     Pending {
+        /// Lock transaction hash in the runtime's chain-native byte encoding.
+        lock_tx_hash: String,
         /// Confirmations observed on the source-chain lock transaction.
         confirmations: u64,
         /// Confirmation depth required by the source chain's finality policy.
@@ -433,6 +435,7 @@ impl TransferCoordinator {
             TransferOutcome::Pending {
                 confirmations,
                 required,
+                ..
             } => Err(TransferCoordinatorError::FinalityFailed(format!(
                 "lock has {} confirmations, {} required",
                 confirmations, required
@@ -978,6 +981,7 @@ impl TransferCoordinator {
                 required_finality
             );
             return Ok(TransferOutcome::Pending {
+                lock_tx_hash: hex::encode(&transfer.lock_tx_hash),
                 confirmations: finality.confirmations,
                 required: required_finality,
             });
@@ -2229,6 +2233,7 @@ impl TransferCoordinator {
             TransferOutcome::Pending {
                 confirmations,
                 required,
+                ..
             } => Err(TransferCoordinatorError::FinalityFailed(format!(
                 "lock has {} confirmations, {} required",
                 confirmations, required
@@ -2309,6 +2314,7 @@ impl TransferCoordinator {
                 required_finality
             );
             return Ok(TransferOutcome::Pending {
+                lock_tx_hash: hex::encode(&transfer.lock_tx_hash),
                 confirmations: finality.confirmations,
                 required: required_finality,
             });

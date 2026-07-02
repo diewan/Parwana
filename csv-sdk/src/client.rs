@@ -55,6 +55,9 @@ use csv_adapter_factory::{
     BitcoinFactory, EthereumFactory, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol,
     SolanaFactory, SuiFactory,
 };
+#[cfg(not(feature = "runtime-coordinator"))]
+use csv_keys::memory::SecretKey;
+#[cfg(feature = "runtime-coordinator")]
 use csv_protocol::secret::SharedSecretHandle;
 
 #[cfg(feature = "runtime-coordinator")]
@@ -708,7 +711,11 @@ impl CsvClient {
                     finality_depth: if _is_testnet { 15 } else { 12 },
                     use_checkpoint_finality: !_is_testnet,
                     rpc_url: rpc_url.clone(),
-                    secret_key: SharedSecretHandle::none(),
+                    private_key: private_keys
+                        .as_ref()
+                        .and_then(|keys| keys.get("ethereum"))
+                        .and_then(|key| key.as_bytes())
+                        .map(|bytes| SecretKey::new(*bytes)),
                     contract_address: Some(csv_seal_address),
                 };
                 let mut rpc = csv_ethereum::node::EthereumNode::new(&rpc_url, csv_seal_address)
@@ -722,10 +729,11 @@ impl CsvClient {
                 let eth_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("ethereum"))
-                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
+                    .and_then(|k| k.as_bytes())
+                    .map(hex::encode);
                 if let Some(private_key) = eth_private_key {
                     rpc = rpc
-                        .with_signer(private_key)
+                        .with_signer(&private_key)
                         .map_err(|e| CsvError::ProtocolError {
                             chain: ChainId::new("ethereum"),
                             message: format!("Failed to configure Ethereum signer: {}", e),
@@ -738,7 +746,7 @@ impl CsvClient {
                         csv_seal_address,
                     )
                     .await
-                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
+                    .map(Some)
             }
             #[cfg(all(feature = "sui", feature = "runtime-coordinator"))]
             "sui" => {
@@ -854,47 +862,37 @@ impl CsvClient {
                 let sui_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("sui"))
-                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
+                    .and_then(|k| k.as_bytes())
+                    .copied();
                 let signer_address = if let Some(pk) = sui_private_key {
-                    let cleaned = pk.trim_start_matches("0x");
-                    if let Ok(key_bytes) = hex::decode(cleaned) {
-                        sui_config.signer_private_key = Some(key_bytes.clone());
-                        if key_bytes.len() == 32 {
-                            use ed25519_dalek::SigningKey;
-                            let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
-                                CsvError::ConfigError("Invalid Sui private key length".to_string())
+                    sui_config.signer_private_key = Some(SecretKey::new(pk));
+                    let key_bytes = pk;
+                    {
+                        use ed25519_dalek::SigningKey;
+                        let signing_key = SigningKey::from_bytes(&key_bytes);
+                        let public_key = signing_key.verifying_key();
+                        let pubkey_bytes = public_key.as_bytes();
+
+                        // Sui address is derived from public key using Blake2b with 0x00 prefix
+                        use blake2::Blake2b;
+                        use blake2::Digest as Blake2Digest;
+                        let mut hasher = Blake2b::new();
+                        hasher.update([0x00]); // Sui address prefix
+                        hasher.update(pubkey_bytes);
+                        let hash: [u8; 32] = hasher.finalize().into();
+                        let signer_addr = format!("0x{}", hex::encode(hash));
+                        sui_config.signer_address = Some(signer_addr.clone());
+
+                        // Parse signer address bytes for RPC client
+                        let signer_addr_bytes = hex::decode(signer_addr.trim_start_matches("0x"))
+                            .map_err(|e| {
+                            CsvError::ConfigError(format!("Invalid signer address: {}", e))
+                        })?;
+                        let signer_addr_array: [u8; 32] =
+                            signer_addr_bytes.try_into().map_err(|_| {
+                                CsvError::ConfigError("Signer address must be 32 bytes".to_string())
                             })?;
-                            let signing_key = SigningKey::from_bytes(&key_array);
-                            let public_key = signing_key.verifying_key();
-                            let pubkey_bytes = public_key.as_bytes();
-
-                            // Sui address is derived from public key using Blake2b with 0x00 prefix
-                            use blake2::Blake2b;
-                            use blake2::Digest as Blake2Digest;
-                            let mut hasher = Blake2b::new();
-                            hasher.update([0x00]); // Sui address prefix
-                            hasher.update(pubkey_bytes);
-                            let hash: [u8; 32] = hasher.finalize().into();
-                            let signer_addr = format!("0x{}", hex::encode(hash));
-                            sui_config.signer_address = Some(signer_addr.clone());
-
-                            // Parse signer address bytes for RPC client
-                            let signer_addr_bytes =
-                                hex::decode(signer_addr.trim_start_matches("0x")).map_err(|e| {
-                                    CsvError::ConfigError(format!("Invalid signer address: {}", e))
-                                })?;
-                            let signer_addr_array: [u8; 32] =
-                                signer_addr_bytes.try_into().map_err(|_| {
-                                    CsvError::ConfigError(
-                                        "Signer address must be 32 bytes".to_string(),
-                                    )
-                                })?;
-                            Some(signer_addr_array)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                        Some(signer_addr_array)
                     }
                 } else {
                     sui_config.signer_private_key = None;
@@ -909,7 +907,7 @@ impl CsvClient {
                 _builder
                     .sui_from_config(sui_config, std::sync::Arc::new(node))
                     .await
-                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
+                    .map(Some)
             }
             #[cfg(all(feature = "aptos", feature = "runtime-coordinator"))]
             "aptos" => {
@@ -1020,49 +1018,42 @@ impl CsvClient {
                 let aptos_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("aptos"))
-                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
+                    .and_then(|k| k.as_bytes())
+                    .copied();
                 let signer_address = if let Some(pk) = aptos_private_key {
-                    let cleaned = pk.trim().trim_start_matches("0x");
-                    if let Ok(key_bytes) = hex::decode(cleaned) {
-                        if key_bytes.len() == 32 {
-                            use ed25519_dalek::SigningKey;
-                            use sha3::{Digest, Sha3_256};
-                            log::info!(
-                                "SDK LAYER: Private key (first 8 bytes): 0x{}",
-                                hex::encode(&key_bytes[..8])
-                            );
-                            let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
-                                CsvError::ConfigError(
-                                    "Invalid Aptos private key length".to_string(),
-                                )
-                            })?;
-                            let signing_key = SigningKey::from_bytes(&key_array);
-                            let public_key = signing_key.verifying_key();
-                            let public_key_bytes = public_key.as_bytes();
+                    let key_bytes = pk;
+                    {
+                        use ed25519_dalek::SigningKey;
+                        use sha3::{Digest, Sha3_256};
+                        log::info!(
+                            "SDK LAYER: Private key (first 8 bytes): 0x{}",
+                            hex::encode(&key_bytes[..8])
+                        );
+                        let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
+                            CsvError::ConfigError("Invalid Aptos private key length".to_string())
+                        })?;
+                        let signing_key = SigningKey::from_bytes(&key_array);
+                        let public_key = signing_key.verifying_key();
+                        let public_key_bytes = public_key.as_bytes();
 
-                            log::info!(
-                                "SDK LAYER: Public key (first 8 bytes): 0x{}",
-                                hex::encode(&public_key_bytes[..8])
-                            );
+                        log::info!(
+                            "SDK LAYER: Public key (first 8 bytes): 0x{}",
+                            hex::encode(&public_key_bytes[..8])
+                        );
 
-                            // Aptos address derivation: sha3-256(public_key || 0x00), take last 32 bytes
-                            let mut hasher = Sha3_256::new();
-                            hasher.update(public_key_bytes);
-                            hasher.update(&[0x00u8]); // Scheme byte for Ed25519
-                            let hash = hasher.finalize();
-                            let mut addr_array = [0u8; 32];
-                            addr_array.copy_from_slice(&hash[..32]);
+                        // Aptos address derivation: sha3-256(public_key || 0x00), take last 32 bytes
+                        let mut hasher = Sha3_256::new();
+                        hasher.update(public_key_bytes);
+                        hasher.update(&[0x00u8]); // Scheme byte for Ed25519
+                        let hash = hasher.finalize();
+                        let mut addr_array = [0u8; 32];
+                        addr_array.copy_from_slice(&hash[..32]);
 
-                            log::info!(
-                                "SDK LAYER: Derived Aptos signer address: 0x{}",
-                                hex::encode(addr_array)
-                            );
-                            Some(addr_array)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                        log::info!(
+                            "SDK LAYER: Derived Aptos signer address: 0x{}",
+                            hex::encode(addr_array)
+                        );
+                        Some(addr_array)
                     }
                 } else {
                     None
@@ -1075,12 +1066,7 @@ impl CsvClient {
                         csv_aptos::config::AptosNetwork::Mainnet
                     },
                     rpc_url: rpc_url.clone(),
-                    secret_key: aptos_private_key
-                        .as_ref()
-                        .and_then(|k| hex::decode(k.trim_start_matches("0x")).ok())
-                        .and_then(|bytes| bytes.try_into().map(|arr: [u8; 32]| arr).ok())
-                        .map(SharedSecretHandle::from_bytes)
-                        .unwrap_or_default(),
+                    private_key: aptos_private_key.map(SecretKey::new),
                     ..Default::default()
                 };
                 // Set module_address from config if available
@@ -1105,7 +1091,7 @@ impl CsvClient {
                         Box::new(rpc) as Box<dyn csv_aptos::rpc::AptosRpc>,
                     )
                     .await
-                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
+                    .map(Some)
             }
             #[cfg(all(feature = "solana", feature = "runtime-coordinator"))]
             "solana" => {
@@ -1212,36 +1198,9 @@ impl CsvClient {
                 let solana_private_key = private_keys
                     .as_ref()
                     .and_then(|keys| keys.get("solana"))
-                    .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
-                let keypair_base58 = if let Some(pk) = solana_private_key {
-                    let cleaned = pk.trim().trim_start_matches("0x");
-                    if let Ok(key_bytes) = hex::decode(cleaned) {
-                        if key_bytes.len() == 32 {
-                            use ed25519_dalek::SigningKey;
-                            let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| {
-                                CsvError::ConfigError(
-                                    "Invalid Solana private key length".to_string(),
-                                )
-                            })?;
-                            let signing_key = SigningKey::from_bytes(&key_array);
-                            let public_key = signing_key.verifying_key();
-
-                            // Solana keypair is 64 bytes: [secret_key(32) || public_key(32)]
-                            let mut keypair_bytes = [0u8; 64];
-                            keypair_bytes[..32].copy_from_slice(&key_array);
-                            keypair_bytes[32..].copy_from_slice(public_key.as_bytes());
-
-                            // Encode in base58
-                            Some(bs58::encode(keypair_bytes).into_string())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+                    .and_then(|k| k.as_bytes())
+                    .copied()
+                    .map(SecretKey::new);
 
                 let program_id_from_config = _config
                     .chains
@@ -1261,16 +1220,13 @@ impl CsvClient {
                     network: sol_network,
                     rpc_url: rpc_url.clone(),
                     csv_program_id: program_id_from_config,
-                    keypair: keypair_base58,
+                    keypair: solana_private_key,
                     commitment: Some("confirmed".to_string()),
                     max_retries: 3,
                     timeout_seconds: 30,
                 };
                 let rpc = Box::new(csv_solana::node::SolanaNode::new(&rpc_url));
-                _builder
-                    .solana_from_config(sol_config, rpc)
-                    .await
-                    .map(|backend| Some(AdapterBuildResult::Legacy(backend)))
+                _builder.solana_from_config(sol_config, rpc).await.map(Some)
             }
             _ => Ok(None), // Skip unsupported chains
         }

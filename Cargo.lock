@@ -3061,8 +3061,10 @@ name = "csv-examples"
 version = "0.1.0"
 dependencies = [
  "csv-hash",
+ "csv-keys",
  "csv-protocol",
  "csv-sdk",
+ "hex",
  "tokio",
 ]
 

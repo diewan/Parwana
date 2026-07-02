@@ -10,12 +10,15 @@
 //!     finality and the destination mint completes.
 //! The `resume` subcommand advances an already-locked transfer without re-locking.
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
+use csv_runtime::execution_journal::ExecutionJournal;
+use csv_runtime::execution_journal::RocksDbExecutionJournal;
 use csv_sdk::CsvClient;
 use csv_sdk::transfers::{TransferManager, TransferOutcome, TransferReceipt as SdkReceipt};
 
@@ -44,6 +47,12 @@ impl WaitOpts {
             timeout: Duration::from_secs(timeout_secs),
         }
     }
+}
+
+struct ResumeContext {
+    from: Chain,
+    to: Chain,
+    sanad_id: SanadId,
 }
 
 /// Build a runtime-backed CSV client for the given source/destination chains.
@@ -306,29 +315,45 @@ pub async fn cmd_resume(
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
-    let record = state
-        .get_transfer(&transfer_id)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("Transfer {} not found in local state", transfer_id))?;
-
     output::header(&format!("Resume Cross-Chain Transfer: {}", transfer_id));
+    let resume_ctx = if let Some(record) = state.get_transfer(&transfer_id).cloned() {
+        let sanad_id = SanadId::parse_hex(&record.sanad_id)
+            .map_err(|e| anyhow::anyhow!("Invalid stored Sanad ID: {}", e))?;
+        ResumeContext {
+            from: record.source_chain,
+            to: record.dest_chain,
+            sanad_id,
+        }
+    } else if let Some(ctx) = recover_resume_context_from_journal(&transfer_id, config)? {
+        output::info("Transfer not found in local display cache; recovering from runtime journal");
+        ctx
+    } else {
+        return Err(anyhow::anyhow!(
+            "Transfer {} not found in local state or runtime journal",
+            transfer_id
+        ));
+    };
 
-    let from = record.source_chain.clone();
-    let to = record.dest_chain.clone();
-    let sanad_id = SanadId::parse_hex(&record.sanad_id)
-        .map_err(|e| anyhow::anyhow!("Invalid stored Sanad ID: {}", e))?;
-
-    let client = build_client(&from, &to, None, config, state).await?;
+    let client = build_client(&resume_ctx.from, &resume_ctx.to, None, config, state).await?;
     let manager = client.transfers();
 
-    let from_id = to_protocol_chain(from.clone());
-    let to_id = to_protocol_chain(to.clone());
+    let from_id = to_protocol_chain(resume_ctx.from.clone());
+    let to_id = to_protocol_chain(resume_ctx.to.clone());
     let outcome = manager
-        .resume(&transfer_id, sanad_id.clone(), from_id, to_id)
+        .resume(&transfer_id, resume_ctx.sanad_id.clone(), from_id, to_id)
         .await
         .map_err(|e| anyhow::anyhow!("Resume failed: {}", e))?;
 
-    drive(&manager, outcome, sanad_id, from, to, &opts, state).await
+    drive(
+        &manager,
+        outcome,
+        resume_ctx.sanad_id,
+        resume_ctx.from,
+        resume_ctx.to,
+        &opts,
+        state,
+    )
+    .await
 }
 
 /// Drive an outcome to completion according to the selected wait mode.
@@ -346,11 +371,13 @@ async fn drive(
 ) -> Result<()> {
     let started = Instant::now();
     let mut outcome = first;
+    let mut transfer_id_announced = false;
 
     loop {
         match outcome {
             TransferOutcome::Completed(receipt) => {
                 record_completed(state, &receipt, &from, &to, &sanad_id);
+                state.save()?;
                 output::success(&format!(
                     "Transfer {} completed. Sanad locked on source chain and minted on destination chain.",
                     receipt.transfer_id
@@ -359,16 +386,26 @@ async fn drive(
                 output::kv("Replay ID", &receipt.replay_id.to_string());
                 output::kv("Source Chain", &receipt.source_chain.to_string());
                 output::kv("Destination Chain", &receipt.destination_chain.to_string());
-                output::kv("Lock Tx Hash", &receipt.lock_tx_hash);
+                output::kv(
+                    "Lock Tx Hash",
+                    &display_tx_hash(&from, &receipt.lock_tx_hash),
+                );
                 output::kv("Mint Tx Hash", &receipt.mint_tx_hash);
                 return Ok(());
             }
             TransferOutcome::Pending {
                 transfer_id,
+                lock_tx_hash,
                 confirmations,
                 required,
             } => {
                 record_pending(state, &transfer_id, &from, &to, &sanad_id);
+                state.save()?;
+
+                if !transfer_id_announced {
+                    output::kv("Transfer ID", &transfer_id);
+                    transfer_id_announced = true;
+                }
 
                 if !opts.wait {
                     output::info(&format!(
@@ -376,6 +413,7 @@ async fn drive(
                         transfer_id, confirmations, required
                     ));
                     output::kv("Transfer ID", &transfer_id);
+                    output::kv("Lock Tx Hash", &display_tx_hash(&from, &lock_tx_hash));
                     output::info(&format!(
                         "Run `csv cross-chain resume {}` (optionally with --wait) once the lock confirms.",
                         transfer_id
@@ -398,7 +436,8 @@ async fn drive(
                 }
 
                 output::info(&format!(
-                    "Awaiting finality: {}/{} confirmations. Re-checking in {}s…",
+                    "Awaiting finality for lock {}: {}/{} confirmations. Re-checking in {}s…",
+                    display_tx_hash(&from, &lock_tx_hash),
                     confirmations,
                     required,
                     opts.poll_interval.as_secs()
@@ -414,6 +453,51 @@ async fn drive(
             }
         }
     }
+}
+
+fn recover_resume_context_from_journal(
+    transfer_id: &str,
+    config: &Config,
+) -> Result<Option<ResumeContext>> {
+    let journal_path = runtime_journal_path(config);
+    if !journal_path.exists() {
+        return Ok(None);
+    }
+
+    let journal = RocksDbExecutionJournal::open(&journal_path.to_string_lossy())
+        .map_err(|e| anyhow::anyhow!("Failed to open runtime journal: {}", e))?;
+    let entry = match journal
+        .latest_entry(transfer_id)
+        .map_err(|e| anyhow::anyhow!("Failed to read runtime journal: {}", e))?
+    {
+        Some(entry) => entry,
+        None => return Ok(None),
+    };
+    let ctx = match entry.transfer_context {
+        Some(ctx) => ctx,
+        None => return Ok(None),
+    };
+
+    let from = crate::config::parse_chain(&ctx.source_chain)
+        .map_err(|e| anyhow::anyhow!("Invalid source chain in runtime journal: {}", e))?;
+    let to = crate::config::parse_chain(&ctx.destination_chain)
+        .map_err(|e| anyhow::anyhow!("Invalid destination chain in runtime journal: {}", e))?;
+    let sanad_id = SanadId::parse_hex(&ctx.sanad_id.bytes)
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID in runtime journal: {}", e))?;
+
+    Ok(Some(ResumeContext { from, to, sanad_id }))
+}
+
+fn runtime_journal_path(config: &Config) -> PathBuf {
+    let data_dir = if let Some(stripped) = config.data_dir.strip_prefix("~/") {
+        dirs::home_dir()
+            .map(|home| home.join(stripped))
+            .unwrap_or_else(|| PathBuf::from(&config.data_dir))
+    } else {
+        PathBuf::from(&config.data_dir)
+    };
+
+    data_dir.join("runtime").join("journal")
 }
 
 /// Minimal chain config used only for capability probing (no wallet material).
@@ -439,6 +523,21 @@ fn capability_chain_config(
         index: 0,
         utxos: Vec::new(),
         sanad_seals: Vec::new(),
+    }
+}
+
+fn display_tx_hash(chain: &Chain, tx_hash: &str) -> String {
+    if chain.as_str() != "bitcoin" {
+        return tx_hash.to_string();
+    }
+
+    let normalized = tx_hash.trim_start_matches("0x");
+    match hex::decode(normalized) {
+        Ok(mut bytes) if bytes.len() == 32 => {
+            bytes.reverse();
+            hex::encode(bytes)
+        }
+        _ => tx_hash.to_string(),
     }
 }
 

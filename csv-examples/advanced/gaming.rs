@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
     // Transfer sword from Bitcoin to Ethereum
     println!("Transferring sword to Ethereum (Ethereum Warriors game)...");
-    let transfer_id = client
+    let transfer_receipt = client
         .transfers()
         .cross_chain(
             csv_protocol::wire::SanadIdWire::try_into(sword.id.clone()).unwrap(),
@@ -87,10 +87,10 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    println!("✓ Transfer initiated: {}", transfer_id);
+    println!("✓ Transfer initiated: {}", transfer_receipt);
 
     // Check transfer status
-    let status = client.transfers().status(&transfer_id)?;
+    let status = client.transfers().status(&transfer_receipt.transfer_id)?;
     println!("  Status: {:?}\n", status);
 
     // List all player assets

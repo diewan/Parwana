@@ -44,7 +44,7 @@ csv-adapter-factory = { path = "../csv-adapter-factory", optional = true }
 csv-codec = { path = "../csv-codec" }
 
 # Key management
-csv-keys = { path = "../csv-keys", optional = true }
+csv-keys = { path = "../csv-keys" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"], optional = true }
@@ -122,7 +122,7 @@ cross-chain-persist = ["dep:csv-storage", "dep:sqlx", "dep:chrono"]
 runtime-coordinator = ["dep:csv-storage", "csv-storage/rocksdb", "csv-runtime/persistent", "tokio", "dep:csv-adapter-factory", "csv-adapter-factory/bitcoin", "csv-adapter-factory/ethereum", "csv-adapter-factory/sui", "csv-adapter-factory/aptos", "csv-adapter-factory/solana"]
 
 # Wallet / crypto
-wallet = ["dep:csv-keys", "dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]
+wallet = ["dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]
 
 # P2P proof delivery
 p2p = ["dep:csv-p2p"]

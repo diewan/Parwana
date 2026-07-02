@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     println!("  3. Verifying on Ethereum...");
     println!("  4. Minting destination sanad...");
 
-    let transfer_id = client
+    let transfer_receipt = client
         .transfers()
         .cross_chain(
             csv_protocol::wire::SanadIdWire::try_into(sanad.id.clone()).unwrap(),
@@ -73,10 +73,10 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    println!("\n✓ Transfer initiated: {}\n", transfer_id);
+    println!("\n✓ Transfer initiated: {}\n", transfer_receipt);
 
     // Check status
-    let status = client.transfers().status(&transfer_id)?;
+    let status = client.transfers().status(&transfer_receipt.transfer_id)?;
     println!("Transfer status: {:?}", status);
 
     println!("\n=== Demo Complete ===");

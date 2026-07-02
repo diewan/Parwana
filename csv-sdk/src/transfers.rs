@@ -270,10 +270,12 @@ impl TransferManager {
                 })
             }
             csv_runtime::TransferOutcome::Pending {
+                lock_tx_hash,
                 confirmations,
                 required,
             } => TransferOutcome::Pending {
                 transfer_id: transfer_id.to_string(),
+                lock_tx_hash,
                 confirmations,
                 required,
             },
@@ -326,6 +328,8 @@ pub enum TransferOutcome {
     Pending {
         /// Runtime-assigned transfer identifier (needed to resume later).
         transfer_id: String,
+        /// Lock transaction hash in the runtime's chain-native byte encoding.
+        lock_tx_hash: String,
         /// Confirmations observed on the source-chain lock.
         confirmations: u64,
         /// Confirmation depth required by the source chain.
@@ -549,6 +553,7 @@ impl TransferBuilder {
                             })
                         }
                         csv_runtime::TransferOutcome::Pending {
+                            lock_tx_hash,
                             confirmations,
                             required,
                         } => {
@@ -560,6 +565,7 @@ impl TransferBuilder {
                             );
                             TransferOutcome::Pending {
                                 transfer_id,
+                                lock_tx_hash,
                                 confirmations,
                                 required,
                             }
