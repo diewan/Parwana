@@ -32,8 +32,10 @@ pub async fn cmd_status(
             "Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration",
         );
 
-        output::kv("Transfer ID", &hex::encode(transfer.id.as_bytes()));
-        output::kv("Sanad ID", &hex::encode(transfer.sanad_id.as_bytes()));
+        // `id` and `sanad_id` are already hex strings; don't hex-encode the
+        // ASCII of the string again.
+        output::kv("Transfer ID", &transfer.id);
+        output::kv("Sanad ID", &transfer.sanad_id);
         output::kv("Status", &format!("{:?}", transfer.status));
         output::kv(
             "Created At",
@@ -91,8 +93,11 @@ pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateMana
         "Note: Runtime-backed canonical transfer state requires csv-runtime TransferCoordinator integration",
     );
 
+    // Full Sanad ID (not truncated): it is the argument `cross-chain resume`
+    // needs, so it must be copy-pasteable straight from this table.
     let headers = vec!["Transfer ID", "From", "To", "Sanad ID", "Status"];
     let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
     for transfer in &state.storage.transfers {
         if let Some(ref filter_from) = from
@@ -106,17 +111,27 @@ pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateMana
             continue;
         }
 
+        // Older caches accumulated one duplicate row per finality re-check;
+        // collapse them so each transfer appears once.
+        if !seen.insert(transfer.id.clone()) {
+            continue;
+        }
+
         let status_str = match &transfer.status {
             TransferStatus::Completed => "Completed".to_string(),
             TransferStatus::Failed => "Failed".to_string(),
             other => format!("{:?}", other),
         };
 
+        // `id` and `sanad_id` are already hex/UUID strings; render them directly
+        // rather than hex-encoding the ASCII of the string again. Show the full
+        // Transfer ID — `cross-chain resume` looks it up by exact match, so a
+        // truncated value is useless.
         rows.push(vec![
-            hex::encode(transfer.id.as_bytes())[..10].to_string(),
+            transfer.id.clone(),
             transfer.source_chain.to_string(),
             transfer.dest_chain.to_string(),
-            hex::encode(transfer.sanad_id.as_bytes())[..10].to_string(),
+            transfer.sanad_id.clone(),
             status_str,
         ]);
     }

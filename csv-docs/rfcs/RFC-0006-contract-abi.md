@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed
+Proposed — **destination-mint model superseded by [RFC-0012: Thin Registry Cross-Chain Mint](RFC-0012-thin-registry-cross-chain-mint.md)**.
+
+> **Deprecation note.** The destination-mint model in this RFC (proof-root / `stateRoot` anchoring, "Anchor proof roots" as a contract duty, `ProofAccepted`/`ProofRejected` events) is **deprecated**. Under RFC-0012, destination mint is a **thin registry**: it authenticates a verifier-signed attestation (RFC-0012 §9), enforces `sanadId`/`nullifier`/`lockEventId` uniqueness, and emits `SanadMinted`. Proof-root installation is **no longer required for ordinary mint** and MUST NOT gate it. The uniqueness/replay-anchoring and event-schema-discipline duties below remain valid; the proof-root duties do not. See [ABI_CONSTITUTION.md](../contracts/ABI_CONSTITUTION.md) for the frozen thin-registry ABI, §9.2 attestation digest, and §10 settlement receipt.
 
 ## Motivation
 
@@ -51,10 +53,11 @@ Contracts MUST:
 
 - Anchor commitments
 - Anchor replay nullifiers
-- Anchor proof roots
+- ~~Anchor proof roots~~ (**deprecated** — RFC-0012 §4 removes proof-root anchoring from the mint hot path)
 - Anchor schema IDs
-- Emit canonical events
-- Enforce replay uniqueness
+- Authenticate the mint via verifier-signed attestation (RFC-0012 §9)
+- Enforce `sanadId` / `nullifier` / `lockEventId` uniqueness
+- Emit canonical events (`SanadMinted`, `SettlementReleased`)
 - NO business logic
 
 ### 4. Add Deployment Framework

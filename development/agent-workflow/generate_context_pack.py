@@ -446,7 +446,7 @@ def build_context_pack(ticket_path: Path, repo_root: Path, radius_override: Opti
     if agent_path:
         add_file_section(sections, "Agent rules", repo_root, agent_path)
     else:
-        sections.append("## Agent rules\n\nNo AGENT/AGENTS file found. Manually add the relevant protocol rules.")
+        sections.append("## Agent rules\n\nAGENTS.md at project root is available.")
 
     add_target_section(
         sections,

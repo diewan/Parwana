@@ -2,6 +2,8 @@
 
 This document defines the canonical event schema that all chain implementations MUST follow. Events are the primary interface between on-chain contracts and off-chain verification.
 
+> Aligned with **[RFC-0012: Thin Registry Cross-Chain Mint](../rfcs/RFC-0012-thin-registry-cross-chain-mint.md)**. Destination materialization emits `SanadMinted` (thin-registry mint, verifier-attested — §9); escrow release emits a **distinct** `SettlementReleased` (§10). Field names follow the canonical field dictionary in [ABI_CONSTITUTION.md](ABI_CONSTITUTION.md). The former `CrossChainMint` is renamed to `SanadMinted`; the proof-root events `ProofAccepted` / `ProofRejected` are **deprecated** (proof adjudication is off-chain under RFC-0012 and not signalled on-chain).
+
 ## Canonical Event Types
 
 ### 1. SanadCreated
@@ -55,23 +57,41 @@ Emitted when a Sanad is locked for cross-chain transfer.
 - **Sui**: Event in Move
 - **Aptos**: Event in Move
 
-### 4. CrossChainMint
+### 4. SanadMinted
 
-Emitted when a Sanad is minted on the destination chain after proof verification.
+Emitted when a Sanad is materialized on the destination chain by the thin registry, after the verifier-signed mint attestation (RFC-0012 §9) is verified natively. This is NOT a proof-root verification event — the destination contract records an off-chain-verified result; it does not re-adjudicate the proof.
 
-**Canonical Fields:**
-- `sanad_id: [u8; 32]` - Sanad identifier
-- `commitment: [u8; 32]` - Commitment hash
-- `owner: Address` - Owner address
-- `source_chain: String` - Source chain ID
+**Canonical Fields** (canonical field dictionary — carries the full `destinationOwner` bytes so off-chain consumers can reconstruct settlement/replay evidence):
+- `sanadId: bytes32` - Sanad identifier (duplicate-mint key)
+- `commitment: bytes32` - Commitment hash
+- `sourceChain: bytes32` - `keccak256("csv.chain.<name>")`
+- `destinationOwner: bytes` - Full recipient bytes (on-chain storage keeps `keccak256(destinationOwner)`; the event carries full bytes)
+- `lockEventId: bytes32` - Source lock event identity (duplicate-source-lock key)
+- `nullifier: bytes32` - Replay nullifier (replay-protection key)
 - `timestamp: u64` - Block timestamp
 
 **Chain-Specific Mappings:**
-- **Ethereum**: `event CrossChainMint(bytes32 sanad_id, bytes32 commitment, address indexed owner, string source_chain, uint256 timestamp)`
-- **Solana**: Token mint + CPI log
-- **Bitcoin**: Not applicable (no minting)
+- **Ethereum**: `event SanadMinted(bytes32 indexed sanadId, bytes32 commitment, bytes32 sourceChain, bytes destinationOwner, bytes32 indexed lockEventId, bytes32 nullifier, uint256 timestamp)`
+- **Solana**: Registry account write + CPI log
+- **Bitcoin**: Not applicable (interactive/off-chain destination only)
 - **Sui**: Object creation + Event
 - **Aptos**: Resource mint + Event
+
+### 4b. SettlementReleased
+
+Emitted by the **source-chain** escrow when it releases the operator's fee after verifying a verifier-signed `SettlementReceipt` (RFC-0012 §10). **Distinct from `SanadMinted`** and never conflated with it — mint happens on the destination chain; settlement happens on the source chain. Authorized by the verifier receipt, never by the operator's own claim.
+
+**Canonical Fields:**
+- `lockEventId: bytes32` - Settlement replay key (exactly one release per `lockEventId`)
+- `sanadId: bytes32` - Sanad identifier
+- `operatorPayoutAddress: Address` - Escrow payout beneficiary (chain-native encoding)
+- `destinationMintTxRef: bytes32` - Canonical reference to the confirmed destination mint
+- `timestamp: u64` - Block timestamp
+
+**Chain-Specific Mappings:**
+- **Ethereum**: `event SettlementReleased(bytes32 indexed lockEventId, bytes32 indexed sanadId, address operatorPayoutAddress, bytes32 destinationMintTxRef, uint256 timestamp)`
+- **Solana / Sui / Aptos**: native escrow-release event with the same fields
+- **Bitcoin**: source escrow release per the chain's script model
 
 ### 5. CrossChainRefund
 
@@ -106,9 +126,9 @@ Emitted when a nullifier is registered for replay protection.
 - **Sui**: Event in Move
 - **Aptos**: Event in Move
 
-### 7. ProofAccepted
+### 7. ProofAccepted — DEPRECATED (RFC-0012)
 
-Emitted when a proof is successfully verified.
+**Deprecated.** Belonged to the proof-root verification model. Under RFC-0012 the destination contract does not adjudicate proofs on-chain, so there is no on-chain "proof accepted" signal; mint authenticity is the verifier attestation carried in the `SanadMinted` calldata. Retained here only as historical context; new contracts MUST NOT emit it.
 
 **Canonical Fields:**
 - `proof_root: [u8; 32]` - Proof bundle root hash
@@ -122,9 +142,9 @@ Emitted when a proof is successfully verified.
 - **Sui**: Event in Move
 - **Aptos**: Event in Move
 
-### 8. ProofRejected
+### 8. ProofRejected — DEPRECATED (RFC-0012)
 
-Emitted when a proof is rejected.
+**Deprecated.** Same rationale as `ProofAccepted`: proof rejection is an off-chain verification outcome under RFC-0012, not an on-chain event. Retained as historical context only; new contracts MUST NOT emit it.
 
 **Canonical Fields:**
 - `proof_root: [u8; 32]` - Proof bundle root hash
@@ -205,7 +225,10 @@ Event schema changes require:
 ## Implementation Checklist
 
 For each chain implementation:
-- [ ] All 9 canonical events implemented
+- [ ] Active canonical events implemented (`SanadCreated`, `SanadConsumed`, `CrossChainLock`, `SanadMinted`, `SettlementReleased`, `CrossChainRefund`, `NullifierRegistered`, `ReplayDetected`)
+- [ ] `ProofAccepted` / `ProofRejected` NOT emitted (deprecated by RFC-0012)
+- [ ] `SanadMinted` field set matches the canonical field dictionary and carries full `destinationOwner` bytes
+- [ ] `SettlementReleased` emitted only by source escrow, distinct from `SanadMinted`
 - [ ] Field types match canonical schema
 - [ ] Event indexing configured
 - [ ] Event emission tested

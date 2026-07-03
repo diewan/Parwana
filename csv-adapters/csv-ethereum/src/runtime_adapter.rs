@@ -383,6 +383,71 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         }
     }
 
+    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        // Confirm a transaction has reached the chain's configured finality
+        // depth. Unlike `tx_finality` (which reports a raw confirmation count for
+        // the runtime finality gate to interpret), `confirm_tx` collapses to a
+        // binary confirmed/not-confirmed decision: it succeeds only when the tx
+        // is mined *and* final, and fails closed otherwise. Finality is never
+        // optional, so an unconfirmed or shallow transaction is an error, not a
+        // zero-confirmation success.
+        let tx_bytes = hex::decode(tx_hash.trim_start_matches("0x"))
+            .map_err(|e| AdapterError::Generic(format!("Invalid tx hash: {}", e)))?;
+        if tx_bytes.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid tx hash length: expected 32 bytes, got {}",
+                tx_bytes.len()
+            )));
+        }
+        let mut txid_array = [0u8; 32];
+        txid_array.copy_from_slice(&tx_bytes);
+
+        // No receipt yet → the transaction is still pending; it has not reached
+        // finality, so fail closed rather than reporting a false confirmation.
+        let receipt = self
+            .backend
+            .rpc()
+            .get_transaction_receipt(txid_array)
+            .await
+            .map_err(|e| {
+                AdapterError::RpcError(format!("Failed to fetch receipt for {}: {}", tx_hash, e))
+            })?
+            .ok_or_else(|| {
+                AdapterError::Generic(format!(
+                    "Transaction {} is not yet confirmed (no receipt)",
+                    tx_hash
+                ))
+            })?;
+        if receipt.status != 1 {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Transaction {} reverted (status={})",
+                tx_hash, receipt.status
+            )));
+        }
+
+        let tip = self
+            .backend
+            .rpc()
+            .block_number()
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to get block number: {}", e)))?;
+        // Same `tip - block_number` convention as `build_inclusion_proof` and
+        // `tx_finality`, so all three agree on when a tx is final.
+        let confirmations = tip.saturating_sub(receipt.block_number);
+        let required_depth = self.capabilities.finality_depth;
+        if confirmations < required_depth {
+            return Err(AdapterError::Generic(format!(
+                "Transaction {} has not reached finality (got {} confirmations, need {})",
+                tx_hash, confirmations, required_depth
+            )));
+        }
+
+        Ok(MintResult {
+            tx_hash: tx_hash.to_string(),
+            block_height: receipt.block_number,
+        })
+    }
+
     async fn tx_finality(&self, tx_hash: &str) -> Result<TxFinality, AdapterError> {
         // Decode the lock txid the same way `build_inclusion_proof` does.
         let lock_tx_bytes = hex::decode(tx_hash.trim_start_matches("0x"))
@@ -809,5 +874,125 @@ mod tests {
             result.is_err(),
             "must reject a proof bundle with empty inclusion proof bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_fails_closed_without_receipt() {
+        // No receipt for the tx → still pending, so confirm_tx must fail closed
+        // rather than report a false confirmation.
+        let rpc = MockEthereumRpc::new(200);
+        let adapter = test_adapter(rpc);
+        let result = adapter.confirm_tx(&hex::encode([0xAAu8; 32])).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when the transaction has no receipt yet"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_fails_closed_on_reverted_tx() {
+        let rpc = MockEthereumRpc::new(200);
+        let txid = [0xAAu8; 32];
+        rpc.add_receipt(
+            txid,
+            TransactionReceipt {
+                tx_hash: txid,
+                block_number: 100,
+                block_hash: [0x11u8; 32],
+                contract_address: None,
+                logs: vec![],
+                status: 0, // reverted
+                gas_used: 21000,
+                success: false,
+            },
+        );
+        let adapter = test_adapter(rpc);
+        let result = adapter.confirm_tx(&hex::encode(txid)).await;
+        assert!(
+            result.is_err(),
+            "must fail closed on a reverted transaction"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_fails_closed_below_finality_depth() {
+        // tip 105, confirmed at 100: only 5 confirmations, but Ethereum requires
+        // 15 (ChainCapabilities::ethereum()). Finality is never optional.
+        let rpc = MockEthereumRpc::new(105);
+        let txid = [0xAAu8; 32];
+        rpc.add_receipt(
+            txid,
+            TransactionReceipt {
+                tx_hash: txid,
+                block_number: 100,
+                block_hash: [0x11u8; 32],
+                contract_address: None,
+                logs: vec![],
+                status: 1,
+                gas_used: 21000,
+                success: true,
+            },
+        );
+        let adapter = test_adapter(rpc);
+        let result = adapter.confirm_tx(&hex::encode(txid)).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when confirmations are below the chain's finality depth"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_returns_confirming_height_when_final() {
+        // tip 200, confirmed at 100: 100 confirmations, well past the required 15.
+        let rpc = MockEthereumRpc::new(200);
+        let txid = [0xAAu8; 32];
+        rpc.add_receipt(
+            txid,
+            TransactionReceipt {
+                tx_hash: txid,
+                block_number: 100,
+                block_hash: [0x11u8; 32],
+                contract_address: None,
+                logs: vec![],
+                status: 1,
+                gas_used: 21000,
+                success: true,
+            },
+        );
+        let adapter = test_adapter(rpc);
+        let result = adapter
+            .confirm_tx(&hex::encode(txid))
+            .await
+            .expect("must confirm a final transaction");
+        assert_eq!(
+            result.block_height, 100,
+            "must report the true confirming block height"
+        );
+        assert_eq!(result.tx_hash, hex::encode(txid));
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_accepts_0x_prefixed_hash() {
+        let rpc = MockEthereumRpc::new(200);
+        let txid = [0xAAu8; 32];
+        rpc.add_receipt(
+            txid,
+            TransactionReceipt {
+                tx_hash: txid,
+                block_number: 100,
+                block_hash: [0x11u8; 32],
+                contract_address: None,
+                logs: vec![],
+                status: 1,
+                gas_used: 21000,
+                success: true,
+            },
+        );
+        let adapter = test_adapter(rpc);
+        let result = adapter
+            .confirm_tx(&format!("0x{}", hex::encode(txid)))
+            .await
+            .expect("must accept a 0x-prefixed tx hash");
+        assert_eq!(result.block_height, 100);
     }
 }

@@ -4,153 +4,285 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/CSVSeal.sol";
 
-/// Contract adversarial suite per AUDIT.md T12
-///
-/// Tests 7 attack scenarios to ensure contract security:
-/// 1. double_consume - Submit same proof bundle twice
-/// 2. malformed_merkle_proof - Flip 1 byte in Merkle sibling
-/// 3. replay_nullifier_reuse - Use consumed nullifier in new transfer
-/// 4. stale_checkpoint - Submit proof against checkpoint N-5 (old)
-/// 5. forged_anchor - Submit anchor hash not in event log
-/// 6. partial_event_replay - Omit 1 event from event bundle
-/// 7. duplicate_mint_proof - Submit valid mint proof twice
-
-contract AdversarialTest is Test {
+/// @title Verifier-attested mint adversarial suite (RFC-0012 §9 / TRM-ETH-CTR-001)
+/// @dev Covers the thin-registry mint authenticity model:
+///  - happy mint on a FRESH deploy with a valid attestation and NO proof-root install
+///  - forged / insufficient / malformed / expired attestations are rejected
+///  - duplicate sanadId / nullifier / lockEventId are each rejected
+///  - the §9.2 digest binds destination chain + contract (cross-deploy replay is rejected)
+contract AdversarialMintTest is Test {
     CSVSeal public csvSeal;
-    address public owner;
-    address public attacker;
-    
-    bytes32 internal constant CHAIN_ETHEREUM = keccak256(abi.encodePacked("csv.chain.ethereum"));
-    bytes32 internal constant CHAIN_SOLANA = keccak256(abi.encodePacked("csv.chain.solana"));
+
+    // Verifier keypair. The address is the seeded member of the §9.3 verifier set.
+    uint256 internal constant VERIFIER_PK = 0xA11CE;
+    address internal verifierAddr;
+
+    // A non-verifier attacker keypair.
+    uint256 internal constant ATTACKER_PK = 0xBADBAD;
+
+    bytes32 internal constant SANAD_ID = keccak256("sanad-1");
+    bytes32 internal constant COMMITMENT = keccak256("commitment-1");
+    bytes32 internal constant LOCK_EVENT_ID = keccak256("lock-event-1");
+    bytes32 internal constant NULLIFIER = keccak256("nullifier-1");
+
+    bytes32 internal sourceChain;
+    bytes internal destinationOwner;
+
+    // Local mirror of CSVSeal.SanadMinted for vm.expectEmit.
+    event SanadMinted(
+        bytes32 indexed sanadId,
+        bytes32 indexed lockEventId,
+        bytes32 indexed nullifier,
+        bytes32 commitment,
+        bytes32 sourceChain,
+        bytes destinationOwner,
+        uint256 timestamp
+    );
 
     function setUp() public {
-        owner = address(this);
-        attacker = address(0x1337);
-        
-        csvSeal = new CSVSeal(owner);
+        verifierAddr = vm.addr(VERIFIER_PK);
+        csvSeal = new CSVSeal(verifierAddr);
+        sourceChain = csvSeal.CHAIN_BITCOIN();
+        destinationOwner = abi.encodePacked(address(0xD00D), "recipient-blob");
     }
 
-    /// Test 1: double_consume - Submit same proof bundle twice
-    /// Expected: Second mint must revert with SanadAlreadyMinted
-    function testDoubleConsume() public {
-        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-1"));
-        bytes32 commitment = keccak256(abi.encodePacked("test-commitment"));
-        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root"));
-        bytes memory sourceSealPoint = abi.encodePacked("test-seal");
-        bytes memory proof = hex"00"; // dummy proof
-        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root"));
-        
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
-        
-        vm.expectRevert(); // SanadAlreadyMinted
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
+    // -------- helpers --------
+
+    function _digest(
+        bytes32 sanadId,
+        bytes32 commitment,
+        bytes32 srcChain,
+        bytes memory destOwner,
+        bytes32 lockEventId,
+        bytes32 nullifier,
+        uint64 expiry
+    ) internal view returns (bytes32) {
+        return csvSeal.mint_attestation_digest(
+            sanadId,
+            commitment,
+            srcChain,
+            keccak256(destOwner),
+            lockEventId,
+            nullifier,
+            expiry
+        );
     }
 
-    /// Test 2: malformed_merkle_proof - Flip 1 byte in Merkle sibling
-    /// Expected: Verification must fail; no state change
-    function testMalformedMerkleProof() public {
-        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-2"));
-        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-2"));
-        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-2"));
-        bytes memory sourceSealPoint = abi.encodePacked("test-seal-2");
-        bytes memory proof = hex"00112233"; // dummy proof
-        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-2"));
-        
-        // Flip one byte in the proof
-        proof[1] = bytes1(uint8(proof[1]) ^ 0xFF);
-        
-        vm.expectRevert(); // InvalidProof
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
+    function _sign(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
+        return abi.encodePacked(r, s, v);
     }
 
-    /// Test 3: replay_nullifier_reuse - Use consumed nullifier in new transfer
-    /// Expected: Contract must reject duplicate nullifier
-    function testReplayNullifierReuse() public {
-        bytes32 nullifier = keccak256(abi.encodePacked("test-nullifier"));
-        
-        csvSeal.register_nullifier(nullifier, bytes32(0), CHAIN_ETHEREUM);
-        
-        vm.expectRevert(); // NullifierAlreadyRegistered
-        csvSeal.register_nullifier(nullifier, bytes32(0), CHAIN_ETHEREUM);
+    function _sigs(uint256 pk, bytes32 digest) internal pure returns (bytes[] memory) {
+        bytes[] memory out = new bytes[](1);
+        out[0] = _sign(pk, digest);
+        return out;
     }
 
-    /// Test 4: stale_checkpoint - Submit proof against invalid proof root
-    /// Expected: Contract must reject invalid proof root
-    function testStaleCheckpoint() public {
-        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-4"));
-        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-4"));
-        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-4"));
-        bytes memory sourceSealPoint = abi.encodePacked("test-seal-4");
-        bytes memory proof = hex"00";
-        bytes32 invalidProofRoot = keccak256(abi.encodePacked("invalid-root"));
-        
-        vm.expectRevert(); // InvalidProofRoot
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, invalidProofRoot, 0);
+    function _mint(
+        bytes32 sanadId,
+        bytes32 commitment,
+        bytes32 srcChain,
+        bytes memory destOwner,
+        bytes32 lockEventId,
+        bytes32 nullifier,
+        uint64 expiry,
+        uint256 signerPk
+    ) internal returns (bool) {
+        bytes32 digest = _digest(sanadId, commitment, srcChain, destOwner, lockEventId, nullifier, expiry);
+        return csvSeal.mint_sanad(
+            sanadId, commitment, srcChain, destOwner, lockEventId, nullifier, expiry, _sigs(signerPk, digest)
+        );
     }
 
-    /// Test 5: forged_anchor - Submit empty proof
-    /// Expected: Contract must reject empty proof
-    function testForgedAnchor() public {
-        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-5"));
-        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-5"));
-        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-5"));
-        bytes memory sourceSealPoint = abi.encodePacked("test-seal-5");
-        bytes memory emptyProof = "";
-        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-5"));
-        
-        vm.expectRevert(); // InvalidProof
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, emptyProof, proofRoot, 0);
+    // -------- acceptance: happy mint on a fresh deploy --------
+
+    /// A fresh deploy can mint with a valid attestation and no proof-root installation.
+    function testFreshDeployHappyMint() public {
+        // The gas-payer is an arbitrary operator, NOT the verifier — authority travels in the payload.
+        vm.prank(address(0xEEEE));
+        bool ok = _mint(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, VERIFIER_PK);
+        assertTrue(ok);
+
+        assertTrue(csvSeal.is_sanad_minted(SANAD_ID));
+        assertTrue(csvSeal.is_nullifier_registered(NULLIFIER));
+        assertTrue(csvSeal.is_lock_event_recorded(LOCK_EVENT_ID));
+
+        (bytes32 c, bytes32 sc, bytes32 doh, bytes32 le, bytes32 nf, uint256 mintedAt) = csvSeal.mintRecords(SANAD_ID);
+        assertEq(c, COMMITMENT);
+        assertEq(sc, sourceChain);
+        assertEq(doh, keccak256(destinationOwner)); // stores the hash, not the full bytes
+        assertEq(le, LOCK_EVENT_ID);
+        assertEq(nf, NULLIFIER);
+        assertGt(mintedAt, 0);
     }
 
-    /// Test 6: partial_event_replay - Submit proof with wrong length
-    /// Expected: Contract must reject malformed proof
-    function testPartialEventReplay() public {
-        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-6"));
-        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-6"));
-        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-6"));
-        bytes memory sourceSealPoint = abi.encodePacked("test-seal-6");
-        bytes memory malformedProof = hex"001122"; // wrong length (not multiple of 32)
-        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-6"));
-        
-        vm.expectRevert(); // InvalidProof
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, malformedProof, proofRoot, 0);
+    /// SanadMinted must emit the FULL destinationOwner bytes with settlement-indexed topics.
+    function testSanadMintedEmitsFullOwnerBytes() public {
+        vm.expectEmit(true, true, true, true);
+        emit SanadMinted(
+            SANAD_ID, LOCK_EVENT_ID, NULLIFIER, COMMITMENT, sourceChain, destinationOwner, block.timestamp
+        );
+        _mint(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, VERIFIER_PK);
     }
 
-    /// Test 7: duplicate_mint_proof - Submit valid mint proof twice
-    /// Expected: Second mint must revert with SanadAlreadyMinted
-    function testDuplicateMintProof() public {
-        bytes32 sanadId = keccak256(abi.encodePacked("test-sanad-7"));
-        bytes32 commitment = keccak256(abi.encodePacked("test-commitment-7"));
-        bytes32 stateRoot = keccak256(abi.encodePacked("test-state-root-7"));
-        bytes memory sourceSealPoint = abi.encodePacked("test-seal-7");
-        bytes memory proof = hex"00";
-        bytes32 proofRoot = keccak256(abi.encodePacked("test-proof-root-7"));
-        
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
-        
-        vm.expectRevert(); // SanadAlreadyMinted
-        csvSeal.mint_sanad(sanadId, commitment, stateRoot, CHAIN_SOLANA, sourceSealPoint, proof, proofRoot, 0);
+    // -------- acceptance: forged / insufficient signatures --------
+
+    /// Mint reverts on a signature from a key that is not in the verifier set.
+    function testForgedAttestationRejected() public {
+        bytes32 digest = _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0);
+        vm.expectRevert(CSVSeal.InvalidVerifierSignature.selector);
+        csvSeal.mint_sanad(
+            SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, _sigs(ATTACKER_PK, digest)
+        );
     }
 
-    // Helper functions to create adversarial proof bundles
-    
-    function createValidProofBundle() internal pure returns (bytes memory) {
-        return abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(2)));
+    /// A valid verifier signature over a DIFFERENT payload must not authorize this mint.
+    function testWrongPayloadSignatureRejected() public {
+        // Sign a digest for a different sanadId, then submit it against SANAD_ID.
+        bytes32 wrongDigest = _digest(keccak256("other-sanad"), COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0);
+        vm.expectRevert(CSVSeal.InvalidVerifierSignature.selector);
+        csvSeal.mint_sanad(
+            SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, _sigs(VERIFIER_PK, wrongDigest)
+        );
     }
-    
-    function createProofWithSameNullifier(bytes memory originalProof) internal pure returns (bytes memory) {
-        return originalProof;
+
+    /// Empty signature vector cannot satisfy threshold M = 1.
+    function testNoSignaturesRejected() public {
+        bytes[] memory none = new bytes[](0);
+        vm.expectRevert(CSVSeal.InsufficientSignatures.selector);
+        csvSeal.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, none);
     }
-    
-    function createProofWithStaleCheckpoint() internal pure returns (bytes memory) {
-        return abi.encodePacked(bytes32(uint256(1)), uint256(0));
+
+    /// Malformed (wrong-length) signatures are rejected.
+    function testMalformedSignatureRejected() public {
+        bytes[] memory bad = new bytes[](1);
+        bad[0] = hex"1234"; // not 65 bytes
+        vm.expectRevert(CSVSeal.MalformedSignature.selector);
+        csvSeal.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, bad);
     }
-    
-    function createProofWithForgedAnchor() internal pure returns (bytes memory) {
-        return abi.encodePacked(bytes32(uint256(0xDEADBEEF)), bytes32(uint256(2)));
+
+    /// Duplicate signatures from a single verifier do not reach an M=2 threshold.
+    function testDuplicateSignatureDoesNotReachThreshold() public {
+        // Add a second verifier and require M = 2.
+        uint256 pk2 = 0xC0FFEE;
+        address v2 = vm.addr(pk2);
+        csvSeal.schedule_verifier_update(v2, true, 2);
+        vm.warp(block.timestamp + 8 days);
+        csvSeal.execute_verifier_update();
+        assertEq(csvSeal.threshold(), 2);
+
+        bytes32 digest = _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0);
+        bytes[] memory dup = new bytes[](2);
+        dup[0] = _sign(VERIFIER_PK, digest);
+        dup[1] = _sign(VERIFIER_PK, digest); // same signer twice
+        vm.expectRevert(CSVSeal.InsufficientSignatures.selector);
+        csvSeal.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, dup);
+
+        // Two DISTINCT verifier signatures satisfy the threshold.
+        bytes[] memory both = new bytes[](2);
+        both[0] = _sign(VERIFIER_PK, digest);
+        both[1] = _sign(pk2, digest);
+        assertTrue(csvSeal.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, both));
     }
-    
-    function createProofWithPartialEvents() internal pure returns (bytes memory) {
-        return abi.encodePacked(bytes32(uint256(1)), bytes("partial"));
+
+    // -------- acceptance: expiry --------
+
+    /// Expired attestations are rejected (§9.2 attestationExpiry).
+    function testExpiredAttestationRejected() public {
+        vm.warp(1_000_000);
+        uint64 expiry = uint64(block.timestamp - 1);
+        bytes32 digest = _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, expiry);
+        vm.expectRevert(CSVSeal.AttestationExpired.selector);
+        csvSeal.mint_sanad(
+            SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, expiry, _sigs(VERIFIER_PK, digest)
+        );
+    }
+
+    /// A non-expired attestation with an explicit future expiry mints.
+    function testFutureExpiryMints() public {
+        vm.warp(1_000_000);
+        uint64 expiry = uint64(block.timestamp + 3600);
+        assertTrue(_mint(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, expiry, VERIFIER_PK));
+    }
+
+    // -------- acceptance: duplicate uniqueness keys --------
+
+    /// Duplicate sanadId is rejected even with a fresh valid attestation.
+    function testDuplicateSanadRejected() public {
+        _mint(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, VERIFIER_PK);
+        // Change nullifier + lockEventId so ONLY the sanadId collision is exercised.
+        bytes32 le2 = keccak256("le2");
+        bytes32 nf2 = keccak256("nf2");
+        // Precompute sigs BEFORE expectRevert so the digest view call is not the reverting call.
+        bytes[] memory sig = _sigs(VERIFIER_PK, _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, le2, nf2, 0));
+        vm.expectRevert(CSVSeal.SanadAlreadyMinted.selector);
+        csvSeal.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, le2, nf2, 0, sig);
+    }
+
+    /// Duplicate nullifier is rejected.
+    function testDuplicateNullifierRejected() public {
+        _mint(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, VERIFIER_PK);
+        bytes32 sanad2 = keccak256("sanad2");
+        bytes32 le2 = keccak256("le2");
+        bytes[] memory sig = _sigs(VERIFIER_PK, _digest(sanad2, COMMITMENT, sourceChain, destinationOwner, le2, NULLIFIER, 0));
+        vm.expectRevert(CSVSeal.NullifierAlreadyRegistered.selector);
+        csvSeal.mint_sanad(sanad2, COMMITMENT, sourceChain, destinationOwner, le2, NULLIFIER, 0, sig);
+    }
+
+    /// Duplicate lockEventId is rejected.
+    function testDuplicateLockEventRejected() public {
+        _mint(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, VERIFIER_PK);
+        bytes32 sanad2 = keccak256("sanad2");
+        bytes32 nf2 = keccak256("nf2");
+        bytes[] memory sig = _sigs(VERIFIER_PK, _digest(sanad2, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, nf2, 0));
+        vm.expectRevert(CSVSeal.LockEventAlreadyRecorded.selector);
+        csvSeal.mint_sanad(sanad2, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, nf2, 0, sig);
+    }
+
+    /// Zero replay keys are rejected — no mint without a nullifier and lock event.
+    function testZeroKeysRejected() public {
+        bytes32 digest = _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, bytes32(0), NULLIFIER, 0);
+        vm.expectRevert(CSVSeal.InvalidMintRequest.selector);
+        csvSeal.mint_sanad(
+            SANAD_ID, COMMITMENT, sourceChain, destinationOwner, bytes32(0), NULLIFIER, 0, _sigs(VERIFIER_PK, digest)
+        );
+    }
+
+    // -------- acceptance: cross-deploy replay --------
+
+    /// A signature bound to one deployment must not authorize a mint on a second deployment.
+    /// The §9.2 digest binds `destinationContract`, so the same fields signed for `csvSeal`
+    /// do not verify against a second CSVSeal instance.
+    function testCrossDeployReplayRejected() public {
+        CSVSeal other = new CSVSeal(verifierAddr);
+
+        // Digest/signature produced against the ORIGINAL contract.
+        bytes32 digest = _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0);
+        bytes[] memory sig = _sigs(VERIFIER_PK, digest);
+
+        // Replaying it against `other` must fail: `other`'s digest binds `other`'s address.
+        vm.expectRevert(CSVSeal.InvalidVerifierSignature.selector);
+        other.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, sig);
+    }
+
+    // -------- gated nullifier registration --------
+
+    /// register_nullifier is no longer permissionless: a non-verifier cannot pre-register.
+    function testRegisterNullifierGated() public {
+        vm.prank(address(0x1234));
+        vm.expectRevert(CSVSeal.Unauthorized.selector);
+        csvSeal.register_nullifier(NULLIFIER, SANAD_ID, sourceChain);
+    }
+
+    /// A verifier may still register a nullifier out-of-band, and it then blocks a mint reusing it.
+    function testVerifierCanRegisterNullifier() public {
+        vm.prank(verifierAddr);
+        csvSeal.register_nullifier(NULLIFIER, SANAD_ID, sourceChain);
+        assertTrue(csvSeal.is_nullifier_registered(NULLIFIER));
+
+        bytes[] memory sig = _sigs(VERIFIER_PK, _digest(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0));
+        vm.expectRevert(CSVSeal.NullifierAlreadyRegistered.selector);
+        csvSeal.mint_sanad(SANAD_ID, COMMITMENT, sourceChain, destinationOwner, LOCK_EVENT_ID, NULLIFIER, 0, sig);
     }
 }

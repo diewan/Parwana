@@ -254,6 +254,12 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         proof_bytes.extend_from_slice(&(btc_inclusion.tx_index as u64).to_le_bytes());
         proof_bytes.extend_from_slice(&btc_inclusion.block_height.to_le_bytes());
 
+        // The canonical verifier (`csv-verifier::validate_anchor_reference`)
+        // requires `anchor_ref.metadata == inclusion_proof.proof_bytes`, so the
+        // anchor carries the same Merkle-proof bytes. (The lock txid binding is
+        // carried by `seal_ref` below and the Sanad binding by `anchor_id`.)
+        let anchor_metadata = proof_bytes.clone();
+
         let inclusion_proof = InclusionProof::new(
             proof_bytes,
             csv_hash::Hash::new(btc_inclusion.block_hash),
@@ -266,11 +272,6 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
             FinalityProof::new(confirmations.to_le_bytes().to_vec(), confirmations, true)
                 .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
 
-        // The anchor is bound to the Sanad ID being transferred (required by
-        // `verify_proof_binding`), with the lock txid/height carried as metadata.
-        let mut anchor_metadata = Vec::with_capacity(32 + 4);
-        anchor_metadata.extend_from_slice(&txid_array);
-        anchor_metadata.extend_from_slice(&transfer.lock_output_index.to_le_bytes());
         let anchor_ref = CoreCommitAnchor::new(
             transfer.sanad_id.as_bytes().to_vec(),
             lock_result.block_height,
@@ -347,7 +348,14 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         let btc_inclusion_proof = BitcoinInclusionProof {
             merkle_branch: self.extract_merkle_branch(&inclusion_proof.proof_bytes)?,
             block_hash: *inclusion_proof.block_hash.as_bytes(),
-            tx_index: inclusion_proof.position as u32,
+            // The transaction's position in the block lives in `leaf_index`, not
+            // `position`: `InclusionProof::new` sets `position = block_number`
+            // (Ethereum/Solana read it as the block/slot number), while
+            // `build_inclusion_proof` passes the real tx index as the 4th arg,
+            // which lands in `leaf_index`. Reading `position` here fed the block
+            // height into the Merkle fold's left/right selection and corrupted
+            // SPV verification.
+            tx_index: inclusion_proof.leaf_index as u32,
             block_height: inclusion_proof.block_number,
         };
 
@@ -421,6 +429,62 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
     ) -> Result<SealRegistryStatus, AdapterError> {
         // Bitcoin doesn't have a seal registry (UTXO model)
         Ok(SealRegistryStatus::Available)
+    }
+
+    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        // Confirm a transaction has reached the chain's finality depth. Like the
+        // Ethereum adapter's `confirm_tx`, this collapses to a binary
+        // confirmed/not-confirmed decision: it succeeds only when the tx is mined
+        // *and* final, and fails closed otherwise. Finality is never optional, so
+        // an unconfirmed or shallow tx is an error, not a success. It shares the
+        // `tip - block_height` confirmation convention with `tx_finality` and the
+        // runtime finality gate, so a lock that passed the gate also confirms here.
+        let bytes = hex::decode(tx_hash.trim_start_matches("0x"))
+            .map_err(|e| AdapterError::Generic(format!("Invalid tx hash: {}", e)))?;
+        if bytes.len() != 32 {
+            return Err(AdapterError::Generic(format!(
+                "Invalid tx hash length: expected 32 bytes, got {}",
+                bytes.len()
+            )));
+        }
+        let mut txid = [0u8; 32];
+        txid.copy_from_slice(&bytes);
+
+        // `get_tx_confirmations` returns the Bitcoin-native depth (tip-height+1),
+        // and 0 while the tx is still unconfirmed / in the mempool.
+        let real_confirmations = self.rpc.get_tx_confirmations(txid).await.map_err(|e| {
+            AdapterError::RpcError(format!("Failed to get tx confirmations: {}", e))
+        })?;
+        if real_confirmations == 0 {
+            return Err(AdapterError::Generic(format!(
+                "Transaction {} is not yet confirmed (in mempool)",
+                tx_hash
+            )));
+        }
+
+        let tip = self
+            .rpc
+            .get_block_count()
+            .await
+            .map_err(|e| AdapterError::RpcError(format!("Failed to get block count: {}", e)))?;
+
+        // Recover the true confirming height (get_tx_confirmations == tip - height + 1)
+        // and report confirmations with the same `tip - block_height` convention
+        // the proof/validation/gate paths use.
+        let block_height = tip.saturating_sub(real_confirmations.saturating_sub(1));
+        let confirmations = tip.saturating_sub(block_height);
+        let required_depth = self.capabilities().finality_depth;
+        if confirmations < required_depth {
+            return Err(AdapterError::Generic(format!(
+                "Transaction {} has not reached finality (got {} confirmations, need {})",
+                tx_hash, confirmations, required_depth
+            )));
+        }
+
+        Ok(MintResult {
+            tx_hash: tx_hash.to_string(),
+            block_height,
+        })
     }
 
     async fn tx_finality(&self, tx_hash: &str) -> Result<TxFinality, AdapterError> {
@@ -653,6 +717,180 @@ mod tests {
         fn clone_boxed(&self) -> Box<dyn crate::rpc::BitcoinRpc + Send + Sync> {
             Box::new(self.clone())
         }
+    }
+
+    /// Test RPC serving a real 80-byte header (with a caller-supplied Merkle
+    /// root at bytes 36..68) plus an always-unspent UTXO, so `validate_source_proof`
+    /// can be driven through genuine SPV Merkle verification against a
+    /// multi-transaction block.
+    #[derive(Clone)]
+    struct SpvHeaderRpc {
+        block_count: u64,
+        merkle_root_internal: [u8; 32],
+    }
+
+    #[async_trait::async_trait]
+    impl crate::rpc::BitcoinRpc for SpvHeaderRpc {
+        async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.block_count)
+        }
+        async fn get_block_hash(
+            &self,
+            height: u64,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            let mut hash = [0u8; 32];
+            hash[..8].copy_from_slice(&height.to_le_bytes());
+            Ok(hash)
+        }
+        async fn get_raw_block_header(
+            &self,
+            block_hash: [u8; 32],
+        ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+            let mut header = vec![0u8; 80];
+            header[0..4].copy_from_slice(&1u32.to_le_bytes());
+            header[4..36].copy_from_slice(&block_hash);
+            // The Merkle root SPV verification reads (internal byte order).
+            header[36..68].copy_from_slice(&self.merkle_root_internal);
+            Ok(header)
+        }
+        async fn is_utxo_unspent(
+            &self,
+            _txid: [u8; 32],
+            _vout: u32,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(true)
+        }
+        async fn send_raw_transaction(
+            &self,
+            _tx_bytes: Vec<u8>,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            Err("SpvHeaderRpc cannot broadcast transactions".into())
+        }
+        async fn get_tx_confirmations(
+            &self,
+            _txid: [u8; 32],
+        ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.block_count)
+        }
+        async fn get_utxos_for_address(
+            &self,
+            _address: String,
+        ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
+        }
+        fn clone_boxed(&self) -> Box<dyn crate::rpc::BitcoinRpc + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    /// Regression test for the SPV Merkle `tx_index` bug: `validate_source_proof`
+    /// must take the transaction's position in the block from `InclusionProof.leaf_index`,
+    /// not `.position` — `InclusionProof::new` sets `position = block_number` (which
+    /// Ethereum/Solana read as the block/slot), so reading it fed the block height
+    /// into the Merkle fold's left/right selection and corrupted verification.
+    ///
+    /// Uses a genuine two-transaction block with the target tx at index 1 and a
+    /// block height that differs from the index, so a run that mistakenly used
+    /// `position` (== block height) would fold on the wrong side and fail.
+    #[tokio::test]
+    async fn test_validate_source_proof_uses_leaf_index_not_block_number() {
+        use crate::proofs::{compute_merkle_branch, compute_merkle_root};
+
+        // Two internal-order txids; ours is at index 1 so left/right selection matters.
+        let sibling_internal: [u8; 32] = std::array::from_fn(|i| 0xF0 ^ (i as u8));
+        let our_txid_internal: [u8; 32] = std::array::from_fn(|i| i as u8 + 1);
+        let all_txids = [sibling_internal, our_txid_internal];
+        let leaf_index = 1u64;
+
+        let merkle_root_internal = compute_merkle_root(&all_txids).unwrap();
+        let branch =
+            compute_merkle_branch(&our_txid_internal, leaf_index as usize, &all_txids).unwrap();
+        assert_eq!(branch, vec![sibling_internal]);
+
+        let adapter = BitcoinRuntimeAdapter::new(
+            Network::Regtest,
+            SealWallet::generate_random(Network::Regtest),
+            Box::new(SpvHeaderRpc {
+                block_count: 200,
+                merkle_root_internal,
+            }),
+        );
+
+        // `lock_tx_hash` is fed through verification as-is (internal byte order),
+        // matching the txid `build_inclusion_proof` hands the RPC to locate the tx.
+        let transfer = CrossChainTransfer {
+            id: "test-spv-leaf-index".to_string(),
+            source_chain: "bitcoin".to_string(),
+            destination_chain: "ethereum".to_string(),
+            lock_tx_hash: our_txid_internal.to_vec(),
+            lock_output_index: 0,
+            sanad_id: Hash::new([2u8; 32]),
+            transition_id: vec![1u8; 32],
+        };
+
+        // Encode the inclusion proof exactly as `build_inclusion_proof` does:
+        // internal-order branch siblings, then block_hash + tx_index + height.
+        let block_height = 100u64; // deliberately != leaf_index (1)
+        let block_hash = [3u8; 32];
+        let mut proof_bytes = Vec::new();
+        for sibling in &branch {
+            proof_bytes.extend_from_slice(sibling);
+        }
+        proof_bytes.extend_from_slice(&block_hash);
+        proof_bytes.extend_from_slice(&leaf_index.to_le_bytes());
+        proof_bytes.extend_from_slice(&block_height.to_le_bytes());
+
+        // `InclusionProof::new(proof_bytes, block_hash, block_number, leaf_index)`
+        // — the 4th arg lands in `leaf_index`, and `position` is forced to
+        // `block_number`. The block number (100) differs from the leaf index (1).
+        let inclusion_proof = csv_protocol::proof_taxonomy::InclusionProof::new(
+            proof_bytes,
+            Hash::new(block_hash),
+            block_height,
+            leaf_index,
+        )
+        .unwrap();
+        assert_eq!(inclusion_proof.position, block_height, "fixture assumption");
+        assert_eq!(inclusion_proof.leaf_index as u64, leaf_index);
+
+        let finality_proof = csv_protocol::proof_taxonomy::FinalityProof {
+            finality_data: block_height.to_le_bytes().to_vec(),
+            block_hash: Hash::new(block_hash),
+            threshold: 6,
+            confirmations: 100,
+            data: vec![],
+            source: "bitcoin".to_string(),
+            is_deterministic: false,
+        };
+
+        // Canonical contract: anchor metadata mirrors the inclusion proof bytes.
+        let anchor_ref = csv_hash::seal::CommitAnchor::new(
+            vec![2u8; 32],
+            block_height,
+            inclusion_proof.proof_bytes.clone(),
+        )
+        .unwrap();
+
+        let proof_bundle = ProofBundle {
+            version: 1,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+            seal_ref: csv_hash::seal::SealPoint::new(our_txid_internal.to_vec(), Some(0), None)
+                .unwrap(),
+            signature_scheme: csv_protocol::signature::SignatureScheme::Secp256k1,
+            signatures: vec![vec![0xCDu8; 68]],
+            transition_dag: test_transition_dag(Hash::new([2u8; 32])),
+        };
+
+        let result = adapter
+            .validate_source_proof(&transfer, &proof_bundle)
+            .await;
+        assert!(
+            result.is_ok(),
+            "SPV verification must pass using leaf_index for the tx position; got {:?}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -1287,5 +1525,116 @@ mod tests {
         expected.reverse();
         assert_eq!(&outpoint.txid.as_byte_array()[..], &expected[..]);
         assert_ne!(&outpoint.txid.as_byte_array()[..], &raw_txid[..]);
+    }
+
+    /// Test RPC with an independently configurable tip height and per-tx
+    /// confirmation depth, so `confirm_tx`'s finality gate can be exercised.
+    #[derive(Clone)]
+    struct ConfirmTxRpc {
+        block_count: u64,
+        confirmations: u64,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::rpc::BitcoinRpc for ConfirmTxRpc {
+        async fn get_block_count(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.block_count)
+        }
+        async fn get_block_hash(
+            &self,
+            height: u64,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            let mut hash = [0u8; 32];
+            hash[..8].copy_from_slice(&height.to_le_bytes());
+            Ok(hash)
+        }
+        async fn is_utxo_unspent(
+            &self,
+            _txid: [u8; 32],
+            _vout: u32,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(true)
+        }
+        async fn send_raw_transaction(
+            &self,
+            _tx_bytes: Vec<u8>,
+        ) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
+            Err("ConfirmTxRpc cannot broadcast transactions".into())
+        }
+        async fn get_tx_confirmations(
+            &self,
+            _txid: [u8; 32],
+        ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.confirmations)
+        }
+        async fn get_utxos_for_address(
+            &self,
+            _address: String,
+        ) -> Result<Vec<crate::rpc::UtxoInfo>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
+        }
+        fn clone_boxed(&self) -> Box<dyn crate::rpc::BitcoinRpc + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    fn confirm_tx_adapter(block_count: u64, confirmations: u64) -> BitcoinRuntimeAdapter {
+        BitcoinRuntimeAdapter::new(
+            Network::Regtest,
+            SealWallet::generate_random(Network::Regtest),
+            Box::new(ConfirmTxRpc {
+                block_count,
+                confirmations,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_fails_closed_when_unconfirmed() {
+        // 0 confirmations → still in the mempool; must fail closed.
+        let adapter = confirm_tx_adapter(200, 0);
+        let result = adapter.confirm_tx(&hex::encode([0xAAu8; 32])).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when the tx is still unconfirmed"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_fails_closed_below_finality_depth() {
+        // Native depth 3 → `tip - block_height` = 2 confirmations, below the
+        // required 6 (ChainCapabilities::bitcoin()). Finality is never optional.
+        let adapter = confirm_tx_adapter(200, 3);
+        let result = adapter.confirm_tx(&hex::encode([0xAAu8; 32])).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when confirmations are below the chain's finality depth"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_returns_confirming_height_when_final() {
+        // tip 200, native depth 10 → confirming height 191, and
+        // `tip - block_height` = 9 confirmations, past the required 6.
+        let adapter = confirm_tx_adapter(200, 10);
+        let result = adapter
+            .confirm_tx(&hex::encode([0xAAu8; 32]))
+            .await
+            .expect("must confirm a final transaction");
+        assert_eq!(
+            result.block_height, 191,
+            "must report the true confirming block height (tip - depth + 1)"
+        );
+        assert_eq!(result.tx_hash, hex::encode([0xAAu8; 32]));
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_accepts_0x_prefixed_hash() {
+        let adapter = confirm_tx_adapter(200, 10);
+        let result = adapter
+            .confirm_tx(&format!("0x{}", hex::encode([0xAAu8; 32])))
+            .await
+            .expect("must accept a 0x-prefixed tx hash");
+        assert_eq!(result.block_height, 191);
     }
 }

@@ -21,7 +21,6 @@ contract NamingConstitutionTest is Test {
 
     event SealUsed(bytes32 indexed sealId, bytes32 commitment);
     event SanadConsumed(bytes32 indexed sanadId, bytes32 indexed nullifier, address indexed consumer, uint256 timestamp);
-    event SanadMinted(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 sourceChain, bytes sourceSealRef, uint256 timestamp);
     event CrossChainLock(bytes32 indexed sanadId, bytes32 indexed commitment, address indexed owner, bytes32 destinationChain, bytes destinationOwner, uint256 timestamp);
 
     function setUp() public {
@@ -139,18 +138,5 @@ contract NamingConstitutionTest is Test {
         
         // Verify ownership changed
         assertEq(csvSeal.owner(), newOwner);
-    }
-
-    /// @notice Test that epoch events are emitted correctly
-    function testEpochEvents() public {
-        bytes32 newRoot = keccak256("new_root");
-        
-        // Advance epoch
-        csvSeal.advance_epoch(newRoot, 365 days);
-        
-        // Verify epoch advanced (currentEpoch returns a tuple)
-        (uint256 epoch, bytes32 root, , , ) = csvSeal.currentEpoch();
-        assertEq(epoch, 1);
-        assertEq(root, newRoot);
     }
 }

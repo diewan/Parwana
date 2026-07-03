@@ -493,6 +493,28 @@ impl BitcoinRpc for MempoolSignetRpc {
         self.extract_merkle_proof(txid, block_hash).await
     }
 
+    async fn get_raw_block_header(
+        &self,
+        block_hash: [u8; 32],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        // esplora `GET /block/:hash/header` returns the raw 80-byte block header
+        // as a hex string. `block_hash` is already in display byte order (same as
+        // `get_block_hash` returns and `extract_merkle_proof` consumes), so it is
+        // hex-encoded directly for the URL without reversal.
+        let block_hash_hex = hex::encode(block_hash);
+        let url = format!("{}/block/{}/header", self.base_url, block_hash_hex);
+        let header_hex = self.get_text_with_retry(&url).await?;
+        let header_bytes = hex::decode(header_hex.trim())?;
+        if header_bytes.len() != 80 {
+            return Err(format!(
+                "Invalid block header length from esplora: expected 80 bytes, got {}",
+                header_bytes.len()
+            )
+            .into());
+        }
+        Ok(header_bytes)
+    }
+
     async fn estimate_fee_rate(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/v1/fees/recommended", self.base_url);
         let fees: RecommendedFees = self.get_with_retry(&url).await?;

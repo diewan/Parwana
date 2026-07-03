@@ -82,6 +82,195 @@ fn proof_payload_hash(payload: &[u8]) -> [u8; 32] {
     csv_hash::csv_tagged_hash("csv.execution-journal.proof-payload.v1", payload)
 }
 
+/// 23-byte domain tag for the RFC-0012 §9.2 mint attestation digest.
+///
+/// Kept byte-for-byte in sync with the destination contract
+/// (`CSVSeal.MINT_ATTESTATION_DOMAIN`). The `const` assertion below fails the
+/// build if the tag ever drifts from the frozen 23-byte length.
+const MINT_ATTESTATION_DOMAIN: &[u8] = b"csv.mint.attestation.v1";
+const _: () = assert!(MINT_ATTESTATION_DOMAIN.len() == 23);
+
+/// Contract-layer chain identity (RFC-0012 §6): `keccak256("csv.chain.<name>")`.
+///
+/// This is the fixed-width identifier the destination contract ABI uses. It is
+/// deliberately distinct from the proof-layer `ProofLeafV1` one-byte chain id,
+/// which this RFC does NOT change (§5) — adapters map the same chain name into
+/// both representations. Nothing in the mint dispatch reads or writes a proof
+/// root; correctness is decided off-chain by the canonical verifier.
+fn contract_chain_id(name: &str) -> [u8; 32] {
+    use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+    let tag = format!("csv.chain.{}", name);
+    *CrossChainHashAlgorithm::Keccak256
+        .hash_bytes(tag.as_bytes())
+        .as_bytes()
+}
+
+/// Extract the mint commitment from a verified proof bundle.
+///
+/// Mirrors the destination adapter's convention: the commitment binding the
+/// sanad travels in `anchor_ref.anchor_id`. Left-copied into a fixed 32-byte
+/// field (the contract-ABI width); every real bundle carries a non-zero anchor,
+/// which the destination contract additionally enforces.
+fn commitment_from_bundle(proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle) -> [u8; 32] {
+    let mut commitment = [0u8; 32];
+    let anchor = &proof_bundle.anchor_ref.anchor_id;
+    let len = anchor.len().min(32);
+    commitment[..len].copy_from_slice(&anchor[..len]);
+    commitment
+}
+
+/// Deterministic identity of the source-chain lock event.
+///
+/// Derived from the real lock outpoint (`lock_tx_hash || lock_output_index`),
+/// so it is stable across resume and is the settlement / duplicate-source-lock
+/// key the destination contract records (`lockEventId`).
+fn lock_event_id(transfer: &CrossChainTransfer) -> [u8; 32] {
+    let mut preimage = transfer.lock_tx_hash.clone();
+    preimage.extend_from_slice(&transfer.lock_output_index.to_le_bytes());
+    csv_hash::csv_tagged_hash("csv.mint.lock-event.v1", &preimage)
+}
+
+/// Replay nullifier consumed by the source single-use seal.
+///
+/// Derived from the seal outpoint the verifier proved consumed
+/// (`seal_ref.id`), giving the contract's replay-anchoring domain a value bound
+/// to the specific single-use seal rather than to the sanad id.
+fn mint_nullifier(proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle) -> [u8; 32] {
+    csv_hash::csv_tagged_hash("csv.mint.nullifier.v1", &proof_bundle.seal_ref.id)
+}
+
+/// RFC-0012 §9.2 attestation-digest inputs the runtime binds for a destination
+/// mint.
+///
+/// This is the thin-registry authorization surface. There is deliberately **no**
+/// proof root, state root, Merkle proof, or leaf index here: cross-chain
+/// validity is adjudicated off-chain by the canonical verifier, and the only
+/// on-chain authenticity check is a set of verifier signatures over the digest
+/// computed from these fields (§9). The field order and widths mirror
+/// `CSVSeal.mint_attestation_digest` exactly.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MintAttestationInputs {
+    /// `keccak256("csv.chain.<dest>")` — contract-layer destination chain identity.
+    pub destination_chain_id: [u8; 32],
+    /// Canonical 32-byte destination contract identity (EVM: address left-padded
+    /// to 32 bytes). Left zero by the runtime, which does not hold deployment
+    /// addresses (it must not import chain adapters); the submitting adapter,
+    /// which knows `address(this)`, binds it before computing the signable digest.
+    pub destination_contract: [u8; 32],
+    /// Sanad identifier; the destination contract's primary duplicate-mint key.
+    pub sanad_id: [u8; 32],
+    /// Commitment binding the sanad content/ownership.
+    pub commitment: [u8; 32],
+    /// `keccak256("csv.chain.<src>")` — contract-layer source chain identity.
+    pub source_chain: [u8; 32],
+    /// Full recipient identity bytes; only `keccak256(destination_owner)` enters
+    /// the digest (the full bytes travel in the mint event). Empty until the
+    /// owner-binding wiring (interactive/materialize modes) supplies a recipient.
+    pub destination_owner: Vec<u8>,
+    /// Identity of the source-chain lock event; duplicate-source-lock + settlement key.
+    pub lock_event_id: [u8; 32],
+    /// Replay nullifier consumed by the source seal.
+    pub nullifier: [u8; 32],
+    /// Attestation expiry, unix seconds, u64 big-endian in the digest; 0 = no expiry.
+    pub attestation_expiry: u64,
+}
+
+impl MintAttestationInputs {
+    /// Compute the frozen RFC-0012 §9.2 attestation digest.
+    ///
+    /// `SHA-256` over the fixed preimage:
+    /// `domain(23) || destinationChainId(32) || destinationContract(32) ||
+    /// sanadId(32) || commitment(32) || sourceChain(32) ||
+    /// keccak256(destinationOwner)(32) || lockEventId(32) || nullifier(32) ||
+    /// attestationExpiry(u64 big-endian, 8)`.
+    ///
+    /// Byte-compatible with `CSVSeal.mint_attestation_digest`. The digest is only
+    /// signable once `destination_contract` is bound (by the submitting adapter),
+    /// so the runtime computes it for tooling/tests but does not cache a stale
+    /// pre-binding value in the request.
+    pub fn attestation_digest(&self) -> [u8; 32] {
+        use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+        let owner_hash = *CrossChainHashAlgorithm::Keccak256
+            .hash_bytes(&self.destination_owner)
+            .as_bytes();
+        let mut preimage = Vec::with_capacity(MINT_ATTESTATION_DOMAIN.len() + 32 * 8 + 8);
+        preimage.extend_from_slice(MINT_ATTESTATION_DOMAIN);
+        preimage.extend_from_slice(&self.destination_chain_id);
+        preimage.extend_from_slice(&self.destination_contract);
+        preimage.extend_from_slice(&self.sanad_id);
+        preimage.extend_from_slice(&self.commitment);
+        preimage.extend_from_slice(&self.source_chain);
+        preimage.extend_from_slice(&owner_hash);
+        preimage.extend_from_slice(&self.lock_event_id);
+        preimage.extend_from_slice(&self.nullifier);
+        preimage.extend_from_slice(&self.attestation_expiry.to_be_bytes());
+        *CrossChainHashAlgorithm::Sha256
+            .hash_bytes(&preimage)
+            .as_bytes()
+    }
+}
+
+/// Runtime-facing mint request handed to the destination adapter (RFC-0012 §3/§9).
+///
+/// Replaces the proof-root-era mint payload. It carries the §9.2 attestation
+/// inputs (what the verifier signs), the verifier signatures produced by the
+/// adapter/verifier that holds the key, and the canonically-encoded source
+/// `ProofBundle` that the runtime's off-chain verification already adjudicated.
+/// The runtime remains the sole authoritative proof adjudicator; the destination
+/// contract only checks the M-of-N signatures over the digest.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RuntimeMintRequest {
+    /// §9.2 attestation inputs bound by the runtime.
+    pub attestation: MintAttestationInputs,
+    /// M-of-N secp256k1 verifier signatures over `attestation.attestation_digest()`.
+    ///
+    /// Empty when produced by the runtime: the runtime does not hold a verifier
+    /// key and cannot bind `destination_contract`, so the submitting
+    /// adapter/verifier fills this after finalizing the digest. Fail-closed: a
+    /// destination contract rejects a mint carrying fewer than its threshold of
+    /// valid signatures, so an empty vector can never mint.
+    pub verifier_signatures: Vec<Vec<u8>>,
+    /// Canonical CBOR of the verified source `ProofBundle`.
+    pub proof_bundle: Vec<u8>,
+}
+
+/// Build the runtime mint request from a verified proof bundle.
+///
+/// Called only after off-chain verification has succeeded and been journaled, so
+/// the attestation it carries is over material the canonical verifier accepted.
+fn build_runtime_mint_request(
+    transfer: &CrossChainTransfer,
+    proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+    proof_bundle_bytes: Vec<u8>,
+) -> RuntimeMintRequest {
+    RuntimeMintRequest {
+        attestation: MintAttestationInputs {
+            destination_chain_id: contract_chain_id(&transfer.destination_chain),
+            destination_contract: [0u8; 32],
+            sanad_id: *transfer.sanad_id.as_bytes(),
+            commitment: commitment_from_bundle(proof_bundle),
+            source_chain: contract_chain_id(&transfer.source_chain),
+            destination_owner: Vec::new(),
+            lock_event_id: lock_event_id(transfer),
+            nullifier: mint_nullifier(proof_bundle),
+            attestation_expiry: 0,
+        },
+        verifier_signatures: Vec::new(),
+        proof_bundle: proof_bundle_bytes,
+    }
+}
+
+/// Encode a [`RuntimeMintRequest`] into the canonical bytes handed to the
+/// destination adapter's `mint_sanad`.
+fn encode_mint_request(request: &RuntimeMintRequest) -> Result<Vec<u8>, TransferCoordinatorError> {
+    csv_codec::to_canonical_cbor(request).map_err(|e| {
+        TransferCoordinatorError::ProofBuildFailed(format!(
+            "Failed to encode runtime mint request: {}",
+            e
+        ))
+    })
+}
+
 /// Convert CrossChainTransfer to HashEntry for durable storage
 fn transfer_to_registry_entry(
     transfer: &CrossChainTransfer,
@@ -1311,12 +1500,21 @@ impl TransferCoordinator {
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
+        // Construct the RFC-0012 §9.2 attestation-carrying mint request the
+        // adapter submits. Built from the already-verified proof bundle — the
+        // off-chain verifier above is the sole proof adjudicator; this request
+        // carries attestation inputs (chain identities via keccak256, commitment,
+        // lock-event id, nullifier), never a proof root.
+        let mint_request =
+            build_runtime_mint_request(&transfer, &proof_bundle, proof_bundle_bytes.clone());
+        let mint_payload = encode_mint_request(&mint_request)?;
+
         let mut mint_result = None;
         let mut last_error = None;
 
         for attempt in 0..=runtime_ctx.policy.max_retries {
             match adapter_registry
-                .mint_sanad(&transfer.destination_chain, &transfer, &proof_bundle_bytes)
+                .mint_sanad(&transfer.destination_chain, &transfer, &mint_payload)
                 .await
             {
                 Ok(result) => {
@@ -2151,35 +2349,25 @@ impl TransferCoordinator {
                 ))
             })?;
 
-        let sanad_id_bound = proof_bundle
-            .seal_ref
-            .id
-            .get(0..32)
-            .map(|b| csv_hash::SanadId::new(b.try_into().unwrap_or([0u8; 32])));
-        if let Some(ref bound_sanad) = sanad_id_bound {
-            let expected_sanad = csv_hash::SanadId(transfer.sanad_id);
-            if bound_sanad.as_bytes() != expected_sanad.as_bytes() {
-                return Err(TransferCoordinatorError::ProofVerificationFailed(
-                    "Proof seal does not bind to the transfer sanad_id".to_string(),
-                ));
-            }
+        // The sanad binding lives in the anchor, not the seal. Chain adapters
+        // set `seal_ref.id` to the single-use seal's outpoint (e.g. the Bitcoin
+        // lock txid + vout), while the sanad_id being transferred is carried in
+        // `anchor_ref.anchor_id`. Bind against the anchor to match every real
+        // adapter's proof layout — the fresh-execution path enforces the same
+        // invariant via `validate_source_proof` -> `verify_proof_binding`.
+        if proof_bundle.anchor_ref.anchor_id != transfer.sanad_id.as_bytes() {
+            return Err(TransferCoordinatorError::ProofVerificationFailed(
+                "Proof anchor does not bind to the transfer sanad_id".to_string(),
+            ));
         }
 
-        if transfer.lock_tx_hash.len() == 32 {
-            let expected_lock_bytes = hex::encode(&transfer.lock_tx_hash);
-            let proof_lock_bytes = proof_bundle
-                .anchor_ref
-                .metadata
-                .get(0..expected_lock_bytes.len())
-                .map(|s| String::from_utf8_lossy(s).to_string());
-            if let Some(ref lock_bytes) = proof_lock_bytes
-                && lock_bytes.as_str() != expected_lock_bytes.as_str()
-            {
-                return Err(TransferCoordinatorError::ProofVerificationFailed(
-                    "Proof anchor metadata does not bind to the lock transaction".to_string(),
-                ));
-            }
-        }
+        // The lock-transaction binding is enforced where it is cryptographically
+        // meaningful: `validate_source_proof` proves the lock txid is in the
+        // block via SPV, and `seal_ref.id` (the txid+vout) is checked against the
+        // seal registry above. The anchor `metadata` carries the canonical
+        // inclusion-proof bytes (`csv-verifier` enforces
+        // `metadata == inclusion_proof.proof_bytes`), so it must not be
+        // reinterpreted here as the ASCII hex of the lock txid.
 
         let verification_context = VerificationContext {
             chain_id: transfer.source_chain.clone(),
@@ -2468,8 +2656,13 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+        // Same attestation-carrying request on the resume path so a recovered
+        // transfer submits the identical §9.2 mint request as a fresh one.
+        let mint_request =
+            build_runtime_mint_request(&transfer, &proof_bundle, proof_payload.clone());
+        let mint_payload = encode_mint_request(&mint_request)?;
         let mint_result = adapter_registry
-            .mint_sanad(&transfer.destination_chain, &transfer, &proof_payload)
+            .mint_sanad(&transfer.destination_chain, &transfer, &mint_payload)
             .await
             .map_err(|e| TransferCoordinatorError::MintFailed(e.to_string()))?;
         let mut submitted_entry = transfer_to_registry_entry(&transfer)?;
@@ -2752,7 +2945,10 @@ mod tests {
         fn build_fake_inclusion_proof(sanad_id: &csv_hash::Hash) -> Result<ProofBundle, String> {
             // Use deterministic proof fixture from csv-testkit
             let mut bundle = csv_testkit::fixtures::TestProofBundle::minimal();
-            // Update the seal_ref to match the sanad_id
+            // Bind the proof to the sanad the way real adapters do: the sanad_id
+            // lives in `anchor_ref.anchor_id` (what `verify_recovery_proof`
+            // checks), while `seal_ref.id` carries the single-use seal outpoint.
+            bundle.anchor_ref.anchor_id = sanad_id.as_bytes().to_vec();
             bundle.seal_ref.id = sanad_id.as_bytes().to_vec();
             Ok(bundle)
         }
@@ -4263,5 +4459,444 @@ mod tests {
         // Runtime mode should be unsafe
         let mode = coordinator.health_monitor().lock().unwrap().mode();
         assert_eq!(mode, crate::runtime_mode::RuntimeMode::Unsafe);
+    }
+
+    // ===================== RFC-0012 thin-registry mint request (TRM-RUNTIME-001) =====================
+
+    fn hex32(s: &str) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        hex::decode_to_slice(s, &mut out).expect("valid 32-byte hex vector");
+        out
+    }
+
+    #[test]
+    fn contract_chain_id_matches_rfc0012_vectors() {
+        // keccak256("csv.chain.<name>"), cross-checked against `cast keccak` and
+        // an independent keccak implementation. These are the contract-layer
+        // identifiers CSVSeal stores as CHAIN_* constants (RFC-0012 §6).
+        assert_eq!(
+            contract_chain_id("bitcoin"),
+            hex32("43e835a8bce7f8ee213d07ddcc0bdd7b7d247ca16a60e7e639c00de296eee11b")
+        );
+        assert_eq!(
+            contract_chain_id("ethereum"),
+            hex32("7d0dc209c5a3fa11e0ee0a3f9680f759f6e93896d643983f9c68ae5323226e48")
+        );
+        assert_eq!(
+            contract_chain_id("solana"),
+            hex32("153c41791368005b07fa0a9c3d922fe9d076559f2b15a1a8c33f89bcb4874a3b")
+        );
+        assert_eq!(
+            contract_chain_id("sui"),
+            hex32("8ee0b88a63765bed253fe6d0961996852c3a8a4e660c96d65d7c5b58542871e4")
+        );
+        assert_eq!(
+            contract_chain_id("aptos"),
+            hex32("c627230c85fd40ff7b0b2c218061691019e9b72f102ad7f817207e4aec59eb9b")
+        );
+    }
+
+    #[test]
+    fn contract_chain_id_is_deterministic_and_distinct_per_chain() {
+        assert_eq!(contract_chain_id("bitcoin"), contract_chain_id("bitcoin"));
+        assert_ne!(contract_chain_id("bitcoin"), contract_chain_id("ethereum"));
+        // The contract-layer identity is a full 32-byte keccak, never the
+        // proof-layer one-byte `ProofLeafV1` chain id — the two layers stay distinct.
+        assert_ne!(contract_chain_id("bitcoin"), [0u8; 32]);
+    }
+
+    #[test]
+    fn attestation_digest_matches_independent_sha256_vector() {
+        // Cross-implementation check against a Python (keccak + sha256) computation
+        // of the exact §9.2 287-byte preimage.
+        let inputs = MintAttestationInputs {
+            destination_chain_id: [1u8; 32],
+            destination_contract: [2u8; 32],
+            sanad_id: [3u8; 32],
+            commitment: [4u8; 32],
+            source_chain: [5u8; 32],
+            destination_owner: b"owner-bytes".to_vec(),
+            lock_event_id: [6u8; 32],
+            nullifier: [7u8; 32],
+            attestation_expiry: 42,
+        };
+        assert_eq!(
+            inputs.attestation_digest(),
+            hex32("384dedf1821702b2e99d7d0cc73279bb0038cd76d63f93d6fb57933812132bc6")
+        );
+    }
+
+    #[test]
+    fn attestation_digest_is_field_sensitive() {
+        let base = MintAttestationInputs {
+            destination_chain_id: [0u8; 32],
+            destination_contract: [0u8; 32],
+            sanad_id: [0u8; 32],
+            commitment: [0u8; 32],
+            source_chain: [0u8; 32],
+            destination_owner: Vec::new(),
+            lock_event_id: [0u8; 32],
+            nullifier: [0u8; 32],
+            attestation_expiry: 0,
+        };
+        let base_digest = base.attestation_digest();
+
+        let mut flip_nullifier = base.clone();
+        flip_nullifier.nullifier = [9u8; 32];
+        assert_ne!(base_digest, flip_nullifier.attestation_digest());
+
+        let mut flip_contract = base.clone();
+        flip_contract.destination_contract = [9u8; 32];
+        assert_ne!(base_digest, flip_contract.attestation_digest());
+
+        let mut flip_owner = base.clone();
+        flip_owner.destination_owner = b"x".to_vec();
+        assert_ne!(base_digest, flip_owner.attestation_digest());
+
+        let mut flip_expiry = base.clone();
+        flip_expiry.attestation_expiry = 1;
+        assert_ne!(base_digest, flip_expiry.attestation_digest());
+    }
+
+    #[test]
+    fn build_runtime_mint_request_carries_attestation_not_proof_root() {
+        let transfer = CrossChainTransfer {
+            id: "req".to_string(),
+            source_chain: "bitcoin".to_string(),
+            destination_chain: "ethereum".to_string(),
+            lock_tx_hash: vec![0xAB; 32],
+            lock_output_index: 7,
+            sanad_id: csv_hash::Hash::new([0x44; 32]),
+            transition_id: vec![3u8; 32],
+        };
+        let bundle = LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id).unwrap();
+        let bytes = bundle.to_canonical_bytes().unwrap();
+
+        let request = build_runtime_mint_request(&transfer, &bundle, bytes.clone());
+        let a = &request.attestation;
+
+        // Contract-layer chain identities via keccak256("csv.chain.<name>").
+        assert_eq!(a.destination_chain_id, contract_chain_id("ethereum"));
+        assert_eq!(a.source_chain, contract_chain_id("bitcoin"));
+        // Sanad + commitment binding taken from the verified bundle.
+        assert_eq!(a.sanad_id, *transfer.sanad_id.as_bytes());
+        assert_eq!(a.commitment, commitment_from_bundle(&bundle));
+        // Lock event id derives from the real lock outpoint; nullifier from the seal.
+        assert_eq!(a.lock_event_id, lock_event_id(&transfer));
+        assert_eq!(a.nullifier, mint_nullifier(&bundle));
+        // The nullifier is bound to the source seal, not aliased to the sanad id.
+        assert_ne!(a.nullifier, a.sanad_id);
+        // Contract identity + signatures are supplied downstream by the adapter/verifier.
+        assert_eq!(a.destination_contract, [0u8; 32]);
+        assert!(request.verifier_signatures.is_empty());
+        // The verified proof bundle travels alongside for the submitting adapter.
+        assert_eq!(request.proof_bundle, bytes);
+    }
+
+    #[test]
+    fn runtime_mint_request_roundtrips_through_canonical_cbor() {
+        let request = RuntimeMintRequest {
+            attestation: MintAttestationInputs {
+                destination_chain_id: [1u8; 32],
+                destination_contract: [2u8; 32],
+                sanad_id: [3u8; 32],
+                commitment: [4u8; 32],
+                source_chain: [5u8; 32],
+                destination_owner: b"owner".to_vec(),
+                lock_event_id: [6u8; 32],
+                nullifier: [7u8; 32],
+                attestation_expiry: 99,
+            },
+            verifier_signatures: vec![vec![0xAB; 65]],
+            proof_bundle: vec![1, 2, 3, 4],
+        };
+        let bytes = encode_mint_request(&request).unwrap();
+        let decoded: RuntimeMintRequest = csv_codec::from_canonical_cbor(&bytes).unwrap();
+        assert_eq!(decoded, request);
+    }
+
+    #[tokio::test]
+    async fn mint_dispatch_hands_adapter_the_attestation_request() {
+        // The adapter that submits the mint must receive the runtime's §9.2
+        // attestation request — not a bare proof bundle and not a proof root.
+        struct CapturingAdapter {
+            caps: ChainCapabilities,
+            mint_payload: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl ChainAdapter for CapturingAdapter {
+            fn chain_id(&self) -> &str {
+                "test-chain"
+            }
+            fn capabilities(&self) -> ChainCapabilities {
+                self.caps.clone()
+            }
+            fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+                csv_protocol::signature::SignatureScheme::Ed25519
+            }
+            async fn lock_sanad(
+                &self,
+                _transfer: &CrossChainTransfer,
+            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+                Ok(LocalTestAdapter::build_fake_lock_result())
+            }
+            async fn mint_sanad(
+                &self,
+                _transfer: &CrossChainTransfer,
+                proof_bundle: &[u8],
+            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+                *self.mint_payload.lock().unwrap() = Some(proof_bundle.to_vec());
+                Ok(LocalTestAdapter::build_fake_mint_result())
+            }
+            async fn build_inclusion_proof(
+                &self,
+                transfer: &CrossChainTransfer,
+                _lock_result: &LockResult,
+            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+                LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+                    .map_err(csv_adapter_core::AdapterError::Generic)
+            }
+            async fn validate_source_proof(
+                &self,
+                _transfer: &CrossChainTransfer,
+                _proof_bundle: &ProofBundle,
+            ) -> Result<(), csv_adapter_core::AdapterError> {
+                Ok(())
+            }
+            async fn check_seal_registry(
+                &self,
+                _seal_id: &[u8],
+            ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+                Ok(SealRegistryStatus::Available)
+            }
+            async fn confirm_tx(
+                &self,
+                tx_hash: &str,
+            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+                Ok(MintResult {
+                    tx_hash: tx_hash.to_string(),
+                    block_height: 100,
+                })
+            }
+            async fn get_balance(
+                &self,
+                _address: &str,
+            ) -> Result<String, csv_adapter_core::AdapterError> {
+                Ok("0".to_string())
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        let transfer = CrossChainTransfer {
+            id: "capture-transfer".to_string(),
+            source_chain: "test-chain".to_string(),
+            destination_chain: "test-chain".to_string(),
+            lock_tx_hash: vec![1u8; 32],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([44u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
+        let bundle = LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id).unwrap();
+        let payload = bundle.to_canonical_bytes().unwrap();
+
+        let db = csv_storage::InMemoryReplayDb::new();
+        db.insert_if_absent(transfer.sanad_id.as_bytes())
+            .await
+            .unwrap();
+        db.store_transfer_entry(&transfer_to_registry_entry(&transfer).unwrap())
+            .await
+            .unwrap();
+        let coordinator = TransferCoordinator::new(Box::new(db), EventBus::new());
+        coordinator
+            .execution_journal()
+            .record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer.id.clone(),
+                replay_id: csv_wire::HashWire::from(transfer.sanad_id),
+                proof_hash: proof_payload_hash(&payload),
+                proof_payload: Some(payload.clone()),
+                phase: TransferStage::ProofValidated,
+                ts: std::time::SystemTime::now(),
+                outcome: crate::execution_journal::PhaseOutcome::Completed,
+                attempt: 1,
+                transfer_context: None,
+            })
+            .unwrap();
+
+        let captured = Arc::new(std::sync::Mutex::new(None));
+        let mut registry = AdapterRegistryImpl::new();
+        registry
+            .register_adapter(Box::new(CapturingAdapter {
+                caps: ChainCapabilities::bitcoin(),
+                mint_payload: captured.clone(),
+            }))
+            .unwrap();
+
+        let owner = uuid::Uuid::new_v4();
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
+            lease: crate::user_runtime_lease::TransferLease {
+                transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
+                epoch: 1,
+                owner_runtime_id: owner,
+                acquired_at: std::time::SystemTime::now(),
+                expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
+            },
+            runtime_instance: owner,
+            policy: crate::policy::RuntimePolicy::new(),
+        };
+
+        coordinator
+            .resume_transfer(&transfer.id, &registry, runtime_ctx)
+            .await
+            .expect("validated proof recovery must mint");
+
+        let bytes = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("mint_sanad must be invoked");
+        let request: RuntimeMintRequest = csv_codec::from_canonical_cbor(&bytes)
+            .expect("adapter must receive a canonical runtime mint request");
+        assert_eq!(request.attestation.sanad_id, *transfer.sanad_id.as_bytes());
+        assert_eq!(
+            request.attestation.destination_chain_id,
+            contract_chain_id("test-chain")
+        );
+        assert_eq!(
+            request.attestation.source_chain,
+            contract_chain_id("test-chain")
+        );
+        assert!(request.verifier_signatures.is_empty());
+        assert_eq!(request.proof_bundle, payload);
+    }
+
+    #[tokio::test]
+    async fn verification_failure_prevents_mint_dispatch() {
+        // Off-chain verification must precede mint: if `validate_source_proof`
+        // rejects, the coordinator must never dispatch a mint.
+        struct MintTrackingAdapter {
+            caps: ChainCapabilities,
+            mint_called: Arc<std::sync::atomic::AtomicBool>,
+        }
+
+        #[async_trait::async_trait]
+        impl ChainAdapter for MintTrackingAdapter {
+            fn chain_id(&self) -> &str {
+                "test-chain"
+            }
+            fn capabilities(&self) -> ChainCapabilities {
+                self.caps.clone()
+            }
+            fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+                csv_protocol::signature::SignatureScheme::Ed25519
+            }
+            async fn lock_sanad(
+                &self,
+                _transfer: &CrossChainTransfer,
+            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+                Ok(LocalTestAdapter::build_fake_lock_result())
+            }
+            async fn mint_sanad(
+                &self,
+                _transfer: &CrossChainTransfer,
+                _proof_bundle: &[u8],
+            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+                self.mint_called
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(LocalTestAdapter::build_fake_mint_result())
+            }
+            async fn build_inclusion_proof(
+                &self,
+                transfer: &CrossChainTransfer,
+                _lock_result: &LockResult,
+            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+                LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+                    .map_err(csv_adapter_core::AdapterError::Generic)
+            }
+            async fn validate_source_proof(
+                &self,
+                _transfer: &CrossChainTransfer,
+                _proof_bundle: &ProofBundle,
+            ) -> Result<(), csv_adapter_core::AdapterError> {
+                Err(csv_adapter_core::AdapterError::Generic(
+                    "source proof rejected".to_string(),
+                ))
+            }
+            async fn check_seal_registry(
+                &self,
+                _seal_id: &[u8],
+            ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+                Ok(SealRegistryStatus::Available)
+            }
+            async fn confirm_tx(
+                &self,
+                tx_hash: &str,
+            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+                Ok(MintResult {
+                    tx_hash: tx_hash.to_string(),
+                    block_height: 100,
+                })
+            }
+            async fn get_balance(
+                &self,
+                _address: &str,
+            ) -> Result<String, csv_adapter_core::AdapterError> {
+                Ok("0".to_string())
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        let mint_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = AdapterRegistryImpl::new();
+        registry
+            .register_adapter(Box::new(MintTrackingAdapter {
+                caps: ChainCapabilities::bitcoin(),
+                mint_called: mint_called.clone(),
+            }))
+            .unwrap();
+
+        let transfer = CrossChainTransfer {
+            id: "verify-before-mint".to_string(),
+            source_chain: "test-chain".to_string(),
+            destination_chain: "test-chain".to_string(),
+            lock_tx_hash: vec![1u8; 32],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let owner = uuid::Uuid::new_v4();
+        let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
+            lease: crate::user_runtime_lease::TransferLease {
+                transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
+                epoch: 1,
+                owner_runtime_id: owner,
+                acquired_at: std::time::SystemTime::now(),
+                expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
+            },
+            runtime_instance: owner,
+            policy: crate::policy::RuntimePolicy::new(),
+        };
+
+        let result = coordinator.execute(transfer, &registry, runtime_ctx).await;
+        assert!(
+            matches!(
+                result,
+                Err(TransferCoordinatorError::ProofVerificationFailed(_))
+            ),
+            "expected proof verification failure, got {:?}",
+            result
+        );
+        assert!(
+            !mint_called.load(std::sync::atomic::Ordering::SeqCst),
+            "mint must not be dispatched when source-proof verification fails"
+        );
     }
 }

@@ -1,20 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title CSVSeal — Cross-Chain Sanad Transfer on Ethereum
-/// @notice Unified contract for lock, mint, and refund operations
-/// @dev Canonical naming: all functions use snake_case, matching Solana/Sui/Aptos
+/// @title CSVSeal — Cross-Chain Sanad Transfer on Ethereum (thin registry)
+/// @notice Unified contract for source lock, verifier-attested destination mint, and refund.
+/// @dev Canonical naming: all functions use snake_case, matching Solana/Sui/Aptos.
+///
+/// Authenticity model (RFC-0012 §9 / ABI_CONSTITUTION.md §9): destination mint is a
+/// THIN REGISTRY. Cross-chain correctness is decided OFF-CHAIN by the CSV verifier; this
+/// contract does not re-adjudicate the proof. It records a mint only when the calldata
+/// carries at least `threshold` distinct valid verifier signatures over the frozen §9.2
+/// attestation digest, and it enforces on-chain replay protection
+/// (`sanadId` / `nullifier` / `lockEventId` uniqueness).
+///
+/// The former trusted-root gating model (RFC-0012 Model B: a governance-installed,
+/// timelock-rotated root as a mint precondition) is REMOVED from the mint path. It bricked
+/// mint on a fresh deploy (the root defaulted to zero and could only move via a 7-day
+/// timelock) and was superseded by RFC-0012. No installed root, state root, Merkle proof,
+/// or leaf index gates the mint hot path.
 contract CSVSeal {
-    /// @notice Protocol version
-    uint256 public constant VERSION = 5; // Canonical naming version
-
-    /// @notice Pinned ABI hash for contract freeze verification
-    /// @dev This hash must match the deployed contract's ABI. Computed as keccak256(abi.encode(contractABI))
-    bytes32 public constant PINNED_ABI_HASH = 0x7f8e1b41739254250f829f116b47ecfc6bd88332acfed2a7bd1b532b181b1469;
-
-    /// @notice Pinned bytecode hash for contract freeze verification
-    /// @dev This hash must match the deployed contract's bytecode (without constructor args)
-    bytes32 public constant PINNED_BYTECODE_HASH = 0xb93a35143e1abef191c162ad4488d12527e50926ca23cc58fc1a25247dd101ee;
+    /// @notice Protocol version (thin-registry / verifier-attested mint)
+    uint256 public constant VERSION = 6;
 
     uint8 public constant ASSET_CLASS_UNSPECIFIED = 0;
     uint8 public constant ASSET_CLASS_FUNGIBLE_TOKEN = 1;
@@ -22,83 +27,16 @@ contract CSVSeal {
     uint8 public constant ASSET_CLASS_PROOF_SANAD = 3;
     uint8 public constant PROOF_SYSTEM_UNSPECIFIED = 0;
 
-    /// @notice Chain IDs — canonical across all chains (now using hashed values)
-    /// @dev ChainIdHash = H(canonical(ChainIdentity)) for cross-chain consistency
+    /// @notice Chain identity for the contract ABI (RFC-0012 §6): keccak256("csv.chain.<name>").
+    /// @dev Distinct from `ProofLeafV1`'s 1-byte chain id, which is unchanged (RFC-0012 §5).
     bytes32 public constant CHAIN_BITCOIN = keccak256(abi.encodePacked("csv.chain.bitcoin"));
     bytes32 public constant CHAIN_SUI = keccak256(abi.encodePacked("csv.chain.sui"));
     bytes32 public constant CHAIN_APTOS = keccak256(abi.encodePacked("csv.chain.aptos"));
     bytes32 public constant CHAIN_ETHEREUM = keccak256(abi.encodePacked("csv.chain.ethereum"));
     bytes32 public constant CHAIN_SOLANA = keccak256(abi.encodePacked("csv.chain.solana"));
 
-    // ==================== Canonical ProofLeafV1 Schema ====================
-
-    /// @notice Canonical ProofLeafV1 schema for cross-chain proof verification
-    /// @dev This struct matches the canonical schema defined in csv-protocol
-    struct ProofLeafV1 {
-        uint32 version;                    // Version of the proof leaf schema
-        bytes32 sourceChain;               // Source chain identifier (hashed)
-        bytes32 destinationChain;          // Destination chain identifier (hashed)
-        bytes32 sanadId;                   // Sanad identifier
-        bytes32 commitment;                // Commitment hash
-        bytes32 contentDescriptorHash;     // Content descriptor hash (optional, default 0)
-        bytes32 sourceSealRefHash;          // Source seal reference hash (optional, default 0)
-        bytes32 destinationOwnerHash;      // Destination owner hash (optional, default 0)
-        bytes32 nullifier;                 // Nullifier hash (optional, default 0)
-        bytes32 lockEventId;               // Lock event ID hash (optional, default 0)
-        bytes32 metadataHash;              // Metadata hash (optional, default 0)
-        bytes32 proofPolicyHash;           // Proof policy hash (optional, default 0)
-    }
-
-    /// @notice Compute the canonical hash of a ProofLeafV1 using keccak256
-    /// @dev Uses Minimal Canonical Encoding (MCE) - fixed-width byte layout without serialization libraries
-    /// This matches the Rust ProofLeafV1::to_canonical_bytes() implementation exactly.
-    /// Byte layout: domain_tag(17) + version(4) + source_chain(1) + dest_chain(1) + 9×hash(32) = 311 bytes
-    /// @param leaf The proof leaf to hash
-    /// @return The canonical hash of the proof leaf
-    function hashProofLeafV1(ProofLeafV1 memory leaf) internal pure returns (bytes32) {
-        // MCE byte layout (exactly matching Rust implementation):
-        // - domain_tag(17 bytes): "csv.proof.leaf.v1"
-        // - version(4 bytes, little-endian u32)
-        // - source_chain(1 byte u8)
-        // - destination_chain(1 byte u8)
-        // - sanad_id(32 bytes)
-        // - commitment(32 bytes)
-        // - content_descriptor_hash(32 bytes)
-        // - source_seal_ref_hash(32 bytes)
-        // - destination_owner_hash(32 bytes)
-        // - nullifier(32 bytes)
-        // - lock_event_id(32 bytes)
-        // - metadata_hash(32 bytes)
-        // - proof_policy_hash(32 bytes)
-        
-        bytes memory preimage = abi.encodePacked(
-            "csv.proof.leaf.v1",  // 17 bytes domain tag
-            leaf.version,          // 4 bytes little-endian u32
-            leaf.sourceChain,      // 1 byte u8 (chain ID)
-            leaf.destinationChain, // 1 byte u8 (chain ID)
-            leaf.sanadId,          // 32 bytes
-            leaf.commitment,       // 32 bytes
-            leaf.contentDescriptorHash,  // 32 bytes
-            leaf.sourceSealRefHash,       // 32 bytes
-            leaf.destinationOwnerHash,   // 32 bytes
-            leaf.nullifier,         // 32 bytes
-            leaf.lockEventId,      // 32 bytes
-            leaf.metadataHash,     // 32 bytes
-            leaf.proofPolicyHash   // 32 bytes
-        );
-        
-        // Hash with keccak256 (Ethereum's native hash function)
-        return keccak256(preimage);
-    }
-
-    /// @notice Compute ProofLeafV1 hash using chain-specific hash function
-    /// @dev For Ethereum, this uses keccak256 (native hash function)
-    /// @param leaf The proof leaf to hash
-    /// @return The hash of the proof leaf using chain-specific function
-    function hashProofLeafV1WithChainFunction(ProofLeafV1 memory leaf, bytes32 chain) internal pure returns (bytes32) {
-        // Ethereum uses keccak256 natively
-        return hashProofLeafV1(leaf);
-    }
+    /// @notice Domain tag for the §9.2 mint attestation digest (23 bytes, ASCII, no NUL).
+    string internal constant MINT_ATTESTATION_DOMAIN = "csv.mint.attestation.v1";
 
     // ==================== Canonical State Enum ====================
 
@@ -159,58 +97,31 @@ contract CSVSeal {
         uint256 lockedAt;
     }
 
-    // ==================== Governance Epoch ====================
-
-    /// @notice Root governance epoch structure
-    /// @dev Each epoch has a monotonic epoch number, root hash, validity period, and link to previous epoch
-    struct GovernanceEpoch {
-        uint256 epoch;                  // Monotonic epoch number
-        bytes32 root;                   // Root hash for this epoch
-        uint256 validFrom;              // Unix timestamp when epoch becomes valid
-        uint256 validUntil;             // Unix timestamp when epoch expires
-        bytes32 previousRoot;           // Root hash of previous epoch (for chain verification)
-    }
-
-    /// @notice Current governance epoch
-    GovernanceEpoch public currentEpoch;
-
-    /// @notice Governance timelock period (7 days default)
-    uint256 public constant TIMELOCK_PERIOD = 7 days;
-
-    /// @notice Pending governance changes (for timelock)
-    struct PendingGovernanceChange {
-        address newOwner;
-        bytes32 newProofRoot;
-        uint256 validAfter;             // Unix timestamp when change becomes valid
-    }
-
-    PendingGovernanceChange public pendingChange;
-
-    /// @notice Multisig governance (optional - can be enabled)
-    bool public multisigEnabled;
-    uint256 public multisigThreshold;
-    mapping(address => bool) public multisigSigners;
-    mapping(bytes32 => uint256) public multisigApprovals; // change_hash -> approval count
-
     // ==================== Storage ====================
 
     address public owner;
-    address public immutable verifier;
-    bytes32 public trustedProofRoot;
-    uint256 public proofRootBlockHeight;
 
+    /// @notice Authorized verifier set and threshold `M` (RFC-0012 §9.3).
+    /// @dev Generalizes the former immutable `verifier` primitive into an M-of-N set.
+    ///      Mint requires >= `threshold` distinct valid signatures over the §9.2 digest.
+    mapping(address => bool) public isVerifier;
+    address[] public verifiers;
+    uint256 public threshold;
+
+    // ---- Replay / registry state (on-chain anti-replay domain) ----
     mapping(bytes32 => bool) public usedSeals;
     mapping(bytes32 => bool) public mintedSanads;
     mapping(bytes32 => bool) public nullifiers;
+    mapping(bytes32 => bool) public usedLockEvents;
     mapping(bytes32 => uint256) public commitmentAnchorHeight;
     mapping(bytes32 => address) public sealOwners; // Track seal ownership
 
+    /// @notice Archival sanad metadata (RFC-0012 §4: metadata is NOT on the mint hot path).
     struct SanadMetadata {
         uint8 assetClass;
         bytes32 assetId;
         bytes32 metadataHash;
         uint8 proofSystem;
-        bytes32 proofRoot;
     }
     mapping(bytes32 => SanadMetadata) public sanadMetadata;
 
@@ -225,6 +136,18 @@ contract CSVSeal {
     }
     mapping(bytes32 => LockRecord) public locks;
 
+    /// @notice Minimal destination-mint record (RFC-0012 §3: persisted for settlement/inspection).
+    /// @dev Stores `keccak256(destinationOwner)`; the full bytes travel in the `SanadMinted` event.
+    struct MintRecord {
+        bytes32 commitment;
+        bytes32 sourceChain;
+        bytes32 destinationOwnerHash;
+        bytes32 lockEventId;
+        bytes32 nullifier;
+        uint256 mintedAt;
+    }
+    mapping(bytes32 => MintRecord) public mintRecords;
+
     /// @notice Canonical Sanad state tracking
     mapping(bytes32 => SanadState) public sanadStates;
     mapping(bytes32 => bytes32) public sanadSealId; // sanad_id -> seal_id
@@ -237,6 +160,24 @@ contract CSVSeal {
 
     uint256 public constant REFUND_TIMEOUT = 24 hours;
 
+    // ==================== Verifier-set / ownership timelock (OFF the mint path) ====================
+
+    /// @notice Governance timelock period (7 days default). Scopes ONLY verifier-set and
+    ///         ownership changes — never a per-mint precondition (RFC-0012 §9.3).
+    uint256 public constant TIMELOCK_PERIOD = 7 days;
+
+    address public pendingOwner;
+    uint256 public pendingOwnerValidAfter;
+
+    struct PendingVerifierUpdate {
+        address verifier;
+        bool add; // true = add to set, false = remove from set
+        uint256 newThreshold;
+        uint256 validAfter;
+        bool active;
+    }
+    PendingVerifierUpdate public pendingVerifierUpdate;
+
     // ==================== Canonical Events ====================
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -247,7 +188,7 @@ contract CSVSeal {
     /// @notice Emitted when a seal is consumed (canonical name, replaces SealUsed)
     event SanadConsumed(bytes32 indexed sanadId, bytes32 indexed nullifier, address indexed consumer, uint256 timestamp);
 
-    /// @notice Emitted when a Sanad is locked for cross-chain transfer (canonical name, replaces CrossChainLock)
+    /// @notice Emitted when a Sanad is locked for cross-chain transfer
     event SanadLocked(
         bytes32 indexed sanadId,
         bytes32 indexed commitment,
@@ -257,13 +198,16 @@ contract CSVSeal {
         uint256 timestamp
     );
 
-    /// @notice Emitted when a Sanad is minted on destination (canonical name, replaces SanadMinted)
+    /// @notice Emitted when a Sanad is minted on the destination (RFC-0012 §3 / ABI §Canonical Event Names).
+    /// @dev Indexed topics chosen for settlement lookup: `sanadId`, `lockEventId` (settlement replay key),
+    ///      and `nullifier`. The FULL `destinationOwner` bytes are emitted (contract stores only its hash).
     event SanadMinted(
         bytes32 indexed sanadId,
-        bytes32 indexed commitment,
-        address indexed owner,
+        bytes32 indexed lockEventId,
+        bytes32 indexed nullifier,
+        bytes32 commitment,
         bytes32 sourceChain,
-        bytes sourceSealRef,
+        bytes destinationOwner,
         uint256 timestamp
     );
 
@@ -285,23 +229,26 @@ contract CSVSeal {
     /// @notice Emitted when a commitment is anchored
     event CommitmentAnchored(bytes32 indexed commitment, bytes32 indexed sealId, address indexed owner, uint256 timestamp);
 
-    /// @notice Emitted when proof root is updated
-    event ProofRootUpdated(bytes32 indexed proofRoot, uint256 blockNumber, address indexed updater);
-
-    /// @notice Emitted when governance epoch is advanced
-    event EpochAdvanced(uint256 indexed newEpoch, bytes32 indexed newRoot, uint256 validFrom, uint256 validUntil);
-
-    /// @notice Emitted when governance change is scheduled (timelock)
-    event GovernanceChangeScheduled(bytes32 indexed changeHash, uint256 validAfter);
-
-    /// @notice Emitted when governance change is executed
-    event GovernanceChangeExecuted(bytes32 indexed changeHash);
-
-    /// @notice Emitted when multisig signer is added/removed
-    event MultisigSignerUpdated(address indexed signer, bool added);
-
     /// @notice Emitted when replay is detected
     event ReplayDetected(bytes32 indexed replayId, bytes32 indexed sanadId, uint256 timestamp);
+
+    /// @notice Emitted when a verifier is added to the set
+    event VerifierAdded(address indexed verifier);
+
+    /// @notice Emitted when a verifier is removed from the set
+    event VerifierRemoved(address indexed verifier);
+
+    /// @notice Emitted when the signature threshold `M` is updated
+    event ThresholdUpdated(uint256 threshold);
+
+    /// @notice Emitted when a verifier-set update is scheduled (timelock)
+    event VerifierUpdateScheduled(address indexed verifier, bool add, uint256 newThreshold, uint256 validAfter);
+
+    /// @notice Emitted when a governance change is scheduled (timelock)
+    event GovernanceChangeScheduled(bytes32 indexed changeHash, uint256 validAfter);
+
+    /// @notice Emitted when a governance change is executed
+    event GovernanceChangeExecuted(bytes32 indexed changeHash);
 
     // Legacy events (backward compatibility — emit alongside canonical events during transition)
     event SealUsed(bytes32 indexed sealId, bytes32 commitment);
@@ -314,178 +261,139 @@ contract CSVSeal {
     error TimeoutNotExpired();
     error SanadAlreadyMinted();
     error RefundAlreadyClaimed();
-    error InvalidSanadMetadata();
     error NotOwner();
     error ZeroAddress();
     error InvalidProof();
     error NullifierAlreadyRegistered();
-    error ArraysMismatch();
+    error LockEventAlreadyRecorded();
     error Unauthorized();
-    error InvalidProofRoot();
     error CommitmentNotAnchored();
     error SanadNotFound();
     error TimelockNotExpired();
-    error InvalidEpoch();
-    error MonotonicEpochViolation();
-    error MultisigThresholdNotMet();
+    // Mint-authentication errors (RFC-0012 §9)
+    error InvalidMintRequest();
+    error InsufficientSignatures();
+    error InvalidVerifierSignature();
+    error MalformedSignature();
+    error AttestationExpired();
+    error InvalidThreshold();
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
         _;
     }
 
-    modifier onlyMultisig() {
-        require(multisigEnabled, "Multisig not enabled");
-        require(multisigSigners[msg.sender], "Not a multisig signer");
-        _;
-    }
-
     // ==================== Constructor ====================
 
+    /// @notice Seed the verifier set with a single verifier and threshold `M = 1`
+    ///         (RFC-0012 §9.3 ETH fast-track). Rotation to M-of-N needs no ABI change.
     constructor(address _verifier) {
         require(_verifier != address(0), "Invalid verifier address");
-        verifier = _verifier;
         owner = msg.sender;
-        trustedProofRoot = bytes32(0);
-        proofRootBlockHeight = block.number;
 
-        // Initialize governance epoch (epoch 0)
-        currentEpoch = GovernanceEpoch({
-            epoch: 0,
-            root: bytes32(0),
-            validFrom: block.timestamp,
-            validUntil: block.timestamp + 365 days,
-            previousRoot: bytes32(0)
-        });
+        isVerifier[_verifier] = true;
+        verifiers.push(_verifier);
+        threshold = 1;
 
         emit OwnershipTransferred(address(0), msg.sender);
-        emit EpochAdvanced(0, bytes32(0), block.timestamp, block.timestamp + 365 days);
+        emit VerifierAdded(_verifier);
+        emit ThresholdUpdated(1);
     }
 
-    // ==================== Governance ====================
+    // ==================== Verifier set / ownership governance (OFF the mint path) ====================
 
     /// @notice Schedule ownership transfer with timelock
-    /// @dev New owner must wait TIMELOCK_PERIOD before accepting transfer
     function schedule_ownership_transfer(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert("New owner cannot be zero address");
-        
-        bytes32 changeHash = keccak256(abi.encodePacked("ownership", newOwner, block.timestamp + TIMELOCK_PERIOD));
-        pendingChange = PendingGovernanceChange({
-            newOwner: newOwner,
-            newProofRoot: bytes32(0),
-            validAfter: block.timestamp + TIMELOCK_PERIOD
-        });
-        
-        emit GovernanceChangeScheduled(changeHash, block.timestamp + TIMELOCK_PERIOD);
+
+        pendingOwner = newOwner;
+        pendingOwnerValidAfter = block.timestamp + TIMELOCK_PERIOD;
+
+        emit GovernanceChangeScheduled(
+            keccak256(abi.encodePacked("ownership", newOwner, pendingOwnerValidAfter)),
+            pendingOwnerValidAfter
+        );
     }
 
     /// @notice Execute scheduled ownership transfer (after timelock expires)
     function execute_ownership_transfer() external {
-        if (block.timestamp < pendingChange.validAfter) revert TimelockNotExpired();
-        if (pendingChange.newOwner == address(0)) revert("No pending ownership transfer");
-        
-        address newOwner = pendingChange.newOwner;
+        if (pendingOwner == address(0)) revert("No pending ownership transfer");
+        if (block.timestamp < pendingOwnerValidAfter) revert TimelockNotExpired();
+
+        address newOwner = pendingOwner;
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
-        
-        // Clear pending change
-        pendingChange.newOwner = address(0);
-        pendingChange.validAfter = 0;
-        
-        bytes32 changeHash = keccak256(abi.encodePacked("ownership", newOwner, pendingChange.validAfter));
-        emit GovernanceChangeExecuted(changeHash);
+
+        pendingOwner = address(0);
+        pendingOwnerValidAfter = 0;
+
+        emit GovernanceChangeExecuted(keccak256(abi.encodePacked("ownership", newOwner)));
     }
 
-    /// @notice Schedule proof root update with timelock
-    function schedule_proof_root_update(bytes32 _proofRoot) external {
-        if (msg.sender != owner && msg.sender != verifier) revert Unauthorized();
-        if (_proofRoot == bytes32(0)) revert InvalidProofRoot();
-        
-        bytes32 changeHash = keccak256(abi.encodePacked("proofRoot", _proofRoot, block.timestamp + TIMELOCK_PERIOD));
-        pendingChange = PendingGovernanceChange({
-            newOwner: address(0),
-            newProofRoot: _proofRoot,
-            validAfter: block.timestamp + TIMELOCK_PERIOD
+    /// @notice Schedule a verifier-set update (add/remove a verifier and set threshold) with timelock.
+    /// @dev Governance touches ONLY the verifier set — never a per-mint proof root (RFC-0012 §9.3).
+    ///      `newThreshold` is applied on execute and validated against the resulting set size.
+    function schedule_verifier_update(address verifier, bool add, uint256 newThreshold) external onlyOwner {
+        if (verifier == address(0)) revert ZeroAddress();
+
+        pendingVerifierUpdate = PendingVerifierUpdate({
+            verifier: verifier,
+            add: add,
+            newThreshold: newThreshold,
+            validAfter: block.timestamp + TIMELOCK_PERIOD,
+            active: true
         });
-        
-        emit GovernanceChangeScheduled(changeHash, block.timestamp + TIMELOCK_PERIOD);
+
+        emit VerifierUpdateScheduled(verifier, add, newThreshold, block.timestamp + TIMELOCK_PERIOD);
     }
 
-    /// @notice Execute scheduled proof root update (after timelock expires)
-    function execute_proof_root_update() external {
-        if (block.timestamp < pendingChange.validAfter) revert TimelockNotExpired();
-        if (pendingChange.newProofRoot == bytes32(0)) revert("No pending proof root update");
-        
-        bytes32 newRoot = pendingChange.newProofRoot;
-        trustedProofRoot = newRoot;
-        proofRootBlockHeight = block.number;
-        
-        emit ProofRootUpdated(newRoot, block.number, msg.sender);
-        
-        // Clear pending change
-        pendingChange.newProofRoot = bytes32(0);
-        pendingChange.validAfter = 0;
-        
-        bytes32 changeHash = keccak256(abi.encodePacked("proofRoot", newRoot, pendingChange.validAfter));
-        emit GovernanceChangeExecuted(changeHash);
+    /// @notice Execute a scheduled verifier-set update (after timelock expires).
+    function execute_verifier_update() external onlyOwner {
+        PendingVerifierUpdate memory p = pendingVerifierUpdate;
+        if (!p.active) revert("No pending verifier update");
+        if (block.timestamp < p.validAfter) revert TimelockNotExpired();
+
+        if (p.add) {
+            if (!isVerifier[p.verifier]) {
+                isVerifier[p.verifier] = true;
+                verifiers.push(p.verifier);
+                emit VerifierAdded(p.verifier);
+            }
+        } else {
+            if (isVerifier[p.verifier]) {
+                isVerifier[p.verifier] = false;
+                _remove_verifier(p.verifier);
+                emit VerifierRemoved(p.verifier);
+            }
+        }
+
+        // Threshold must be a valid M-of-N over the resulting set.
+        if (p.newThreshold == 0 || p.newThreshold > verifiers.length) revert InvalidThreshold();
+        threshold = p.newThreshold;
+        emit ThresholdUpdated(p.newThreshold);
+
+        delete pendingVerifierUpdate;
     }
 
-    /// @notice Advance governance epoch (monotonic)
-    /// @dev Only callable by owner or multisig, enforces monotonic epoch numbers
-    function advance_epoch(bytes32 newRoot, uint256 validDuration) external onlyOwner {
-        if (newRoot == bytes32(0)) revert("New root cannot be zero");
-        if (validDuration == 0) revert("Valid duration must be positive");
-        if (block.timestamp < currentEpoch.validFrom) revert("Current epoch not yet valid");
-        
-        uint256 newEpoch = currentEpoch.epoch + 1;
-        bytes32 previousRoot = currentEpoch.root;
-        
-        currentEpoch = GovernanceEpoch({
-            epoch: newEpoch,
-            root: newRoot,
-            validFrom: block.timestamp,
-            validUntil: block.timestamp + validDuration,
-            previousRoot: previousRoot
-        });
-        
-        emit EpochAdvanced(newEpoch, newRoot, block.timestamp, block.timestamp + validDuration);
+    function _remove_verifier(address verifier) internal {
+        uint256 len = verifiers.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (verifiers[i] == verifier) {
+                verifiers[i] = verifiers[len - 1];
+                verifiers.pop();
+                return;
+            }
+        }
     }
 
-    /// @notice Enable multisig governance
-    function enable_multisig(uint256 _threshold) external onlyOwner {
-        if (_threshold == 0) revert("Threshold must be positive");
-        multisigEnabled = true;
-        multisigThreshold = _threshold;
+    /// @notice Number of verifiers currently in the set.
+    function verifier_count() external view returns (uint256) {
+        return verifiers.length;
     }
 
-    /// @notice Disable multisig governance
-    function disable_multisig() external onlyOwner {
-        multisigEnabled = false;
-    }
-
-    /// @notice Add multisig signer
-    function add_multisig_signer(address signer) external onlyOwner {
-        if (signer == address(0)) revert("Signer cannot be zero address");
-        multisigSigners[signer] = true;
-        emit MultisigSignerUpdated(signer, true);
-    }
-
-    /// @notice Remove multisig signer
-    function remove_multisig_signer(address signer) external onlyOwner {
-        multisigSigners[signer] = false;
-        emit MultisigSignerUpdated(signer, false);
-    }
-
-    /// @notice Approve governance change (multisig)
-    function approve_governance_change(bytes32 changeHash) external onlyMultisig {
-        multisigApprovals[changeHash]++;
-    }
-
-    /// @notice Execute governance change with multisig approval
-    function execute_multisig_change(bytes32 changeHash) external onlyMultisig {
-        if (multisigApprovals[changeHash] < multisigThreshold) revert MultisigThresholdNotMet();
-        multisigApprovals[changeHash] = 0; // Reset approvals
-        emit GovernanceChangeExecuted(changeHash);
+    /// @notice Whether an address is an authorized verifier.
+    function is_verifier(address account) external view returns (bool) {
+        return isVerifier[account];
     }
 
     // ==================== Lifecycle Mutations (Canonical Names) ====================
@@ -531,7 +439,7 @@ contract CSVSeal {
         }
     }
 
-    /// @notice Lock a Sanad for cross-chain transfer (canonical name, replaces lockSanad)
+    /// @notice Lock a Sanad for cross-chain transfer
     function lock_sanad(
         bytes32 sanadId,
         bytes32 commitment,
@@ -542,12 +450,11 @@ contract CSVSeal {
             assetClass: ASSET_CLASS_UNSPECIFIED,
             assetId: bytes32(0),
             metadataHash: bytes32(0),
-            proofSystem: PROOF_SYSTEM_UNSPECIFIED,
-            proofRoot: bytes32(0)
+            proofSystem: PROOF_SYSTEM_UNSPECIFIED
         }));
     }
 
-    /// @notice Lock a Sanad with metadata
+    /// @notice Lock a Sanad with archival metadata (metadata is NOT on the mint hot path)
     function lock_sanad_with_metadata(
         bytes32 sanadId,
         bytes32 commitment,
@@ -556,15 +463,13 @@ contract CSVSeal {
         uint8 assetClass,
         bytes32 assetId,
         bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 proofRoot
+        uint8 proofSystem
     ) external {
         _lock_sanad_internal(sanadId, commitment, destinationChain, destinationOwner, SanadMetadata({
             assetClass: assetClass,
             assetId: assetId,
             metadataHash: metadataHash,
-            proofSystem: proofSystem,
-            proofRoot: proofRoot
+            proofSystem: proofSystem
         }));
     }
 
@@ -600,133 +505,172 @@ contract CSVSeal {
         emit CrossChainLock(sanadId, commitment, msg.sender, destinationChain, destinationOwner, block.timestamp); // Legacy
     }
 
-    /// @notice Mint a Sanad on destination chain (canonical name, replaces mintSanad)
+    // ==================== Verifier-attested destination mint (RFC-0012 §3 / §9) ====================
+
+    /// @notice Mint (materialize) a Sanad on this destination chain.
+    /// @dev THIN REGISTRY. Cross-chain validity is decided off-chain; authenticity here is a set
+    ///      of verifier signatures over the frozen §9.2 attestation digest. There is NO proof root,
+    ///      state root, Merkle proof, or leaf index. Uniqueness of `sanadId` / `nullifier` /
+    ///      `lockEventId` is enforced on-chain.
+    /// @param sanadId Unique sanad identifier; primary duplicate-mint key.
+    /// @param commitment Commitment binding the sanad content/ownership.
+    /// @param sourceChain keccak256("csv.chain.<src>") — the chain the sanad was locked on.
+    /// @param destinationOwner Recipient identity bytes; the full bytes are emitted, only the hash is stored.
+    /// @param lockEventId Identity of the source-chain lock event; duplicate-source-lock + settlement key.
+    /// @param nullifier Replay nullifier consumed by the source seal.
+    /// @param attestationExpiry u64 unix seconds; 0 = no expiry. Bound over the digest (§9.2).
+    /// @param verifierSignatures `bytes[]` of 65-byte secp256k1 signatures over the §9.2 digest.
     function mint_sanad(
         bytes32 sanadId,
         bytes32 commitment,
-        bytes32 stateRoot,
         bytes32 sourceChain,
-        bytes calldata sourceSealPoint,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint256 leafPosition
-    ) external returns (bool) {
-        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, CHAIN_ETHEREUM, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
-            assetClass: ASSET_CLASS_UNSPECIFIED,
-            assetId: bytes32(0),
-            metadataHash: bytes32(0),
-            proofSystem: PROOF_SYSTEM_UNSPECIFIED,
-            proofRoot: proofRoot
-        }), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0));
-    }
-
-    /// @notice Mint a Sanad with metadata
-    function mint_sanad_with_metadata(
-        bytes32 sanadId,
-        bytes32 commitment,
-        bytes32 stateRoot,
-        bytes32 sourceChain,
-        bytes calldata sourceSealPoint,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint8 assetClass,
-        bytes32 assetId,
-        bytes32 metadataHash,
-        uint8 proofSystem,
-        uint256 leafPosition
-    ) external returns (bool) {
-        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, CHAIN_ETHEREUM, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
-            assetClass: assetClass,
-            assetId: assetId,
-            metadataHash: metadataHash,
-            proofSystem: proofSystem,
-            proofRoot: proofRoot
-        }), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0));
-    }
-
-    /// @notice Mint a Sanad using canonical ProofLeafV1 schema
-    /// @dev This is the recommended method for cross-chain minting
-    function mint_sanad_with_proof_leaf(
-        bytes32 sanadId,
-        bytes32 commitment,
-        bytes32 stateRoot,
-        bytes32 sourceChain,
-        bytes32 destinationChain,
-        bytes calldata sourceSealPoint,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint256 leafPosition,
-        bytes32 contentDescriptorHash,
-        bytes32 sourceSealRefHash,
-        bytes32 destinationOwnerHash,
-        bytes32 nullifier,
+        bytes calldata destinationOwner,
         bytes32 lockEventId,
-        bytes32 metadataHash,
-        bytes32 proofPolicyHash,
-        uint8 assetClass,
-        bytes32 assetId,
-        uint8 proofSystem
-    ) external returns (bool) {
-        return _mint_sanad_internal(sanadId, commitment, stateRoot, sourceChain, destinationChain, sourceSealPoint, proof, proofRoot, leafPosition, SanadMetadata({
-            assetClass: assetClass,
-            assetId: assetId,
-            metadataHash: metadataHash,
-            proofSystem: proofSystem,
-            proofRoot: proofRoot
-        }), contentDescriptorHash, sourceSealRefHash, destinationOwnerHash, nullifier, lockEventId, metadataHash, proofPolicyHash);
-    }
-
-    function _mint_sanad_internal(
-        bytes32 sanadId,
-        bytes32 commitment,
-        bytes32 stateRoot,
-        bytes32 sourceChain,
-        bytes32 destinationChain,
-        bytes calldata sourceSealPoint,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint256 leafPosition,
-        SanadMetadata memory metadata,
-        bytes32 contentDescriptorHash,
-        bytes32 sourceSealRefHash,
-        bytes32 destinationOwnerHash,
         bytes32 nullifier,
-        bytes32 lockEventId,
-        bytes32 proofLeafMetadataHash,
-        bytes32 proofPolicyHash
-    ) internal returns (bool) {
-        if (proofRoot != trustedProofRoot) revert InvalidProofRoot();
+        uint64 attestationExpiry,
+        bytes[] calldata verifierSignatures
+    ) external returns (bool) {
+        // Field sanity: every real mint carries non-zero replay keys.
+        if (
+            sanadId == bytes32(0) ||
+            commitment == bytes32(0) ||
+            sourceChain == bytes32(0) ||
+            lockEventId == bytes32(0) ||
+            nullifier == bytes32(0)
+        ) revert InvalidMintRequest();
+
+        // §9.2 expiry bound.
+        if (attestationExpiry != 0 && block.timestamp > attestationExpiry) revert AttestationExpired();
+
+        // On-chain anti-replay domain (RFC-0012 §3): reject if any uniqueness key is already taken.
         if (mintedSanads[sanadId]) revert SanadAlreadyMinted();
-        if (stateRoot == bytes32(0)) revert InvalidProof();
+        if (nullifiers[nullifier]) revert NullifierAlreadyRegistered();
+        if (usedLockEvents[lockEventId]) revert LockEventAlreadyRecorded();
 
-        if (sourceChain == CHAIN_BITCOIN) {
-            _verify_bitcoin_proof(sanadId, commitment, proof, proofRoot, leafPosition);
-        } else {
-            _verify_cross_chain_proof_with_proof_leaf(
-                sanadId,
-                commitment,
-                sourceChain,
-                destinationChain,
-                proof,
-                proofRoot,
-                leafPosition,
-                contentDescriptorHash,
-                sourceSealRefHash,
-                destinationOwnerHash,
-                nullifier,
-                lockEventId,
-                proofLeafMetadataHash,
-                proofPolicyHash
-            );
-        }
+        bytes32 destinationOwnerHash = keccak256(destinationOwner);
 
+        // §9 authentication: verify M-of-N verifier signatures over the frozen §9.2 digest.
+        bytes32 digest = mint_attestation_digest(
+            sanadId,
+            commitment,
+            sourceChain,
+            destinationOwnerHash,
+            lockEventId,
+            nullifier,
+            attestationExpiry
+        );
+        _require_verifier_threshold(digest, verifierSignatures);
+
+        // Record the mint and consume the replay keys.
         mintedSanads[sanadId] = true;
-        sanadMetadata[sanadId] = metadata;
+        nullifiers[nullifier] = true;
+        usedLockEvents[lockEventId] = true;
+
+        mintRecords[sanadId] = MintRecord({
+            commitment: commitment,
+            sourceChain: sourceChain,
+            destinationOwnerHash: destinationOwnerHash,
+            lockEventId: lockEventId,
+            nullifier: nullifier,
+            mintedAt: block.timestamp
+        });
+
         sanadStates[sanadId] = SanadState.Minted;
         sanadMintedAt[sanadId] = block.timestamp;
-        sanadLastTx[sanadId] = bytes32(0);
+        sanadLastTx[sanadId] = lockEventId;
 
-        emit SanadMinted(sanadId, commitment, msg.sender, sourceChain, sourceSealPoint, block.timestamp);
+        emit SanadMinted(sanadId, lockEventId, nullifier, commitment, sourceChain, destinationOwner, block.timestamp);
+        emit NullifierRegistered(nullifier, sanadId, sourceChain, block.timestamp);
+
+        return true;
+    }
+
+    /// @notice Compute the frozen §9.2 mint attestation digest for a mint request.
+    /// @dev SHA-256 over the fixed 287-byte preimage:
+    ///      "csv.mint.attestation.v1" (23) || destinationChainId (32) || destinationContract (32)
+    ///      || sanadId (32) || commitment (32) || sourceChain (32) || keccak256(destinationOwner) (32)
+    ///      || lockEventId (32) || nullifier (32) || attestationExpiry (u64 big-endian, 8).
+    ///      `destinationChainId` = CHAIN_ETHEREUM; `destinationContract` = this contract's address
+    ///      left-zero-padded to 32 bytes (EVM canonical form). Exposed as a view so operators and
+    ///      the off-chain adapter can reproduce the exact digest they must sign.
+    function mint_attestation_digest(
+        bytes32 sanadId,
+        bytes32 commitment,
+        bytes32 sourceChain,
+        bytes32 destinationOwnerHash,
+        bytes32 lockEventId,
+        bytes32 nullifier,
+        uint64 attestationExpiry
+    ) public view returns (bytes32) {
+        bytes memory preimage = abi.encodePacked(
+            MINT_ATTESTATION_DOMAIN,                       // 23 bytes
+            CHAIN_ETHEREUM,                                // destinationChainId (32)
+            bytes32(uint256(uint160(address(this)))),      // destinationContract (32, left-padded address)
+            sanadId,                                       // 32
+            commitment,                                    // 32
+            sourceChain,                                   // 32
+            destinationOwnerHash,                          // 32
+            lockEventId,                                   // 32
+            nullifier,                                     // 32
+            attestationExpiry                              // 8 bytes, u64 big-endian
+        );
+        return sha256(preimage);
+    }
+
+    /// @notice Require at least `threshold` DISTINCT valid verifier signatures over `digest`.
+    /// @dev Every signature MUST recover to an authorized verifier (invalid signer => revert);
+    ///      duplicate signatures from the same verifier are counted once.
+    function _require_verifier_threshold(bytes32 digest, bytes[] calldata sigs) internal view {
+        uint256 m = threshold;
+        if (sigs.length < m) revert InsufficientSignatures();
+
+        address[] memory seen = new address[](sigs.length);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < sigs.length; i++) {
+            address recovered = _recover_verifier(digest, sigs[i]);
+            if (recovered == address(0) || !isVerifier[recovered]) revert InvalidVerifierSignature();
+
+            bool duplicate = false;
+            for (uint256 j = 0; j < count; j++) {
+                if (seen[j] == recovered) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+
+            seen[count] = recovered;
+            count++;
+        }
+
+        if (count < m) revert InsufficientSignatures();
+    }
+
+    /// @notice Recover the signer of a 65-byte secp256k1 signature (r||s||v) over `digest`.
+    /// @dev Enforces low-s and canonical v to reject malleable encodings.
+    function _recover_verifier(bytes32 digest, bytes calldata sig) internal pure returns (address) {
+        if (sig.length != 65) revert MalformedSignature();
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(sig.offset)
+            s := calldataload(add(sig.offset, 32))
+            v := byte(0, calldataload(add(sig.offset, 64)))
+        }
+
+        // Reject high-s (EIP-2 malleability guard).
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+            revert MalformedSignature();
+        }
+        if (v < 27) {
+            v += 27;
+        }
+        if (v != 27 && v != 28) revert MalformedSignature();
+
+        return ecrecover(digest, v, r, s);
     }
 
     /// @notice Refund a locked Sanad after timeout (canonical name)
@@ -765,8 +709,12 @@ contract CSVSeal {
         emit SanadTransferred(sanadId, currentOwner, newOwner, block.timestamp);
     }
 
-    /// @notice Register nullifier for replay protection
+    /// @notice Register a nullifier for replay protection.
+    /// @dev GATED to the verifier set / owner (RFC-0012: the standalone permissionless registration
+    ///      let anyone pre-register a nullifier and grief a future mint). Authenticated mint folds
+    ///      nullifier registration in; this remains only for authorized out-of-band registration.
     function register_nullifier(bytes32 nullifier, bytes32 sanadId, bytes32 sourceChain) external {
+        if (!isVerifier[msg.sender] && msg.sender != owner) revert Unauthorized();
         if (nullifiers[nullifier]) revert NullifierAlreadyRegistered();
 
         nullifiers[nullifier] = true;
@@ -783,14 +731,13 @@ contract CSVSeal {
         emit CommitmentAnchored(commitment, sealId, msg.sender, block.timestamp);
     }
 
-    /// @notice Record metadata for a Sanad
+    /// @notice Record archival metadata for a Sanad (NOT on the mint hot path)
     function record_sanad_metadata(
         bytes32 sanadId,
         uint8 assetClass,
         bytes32 assetId,
         bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 proofRoot
+        uint8 proofSystem
     ) external {
         if (sanadStates[sanadId] == SanadState.Uncreated || sanadStates[sanadId] == SanadState.Invalid) revert SanadNotFound();
 
@@ -798,8 +745,7 @@ contract CSVSeal {
             assetClass: assetClass,
             assetId: assetId,
             metadataHash: metadataHash,
-            proofSystem: proofSystem,
-            proofRoot: proofRoot
+            proofSystem: proofSystem
         });
     }
 
@@ -826,11 +772,11 @@ contract CSVSeal {
             sealId: sanadSealId[sanadId],
             commitment: lock.commitment,
             owner: lock.owner,
-            sourceChain: 0,
+            sourceChain: mintRecords[sanadId].sourceChain,
             currentChain: CHAIN_ETHEREUM,
             destinationChain: lock.destinationChain,
             state: state,
-            nullifier: bytes32(0),
+            nullifier: mintRecords[sanadId].nullifier,
             createdAt: sanadCreatedAt[sanadId],
             updatedAt: block.timestamp,
             lockedAt: sanadLockedAt[sanadId],
@@ -877,6 +823,11 @@ contract CSVSeal {
         return nullifiers[nullifier];
     }
 
+    /// @notice Check if a source lock event has already been recorded (duplicate-mint guard)
+    function is_lock_event_recorded(bytes32 lockEventId) external view returns (bool) {
+        return usedLockEvents[lockEventId];
+    }
+
     /// @notice Check if commitment is anchored
     function is_commitment_anchored(bytes32 commitment) external view returns (bool) {
         return commitmentAnchorHeight[commitment] != 0;
@@ -912,114 +863,63 @@ contract CSVSeal {
         uint8 assetClass,
         bytes32 assetId,
         bytes32 metadataHash,
-        uint8 proofSystem,
-        bytes32 proofRoot
+        uint8 proofSystem
     ) {
         SanadMetadata storage metadata = sanadMetadata[sanadId];
-        return (metadata.assetClass, metadata.assetId, metadata.metadataHash, metadata.proofSystem, metadata.proofRoot);
+        return (metadata.assetClass, metadata.assetId, metadata.metadataHash, metadata.proofSystem);
     }
 
-    // ==================== Proof Verification (Internal) ====================
+    // ==================== Non-authoritative proof utilities (RFC-0012 §5, NOT on the mint path) ====================
+    //
+    // These helpers are retained ONLY as non-authoritative utilities for future on-chain SPV work
+    // (RFC-0012 §9.5). They DO NOT gate mint. Note the open reconciliation item: the on-chain
+    // `ProofLeafV1` below uses `bytes32` chain identity while the Rust MCE uses a 1-byte chain id,
+    // so this leaf hashing MUST NOT be used to authenticate mint until that mismatch is reconciled.
 
-    function _verify_cross_chain_proof(
-        bytes32 sanadId,
-        bytes32 commitment,
-        bytes32 sourceChain,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint256 leafPosition
-    ) internal view {
-        if (proof.length == 0) revert InvalidProof();
-        if (proofRoot == bytes32(0)) revert InvalidProof();
-        if (sanadId == bytes32(0)) revert InvalidProof();
-        if (commitment == bytes32(0)) revert InvalidProof();
-
-        bytes32 leaf;
-
-        if (sourceChain == CHAIN_ETHEREUM || sourceChain == CHAIN_SOLANA) {
-            leaf = keccak256(abi.encodePacked(sanadId, commitment, sourceChain));
-            if (!_verify_merkle_proof_keccak256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
-        } else if (sourceChain == CHAIN_SUI) {
-            leaf = blake2b256(abi.encodePacked(sanadId, commitment, sourceChain));
-            if (!_verify_merkle_proof_blake2b256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
-        } else if (sourceChain == CHAIN_APTOS) {
-            leaf = sha3_256(abi.encodePacked(sanadId, commitment, sourceChain));
-            if (!_verify_merkle_proof_sha3_256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
-        } else {
-            revert InvalidProof();
-        }
+    /// @notice Canonical ProofLeafV1 schema (non-authoritative; see section note).
+    struct ProofLeafV1 {
+        uint32 version;
+        bytes32 sourceChain;
+        bytes32 destinationChain;
+        bytes32 sanadId;
+        bytes32 commitment;
+        bytes32 contentDescriptorHash;
+        bytes32 sourceSealRefHash;
+        bytes32 destinationOwnerHash;
+        bytes32 nullifier;
+        bytes32 lockEventId;
+        bytes32 metadataHash;
+        bytes32 proofPolicyHash;
     }
 
-    /// @notice Verify cross-chain proof using canonical ProofLeafV1 schema
-    /// @dev This is the recommended verification method for cross-chain proofs
-    function _verify_cross_chain_proof_with_proof_leaf(
-        bytes32 sanadId,
-        bytes32 commitment,
-        bytes32 sourceChain,
-        bytes32 destinationChain,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint256 leafPosition,
-        bytes32 contentDescriptorHash,
-        bytes32 sourceSealRefHash,
-        bytes32 destinationOwnerHash,
-        bytes32 nullifier,
-        bytes32 lockEventId,
-        bytes32 metadataHash,
-        bytes32 proofPolicyHash
-    ) internal view {
-        if (proof.length == 0) revert InvalidProof();
-        if (proofRoot == bytes32(0)) revert InvalidProof();
-        if (sanadId == bytes32(0)) revert InvalidProof();
-        if (commitment == bytes32(0)) revert InvalidProof();
-
-        // Construct canonical ProofLeafV1
-        ProofLeafV1 memory leaf = ProofLeafV1({
-            version: 1,  // ProofLeafV1 version
-            sourceChain: sourceChain,
-            destinationChain: destinationChain,
-            sanadId: sanadId,
-            commitment: commitment,
-            contentDescriptorHash: contentDescriptorHash,
-            sourceSealRefHash: sourceSealRefHash,
-            destinationOwnerHash: destinationOwnerHash,
-            nullifier: nullifier,
-            lockEventId: lockEventId,
-            metadataHash: metadataHash,
-            proofPolicyHash: proofPolicyHash
-        });
-
-        // Compute canonical hash using keccak256 (Ethereum's native hash)
-        bytes32 leafHash = hashProofLeafV1(leaf);
-
-        // Verify Merkle proof using keccak256
-        if (!_verify_merkle_proof_keccak256(proof, proofRoot, leafHash, leafPosition)) revert InvalidProof();
+    /// @notice Compute the keccak256 hash of a ProofLeafV1 (non-authoritative utility).
+    function hashProofLeafV1(ProofLeafV1 memory leaf) internal pure returns (bytes32) {
+        bytes memory preimage = abi.encodePacked(
+            "csv.proof.leaf.v1",
+            leaf.version,
+            leaf.sourceChain,
+            leaf.destinationChain,
+            leaf.sanadId,
+            leaf.commitment,
+            leaf.contentDescriptorHash,
+            leaf.sourceSealRefHash,
+            leaf.destinationOwnerHash,
+            leaf.nullifier,
+            leaf.lockEventId,
+            leaf.metadataHash,
+            leaf.proofPolicyHash
+        );
+        return keccak256(preimage);
     }
 
-    function _verify_bitcoin_proof(
-        bytes32 sanadId,
-        bytes32 commitment,
-        bytes calldata proof,
-        bytes32 proofRoot,
-        uint256 leafPosition
-    ) internal pure {
-        if (proof.length == 0) revert InvalidProof();
-        if (proofRoot == bytes32(0)) revert InvalidProof();
-        if (sanadId == bytes32(0)) revert InvalidProof();
-        if (commitment == bytes32(0)) revert InvalidProof();
-
-        bytes32 leaf = double_sha256(abi.encodePacked(sanadId, commitment));
-        if (!_verify_merkle_proof_double_sha256(proof, proofRoot, leaf, leafPosition)) revert InvalidProof();
-    }
-
-    function _verify_merkle_proof_keccak256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal pure returns (bool) {
+    function _verify_merkle_proof_keccak256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafIndex) internal pure returns (bool) {
         if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
             assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
-            if ((leafPosition >> i) & 1 == 0) {
+            if ((leafIndex >> i) & 1 == 0) {
                 current = _hash_pair_keccak256(current, sibling);
             } else {
                 current = _hash_pair_keccak256(sibling, current);
@@ -1028,14 +928,14 @@ contract CSVSeal {
         return current == root;
     }
 
-    function _verify_merkle_proof_double_sha256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal pure returns (bool) {
+    function _verify_merkle_proof_double_sha256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafIndex) internal pure returns (bool) {
         if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
             assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
-            if ((leafPosition >> i) & 1 == 0) {
+            if ((leafIndex >> i) & 1 == 0) {
                 current = _hash_pair_double_sha256(current, sibling);
             } else {
                 current = _hash_pair_double_sha256(sibling, current);
@@ -1044,14 +944,14 @@ contract CSVSeal {
         return current == root;
     }
 
-    function _verify_merkle_proof_blake2b256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal view returns (bool) {
+    function _verify_merkle_proof_blake2b256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafIndex) internal view returns (bool) {
         if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
             assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
-            if ((leafPosition >> i) & 1 == 0) {
+            if ((leafIndex >> i) & 1 == 0) {
                 current = _hash_pair_blake2b256(current, sibling);
             } else {
                 current = _hash_pair_blake2b256(sibling, current);
@@ -1060,14 +960,14 @@ contract CSVSeal {
         return current == root;
     }
 
-    function _verify_merkle_proof_sha3_256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafPosition) internal view returns (bool) {
+    function _verify_merkle_proof_sha3_256(bytes calldata proof, bytes32 root, bytes32 leaf, uint256 leafIndex) internal view returns (bool) {
         if (proof.length == 0 || proof.length % 32 != 0) return false;
         uint256 numLevels = proof.length / 32;
         bytes32 current = leaf;
         for (uint256 i = 0; i < numLevels; i++) {
             bytes32 sibling;
             assembly { sibling := calldataload(add(proof.offset, mul(i, 32))) }
-            if ((leafPosition >> i) & 1 == 0) {
+            if ((leafIndex >> i) & 1 == 0) {
                 current = _hash_pair_sha3_256(current, sibling);
             } else {
                 current = _hash_pair_sha3_256(sibling, current);
@@ -1108,31 +1008,5 @@ contract CSVSeal {
         require(success, "SHA3-256 precompile failed");
         require(result.length == 32, "Invalid SHA3-256 result length");
         return bytes32(result);
-    }
-
-    // ==================== Batch Operations ====================
-
-    function batch_mint_sanads(
-        bytes32[] calldata sanadIds,
-        bytes32[] calldata commitments,
-        bytes32[] calldata stateRoots,
-        bytes32 sourceChain,
-        bytes calldata sourceSealPoint,
-        bytes[] calldata proofs,
-        bytes32 proofRoot,
-        uint256[] calldata leafPositions
-    ) external {
-        if (msg.sender != verifier) revert Unauthorized();
-        if (sanadIds.length != commitments.length || sanadIds.length != stateRoots.length || sanadIds.length != proofs.length || sanadIds.length != leafPositions.length) revert ArraysMismatch();
-
-        for (uint256 i = 0; i < sanadIds.length; i++) {
-            _mint_sanad_internal(sanadIds[i], commitments[i], stateRoots[i], sourceChain, CHAIN_ETHEREUM, sourceSealPoint, proofs[i], proofRoot, leafPositions[i], SanadMetadata({
-                assetClass: ASSET_CLASS_UNSPECIFIED,
-                assetId: bytes32(0),
-                metadataHash: bytes32(0),
-                proofSystem: PROOF_SYSTEM_UNSPECIFIED,
-                proofRoot: proofRoot
-            }), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0));
-        }
     }
 }

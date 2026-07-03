@@ -174,9 +174,23 @@ impl UnifiedStateManager {
 
     // --- Transfer Management ---
 
-    /// Add a transfer to tracking
+    /// Add or update a transfer in tracking.
+    ///
+    /// Upserts by transfer `id`: a transfer that is locked, re-checked on each
+    /// finality poll, and later resumed would otherwise append a new row every
+    /// time, flooding `cross-chain list` with duplicates. Replace the existing
+    /// entry in place instead so the cache holds one row per transfer.
     pub fn add_transfer(&mut self, transfer: TransferRecord) {
-        self.storage.transfers.push(transfer);
+        if let Some(existing) = self
+            .storage
+            .transfers
+            .iter_mut()
+            .find(|t| t.id == transfer.id)
+        {
+            *existing = transfer;
+        } else {
+            self.storage.transfers.push(transfer);
+        }
     }
 
     /// Get a transfer by ID
