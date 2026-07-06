@@ -178,8 +178,6 @@ pub struct SolanaSanadAccount {
     pub metadata_hash: [u8; 32],
     /// Proof system identifier
     pub proof_system: u8,
-    /// Proof root or verification-key commitment
-    pub proof_root: [u8; 32],
     /// Canonical lifecycle state (0-9)
     pub state: u8,
     /// Creation timestamp (Unix epoch seconds)

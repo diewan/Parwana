@@ -34,7 +34,7 @@
 //! let replay_id = ReplayIdHash(hash);
 //!
 //! // Use canonical encoding for serialization
-//! let bytes = replay_id.0.to_canonical_bytes()?;
+//! let bytes = replay_id.0.as_bytes();
 //! ```
 //!
 //! # Migration Guide

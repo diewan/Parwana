@@ -13,8 +13,9 @@ mod verifier;
 
 pub use anchors::{
     AnchorError, CanonicalBlockHeader, CanonicalInclusionProof, CryptographicAnchor,
-    EthereumAnchor, FinalityGuarantee, ProofSystem, QuorumCertificate, ValidatorInfo, ValidatorSet,
-    VerifiedHeader,
+    EthereumAnchor, FinalityGuarantee, Groth16PairingVerifier, ProofSystem, QuorumCertificate,
+    UnavailableGroth16Verifier, ValidatorInfo, ValidatorSet, VerifiedHeader, ZkHeader,
+    verify_zk_seal_unavailable, verify_zk_seal_with_pairing,
 };
 pub use chain_proof_bundle::{
     ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier, DynChainProofVerifier,

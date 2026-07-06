@@ -62,8 +62,19 @@ impl AdapterFactory for SolanaFactory {
             .map_err(|e| FactoryError::InvalidConfig(format!("Solana config error: {}", e)))?;
 
         // Create ChainBackend from seal protocol
-        let solana_backend = SolanaBackend::from_seal_protocol(Arc::new(seal_protocol))
+        let mut solana_backend = SolanaBackend::from_seal_protocol(Arc::new(seal_protocol))
             .map_err(|e| FactoryError::InvalidConfig(format!("Solana backend error: {}", e)))?;
+        // Attach the RFC-0012 mint verifier signing key if provided (env). Without
+        // it the backend signs no attestation and mint fails closed by design.
+        if let Some(vk) = super::load_mint_verifier_key() {
+            solana_backend = solana_backend.with_verifier_key(vk);
+            log::info!("Factory: Solana adapter configured with mint verifier key");
+        } else {
+            log::warn!(
+                "Factory: no mint verifier key ({}) — Solana mint will fail closed",
+                super::MINT_VERIFIER_KEY_ENV
+            );
+        }
         let solana_backend = Arc::new(solana_backend);
 
         let chain_backend: Arc<dyn ChainBackend> = solana_backend.clone();

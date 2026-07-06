@@ -92,6 +92,7 @@ All chains MUST use these exact numeric values.
 ## Canonical View Structures
 
 ### SanadStateView
+
 ```
 SanadStateView {
     sanad_id: bytes32,
@@ -114,6 +115,7 @@ SanadStateView {
 ```
 
 ### SealStateView
+
 ```
 SealStateView {
     seal_id: bytes32,
@@ -130,6 +132,7 @@ SealStateView {
 ## Cross-Chain Mapping (Old → New)
 
 ### Ethereum (CSVSeal.sol)
+
 | Old Name | New Name | Notes |
 |---|---|---|
 | `lockSanad` | `lock_sanad` | snake_case |
@@ -150,6 +153,7 @@ SealStateView {
 | (none) | `record_sanad_metadata` | NEW |
 
 ### Solana
+
 | Old Name | New Name | Notes |
 |---|---|---|
 | `create_seal` | `create_seal` | ✓ already canonical |
@@ -170,6 +174,7 @@ SealStateView {
 | (none) | `can_refund` | NEW |
 
 ### Sui
+
 | Old Name | New Name | Notes |
 |---|---|---|
 | `create_seal` | `create_seal` | ✓ already canonical |
@@ -190,6 +195,7 @@ SealStateView {
 | (none) | `record_sanad_metadata` | NEW |
 
 ### Aptos
+
 | Old Name | New Name | Notes |
 |---|---|---|
 | `create_seal` | `create_seal` | ✓ already canonical |
@@ -387,6 +393,7 @@ impl ProofLeafV1 {
 ### Golden Vector Tests
 
 Golden vector tests are in `csv-protocol/tests/mce_golden_vectors.rs` with 6 test vectors covering:
+
 - Ethereum → Solana (minimal)
 - Bitcoin → Sui (full)
 - Aptos → Ethereum (mixed)

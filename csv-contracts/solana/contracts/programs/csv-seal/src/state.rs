@@ -1,84 +1,12 @@
-//! State definitions for CSV Seal program
+//! State definitions for CSV Seal program (RFC-0012 thin-registry model)
+//!
+//! The former proof-root / `ProofLeafV1` mint model has been removed. Destination
+//! mint is authenticated by verifier-signed attestations over the §9.2 digest, and
+//! on-chain replay protection is enforced by uniqueness of the minted-sanad,
+//! nullifier, and lock-event PDAs (see `MintRecord`, `NullifierRecord`,
+//! `LockEventRecord`).
 
 use anchor_lang::prelude::*;
-
-/// Canonical ProofLeafV1 schema for cross-chain proof verification
-/// This struct matches the canonical schema defined in csv-protocol
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
-pub struct ProofLeafV1 {
-    /// Version of the proof leaf schema
-    pub version: u32,
-    /// Source chain identifier
-    pub source_chain: u8,
-    /// Destination chain identifier
-    pub destination_chain: u8,
-    /// Sanad identifier
-    pub sanad_id: [u8; 32],
-    /// Commitment hash
-    pub commitment: [u8; 32],
-    /// Content descriptor hash (optional, default 0)
-    pub content_descriptor_hash: [u8; 32],
-    /// Source seal reference hash (optional, default 0)
-    pub source_seal_ref_hash: [u8; 32],
-    /// Destination owner hash (optional, default 0)
-    pub destination_owner_hash: [u8; 32],
-    /// Nullifier hash (optional, default 0)
-    pub nullifier: [u8; 32],
-    /// Lock event ID hash (optional, default 0)
-    pub lock_event_id: [u8; 32],
-    /// Metadata hash (optional, default 0)
-    pub metadata_hash: [u8; 32],
-    /// Proof policy hash (optional, default 0)
-    pub proof_policy_hash: [u8; 32],
-}
-
-impl ProofLeafV1 {
-    /// Compute the canonical hash of a ProofLeafV1 using sha256 (Solana's native hash)
-    /// Uses Minimal Canonical Encoding (MCE) - fixed-width byte layout without serialization libraries
-    /// This matches the Rust ProofLeafV1::to_canonical_bytes() implementation exactly.
-    pub fn hash(&self) -> [u8; 32] {
-        // MCE byte layout (exactly matching Rust implementation):
-        // - domain_tag(17 bytes): "csv.proof.leaf.v1"
-        // - version(4 bytes, little-endian u32)
-        // - source_chain(1 byte u8)
-        // - destination_chain(1 byte u8)
-        // - sanad_id(32 bytes)
-        // - commitment(32 bytes)
-        // - content_descriptor_hash(32 bytes)
-        // - source_seal_ref_hash(32 bytes)
-        // - destination_owner_hash(32 bytes)
-        // - nullifier(32 bytes)
-        // - lock_event_id(32 bytes)
-        // - metadata_hash(32 bytes)
-        // - proof_policy_hash(32 bytes)
-        
-        let domain = b"csv.proof.leaf.v1";
-        
-        let mut data = Vec::new();
-        data.extend_from_slice(domain);
-        data.extend_from_slice(&self.version.to_le_bytes());
-        data.push(self.source_chain);
-        data.push(self.destination_chain);
-        data.extend_from_slice(&self.sanad_id);
-        data.extend_from_slice(&self.commitment);
-        data.extend_from_slice(&self.content_descriptor_hash);
-        data.extend_from_slice(&self.source_seal_ref_hash);
-        data.extend_from_slice(&self.destination_owner_hash);
-        data.extend_from_slice(&self.nullifier);
-        data.extend_from_slice(&self.lock_event_id);
-        data.extend_from_slice(&self.metadata_hash);
-        data.extend_from_slice(&self.proof_policy_hash);
-        
-        // Use sha256 (Solana's native hash)
-        solana_program::hash::hash(&data).to_bytes()
-    }
-    
-    /// Compute ProofLeafV1 hash using chain-specific hash function
-    /// For Solana, this uses sha256 (native hash function)
-    pub fn hash_with_chain_function(&self, _chain: u8) -> [u8; 32] {
-        self.hash()
-    }
-}
 
 /// Canonical Sanad lifecycle state — matches Ethereum/Sui/Aptos
 /// 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred, 7=Refunded, 8=Burned, 9=Invalid
@@ -140,8 +68,11 @@ impl SealState {
     }
 }
 
-/// SanadAccount stores the state of a Sanad on Solana
-/// This is a PDA (Program Derived Address) account
+/// SanadAccount stores the state of a locally-created Sanad on Solana.
+/// This is a PDA (Program Derived Address) account.
+///
+/// NOTE: cross-chain *materialized* sanads are recorded in [`MintRecord`], not here;
+/// this account tracks the local create/consume/lock/refund lifecycle.
 #[account]
 pub struct SanadAccount {
     /// Owner of the sanad
@@ -162,8 +93,6 @@ pub struct SanadAccount {
     pub metadata_hash: [u8; 32],
     /// Proof system: 0 unspecified, chain/app-specific values above zero
     pub proof_system: u8,
-    /// Root/verification key commitment for advanced proof systems
-    pub proof_root: [u8; 32],
     /// Canonical lifecycle state (replaces consumed/locked booleans)
     pub state: u8,
     /// Creation timestamp (Unix epoch seconds)
@@ -181,13 +110,13 @@ pub struct SanadAccount {
 }
 
 impl SanadAccount {
-    /// Account size for space calculation
-    /// 8 (discriminator) + 32 (owner) + 32 (sanad_id) + 32 (commitment) + 
-    /// 32 (state_root) + 32 (nullifier) + metadata/proof fields + state + timestamps + bump
-    pub const SIZE: usize = 8 + 32 + 32 + 32 + 32 + 32 + 1 + 32 + 32 + 1 + 32 + 1 + 8 + 8 + 8 + 8 + 1;
+    /// 8 (discriminator) + 32 (owner) + 32 (sanad_id) + 32 (commitment) +
+    /// 32 (state_root) + 32 (nullifier) + 1 (asset_class) + 32 (asset_id) +
+    /// 32 (metadata_hash) + 1 (proof_system) + 1 (state) + 5*8 (timestamps) + 1 (bump)
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 32 + 32 + 1 + 32 + 32 + 1 + 1 + (5 * 8) + 1;
 }
 
-/// LockRecord stores information about a locked sanad for refund purposes
+/// LockRecord stores information about a locked sanad for refund/settlement purposes
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct LockRecord {
     /// Sanad identifier
@@ -196,7 +125,7 @@ pub struct LockRecord {
     pub commitment: [u8; 32],
     /// Original owner
     pub owner: Pubkey,
-    /// Destination chain ID
+    /// Destination chain ID (1-byte legacy id retained for the lock event)
     pub destination_chain: u8,
     /// Destination owner (hashed)
     pub destination_owner: [u8; 32],
@@ -208,21 +137,21 @@ pub struct LockRecord {
     pub metadata_hash: [u8; 32],
     /// Proof system identifier
     pub proof_system: u8,
-    /// Proof root or verification-key commitment
-    pub proof_root: [u8; 32],
     /// Lock timestamp (Unix epoch seconds)
     pub locked_at: i64,
-    /// Whether this lock has been refunded
+    /// Whether this lock has been refunded (terminal, mutually exclusive with `settled`)
     pub refunded: bool,
+    /// Whether this lock's escrow has been settled to the operator via a §10 receipt
+    /// (terminal, mutually exclusive with `refunded`).
+    pub settled: bool,
 }
 
 impl LockRecord {
-    /// Size of LockRecord for space calculation
-    pub const SIZE: usize = 32 + 32 + 32 + 1 + 32 + 1 + 32 + 32 + 1 + 32 + 8 + 1;
+    /// 32 + 32 + 32 (owner) + 1 + 32 + 1 + 32 + 32 + 1 + 8 + 1 + 1
+    pub const SIZE: usize = 32 + 32 + 32 + 1 + 32 + 1 + 32 + 32 + 1 + 8 + 1 + 1;
 }
 
 /// LockAccount stores a single lock record as a PDA
-/// This eliminates the Vec storage and O(n) lookup issues
 #[account]
 pub struct LockAccount {
     /// The lock record data
@@ -232,7 +161,6 @@ pub struct LockAccount {
 }
 
 impl LockAccount {
-    /// Space required for the LockAccount
     /// 8 (discriminator) + LockRecord::SIZE + 1 (bump)
     pub const SIZE: usize = 8 + LockRecord::SIZE + 1;
 }
@@ -252,25 +180,140 @@ pub struct LockRegistry {
 }
 
 impl LockRegistry {
-    /// Fixed size - no variable-length data
     /// 8 (discriminator) + 32 (authority) + 4 (refund_timeout) + 4 (lock_count) + 1 (bump)
     pub const SIZE: usize = 8 + 32 + 4 + 4 + 1;
 }
 
-/// MintedSanad account for replay protection (PDA: ["minted", sanad_id])
-/// This prevents the same sanad_id from being minted multiple times
+/// Maximum number of verifiers the on-chain verifier set can hold.
+pub const MAX_VERIFIERS: usize = 16;
+
+/// VerifierRegistry — the authorized verifier set and threshold `M` (RFC-0012 §9.3).
+///
+/// Verifier identities are stored in the non-EVM canonical form pinned by the ABI
+/// constitution: the compressed 33-byte secp256k1 public key. A single verifier
+/// keypair serves all chains; mint requires >= `threshold` DISTINCT valid signatures
+/// over the §9.2 digest, recovered via `secp256k1_recover`.
+///
+/// This account and its mutations are OFF the mint hot path — the mint instruction
+/// only reads it. Rotation / revocation are authority-gated governance operations.
 #[account]
-pub struct MintedSanad {
-    /// Sanad identifier that was minted
+pub struct VerifierRegistry {
+    /// Governance authority permitted to rotate the verifier set / threshold.
+    pub authority: Pubkey,
+    /// Signature threshold `M` (>= 1, <= verifiers.len()).
+    pub threshold: u8,
+    /// Authorized verifier identities (compressed 33-byte secp256k1 public keys).
+    pub verifiers: Vec<[u8; 33]>,
+    /// PDA bump seed
+    pub bump: u8,
+}
+
+impl VerifierRegistry {
+    /// 8 (discriminator) + 32 (authority) + 1 (threshold)
+    /// + 4 (vec len prefix) + MAX_VERIFIERS * 33 + 1 (bump)
+    pub const SIZE: usize = 8 + 32 + 1 + 4 + (MAX_VERIFIERS * 33) + 1;
+}
+
+/// MintRecord — the destination-mint registry entry AND the sanadId anti-replay
+/// tombstone (PDA seeds: `["minted", sanad_id]`).
+///
+/// SECURITY: this account is created with `init` and is NEVER closed by any
+/// instruction. Its permanent existence is what prevents a `sanad_id` from being
+/// minted twice, including via Solana's account close+reopen path.
+#[account]
+pub struct MintRecord {
+    /// Sanad identifier that was minted (primary duplicate-mint key)
     pub sanad_id: [u8; 32],
+    /// Commitment binding the sanad content/ownership
+    pub commitment: [u8; 32],
+    /// Source chain identity (keccak256("csv.chain.<src>"))
+    pub source_chain: [u8; 32],
+    /// keccak256(destination_owner) — full bytes travel in the event
+    pub destination_owner_hash: [u8; 32],
+    /// Source-chain lock event id (settlement replay key)
+    pub lock_event_id: [u8; 32],
+    /// Replay nullifier consumed by the source seal
+    pub nullifier: [u8; 32],
     /// When it was minted (Unix epoch seconds)
     pub minted_at: i64,
     /// PDA bump seed
     pub bump: u8,
 }
 
-impl MintedSanad {
-    /// Space required for MintedSanad
-    /// 8 (discriminator) + 32 (sanad_id) + 8 (minted_at) + 1 (bump)
-    pub const SIZE: usize = 8 + 32 + 8 + 1;
+impl MintRecord {
+    /// 8 (discriminator) + 6*32 (hash fields) + 8 (minted_at) + 1 (bump)
+    pub const SIZE: usize = 8 + (6 * 32) + 8 + 1;
+}
+
+/// NullifierRecord — the nullifier anti-replay tombstone (PDA seeds:
+/// `["nullifier", nullifier]`).
+///
+/// SECURITY: created with `init`, NEVER closed. Permanent existence enforces
+/// single-use of a replay nullifier against account close+reopen reuse.
+#[account]
+pub struct NullifierRecord {
+    /// The consumed nullifier
+    pub nullifier: [u8; 32],
+    /// Sanad that consumed it
+    pub sanad_id: [u8; 32],
+    /// When it was recorded (Unix epoch seconds)
+    pub recorded_at: i64,
+    /// PDA bump seed
+    pub bump: u8,
+}
+
+impl NullifierRecord {
+    /// 8 (discriminator) + 32 + 32 + 8 + 1
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 1;
+}
+
+/// LockEventRecord — the source lock-event anti-replay tombstone (PDA seeds:
+/// `["lock_event", lock_event_id]`).
+///
+/// SECURITY: created with `init`, NEVER closed. Permanent existence enforces that
+/// a single source lock event mints at most once.
+#[account]
+pub struct LockEventRecord {
+    /// The source-chain lock event id
+    pub lock_event_id: [u8; 32],
+    /// Sanad minted from it
+    pub sanad_id: [u8; 32],
+    /// When it was recorded (Unix epoch seconds)
+    pub recorded_at: i64,
+    /// PDA bump seed
+    pub bump: u8,
+}
+
+impl LockEventRecord {
+    /// 8 (discriminator) + 32 + 32 + 8 + 1
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 1;
+}
+
+/// SettlementRecord — source-chain settlement entry (RFC-0012 §10), keyed by
+/// `lock_event_id` (PDA seeds: `["settlement", lock_event_id]`).
+///
+/// SECURITY: created with `init`, NEVER closed. Its existence is the settlement
+/// anti-replay key: exactly one verifier-signed receipt may settle per
+/// `lock_event_id`.
+#[account]
+pub struct SettlementRecord {
+    /// Settlement replay key (the source lock event)
+    pub lock_event_id: [u8; 32],
+    /// Sanad whose source lock was settled
+    pub sanad_id: [u8; 32],
+    /// Canonical reference to the confirmed destination mint
+    pub destination_mint_tx_ref: [u8; 32],
+    /// The sole escrow beneficiary bound in the signed receipt
+    pub operator_payout: Pubkey,
+    /// Terminal release flag
+    pub released: bool,
+    /// When it was released (Unix epoch seconds)
+    pub released_at: i64,
+    /// PDA bump seed
+    pub bump: u8,
+}
+
+impl SettlementRecord {
+    /// 8 (discriminator) + 32 + 32 + 32 + 32 (operator) + 1 + 8 + 1
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 32 + 1 + 8 + 1;
 }

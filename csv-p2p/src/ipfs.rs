@@ -9,12 +9,17 @@ use async_trait::async_trait;
 #[cfg(feature = "ipfs")]
 use csv_protocol::proof_taxonomy::ProofBundle;
 #[cfg(feature = "ipfs")]
+use csv_wire::Consignment;
+#[cfg(feature = "ipfs")]
 use tokio_stream::wrappers::ReceiverStream;
 #[cfg(feature = "ipfs")]
 use tracing::{debug, info, warn};
 
 #[cfg(feature = "ipfs")]
-use crate::{DeliveredProof, EventId, ProofFilter, ProofTransport, TransportError};
+use crate::{
+    ConsignmentFilter, ConsignmentTransport, DeliveredConsignment, DeliveredProof, EventId,
+    ProofFilter, ProofTransport, TransportError,
+};
 
 #[cfg(feature = "ipfs")]
 /// IPFS client configuration.
@@ -149,6 +154,53 @@ impl IpfsTransport {
         Ok(cid.to_string())
     }
 
+    /// Add a consignment envelope to IPFS.
+    ///
+    /// Returns the CID (Content Identifier) of the stored object.
+    pub async fn add_consignment(
+        &self,
+        consignment: &Consignment,
+    ) -> Result<String, TransportError> {
+        if !self.connected {
+            return Err(TransportError::NotInitialized);
+        }
+
+        let client = self.client.as_ref().ok_or(TransportError::NotInitialized)?;
+        let consignment_bytes = crate::serialize_consignment(consignment)?;
+
+        let url = format!("{}/add", self.config.api_url);
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(consignment_bytes)
+                .file_name("consignment.cbor")
+                .mime_str("application/cbor")
+                .map_err(|e| TransportError::Serialization(e.to_string()))?,
+        );
+
+        let response = client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| TransportError::Network(format!("IPFS add failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(TransportError::PublishFailed);
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| TransportError::Serialization(e.to_string()))?;
+
+        let cid = result["Hash"]
+            .as_str()
+            .ok_or_else(|| TransportError::InvalidEvent("No CID in response".to_string()))?;
+
+        debug!(cid, "Stored consignment on IPFS");
+        Ok(cid.to_string())
+    }
+
     /// Retrieve a ProofBundle from IPFS by CID.
     pub async fn get_proof(&self, cid: &str) -> Result<ProofBundle, TransportError> {
         if !self.connected {
@@ -225,6 +277,40 @@ impl IpfsTransport {
 
 #[cfg(feature = "ipfs")]
 #[async_trait]
+impl ConsignmentTransport for IpfsTransport {
+    async fn deliver_consignment(
+        &self,
+        consignment: &Consignment,
+    ) -> Result<EventId, TransportError> {
+        let cid = self.add_consignment(consignment).await?;
+        self.pin_proof(&cid).await?;
+        Ok(EventId::new(cid))
+    }
+
+    async fn subscribe_consignments(
+        &self,
+        _filter: ConsignmentFilter,
+    ) -> Result<ReceiverStream<DeliveredConsignment>, TransportError> {
+        warn!("IPFS does not support real-time consignment subscriptions");
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+    }
+
+    async fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    fn transport_name(&self) -> &str {
+        "ipfs"
+    }
+
+    async fn disconnect(&self) {
+        warn!("IPFS transport disconnect called");
+    }
+}
+
+#[cfg(feature = "ipfs")]
+#[async_trait]
 impl ProofTransport for IpfsTransport {
     /// Broadcast a proof bundle to IPFS.
     ///
@@ -283,7 +369,7 @@ mod tests {
     #[tokio::test]
     async fn test_ipfs_transport_creation() {
         let transport = IpfsTransport::with_defaults();
-        assert_eq!(transport.transport_name(), "ipfs");
-        assert!(!transport.is_connected().await);
+        assert_eq!(ProofTransport::transport_name(&transport), "ipfs");
+        assert!(!ProofTransport::is_connected(&transport).await);
     }
 }

@@ -57,6 +57,19 @@ impl EventType {
     pub const TRANSFER_REPLAY_DETECTED: &'static str = "Transfer.ReplayDetected";
     /// Transfer verification downgraded.
     pub const TRANSFER_VERIFICATION_DOWNGRADED: &'static str = "Transfer.VerificationDowngraded";
+    /// Settlement evidence recorded after a confirmed destination mint. Keyed for
+    /// a later source-chain escrow release (TRM-ESCROW-001); this is auditable
+    /// evidence, not release authority.
+    pub const TRANSFER_SETTLEMENT_RECORDED: &'static str = "Transfer.SettlementRecorded";
+    /// Source-chain escrow released to the operator on a verifier-signed settlement
+    /// receipt (RFC-0012 §10 / TRM-ESCROW-001). DISTINCT from a destination mint
+    /// (`Transfer.Minted`) and from settlement evidence; this is the terminal
+    /// source-side payout and the runtime's one-release-per-`lock_event_id` guard.
+    pub const TRANSFER_SETTLEMENT_RELEASED: &'static str = "Transfer.SettlementReleased";
+    /// Source-chain escrow refunded to the original locker after the destination
+    /// mint failed to occur within the escrow timeout (RFC-0012 §10 failure
+    /// handling). Mutually exclusive with `Transfer.SettlementReleased`.
+    pub const TRANSFER_SETTLEMENT_REFUNDED: &'static str = "Transfer.SettlementRefunded";
 
     /// Lease management events.
     pub const LEASE_ACQUIRED: &'static str = "Lease.Acquired";

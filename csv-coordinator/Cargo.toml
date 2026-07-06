@@ -7,7 +7,9 @@ rust-version = "1.95"
 [dependencies]
 csv-protocol = { path = "../csv-protocol" }
 csv-verifier = { path = "../csv-verifier" }
-csv-storage = { path = "../csv-storage" }
+# default-features off so RocksDB (native C++) does not leak into the wasm build of
+# downstream csv-runtime; coordinator does not use the RocksDB backend directly.
+csv-storage = { path = "../csv-storage", default-features = false }
 csv-hash = { path = "../csv-hash" }
 csv-keys = { path = "../csv-keys" }
 csv-wallet = { path = "../csv-wallet" }

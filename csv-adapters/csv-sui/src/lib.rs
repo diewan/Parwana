@@ -64,7 +64,8 @@ pub use checkpoint::CheckpointVerifier;
 pub use config::{CheckpointConfig, SealContractConfig, SuiConfig, SuiNetwork, TransactionConfig};
 pub use error::SuiError;
 #[cfg(feature = "rpc")]
-pub use mint::mint_sanad;
+pub use mint::submit_mint;
+pub use mint::{SuiMintArgs, build_sui_mint_args, parse_destination_owner};
 #[cfg(feature = "rpc")]
 pub use node::SuiNode;
 pub use proofs::{

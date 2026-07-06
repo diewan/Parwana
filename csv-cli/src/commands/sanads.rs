@@ -1210,6 +1210,7 @@ async fn cmd_create(
                     .as_secs(),
                 anchor_tx_hash: Some(hex::encode(&result.anchor.anchor_id)),
                 nonce,
+                provenance_strength: None,
             };
 
             state.storage.sanads.push(tracked);
@@ -1454,7 +1455,10 @@ fn cmd_transfer(sanad_id: String, to: String, _state: &UnifiedStateManager) -> R
     output::header(&format!("Transferring Sanad to {}", to));
     output::kv("Sanad ID", &hex::encode(sanad_id_parsed.as_bytes()));
     output::kv("New Owner", &to);
-    output::info("Cross-chain transfer: use 'csv cross-chain transfer' instead");
+    output::info(
+        "Cross-chain transfer: pick a mode — 'csv cross-chain send' (off-chain) \
+         or 'csv cross-chain materialize' (on-chain) instead",
+    );
     Ok(())
 }
 

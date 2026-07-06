@@ -97,6 +97,15 @@ pub struct SealContractConfig {
     /// Package ID where CSVSeal module is deployed.
     /// Must be set explicitly — there is no safe default.
     pub package_id: Option<String>,
+    /// Shared `Registry` object ID (32-byte hex) created at package publish.
+    ///
+    /// This object is the thin-registry mint authority on Sui: it holds the
+    /// verifier set / threshold and the on-chain anti-replay tables, and its
+    /// 32-byte object id is the RFC-0012 §9.2 `destinationContract` bound into
+    /// the mint-attestation digest. Must be set explicitly — the digest a
+    /// verifier signs is scoped to exactly one `Registry`, so there is no safe
+    /// default.
+    pub registry_id: Option<String>,
     /// Module name (typically "csv_seal").
     pub module_name: String,
     /// Seal object type name.
@@ -106,7 +115,8 @@ pub struct SealContractConfig {
 impl Default for SealContractConfig {
     fn default() -> Self {
         Self {
-            package_id: None, // No safe default — must be set explicitly
+            package_id: None,  // No safe default — must be set explicitly
+            registry_id: None, // No safe default — must be set explicitly
             module_name: "csv_seal".to_string(),
             seal_type: "Seal".to_string(),
         }

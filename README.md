@@ -1,4 +1,5 @@
 # CSV Protocol
+
 ## Constitutional Client-Side Validation Infrastructure
 
 > A multi-chain, client-validated protocol for cryptographic ownership, transfer, provenance, and state evolution using Single-Use Seals, canonical commitments, deterministic replay resistance, and adversarial runtime orchestration.
@@ -667,4 +668,3 @@ It is not a blockchain application.
 CSV Protocol is evolving into a:
 
 > constitutional client-side validation protocol for cryptographic ownership, provenance, and multi-chain state evolution.
-

@@ -5,7 +5,8 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
+    SealRegistryStatus,
 };
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::finality::capabilities::{
@@ -108,48 +109,90 @@ impl ChainAdapter for SuiRuntimeAdapter {
         transfer: &CrossChainTransfer,
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
-        // Use the backend's mint_sanad method which properly constructs and signs the transaction
-        use csv_protocol::chain_adapter_traits::ChainSanadOps;
+        // `proof_bundle` is the runtime's canonical-CBOR `RuntimeMintRequest`
+        // (RFC-0012 §3/§9): the §9.2 attestation inputs the runtime bound after
+        // its off-chain canonical verifier already adjudicated the source proof
+        // (`validate_source_proof` on the *source* adapter, journaled by the
+        // coordinator before this call). This adapter is the thin-registry
+        // submitter: it binds `destination_contract = Registry` object id,
+        // forces `destination_chain_id = keccak256("csv.chain.sui")`, computes the
+        // frozen §9.2 digest, signs it with the secp256k1 verifier key, and
+        // submits `csv_seal::mint_sanad`. There is no proof root and no Merkle
+        // proof anywhere on this path.
+        let request: RuntimeMintRequest =
+            csv_codec::from_canonical_cbor(proof_bundle).map_err(|e| {
+                AdapterError::Generic(format!("Failed to decode runtime mint request: {}", e))
+            })?;
 
-        let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
-        let source_chain = &transfer.source_chain;
+        // Bind the request to this transfer: a payload whose attestation is for a
+        // different Sanad must never be signed or submitted here.
+        if request.attestation.sanad_id != *transfer.sanad_id.as_bytes() {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Mint request Sanad {} does not match transfer Sanad {}",
+                hex::encode(request.attestation.sanad_id),
+                hex::encode(transfer.sanad_id.as_bytes())
+            )));
+        }
 
-        // Parse proof bundle to extract needed fields
-        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
-            ProofBundle::from_canonical_bytes(proof_bundle)
-                .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
-                .map_err(|e| {
-                    AdapterError::Generic(format!("Failed to decode proof bundle: {}", e))
-                })?;
+        #[cfg(feature = "rpc")]
+        {
+            // Bind `destination_contract` to the shared Registry object id and
+            // force `destination_chain_id` to the frozen Sui chain tag, exactly
+            // as the Move contract derives them, so the signed digest matches the
+            // value the Registry recomputes on-chain.
+            let registry_id = self.backend.registry_object_id().map_err(|e| {
+                AdapterError::Generic(format!("No mint Registry configured: {}", e))
+            })?;
+            let mut attestation = request.attestation.clone();
+            attestation.destination_contract = registry_id;
+            attestation.destination_chain_id = sui_contract_chain_id();
 
-        // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])
-        let mut commitment_bytes = [0u8; 32];
-        let len = proof_bundle.anchor_ref.anchor_id.len().min(32);
-        commitment_bytes[..len].copy_from_slice(&proof_bundle.anchor_ref.anchor_id[..len]);
-        let _commitment = csv_hash::Hash::new(commitment_bytes);
-
-        // Use the inclusion_proof directly
-        let inclusion_proof = &proof_bundle.inclusion_proof;
-
-        let result = self
-            .backend
-            .mint_sanad(
-                source_chain,
-                &sanad_id,
-                inclusion_proof,
-                "0x0000000000000000000000000000000000000000000000000000000000000000",
+            // The recipient must be a concrete 32-byte Sui address. These same
+            // bytes enter the digest (via `keccak256(destination_owner)`) and the
+            // Move `address` argument, so they cannot diverge.
+            let destination_owner = crate::mint::parse_destination_owner(
+                &attestation.destination_owner,
             )
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to mint sanad: {}", e)))?;
+            .map_err(|e| {
+                AdapterError::ProofVerificationFailed(format!("Invalid mint recipient: {}", e))
+            })?;
 
-        // Extract tx_hash and block_height from the result (these are not Option types)
-        let tx_hash = result.transaction_hash;
-        let block_height = result.block_height;
+            // Compute the frozen §9.2 digest and attest it with the configured
+            // verifier key. Fails closed (no signer -> no signature) rather than
+            // emitting an unauthenticated mint the Registry would reject.
+            let digest = attestation.attestation_digest();
+            let signature = self
+                .backend
+                .sign_mint_attestation_digest(&digest)
+                .map_err(|e| {
+                    AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
+                })?;
+            let mut verifier_signatures = request.verifier_signatures.clone();
+            verifier_signatures.push(signature);
 
-        Ok(MintResult {
-            tx_hash,
-            block_height,
-        })
+            let args = crate::mint::build_sui_mint_args(
+                &attestation,
+                destination_owner,
+                &verifier_signatures,
+            );
+            let (tx_hash, block_height) = self
+                .backend
+                .submit_attested_mint(args)
+                .await
+                .map_err(|e| AdapterError::Generic(format!("Failed to submit mint: {}", e)))?;
+
+            Ok(MintResult {
+                tx_hash,
+                block_height,
+            })
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let _ = request;
+            Err(AdapterError::Generic(
+                "Cannot submit attested mint: the 'rpc' feature is not enabled".to_string(),
+            ))
+        }
     }
 
     async fn build_inclusion_proof(
@@ -306,5 +349,229 @@ impl ChainAdapter for SuiRuntimeAdapter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Contract-layer Sui chain identity: `keccak256("csv.chain.sui")`.
+///
+/// The Move `csv_seal` module hardcodes this tag (`CHAIN_SUI_TAG`) as
+/// `destinationChainId` in the §9.2 preimage regardless of network, so the
+/// adapter forces the same value rather than trusting the runtime-supplied
+/// destination chain name.
+#[cfg(feature = "rpc")]
+fn sui_contract_chain_id() -> [u8; 32] {
+    use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+    *CrossChainHashAlgorithm::Keccak256
+        .hash_bytes(b"csv.chain.sui")
+        .as_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{SealContractConfig, SuiConfig, SuiNetwork};
+    use crate::node::SuiNode;
+    use crate::ops::SuiBackend;
+    use csv_adapter_core::MintAttestationInputs;
+    use csv_hash::Hash;
+
+    const REGISTRY_ID: &str = "0x00000000000000000000000000000000000000000000000000000000000000aa";
+
+    fn test_config(registry: Option<&str>) -> SuiConfig {
+        SuiConfig {
+            seal_contract: SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                registry_id: registry.map(|s| s.to_string()),
+                ..Default::default()
+            },
+            ..SuiConfig::new(SuiNetwork::Testnet)
+        }
+    }
+
+    fn test_backend(
+        registry: Option<&str>,
+        verifier: Option<secp256k1::SecretKey>,
+    ) -> Arc<SuiBackend> {
+        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let mut backend =
+            SuiBackend::with_signing_key(test_config(registry), node, Some(signing_key));
+        if let Some(v) = verifier {
+            backend = backend.with_verifier_key(v);
+        }
+        Arc::new(backend)
+    }
+
+    fn test_transfer(sanad_id: Hash) -> CrossChainTransfer {
+        CrossChainTransfer {
+            id: "sui-transfer-1".to_string(),
+            source_chain: "ethereum".to_string(),
+            destination_chain: "sui".to_string(),
+            lock_tx_hash: vec![0xAAu8; 32],
+            lock_output_index: 0,
+            sanad_id,
+            transition_id: vec![1u8; 32],
+        }
+    }
+
+    fn mint_attestation(sanad_id: Hash) -> MintAttestationInputs {
+        MintAttestationInputs {
+            destination_chain_id: [0u8; 32],
+            destination_contract: [0u8; 32],
+            sanad_id: *sanad_id.as_bytes(),
+            commitment: [8u8; 32],
+            source_chain: [9u8; 32],
+            // A concrete 32-byte Sui recipient address.
+            destination_owner: vec![0x11u8; 32],
+            lock_event_id: [0xAu8; 32],
+            nullifier: [0xBu8; 32],
+            attestation_expiry: 0,
+        }
+    }
+
+    fn runtime_mint_request_cbor(sanad_id: Hash) -> Vec<u8> {
+        let request = RuntimeMintRequest {
+            attestation: mint_attestation(sanad_id),
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        csv_codec::to_canonical_cbor(&request).expect("encode runtime mint request")
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_request_bound_to_other_sanad() {
+        // A payload whose attestation is for a different Sanad must be rejected
+        // before any registry lookup, signing, or submission.
+        let backend = test_backend(Some(REGISTRY_ID), None);
+        let adapter = SuiRuntimeAdapter::new(backend);
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+        let payload = runtime_mint_request_cbor(Hash::new([9u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must reject a mint request bound to a different sanad"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_undecodable_payload() {
+        let backend = test_backend(Some(REGISTRY_ID), None);
+        let adapter = SuiRuntimeAdapter::new(backend);
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, b"not-a-mint-request").await;
+        assert!(
+            result.is_err(),
+            "must reject a payload that is not a canonical RuntimeMintRequest"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn mint_sanad_fails_closed_without_registry() {
+        // No Registry object id configured: the verifier signature is scoped to a
+        // specific Registry, so the adapter cannot build a mint and must fail
+        // closed instead of submitting an unscoped call.
+        let backend = test_backend(None, None);
+        let adapter = SuiRuntimeAdapter::new(backend);
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        let err = result.expect_err("must fail closed without a Registry");
+        assert!(
+            format!("{}", err).contains("Registry"),
+            "error should point at the missing Registry: {}",
+            err
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn mint_sanad_fails_closed_without_verifier_key() {
+        // Registry configured but no secp256k1 verifier key: the adapter cannot
+        // attest the §9.2 digest and must fail closed rather than submit an
+        // unauthenticated mint.
+        let backend = test_backend(Some(REGISTRY_ID), None);
+        let adapter = SuiRuntimeAdapter::new(backend);
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when no verifier signer is configured"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn mint_sanad_rejects_missing_destination_owner() {
+        // The runtime leaves `destination_owner` empty until owner-binding wires a
+        // recipient; the Sui mint needs a concrete 32-byte address, so an empty
+        // owner must fail closed before signing.
+        let secp = secp256k1::Secp256k1::new();
+        let (secret, _pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let backend = test_backend(Some(REGISTRY_ID), Some(secret));
+        let adapter = SuiRuntimeAdapter::new(backend);
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+
+        let mut attestation = mint_attestation(sanad);
+        attestation.destination_owner = Vec::new(); // un-bound owner
+        let request = RuntimeMintRequest {
+            attestation,
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        let payload = csv_codec::to_canonical_cbor(&request).unwrap();
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must reject a mint with an unspecified destination owner"
+        );
+    }
+
+    #[tokio::test]
+    async fn verifier_signature_recovers_to_configured_key_over_digest() {
+        // The §9.2 signature the adapter attaches must recover — over the raw
+        // preimage hashed with SHA-256, exactly as Sui's `secp256k1_ecrecover`
+        // does — to the configured verifier public key. This pins the signature
+        // format (raw recovery id, no EVM +27) that the Move Registry accepts.
+        use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+        use secp256k1::{Message, Secp256k1};
+
+        let secp = Secp256k1::new();
+        let (secret, expected_pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let backend = test_backend(Some(REGISTRY_ID), Some(secret));
+
+        let mut attestation = mint_attestation(Hash::new([2u8; 32]));
+        attestation.destination_contract = [0xAAu8; 32];
+        attestation.destination_chain_id = sui_contract_chain_id();
+        let digest = attestation.attestation_digest();
+
+        let sig = backend
+            .sign_mint_attestation_digest(&digest)
+            .expect("verifier key configured");
+        assert_eq!(sig.len(), 65, "recoverable signature is r || s || v");
+
+        let recovery_id = RecoveryId::from_i32(sig[64] as i32).expect("valid recovery id");
+        let recoverable =
+            RecoverableSignature::from_compact(&sig[..64], recovery_id).expect("valid signature");
+        let msg = Message::from_digest(digest);
+        let recovered = secp
+            .recover_ecdsa(&msg, &recoverable)
+            .expect("recover verifier pubkey");
+        assert_eq!(
+            recovered, expected_pubkey,
+            "signature must recover to the configured verifier key"
+        );
     }
 }

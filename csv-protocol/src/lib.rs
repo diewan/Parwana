@@ -131,7 +131,7 @@ pub use envelope::{CanonicalSanadEnvelope, TypeId, decode_envelope};
 pub use proof_taxonomy::{HashFunction, InclusionProof, ProofBundle, ProofLeafV1};
 
 // Re-export transfer state types
-pub use transfer_state::TransferStage;
+pub use transfer_state::{TransferMode, TransferStage};
 
 // Re-export lease types
 pub use lease::{Lease, LeaseError, LeaseId, LeaseManager, now_secs};

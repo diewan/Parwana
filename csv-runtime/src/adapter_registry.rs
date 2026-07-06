@@ -9,7 +9,7 @@
 use csv_adapter_core::{
     AdapterError, AdapterRegistry as AdapterRegistryTrait, ChainAdapter, ChainCapabilityPort,
     ChainLockPort, ChainMintPort, ChainProofPort, ChainReadPort, ChainSealRegistryPort,
-    CrossChainTransfer, LockResult, MintResult, SealRegistryStatus, TxFinality,
+    CrossChainTransfer, LockResult, MintResult, SealRegistryStatus, SettlementResult, TxFinality,
 };
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::proof_taxonomy::ProofBundle;
@@ -204,6 +204,25 @@ impl AdapterRegistryTrait for AdapterRegistryImpl {
 
     async fn get_balance(&self, chain_id: &str, address: &str) -> Result<String, AdapterError> {
         ChainReadPort::get_balance(self, chain_id, address).await
+    }
+
+    async fn settle_escrow(
+        &self,
+        chain_id: &str,
+        transfer: &CrossChainTransfer,
+        settlement_request: &[u8],
+    ) -> Result<SettlementResult, AdapterError> {
+        self.adapter(chain_id)?
+            .settle_escrow(transfer, settlement_request)
+            .await
+    }
+
+    async fn refund_escrow(
+        &self,
+        chain_id: &str,
+        transfer: &CrossChainTransfer,
+    ) -> Result<SettlementResult, AdapterError> {
+        self.adapter(chain_id)?.refund_escrow(transfer).await
     }
 }
 

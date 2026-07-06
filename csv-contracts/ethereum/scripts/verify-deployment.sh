@@ -139,10 +139,21 @@ fi
 echo -e "${GREEN}Verifying contract version...${NC}"
 VERSION=$(cast call "$CONTRACT_ADDRESS" "VERSION()(uint256)" --rpc-url "$RPC_URL")
 echo -e "  Contract version: $VERSION"
-if [ "$VERSION" = "4" ]; then
-    echo -e "${GREEN}✓ Contract version matches expected (4)${NC}"
+if [ "$VERSION" = "6" ]; then
+    echo -e "${GREEN}✓ Contract version matches expected (6)${NC}"
 else
-    echo -e "${YELLOW}⚠ Contract version is $VERSION (expected 4)${NC}"
+    echo -e "${RED}✗ Contract version is $VERSION (expected 6 — thin-registry CSVSeal)${NC}"
+    exit 1
+fi
+
+# Verify thin-registry seed: 1-of-1 verifier set, no proof root reintroduced
+echo -e "${GREEN}Verifying verifier set (thin registry)...${NC}"
+VERIFIER_COUNT=$(cast call "$CONTRACT_ADDRESS" "verifier_count()(uint256)" --rpc-url "$RPC_URL")
+THRESHOLD=$(cast call "$CONTRACT_ADDRESS" "threshold()(uint256)" --rpc-url "$RPC_URL")
+echo -e "  verifier_count: $VERIFIER_COUNT, threshold: $THRESHOLD"
+if [ "$THRESHOLD" != "1" ]; then
+    echo -e "${RED}✗ Expected threshold 1 (1-of-1 seed), got $THRESHOLD${NC}"
+    exit 1
 fi
 
 # Verify chain IDs are hashed

@@ -251,6 +251,61 @@ receiptDigest = SHA256(
 
 The verifier signs the receipt only after observing the destination mint at strict finality. The operator submits and pays gas but cannot authorize its own payout. The source escrow verifies exactly one valid receipt per `lockEventId`, releases to `operatorPayoutAddress`, and emits a `SettlementReleased` event distinct from `SanadMinted`. This receipt is upgradeable to a destination→source inclusion proof on the same seam as §9.5.
 
+### 11. Canonical event schema
+
+Events are the auditable interface of the thin registry: §9.1 requires the mint attestation to be a reproducible artifact, and that reproducibility is only realizable if the emitted event carries **enough data to recompute the §9.2 digest** and re-verify it against the published verifier set. This section fixes the canonical event schema so all destination chains emit equivalent events. It is normative for the mint and settlement events introduced by this RFC; the full cross-event catalogue and per-chain encoding table live in [`csv-docs/contracts/CANONICAL_EVENT_SCHEMA.md`](../contracts/CANONICAL_EVENT_SCHEMA.md), which MUST stay consistent with this section, and field names follow the dictionary in [`ABI_CONSTITUTION.md`](../contracts/ABI_CONSTITUTION.md).
+
+#### 11.1 Naming and deprecations
+
+- The destination materialization event is `SanadMinted`. The former `CrossChainMint` name is **renamed** to `SanadMinted`; implementations MUST NOT emit both.
+- The proof-adjudication events `ProofAccepted` / `ProofRejected` are **deprecated** and MUST NOT be emitted. Under this RFC proof adjudication is off-chain (§1); the destination contract records an already-verified result and does not signal proof verdicts on-chain.
+- `SanadMinted` (destination mint) and `SettlementReleased` (source-chain escrow release, §10) are **distinct** events and MUST NOT be conflated: the mint happens on the destination chain, settlement on the source chain.
+
+#### 11.2 `SanadMinted`
+
+Emitted on the destination chain by the registry after the §9 verifier-attested mint is accepted. It carries the full §3 mint field set plus a block timestamp:
+
+| Field | Type | Meaning | Duplicate/replay role |
+|-------|------|---------|-----------------------|
+| `sanadId` | `bytes32` | Sanad identifier | duplicate-mint key (indexed) |
+| `commitment` | `bytes32` | committed sanad state | — |
+| `sourceChain` | `bytes32` | `keccak256("csv.chain.<src>")` (§6) | — |
+| `destinationOwner` | `bytes` | full recipient bytes | — |
+| `lockEventId` | `bytes32` | source-lock identity | duplicate-source-lock key (indexed) |
+| `nullifier` | `bytes32` | replay nullifier | replay-protection key |
+| `timestamp` | `u64` | destination block timestamp | — |
+
+Rules:
+
+- **Full `destinationOwner` bytes MUST travel in the event**, even though the contract persists only `keccak256(destinationOwner)` on-chain for fixed width (§9.2). Off-chain consumers reconstruct settlement/replay evidence and recompute the digest from the event, so truncating the owner to its hash in the event is non-conforming.
+- The seven fields above, taken together with the deployment's `destinationChainId`/`destinationContract` (fixed per deployment) and `attestationExpiry`, are exactly the inputs to the §9.2 digest. An auditor recomputes `digest = SHA256("csv.mint.attestation.v1" || destinationChainId || destinationContract || sanadId || commitment || sourceChain || keccak256(destinationOwner) || lockEventId || nullifier || attestationExpiry)` and re-verifies the recovered signers against the published verifier set (§9.3).
+- Semantics are uniform across chains; only the native encoding differs. Reference mapping:
+  - **Ethereum**: `event SanadMinted(bytes32 indexed sanadId, bytes32 commitment, bytes32 sourceChain, bytes destinationOwner, bytes32 indexed lockEventId, bytes32 nullifier, uint256 timestamp)`
+  - **Sui**: a Move event `struct` with the same fields, emitted alongside the minted object.
+  - **Aptos**: a Move event with the same fields, emitted on resource mint.
+  - **Solana**: registry account write plus a CPI log carrying the same fields.
+  - **Bitcoin**: not applicable as a destination (interactive/off-chain destination only).
+
+#### 11.3 `SettlementReleased`
+
+Emitted by the **source-chain** escrow when it releases the operator's payout after verifying the §10 `SettlementReceipt`. Authorized by the verifier receipt, never by the operator's own claim.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `lockEventId` | `bytes32` | settlement replay key — exactly one release per `lockEventId` (indexed) |
+| `sanadId` | `bytes32` | Sanad identifier (indexed) |
+| `operatorPayoutAddress` | address (chain-native) | escrow payout beneficiary |
+| `destinationMintTxRef` | `bytes32` | canonical reference to the confirmed destination mint |
+| `timestamp` | `u64` | source block timestamp |
+
+Reference mapping (Ethereum): `event SettlementReleased(bytes32 indexed lockEventId, bytes32 indexed sanadId, address operatorPayoutAddress, bytes32 destinationMintTxRef, uint256 timestamp)`. Solana/Sui/Aptos emit a native escrow-release event with the same fields.
+
+#### 11.4 Conformance
+
+A destination chain is event-conformant iff, for the same transfer, its `SanadMinted` carries all seven §11.2 fields with values matching the source lock and the supplied recipient, and the §9.2 digest recomputed from those fields verifies against the published verifier set. The rollout conformance check (per-chain scenarios) validates exactly this equivalence — see the operator runbook `csv-docs/runbooks/OPERATOR_ROLLOUT_MULTICHAIN.md`.
+
+> Implementation note: the Rust `CanonicalEvent`/`SealMintedEvent` types in `csv-protocol/src/events.rs` predate this RFC and still use the older `Seal*` shape (a one-byte `source_chain` and a `source_seal_ref`) rather than the seven fields above. Aligning those types to this schema is a separate, non-breaking follow-up (it changes an off-chain representation, not the mint ABI or the on-chain event); this section is the authoritative target for that work.
+
 ## Rationale
 
 This RFC chooses off-chain CSV verification because it best preserves the protocol's intended trust boundary and operational properties.

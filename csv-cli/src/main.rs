@@ -33,8 +33,9 @@
 //! csv proof generate --chain bitcoin --sanad-id 0x...
 //! csv proof verify --chain sui --proof-file proof.json
 //!
-//! # Cross-chain transfers
-//! csv cross-chain transfer --from bitcoin --to sui --sanad-id 0x...
+//! # Cross-chain transfers (pick a mode explicitly)
+//! csv cross-chain materialize --from bitcoin --to sui --sanad-id 0x...   # on-chain mint
+//! csv cross-chain send --from bitcoin --sanad-id 0x... --invoice <blob>  # interactive off-chain
 //! csv cross-chain status --transfer-id 0x...
 //!
 //! # Contract deployment

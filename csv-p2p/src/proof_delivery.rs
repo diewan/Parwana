@@ -8,9 +8,13 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_wire::Consignment;
 use tracing::{debug, info, warn};
 
-use crate::{DeliveredProof, EventId, ProofTransport, TransportError};
+use crate::{
+    ConsignmentTransport, DeliveredConsignment, DeliveredProof, EventId, ProofTransport,
+    TransportError,
+};
 
 /// Default TTL for proof cache entries (1 hour).
 const DEFAULT_PROOF_TTL: Duration = Duration::from_secs(3600);
@@ -27,6 +31,93 @@ pub struct ProofFilter {
     pub authors: Vec<String>,
     /// Minimum confirmation count required.
     pub min_confirmations: Option<u64>,
+}
+
+/// Filter criteria for subscribing to consignments via P2P transport.
+///
+/// These fields are routing hints only. A matching filter must never be treated
+/// as acceptance; recipients must still validate the delivered consignment using
+/// the normal accept path.
+#[derive(Debug, Clone, Default)]
+pub struct ConsignmentFilter {
+    /// Destination chain IDs to filter by (empty = all chains).
+    pub destination_chains: Vec<String>,
+    /// Sanad IDs to filter by (empty = all Sanads).
+    pub sanad_ids: Vec<String>,
+    /// Invoice IDs to filter by (hex canonical invoice id; empty = all invoices).
+    pub invoice_ids: Vec<String>,
+    /// Author public keys to filter by (empty = all authors).
+    pub authors: Vec<String>,
+}
+
+impl ConsignmentFilter {
+    /// Create a filter matching all CSV consignments.
+    pub fn all_csv_consignments() -> Self {
+        Self::default()
+    }
+
+    /// Create a filter for consignments targeting a destination chain.
+    pub fn for_destination_chain(chain: &str) -> Self {
+        Self {
+            destination_chains: vec![chain.to_string()],
+            ..Default::default()
+        }
+    }
+
+    /// Create a filter for a specific Sanad.
+    pub fn for_sanad(sanad_id: &str) -> Self {
+        Self {
+            sanad_ids: vec![sanad_id.to_string()],
+            ..Default::default()
+        }
+    }
+
+    /// Create a filter for a specific invoice id.
+    pub fn for_invoice(invoice_id_hex: &str) -> Self {
+        Self {
+            invoice_ids: vec![invoice_id_hex.to_string()],
+            ..Default::default()
+        }
+    }
+
+    /// Check if this filter matches a destination chain.
+    pub fn matches_destination_chain(&self, chain_id: &str) -> bool {
+        self.destination_chains.is_empty()
+            || self
+                .destination_chains
+                .iter()
+                .any(|chain| chain == chain_id)
+    }
+
+    /// Check if this filter matches an author pubkey.
+    pub fn matches_author(&self, author: &str) -> bool {
+        self.authors.is_empty() || self.authors.iter().any(|known| known == author)
+    }
+
+    /// Check if this filter matches a consignment's structural routing fields.
+    ///
+    /// This is intentionally limited to envelope metadata. It does not replace
+    /// accept validation.
+    pub fn matches_consignment(&self, consignment: &Consignment) -> Result<bool, TransportError> {
+        let chain_matches = self.matches_destination_chain(consignment.invoice.seal.chain());
+        let sanad_matches = self.sanad_ids.is_empty()
+            || self
+                .sanad_ids
+                .iter()
+                .any(|id| id == &consignment.sanad_id.bytes);
+        let invoice_matches = if self.invoice_ids.is_empty() {
+            true
+        } else {
+            let invoice_id = consignment
+                .invoice
+                .canonical_id()
+                .map_err(|e| TransportError::Serialization(e.to_string()))?;
+            let invoice_id_hex = hex::encode(invoice_id);
+            self.invoice_ids.iter().any(|id| id == &invoice_id_hex)
+        };
+
+        Ok(chain_matches && sanad_matches && invoice_matches)
+    }
 }
 
 impl ProofFilter {
@@ -159,6 +250,17 @@ impl Default for ProofCache {
 /// for each broadcast based on chain affinity and connectivity status.
 pub struct ProofRouter {
     transports: HashMap<String, Box<dyn ProofTransport>>,
+    preferred_transport: Option<String>,
+    cache: ProofCache,
+}
+
+/// Routes consignment envelopes to available P2P transports.
+///
+/// File delivery remains the default application behavior; this router is an
+/// opt-in convenience for moving the same canonical bytes peer-to-peer. It never
+/// records acceptance or mutates protocol state.
+pub struct ConsignmentRouter {
+    transports: HashMap<String, Box<dyn ConsignmentTransport>>,
     preferred_transport: Option<String>,
     cache: ProofCache,
 }
@@ -310,6 +412,154 @@ impl ProofRouter {
     }
 }
 
+impl ConsignmentRouter {
+    /// Create a new consignment router.
+    pub fn new() -> Self {
+        Self {
+            transports: HashMap::new(),
+            preferred_transport: None,
+            cache: ProofCache::new(),
+        }
+    }
+
+    /// Register a transport for consignment delivery.
+    pub fn register(&mut self, name: String, transport: Box<dyn ConsignmentTransport>) {
+        let name_clone = name.clone();
+        info!(transport = %name, "Registered P2P consignment transport");
+        self.transports.insert(name, transport);
+
+        if self.preferred_transport.is_none() {
+            self.preferred_transport = Some(name_clone);
+        }
+    }
+
+    /// Get the list of registered transport names.
+    pub fn transports(&self) -> Vec<String> {
+        self.transports.keys().cloned().collect()
+    }
+
+    /// Set the preferred transport by name.
+    pub fn set_preferred(&mut self, name: &str) {
+        if self.transports.contains_key(name) {
+            self.preferred_transport = Some(name.to_string());
+            info!(preferred = %name, "Set preferred P2P consignment transport");
+        } else {
+            warn!(%name, "Attempted to set unknown consignment transport as preferred");
+        }
+    }
+
+    /// Get the preferred transport name.
+    pub fn preferred(&self) -> Option<&str> {
+        self.preferred_transport.as_deref()
+    }
+
+    /// Deliver a consignment envelope via the preferred connected transport.
+    pub async fn deliver(&self, consignment: &Consignment) -> Result<EventId, TransportError> {
+        if let Some(ref name) = self.preferred_transport {
+            if let Some(transport) = self.transports.get(name) {
+                if transport.is_connected().await {
+                    debug!(transport = %name, "Delivering consignment via preferred transport");
+                    match transport.deliver_consignment(consignment).await {
+                        Ok(event_id) => return Ok(event_id),
+                        Err(e) => {
+                            warn!(transport = %name, error = %e, "Preferred consignment transport failed, trying fallback");
+                        }
+                    }
+                } else {
+                    warn!(transport = %name, "Preferred consignment transport not connected, trying fallback");
+                }
+            }
+        }
+
+        for (name, transport) in &self.transports {
+            if transport.is_connected().await {
+                debug!(transport = %name, "Delivering consignment via fallback transport");
+                match transport.deliver_consignment(consignment).await {
+                    Ok(event_id) => return Ok(event_id),
+                    Err(e) => {
+                        warn!(transport = %name, error = %e, "Fallback consignment transport failed");
+                    }
+                }
+            }
+        }
+
+        Err(TransportError::NoRelays)
+    }
+
+    /// Deliver a consignment envelope to all connected transports.
+    pub async fn deliver_all(
+        &self,
+        consignment: &Consignment,
+    ) -> (Vec<EventId>, Vec<TransportError>) {
+        let mut success = Vec::new();
+        let mut errors = Vec::new();
+
+        for (name, transport) in &self.transports {
+            if !transport.is_connected().await {
+                debug!(transport = %name, "Skipping disconnected consignment transport");
+                continue;
+            }
+
+            match transport.deliver_consignment(consignment).await {
+                Ok(event_id) => {
+                    info!(transport = %name, event_id = %event_id.as_hex(), "Consignment delivery successful");
+                    success.push(event_id);
+                }
+                Err(e) => {
+                    warn!(transport = %name, error = %e, "Consignment delivery failed");
+                    errors.push(e);
+                }
+            }
+        }
+
+        info!(
+            total = self.transports.len(),
+            successful = success.len(),
+            failed = errors.len(),
+            "Consignment deliver-all completed"
+        );
+
+        (success, errors)
+    }
+
+    /// Process an incoming delivered consignment with deduplication.
+    ///
+    /// Returns true if the envelope was new. This method does not validate or
+    /// accept the consignment.
+    pub fn process_incoming(&mut self, delivered: DeliveredConsignment) -> bool {
+        if self.cache.is_duplicate(&delivered.event_id) {
+            debug!(event_id = %delivered.event_id.as_hex(), "Duplicate consignment rejected");
+            return false;
+        }
+
+        self.cache.record(&delivered.event_id);
+
+        info!(
+            event_id = %delivered.event_id.as_hex(),
+            author = %delivered.author_pubkey,
+            timestamp = delivered.timestamp,
+            "Processing incoming consignment envelope"
+        );
+
+        true
+    }
+
+    pub fn is_seen(&mut self, event_id: &EventId) -> bool {
+        self.cache.is_duplicate(event_id)
+    }
+
+    /// Get the number of cached consignments.
+    pub fn cache_size(&self) -> usize {
+        self.cache.len()
+    }
+}
+
+impl Default for ConsignmentRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Default for ProofRouter {
     fn default() -> Self {
         Self::new()
@@ -319,6 +569,120 @@ impl Default for ProofRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use csv_hash::Hash;
+    use csv_hash::dag::DAGSegment;
+    use csv_hash::seal::{CommitAnchor, SealPoint};
+    use csv_protocol::SignatureScheme;
+    use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
+    use csv_wire::{Invoice, SanadIdWire, SealDefinition};
+    use std::sync::Arc;
+
+    #[derive(Clone, Default)]
+    struct InMemoryConsignmentTransport {
+        delivered: Arc<parking_lot::Mutex<Vec<DeliveredConsignment>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ConsignmentTransport for InMemoryConsignmentTransport {
+        async fn deliver_consignment(
+            &self,
+            consignment: &Consignment,
+        ) -> Result<EventId, TransportError> {
+            let bytes = crate::serialize_consignment(consignment)?;
+            let received = crate::deserialize_consignment(&bytes)?;
+            let event_id = EventId::new(format!("consignment-{}", self.delivered.lock().len()));
+            self.delivered.lock().push(DeliveredConsignment {
+                consignment: received,
+                event_id: event_id.clone(),
+                author_pubkey: "memory-author".to_string(),
+                timestamp: 1,
+            });
+            Ok(event_id)
+        }
+
+        #[cfg(feature = "nostr")]
+        async fn subscribe_consignments(
+            &self,
+            _filter: ConsignmentFilter,
+        ) -> Result<tokio_stream::wrappers::ReceiverStream<DeliveredConsignment>, TransportError>
+        {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+        }
+
+        async fn is_connected(&self) -> bool {
+            true
+        }
+
+        fn transport_name(&self) -> &str {
+            "memory"
+        }
+
+        async fn disconnect(&self) {}
+    }
+
+    fn sample_invoice() -> Invoice {
+        let seal = SealDefinition::sui(vec![0xCD; 32], 7).unwrap();
+        Invoice::new(seal, vec![0xAA; 32], 0xBEEF).unwrap()
+    }
+
+    fn proof_bundle_with_seal(seal_ref: SealPoint) -> ProofBundle {
+        ProofBundle {
+            version: 1,
+            transition_dag: DAGSegment::new(vec![], Hash::new([0u8; 32])),
+            signatures: vec![],
+            signature_scheme: SignatureScheme::Ed25519,
+            seal_ref,
+            anchor_ref: CommitAnchor {
+                anchor_id: vec![0u8; 32],
+                block_height: 10,
+                metadata: b"sui".to_vec(),
+            },
+            inclusion_proof: InclusionProof {
+                proof_bytes: vec![1u8; 32],
+                block_hash: Hash::new([1u8; 32]),
+                position: 0,
+                block_number: 10,
+                leaf: Hash::new([3u8; 32]),
+                root: Hash::new([4u8; 32]),
+                siblings: vec![],
+                leaf_index: 0,
+                source: "test".to_string(),
+            },
+            finality_proof: FinalityProof {
+                finality_data: vec![1u8; 32],
+                block_hash: Hash::new([2u8; 32]),
+                threshold: 2,
+                confirmations: 6,
+                data: vec![2u8; 32],
+                source: "test".to_string(),
+                is_deterministic: true,
+            },
+        }
+    }
+
+    fn sample_consignment() -> Consignment {
+        let invoice = sample_invoice();
+        let seal_ref = invoice.bound_seal_point().unwrap();
+        Consignment::new(
+            invoice,
+            SanadIdWire {
+                bytes: hex::encode([0x55u8; 32]),
+            },
+            proof_bundle_with_seal(seal_ref),
+        )
+    }
+
+    fn accept_like_validate(bytes: &[u8]) -> Result<Consignment, TransportError> {
+        let consignment = crate::deserialize_consignment(bytes)?;
+        match consignment.binds_invoice_seal() {
+            Ok(true) => Ok(consignment),
+            Ok(false) => Err(TransportError::InvalidEvent(
+                "consignment proof is not assigned to invoice seal".to_string(),
+            )),
+            Err(e) => Err(TransportError::InvalidEvent(e)),
+        }
+    }
 
     #[test]
     fn test_proof_filter_chain_only() {
@@ -431,5 +795,67 @@ mod tests {
     fn test_event_id_display() {
         let eid = EventId::new("abc123");
         assert_eq!(format!("{}", eid), "abc123");
+    }
+
+    #[test]
+    fn test_consignment_filter_matches_routing_fields() {
+        let consignment = sample_consignment();
+        let invoice_id = hex::encode(consignment.invoice.canonical_id().unwrap());
+        let filter = ConsignmentFilter {
+            destination_chains: vec!["sui".to_string()],
+            sanad_ids: vec![consignment.sanad_id.bytes.clone()],
+            invoice_ids: vec![invoice_id],
+            authors: vec![],
+        };
+
+        assert!(filter.matches_consignment(&consignment).unwrap());
+        assert!(
+            !ConsignmentFilter::for_destination_chain("ethereum")
+                .matches_consignment(&consignment)
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_consignment_router_round_trip_delivery_accept_succeeds() {
+        let transport = InMemoryConsignmentTransport::default();
+        let delivered = Arc::clone(&transport.delivered);
+        let mut router = ConsignmentRouter::new();
+        router.register("memory".to_string(), Box::new(transport));
+
+        let consignment = sample_consignment();
+        let event_id = router.deliver(&consignment).await.unwrap();
+
+        let received = delivered.lock().first().cloned().unwrap();
+        assert_eq!(received.event_id, event_id);
+        assert!(router.process_incoming(received.clone()));
+        assert!(!router.process_incoming(received.clone()));
+
+        let received_bytes = crate::serialize_consignment(&received.consignment).unwrap();
+        let accepted = accept_like_validate(&received_bytes).unwrap();
+        assert_eq!(accepted.sanad_id.bytes, consignment.sanad_id.bytes);
+        assert!(accepted.binds_invoice_seal().unwrap());
+    }
+
+    #[test]
+    fn test_corrupted_in_transit_consignment_is_rejected_at_accept() {
+        let corrupted = b"not a canonical consignment envelope";
+        assert!(accept_like_validate(corrupted).is_err());
+    }
+
+    #[test]
+    fn test_unbound_delivered_consignment_is_rejected_at_accept() {
+        let invoice = sample_invoice();
+        let bad_seal = SealPoint::new(vec![0xFE; 32], None, None).unwrap();
+        let consignment = Consignment::new(
+            invoice,
+            SanadIdWire {
+                bytes: hex::encode([0x55u8; 32]),
+            },
+            proof_bundle_with_seal(bad_seal),
+        );
+        let bytes = crate::serialize_consignment(&consignment).unwrap();
+
+        assert!(accept_like_validate(&bytes).is_err());
     }
 }

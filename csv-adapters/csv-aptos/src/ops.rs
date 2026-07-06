@@ -28,7 +28,6 @@ use std::sync::Arc;
 use crate::address_utils::format_address;
 use crate::config::AptosNetwork;
 use crate::proofs::CommitmentEventBuilder;
-use crate::proofs::ParsedLockProof;
 use crate::rpc::{AptosRpc, AptosTransaction};
 use crate::seal_protocol::AptosSealProtocol;
 
@@ -44,6 +43,16 @@ pub struct AptosBackend {
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     pub(crate) seal_protocol: Arc<AptosSealProtocol>,
+    /// secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation
+    /// digest (optional).
+    ///
+    /// Distinct from the seal protocol's Ed25519 transaction signing key: the
+    /// destination `csv_seal` module authenticates a mint by recovering M-of-N
+    /// secp256k1 verifier public keys from signatures over the §9.2 digest
+    /// (`secp256k1::ecdsa_recover`), independent of who submits the transaction.
+    /// Absent this key the adapter fails closed rather than emitting an
+    /// unauthenticated mint the module would reject.
+    verifier_signing_key: Option<secp256k1::SecretKey>,
 }
 
 impl AptosBackend {
@@ -81,6 +90,7 @@ impl AptosBackend {
             domain_separator,
             event_builder,
             seal_protocol: Arc::new(seal),
+            verifier_signing_key: None,
         })
     }
 
@@ -93,6 +103,144 @@ impl AptosBackend {
             domain_separator: seal.domain(),
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
+            verifier_signing_key: None,
+        })
+    }
+
+    /// Set the secp256k1 verifier key that signs the RFC-0012 §9.2 mint
+    /// attestation digest.
+    ///
+    /// This is the mint-authority key (its 33-byte compressed public key must be
+    /// registered in the destination module's `MintAuthority` verifier set). It is
+    /// distinct from the Ed25519 transaction signer held by the seal protocol.
+    pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
+        self.verifier_signing_key = Some(verifier_signing_key);
+        self
+    }
+
+    /// Canonical 32-byte identity of the destination `csv_seal` module account
+    /// (RFC-0012 §9.2 `destinationContract` on Aptos).
+    ///
+    /// The Move digest binds `destinationContract = bcs::to_bytes(&@csv_seal)`,
+    /// which for an `address` is the 32-byte big-endian account address. The
+    /// adapter forces this value into the attestation before signing rather than
+    /// trusting the runtime-supplied (zeroed) contract identity, so the signed
+    /// digest matches the value the module recomputes on-chain.
+    pub fn module_contract_id(&self) -> ChainOpResult<[u8; 32]> {
+        let module_address = &self.seal_protocol.config().seal_contract.module_address;
+        crate::address_utils::parse_aptos_address(module_address).map_err(|e| {
+            ChainOpError::InvalidInput(format!("Invalid csv_seal module address: {}", e))
+        })
+    }
+
+    /// Sign a 32-byte RFC-0012 §9.2 attestation digest with the configured
+    /// secp256k1 verifier key, producing a 65-byte recoverable signature
+    /// (`r(32) || s(32) || v(1)`, `v` = recovery id `∈ {0, 1}`).
+    ///
+    /// The digest is `sha256(preimage)` (the frozen §9.2 preimage). The Move
+    /// `csv_seal` module recovers the signer via `secp256k1::ecdsa_recover(digest,
+    /// recovery_id, sig)` — recovering directly over the 32-byte digest — so
+    /// signing the digest bytes recovers the same key on-chain. The recovery id is
+    /// emitted raw (0/1), which the Move code also accepts as-is (it additionally
+    /// tolerates the EVM `+27` form). Fails closed when no verifier key is
+    /// configured rather than emitting an unauthenticated mint.
+    pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
+        use secp256k1::{Message, Secp256k1};
+
+        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set a secp256k1 verifier key via with_verifier_key())."
+                    .to_string(),
+            )
+        })?;
+
+        // Sign the digest bytes directly (no message prefix), matching the
+        // on-chain ecdsa_recover-over-digest semantics.
+        let msg = Message::from_digest(*digest);
+        let secp = Secp256k1::new();
+        let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
+        let (recovery_id, compact) = signature.serialize_compact();
+
+        let mut out = Vec::with_capacity(65);
+        out.extend_from_slice(&compact);
+        // Aptos `secp256k1::ecdsa_recover` expects the raw recovery id (0/1) as `v`.
+        out.push(recovery_id.to_i32() as u8);
+        Ok(out)
+    }
+
+    /// Submit a verifier-attested §9.2 `csv_seal::mint_sanad` call and wait for its
+    /// effects, returning `(tx_hash_hex, ledger_version)`.
+    ///
+    /// The `args` already carry the frozen §9.2 fields and the attached verifier
+    /// signatures (built by the runtime adapter after it bound
+    /// `destinationContract`, computed the digest, and signed it). This is the sole
+    /// submission point; it fails closed on a reverted transaction.
+    #[cfg(feature = "rpc")]
+    pub async fn submit_attested_mint(
+        &self,
+        args: crate::mint::AptosMintArgs,
+    ) -> ChainOpResult<SanadOperationResult> {
+        use csv_protocol::chain_adapter_traits::SanadOperation;
+
+        // Build the mint_sanad entry-function payload against the deployed module.
+        let (module_addr, _) = self.seal_protocol.event_builder_config();
+        let module_address = format_address(module_addr);
+        let builder = crate::entry_function::EntryFunctionBuilder::new(module_address);
+        let payload = builder.mint_sanad(
+            args.sanad_id,
+            args.commitment,
+            args.source_chain,
+            args.destination_owner.clone(),
+            args.lock_event_id,
+            args.nullifier,
+            args.attestation_expiry,
+            args.verifier_signatures.clone(),
+        );
+
+        // Sign with the Ed25519 transaction signer (submission authority only — it
+        // confers NO mint authority; that lives in the verifier signatures).
+        let signed_tx = self
+            .seal_protocol
+            .sign_entry_function_payload(payload)
+            .await
+            .map_err(|e| {
+                ChainOpError::TransactionError(format!(
+                    "Failed to build and sign mint_sanad transaction: {}",
+                    e
+                ))
+            })?;
+
+        let tx_hash = self
+            .rpc
+            .submit_signed_transaction(signed_tx)
+            .await
+            .map_err(|e| {
+                ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
+            })?;
+
+        // Wait for confirmation and fail closed on a reverted mint.
+        let tx = self.rpc.wait_for_transaction(tx_hash).await.map_err(|_| {
+            ChainOpError::Timeout(format!(
+                "Timeout waiting for mint confirmation. Transaction hash: {}. Check explorer for status.",
+                hex::encode(tx_hash)
+            ))
+        })?;
+
+        if !tx.success {
+            return Err(ChainOpError::TransactionError(format!(
+                "Mint transaction failed with VM status: {}",
+                tx.vm_status
+            )));
+        }
+
+        Ok(SanadOperationResult {
+            sanad_id: SanadId(Hash::new(args.sanad_id)),
+            operation: SanadOperation::Mint,
+            transaction_hash: hex::encode(tx_hash),
+            block_height: tx.version,
+            chain_id: "aptos".to_string(),
+            metadata: Vec::new(),
         })
     }
 
@@ -1015,211 +1163,28 @@ impl ChainSanadOps for AptosBackend {
 
     async fn mint_sanad(
         &self,
-        source_chain: &str,
-        source_sanad_id: &SanadId,
-        lock_proof: &CoreInclusionProof,
-        new_owner: &str,
+        _source_chain: &str,
+        _source_sanad_id: &SanadId,
+        _lock_proof: &CoreInclusionProof,
+        _new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        #[cfg(feature = "rpc")]
-        {
-            use csv_protocol::chain_adapter_traits::SanadOperation;
-
-            // Parse the source chain to ensure it's valid
-            let _source = source_chain
-                .parse::<csv_hash::chain_id::ChainId>()
-                .map_err(|_| {
-                    ChainOpError::InvalidInput(format!("Invalid source chain: {}", source_chain))
-                })?;
-
-            // Parse new owner address (expecting hex-encoded 32-byte Aptos address)
-            let new_owner_clean = new_owner.trim_start_matches("0x");
-            let owner_bytes = hex::decode(new_owner_clean).map_err(|_| {
-                ChainOpError::InvalidInput("Invalid owner address format".to_string())
-            })?;
-
-            if owner_bytes.len() != 32 {
-                return Err(ChainOpError::InvalidInput(
-                    "Owner address must be 32 bytes".to_string(),
-                ));
-            }
-
-            let _owner_address: [u8; 32] = owner_bytes.try_into().map_err(|_| {
-                ChainOpError::InvalidInput("Invalid owner address array".to_string())
-            })?;
-
-            // Verify the lock proof has valid structure
-            if lock_proof.proof_bytes.is_empty() {
-                return Err(ChainOpError::InvalidInput(
-                    "Lock proof is empty".to_string(),
-                ));
-            }
-
-            if lock_proof.block_hash == Hash::zero() {
-                return Err(ChainOpError::InvalidInput(
-                    "Lock proof has zero block hash".to_string(),
-                ));
-            }
-
-            log::debug!("APTOS: Minting sanad from source chain: {}", source_chain);
-            log::debug!(
-                "APTOS: Source sanad ID: {}",
-                hex::encode(source_sanad_id.as_bytes())
-            );
-
-            // Find the seal resource for this sanad from active seals, or create one if none exist
-            let seal = if let Some(seal) = self.seal_protocol.get_active_seals().into_iter().last()
-            {
-                seal
-            } else {
-                // Auto-create a seal if none exist
-                log::debug!("APTOS: No active seals found, creating a new seal");
-                let seal = self.seal_protocol.create_seal(None).await.map_err(|e| {
-                    ChainOpError::TransactionError(format!("Failed to create seal: {}", e))
-                })?;
-
-                // Wait a moment for the seal creation transaction to be processed
-                // This avoids SEQUENCE_NUMBER_TOO_OLD errors by allowing the sequence number to increment
-                log::debug!("APTOS: Waiting for seal creation to be processed...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                seal
-            };
-
-            // The commitment is the source sanad ID
-            let commitment = *source_sanad_id.as_bytes();
-
-            // Build and sign the mint_sanad transaction using the actual Move contract function
-            // The mint_sanad entry function signature:
-            // mint_sanad(account, sanad_id, commitment, state_root, source_chain, source_seal_ref, proof, proof_root, leaf_position)
-            log::debug!("APTOS: Building mint_sanad transaction");
-
-            // Parse source chain to u8
-            let source_chain_u8 = match source_chain {
-                "bitcoin" => 0,
-                "sui" => 1,
-                "aptos" => 2,
-                "ethereum" => 3,
-                "solana" => 4,
-                _ => {
-                    return Err(ChainOpError::InvalidInput(format!(
-                        "Invalid source chain: {}",
-                        source_chain
-                    )));
-                }
-            };
-
-            // Get module address from seal protocol
-            let (module_addr, _) = self.seal_protocol.event_builder_config();
-            let module_address = format_address(module_addr);
-
-            // Use EntryFunctionBuilder to construct the mint_sanad payload
-            let builder = crate::entry_function::EntryFunctionBuilder::new(module_address);
-
-            // Convert Vec<u8> to [u8; 32] where needed
-            let source_seal_ref_array: [u8; 32] = if lock_proof.proof_bytes.len() >= 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&lock_proof.proof_bytes[..32]);
-                arr
-            } else {
-                return Err(ChainOpError::InvalidInput(
-                    "Lock proof too short for source_seal_ref".to_string(),
-                ));
-            };
-
-            let proof_root_array = *lock_proof.block_hash.as_bytes();
-
-            // Parse lock proof into explicit fields required by Move entry function
-            // This rejects short proofs and extracts state_root and leaf_position properly
-            let parsed_proof = ParsedLockProof::parse(&lock_proof.proof_bytes).map_err(|e| {
-                ChainOpError::InvalidInput(format!("Failed to parse lock proof: {}", e))
-            })?;
-
-            let state_root = parsed_proof.state_root;
-            let leaf_position = parsed_proof.leaf_position;
-
-            // Build the payload with all required parameters
-            let payload = builder.mint_sanad(
-                *source_sanad_id.as_bytes(), // sanad_id
-                commitment,                  // commitment
-                state_root,                  // state_root parsed from lock proof
-                source_chain_u8,             // source_chain
-                source_seal_ref_array,       // source_seal_ref
-                parsed_proof.proof_data,     // proof_data (without prefix)
-                proof_root_array,            // proof_root
-                leaf_position,               // leaf_position parsed from lock proof
-            );
-
-            let signed_tx = self
-                .seal_protocol
-                .sign_entry_function_payload(payload)
-                .await
-                .map_err(|e| {
-                    ChainOpError::TransactionError(format!(
-                        "Failed to build and sign mint_sanad transaction: {}",
-                        e
-                    ))
-                })?;
-
-            log::debug!("APTOS: Built and signed mint_sanad transaction");
-
-            // Submit the signed transaction via RPC
-            log::debug!("APTOS: Submitting mint_sanad transaction");
-            let tx_hash = self
-                .rpc
-                .submit_signed_transaction(signed_tx)
-                .await
-                .map_err(|e| {
-                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
-                })?;
-
-            log::debug!(
-                "APTOS: Transaction submitted with hash: {}",
-                hex::encode(tx_hash)
-            );
-
-            // Wait for transaction confirmation
-            log::debug!("APTOS: Waiting for transaction confirmation");
-            let tx = match self.rpc.wait_for_transaction(tx_hash).await {
-                Ok(tx) => tx,
-                Err(e) => {
-                    log::warn!("APTOS: Timeout waiting for transaction, querying status directly");
-                    return Err(ChainOpError::Timeout(format!(
-                        "Timeout waiting for transaction confirmation. Transaction hash: {}. Check explorer for status.",
-                        hex::encode(tx_hash)
-                    )));
-                }
-            };
-
-            if !tx.success {
-                return Err(ChainOpError::TransactionError(format!(
-                    "Transaction failed with VM status: {}",
-                    tx.vm_status
-                )));
-            }
-
-            log::debug!("APTOS: Transaction confirmed successfully");
-
-            Ok(SanadOperationResult {
-                sanad_id: source_sanad_id.clone(),
-                operation: SanadOperation::Mint,
-                transaction_hash: hex::encode(tx_hash),
-                block_height: tx.version,
-                chain_id: "aptos".to_string(),
-                metadata: serde_json::to_vec(&serde_json::json!({
-                    "source_chain": source_chain,
-                    "new_owner": new_owner,
-                    "seal_address": hex::encode(seal.account_address),
-                }))
-                .unwrap_or_default(),
-            })
-        }
-
-        #[cfg(not(feature = "rpc"))]
-        {
-            Err(ChainOpError::CapabilityUnavailable(
-                "Sanad minting requires RPC feature. Enable with --features rpc".to_string(),
-            ))
-        }
+        // Pre-RFC-0012 mint shape. Under the thin-registry model (RFC-0012 §9) a
+        // destination mint is NOT authorized by a lock/inclusion proof handed to
+        // the chain, and carries no `u8` source-chain tag: cross-chain validity is
+        // adjudicated OFF-CHAIN by the canonical verifier, and the only on-chain
+        // authenticity check is a set of secp256k1 verifier signatures over the
+        // frozen §9.2 attestation digest. The authoritative mint path is
+        // `AptosRuntimeAdapter::mint_sanad`, which decodes the runtime's
+        // `RuntimeMintRequest`, binds `destinationContract = @csv_seal` module
+        // address, signs the §9.2 digest, and calls
+        // `AptosBackend::submit_attested_mint`. Fail closed here rather than submit
+        // a mint authenticated by a proof the module never checks.
+        Err(ChainOpError::CapabilityUnavailable(
+            "Aptos mint is verifier-attested (RFC-0012 §9.2); use \
+             AptosRuntimeAdapter::mint_sanad which carries the attestation, not the \
+             pre-RFC-0012 inclusion-proof mint path."
+                .to_string(),
+        ))
     }
 
     async fn refund_sanad(

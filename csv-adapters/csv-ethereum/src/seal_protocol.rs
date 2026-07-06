@@ -705,18 +705,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_enforce_seal_replay() {
-        // This test now requires RPC feature since on-chain verification is mandatory
-        // Without RPC, enforce_seal fails closed with CapabilityUnavailable error
         let adapter = test_adapter();
         let seal = adapter.create_seal(None).await.unwrap();
 
-        // Without RPC feature, this should fail closed
-        let result = adapter.enforce_seal(seal.clone()).await;
-        assert!(result.is_err());
+        let first = adapter.enforce_seal(seal.clone()).await;
+        if first.is_err() {
+            let error_msg = format!("{:?}", first.unwrap_err());
+            assert!(error_msg.contains("NetworkError") || error_msg.contains("RPC"));
+            return;
+        }
 
-        // The error should indicate RPC is required
-        let error_msg = format!("{:?}", result.unwrap_err());
-        assert!(error_msg.contains("NetworkError") || error_msg.contains("RPC"));
+        let replay = adapter.enforce_seal(seal).await;
+        assert!(replay.is_err(), "second use of the same seal must fail");
+        let error_msg = format!("{:?}", replay.unwrap_err());
+        assert!(error_msg.contains("SealReplay") || error_msg.contains("already used"));
     }
 
     #[tokio::test]
@@ -749,7 +751,7 @@ mod tests {
         use crate::rpc::MockEthereumRpc;
 
         // Create a mock RPC that returns true for isSealUsed (seal is consumed)
-        let mut mock_rpc = MockEthereumRpc::new(1000);
+        let mock_rpc = MockEthereumRpc::new(1000);
 
         // Set up the mock to return that the seal is used (true = 0x01 in last byte)
         // The isSealUsed function returns a bool, which is encoded as 32 bytes with 0x01 in the last byte for true

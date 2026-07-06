@@ -4,8 +4,16 @@ default_network = "testnet"
 rpc_endpoints = ["https://api.devnet.solana.com"]
 block_explorer_urls = ["https://explorer.solana.com/?cluster=devnet"]
 start_block = 0
-# program_id is now read from deployments/deployment-manifest.json
-# program_id = "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj"
+# Thin-registry verifier-attested mint (RFC-0012 §9). Mints are authorized by an
+# M-of-N verifier-signed attestation over the §9.2 digest — there is NO proof
+# root and NO fallback mint path. The csv-seal program id is the RFC-0012 §9.2
+# `destinationContract`; replay protection uses never-closed tombstone PDAs
+# (minted / nullifier / lock-event) since Solana has weak native single-use.
+#
+# program_id is read from deployments/deployment-manifest.json
+# (deployments.solana.program_id) via get_solana_program_id().
+# Deployed to devnet 2026-07-06 (RFC-0012 thin-registry):
+# program_id = "9ekKQYpaLkTrycYmRNRDHohYZwXycHAyfLNirUDRnRVh"
 
 [finality_guarantee]
 max_reorg_depth = 32

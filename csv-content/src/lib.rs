@@ -24,10 +24,10 @@
 //! use csv_content::ContentTree;
 //!
 //! // Create a content tree
-//! let tree = ContentTree::new(...);
+//! let tree = ContentTree::from_leaves(vec![b"leaf-0".to_vec(), b"leaf-1".to_vec()]);
 //!
-//! // Use serde for serialization (L2 allows serde)
-//! let json = serde_json::to_string(&tree)?;
+//! // Verify inclusion with the tree's Merkle proof.
+//! assert!(tree.verify_inclusion(0, b"leaf-0"));
 //! ```
 //!
 //! # Migration Guide

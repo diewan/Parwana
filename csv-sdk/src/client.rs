@@ -858,6 +858,12 @@ impl CsvClient {
                             )
                         })?,
                 );
+                // Bind the shared thin-registry `Registry` object id (RFC-0012
+                // §9.2 `destinationContract`) from the deployment manifest. It is
+                // distinct from the package id; when unset the adapter fails
+                // closed at mint time rather than defaulting.
+                sui_config.seal_contract.registry_id =
+                    csv_protocol::deployment_manifest::get_sui_registry_id().ok();
                 // Convert hex string to Vec<u8> for Sui and derive signer address
                 let sui_private_key = private_keys
                     .as_ref()

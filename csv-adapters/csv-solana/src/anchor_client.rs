@@ -128,6 +128,31 @@ pub mod pdas {
             program_id,
         )
     }
+
+    /// Derive the verifier registry PDA: ["verifier_registry"]
+    ///
+    /// The RFC-0012 §9.3 verifier set the mint reads to authenticate signatures.
+    pub fn verifier_registry(program_id: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"verifier_registry"], program_id)
+    }
+
+    /// Derive the minted-sanad tombstone PDA: ["minted", sanad_id]
+    ///
+    /// Created with `init` at mint and never closed — its existence is the primary
+    /// duplicate-mint guard.
+    pub fn mint_record(program_id: &Pubkey, sanad_id: &[u8; 32]) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"minted", sanad_id], program_id)
+    }
+
+    /// Derive the nullifier tombstone PDA: ["nullifier", nullifier]
+    pub fn nullifier_record(program_id: &Pubkey, nullifier: &[u8; 32]) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"nullifier", nullifier], program_id)
+    }
+
+    /// Derive the lock-event tombstone PDA: ["lock_event", lock_event_id]
+    pub fn lock_event_record(program_id: &Pubkey, lock_event_id: &[u8; 32]) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"lock_event", lock_event_id], program_id)
+    }
 }
 
 /// Instruction builders
@@ -239,44 +264,10 @@ impl InstructionBuilder {
         )
     }
 
-    /// Build mint_sanad instruction
-    #[allow(clippy::too_many_arguments)]
-    pub fn mint_sanad(
-        &self,
-        sanad_account: Pubkey,
-        owner: Pubkey,
-        sanad_id: [u8; 32],
-        commitment: [u8; 32],
-        state_root: [u8; 32],
-        source_chain: u8,
-        source_seal_ref: [u8; 32],
-        proof: Vec<u8>,
-        proof_root: [u8; 32],
-        leaf_position: u64,
-    ) -> Instruction {
-        let mut data = Vec::new();
-        data.extend_from_slice(&discriminators::mint_sanad());
-        data.extend_from_slice(&sanad_id);
-        data.extend_from_slice(&commitment);
-        data.extend_from_slice(&state_root);
-        data.push(source_chain);
-        data.extend_from_slice(&source_seal_ref);
-        data.extend_from_slice(&(proof.len() as u32).to_le_bytes());
-        data.extend_from_slice(&proof);
-        data.extend_from_slice(&proof_root);
-        data.extend_from_slice(&leaf_position.to_le_bytes());
-
-        Instruction::new_with_bytes(
-            self.program_id,
-            &data,
-            vec![
-                AccountMeta::new(sanad_account, false),
-                AccountMeta::new_readonly(owner, true),
-                // AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
-                AccountMeta::new_readonly(Pubkey::from([0u8; 32]), false),
-            ],
-        )
-    }
+    // NOTE: the verifier-attested (RFC-0012 §9.2) `mint_sanad` instruction is built
+    // by [`crate::mint::build_mint_instruction`], the single canonical builder for
+    // the thin-registry mint. The former proof-root-era builder that lived here has
+    // been removed.
 
     /// Build refund_sanad instruction
     pub fn refund_sanad(
@@ -329,7 +320,6 @@ impl InstructionBuilder {
     }
 
     /// Build record_sanad_metadata instruction
-    #[allow(clippy::too_many_arguments)]
     pub fn record_sanad_metadata(
         &self,
         sanad_account: Pubkey,
@@ -338,7 +328,6 @@ impl InstructionBuilder {
         asset_id: [u8; 32],
         metadata_hash: [u8; 32],
         proof_system: u8,
-        proof_root: [u8; 32],
     ) -> Instruction {
         let mut data = Vec::new();
         data.extend_from_slice(&discriminators::record_sanad_metadata());
@@ -346,7 +335,6 @@ impl InstructionBuilder {
         data.extend_from_slice(&asset_id);
         data.extend_from_slice(&metadata_hash);
         data.push(proof_system);
-        data.extend_from_slice(&proof_root);
 
         Instruction::new_with_bytes(
             self.program_id,
@@ -437,34 +425,22 @@ mod tests {
     }
 
     #[test]
-    fn test_mint_sanad_instruction_with_proof() {
-        let builder = InstructionBuilder::new();
-        let sanad_account = Pubkey::new_unique();
-        let owner = Pubkey::new_unique();
+    fn test_thin_registry_mint_pdas_are_distinct_and_seeded() {
+        let program_id = Pubkey::from_str(CSV_SEAL_PROGRAM_ID).unwrap();
         let sanad_id = [1u8; 32];
-        let commitment = [2u8; 32];
-        let state_root = [3u8; 32];
-        let source_chain = 1u8;
-        let source_seal_ref = [4u8; 32];
-        let proof = vec![5u8; 64];
-        let proof_root = [6u8; 32];
-        let leaf_position = 0u64;
+        let nullifier = [2u8; 32];
+        let lock_event_id = [3u8; 32];
 
-        let ix = builder.mint_sanad(
-            sanad_account,
-            owner,
-            sanad_id,
-            commitment,
-            state_root,
-            source_chain,
-            source_seal_ref,
-            proof.clone(),
-            proof_root,
-            leaf_position,
-        );
+        let (verifier_registry, _) = pdas::verifier_registry(&program_id);
+        let (mint_record, _) = pdas::mint_record(&program_id, &sanad_id);
+        let (nullifier_record, _) = pdas::nullifier_record(&program_id, &nullifier);
+        let (lock_event_record, _) = pdas::lock_event_record(&program_id, &lock_event_id);
 
-        assert_eq!(ix.accounts.len(), 3);
-        // discriminator + sanad_id + commitment + state_root + source_chain + source_seal_ref + proof_len + proof + proof_root + leaf_position
-        assert_eq!(ix.data.len(), 8 + 32 + 32 + 32 + 1 + 32 + 4 + 64 + 32 + 8);
+        // Each replay tombstone is a distinct account, and re-deriving is stable.
+        assert_ne!(mint_record, nullifier_record);
+        assert_ne!(mint_record, lock_event_record);
+        assert_ne!(nullifier_record, lock_event_record);
+        assert_ne!(verifier_registry, mint_record);
+        assert_eq!(mint_record, pdas::mint_record(&program_id, &sanad_id).0);
     }
 }

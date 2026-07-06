@@ -16,6 +16,7 @@
 //! - `rollback_triggered_total` — Count of rollbacks triggered
 //! - `proof_pipeline_latency_ms` — Latency from lock confirmation to mint confirmation
 //! - `verification_component_failure_total` — Count of verification component failures
+//! - `runtime_flow_*_total` — Operator-facing transfer lifecycle signals
 
 extern crate alloc;
 
@@ -23,6 +24,100 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
+
+// =========================================================================
+// Runtime Flow Metrics
+// =========================================================================
+
+/// Operator-facing counters for the thin-registry materialize and settlement flow.
+///
+/// These counters intentionally mirror the release runbook's named signals, so
+/// dashboards and incident checks can key off a stable vocabulary independent
+/// of chain-specific event encodings.
+#[derive(Debug)]
+pub struct RuntimeFlowMetrics {
+    verified_proof_built: AtomicU64,
+    mint_submitted: AtomicU64,
+    mint_confirmed: AtomicU64,
+    settlement_submitted: AtomicU64,
+    settlement_confirmed: AtomicU64,
+    replay_rejected: AtomicU64,
+    authorization_rejected: AtomicU64,
+}
+
+/// Snapshot of runtime flow metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeFlowSnapshot {
+    pub verified_proof_built: u64,
+    pub mint_submitted: u64,
+    pub mint_confirmed: u64,
+    pub settlement_submitted: u64,
+    pub settlement_confirmed: u64,
+    pub replay_rejected: u64,
+    pub authorization_rejected: u64,
+}
+
+impl RuntimeFlowMetrics {
+    /// Create new runtime flow metrics.
+    pub fn new() -> Self {
+        Self {
+            verified_proof_built: AtomicU64::new(0),
+            mint_submitted: AtomicU64::new(0),
+            mint_confirmed: AtomicU64::new(0),
+            settlement_submitted: AtomicU64::new(0),
+            settlement_confirmed: AtomicU64::new(0),
+            replay_rejected: AtomicU64::new(0),
+            authorization_rejected: AtomicU64::new(0),
+        }
+    }
+
+    pub fn record_verified_proof_built(&self) {
+        self.verified_proof_built.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_mint_submitted(&self) {
+        self.mint_submitted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_mint_confirmed(&self) {
+        self.mint_confirmed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_settlement_submitted(&self) {
+        self.settlement_submitted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_settlement_confirmed(&self) {
+        self.settlement_confirmed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_replay_rejected(&self) {
+        self.replay_rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_authorization_rejected(&self) {
+        self.authorization_rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return an immutable snapshot for tests, dashboards, and health output.
+    pub fn snapshot(&self) -> RuntimeFlowSnapshot {
+        RuntimeFlowSnapshot {
+            verified_proof_built: self.verified_proof_built.load(Ordering::Relaxed),
+            mint_submitted: self.mint_submitted.load(Ordering::Relaxed),
+            mint_confirmed: self.mint_confirmed.load(Ordering::Relaxed),
+            settlement_submitted: self.settlement_submitted.load(Ordering::Relaxed),
+            settlement_confirmed: self.settlement_confirmed.load(Ordering::Relaxed),
+            replay_rejected: self.replay_rejected.load(Ordering::Relaxed),
+            authorization_rejected: self.authorization_rejected.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Default for RuntimeFlowMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // =========================================================================
 // RPC Metrics
@@ -616,6 +711,8 @@ pub struct MetricsCollector {
     pub rollback: RollbackMetrics,
     /// Proof pipeline metrics
     pub pipeline: PipelineMetrics,
+    /// Runtime operator-flow metrics
+    pub runtime_flow: RuntimeFlowMetrics,
 }
 
 impl MetricsCollector {
@@ -627,6 +724,7 @@ impl MetricsCollector {
             replay: ReplayMetrics::new(),
             rollback: RollbackMetrics::new(),
             pipeline: PipelineMetrics::new(),
+            runtime_flow: RuntimeFlowMetrics::new(),
         }
     }
 
@@ -664,6 +762,38 @@ impl MetricsCollector {
     /// Emit a proof pipeline latency event
     pub fn record_pipeline_latency(&mut self, chain: &str, latency_ms: u64) {
         self.pipeline.record_execution(chain, latency_ms);
+    }
+
+    pub fn record_verified_proof_built(&self) {
+        self.runtime_flow.record_verified_proof_built();
+    }
+
+    pub fn record_mint_submitted(&self) {
+        self.runtime_flow.record_mint_submitted();
+    }
+
+    pub fn record_mint_confirmed(&self) {
+        self.runtime_flow.record_mint_confirmed();
+    }
+
+    pub fn record_settlement_submitted(&self) {
+        self.runtime_flow.record_settlement_submitted();
+    }
+
+    pub fn record_settlement_confirmed(&self) {
+        self.runtime_flow.record_settlement_confirmed();
+    }
+
+    pub fn record_replay_rejected(&self) {
+        self.runtime_flow.record_replay_rejected();
+    }
+
+    pub fn record_authorization_rejected(&self) {
+        self.runtime_flow.record_authorization_rejected();
+    }
+
+    pub fn runtime_flow_snapshot(&self) -> RuntimeFlowSnapshot {
+        self.runtime_flow.snapshot()
     }
 }
 
@@ -821,5 +951,26 @@ mod tests {
         assert_eq!(collector.proof.total(), 2);
         assert_eq!(collector.replay.total_checks(), 2);
         assert_eq!(collector.rollback.total(), 1);
+    }
+
+    #[test]
+    fn test_runtime_flow_metrics() {
+        let collector = MetricsCollector::new();
+        collector.record_verified_proof_built();
+        collector.record_mint_submitted();
+        collector.record_mint_confirmed();
+        collector.record_settlement_submitted();
+        collector.record_settlement_confirmed();
+        collector.record_replay_rejected();
+        collector.record_authorization_rejected();
+
+        let snapshot = collector.runtime_flow_snapshot();
+        assert_eq!(snapshot.verified_proof_built, 1);
+        assert_eq!(snapshot.mint_submitted, 1);
+        assert_eq!(snapshot.mint_confirmed, 1);
+        assert_eq!(snapshot.settlement_submitted, 1);
+        assert_eq!(snapshot.settlement_confirmed, 1);
+        assert_eq!(snapshot.replay_rejected, 1);
+        assert_eq!(snapshot.authorization_rejected, 1);
     }
 }

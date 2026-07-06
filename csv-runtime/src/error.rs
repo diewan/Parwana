@@ -148,6 +148,33 @@ pub enum TransferCoordinatorError {
     /// Transfer already rolled back
     #[error("Transfer already rolled back")]
     AlreadyRolledBack,
+
+    /// Source-chain escrow settlement (release or refund) submission failed
+    #[error("Settlement failed: {0}")]
+    SettlementFailed(String),
+
+    /// Escrow release requested without a confirmed destination mint to settle
+    #[error("Settlement not authorized: {0}")]
+    SettlementNotAuthorized(String),
+
+    /// Source escrow already released for this lock event (one release per lock_event_id)
+    #[error("Escrow already released")]
+    AlreadyReleased,
+
+    /// Source escrow already refunded to the locker
+    #[error("Escrow already refunded")]
+    AlreadyRefunded,
+
+    /// Interactive off-chain (send-mode) execution failed at one of the
+    /// assign / close-source-seal / emit-consignment steps.
+    #[error("Send failed: {0}")]
+    SendFailed(String),
+
+    /// The single-use source seal named by a send-mode transfer has already
+    /// been closed (by this or another transfer). Closing it again would
+    /// re-consume the seal / double-spend the Sanad, so the send is rejected.
+    #[error("Duplicate source seal: seal already closed by another transfer")]
+    DuplicateSourceSeal,
 }
 
 impl TransferCoordinatorError {
@@ -172,6 +199,12 @@ impl TransferCoordinatorError {
             TransferCoordinatorError::MintFailed(_) => FailureDomain::Rpc,
             TransferCoordinatorError::AlreadyComplete => FailureDomain::Consensus,
             TransferCoordinatorError::AlreadyRolledBack => FailureDomain::Consensus,
+            TransferCoordinatorError::SettlementFailed(_) => FailureDomain::Rpc,
+            TransferCoordinatorError::SettlementNotAuthorized(_) => FailureDomain::Verification,
+            TransferCoordinatorError::AlreadyReleased => FailureDomain::Consensus,
+            TransferCoordinatorError::AlreadyRefunded => FailureDomain::Consensus,
+            TransferCoordinatorError::SendFailed(_) => FailureDomain::Rpc,
+            TransferCoordinatorError::DuplicateSourceSeal => FailureDomain::Replay,
         }
     }
 }

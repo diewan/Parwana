@@ -12,7 +12,9 @@ csv-verifier = { path = "../csv-verifier" }
 csv-proof = { path = "../csv-proof" }
 csv-hash = { path = "../csv-hash" }
 csv-wire = { path = "../csv-wire" }
-csv-storage = { path = "../csv-storage" }
+# default-features off so RocksDB (native C++, wasm-incompatible) is pulled in ONLY via
+# the `persistent` feature — keeps the `--no-default-features` wasm build clean.
+csv-storage = { path = "../csv-storage", default-features = false }
 csv-codec = { path = "../csv-codec" }
 csv-coordinator = { path = "../csv-coordinator" }
 csv-admission = { path = "../csv-admission" }

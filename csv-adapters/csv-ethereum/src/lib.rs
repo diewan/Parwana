@@ -17,11 +17,12 @@ pub mod contract_bytecode;
 pub mod error;
 pub mod finality;
 pub mod mpt;
-// pub mod mint;  // TEMPORARILY DISABLED: uses ethers which is not in dependencies (project uses alloy)
+// The hand-written proof-root mint/lock encoders (`mint.rs`, `sanad_contract.rs`)
+// were removed with TRM-ETH-ADPT-001: the mint path is now the verifier-attested
+// §9.2 ABI submitted through the regenerated `bindings::csv_seal` bindings.
 pub mod ops;
 pub mod proofs;
 pub mod rpc;
-pub mod sanad_contract;
 pub mod seal;
 pub mod seal_contract;
 pub mod seal_protocol;
@@ -52,10 +53,6 @@ pub use rpc::EthereumRpc;
 /// this mock should depend on it under `[dev-dependencies]` only.
 #[cfg(test)]
 pub use rpc::MockEthereumRpc;
-pub use sanad_contract::{
-    CsvLockAbi, CsvMintAbi, cross_chain_lock_signature, sanad_minted_signature,
-    sanad_refunded_signature,
-};
 pub use seal_contract::CsvSealAbi;
 pub use seal_protocol::EthereumSealProtocol;
 pub use types::{

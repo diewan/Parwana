@@ -117,6 +117,43 @@ rm -rf build/
     --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" 2>&1 | tail -5
 echo ""
 
+# Analyze a failed publish and give actionable guidance. Aptos has NO un-publish:
+# a module can only be UPGRADED in place if the change is backward-compatible.
+# A breaking change (e.g. changed struct fields or #[event] attributes) is
+# rejected and must go to a fresh account.
+analyze_publish_failure() {
+    echo "ERROR: Publish failed"
+    echo "$PUBLISH_OUTPUT" | tail -20
+    cp "${MOVE_TOML_BACKUP}" "${MOVE_TOML}" 2>/dev/null || true
+    rm -rf "${TEMP_DIR}" .aptos 2>/dev/null || true
+    if echo "$PUBLISH_OUTPUT" | grep -qiE 'EVENT_METADATA_VALIDATION_ERROR|BACKWARD_INCOMPAT|incompatible|compatibility'; then
+        cat <<EOF
+
+============================================================
+INCOMPATIBLE UPGRADE: account ${ACCOUNT} already has a csv_seal module whose
+on-chain layout/events differ from this code. Aptos rejects incompatible
+in-place upgrades and cannot delete a published module. Choose ONE:
+
+  1) Keep the account: make the change COMPATIBLE (only ADD items; do not change
+     or reorder existing struct fields or #[event] struct attributes), then
+     re-run this script. The @csv_seal address and existing resources are kept.
+
+  2) Use a FRESH account (new @csv_seal address) for a breaking change:
+       aptos init --profile csvmint --network ${NETWORK} --private-key <hex> --assume-yes
+       # fund it (aptos account transfer / faucet), then re-run this script so it
+       # publishes under that account. Update deployments/deployment-manifest.json
+       # and chains/aptos-*.toml to the new module_address afterwards.
+
+  DO NOT 'aptos move deploy-object' this contract: init_registry /
+  init_mint_authority assert signer == @csv_seal and store resources there, and
+  an object address exposes no signer to call them — the module would be
+  permanently uninitializable.
+============================================================
+EOF
+    fi
+    exit 1
+}
+
 # Publish to testnet with the correct address
 echo "Publishing to ${NETWORK}..."
 if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
@@ -126,28 +163,14 @@ if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
         --profile "${APTOS_PROFILE}" \
         --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" \
         --config-file "${APTOS_CONFIG_FILE}" \
-        --assume-yes 2>&1) || {
-        echo "ERROR: Publish failed"
-        echo "$PUBLISH_OUTPUT"
-        # Restore original Move.toml on failure
-        cp "${MOVE_TOML_BACKUP}" "${MOVE_TOML}"
-        rm -rf "${TEMP_DIR}" .aptos 2>/dev/null || true
-        exit 1
-    }
+        --assume-yes 2>&1) || analyze_publish_failure
 else
     # Use default profile from global config
     PUBLISH_OUTPUT=$("$APTOS" move publish \
         --package-dir contracts \
         --profile "${APTOS_PROFILE}" \
         --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" \
-        --assume-yes 2>&1) || {
-        echo "ERROR: Publish failed"
-        echo "$PUBLISH_OUTPUT"
-        # Restore original Move.toml on failure
-        cp "${MOVE_TOML_BACKUP}" "${MOVE_TOML}"
-        rm -rf "${TEMP_DIR}" 2>/dev/null || true
-        exit 1
-    }
+        --assume-yes 2>&1) || analyze_publish_failure
 fi
 
 # Restore original Move.toml after successful deployment
@@ -169,14 +192,7 @@ echo "Network: ${NETWORK}"
 echo "Module: csv_seal::csv_seal"
 echo "=========================="
 echo ""
-echo "Next steps:"
-echo "1. The package is published under your account address: ${ACCOUNT}"
-echo "2. Initialize LockRegistry:"
-echo "   aptos move run --function-id ${ACCOUNT}::CSVSeal::init_registry --profile ${APTOS_PROFILE}"
-echo ""
-
-# Initialize the LockRegistry
-echo "Initializing LockRegistry..."
+echo "Initializing module (this is what actually enables the module)..."
 echo "  Waiting for publish transaction to be committed..."
 sleep 5
 
@@ -188,44 +204,51 @@ if [ -n "${APTOS_CONFIG_FILE:-}" ] && [ ! -f ".aptos/config.yaml" ]; then
     exit 1
 fi
 
-# Retry init up to 3 times with delay
-INIT_SUCCESS=false
-for i in 1 2 3; do
-    echo "  Attempt $i/3..."
-    if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
-        # Use explicit config for csv_deploy profile
-        if "$APTOS" move run \
-            --function-id "${ACCOUNT}::CSVSeal::init_registry" \
-            --profile "${APTOS_PROFILE}" \
-            --config-file "${APTOS_CONFIG_FILE}" \
-            --assume-yes 2>&1 | tee "scripts/registry-init-${NETWORK}.txt" | tail -5; then
-            INIT_SUCCESS=true
-            break
-        fi
-    else
-        # Use default profile from global config
-        if "$APTOS" move run \
-            --function-id "${ACCOUNT}::CSVSeal::init_registry" \
-            --profile "${APTOS_PROFILE}" \
-            --assume-yes 2>&1 | tee "scripts/registry-init-${NETWORK}.txt" | tail -5; then
-            INIT_SUCCESS=true
-            break
-        fi
-    fi
-    if [ $i -lt 3 ]; then
-        echo "  Retrying in 10 seconds..."
-        sleep 10
-    fi
-done
+# Common profile/config args for `aptos move run`.
+declare -a RUN_ARGS=(--profile "${APTOS_PROFILE}" --assume-yes)
+[ -n "${APTOS_CONFIG_FILE:-}" ] && RUN_ARGS+=(--config-file "${APTOS_CONFIG_FILE}")
 
-if [ "$INIT_SUCCESS" = false ]; then
-    echo "WARNING: Failed to initialize LockRegistry. You may need to run it manually:"
-    if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
-        echo "  aptos move run --function-id ${ACCOUNT}::CSVSeal::init_registry --profile ${APTOS_PROFILE} --config-file ${APTOS_CONFIG_FILE}"
-        echo "  (from directory: ${PWD})"
-    else
-        echo "  aptos move run --function-id ${ACCOUNT}::CSVSeal::init_registry --profile ${APTOS_PROFILE}"
+# Run an entry function, treating "already initialized" as success so re-running
+# the script (or re-seeding) is idempotent. Extra args (e.g. --args ...) precede.
+run_init() {
+    local fn="$1"; shift
+    echo "  -> ${fn} $*"
+    local out
+    if out=$("$APTOS" move run --function-id "${ACCOUNT}::CSVSeal::${fn}" "$@" "${RUN_ARGS[@]}" 2>&1); then
+        echo "     ok"
+        return 0
     fi
+    if echo "$out" | grep -qiE 'RESOURCE_ALREADY_EXISTS|EAnchorDataExists|already.*exist'; then
+        echo "     already initialized (ok)"
+        return 0
+    fi
+    echo "$out" | tail -6
+    return 1
+}
+
+# The mint destination needs: event handle, the LockRegistry (holds the replay
+# tables), and the MintAuthority (verifier set). All assert signer == @csv_seal.
+run_init initialize_module || echo "  WARNING: initialize_module failed (see above)"
+run_init init_registry      || echo "  WARNING: init_registry failed (see above)"
+
+# Seed the verifier set if the operator supplied a pubkey; otherwise mint stays
+# fail-closed and the operator seeds it later (see runbook).
+if [ -n "${CSV_MINT_VERIFIER_PUBKEY:-}" ]; then
+    PUBHEX="${CSV_MINT_VERIFIER_PUBKEY#0x}"
+    if run_init init_mint_authority --args "hex:${PUBHEX}"; then
+        echo "  verifier set SEEDED (1 verifier, threshold 1)"
+    else
+        echo "  WARNING: init_mint_authority failed — seed manually (see runbook)"
+    fi
+else
+    echo ""
+    echo "NOTE: CSV_MINT_VERIFIER_PUBKEY not set — MintAuthority NOT seeded; mint fails closed."
+    echo "  Seed later (verifier = compressed 33-byte secp256k1 pubkey):"
+    echo "    aptos move run --function-id ${ACCOUNT}::CSVSeal::init_mint_authority \\"
+    echo "        --args hex:<verifier_pubkey> --profile ${APTOS_PROFILE} --assume-yes"
+    echo "  Rotate later is TIMELOCKED (7 days) — two steps:"
+    echo "    schedule_verifier_update --args hex:<pubkey> bool:<add?> u64:<new_threshold>"
+    echo "    execute_verifier_update            # after the 7-day timelock elapses"
 fi
 
 # Update ~/.csv/config.toml with the deployed module address
@@ -266,9 +289,23 @@ try:
     
     # Update aptos deployment info
     if 'deployments' in manifest and 'aptos' in manifest['deployments']:
-        manifest['deployments']['aptos']['network'] = '$NETWORK'
-        manifest['deployments']['aptos']['module_address'] = '$PACKAGE_ID'
-        manifest['deployments']['aptos']['verified'] = True
+        apt = manifest['deployments']['aptos']
+        apt['network'] = '$NETWORK'
+        # module_address (@csv_seal) is the RFC-0012 §9.2 destinationContract.
+        apt['module_address'] = '$PACKAGE_ID'
+        apt['verified'] = True
+        apt['deployment_type'] = 'account_publish'
+        # Record the seeded verifier if init_mint_authority ran this deploy;
+        # otherwise reset to empty so the manifest never advertises stale keys
+        # (mint stays fail-closed until seeded).
+        seeded = '${CSV_MINT_VERIFIER_PUBKEY:-}'.strip()
+        if seeded:
+            pk = seeded if seeded.startswith('0x') else '0x' + seeded
+            apt['verifier_set'] = [pk]
+            apt['mint_threshold'] = 1
+        else:
+            apt['verifier_set'] = []
+            apt['mint_threshold'] = 0
         manifest['updated_at'] = datetime.utcnow().isoformat() + 'Z'
     
     with open('$MANIFEST_PATH', 'w') as f:
@@ -297,5 +334,15 @@ if [ -d ".aptos" ]; then
     rm -rf .aptos
 fi
 
+echo ""
+echo "To finish enabling mint:"
+if [ -n "${CSV_MINT_VERIFIER_PUBKEY:-}" ]; then
+    echo "  - Verifier was seeded above. Record verifier_set + mint_threshold in"
+    echo "    deployments/deployment-manifest.json, and give the runtime the matching"
+    echo "    private key: export CSV_MINT_VERIFIER_KEY=<hex>."
+else
+    echo "  - Seed the verifier (see the note above), then export CSV_MINT_VERIFIER_KEY=<hex>."
+fi
+echo "  Full operator guide: csv-docs/runbooks/MINT_VERIFIER_OPERATIONS.md"
 echo ""
 echo "Deployment complete!"

@@ -521,6 +521,85 @@ impl EthereumBackend {
 
         Ok(address)
     }
+
+    /// Deployed CSVSeal contract address (20 bytes).
+    ///
+    /// The destination adapter binds this into the RFC-0012 §9.2 attestation
+    /// digest (`destination_contract`, left-padded to 32 bytes) so a verifier
+    /// signature is scoped to exactly one contract deployment and cannot be
+    /// replayed against a different CSVSeal instance. Fails closed when no
+    /// contract address is configured.
+    pub fn contract_address(&self) -> ChainOpResult<[u8; 20]> {
+        self.contract()
+    }
+
+    /// Sign a 32-byte RFC-0012 §9.2 attestation digest with the configured
+    /// secp256k1 key, producing a 65-byte EVM-recoverable signature
+    /// (`r(32) || s(32) || v(1)`, `v ∈ {27, 28}`).
+    ///
+    /// This is a raw ECDSA signature over the digest itself — NOT an
+    /// `eth_sign`/personal-message signature — so it recovers under the
+    /// contract's `ecrecover(digest, v, r, s)` verifier check. Fails closed when
+    /// no signer is configured rather than emitting an unauthenticated mint.
+    #[cfg(feature = "rpc")]
+    pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
+        use secp256k1::{Message, Secp256k1, SecretKey};
+
+        let signer = self
+            .rpc()
+            .as_any()
+            .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
+            .and_then(|node| node.signer())
+            .ok_or_else(|| {
+                ChainOpError::SigningError(
+                    "No verifier signer configured: cannot attest the §9.2 mint digest \
+                     (set a private key on the RPC client via with_signer())"
+                        .to_string(),
+                )
+            })?;
+
+        let secret_key = SecretKey::from_slice(&signer.credential().to_bytes()).map_err(|e| {
+            ChainOpError::SigningError(format!("Invalid verifier secret key: {}", e))
+        })?;
+
+        // Sign the digest bytes directly (no Ethereum message prefix), matching
+        // on-chain ecrecover semantics.
+        let msg = Message::from_digest(*digest);
+        let secp = Secp256k1::new();
+        let signature = secp.sign_ecdsa_recoverable(&msg, &secret_key);
+        let (recovery_id, compact) = signature.serialize_compact();
+
+        let mut out = Vec::with_capacity(65);
+        out.extend_from_slice(&compact);
+        // EVM `v` = recovery id (0/1) + 27.
+        out.push(recovery_id.to_i32() as u8 + 27);
+        Ok(out)
+    }
+
+    /// Submit pre-encoded mint calldata to the CSVSeal contract, wait for its
+    /// receipt, and fail closed if the mint reverted.
+    ///
+    /// Used by the runtime adapter after it has built the §9.2 digest and
+    /// attached verifier signatures; returns `(tx_hash_hex, block_height)`.
+    #[cfg(feature = "rpc")]
+    pub async fn submit_and_confirm_mint(
+        &self,
+        calldata: Vec<u8>,
+        signer_ref: &str,
+    ) -> ChainOpResult<(String, u64)> {
+        let contract = self.contract()?;
+        let tx_hash = self
+            .build_sign_and_send_transaction(contract, &calldata, signer_ref)
+            .await?;
+        let receipt = self.wait_for_receipt(&tx_hash).await?;
+        if receipt.status == 0 {
+            return Err(ChainOpError::TransactionError(format!(
+                "mint_sanad reverted on-chain (tx {})",
+                hex::encode(tx_hash)
+            )));
+        }
+        Ok((hex::encode(tx_hash), receipt.block_number))
+    }
 }
 
 #[async_trait]
@@ -1375,65 +1454,28 @@ impl ChainSanadOps for EthereumBackend {
         lock_proof: &CoreInclusionProof,
         new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        let contract = self.contract()?;
-        let sanad_id_bytes = source_sanad_id.0.as_bytes();
-        let commitment = sanad_id_bytes;
-        let state_root = lock_proof.block_hash.as_bytes();
-        let source_chain_id = parse_chain_id(source_chain)?;
-        let owner_addr = self.parse_address(new_owner)?;
-        let proof_root = lock_proof.block_hash.as_bytes();
-
-        #[cfg(feature = "rpc")]
-        {
-            // Build the mint transaction using generated Alloy bindings
-            use crate::bindings::csv_seal::mintSanadCall;
-            let call = mintSanadCall {
-                sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
-                commitment: alloy_primitives::FixedBytes::<32>::from_slice(commitment),
-                stateRoot: alloy_primitives::FixedBytes::<32>::from_slice(state_root),
-                sourceChain: source_chain_id,
-                sourceSealPoint: alloy_primitives::Bytes::from(owner_addr.to_vec()),
-                proof: alloy_primitives::Bytes::from(lock_proof.proof_bytes.clone()),
-                proofRoot: alloy_primitives::FixedBytes::<32>::from_slice(proof_root),
-                leafPosition: alloy_primitives::U256::from(0),
-            };
-
-            // Encode the calldata from the generated call struct
-            let calldata = call.abi_encode();
-
-            // Build and sign transaction
-            let tx_hash = self
-                .build_sign_and_send_transaction(contract, &calldata, new_owner)
-                .await?;
-
-            // Wait for receipt
-            let receipt = self.wait_for_receipt(&tx_hash).await?;
-
-            Ok(SanadOperationResult {
-                sanad_id: source_sanad_id.clone(),
-                operation: SanadOperation::Mint,
-                transaction_hash: hex::encode(tx_hash),
-                block_height: receipt.block_number,
-                chain_id: self.config.network.chain_id().to_string(),
-                metadata: serde_json::to_vec(&serde_json::json!({
-                    "operation": "mint",
-                    "source_chain": source_chain,
-                    "new_owner": new_owner,
-                    "contract": hex::encode(contract),
-                }))
-                .unwrap_or_default(),
-            })
-        }
-
-        #[cfg(not(feature = "rpc"))]
-        {
-            let _ = (contract, owner_addr);
-            Err(ChainOpError::FeatureNotEnabled(
-                "Sanad minting requires the 'rpc' feature for transaction signing. \
-                 Enable it in Cargo.toml: csv-adapter-ethereum = { features = ['rpc'] }"
-                    .to_string(),
-            ))
-        }
+        // The finalized CSVSeal ABI (VERSION 6, RFC-0012 §9 / ABI_CONSTITUTION.md) makes the
+        // destination mint a THIN REGISTRY: `mint_sanad` authenticity is a set of verifier
+        // signatures over the frozen §9.2 attestation digest. This low-level trait method only
+        // receives a source inclusion proof and the new owner — it carries none of the attestation
+        // inputs (`lockEventId`, `nullifier`, `attestationExpiry`, `verifierSignatures`).
+        // Constructing a call without them would send a request the contract rejects, violating
+        // the "no fabricated blockchain interaction" invariant.
+        //
+        // The real cross-chain mint runs through the runtime path
+        // (`EthereumRuntimeAdapter::mint_sanad`, TRM-ETH-ADPT-001): it decodes the runtime's
+        // verifier-signed `RuntimeMintRequest`, binds `destination_contract`, computes the §9.2
+        // digest, attaches verifier signature(s), and submits via the regenerated bindings. This
+        // `ChainSanadOps` entry point has no such inputs, so it stays fail-closed by design.
+        let _ = (source_sanad_id, lock_proof, new_owner);
+        let _ = self.contract()?;
+        Err(ChainOpError::CapabilityUnavailable(format!(
+            "Ethereum ChainSanadOps::mint_sanad cannot mint from a bare inclusion proof: the \
+             thin-registry mint (RFC-0012 §9) requires a verifier-attested RuntimeMintRequest \
+             (lockEventId, nullifier, attestationExpiry, and verifierSignatures over the §9.2 \
+             digest). Use the runtime mint path (EthereumRuntimeAdapter::mint_sanad) for \
+             {source_chain}->ethereum transfers; refusing to send an unauthenticated mint."
+        )))
     }
 
     async fn refund_sanad(
@@ -1451,8 +1493,8 @@ impl ChainSanadOps for EthereumBackend {
         #[cfg(feature = "rpc")]
         {
             // Build the refund transaction using generated Alloy bindings
-            use crate::bindings::csv_seal::refundSanadCall;
-            let call = refundSanadCall {
+            use crate::bindings::csv_seal::refund_sanadCall;
+            let call = refund_sanadCall {
                 sanadId: alloy_primitives::FixedBytes::<32>::from_slice(sanad_id_bytes),
                 destinationOwnerHash: alloy_primitives::FixedBytes::<32>::from_slice(&owner_hash),
             };

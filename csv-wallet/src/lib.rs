@@ -23,6 +23,7 @@
 
 pub mod error;
 pub mod keystore;
+pub mod seal_custody;
 pub mod signer;
 pub mod wallet;
 pub mod wallet_traits;
@@ -30,6 +31,7 @@ pub mod wallet_traits;
 // Re-export commonly used types
 pub use error::{Result, WalletError};
 pub use keystore::{KeyPurpose, KeyStore};
+pub use seal_custody::{SealCustody, SealCustodyRecord};
 pub use signer::{Signature, Signer, SignerRef};
 pub use wallet::address; // Static address derivation functions
 pub use wallet::{Wallet, WalletConfig, WalletManager};

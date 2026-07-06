@@ -11,9 +11,9 @@ use std::path::Path;
 mod encrypt;
 
 pub use csv_store::state::{
-    Chain, ContractRecord, GasAccount, SanadRecord, SanadStatus, SealRecord, TransactionRecord,
-    TransactionStatus, TransactionType, TransferRecord, TransferStatus, UnifiedStorage, UtxoRecord,
-    WalletAccount,
+    Chain, ContractRecord, GasAccount, ProvenanceStrengthSignal, SanadRecord, SanadStatus,
+    SealRecord, SealStatus, TransactionRecord, TransactionStatus, TransactionType, TransferRecord,
+    TransferStatus, UnifiedStorage, UtxoRecord, WalletAccount,
 };
 
 // Unified state manager for CLI
@@ -127,6 +127,11 @@ impl UnifiedStateManager {
     /// Passphrase used to decrypt the loaded CLI state.
     pub fn passphrase(&self) -> &str {
         &self.passphrase
+    }
+
+    /// Path of the encrypted CLI state file.
+    pub fn file_path(&self) -> &str {
+        &self.file_path
     }
 
     // --- Sanads Management ---

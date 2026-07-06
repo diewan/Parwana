@@ -28,7 +28,7 @@ pub mod wallet_operations;
 
 pub use config::{Network, SolanaConfig};
 pub use error::{SolanaError, SolanaResult};
-pub use mint::mint_sanad_from_hex_key;
+pub use mint::{SolanaMintArgs, build_mint_instruction, build_solana_mint_args};
 pub use rpc::SolanaRpc;
 pub use seal_protocol::SolanaSealProtocol;
 pub use types::{SolanaCommitAnchor, SolanaFinalityProof, SolanaInclusionProof, SolanaSealPoint};

@@ -5,7 +5,8 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
+    SealRegistryStatus,
 };
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::finality::capabilities::{
@@ -103,34 +104,77 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         transfer: &CrossChainTransfer,
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
-        // For Solana, minting means calling the mint function on the smart contract
-        // with the lock proof from the source chain
-        //
-        // This implementation:
-        // 1. Deserializes the proof bundle
-        // 2. Builds the mint transaction instruction
-        // 3. Signs the transaction with the wallet
-        // 4. Broadcasts the transaction via RPC
-        // 5. Returns the mint_tx_hash as result
-
-        use csv_protocol::proof_taxonomy::ProofBundle;
-        use solana_sdk::instruction::Instruction;
+        // `proof_bundle` is the runtime's canonical-CBOR `RuntimeMintRequest`
+        // (RFC-0012 §3/§9): the §9.2 attestation inputs the runtime bound after its
+        // off-chain canonical verifier already adjudicated the source proof
+        // (`validate_source_proof` on the *source* adapter, journaled by the
+        // coordinator before this call). This adapter is the thin-registry
+        // submitter: it binds `destination_contract = program id` and
+        // `destination_chain_id = keccak256("csv.chain.solana")` exactly as the
+        // on-chain `mint_attestation_digest` derives them, computes the frozen §9.2
+        // digest, signs it with the secp256k1 verifier key, and submits the
+        // redesigned `mint_sanad` instruction. There is no proof root and no Merkle
+        // proof anywhere on this path; Solana's weak native single-use is backstopped
+        // by the three replay-tombstone PDAs the instruction creates.
         use solana_sdk::pubkey::Pubkey;
         use solana_sdk::transaction::Transaction;
-        use std::str::FromStr;
 
-        // Deserialize the proof bundle
-        let proof_bundle = ProofBundle::from_canonical_bytes(proof_bundle)
-            .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
-            .map_err(|e| {
-                AdapterError::Generic(format!("Failed to deserialize proof bundle: {}", e))
+        let request: RuntimeMintRequest =
+            csv_codec::from_canonical_cbor(proof_bundle).map_err(|e| {
+                AdapterError::Generic(format!("Failed to decode runtime mint request: {}", e))
             })?;
 
-        // Get the program ID from backend seal_protocol config
-        let program_id = Pubkey::from_str(&self.backend.seal_protocol().config.csv_program_id)
-            .map_err(|e| AdapterError::Generic(format!("Invalid program ID: {}", e)))?;
+        // Bind the request to this transfer: a payload whose attestation is for a
+        // different Sanad must never be signed or submitted here.
+        if request.attestation.sanad_id != *transfer.sanad_id.as_bytes() {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Mint request Sanad {} does not match transfer Sanad {}",
+                hex::encode(request.attestation.sanad_id),
+                hex::encode(transfer.sanad_id.as_bytes())
+            )));
+        }
 
-        // Get the wallet for signing from backend seal_protocol
+        // Bind `destination_contract` to this program id and force
+        // `destination_chain_id` to the frozen Solana chain tag, exactly as the
+        // program recomputes them, so the signed digest matches the value
+        // `mint_attestation_digest` reproduces on-chain.
+        let program_id_bytes = self
+            .backend
+            .program_id()
+            .map_err(|e| AdapterError::Generic(format!("No mint program configured: {}", e)))?;
+        let program_id = Pubkey::from(program_id_bytes);
+        let mut attestation = request.attestation.clone();
+        attestation.destination_contract = program_id_bytes;
+        attestation.destination_chain_id = solana_contract_chain_id();
+
+        // The recipient must be present. The program hashes `keccak256(destination_owner)`
+        // into the digest and rejects an empty owner; the runtime leaves it empty
+        // until owner-binding supplies a recipient, so fail closed here before signing.
+        if attestation.destination_owner.is_empty() {
+            return Err(AdapterError::ProofVerificationFailed(
+                "Mint request has no destination owner: cannot materialize a sanad without a \
+                 recipient"
+                    .to_string(),
+            ));
+        }
+
+        // Compute the frozen §9.2 digest and attest it with the configured verifier
+        // key. Fails closed (no signer -> no signature) rather than emitting an
+        // unauthenticated mint the program would reject.
+        let digest = attestation.attestation_digest();
+        let signature = self
+            .backend
+            .sign_mint_attestation_digest(&digest)
+            .map_err(|e| {
+                AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
+            })?;
+        let mut verifier_signatures = request.verifier_signatures.clone();
+        verifier_signatures.push(signature);
+
+        let args = crate::mint::build_solana_mint_args(&attestation, &verifier_signatures);
+
+        // The wallet is the fee payer / transaction signer only — it holds NO mint
+        // authority (authority is the verifier signatures carried in the args).
         let wallet = self
             .backend
             .seal_protocol()
@@ -140,39 +184,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
                 AdapterError::Generic("Wallet not configured for mint operation".to_string())
             })?;
 
-        // Build the mint instruction
-        // The mint instruction should include:
-        // - The sanad_id from the transfer
-        // - The commitment from the proof bundle
-        // - The source chain seal reference
-        let sanad_id_bytes = transfer.sanad_id.as_bytes();
-        let commitment_bytes = proof_bundle.transition_dag.root_commitment.as_bytes();
-
-        // Create the instruction data
-        // This is a simplified version - the actual instruction format depends on the Solana program
-        let mut instruction_data = Vec::new();
-        instruction_data.push(0x04); // Mint instruction discriminator
-        instruction_data.extend_from_slice(sanad_id_bytes);
-        instruction_data.extend_from_slice(commitment_bytes);
-
-        // Derive the PDA for the sanad account
-        let sanad_pda =
-            Pubkey::create_with_seed(&wallet.pubkey(), &hex::encode(sanad_id_bytes), &program_id)
-                .map_err(|e| AdapterError::Generic(format!("Failed to derive PDA: {}", e)))?;
-
-        // Build the instruction
-        let instruction = Instruction {
-            program_id,
-            accounts: vec![
-                solana_sdk::instruction::AccountMeta::new(sanad_pda, false),
-                solana_sdk::instruction::AccountMeta::new(wallet.pubkey(), true),
-                solana_sdk::instruction::AccountMeta::new_readonly(
-                    solana_sdk::pubkey::Pubkey::from([0u8; 32]),
-                    false,
-                ),
-            ],
-            data: instruction_data,
-        };
+        let instruction = crate::mint::build_mint_instruction(&program_id, &wallet.pubkey(), &args);
 
         // Get recent blockhash from backend RPC
         let recent_blockhash =
@@ -188,7 +200,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             recent_blockhash,
         );
 
-        // Send the transaction
+        // Send the transaction (fails closed if the program rejects an
+        // unauthenticated or duplicate mint at simulation/preflight).
         let signature = self
             .backend
             .rpc()
@@ -350,5 +363,194 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Contract-layer Solana chain identity: `keccak256("csv.chain.solana")`.
+///
+/// The `csv_seal` program hardcodes this tag (`keccak256(CHAIN_NAME_SOLANA)`) as
+/// `destinationChainId` in the §9.2 preimage regardless of cluster, so the adapter
+/// forces the same value rather than trusting the runtime-supplied destination
+/// chain name.
+fn solana_contract_chain_id() -> [u8; 32] {
+    use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+    *CrossChainHashAlgorithm::Keccak256
+        .hash_bytes(b"csv.chain.solana")
+        .as_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Network, SolanaConfig};
+    use crate::ops::SolanaBackend;
+    use crate::rpc::MockSolanaRpc;
+    use crate::seal_protocol::SolanaSealProtocol;
+    use csv_adapter_core::MintAttestationInputs;
+    use csv_hash::Hash;
+
+    /// Deterministic non-default program id so the digest binding is exercised.
+    const PROGRAM_ID: &str = "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj";
+
+    fn test_backend(verifier: Option<secp256k1::SecretKey>) -> Arc<SolanaBackend> {
+        let config = SolanaConfig {
+            network: Network::Devnet,
+            csv_program_id: PROGRAM_ID.to_string(),
+            ..Default::default()
+        };
+        let seal = SolanaSealProtocol::from_config(config, Box::new(MockSolanaRpc::new()))
+            .expect("seal protocol");
+        let mut backend =
+            SolanaBackend::from_seal_protocol(Arc::new(seal)).expect("backend from seal protocol");
+        if let Some(v) = verifier {
+            backend = backend.with_verifier_key(v);
+        }
+        Arc::new(backend)
+    }
+
+    fn test_transfer(sanad_id: Hash) -> CrossChainTransfer {
+        CrossChainTransfer {
+            id: "solana-transfer-1".to_string(),
+            source_chain: "ethereum".to_string(),
+            destination_chain: "solana".to_string(),
+            lock_tx_hash: vec![0xAAu8; 32],
+            lock_output_index: 0,
+            sanad_id,
+            transition_id: vec![1u8; 32],
+        }
+    }
+
+    fn mint_attestation(sanad_id: Hash) -> MintAttestationInputs {
+        MintAttestationInputs {
+            destination_chain_id: [0u8; 32],
+            destination_contract: [0u8; 32],
+            sanad_id: *sanad_id.as_bytes(),
+            commitment: [8u8; 32],
+            source_chain: [9u8; 32],
+            destination_owner: vec![0x11u8; 32],
+            lock_event_id: [0xAu8; 32],
+            nullifier: [0xBu8; 32],
+            attestation_expiry: 0,
+        }
+    }
+
+    fn runtime_mint_request_cbor(sanad_id: Hash) -> Vec<u8> {
+        let request = RuntimeMintRequest {
+            attestation: mint_attestation(sanad_id),
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        csv_codec::to_canonical_cbor(&request).expect("encode runtime mint request")
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_request_bound_to_other_sanad() {
+        // A payload whose attestation is for a different Sanad must be rejected
+        // before any signing or submission.
+        let adapter = SolanaRuntimeAdapter::new(test_backend(None));
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+        let payload = runtime_mint_request_cbor(Hash::new([9u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must reject a mint request bound to a different sanad"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_undecodable_payload() {
+        let adapter = SolanaRuntimeAdapter::new(test_backend(None));
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, b"not-a-mint-request").await;
+        assert!(
+            result.is_err(),
+            "must reject a payload that is not a canonical RuntimeMintRequest"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_fails_closed_without_verifier_key() {
+        // No secp256k1 verifier key: the adapter cannot attest the §9.2 digest and
+        // must fail closed rather than submit an unauthenticated mint.
+        let adapter = SolanaRuntimeAdapter::new(test_backend(None));
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        let err = result.expect_err("must fail closed without a verifier signer");
+        assert!(
+            format!("{}", err).contains("verifier"),
+            "error should point at the missing verifier signer: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_missing_destination_owner() {
+        // The runtime leaves `destination_owner` empty until owner-binding wires a
+        // recipient; the program hashes and requires it, so an empty owner must fail
+        // closed before signing.
+        let secp = secp256k1::Secp256k1::new();
+        let (secret, _pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let adapter = SolanaRuntimeAdapter::new(test_backend(Some(secret)));
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+
+        let mut attestation = mint_attestation(sanad);
+        attestation.destination_owner = Vec::new(); // un-bound owner
+        let request = RuntimeMintRequest {
+            attestation,
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        let payload = csv_codec::to_canonical_cbor(&request).unwrap();
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        let err = result.expect_err("must reject a mint with an unspecified destination owner");
+        assert!(
+            format!("{}", err).contains("destination owner"),
+            "error should point at the missing destination owner: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn verifier_signature_recovers_to_configured_key_over_digest() {
+        // The §9.2 signature the adapter attaches must recover — over the digest,
+        // exactly as Solana's `secp256k1_recover` does — to the configured verifier
+        // public key. This pins the signature format (raw recovery id, no EVM +27)
+        // and the destination_contract / destination_chain_id binding.
+        use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+        use secp256k1::{Message, Secp256k1};
+
+        let secp = Secp256k1::new();
+        let (secret, expected_pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let backend = test_backend(Some(secret));
+
+        let mut attestation = mint_attestation(Hash::new([2u8; 32]));
+        attestation.destination_contract = backend.program_id().unwrap();
+        attestation.destination_chain_id = solana_contract_chain_id();
+        let digest = attestation.attestation_digest();
+
+        let sig = backend
+            .sign_mint_attestation_digest(&digest)
+            .expect("verifier key configured");
+        assert_eq!(sig.len(), 65, "recoverable signature is r || s || v");
+        assert!(sig[64] <= 1, "recovery id must be raw 0/1, not EVM +27");
+
+        let recovery_id = RecoveryId::from_i32(sig[64] as i32).expect("valid recovery id");
+        let recoverable =
+            RecoverableSignature::from_compact(&sig[..64], recovery_id).expect("valid signature");
+        let msg = Message::from_digest(digest);
+        let recovered = secp
+            .recover_ecdsa(&msg, &recoverable)
+            .expect("recover verifier pubkey");
+        assert_eq!(
+            recovered, expected_pubkey,
+            "signature must recover to the configured verifier key"
+        );
     }
 }

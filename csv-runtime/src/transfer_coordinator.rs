@@ -23,6 +23,7 @@ use csv_adapter_core::{AdapterRegistry, CrossChainTransfer, TxFinality};
 use csv_admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
+use csv_observability::metrics::{MetricsCollector, RuntimeFlowSnapshot};
 use csv_protocol::finality::CapabilityRequirements;
 use csv_storage::{ReplayDatabase, ReplayDbError};
 use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
@@ -84,10 +85,12 @@ fn proof_payload_hash(payload: &[u8]) -> [u8; 32] {
 
 /// 23-byte domain tag for the RFC-0012 §9.2 mint attestation digest.
 ///
-/// Kept byte-for-byte in sync with the destination contract
-/// (`CSVSeal.MINT_ATTESTATION_DOMAIN`). The `const` assertion below fails the
-/// build if the tag ever drifts from the frozen 23-byte length.
-const MINT_ATTESTATION_DOMAIN: &[u8] = b"csv.mint.attestation.v1";
+/// Single source of truth lives in `csv_adapter_core` so the runtime (which
+/// binds the attestation) and the destination adapter (which binds
+/// `destination_contract` and signs the digest) can never drift. The `const`
+/// assertion below fails the build if the tag ever drifts from the frozen
+/// 23-byte length.
+use csv_adapter_core::MINT_ATTESTATION_DOMAIN;
 const _: () = assert!(MINT_ATTESTATION_DOMAIN.len() == 23);
 
 /// Contract-layer chain identity (RFC-0012 §6): `keccak256("csv.chain.<name>")`.
@@ -139,100 +142,13 @@ fn mint_nullifier(proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle) -> [
     csv_hash::csv_tagged_hash("csv.mint.nullifier.v1", &proof_bundle.seal_ref.id)
 }
 
-/// RFC-0012 §9.2 attestation-digest inputs the runtime binds for a destination
-/// mint.
-///
-/// This is the thin-registry authorization surface. There is deliberately **no**
-/// proof root, state root, Merkle proof, or leaf index here: cross-chain
-/// validity is adjudicated off-chain by the canonical verifier, and the only
-/// on-chain authenticity check is a set of verifier signatures over the digest
-/// computed from these fields (§9). The field order and widths mirror
-/// `CSVSeal.mint_attestation_digest` exactly.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct MintAttestationInputs {
-    /// `keccak256("csv.chain.<dest>")` — contract-layer destination chain identity.
-    pub destination_chain_id: [u8; 32],
-    /// Canonical 32-byte destination contract identity (EVM: address left-padded
-    /// to 32 bytes). Left zero by the runtime, which does not hold deployment
-    /// addresses (it must not import chain adapters); the submitting adapter,
-    /// which knows `address(this)`, binds it before computing the signable digest.
-    pub destination_contract: [u8; 32],
-    /// Sanad identifier; the destination contract's primary duplicate-mint key.
-    pub sanad_id: [u8; 32],
-    /// Commitment binding the sanad content/ownership.
-    pub commitment: [u8; 32],
-    /// `keccak256("csv.chain.<src>")` — contract-layer source chain identity.
-    pub source_chain: [u8; 32],
-    /// Full recipient identity bytes; only `keccak256(destination_owner)` enters
-    /// the digest (the full bytes travel in the mint event). Empty until the
-    /// owner-binding wiring (interactive/materialize modes) supplies a recipient.
-    pub destination_owner: Vec<u8>,
-    /// Identity of the source-chain lock event; duplicate-source-lock + settlement key.
-    pub lock_event_id: [u8; 32],
-    /// Replay nullifier consumed by the source seal.
-    pub nullifier: [u8; 32],
-    /// Attestation expiry, unix seconds, u64 big-endian in the digest; 0 = no expiry.
-    pub attestation_expiry: u64,
-}
-
-impl MintAttestationInputs {
-    /// Compute the frozen RFC-0012 §9.2 attestation digest.
-    ///
-    /// `SHA-256` over the fixed preimage:
-    /// `domain(23) || destinationChainId(32) || destinationContract(32) ||
-    /// sanadId(32) || commitment(32) || sourceChain(32) ||
-    /// keccak256(destinationOwner)(32) || lockEventId(32) || nullifier(32) ||
-    /// attestationExpiry(u64 big-endian, 8)`.
-    ///
-    /// Byte-compatible with `CSVSeal.mint_attestation_digest`. The digest is only
-    /// signable once `destination_contract` is bound (by the submitting adapter),
-    /// so the runtime computes it for tooling/tests but does not cache a stale
-    /// pre-binding value in the request.
-    pub fn attestation_digest(&self) -> [u8; 32] {
-        use csv_protocol::cross_chain::CrossChainHashAlgorithm;
-        let owner_hash = *CrossChainHashAlgorithm::Keccak256
-            .hash_bytes(&self.destination_owner)
-            .as_bytes();
-        let mut preimage = Vec::with_capacity(MINT_ATTESTATION_DOMAIN.len() + 32 * 8 + 8);
-        preimage.extend_from_slice(MINT_ATTESTATION_DOMAIN);
-        preimage.extend_from_slice(&self.destination_chain_id);
-        preimage.extend_from_slice(&self.destination_contract);
-        preimage.extend_from_slice(&self.sanad_id);
-        preimage.extend_from_slice(&self.commitment);
-        preimage.extend_from_slice(&self.source_chain);
-        preimage.extend_from_slice(&owner_hash);
-        preimage.extend_from_slice(&self.lock_event_id);
-        preimage.extend_from_slice(&self.nullifier);
-        preimage.extend_from_slice(&self.attestation_expiry.to_be_bytes());
-        *CrossChainHashAlgorithm::Sha256
-            .hash_bytes(&preimage)
-            .as_bytes()
-    }
-}
-
-/// Runtime-facing mint request handed to the destination adapter (RFC-0012 §3/§9).
-///
-/// Replaces the proof-root-era mint payload. It carries the §9.2 attestation
-/// inputs (what the verifier signs), the verifier signatures produced by the
-/// adapter/verifier that holds the key, and the canonically-encoded source
-/// `ProofBundle` that the runtime's off-chain verification already adjudicated.
-/// The runtime remains the sole authoritative proof adjudicator; the destination
-/// contract only checks the M-of-N signatures over the digest.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeMintRequest {
-    /// §9.2 attestation inputs bound by the runtime.
-    pub attestation: MintAttestationInputs,
-    /// M-of-N secp256k1 verifier signatures over `attestation.attestation_digest()`.
-    ///
-    /// Empty when produced by the runtime: the runtime does not hold a verifier
-    /// key and cannot bind `destination_contract`, so the submitting
-    /// adapter/verifier fills this after finalizing the digest. Fail-closed: a
-    /// destination contract rejects a mint carrying fewer than its threshold of
-    /// valid signatures, so an empty vector can never mint.
-    pub verifier_signatures: Vec<Vec<u8>>,
-    /// Canonical CBOR of the verified source `ProofBundle`.
-    pub proof_bundle: Vec<u8>,
-}
+// The RFC-0012 §9.2 attestation-digest inputs (`MintAttestationInputs`) and the
+// `RuntimeMintRequest` handed to the destination adapter live in
+// `csv_adapter_core` — the single crate depended on by both the runtime (which
+// binds the attestation) and every chain adapter (which binds
+// `destination_contract` and signs the digest). Keeping one definition prevents
+// the silent ABI/serde drift a mirrored struct would invite.
+pub use csv_adapter_core::{MintAttestationInputs, RuntimeMintRequest};
 
 /// Build the runtime mint request from a verified proof bundle.
 ///
@@ -260,6 +176,73 @@ fn build_runtime_mint_request(
     }
 }
 
+/// Auditable evidence that a destination mint confirmed on-chain.
+///
+/// Recorded to the durable event store at mint confirmation on BOTH the
+/// fresh-execution and resume paths (via [`TransferCoordinator::record_settlement_evidence`]),
+/// so the operator flow leaves an identical settlement record no matter how the
+/// transfer reached confirmation. Its purpose is to give a later source-chain
+/// escrow release (TRM-ESCROW-001) a concrete, replayable settlement key.
+///
+/// This is *evidence*, not authority: per RFC-0012 the actual source release must
+/// still be gated on a verifier-signed `SettlementReceipt`. Nothing here is a
+/// proof root — the canonical verifier remains the sole proof adjudicator, and
+/// this record only witnesses that the adjudicated mint confirmed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SettlementEvidence {
+    /// Runtime transfer identifier.
+    pub transfer_id: String,
+    /// Sanad transferred (32 bytes).
+    pub sanad_id: [u8; 32],
+    /// Source chain name.
+    pub source_chain: String,
+    /// Destination chain name.
+    pub destination_chain: String,
+    /// Deterministic source-lock-event id — the settlement / duplicate-source-lock key.
+    pub lock_event_id: [u8; 32],
+    /// Replay nullifier consumed by the source single-use seal.
+    pub nullifier: [u8; 32],
+    /// Commitment binding the sanad content/ownership.
+    pub commitment: [u8; 32],
+    /// Source lock transaction hash (chain-native byte encoding, hex).
+    pub lock_tx_hash: String,
+    /// Confirmed destination mint transaction hash.
+    pub mint_tx_hash: String,
+    /// Block height that confirmed the destination mint.
+    pub mint_block_height: u64,
+    /// Unix seconds when the evidence was recorded.
+    pub recorded_at: u64,
+}
+
+/// Build settlement evidence from a verified transfer and its confirmed mint.
+///
+/// The settlement key material (`lock_event_id`, `nullifier`, `commitment`) is
+/// derived with the same helpers the RFC-0012 §9.2 attestation uses, so the
+/// evidence a later release consumes is bound to exactly what was minted.
+fn build_settlement_evidence(
+    transfer: &CrossChainTransfer,
+    proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+    mint_tx_hash: &str,
+    mint_block_height: u64,
+) -> SettlementEvidence {
+    SettlementEvidence {
+        transfer_id: transfer.id.clone(),
+        sanad_id: *transfer.sanad_id.as_bytes(),
+        source_chain: transfer.source_chain.clone(),
+        destination_chain: transfer.destination_chain.clone(),
+        lock_event_id: lock_event_id(transfer),
+        nullifier: mint_nullifier(proof_bundle),
+        commitment: commitment_from_bundle(proof_bundle),
+        lock_tx_hash: hex::encode(&transfer.lock_tx_hash),
+        mint_tx_hash: mint_tx_hash.to_string(),
+        mint_block_height,
+        recorded_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    }
+}
+
 /// Encode a [`RuntimeMintRequest`] into the canonical bytes handed to the
 /// destination adapter's `mint_sanad`.
 fn encode_mint_request(request: &RuntimeMintRequest) -> Result<Vec<u8>, TransferCoordinatorError> {
@@ -269,6 +252,138 @@ fn encode_mint_request(request: &RuntimeMintRequest) -> Result<Vec<u8>, Transfer
             e
         ))
     })
+}
+
+// The RFC-0012 §10 settlement-receipt inputs (`SettlementReceiptInputs`) and the
+// `RuntimeSettlementRequest` handed to the source adapter live in
+// `csv_adapter_core`, next to the §9.2 mint types — one definition shared by the
+// runtime (which binds every field except `source_escrow_contract`) and the
+// source adapter (which binds `source_escrow_contract` and signs).
+pub use csv_adapter_core::{RuntimeSettlementRequest, SettlementReceiptInputs};
+
+/// Canonical fixed-width reference to a confirmed destination mint, derived from
+/// the mint transaction hash recorded in [`SettlementEvidence`].
+///
+/// The source escrow treats `destination_mint_tx_ref` as an opaque 32-byte value
+/// bound in the signed §10 receipt digest — it does not re-derive it. Tag-hashing
+/// the recorded mint tx hash gives a deterministic, chain-agnostic 32-byte ref
+/// that the runtime and the signing verifier reproduce identically from the same
+/// evidence.
+fn destination_mint_tx_ref(mint_tx_hash: &str) -> [u8; 32] {
+    csv_hash::csv_tagged_hash("csv.settlement.mint-ref.v1", mint_tx_hash.as_bytes())
+}
+
+/// Build the RFC-0012 §10 settlement-receipt inputs from recorded settlement
+/// evidence and the caller-supplied operator payout beneficiary.
+///
+/// Consumes [`SettlementEvidence`] — which exists only after the destination mint
+/// confirmed — so a receipt is never built for an unconfirmed or absent mint. The
+/// settlement key material (`lock_event_id`, chain identities) is taken verbatim
+/// from the evidence, so the receipt authorizes release of exactly the escrow
+/// that backs the settled mint. `source_escrow_contract` is left zero for the
+/// source adapter to bind before signing, mirroring the mint attestation flow.
+fn build_settlement_receipt(
+    evidence: &SettlementEvidence,
+    operator_payout_address: [u8; 32],
+    receipt_expiry: u64,
+) -> SettlementReceiptInputs {
+    SettlementReceiptInputs {
+        source_chain_id: contract_chain_id(&evidence.source_chain),
+        source_escrow_contract: [0u8; 32],
+        sanad_id: evidence.sanad_id,
+        lock_event_id: evidence.lock_event_id,
+        destination_chain_id: contract_chain_id(&evidence.destination_chain),
+        destination_mint_tx_ref: destination_mint_tx_ref(&evidence.mint_tx_hash),
+        operator_payout_address,
+        receipt_expiry,
+    }
+}
+
+/// Current unix time in seconds, saturating to 0 before the epoch.
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Reconstruct the minimal [`CrossChainTransfer`] a source adapter needs to route
+/// and submit an escrow release from recorded [`SettlementEvidence`].
+///
+/// Everything the source escrow authenticates travels in the signed §10 receipt
+/// (carried separately in the encoded request), so this transfer only needs to
+/// identify the sanad and the source chain. `lock_output_index` is not part of
+/// the receipt — the `lock_event_id` that keys settlement is already fixed in the
+/// evidence — so it is defaulted; `transition_id` is unused on the release path.
+fn transfer_from_settlement_evidence(evidence: &SettlementEvidence) -> CrossChainTransfer {
+    CrossChainTransfer {
+        id: evidence.transfer_id.clone(),
+        source_chain: evidence.source_chain.clone(),
+        destination_chain: evidence.destination_chain.clone(),
+        lock_tx_hash: hex::decode(&evidence.lock_tx_hash).unwrap_or_default(),
+        lock_output_index: 0,
+        sanad_id: csv_hash::Hash::from(evidence.sanad_id),
+        transition_id: Vec::new(),
+    }
+}
+
+/// Encode a [`RuntimeSettlementRequest`] into the canonical bytes handed to the
+/// source adapter's `settle_escrow`.
+fn encode_settlement_request(
+    request: &RuntimeSettlementRequest,
+) -> Result<Vec<u8>, TransferCoordinatorError> {
+    csv_codec::to_canonical_cbor(request).map_err(|e| {
+        TransferCoordinatorError::SettlementFailed(format!(
+            "Failed to encode runtime settlement request: {}",
+            e
+        ))
+    })
+}
+
+/// Durable record of a completed source-chain escrow settlement (release or
+/// refund), appended to the event store as the settlement journal of record.
+///
+/// This is the crash-recovery anchor for TRM-ESCROW-001: a release/refund event
+/// is written only after the source-chain submission returns, so on restart the
+/// runtime's one-release-per-`lock_event_id` guard reads it back and refuses to
+/// re-submit. On-chain, the escrow contract independently enforces the same
+/// domain (a resubmission reverts), so a payout can never happen twice even
+/// across a crash between submission and the durable write.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SettlementReleaseRecord {
+    /// Whether this record is a release-to-operator (`true`) or a refund-to-locker (`false`).
+    pub released_to_operator: bool,
+    /// Runtime transfer identifier.
+    pub transfer_id: String,
+    /// Sanad whose source escrow was settled (32 bytes).
+    pub sanad_id: [u8; 32],
+    /// Source chain name (the chain that held the escrow).
+    pub source_chain: String,
+    /// Deterministic source-lock-event id — the settlement anti-replay key.
+    pub lock_event_id: [u8; 32],
+    /// Canonical 32-byte reference to the confirmed destination mint (release only; zero on refund).
+    pub destination_mint_tx_ref: [u8; 32],
+    /// Operator payout beneficiary bound in the signed receipt (release only; zero on refund).
+    pub operator_payout_address: [u8; 32],
+    /// Source-chain settlement transaction hash.
+    pub settlement_tx_hash: String,
+    /// Block height that confirmed the settlement.
+    pub settlement_block_height: u64,
+    /// Unix seconds when the settlement was recorded.
+    pub settled_at: u64,
+}
+
+/// Terminal settlement status of a sanad's source escrow, derived from the
+/// append-only event store. `Released` and `Refunded` are mutually exclusive and
+/// terminal; `Unsettled` means no source settlement has been recorded yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettlementStatus {
+    /// No source-chain settlement recorded.
+    Unsettled,
+    /// Escrow released to the operator (record carries the details).
+    Released(Box<SettlementReleaseRecord>),
+    /// Escrow refunded to the locker (record carries the details).
+    Refunded(Box<SettlementReleaseRecord>),
 }
 
 /// Convert CrossChainTransfer to HashEntry for durable storage
@@ -403,6 +518,8 @@ pub struct TransferCoordinator {
     execution_journal: Box<dyn ExecutionJournal>,
     /// Admission controller for bounded runtime work
     admission_controller: AdmissionController,
+    /// Operator-facing metrics for the materialize / settlement flow.
+    metrics: std::sync::Arc<std::sync::Mutex<MetricsCollector>>,
     /// Current lease observed for each transfer in this coordinator process.
     active_execution_leases: std::sync::Mutex<
         std::collections::HashMap<csv_hash::SanadId, crate::user_runtime_lease::TransferLease>,
@@ -441,6 +558,7 @@ impl TransferCoordinator {
             verifier: std::sync::Arc::new(CanonicalVerifierImpl::default()),
             execution_journal: Box::new(InMemoryJournal::new(10000)),
             admission_controller: AdmissionController::default(),
+            metrics: std::sync::Arc::new(std::sync::Mutex::new(MetricsCollector::new())),
             active_execution_leases: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
@@ -476,6 +594,7 @@ impl TransferCoordinator {
             verifier: std::sync::Arc::new(verifier),
             execution_journal,
             admission_controller: AdmissionController::default(),
+            metrics: std::sync::Arc::new(std::sync::Mutex::new(MetricsCollector::new())),
             active_execution_leases: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
@@ -489,6 +608,28 @@ impl TransferCoordinator {
     /// Return the current admission pressure snapshot.
     pub fn admission_snapshot(&self) -> AdmissionSnapshot {
         self.admission_controller.snapshot()
+    }
+
+    /// Snapshot the operator-facing transfer flow metrics.
+    pub fn runtime_flow_metrics(&self) -> RuntimeFlowSnapshot {
+        self.metrics
+            .lock()
+            .map(|metrics| metrics.runtime_flow_snapshot())
+            .unwrap_or(RuntimeFlowSnapshot {
+                verified_proof_built: 0,
+                mint_submitted: 0,
+                mint_confirmed: 0,
+                settlement_submitted: 0,
+                settlement_confirmed: 0,
+                replay_rejected: 0,
+                authorization_rejected: 0,
+            })
+    }
+
+    fn with_metrics(&self, record: impl FnOnce(&MetricsCollector)) {
+        if let Ok(metrics) = self.metrics.lock() {
+            record(&metrics);
+        }
     }
 
     /// Get a reference to the circuit breaker
@@ -648,6 +789,50 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::FinalityFailed(e.to_string()))
     }
 
+    async fn completed_receipt_for(
+        &self,
+        transfer: &CrossChainTransfer,
+        replay_id: csv_hash::Hash,
+    ) -> Result<Option<TransferReceipt>, TransferCoordinatorError> {
+        if !self
+            .replay_db
+            .contains(replay_id.as_bytes())
+            .await
+            .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?
+        {
+            return Ok(None);
+        }
+
+        let transfers = self.replay_db.load_all_transfers().await.map_err(|e| {
+            TransferCoordinatorError::RuntimeError(format!("Failed to load transfers: {}", e))
+        })?;
+        for entry in transfers {
+            if entry.sanad_id != transfer.sanad_id || entry.mint_tx_hash == csv_hash::Hash::zero() {
+                continue;
+            }
+            let recorded_transfer_id = if entry.transfer_id.is_empty() {
+                transfer.id.clone()
+            } else {
+                entry.transfer_id.clone()
+            };
+            let phase = self
+                .execution_journal
+                .latest_phase(&recorded_transfer_id)
+                .map_err(|e| {
+                    TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e))
+                })?;
+            if phase == Some(TransferStage::Completed) {
+                return Ok(Some(TransferReceipt {
+                    transfer_id: recorded_transfer_id,
+                    replay_id,
+                    lock_tx_hash: hex::encode(entry.lock_tx_hash.as_bytes()),
+                    mint_tx_hash: hex::encode(entry.mint_tx_hash.as_bytes()),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
     /// Execute a cross-chain transfer, returning a [`TransferOutcome`].
     ///
     /// This is the resumable core: it locks (if not already locked), journals,
@@ -715,6 +900,14 @@ impl TransferCoordinator {
         let replay_id = transfer.sanad_id;
         let replay_id_wire = csv_wire::HashWire::from(replay_id);
 
+        if let Some(receipt) = self.completed_receipt_for(&transfer, replay_id).await? {
+            tracing::info!(
+                "Transfer {} already consumed; returning recorded receipt without remint",
+                transfer.id
+            );
+            return Ok(TransferOutcome::Completed(receipt));
+        }
+
         // Record phase entry: Initialized (Entered)
         self.execution_journal
             .record(crate::execution_journal::TransferPhaseEntry {
@@ -736,6 +929,7 @@ impl TransferCoordinator {
             Ok(()) => {}
             Err(e) => match e {
                 ReplayDbError::AlreadyExists => {
+                    self.with_metrics(|metrics| metrics.record_replay_rejected());
                     // Append ReplayDetected event to EventStore (durable write FIRST)
                     if let Err(e) = self.event_store.append(
                         &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
@@ -1145,7 +1339,7 @@ impl TransferCoordinator {
         let finality = self
             .lock_finality_status(&transfer, adapter_registry)
             .await
-            .map_err(|e| {
+            .inspect_err(|e| {
                 let _ =
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
@@ -1159,7 +1353,6 @@ impl TransferCoordinator {
                             attempt: 1,
                             transfer_context: None,
                         });
-                e
             })?;
 
         if finality.confirmations < required_finality {
@@ -1316,6 +1509,7 @@ impl TransferCoordinator {
         {
             Ok(result) => {
                 if !result.is_valid {
+                    self.with_metrics(|metrics| metrics.record_authorization_rejected());
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
@@ -1404,6 +1598,7 @@ impl TransferCoordinator {
                     })?;
             }
             Err(e) => {
+                self.with_metrics(|metrics| metrics.record_authorization_rejected());
                 let _ =
                     self.execution_journal
                         .record(crate::execution_journal::TransferPhaseEntry {
@@ -1443,6 +1638,7 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+        self.with_metrics(|metrics| metrics.record_verified_proof_built());
 
         // Create checkpoint after proof building
         self.checkpoint_manager
@@ -1590,6 +1786,7 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+        self.with_metrics(|metrics| metrics.record_mint_submitted());
 
         // Record phase entry: Minting (Completed)
         self.execution_journal
@@ -1621,6 +1818,17 @@ impl TransferCoordinator {
             .confirm_consumed(&replay_id.0)
             .await
             .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
+        self.with_metrics(|metrics| metrics.record_mint_confirmed());
+
+        // Record auditable settlement evidence for a later source release. Built
+        // from the already-verified proof bundle and the confirmed mint result.
+        let settlement_evidence = build_settlement_evidence(
+            &transfer,
+            &proof_bundle,
+            &mint_result.tx_hash,
+            mint_result.block_height,
+        );
+        self.record_settlement_evidence(&settlement_evidence, runtime_ctx.runtime_instance);
 
         let mut registry_entry = transfer_to_registry_entry(&transfer)?;
         registry_entry.mint_tx_hash = hash_from_tx_str(&mint_result.tx_hash)?;
@@ -1793,6 +2001,365 @@ impl TransferCoordinator {
     /// The execution journal provides crash-safe phase tracking for transfer execution.
     pub fn execution_journal(&self) -> &dyn ExecutionJournal {
         self.execution_journal.as_ref()
+    }
+
+    /// Record auditable [`SettlementEvidence`] into the durable event store.
+    ///
+    /// Called at mint confirmation on both the fresh-execution and resume paths.
+    /// Appended after the transfer's other lifecycle events with a version derived
+    /// from the current aggregate head, so it never regresses the append-only log.
+    /// A failure here is logged but does not fail the transfer: the mint has
+    /// already confirmed and the replay entry is already consumed, so completion
+    /// must not be blocked on the audit write. Escrow release (TRM-ESCROW-001) is
+    /// a separate, verifier-signed authorization and does not depend on this write
+    /// succeeding in-band.
+    fn record_settlement_evidence(&self, evidence: &SettlementEvidence, runtime_instance: Uuid) {
+        let sanad = csv_protocol::sanad::SanadId::new(evidence.sanad_id);
+        let payload = match serde_json::to_string(evidence) {
+            Ok(payload) => payload,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to serialize settlement evidence for transfer {}: {}",
+                    evidence.transfer_id,
+                    e
+                );
+                return;
+            }
+        };
+        // Derive the next version from the aggregate head so the settlement event
+        // is always appended monotonically, regardless of how many lifecycle
+        // events preceded it on this or a prior process.
+        let version = self
+            .event_store
+            .get_latest_version(&sanad)
+            .map(|v| v + 1)
+            .unwrap_or(1);
+        if let Err(e) = self.event_store.append(
+            &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+                csv_wire::SanadIdWire::from(sanad),
+                crate::event_envelope::EventType::from_static(
+                    crate::event_envelope::EventType::TRANSFER_SETTLEMENT_RECORDED,
+                ),
+                version,
+                payload,
+                None,
+                runtime_instance,
+                std::time::SystemTime::now(),
+            ),
+        ) {
+            tracing::warn!(
+                "Failed to append SettlementRecorded event for transfer {}: {}",
+                evidence.transfer_id,
+                e
+            );
+        }
+    }
+
+    /// Query the settlement evidence recorded for a transferred sanad.
+    ///
+    /// Reads the append-only event store and returns the most recently recorded
+    /// [`SettlementEvidence`] for the aggregate, or `None` if the destination mint
+    /// has not yet confirmed. This is the read side a source-chain escrow release
+    /// (TRM-ESCROW-001) consults before authorizing a release.
+    pub fn settlement_evidence(
+        &self,
+        sanad_id: &csv_hash::SanadId,
+    ) -> Result<Option<SettlementEvidence>, TransferCoordinatorError> {
+        let aggregate = csv_protocol::sanad::SanadId::new(*sanad_id.as_bytes());
+        let events = self.event_store.get_events(&aggregate, None).map_err(|e| {
+            TransferCoordinatorError::RuntimeError(format!("Event store error: {}", e))
+        })?;
+        let latest = events.into_iter().rev().find(|event| {
+            event.event_type().as_str()
+                == crate::event_envelope::EventType::TRANSFER_SETTLEMENT_RECORDED
+        });
+        match latest {
+            Some(event) => {
+                let evidence: SettlementEvidence =
+                    serde_json::from_str(event.payload()).map_err(|e| {
+                        TransferCoordinatorError::RuntimeError(format!(
+                            "Malformed settlement evidence in event store: {}",
+                            e
+                        ))
+                    })?;
+                Ok(Some(evidence))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Terminal settlement status of a sanad's source escrow, read from the
+    /// append-only event store.
+    ///
+    /// This is the runtime's crash-safe idempotency oracle: `release_escrow` and
+    /// `refund_escrow` both consult it before submitting, so a settlement that
+    /// already completed (possibly in a prior process) is never re-submitted.
+    /// Release and refund are mutually exclusive — the most recent terminal record
+    /// wins, and both entry points refuse to cross from one to the other.
+    pub fn settlement_status(
+        &self,
+        sanad_id: &csv_hash::SanadId,
+    ) -> Result<SettlementStatus, TransferCoordinatorError> {
+        let aggregate = csv_protocol::sanad::SanadId::new(*sanad_id.as_bytes());
+        let events = self.event_store.get_events(&aggregate, None).map_err(|e| {
+            TransferCoordinatorError::RuntimeError(format!("Event store error: {}", e))
+        })?;
+        let latest = events.into_iter().rev().find(|event| {
+            let t = event.event_type().as_str();
+            t == crate::event_envelope::EventType::TRANSFER_SETTLEMENT_RELEASED
+                || t == crate::event_envelope::EventType::TRANSFER_SETTLEMENT_REFUNDED
+        });
+        match latest {
+            Some(event) => {
+                let record: SettlementReleaseRecord = serde_json::from_str(event.payload())
+                    .map_err(|e| {
+                        TransferCoordinatorError::RuntimeError(format!(
+                            "Malformed settlement record in event store: {}",
+                            e
+                        ))
+                    })?;
+                if event.event_type().as_str()
+                    == crate::event_envelope::EventType::TRANSFER_SETTLEMENT_RELEASED
+                {
+                    Ok(SettlementStatus::Released(Box::new(record)))
+                } else {
+                    Ok(SettlementStatus::Refunded(Box::new(record)))
+                }
+            }
+            None => Ok(SettlementStatus::Unsettled),
+        }
+    }
+
+    /// Release a source-chain escrow to the operator on a verifier-signed
+    /// settlement receipt (RFC-0012 §10 / TRM-ESCROW-001).
+    ///
+    /// The operator is the payout beneficiary and CANNOT self-release: this method
+    /// builds the §10 receipt inputs and dispatches them to the source adapter,
+    /// which binds `source_escrow_contract`, obtains the verifier signatures, and
+    /// submits. Authority is the verifier set that signs the receipt — never the
+    /// operator's own claim (the runtime attaches no signatures; an unsigned
+    /// request is rejected on-chain).
+    ///
+    /// Preconditions enforced here (fail-closed):
+    /// - the destination mint must have confirmed — [`SettlementEvidence`] must
+    ///   exist, or release is refused ([`TransferCoordinatorError::SettlementNotAuthorized`]);
+    /// - the escrow must not already be released or refunded (crash-safe
+    ///   one-release-per-`lock_event_id` via [`Self::settlement_status`]).
+    ///
+    /// On success a distinct `Transfer.SettlementReleased` event is appended (never
+    /// conflated with `Transfer.Minted`), and the release record is returned.
+    pub async fn release_escrow(
+        &self,
+        sanad_id: &csv_hash::SanadId,
+        operator_payout_address: [u8; 32],
+        receipt_expiry: u64,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: &crate::user_runtime_lease::RuntimeExecutionContext,
+    ) -> Result<SettlementReleaseRecord, TransferCoordinatorError> {
+        // Idempotency / mutual-exclusion guard — crash-safe across restarts.
+        match self.settlement_status(sanad_id)? {
+            SettlementStatus::Released(_) => return Err(TransferCoordinatorError::AlreadyReleased),
+            SettlementStatus::Refunded(_) => return Err(TransferCoordinatorError::AlreadyRefunded),
+            SettlementStatus::Unsettled => {}
+        }
+
+        // Release requires a confirmed destination mint. Absent evidence, a failed
+        // or not-yet-confirmed mint must never release escrow.
+        let evidence = match self.settlement_evidence(sanad_id)? {
+            Some(evidence) => evidence,
+            None => {
+                self.with_metrics(|metrics| metrics.record_authorization_rejected());
+                return Err(TransferCoordinatorError::SettlementNotAuthorized(
+                    "no confirmed destination mint recorded for this sanad".to_string(),
+                ));
+            }
+        };
+
+        let receipt = build_settlement_receipt(&evidence, operator_payout_address, receipt_expiry);
+        // The runtime holds no verifier key and cannot bind `source_escrow_contract`;
+        // the source adapter/verifier fills the signatures over the finalized digest.
+        // An empty vector can never release on-chain (fail-closed) — this is the
+        // structural reason the operator cannot self-release.
+        let request = RuntimeSettlementRequest {
+            receipt,
+            verifier_signatures: Vec::new(),
+        };
+        let payload = encode_settlement_request(&request)?;
+        let transfer = transfer_from_settlement_evidence(&evidence);
+
+        let result = adapter_registry
+            .settle_escrow(&evidence.source_chain, &transfer, &payload)
+            .await
+            .map_err(|e| TransferCoordinatorError::SettlementFailed(e.to_string()))?;
+        self.with_metrics(|metrics| metrics.record_settlement_submitted());
+
+        let record = SettlementReleaseRecord {
+            released_to_operator: true,
+            transfer_id: evidence.transfer_id.clone(),
+            sanad_id: evidence.sanad_id,
+            source_chain: evidence.source_chain.clone(),
+            lock_event_id: evidence.lock_event_id,
+            destination_mint_tx_ref: request.receipt.destination_mint_tx_ref,
+            operator_payout_address,
+            settlement_tx_hash: result.tx_hash,
+            settlement_block_height: result.block_height,
+            settled_at: now_unix_secs(),
+        };
+        self.record_settlement(
+            &record,
+            crate::event_envelope::EventType::TRANSFER_SETTLEMENT_RELEASED,
+            runtime_ctx.runtime_instance,
+        )?;
+        self.with_metrics(|metrics| metrics.record_settlement_confirmed());
+        Ok(record)
+    }
+
+    /// Refund a source-chain escrow to the original locker after the destination
+    /// mint fails to occur (RFC-0012 §10 failure handling / TRM-ESCROW-001).
+    ///
+    /// Refuses if a destination mint confirmed ([`SettlementEvidence`] present) —
+    /// a confirmed mint must settle to the operator, never refund — and if the
+    /// escrow was already released or refunded. The source adapter's on-chain
+    /// refund is additionally timeout-gated. On success a distinct
+    /// `Transfer.SettlementRefunded` event is appended.
+    pub async fn refund_escrow(
+        &self,
+        transfer: &CrossChainTransfer,
+        adapter_registry: &dyn AdapterRegistry,
+        runtime_ctx: &crate::user_runtime_lease::RuntimeExecutionContext,
+    ) -> Result<SettlementReleaseRecord, TransferCoordinatorError> {
+        let sanad_id = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        match self.settlement_status(&sanad_id)? {
+            SettlementStatus::Released(_) => return Err(TransferCoordinatorError::AlreadyReleased),
+            SettlementStatus::Refunded(_) => return Err(TransferCoordinatorError::AlreadyRefunded),
+            SettlementStatus::Unsettled => {}
+        }
+
+        // A confirmed destination mint must settle to the operator, not refund.
+        if self.settlement_evidence(&sanad_id)?.is_some() {
+            return Err(TransferCoordinatorError::SettlementNotAuthorized(
+                "destination mint confirmed; escrow must settle to operator, not refund"
+                    .to_string(),
+            ));
+        }
+
+        let result = adapter_registry
+            .refund_escrow(&transfer.source_chain, transfer)
+            .await
+            .map_err(|e| TransferCoordinatorError::SettlementFailed(e.to_string()))?;
+        self.with_metrics(|metrics| metrics.record_settlement_submitted());
+
+        let record = SettlementReleaseRecord {
+            released_to_operator: false,
+            transfer_id: transfer.id.clone(),
+            sanad_id: *transfer.sanad_id.as_bytes(),
+            source_chain: transfer.source_chain.clone(),
+            lock_event_id: lock_event_id(transfer),
+            destination_mint_tx_ref: [0u8; 32],
+            operator_payout_address: [0u8; 32],
+            settlement_tx_hash: result.tx_hash,
+            settlement_block_height: result.block_height,
+            settled_at: now_unix_secs(),
+        };
+        self.record_settlement(
+            &record,
+            crate::event_envelope::EventType::TRANSFER_SETTLEMENT_REFUNDED,
+            runtime_ctx.runtime_instance,
+        )?;
+        self.with_metrics(|metrics| metrics.record_settlement_confirmed());
+        Ok(record)
+    }
+
+    /// Append a terminal settlement record to the event store.
+    ///
+    /// Unlike settlement *evidence* (a best-effort audit write), a settlement
+    /// record is the durable proof the payout happened, so a failed append is a
+    /// hard error: the caller must not treat an unrecorded settlement as complete.
+    fn record_settlement(
+        &self,
+        record: &SettlementReleaseRecord,
+        event_type: &'static str,
+        runtime_instance: Uuid,
+    ) -> Result<(), TransferCoordinatorError> {
+        let sanad = csv_protocol::sanad::SanadId::new(record.sanad_id);
+        let payload = serde_json::to_string(record).map_err(|e| {
+            TransferCoordinatorError::SettlementFailed(format!(
+                "Failed to serialize settlement record: {}",
+                e
+            ))
+        })?;
+        let version = self
+            .event_store
+            .get_latest_version(&sanad)
+            .map(|v| v + 1)
+            .unwrap_or(1);
+        self.event_store
+            .append(
+                &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+                    csv_wire::SanadIdWire::from(sanad),
+                    crate::event_envelope::EventType::from_static(event_type),
+                    version,
+                    payload,
+                    None,
+                    runtime_instance,
+                    std::time::SystemTime::now(),
+                ),
+            )
+            .map_err(|e| {
+                TransferCoordinatorError::SettlementFailed(format!(
+                    "Failed to append settlement record for transfer {}: {}",
+                    record.transfer_id, e
+                ))
+            })
+    }
+
+    /// Record settlement evidence on the resume path, reconstructing the verified
+    /// proof bundle from the journal's persisted payload.
+    ///
+    /// Best-effort: the mint has already confirmed and the replay entry is already
+    /// consumed by the time this runs, so a missing or malformed persisted payload
+    /// is logged rather than allowed to fail the completing transfer.
+    fn record_resumed_settlement_evidence(
+        &self,
+        transfer: &CrossChainTransfer,
+        mint_result: &csv_adapter_core::MintResult,
+        runtime_ctx: &crate::user_runtime_lease::RuntimeExecutionContext,
+    ) {
+        let payload = match self.execution_journal.latest_entry(&transfer.id) {
+            Ok(Some(entry)) => entry.proof_payload,
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(
+                    "Skipping settlement evidence for transfer {}: journal read failed: {}",
+                    transfer.id,
+                    e
+                );
+                return;
+            }
+        };
+        let Some(payload) = payload.filter(|p| !p.is_empty()) else {
+            tracing::warn!(
+                "Skipping settlement evidence for transfer {}: no persisted proof payload",
+                transfer.id
+            );
+            return;
+        };
+        match csv_protocol::proof_taxonomy::ProofBundle::from_canonical_bytes(&payload) {
+            Ok(proof_bundle) => {
+                let evidence = build_settlement_evidence(
+                    transfer,
+                    &proof_bundle,
+                    &mint_result.tx_hash,
+                    mint_result.block_height,
+                );
+                self.record_settlement_evidence(&evidence, runtime_ctx.runtime_instance);
+            }
+            Err(e) => tracing::warn!(
+                "Skipping settlement evidence for transfer {}: proof payload malformed: {}",
+                transfer.id,
+                e
+            ),
+        }
     }
 
     /// Resume a specific transfer after a crash or restart.
@@ -2161,6 +2728,18 @@ impl TransferCoordinator {
                 Err(TransferCoordinatorError::RuntimeError(
                     "Cannot resume from Compromised phase - transfer security incident".to_string(),
                 ))
+            }
+            crate::recovery::TransferStage::SealAssigned
+            | crate::recovery::TransferStage::SourceSealClosed
+            | crate::recovery::TransferStage::ConsignmentEmitted => {
+                // Send-mode (interactive off-chain) transfers have no destination
+                // finality phase and are resumed by the dedicated, idempotent
+                // send path — never by the materialize resume driver, which would
+                // try to drive a lock/mint state machine the send transfer never
+                // entered.
+                Err(TransferCoordinatorError::RuntimeError(format!(
+                    "Cannot resume send-mode transfer {transfer_id} via materialize resume; use resume_send"
+                )))
             }
         }
     }
@@ -2581,6 +3160,7 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+        self.with_metrics(|metrics| metrics.record_verified_proof_built());
         let receipt = self
             .execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
             .await?;
@@ -2684,6 +3264,7 @@ impl TransferCoordinator {
                 transfer_context: None,
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
+        self.with_metrics(|metrics| metrics.record_mint_submitted());
         self.execute_from_mint(
             &transfer.id,
             &mint_result.tx_hash,
@@ -2750,6 +3331,13 @@ impl TransferCoordinator {
             .confirm_consumed(replay_id.as_bytes())
             .await
             .map_err(|e| TransferCoordinatorError::ReplayDbError(e.to_string()))?;
+        self.with_metrics(|metrics| metrics.record_mint_confirmed());
+
+        // Record auditable settlement evidence for a later source release. The
+        // resume path reconstructs the verified proof bundle from the journal's
+        // persisted MintSubmitted payload so the settlement key material is
+        // identical to the fresh-execution path.
+        self.record_resumed_settlement_evidence(&transfer, &mint_result, &runtime_ctx);
 
         let mut registry_entry = transfer_to_registry_entry(&transfer)?;
         registry_entry.mint_tx_hash = hash_from_tx_str(&mint_result.tx_hash)?;
@@ -2889,6 +3477,348 @@ impl TransferCoordinator {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Send mode (interactive off-chain transfer)
+//
+// The send lifecycle is `Initialized -> SealAssigned -> SourceSealClosed ->
+// ConsignmentEmitted -> Completed`. Every step is journaled Entered/Completed
+// in the SAME execution journal the materialize path uses, and resume reads the
+// journal to skip already-completed steps. See [`crate::send_transfer`] for the
+// idempotency contract.
+// ---------------------------------------------------------------------------
+impl TransferCoordinator {
+    /// Journal one send-mode phase transition.
+    fn journal_send_phase(
+        &self,
+        transfer_id: &str,
+        replay_id: &csv_wire::HashWire,
+        phase: crate::recovery::TransferStage,
+        outcome: crate::execution_journal::PhaseOutcome,
+        progress: Option<&crate::send_transfer::SendProgress>,
+    ) -> Result<(), TransferCoordinatorError> {
+        let proof_payload = match progress {
+            Some(p) => Some(csv_codec::to_canonical_cbor(p).map_err(|e| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to encode send progress: {e}"
+                ))
+            })?),
+            None => None,
+        };
+        self.execution_journal
+            .record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer_id.to_string(),
+                replay_id: replay_id.clone(),
+                proof_hash: [0u8; 32],
+                proof_payload,
+                phase,
+                ts: std::time::SystemTime::now(),
+                outcome,
+                attempt: 1,
+                transfer_context: None,
+            })
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {e}")))
+    }
+
+    /// Reconstruct the cumulative send progress from the transfer's latest
+    /// journal entry (empty if the transfer has no persisted progress yet).
+    fn load_send_progress(
+        &self,
+        transfer_id: &str,
+    ) -> Result<crate::send_transfer::SendProgress, TransferCoordinatorError> {
+        let entry = self
+            .execution_journal
+            .latest_entry(transfer_id)
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {e}")))?;
+        match entry.and_then(|e| e.proof_payload) {
+            Some(bytes) => csv_codec::from_canonical_cbor(&bytes).map_err(|e| {
+                TransferCoordinatorError::RuntimeError(format!(
+                    "Failed to decode send progress: {e}"
+                ))
+            }),
+            None => Ok(crate::send_transfer::SendProgress::default()),
+        }
+    }
+
+    /// Execute an interactive off-chain (send-mode) transfer to completion.
+    ///
+    /// Drives assign → close-source-seal → emit-consignment, journaling each
+    /// step. The source-seal close reserves a per-seal nullifier in the replay
+    /// database (compare-and-set) so a *different* transfer cannot close the same
+    /// single-use seal. Safe to interrupt at any point: call
+    /// [`TransferCoordinator::resume_send`] to finish without re-closing the seal
+    /// or re-emitting the consignment.
+    pub async fn execute_send(
+        &self,
+        transfer: &crate::send_transfer::SendTransfer,
+        executor: &dyn crate::send_transfer::SendExecutor,
+    ) -> Result<crate::send_transfer::SendReceipt, TransferCoordinatorError> {
+        let replay_id = csv_wire::HashWire::from(transfer.sanad_id.0);
+
+        // Fresh-execution only. A transfer id that already has journal history —
+        // whether an in-flight/completed send or a materialize transfer reusing
+        // the id — must be advanced through `resume_send`, never re-executed.
+        // Re-journaling `Initialized` over an existing timeline would roll the
+        // recorded phase backward and could re-drive a close whose completion is
+        // not yet visible in `progress`; routing to resume keeps the idempotent,
+        // journal-authoritative path.
+        if self
+            .execution_journal
+            .latest_phase(&transfer.transfer_id)
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {e}")))?
+            .is_some()
+        {
+            return Err(TransferCoordinatorError::RuntimeError(format!(
+                "Transfer {} already has journal history; use resume_send",
+                transfer.transfer_id
+            )));
+        }
+
+        // Initialized: entered + completed (idempotent — a fresh replay of this
+        // phase records only audit entries and mutates no protocol state).
+        self.journal_send_phase(
+            &transfer.transfer_id,
+            &replay_id,
+            crate::recovery::TransferStage::Initialized,
+            crate::execution_journal::PhaseOutcome::Entered,
+            None,
+        )?;
+        self.journal_send_phase(
+            &transfer.transfer_id,
+            &replay_id,
+            crate::recovery::TransferStage::Initialized,
+            crate::execution_journal::PhaseOutcome::Completed,
+            None,
+        )?;
+
+        self.drive_send(
+            transfer,
+            executor,
+            crate::send_transfer::SendProgress::default(),
+        )
+        .await
+    }
+
+    /// Resume an interrupted send-mode transfer from its last journaled phase.
+    ///
+    /// Idempotent: steps already recorded `Completed` are skipped, so the
+    /// single-use source seal is never re-closed and the consignment is never
+    /// re-emitted. If the transfer already reached a terminal state, returns the
+    /// receipt reconstructed from durable journal state.
+    pub async fn resume_send(
+        &self,
+        transfer: &crate::send_transfer::SendTransfer,
+        executor: &dyn crate::send_transfer::SendExecutor,
+    ) -> Result<crate::send_transfer::SendReceipt, TransferCoordinatorError> {
+        let latest_phase = self
+            .execution_journal
+            .latest_phase(&transfer.transfer_id)
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {e}")))?;
+
+        // A resume MUST NOT re-drive a materialize transfer through the send
+        // path, and vice versa. Reject a phase that belongs to the other mode.
+        if let Some(phase) = latest_phase
+            && phase.is_materialize_stage()
+        {
+            return Err(TransferCoordinatorError::RuntimeError(format!(
+                "Transfer {} is a materialize transfer (phase {:?}); use resume_transfer",
+                transfer.transfer_id, phase
+            )));
+        }
+
+        let progress = self.load_send_progress(&transfer.transfer_id)?;
+        self.drive_send(transfer, executor, progress).await
+    }
+
+    /// Shared send driver used by both fresh execution and resume.
+    ///
+    /// `progress` carries whatever prior steps have durably completed; each step
+    /// whose output is already present is skipped, making the driver idempotent
+    /// under repeated invocation.
+    async fn drive_send(
+        &self,
+        transfer: &crate::send_transfer::SendTransfer,
+        executor: &dyn crate::send_transfer::SendExecutor,
+        mut progress: crate::send_transfer::SendProgress,
+    ) -> Result<crate::send_transfer::SendReceipt, TransferCoordinatorError> {
+        use crate::execution_journal::PhaseOutcome;
+        use crate::recovery::TransferStage;
+        use crate::send_transfer::{Consignment, SealAssignment, SealCloseWitness};
+
+        let replay_id = csv_wire::HashWire::from(transfer.sanad_id.0);
+
+        // Capture the last journaled phase for THIS transfer BEFORE this
+        // invocation writes anything. It is `SourceSealClosed` only if a prior
+        // (interrupted) run of this same transfer already reserved the seal
+        // nullifier and journaled the close as `Entered` but not `Completed`.
+        // That single fact is what lets a resumed close tolerate its own
+        // pre-existing nullifier reservation without opening a door for a
+        // *different* transfer to bypass the duplicate-seal check.
+        let owns_prior_close = self
+            .execution_journal
+            .latest_phase(&transfer.transfer_id)
+            .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {e}")))?
+            == Some(TransferStage::SourceSealClosed);
+
+        // Step 1 — assign the Sanad to the invoice's destination seal.
+        let assignment = match &progress.assignment {
+            Some(bytes) => SealAssignment(bytes.clone()),
+            None => {
+                self.journal_send_phase(
+                    &transfer.transfer_id,
+                    &replay_id,
+                    TransferStage::SealAssigned,
+                    PhaseOutcome::Entered,
+                    Some(&progress),
+                )?;
+                let assignment = executor.assign_seal(transfer).await.map_err(|e| {
+                    let _ = self.journal_send_phase(
+                        &transfer.transfer_id,
+                        &replay_id,
+                        TransferStage::SealAssigned,
+                        PhaseOutcome::Failed(e.to_string()),
+                        Some(&progress),
+                    );
+                    TransferCoordinatorError::SendFailed(e.to_string())
+                })?;
+                progress.assignment = Some(assignment.0.clone());
+                self.journal_send_phase(
+                    &transfer.transfer_id,
+                    &replay_id,
+                    TransferStage::SealAssigned,
+                    PhaseOutcome::Completed,
+                    Some(&progress),
+                )?;
+                assignment
+            }
+        };
+
+        // Step 2 — close the single-use source seal (the single-use commitment).
+        let witness = match &progress.witness {
+            Some(bytes) => SealCloseWitness(bytes.clone()),
+            None => {
+                // Reserve the per-seal nullifier BEFORE journaling this phase, so
+                // a transfer that loses the reservation never leaves a
+                // `SourceSealClosed` journal entry behind that a later resume
+                // could misread as proof of ownership. A genuine duplicate is
+                // rejected here with no journal mutation.
+                self.reserve_source_seal(transfer, owns_prior_close).await?;
+
+                self.journal_send_phase(
+                    &transfer.transfer_id,
+                    &replay_id,
+                    TransferStage::SourceSealClosed,
+                    PhaseOutcome::Entered,
+                    Some(&progress),
+                )?;
+
+                let witness = executor
+                    .close_source_seal(transfer, &assignment)
+                    .await
+                    .map_err(|e| {
+                        let _ = self.journal_send_phase(
+                            &transfer.transfer_id,
+                            &replay_id,
+                            TransferStage::SourceSealClosed,
+                            PhaseOutcome::Failed(e.to_string()),
+                            Some(&progress),
+                        );
+                        TransferCoordinatorError::SendFailed(e.to_string())
+                    })?;
+                progress.witness = Some(witness.0.clone());
+                self.journal_send_phase(
+                    &transfer.transfer_id,
+                    &replay_id,
+                    TransferStage::SourceSealClosed,
+                    PhaseOutcome::Completed,
+                    Some(&progress),
+                )?;
+                witness
+            }
+        };
+
+        // Step 3 — emit the consignment for off-band delivery.
+        let consignment = match &progress.consignment {
+            Some(bytes) => Consignment(bytes.clone()),
+            None => {
+                self.journal_send_phase(
+                    &transfer.transfer_id,
+                    &replay_id,
+                    TransferStage::ConsignmentEmitted,
+                    PhaseOutcome::Entered,
+                    Some(&progress),
+                )?;
+                let consignment = executor
+                    .emit_consignment(transfer, &witness)
+                    .await
+                    .map_err(|e| {
+                        let _ = self.journal_send_phase(
+                            &transfer.transfer_id,
+                            &replay_id,
+                            TransferStage::ConsignmentEmitted,
+                            PhaseOutcome::Failed(e.to_string()),
+                            Some(&progress),
+                        );
+                        TransferCoordinatorError::SendFailed(e.to_string())
+                    })?;
+                progress.consignment = Some(consignment.0.clone());
+                self.journal_send_phase(
+                    &transfer.transfer_id,
+                    &replay_id,
+                    TransferStage::ConsignmentEmitted,
+                    PhaseOutcome::Completed,
+                    Some(&progress),
+                )?;
+                consignment
+            }
+        };
+
+        // Terminal: Completed (carry final progress forward for auditability).
+        self.journal_send_phase(
+            &transfer.transfer_id,
+            &replay_id,
+            TransferStage::Completed,
+            PhaseOutcome::Completed,
+            Some(&progress),
+        )?;
+
+        Ok(crate::send_transfer::SendReceipt {
+            transfer_id: transfer.transfer_id.clone(),
+            consignment,
+            witness,
+        })
+    }
+
+    /// Reserve the per-source-seal nullifier so no other transfer can close the
+    /// same single-use seal.
+    ///
+    /// Uses compare-and-set. `owns_prior_close` is true only when THIS transfer
+    /// already journaled the close as `SourceSealClosed` on an earlier,
+    /// interrupted run — in which case a pre-existing reservation is our own and
+    /// is tolerated so the resume can finish. Otherwise an `AlreadyExists` means
+    /// a *different* transfer already closed this seal and the send is rejected
+    /// as a duplicate source seal.
+    ///
+    /// Security note: reservation happens once per transfer (subsequent runs
+    /// skip this via the persisted witness). A crash in the sub-millisecond
+    /// window between a successful reservation and the next journal write leaves
+    /// the reservation without an owning journal entry; such a transfer fails
+    /// closed (rejected) on resume rather than risk re-closing a seal that might
+    /// belong to another transfer. Failing closed never double-spends.
+    async fn reserve_source_seal(
+        &self,
+        transfer: &crate::send_transfer::SendTransfer,
+        owns_prior_close: bool,
+    ) -> Result<(), TransferCoordinatorError> {
+        let nullifier = transfer.source_seal_nullifier();
+        match self.replay_db.insert_if_absent(&nullifier).await {
+            Ok(()) => Ok(()),
+            Err(ReplayDbError::AlreadyExists) if owns_prior_close => Ok(()),
+            Err(ReplayDbError::AlreadyExists) => Err(TransferCoordinatorError::DuplicateSourceSeal),
+            Err(e) => Err(TransferCoordinatorError::ReplayDbError(e.to_string())),
+        }
+    }
+}
+
 /// Supplies authenticated lease context for restart recovery.
 ///
 /// Implementations must retrieve or acquire authority from durable runtime
@@ -2910,7 +3840,7 @@ mod tests {
         SealRegistryStatus,
     };
     use csv_protocol::finality::ChainCapabilities;
-    use csv_protocol::proof_taxonomy::{InclusionProof, ProofBundle};
+    use csv_protocol::proof_taxonomy::ProofBundle;
     use csv_storage::ReplayDatabase;
     use std::sync::Arc;
 
@@ -4898,5 +5828,1299 @@ mod tests {
             !mint_called.load(std::sync::atomic::Ordering::SeqCst),
             "mint must not be dispatched when source-proof verification fails"
         );
+    }
+
+    /// Adapter whose destination mint fails for its first `fail_until` calls and
+    /// succeeds thereafter. Used to exercise the operator retry / revert paths.
+    struct FlakyMintAdapter {
+        caps: ChainCapabilities,
+        mint_attempts: Arc<std::sync::atomic::AtomicUsize>,
+        fail_until: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl ChainAdapter for FlakyMintAdapter {
+        fn chain_id(&self) -> &str {
+            "test-chain"
+        }
+        fn capabilities(&self) -> ChainCapabilities {
+            self.caps.clone()
+        }
+        fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+            csv_protocol::signature::SignatureScheme::Ed25519
+        }
+        async fn lock_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+            Ok(LocalTestAdapter::build_fake_lock_result())
+        }
+        async fn mint_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+            _proof_bundle: &[u8],
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            let attempt = self
+                .mint_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if attempt < self.fail_until {
+                return Err(csv_adapter_core::AdapterError::Generic(
+                    "destination mint reverted".to_string(),
+                ));
+            }
+            Ok(MintResult {
+                tx_hash: hex::encode([0x7u8; 32]),
+                block_height: 4242,
+            })
+        }
+        async fn build_inclusion_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            _lock_result: &LockResult,
+        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+            LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+                .map_err(csv_adapter_core::AdapterError::Generic)
+        }
+        async fn validate_source_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            proof_bundle: &ProofBundle,
+        ) -> Result<(), csv_adapter_core::AdapterError> {
+            if proof_bundle.seal_ref.id != transfer.sanad_id.as_bytes() {
+                return Err(csv_adapter_core::AdapterError::Generic(
+                    "proof is not bound to the requested sanad".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        async fn check_seal_registry(
+            &self,
+            _seal_id: &[u8],
+        ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+            Ok(SealRegistryStatus::Available)
+        }
+        async fn confirm_tx(
+            &self,
+            tx_hash: &str,
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            Ok(MintResult {
+                tx_hash: tx_hash.to_string(),
+                block_height: 100,
+            })
+        }
+        async fn get_balance(
+            &self,
+            _address: &str,
+        ) -> Result<String, csv_adapter_core::AdapterError> {
+            Ok("0".to_string())
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    struct StrictThinRegistryAdapter {
+        caps: ChainCapabilities,
+        mint_calls: Arc<std::sync::atomic::AtomicUsize>,
+        fixed_seal_id: Option<[u8; 32]>,
+        enforce_lock_events: bool,
+        minted_sanads: std::sync::Mutex<std::collections::HashSet<[u8; 32]>>,
+        used_nullifiers: std::sync::Mutex<std::collections::HashSet<[u8; 32]>>,
+        used_lock_events: std::sync::Mutex<std::collections::HashSet<[u8; 32]>>,
+    }
+
+    impl StrictThinRegistryAdapter {
+        fn new(fixed_seal_id: Option<[u8; 32]>, enforce_lock_events: bool) -> Self {
+            Self {
+                caps: ChainCapabilities::bitcoin(),
+                mint_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                fixed_seal_id,
+                enforce_lock_events,
+                minted_sanads: std::sync::Mutex::new(std::collections::HashSet::new()),
+                used_nullifiers: std::sync::Mutex::new(std::collections::HashSet::new()),
+                used_lock_events: std::sync::Mutex::new(std::collections::HashSet::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ChainAdapter for StrictThinRegistryAdapter {
+        fn chain_id(&self) -> &str {
+            "test-chain"
+        }
+        fn capabilities(&self) -> ChainCapabilities {
+            self.caps.clone()
+        }
+        fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+            csv_protocol::signature::SignatureScheme::Ed25519
+        }
+        async fn lock_sanad(
+            &self,
+            transfer: &CrossChainTransfer,
+        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+            Ok(LockResult {
+                tx_hash: hex::encode(&transfer.lock_tx_hash),
+                block_height: 100,
+            })
+        }
+        async fn mint_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+            proof_bundle: &[u8],
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            let request: RuntimeMintRequest = csv_codec::from_canonical_cbor(proof_bundle)
+                .map_err(|e| csv_adapter_core::AdapterError::SerializationError(e.to_string()))?;
+            let attestation = request.attestation;
+
+            if self.enforce_lock_events {
+                let mut locks = self.used_lock_events.lock().map_err(|e| {
+                    csv_adapter_core::AdapterError::Generic(format!("lock set poisoned: {e}"))
+                })?;
+                if !locks.insert(attestation.lock_event_id) {
+                    return Err(csv_adapter_core::AdapterError::Generic(
+                        "duplicate lock event rejected".to_string(),
+                    ));
+                }
+            }
+
+            let mut nullifiers = self.used_nullifiers.lock().map_err(|e| {
+                csv_adapter_core::AdapterError::Generic(format!("nullifier set poisoned: {e}"))
+            })?;
+            if !nullifiers.insert(attestation.nullifier) {
+                return Err(csv_adapter_core::AdapterError::Generic(
+                    "duplicate nullifier rejected".to_string(),
+                ));
+            }
+            drop(nullifiers);
+
+            let mut sanads = self.minted_sanads.lock().map_err(|e| {
+                csv_adapter_core::AdapterError::Generic(format!("sanad set poisoned: {e}"))
+            })?;
+            if !sanads.insert(attestation.sanad_id) {
+                return Err(csv_adapter_core::AdapterError::Generic(
+                    "duplicate sanad mint rejected".to_string(),
+                ));
+            }
+
+            let call = self
+                .mint_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u8;
+            Ok(MintResult {
+                tx_hash: hex::encode([0xA0 | call; 32]),
+                block_height: 700 + u64::from(call),
+            })
+        }
+        async fn build_inclusion_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            _lock_result: &LockResult,
+        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+            let mut bundle = LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+                .map_err(csv_adapter_core::AdapterError::Generic)?;
+            if let Some(seal_id) = self.fixed_seal_id {
+                bundle.seal_ref.id = seal_id.to_vec();
+            }
+            Ok(bundle)
+        }
+        async fn validate_source_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            proof_bundle: &ProofBundle,
+        ) -> Result<(), csv_adapter_core::AdapterError> {
+            if proof_bundle.anchor_ref.anchor_id != transfer.sanad_id.as_bytes() {
+                return Err(csv_adapter_core::AdapterError::Generic(
+                    "proof anchor is not bound to the requested sanad".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        async fn check_seal_registry(
+            &self,
+            _seal_id: &[u8],
+        ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+            Ok(SealRegistryStatus::Available)
+        }
+        async fn confirm_tx(
+            &self,
+            tx_hash: &str,
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            Ok(MintResult {
+                tx_hash: tx_hash.to_string(),
+                block_height: 100,
+            })
+        }
+        async fn get_balance(
+            &self,
+            _address: &str,
+        ) -> Result<String, csv_adapter_core::AdapterError> {
+            Ok("0".to_string())
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn strict_registry(
+        fixed_seal_id: Option<[u8; 32]>,
+        enforce_lock_events: bool,
+    ) -> (AdapterRegistryImpl, Arc<std::sync::atomic::AtomicUsize>) {
+        let adapter = StrictThinRegistryAdapter::new(fixed_seal_id, enforce_lock_events);
+        let calls = adapter.mint_calls.clone();
+        let mut registry = AdapterRegistryImpl::new();
+        registry.register_adapter(Box::new(adapter)).unwrap();
+        (registry, calls)
+    }
+
+    fn operator_transfer(id: &str, seed: u8) -> CrossChainTransfer {
+        CrossChainTransfer {
+            id: id.to_string(),
+            source_chain: "test-chain".to_string(),
+            destination_chain: "test-chain".to_string(),
+            lock_tx_hash: vec![seed; 32],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([seed; 32]),
+            transition_id: vec![seed; 32],
+        }
+    }
+
+    fn operator_ctx(
+        transfer: &CrossChainTransfer,
+        retry_delay: std::time::Duration,
+        max_retries: u32,
+    ) -> crate::user_runtime_lease::RuntimeExecutionContext {
+        let owner = uuid::Uuid::new_v4();
+        let mut policy = crate::policy::RuntimePolicy::new();
+        policy.retry_delay = retry_delay;
+        policy.max_retries = max_retries;
+        crate::user_runtime_lease::RuntimeExecutionContext {
+            lease: crate::user_runtime_lease::TransferLease {
+                transfer_id: csv_hash::SanadId::new(*transfer.sanad_id.as_bytes()).into(),
+                epoch: 1,
+                owner_runtime_id: owner,
+                acquired_at: std::time::SystemTime::now(),
+                expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
+            },
+            runtime_instance: owner,
+            policy,
+        }
+    }
+
+    #[tokio::test]
+    async fn settlement_evidence_recorded_on_successful_mint() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let mut registry = AdapterRegistryImpl::new();
+        registry
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
+            .unwrap();
+        let transfer = operator_transfer("settlement-happy", 9);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+
+        coordinator
+            .execute(transfer.clone(), &registry, ctx)
+            .await
+            .expect("operator mint should complete");
+
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        let evidence = coordinator
+            .settlement_evidence(&sanad)
+            .expect("settlement query must succeed")
+            .expect("settlement evidence must be recorded after a confirmed mint");
+
+        assert_eq!(evidence.transfer_id, transfer.id);
+        assert_eq!(evidence.sanad_id, *transfer.sanad_id.as_bytes());
+        assert_eq!(evidence.source_chain, "test-chain");
+        assert_eq!(evidence.destination_chain, "test-chain");
+        // The coordinator rebinds the transfer to the real lock tx hash reported
+        // by the adapter before deriving the settlement key, so the recorded
+        // lock_event_id is keyed to the confirmed lock outpoint, not the empty
+        // placeholder the caller submitted.
+        let mut confirmed = transfer.clone();
+        confirmed.lock_tx_hash =
+            hex::decode(LocalTestAdapter::build_fake_lock_result().tx_hash).unwrap();
+        assert_eq!(evidence.lock_event_id, lock_event_id(&confirmed));
+        assert_ne!(evidence.mint_tx_hash, "");
+    }
+
+    #[tokio::test]
+    async fn settlement_evidence_recorded_on_resume_path() {
+        // Drive the resume/recovery mint path and confirm it leaves the same
+        // settlement record as the fresh-execution path.
+        let expected_transfer = CrossChainTransfer {
+            id: "recover-transfer".to_string(),
+            source_chain: "test-chain".to_string(),
+            destination_chain: "test-chain".to_string(),
+            lock_tx_hash: vec![1u8; 32],
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([44u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
+        let proof_bundle = LocalTestAdapter::new_bitcoin()
+            .build_inclusion_proof(
+                &expected_transfer,
+                &LockResult {
+                    tx_hash: hex::encode([0x11u8; 32]),
+                    block_height: 100,
+                },
+            )
+            .await
+            .unwrap();
+        let payload = proof_bundle.to_canonical_bytes().unwrap();
+        let (coordinator, registry, transfer, runtime_ctx) =
+            recovery_fixture(TransferStage::ProofValidated, Some(payload)).await;
+
+        coordinator
+            .resume_transfer(&transfer.id, &registry, runtime_ctx)
+            .await
+            .expect("resume must mint using durable proof bytes");
+
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        let evidence = coordinator
+            .settlement_evidence(&sanad)
+            .expect("settlement query must succeed")
+            .expect("resume path must record settlement evidence");
+        assert_eq!(evidence.sanad_id, *transfer.sanad_id.as_bytes());
+        assert_eq!(evidence.nullifier, mint_nullifier(&proof_bundle));
+    }
+
+    #[tokio::test]
+    async fn mint_retry_within_call_completes_and_records_settlement() {
+        // A transient destination-mint revert is retried inside the same execute
+        // call; the transfer still completes and records settlement evidence.
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let mint_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = AdapterRegistryImpl::new();
+        registry
+            .register_adapter(Box::new(FlakyMintAdapter {
+                caps: ChainCapabilities::bitcoin(),
+                mint_attempts: mint_attempts.clone(),
+                fail_until: 1, // first attempt reverts, retry succeeds
+            }))
+            .unwrap();
+        let transfer = operator_transfer("mint-retry", 21);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 3);
+
+        coordinator
+            .execute(transfer.clone(), &registry, ctx)
+            .await
+            .expect("transient revert must be retried and complete");
+
+        assert!(
+            mint_attempts.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "mint should have been retried at least once"
+        );
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        assert!(
+            coordinator.settlement_evidence(&sanad).unwrap().is_some(),
+            "completed retry must record settlement evidence"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_revert_rolls_back_and_blocks_duplicate() {
+        // When every mint attempt reverts, the transfer fails, the replay entry is
+        // rolled back, and a duplicate submission is refused — never double-minted.
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let mint_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = AdapterRegistryImpl::new();
+        registry
+            .register_adapter(Box::new(FlakyMintAdapter {
+                caps: ChainCapabilities::bitcoin(),
+                mint_attempts: mint_attempts.clone(),
+                fail_until: usize::MAX, // every attempt reverts
+            }))
+            .unwrap();
+        let transfer = operator_transfer("mint-revert", 33);
+        // Reuse the same lease/owner for the duplicate so the retry reaches the
+        // replay check rather than being stopped earlier by lease ownership.
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+
+        let result = coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await;
+        assert!(
+            matches!(result, Err(TransferCoordinatorError::MintFailed(_))),
+            "a fully-reverted mint must surface MintFailed, got {:?}",
+            result
+        );
+
+        // No settlement evidence for a mint that never confirmed.
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        assert!(
+            coordinator.settlement_evidence(&sanad).unwrap().is_none(),
+            "a reverted mint must not record settlement evidence"
+        );
+
+        // Duplicate submission after a revert is refused (fail-closed): the
+        // rolled-back replay entry blocks any re-execution, preventing a
+        // double-mint. Recovery from a revert is an operator action, not an
+        // automatic re-run (see the operator runbook).
+        let dup = coordinator.execute(transfer.clone(), &registry, ctx).await;
+        assert!(
+            matches!(dup, Err(TransferCoordinatorError::ReplayDetected(_))),
+            "duplicate submission after revert must be refused, got {:?}",
+            dup
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_completed_sanad_returns_receipt_without_second_mint() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, mint_calls) = strict_registry(None, true);
+        let transfer = operator_transfer("dup-same-sanad", 41);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+
+        let first = coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .expect("first mint must complete");
+        let second = coordinator
+            .execute(transfer.clone(), &registry, ctx)
+            .await
+            .expect("completed replay should return recorded receipt");
+
+        assert_eq!(first.mint_tx_hash, second.mint_tx_hash);
+        assert_eq!(
+            mint_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "completed idempotent retry must not dispatch a second mint"
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_nullifier_fails_closed() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, mint_calls) = strict_registry(Some([0x42; 32]), false);
+        let first = operator_transfer("dup-nullifier-1", 42);
+        let second = operator_transfer("dup-nullifier-2", 43);
+
+        coordinator
+            .execute(
+                first.clone(),
+                &registry,
+                operator_ctx(&first, std::time::Duration::from_millis(0), 1),
+            )
+            .await
+            .expect("first mint must complete");
+        let result = coordinator
+            .execute(
+                second.clone(),
+                &registry,
+                operator_ctx(&second, std::time::Duration::from_millis(0), 1),
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(TransferCoordinatorError::MintFailed(ref message)) if message.contains("duplicate nullifier")),
+            "duplicate nullifier must fail closed, got {:?}",
+            result
+        );
+        assert_eq!(
+            mint_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "duplicate nullifier must not be accepted as a mint"
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_lock_event_fails_closed() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, mint_calls) = strict_registry(None, true);
+        let first = operator_transfer("dup-lock-1", 51);
+        let mut second = operator_transfer("dup-lock-2", 52);
+        second.lock_tx_hash = first.lock_tx_hash.clone();
+        second.lock_output_index = first.lock_output_index;
+
+        coordinator
+            .execute(
+                first.clone(),
+                &registry,
+                operator_ctx(&first, std::time::Duration::from_millis(0), 1),
+            )
+            .await
+            .expect("first mint must complete");
+        let result = coordinator
+            .execute(
+                second.clone(),
+                &registry,
+                operator_ctx(&second, std::time::Duration::from_millis(0), 1),
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(TransferCoordinatorError::MintFailed(ref message)) if message.contains("duplicate lock event")),
+            "duplicate lock event must fail closed, got {:?}",
+            result
+        );
+        assert_eq!(
+            mint_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "duplicate lock event must not be accepted as a mint"
+        );
+    }
+
+    #[tokio::test]
+    async fn forged_mint_authorization_payload_is_rejected() {
+        let adapter = StrictThinRegistryAdapter::new(None, true);
+        let transfer = operator_transfer("forged-auth", 61);
+        let result = adapter.mint_sanad(&transfer, b"not canonical cbor").await;
+        assert!(
+            matches!(
+                result,
+                Err(csv_adapter_core::AdapterError::SerializationError(_))
+            ),
+            "malformed authorization payload must be rejected, got {:?}",
+            result
+        );
+        assert_eq!(
+            adapter.mint_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_flow_metrics_cover_mint_replay_authorization_and_settlement() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, _settle_calls, _refund_calls, _payload) = settling_registry();
+        let transfer = operator_transfer("metrics-flow", 62);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+
+        coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .expect("mint must complete");
+        coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await
+            .expect("settlement release must complete");
+
+        let no_mint = csv_hash::SanadId::new([0xEF; 32]);
+        assert!(matches!(
+            coordinator
+                .release_escrow(&no_mint, PAYOUT, 0, &registry, &ctx)
+                .await,
+            Err(TransferCoordinatorError::SettlementNotAuthorized(_))
+        ));
+
+        let reverted = operator_transfer("metrics-revert", 63);
+        let mut flaky_registry = AdapterRegistryImpl::new();
+        flaky_registry
+            .register_adapter(Box::new(FlakyMintAdapter {
+                caps: ChainCapabilities::bitcoin(),
+                mint_attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                fail_until: usize::MAX,
+            }))
+            .unwrap();
+        let reverted_ctx = operator_ctx(&reverted, std::time::Duration::from_millis(0), 0);
+        assert!(matches!(
+            coordinator
+                .execute(reverted.clone(), &flaky_registry, reverted_ctx.clone())
+                .await,
+            Err(TransferCoordinatorError::MintFailed(_))
+        ));
+        assert!(matches!(
+            coordinator
+                .execute(reverted, &flaky_registry, reverted_ctx)
+                .await,
+            Err(TransferCoordinatorError::ReplayDetected(_))
+        ));
+
+        let snapshot = coordinator.runtime_flow_metrics();
+        assert_eq!(snapshot.verified_proof_built, 2);
+        assert_eq!(snapshot.mint_submitted, 1);
+        assert_eq!(snapshot.mint_confirmed, 1);
+        assert_eq!(snapshot.settlement_submitted, 1);
+        assert_eq!(snapshot.settlement_confirmed, 1);
+        assert_eq!(snapshot.authorization_rejected, 1);
+        assert_eq!(snapshot.replay_rejected, 1);
+    }
+
+    // ==================== Source-chain settlement (TRM-ESCROW-001) ====================
+
+    /// A `test-chain` adapter that behaves like [`LocalTestAdapter`] for the mint
+    /// lifecycle AND implements the §10 settlement ports, capturing what the
+    /// runtime dispatched so tests can assert the release/refund request shape.
+    struct SettlingTestAdapter {
+        caps: ChainCapabilities,
+        settle_calls: Arc<std::sync::atomic::AtomicUsize>,
+        refund_calls: Arc<std::sync::atomic::AtomicUsize>,
+        last_settle_payload: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+    }
+
+    impl SettlingTestAdapter {
+        fn new() -> Self {
+            Self {
+                caps: ChainCapabilities::bitcoin(),
+                settle_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                refund_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                last_settle_payload: Arc::new(std::sync::Mutex::new(None)),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ChainAdapter for SettlingTestAdapter {
+        fn chain_id(&self) -> &str {
+            "test-chain"
+        }
+        fn capabilities(&self) -> ChainCapabilities {
+            self.caps.clone()
+        }
+        fn signature_scheme(&self) -> csv_protocol::signature::SignatureScheme {
+            csv_protocol::signature::SignatureScheme::Ed25519
+        }
+        async fn lock_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+            Ok(LocalTestAdapter::build_fake_lock_result())
+        }
+        async fn mint_sanad(
+            &self,
+            _transfer: &CrossChainTransfer,
+            _proof_bundle: &[u8],
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            Ok(LocalTestAdapter::build_fake_mint_result())
+        }
+        async fn build_inclusion_proof(
+            &self,
+            transfer: &CrossChainTransfer,
+            _lock_result: &LockResult,
+        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+            LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
+                .map_err(csv_adapter_core::AdapterError::Generic)
+        }
+        async fn validate_source_proof(
+            &self,
+            _transfer: &CrossChainTransfer,
+            _proof_bundle: &ProofBundle,
+        ) -> Result<(), csv_adapter_core::AdapterError> {
+            Ok(())
+        }
+        async fn check_seal_registry(
+            &self,
+            _seal_id: &[u8],
+        ) -> Result<csv_adapter_core::SealRegistryStatus, csv_adapter_core::AdapterError> {
+            Ok(csv_adapter_core::SealRegistryStatus::Available)
+        }
+        async fn confirm_tx(
+            &self,
+            tx_hash: &str,
+        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            Ok(MintResult {
+                tx_hash: tx_hash.to_string(),
+                block_height: 100,
+            })
+        }
+        async fn get_balance(
+            &self,
+            _address: &str,
+        ) -> Result<String, csv_adapter_core::AdapterError> {
+            Ok("0".to_string())
+        }
+        async fn settle_escrow(
+            &self,
+            _transfer: &CrossChainTransfer,
+            settlement_request: &[u8],
+        ) -> Result<csv_adapter_core::SettlementResult, csv_adapter_core::AdapterError> {
+            self.settle_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *self.last_settle_payload.lock().unwrap() = Some(settlement_request.to_vec());
+            Ok(csv_adapter_core::SettlementResult {
+                tx_hash: hex::encode([0x5eu8; 32]),
+                block_height: 200,
+            })
+        }
+        async fn refund_escrow(
+            &self,
+            _transfer: &CrossChainTransfer,
+        ) -> Result<csv_adapter_core::SettlementResult, csv_adapter_core::AdapterError> {
+            self.refund_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(csv_adapter_core::SettlementResult {
+                tx_hash: hex::encode([0x4eu8; 32]),
+                block_height: 201,
+            })
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// Register a settlement-capable adapter and return it plus its call counters.
+    fn settling_registry() -> (
+        AdapterRegistryImpl,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+    ) {
+        let adapter = SettlingTestAdapter::new();
+        let settle_calls = adapter.settle_calls.clone();
+        let refund_calls = adapter.refund_calls.clone();
+        let payload = adapter.last_settle_payload.clone();
+        let mut registry = AdapterRegistryImpl::new();
+        registry.register_adapter(Box::new(adapter)).unwrap();
+        (registry, settle_calls, refund_calls, payload)
+    }
+
+    const PAYOUT: [u8; 32] = [0xAB; 32];
+
+    /// After a confirmed mint, release_escrow dispatches a §10 settlement request
+    /// (carrying NO runtime signatures — the operator cannot self-release) and
+    /// records a distinct SettlementReleased status.
+    #[tokio::test]
+    async fn release_escrow_dispatches_and_records_release() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, settle_calls, _refund, payload) = settling_registry();
+        let transfer = operator_transfer("settle-release", 21);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+        coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .expect("mint must complete to record evidence");
+
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        let evidence = coordinator.settlement_evidence(&sanad).unwrap().unwrap();
+
+        let record = coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await
+            .expect("release must succeed after a confirmed mint");
+
+        assert_eq!(settle_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(record.released_to_operator);
+        assert_eq!(record.lock_event_id, evidence.lock_event_id);
+        assert_eq!(record.operator_payout_address, PAYOUT);
+        assert_eq!(record.settlement_block_height, 200);
+
+        // Distinct SettlementReleased status is now terminal.
+        match coordinator.settlement_status(&sanad).unwrap() {
+            SettlementStatus::Released(r) => {
+                assert_eq!(r.operator_payout_address, PAYOUT);
+                assert!(r.released_to_operator);
+            }
+            other => panic!("expected Released, got {:?}", other),
+        }
+
+        // The dispatched request carries the §10 receipt with NO verifier
+        // signatures: authority is bound off-chain by the verifier, never by the
+        // operator/runtime. This is the structural no-self-release guarantee.
+        let bytes = payload.lock().unwrap().clone().unwrap();
+        let decoded: RuntimeSettlementRequest = csv_codec::from_canonical_cbor(&bytes).unwrap();
+        assert!(
+            decoded.verifier_signatures.is_empty(),
+            "runtime must attach no signatures; the source verifier signs the digest"
+        );
+        assert_eq!(decoded.receipt.lock_event_id, evidence.lock_event_id);
+        assert_eq!(decoded.receipt.operator_payout_address, PAYOUT);
+        assert_eq!(decoded.receipt.sanad_id, evidence.sanad_id);
+        // source_escrow_contract is left for the adapter to bind before signing.
+        assert_eq!(decoded.receipt.source_escrow_contract, [0u8; 32]);
+    }
+
+    /// Release is refused when no destination mint confirmed: a failed or absent
+    /// mint must never release escrow.
+    #[tokio::test]
+    async fn release_escrow_without_mint_is_unauthorized() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, settle_calls, _refund, _payload) = settling_registry();
+        let transfer = operator_transfer("settle-nomint", 22);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+
+        let result = coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await;
+        assert!(
+            matches!(
+                result,
+                Err(TransferCoordinatorError::SettlementNotAuthorized(_))
+            ),
+            "release without a confirmed mint must be unauthorized, got {:?}",
+            result
+        );
+        assert_eq!(
+            settle_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no source submission may happen without a confirmed mint"
+        );
+    }
+
+    /// Release is idempotent across restarts: a second release is refused and the
+    /// source adapter is never invoked twice — no double payout on crash recovery.
+    #[tokio::test]
+    async fn release_escrow_is_idempotent() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, settle_calls, _refund, _payload) = settling_registry();
+        let transfer = operator_transfer("settle-idem", 23);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+        coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .unwrap();
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+
+        coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await
+            .expect("first release succeeds");
+        let again = coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await;
+        assert!(
+            matches!(again, Err(TransferCoordinatorError::AlreadyReleased)),
+            "second release must be refused, got {:?}",
+            again
+        );
+        assert_eq!(
+            settle_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the source escrow must be released at most once"
+        );
+    }
+
+    /// A confirmed destination mint must settle to the operator, never refund.
+    #[tokio::test]
+    async fn refund_refused_after_confirmed_mint() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, _settle, refund_calls, _payload) = settling_registry();
+        let transfer = operator_transfer("refund-after-mint", 24);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+        coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .unwrap();
+
+        let result = coordinator.refund_escrow(&transfer, &registry, &ctx).await;
+        assert!(
+            matches!(
+                result,
+                Err(TransferCoordinatorError::SettlementNotAuthorized(_))
+            ),
+            "a confirmed mint must not be refundable, got {:?}",
+            result
+        );
+        assert_eq!(refund_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// When the mint never occurs, refund_escrow dispatches a refund and records a
+    /// distinct SettlementRefunded status.
+    #[tokio::test]
+    async fn refund_escrow_when_mint_absent_records_refund() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, _settle, refund_calls, _payload) = settling_registry();
+        let transfer = operator_transfer("refund-timeout", 25);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+
+        let record = coordinator
+            .refund_escrow(&transfer, &registry, &ctx)
+            .await
+            .expect("refund must succeed when no mint confirmed");
+        assert!(!record.released_to_operator);
+        assert_eq!(refund_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+        match coordinator.settlement_status(&sanad).unwrap() {
+            SettlementStatus::Refunded(r) => assert!(!r.released_to_operator),
+            other => panic!("expected Refunded, got {:?}", other),
+        }
+
+        // Release and refund are mutually exclusive.
+        let after = coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await;
+        assert!(
+            matches!(after, Err(TransferCoordinatorError::AlreadyRefunded)),
+            "cannot release an already-refunded escrow, got {:?}",
+            after
+        );
+    }
+
+    /// A source chain without a wired settlement path fails closed: escrow is never
+    /// released by a default/absent implementation.
+    #[tokio::test]
+    async fn release_escrow_fail_closed_without_adapter_wiring() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        // LocalTestAdapter mints but does NOT implement settle_escrow (default fail-closed).
+        let mut registry = AdapterRegistryImpl::new();
+        registry
+            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
+            .unwrap();
+        let transfer = operator_transfer("settle-unwired", 26);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+        coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .unwrap();
+        let sanad = csv_hash::SanadId::new(*transfer.sanad_id.as_bytes());
+
+        let result = coordinator
+            .release_escrow(&sanad, PAYOUT, 0, &registry, &ctx)
+            .await;
+        assert!(
+            matches!(result, Err(TransferCoordinatorError::SettlementFailed(_))),
+            "an unwired settlement path must fail closed, got {:?}",
+            result
+        );
+        // And no SettlementReleased status was recorded.
+        assert!(matches!(
+            coordinator.settlement_status(&sanad).unwrap(),
+            SettlementStatus::Unsettled
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Send mode (interactive off-chain transfer) journaling & idempotent resume
+    // -----------------------------------------------------------------------
+
+    use crate::send_transfer::{
+        Consignment, SealAssignment, SealCloseWitness, SendExecutor, SendExecutorError,
+        SendTransfer,
+    };
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// Mock send executor that records how many times each step ran and can be
+    /// told to fail a given step exactly once (to simulate an interruption).
+    #[derive(Default)]
+    struct MockSendExecutor {
+        assign_calls: AtomicUsize,
+        close_calls: AtomicUsize,
+        emit_calls: AtomicUsize,
+        fail_assign_once: AtomicBool,
+        fail_close_once: AtomicBool,
+        fail_emit_once: AtomicBool,
+    }
+
+    #[async_trait::async_trait]
+    impl SendExecutor for MockSendExecutor {
+        async fn assign_seal(
+            &self,
+            transfer: &SendTransfer,
+        ) -> Result<SealAssignment, SendExecutorError> {
+            self.assign_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_assign_once.swap(false, Ordering::SeqCst) {
+                return Err(SendExecutorError::Assign("injected".into()));
+            }
+            // Deterministic function of inputs.
+            let mut bytes = b"assign:".to_vec();
+            bytes.extend_from_slice(&transfer.destination_seal.id);
+            Ok(SealAssignment(bytes))
+        }
+
+        async fn close_source_seal(
+            &self,
+            transfer: &SendTransfer,
+            _assignment: &SealAssignment,
+        ) -> Result<SealCloseWitness, SendExecutorError> {
+            self.close_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_close_once.swap(false, Ordering::SeqCst) {
+                return Err(SendExecutorError::Close("injected".into()));
+            }
+            let mut bytes = b"witness:".to_vec();
+            bytes.extend_from_slice(&transfer.source_seal.id);
+            Ok(SealCloseWitness(bytes))
+        }
+
+        async fn emit_consignment(
+            &self,
+            _transfer: &SendTransfer,
+            witness: &SealCloseWitness,
+        ) -> Result<Consignment, SendExecutorError> {
+            self.emit_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_emit_once.swap(false, Ordering::SeqCst) {
+                return Err(SendExecutorError::Emit("injected".into()));
+            }
+            let mut bytes = b"consignment:".to_vec();
+            bytes.extend_from_slice(&witness.0);
+            Ok(Consignment(bytes))
+        }
+    }
+
+    fn send_transfer_fixture(transfer_id: &str, source_seal_byte: u8) -> SendTransfer {
+        SendTransfer {
+            transfer_id: transfer_id.to_string(),
+            source_chain: "bitcoin".to_string(),
+            sanad_id: csv_hash::SanadId::new([source_seal_byte; 32]),
+            source_seal: csv_hash::seal::SealPoint::new(vec![source_seal_byte; 36], Some(0), None)
+                .unwrap(),
+            destination_seal: csv_hash::seal::SealPoint::new(vec![0xDD; 32], Some(7), None)
+                .unwrap(),
+        }
+    }
+
+    fn new_send_coordinator() -> TransferCoordinator {
+        TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn send_happy_path_journals_all_phases_once() {
+        let coordinator = new_send_coordinator();
+        let executor = MockSendExecutor::default();
+        let transfer = send_transfer_fixture("send-happy", 0x11);
+
+        let receipt = coordinator
+            .execute_send(&transfer, &executor)
+            .await
+            .expect("send should complete");
+
+        assert_eq!(executor.assign_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 1);
+        assert!(receipt.consignment.0.starts_with(b"consignment:"));
+
+        // Terminal phase is journaled Completed.
+        assert_eq!(
+            coordinator
+                .execution_journal()
+                .latest_phase(&transfer.transfer_id)
+                .unwrap(),
+            Some(TransferStage::Completed)
+        );
+    }
+
+    #[tokio::test]
+    async fn send_resume_after_close_interrupt_does_not_reassign_and_closes_once_more() {
+        // Interrupt during the source-seal close, then resume: assign must NOT
+        // re-run (its output is durable) and the seal close is retried to
+        // completion — the single-use commitment lands exactly once overall.
+        let coordinator = new_send_coordinator();
+        let executor = MockSendExecutor::default();
+        executor.fail_close_once.store(true, Ordering::SeqCst);
+        let transfer = send_transfer_fixture("send-close-interrupt", 0x22);
+
+        let err = coordinator
+            .execute_send(&transfer, &executor)
+            .await
+            .expect_err("close interrupt should surface as an error");
+        assert!(matches!(err, TransferCoordinatorError::SendFailed(_)));
+        assert_eq!(executor.assign_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 0);
+
+        // Resume: finishes without re-running assign; close runs its second and
+        // final time (the first attempt produced no witness).
+        let receipt = coordinator
+            .resume_send(&transfer, &executor)
+            .await
+            .expect("resume should complete the send");
+        assert_eq!(
+            executor.assign_calls.load(Ordering::SeqCst),
+            1,
+            "assign must not re-run"
+        );
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 1);
+        assert!(receipt.consignment.0.starts_with(b"consignment:"));
+        assert_eq!(
+            coordinator
+                .execution_journal()
+                .latest_phase(&transfer.transfer_id)
+                .unwrap(),
+            Some(TransferStage::Completed)
+        );
+    }
+
+    #[tokio::test]
+    async fn send_resume_after_emit_interrupt_never_recloses_source_seal() {
+        // The critical single-use invariant: once the source seal is closed,
+        // resuming to finish consignment emission must NEVER re-close it.
+        let coordinator = new_send_coordinator();
+        let executor = MockSendExecutor::default();
+        executor.fail_emit_once.store(true, Ordering::SeqCst);
+        let transfer = send_transfer_fixture("send-emit-interrupt", 0x33);
+
+        let err = coordinator
+            .execute_send(&transfer, &executor)
+            .await
+            .expect_err("emit interrupt should surface as an error");
+        assert!(matches!(err, TransferCoordinatorError::SendFailed(_)));
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 1);
+
+        let receipt = coordinator
+            .resume_send(&transfer, &executor)
+            .await
+            .expect("resume should emit the consignment");
+        // Source seal was closed exactly once across the whole lifecycle.
+        assert_eq!(
+            executor.close_calls.load(Ordering::SeqCst),
+            1,
+            "resume must not re-close the single-use source seal"
+        );
+        assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 2);
+        assert!(receipt.consignment.0.starts_with(b"consignment:"));
+    }
+
+    #[tokio::test]
+    async fn send_resume_after_completion_is_a_noop() {
+        // Resuming an already-completed send re-runs nothing.
+        let coordinator = new_send_coordinator();
+        let executor = MockSendExecutor::default();
+        let transfer = send_transfer_fixture("send-idempotent", 0x44);
+
+        let first = coordinator
+            .execute_send(&transfer, &executor)
+            .await
+            .unwrap();
+        let second = coordinator.resume_send(&transfer, &executor).await.unwrap();
+
+        assert_eq!(executor.assign_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(first, second, "resume must reproduce the same receipt");
+    }
+
+    #[tokio::test]
+    async fn send_double_close_of_same_source_seal_is_rejected() {
+        // Two different transfers over the SAME source seal: the second must be
+        // rejected as a duplicate source seal (single-use across transfers).
+        let coordinator = new_send_coordinator();
+        let executor_a = MockSendExecutor::default();
+        let executor_b = MockSendExecutor::default();
+
+        let t1 = send_transfer_fixture("send-dup-1", 0x55);
+        let mut t2 = send_transfer_fixture("send-dup-2", 0x66);
+        // Same source seal as t1, different sanad/transfer id.
+        t2.source_seal = t1.source_seal.clone();
+
+        coordinator.execute_send(&t1, &executor_a).await.unwrap();
+
+        let err = coordinator
+            .execute_send(&t2, &executor_b)
+            .await
+            .expect_err("second close of the same seal must be rejected");
+        assert!(
+            matches!(err, TransferCoordinatorError::DuplicateSourceSeal),
+            "expected DuplicateSourceSeal, got {err:?}"
+        );
+        // The rejected transfer never produced a consignment.
+        assert_eq!(executor_b.emit_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn re_executing_a_started_send_is_rejected() {
+        // Once a send has been started, execute_send must refuse to re-run it
+        // (which would roll the journal backward); the caller must resume.
+        let coordinator = new_send_coordinator();
+        let executor = MockSendExecutor::default();
+        let transfer = send_transfer_fixture("send-reexec", 0x88);
+
+        coordinator
+            .execute_send(&transfer, &executor)
+            .await
+            .unwrap();
+        let err = coordinator
+            .execute_send(&transfer, &executor)
+            .await
+            .expect_err("re-executing a started send must be rejected");
+        assert!(matches!(err, TransferCoordinatorError::RuntimeError(_)));
+        // No extra work ran on the second call.
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn resuming_a_rejected_duplicate_still_rejects() {
+        // A duplicate-seal transfer that was rejected at close must NOT become
+        // resumable into a double-close: it never journaled SourceSealClosed, so
+        // it can never claim ownership of the reservation on resume.
+        let coordinator = new_send_coordinator();
+        let executor_a = MockSendExecutor::default();
+        let executor_b = MockSendExecutor::default();
+
+        let t1 = send_transfer_fixture("dup-owner", 0x99);
+        let mut t2 = send_transfer_fixture("dup-loser", 0xAA);
+        t2.source_seal = t1.source_seal.clone();
+
+        coordinator.execute_send(&t1, &executor_a).await.unwrap();
+        assert!(matches!(
+            coordinator.execute_send(&t2, &executor_b).await,
+            Err(TransferCoordinatorError::DuplicateSourceSeal)
+        ));
+
+        // Resuming the rejected transfer must still be rejected — never allowed
+        // to re-close the seal that t1 owns.
+        let err = coordinator
+            .resume_send(&t2, &executor_b)
+            .await
+            .expect_err("resuming a rejected duplicate must not close the seal");
+        assert!(matches!(err, TransferCoordinatorError::DuplicateSourceSeal));
+        assert_eq!(
+            executor_b.close_calls.load(Ordering::SeqCst),
+            0,
+            "the losing transfer must never close the source seal"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_send_rejects_a_materialize_transfer() {
+        // A materialize transfer must not be resumable through the send path.
+        let coordinator = new_send_coordinator();
+        let executor = MockSendExecutor::default();
+        let transfer = send_transfer_fixture("materialize-not-send", 0x77);
+
+        // Seed the journal with a materialize-mode phase for this id.
+        coordinator
+            .execution_journal()
+            .record(crate::execution_journal::TransferPhaseEntry {
+                transfer_id: transfer.transfer_id.clone(),
+                replay_id: csv_wire::HashWire::from(transfer.sanad_id.0),
+                proof_hash: [0u8; 32],
+                proof_payload: None,
+                phase: TransferStage::AwaitingFinality,
+                ts: std::time::SystemTime::now(),
+                outcome: crate::execution_journal::PhaseOutcome::Entered,
+                attempt: 1,
+                transfer_context: None,
+            })
+            .unwrap();
+
+        let err = coordinator
+            .resume_send(&transfer, &executor)
+            .await
+            .expect_err("send resume must reject a materialize transfer");
+        assert!(matches!(err, TransferCoordinatorError::RuntimeError(_)));
+        assert_eq!(executor.close_calls.load(Ordering::SeqCst), 0);
     }
 }

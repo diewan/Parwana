@@ -41,6 +41,13 @@ pub struct BasicDeployment {
     pub package_id: Option<String>,
     #[serde(rename = "program_id")]
     pub program_id: Option<String>,
+    /// Shared thin-registry mint authority identity (RFC-0012 §9.2
+    /// `destinationContract`). On Sui this is the shared `Registry` **object
+    /// id** created at package publish; it is distinct from `package_id`. The
+    /// verifier signs a mint digest scoped to exactly one registry, so an
+    /// absent/empty value MUST fail closed rather than silently default.
+    #[serde(rename = "registry_id")]
+    pub registry_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,6 +137,37 @@ pub fn get_sui_package_id() -> Result<String, Box<dyn std::error::Error>> {
         .ok_or_else(|| Box::<dyn std::error::Error>::from("Sui package_id not found in manifest"))
 }
 
+/// Get the Sui thin-registry `Registry` object id from the deployment manifest.
+///
+/// This is the RFC-0012 §9.2 `destinationContract` bound into the Sui mint
+/// attestation digest — the shared `Registry` object created at package
+/// publish, **not** the `package_id`. An absent or empty value is an error so
+/// the Sui adapter fails closed (no mint) rather than defaulting; a verifier's
+/// signature is only valid for the exact registry it was scoped to.
+pub fn get_sui_registry_id() -> Result<String, Box<dyn std::error::Error>> {
+    sui_registry_id_from(&load_deployment_manifest()?)
+}
+
+/// Extract the Sui `Registry` object id from an already-loaded manifest, applying
+/// the fail-closed rule (absent deployment / absent / empty `registry_id` → Err).
+/// Split out from [`get_sui_registry_id`] so the fail-closed path is testable
+/// against a synthetic manifest independent of the committed deployment state.
+pub fn sui_registry_id_from(
+    manifest: &DeploymentManifest,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let sui = manifest.deployments.sui.as_ref().ok_or_else(|| {
+        Box::<dyn std::error::Error>::from("Sui deployment not found in manifest")
+    })?;
+    match sui.registry_id.as_ref() {
+        Some(id) if !id.trim().is_empty() => Ok(id.clone()),
+        _ => Err(Box::<dyn std::error::Error>::from(
+            "Sui registry_id not set in manifest — deploy the thin-registry \
+             csv_seal package and record its shared Registry object id under \
+             deployments.sui.registry_id before minting on Sui",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +176,64 @@ mod tests {
     fn test_load_deployment_manifest() {
         let manifest = load_deployment_manifest();
         assert!(manifest.is_ok());
+    }
+
+    #[test]
+    fn test_sui_registry_id_fails_closed_when_unset() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        // Empty string and absent field must both fail closed.
+        for reg in ["\"\"", "null"] {
+            let path = dir.join(format!(
+                "csv-manifest-empty-{}-{}.json",
+                std::process::id(),
+                reg.len()
+            ));
+            let json = format!(
+                r#"{{"deployments":{{"ethereum":null,"solana":null,"aptos":null,
+                    "sui":{{"network":"testnet","package_id":"0x02","registry_id":{reg}}}}}}}"#
+            );
+            std::fs::File::create(&path)
+                .unwrap()
+                .write_all(json.as_bytes())
+                .unwrap();
+            let manifest = load_deployment_manifest_from_path(&path).unwrap();
+            assert!(
+                sui_registry_id_from(&manifest).is_err(),
+                "empty/absent Sui registry_id ({reg}) must fail closed"
+            );
+            std::fs::remove_file(&path).ok();
+        }
+    }
+
+    #[test]
+    fn test_sui_registry_id_resolves_when_present() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("csv-manifest-test-{}.json", std::process::id()));
+        let registry = "0x00000000000000000000000000000000000000000000000000000000000000aa";
+        let json = format!(
+            r#"{{"deployments":{{"ethereum":null,"solana":null,"aptos":null,
+                "sui":{{"network":"testnet","package_id":"0x02","registry_id":"{registry}"}}}}}}"#
+        );
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(json.as_bytes())
+            .unwrap();
+        let manifest = load_deployment_manifest_from_path(&path).unwrap();
+        assert_eq!(sui_registry_id_from(&manifest).unwrap(), registry);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_committed_manifest_has_sui_registry_id() {
+        // After TRM-ROLLOUT-001 the thin-registry Sui package is deployed, so the
+        // committed manifest must resolve a non-empty 0x-prefixed Registry id.
+        let id = get_sui_registry_id().expect("committed manifest must carry a Sui registry_id");
+        assert!(
+            id.starts_with("0x") && id.len() == 66,
+            "unexpected registry id: {id}"
+        );
     }
 
     #[test]

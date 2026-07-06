@@ -25,11 +25,13 @@ pub mod functions {
 /// - `U64` → 8-byte big-endian (Move u64/u128)
 /// - `U8` → 1-byte (Move u8)
 /// - `Bytes` → length-prefixed raw bytes (Move vector<u8>)
+/// - `BytesVec` → length-prefixed vector of `vector<u8>` (Move vector<vector<u8>>)
 #[derive(Debug, Clone)]
 pub enum EntryFunctionArgument {
     U64(u64),
     U8(u8),
     Bytes(Vec<u8>),
+    BytesVec(Vec<Vec<u8>>),
 }
 
 impl EntryFunctionArgument {
@@ -39,6 +41,11 @@ impl EntryFunctionArgument {
             EntryFunctionArgument::U64(n) => Value::String(n.to_string()),
             EntryFunctionArgument::U8(n) => Value::Number(serde_json::Number::from(*n)),
             EntryFunctionArgument::Bytes(b) => Value::String(format!("0x{}", hex::encode(b))),
+            EntryFunctionArgument::BytesVec(v) => Value::Array(
+                v.iter()
+                    .map(|b| Value::String(format!("0x{}", hex::encode(b))))
+                    .collect(),
+            ),
         }
     }
 
@@ -55,6 +62,8 @@ impl EntryFunctionArgument {
             }
             EntryFunctionArgument::Bytes(b) => aptos_bcs::to_bytes(b)
                 .unwrap_or_else(|e| panic!("Failed to serialize bytes: {}", e)),
+            EntryFunctionArgument::BytesVec(v) => aptos_bcs::to_bytes(v)
+                .unwrap_or_else(|e| panic!("Failed to serialize vector<vector<u8>>: {}", e)),
         }
     }
 }
@@ -74,6 +83,12 @@ impl From<u8> for EntryFunctionArgument {
 impl From<Vec<u8>> for EntryFunctionArgument {
     fn from(b: Vec<u8>) -> Self {
         EntryFunctionArgument::Bytes(b)
+    }
+}
+
+impl From<Vec<Vec<u8>>> for EntryFunctionArgument {
+    fn from(v: Vec<Vec<u8>>) -> Self {
+        EntryFunctionArgument::BytesVec(v)
     }
 }
 
@@ -141,40 +156,50 @@ impl EntryFunctionBuilder {
         }
     }
 
-    /// Build mint_sanad EntryFunction payload
+    /// Build mint_sanad EntryFunction payload (RFC-0012 §9 thin-registry / verifier-attested).
+    ///
+    /// Mirrors the redesigned Move `csv_seal::mint_sanad` signature exactly. There is NO
+    /// proof root, state root, Merkle proof, or leaf position: cross-chain validity is
+    /// adjudicated off-chain by the canonical verifier and the only on-chain authenticity
+    /// check is the set of secp256k1 verifier signatures over the frozen §9.2 attestation
+    /// digest. The contract-layer source chain identity is a fixed-width
+    /// `keccak256("csv.chain.<src>")` (32 bytes), NOT a `u8` chain tag.
     ///
     /// # Arguments
     /// * `sanad_id` - Unique Sanad identifier (32 bytes)
-    /// * `commitment` - Commitment hash (32 bytes)
-    /// * `state_root` - Off-chain state root (32 bytes)
-    /// * `source_chain` - Source chain ID (u8)
-    /// * `source_seal_ref` - Reference to source chain seal (32 bytes)
-    /// * `proof` - Cross-chain Merkle proof bytes
-    /// * `proof_root` - Trusted proof root for verification (32 bytes)
-    /// * `leaf_position` - Position of leaf in Merkle tree (u64)
+    /// * `commitment` - Commitment binding the sanad content/ownership (32 bytes)
+    /// * `source_chain` - `keccak256("csv.chain.<src>")` contract-layer source identity (32 bytes)
+    /// * `destination_owner` - Recipient identity bytes (only `keccak256` enters the digest)
+    /// * `lock_event_id` - Identity of the source-chain lock event (32 bytes)
+    /// * `nullifier` - Replay nullifier consumed by the source seal (32 bytes)
+    /// * `attestation_expiry` - Unix seconds; 0 = no expiry (bound over the §9.2 digest)
+    /// * `signatures` - M-of-N 65-byte secp256k1 signatures (r||s||v) over the §9.2 digest
     #[allow(clippy::too_many_arguments)]
     pub fn mint_sanad(
         &self,
         sanad_id: [u8; 32],
         commitment: [u8; 32],
-        state_root: [u8; 32],
-        source_chain: u8,
-        source_seal_ref: [u8; 32],
-        proof: Vec<u8>,
-        proof_root: [u8; 32],
-        leaf_position: u64,
+        source_chain: [u8; 32],
+        destination_owner: Vec<u8>,
+        lock_event_id: [u8; 32],
+        nullifier: [u8; 32],
+        attestation_expiry: u64,
+        signatures: Vec<Vec<u8>>,
     ) -> EntryFunctionPayload {
         let function = self.function_name(functions::MINT_SANAD);
-        // Explicit types ensure BCS encoding matches Aptos REST API reconstruction
+        // Argument order MUST match the Move entry signature (minus the leading `&signer`):
+        // (sanad_id, commitment, source_chain, destination_owner, lock_event_id, nullifier,
+        //  attestation_expiry, signatures).
+        // Explicit types ensure BCS encoding matches Aptos REST API reconstruction.
         let arguments = vec![
             EntryFunctionArgument::Bytes(sanad_id.to_vec()),
             EntryFunctionArgument::Bytes(commitment.to_vec()),
-            EntryFunctionArgument::Bytes(state_root.to_vec()),
-            EntryFunctionArgument::U8(source_chain),
-            EntryFunctionArgument::Bytes(source_seal_ref.to_vec()),
-            EntryFunctionArgument::Bytes(proof),
-            EntryFunctionArgument::Bytes(proof_root.to_vec()),
-            EntryFunctionArgument::U64(leaf_position),
+            EntryFunctionArgument::Bytes(source_chain.to_vec()),
+            EntryFunctionArgument::Bytes(destination_owner),
+            EntryFunctionArgument::Bytes(lock_event_id.to_vec()),
+            EntryFunctionArgument::Bytes(nullifier.to_vec()),
+            EntryFunctionArgument::U64(attestation_expiry),
+            EntryFunctionArgument::BytesVec(signatures),
         ];
 
         EntryFunctionPayload {
@@ -312,29 +337,54 @@ mod tests {
         let builder = EntryFunctionBuilder::new("0x1".to_string());
         let sanad_id = [4u8; 32];
         let commitment = [5u8; 32];
-        let state_root = [6u8; 32];
-        let source_chain = 2u8;
-        let source_seal_ref = [7u8; 32];
-        let proof = vec![8u8; 64];
-        let proof_root = [9u8; 32];
-        let leaf_position = 0u64;
+        let source_chain = [6u8; 32];
+        let destination_owner = vec![7u8; 32];
+        let lock_event_id = [8u8; 32];
+        let nullifier = [9u8; 32];
+        let attestation_expiry = 42u64;
+        let signatures = vec![vec![0x11u8; 65], vec![0x22u8; 65]];
         let payload = builder.mint_sanad(
             sanad_id,
             commitment,
-            state_root,
             source_chain,
-            source_seal_ref,
-            proof,
-            proof_root,
-            leaf_position,
+            destination_owner.clone(),
+            lock_event_id,
+            nullifier,
+            attestation_expiry,
+            signatures.clone(),
         );
 
         assert_eq!(payload.function_short_name(), "mint_sanad");
         assert_eq!(payload.arguments.len(), 8);
-        // source_chain (u8) → JSON number
-        assert_eq!(payload.arguments[3].to_json_value().as_u64().unwrap(), 2);
-        // leaf_position (u64) → JSON string
-        assert_eq!(payload.arguments[7].to_json_value().as_str().unwrap(), "0");
+        // source_chain (vector<u8>) → JSON hex string — NOT a u8 chain tag.
+        assert_eq!(
+            payload.arguments[2].to_json_value().as_str().unwrap(),
+            format!("0x{}", hex::encode(source_chain))
+        );
+        // destination_owner (vector<u8>) → JSON hex string
+        assert_eq!(
+            payload.arguments[3].to_json_value().as_str().unwrap(),
+            format!("0x{}", hex::encode(&destination_owner))
+        );
+        // attestation_expiry (u64) → JSON string
+        assert_eq!(payload.arguments[6].to_json_value().as_str().unwrap(), "42");
+        // signatures (vector<vector<u8>>) → JSON array of hex strings
+        let sig_json = payload.arguments[7].to_json_value();
+        let sig_arr = sig_json.as_array().unwrap();
+        assert_eq!(sig_arr.len(), 2);
+        assert_eq!(
+            sig_arr[0].as_str().unwrap(),
+            format!("0x{}", hex::encode(&signatures[0]))
+        );
+    }
+
+    #[test]
+    fn test_bytes_vec_bcs_matches_aptos_bcs() {
+        // vector<vector<u8>> must BCS-encode identically to what the Aptos REST API
+        // reconstructs from the JSON array of hex strings.
+        let sigs = vec![vec![1u8, 2, 3], vec![4u8, 5]];
+        let arg = EntryFunctionArgument::BytesVec(sigs.clone());
+        assert_eq!(arg.to_bcs_bytes(), aptos_bcs::to_bytes(&sigs).unwrap());
     }
 
     #[test]

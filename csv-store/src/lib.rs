@@ -31,9 +31,9 @@ pub mod encrypted_storage;
 pub use state::Chain;
 pub use state::{
     ChainConfig, ChainId, ContractRecord, FaucetConfig, GasAccount, Network, ProofRecord,
-    SanadStatus, SealRecord, StateStorage, StorageBackend, StorageError, TransactionRecord,
-    TransactionStatus, TransactionType, TransferRecord, TransferStatus, WalletAccount,
-    WalletConfig,
+    ProvenanceStrengthSignal, SanadStatus, SealRecord, StateStorage, StorageBackend, StorageError,
+    TransactionRecord, TransactionStatus, TransactionType, TransferRecord, TransferStatus,
+    WalletAccount, WalletConfig,
 };
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "file-storage"))]

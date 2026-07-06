@@ -43,6 +43,7 @@ pub mod queue;
 pub mod recovery;
 pub mod replay_database;
 pub mod runtime_mode;
+pub mod send_transfer;
 pub mod transfer_coordinator;
 pub mod user_runtime_lease;
 
@@ -78,6 +79,10 @@ pub use recovery::{
 pub use runtime_mode::{
     CircuitBreaker, CircuitBreakerConfig as RuntimeCircuitBreakerConfig, CircuitBreakerState,
     HealthMonitor, HealthStatus, RuntimeMode,
+};
+pub use send_transfer::{
+    Consignment, SealAssignment, SealCloseWitness, SendExecutor, SendExecutorError, SendReceipt,
+    SendTransfer,
 };
 pub use transfer_coordinator::{
     RecoveryContextProvider, TransferCoordinator, TransferOutcome, TransferReceipt,

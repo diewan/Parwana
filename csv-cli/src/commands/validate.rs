@@ -5,6 +5,7 @@ use clap::Subcommand;
 use csv_protocol::SignatureScheme;
 use csv_protocol::proof_taxonomy::ProofBundle;
 
+use crate::commands::cross_chain::transfer;
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::UnifiedStateManager;
@@ -52,24 +53,33 @@ pub fn execute(action: ValidateAction, config: &Config, state: &UnifiedStateMana
     }
 }
 
-fn cmd_consignment(file: String, _config: &Config, _state: &UnifiedStateManager) -> Result<()> {
+fn cmd_consignment(file: String, _config: &Config, state: &UnifiedStateManager) -> Result<()> {
     output::header("Validating Consignment");
 
-    let content = std::fs::read_to_string(&file)?;
-    let _consignment: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Invalid consignment JSON: {}", e))?;
+    let content = std::fs::read(&file)
+        .map_err(|e| anyhow::anyhow!("Failed to read consignment file: {}", e))?;
 
-    output::progress(1, 4, "Checking consignment structure...");
-    // Verify version, schema, contract ID consistency
+    output::progress(1, 4, "Decoding canonical consignment...");
+    let accepted = transfer::validate_consignment_bytes(&content, state)?;
 
-    output::progress(2, 4, "Verifying commitment chain...");
-    // Verify genesis → present linkage
+    output::progress(2, 4, "Verifying invoice seal binding...");
+    output::kv("Sanad", &accepted.sanad_id);
+    if let Some(source_chain) = &accepted.source_chain {
+        output::kv("Source Chain", source_chain.as_str());
+    }
+    output::kv("Destination Chain", accepted.dest_chain.as_str());
 
-    output::progress(3, 4, "Checking seal consumption...");
-    // Check SealNullifier for double-spends
+    output::progress(3, 4, "Checking replay status...");
+    output::kv("Destination Seal", &accepted.seal_ref);
 
-    output::progress(4, 4, "Validating state transitions...");
-    // Verify inputs satisfied by prior outputs
+    output::progress(4, 4, "Validating transition proof and finality...");
+    output::kv(
+        "Verification Level",
+        &format!("{:?}", accepted.verification_level).to_lowercase(),
+    );
+    if let Some(signal) = &accepted.provenance_strength {
+        transfer::emit_provenance_strength_warning(signal);
+    }
 
     output::success("Consignment is valid");
     Ok(())

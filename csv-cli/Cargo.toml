@@ -23,7 +23,10 @@ path = "src/main.rs"
 # No direct chain adapter dependencies - all operations go through csv-adapter
 csv-sdk = { path = "../csv-sdk", features = ["bitcoin", "ethereum", "sui", "aptos", "solana", "rpc", "runtime-coordinator"] }
 csv-protocol = { path = "../csv-protocol" }
+csv-wire = { path = "../csv-wire" }
+csv-codec = { path = "../csv-codec" }
 csv-verifier = { path = "../csv-verifier" }
+csv-algebra = { path = "../csv-algebra" }
 csv-hash = { path = "../csv-hash" }
 csv-proof = { path = "../csv-proof" }
 csv-schema = { path = "../csv-schema" }
@@ -45,6 +48,7 @@ hex = "0.4"
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1.0"
+async-trait = "0.1"
 dirs = "5.0"
 colored = "2.0"
 toml = "0.8"

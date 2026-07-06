@@ -1305,7 +1305,7 @@ impl ChainSanadOps for BitcoinChainSanadOps {
 
         // Try UTXOs in order until one succeeds (fail-closed behavior)
         let mut last_error = None;
-        for (_attempt, selected) in spendable.iter().enumerate() {
+        for selected in spendable.iter() {
             let outpoint = bitcoin::OutPoint::new(selected.outpoint.txid, selected.outpoint.vout);
 
             // Verify UTXO is unspent on-chain before attempting to use it

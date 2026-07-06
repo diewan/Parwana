@@ -166,8 +166,21 @@ csv proof verify-cross-chain --source ethereum --dest sui proof.json  # Cross-ch
 
 ### Cross-Chain Transfers
 
+A transfer mode is chosen explicitly by verb (never a `--mode` flag). The old
+`transfer` verb is a deprecation shim that errors and points at the two modes.
+
 ```bash
-csv cross-chain transfer --from bitcoin --to sui --sanad-id <id> --dest-owner <addr>
+# On-chain mode: materialize the sanad via the thin-registry mint.
+#   --proof attestor (default): RFC §9 verifier-signed attestation (available now)
+#   --proof zk: RFC §9.5 ZkSeal path (returns a not-available error until the prover lands)
+csv cross-chain materialize --from bitcoin --to sui --sanad-id <id> --dest-owner <addr> [--proof attestor|zk] [--wait]
+
+# Interactive off-chain mode (no destination tx/gas): send against a recipient invoice.
+csv cross-chain send --from bitcoin --sanad-id <id> --invoice <blob>
+csv cross-chain invoice --schema <sanad-type> --seal <dest-seal-ref>   # recipient issues invoice
+csv cross-chain accept <consignment-file>                              # recipient validates + accepts
+
+csv cross-chain resume <transfer_id> [--wait]   # advance a materialize awaiting finality
 csv cross-chain status <transfer_id>
 csv cross-chain list [--from <chain>] [--to <chain>]
 csv cross-chain retry <transfer_id>

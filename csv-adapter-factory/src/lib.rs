@@ -33,6 +33,55 @@ pub use solana::SolanaFactory;
 #[cfg(feature = "sui")]
 pub use sui::SuiFactory;
 
+/// Environment variable holding the RFC-0012 mint verifier's secp256k1 signing
+/// key (32-byte secret, hex, with or without a `0x` prefix).
+///
+/// This is the private half of the verifier keypair whose public key is seeded
+/// into each destination registry's verifier set (`add_verifier` /
+/// `initialize_verifier_registry` / `init_mint_authority`). The runtime signs the
+/// RFC-0012 §9.2 mint-attestation digest with it; the destination contract
+/// verifies the recovered signer against its on-chain set. It is deliberately a
+/// process secret (env), never a chain-config field, and never logged.
+#[cfg(any(feature = "sui", feature = "solana", feature = "aptos"))]
+pub const MINT_VERIFIER_KEY_ENV: &str = "CSV_MINT_VERIFIER_KEY";
+
+/// Load the mint verifier signing key from [`MINT_VERIFIER_KEY_ENV`], if set.
+///
+/// Returns `None` when the variable is absent — in that case the destination
+/// adapter is built without a verifier key and mint **fails closed** (the runtime
+/// emits no verifier signature and the contract rejects it). A present-but-invalid
+/// value (bad hex, wrong length, not a valid secp256k1 scalar) also yields `None`
+/// with a warning, preserving fail-closed rather than panicking. The key material
+/// is never included in the log line.
+#[cfg(any(feature = "sui", feature = "solana", feature = "aptos"))]
+pub(crate) fn load_mint_verifier_key() -> Option<secp256k1::SecretKey> {
+    let raw = std::env::var(MINT_VERIFIER_KEY_ENV).ok()?;
+    let trimmed = raw.trim().trim_start_matches("0x");
+    let bytes = match hex::decode(trimmed) {
+        Ok(b) => b,
+        Err(_) => {
+            log::warn!(
+                "{MINT_VERIFIER_KEY_ENV} is set but is not valid hex; \
+                 mint will fail closed (no verifier signature)"
+            );
+            return None;
+        }
+    };
+    match secp256k1::SecretKey::from_slice(&bytes) {
+        Ok(key) => {
+            log::info!("Factory: loaded mint verifier signing key from {MINT_VERIFIER_KEY_ENV}");
+            Some(key)
+        }
+        Err(_) => {
+            log::warn!(
+                "{MINT_VERIFIER_KEY_ENV} is set but is not a valid 32-byte secp256k1 \
+                 secret; mint will fail closed (no verifier signature)"
+            );
+            None
+        }
+    }
+}
+
 /// Configuration for creating a chain adapter.
 ///
 /// # Security
@@ -216,5 +265,46 @@ impl FactoryRegistry {
 impl Default for FactoryRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(all(test, any(feature = "sui", feature = "solana", feature = "aptos")))]
+mod verifier_key_tests {
+    use super::*;
+
+    // All cases live in one test: they mutate a shared process env var, so they
+    // must not run concurrently with each other.
+    #[test]
+    fn load_mint_verifier_key_cases() {
+        let prev = std::env::var(MINT_VERIFIER_KEY_ENV).ok();
+        // SAFETY: single-threaded within this test; restored before returning.
+        unsafe {
+            // Absent -> None (fail-closed).
+            std::env::remove_var(MINT_VERIFIER_KEY_ENV);
+            assert!(load_mint_verifier_key().is_none(), "absent must be None");
+
+            // A valid 32-byte secp256k1 secret loads (bare hex).
+            let valid = "0000000000000000000000000000000000000000000000000000000000000001";
+            std::env::set_var(MINT_VERIFIER_KEY_ENV, valid);
+            assert!(load_mint_verifier_key().is_some(), "valid hex must load");
+
+            // 0x prefix is accepted.
+            std::env::set_var(MINT_VERIFIER_KEY_ENV, format!("0x{valid}"));
+            assert!(load_mint_verifier_key().is_some(), "0x-prefixed must load");
+
+            // Bad hex -> None, not a panic.
+            std::env::set_var(MINT_VERIFIER_KEY_ENV, "nothex");
+            assert!(load_mint_verifier_key().is_none(), "bad hex must be None");
+
+            // Wrong length -> None.
+            std::env::set_var(MINT_VERIFIER_KEY_ENV, "00ff");
+            assert!(load_mint_verifier_key().is_none(), "short key must be None");
+
+            // Restore.
+            match prev {
+                Some(v) => std::env::set_var(MINT_VERIFIER_KEY_ENV, v),
+                None => std::env::remove_var(MINT_VERIFIER_KEY_ENV),
+            }
+        }
     }
 }

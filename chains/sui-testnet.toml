@@ -4,7 +4,7 @@ default_network = "testnet"
 rpc_endpoints = ["https://fullnode.testnet.sui.io:443"]
 block_explorer_urls = ["https://suiscan.xyz/testnet"]
 start_block = 0
-contract_address = "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21"
+contract_address = "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55"
 
 [finality_guarantee]
 max_reorg_depth = 0
@@ -32,5 +32,19 @@ supports_zk_proofs = false
 chain_role = "Settlement"
 
 [custom_settings]
-# Package ID where CSVSeal module is deployed
-package_id = "0x3eba46bb91c08182e426bd5d3e51b5671d3529057d7846521013ebb15353ff21"
+# Thin-registry verifier-attested mint (RFC-0012 §9). Mints are authorized by an
+# M-of-N verifier-signed attestation over the §9.2 digest — there is NO proof
+# root and NO fallback mint path.
+#
+# Package ID where the csv_seal module is published (RFC-0012 thin-registry,
+# Sui testnet, deployed 2026-07-05).
+package_id = "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55"
+# Shared `Registry` object id created at publish. This 32-byte object id is the
+# RFC-0012 §9.2 `destinationContract` bound into the mint-attestation digest, and
+# is DISTINCT from package_id. The canonical value is recorded in
+# deployments/deployment-manifest.json (deployments.sui.registry_id) — the Sui
+# adapter reads it from there (get_sui_registry_id). Mirrored here for operator
+# visibility. NOTE: minting stays fail-closed until the AdminCap holder seeds the
+# verifier set (add_verifier + set_threshold) and the runtime holds the matching
+# verifier key.
+registry_id = "0x37f197aa1bf9af0898fd84a064484cbd876cf7d8078c486c7476b52b6521ac95"

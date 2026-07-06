@@ -56,6 +56,9 @@ pub struct SanadRecord {
     /// Nonce used for this sanad on-chain (Aptos-specific, optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<u64>,
+    /// Receiver-facing provenance strength warning, when the source seal is weaker than this chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance_strength: Option<ProvenanceStrengthSignal>,
 }
 
 /// Status of a cross-chain transfer.
@@ -63,6 +66,23 @@ pub struct SanadRecord {
 /// Re-exported from csv-protocol for compatibility.
 /// Use [`csv_protocol::SimplifiedTransferStatus`] for the canonical definition.
 pub type TransferStatus = SimplifiedTransferStatus;
+
+/// Recorded signal that a transfer's source-chain seal is weaker than the destination seal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProvenanceStrengthSignal {
+    /// Source chain whose consumed seal bounds the received sanad's provenance.
+    pub source_chain: ChainId,
+    /// Destination chain whose stronger seal can otherwise mask the weaker origin.
+    pub destination_chain: ChainId,
+    /// Relative source seal strength rank.
+    pub source_rank: u8,
+    /// Relative destination seal strength rank.
+    pub destination_rank: u8,
+    /// `destination_rank - source_rank`; positive values require a receiver warning.
+    pub provenance_gap: i16,
+    /// Receiver-facing warning text shown by CLI observers.
+    pub warning: String,
+}
 
 /// A cross-chain transfer record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +126,9 @@ pub struct TransferRecord {
     /// Completed timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<u64>,
+    /// Receiver-facing provenance strength warning, when source seal is weaker than destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance_strength: Option<ProvenanceStrengthSignal>,
 }
 
 /// Deployed contract info.

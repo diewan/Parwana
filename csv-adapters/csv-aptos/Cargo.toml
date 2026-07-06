@@ -25,6 +25,7 @@ csv-verifier = { path = "../../csv-verifier" }
 csv-proof = { path = "../../csv-proof" }
 csv-hash = { path = "../../csv-hash" }
 csv-wire = { path = "../../csv-wire" }
+csv-codec = { path = "../../csv-codec" }
 csv-keys = { path = "../../csv-keys" }
 csv-wallet = { path = "../../csv-wallet" }
 serde = { version = "1.0", features = ["derive"] }
@@ -36,6 +37,7 @@ sha3 = "0.10"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+secp256k1 = { version = "0.28", features = ["global-context", "rand-std", "recovery"] }
 base64 = "0.22"
 secrecy = "0.8"
 blst = { version = "0.3", optional = true }

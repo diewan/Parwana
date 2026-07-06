@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Re-export TransferStage from csv-protocol (protocol-level type)
-pub use csv_protocol::transfer_state::TransferStage;
+pub use csv_protocol::transfer_state::{TransferMode, TransferStage};
 
 /// Unique identifier for a recovery checkpoint
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

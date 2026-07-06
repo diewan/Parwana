@@ -431,6 +431,22 @@ async fn execute_transfer_phase(
             );
             Err(format!("Unexpected stage: {:?}", transfer.stage))
         }
+        TransferStage::SealAssigned
+        | TransferStage::SourceSealClosed
+        | TransferStage::ConsignmentEmitted => {
+            // Send-mode (interactive off-chain) stages are never dispatched to a
+            // per-chain execution cell: they have no destination transaction and
+            // are driven entirely by the runtime's send path.
+            tracing::warn!(
+                transfer_id = %transfer.transfer_id,
+                stage = ?transfer.stage,
+                "Send-mode stage must not be executed by a chain cell"
+            );
+            Err(format!(
+                "Send-mode stage not executable by cell: {:?}",
+                transfer.stage
+            ))
+        }
         TransferStage::Completed | TransferStage::RolledBack | TransferStage::Compromised => {
             // Terminal states - should not be processed by cell
             tracing::warn!(

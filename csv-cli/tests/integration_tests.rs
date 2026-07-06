@@ -175,7 +175,7 @@ fn test_no_private_key_prefix_logs() {
 #[test]
 fn test_chain_commands_use_runtime() {
     let chain_rs = Path::new("src/commands/chain.rs");
-    if let Ok(content) = std::fs::read_to_string(chain_rs) {
+    if std::fs::read_to_string(chain_rs).is_ok() {
         // chain.rs is configuration management only - no runtime APIs needed
         // It just reads/writes CLI config file, doesn't interact with chains
         // This test is skipped for chain.rs
@@ -497,13 +497,32 @@ fn cli_golden_path_gauntlet_contract() {
         ("proof generate", "csv proof generate --chain ethereum"),
         ("proof verify", "csv proof verify --chain ethereum"),
         (
-            "cross-chain transfer",
-            "csv cross-chain transfer --from ethereum --to sui",
+            "cross-chain materialize",
+            "csv cross-chain materialize --from ethereum --to sui",
         ),
         ("cross-chain status", "csv cross-chain status <TRANSFER_ID>"),
         ("sanad trace", "csv sanad trace --chain ethereum"),
         ("replay attempt", "replay attempt"),
         ("malformed proof attempt", "malformed proof attempt"),
+        ("duplicate sanad", "duplicate sanadId attempt"),
+        ("duplicate nullifier", "duplicate nullifier attempt"),
+        ("duplicate lock event", "duplicate lockEventId attempt"),
+        (
+            "forged settlement receipt",
+            "forged settlement receipt attempt",
+        ),
+        ("settlement submitted", "settlement submitted"),
+        ("settlement confirmed", "settlement confirmed"),
+        ("verified proof metric", "verified proof built"),
+        ("mint submitted metric", "mint submitted"),
+        ("mint confirmed metric", "mint confirmed"),
+        ("replay rejected metric", "replay rejected"),
+        ("authorization rejected metric", "authorization rejected"),
+        ("BTC to Sui matrix", "BTC -> Sui"),
+        ("BTC to Aptos matrix", "BTC -> Aptos"),
+        ("BTC to Solana matrix", "BTC -> Solana"),
+        ("ETH to Sui matrix", "ETH -> Sui"),
+        ("Sui to ETH matrix", "Sui -> ETH"),
     ];
 
     for (label, needle) in required_steps {

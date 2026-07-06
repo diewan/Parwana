@@ -2,8 +2,10 @@
 
 use crate::error::{Result, WalletError};
 use crate::keystore::{KeyPurpose, KeyStore};
+use crate::seal_custody::{SealCustody, SealCustodyRecord};
 use crate::signer::{MemorySigner, Signer, SignerRef};
 use csv_hash::chain_id::ChainId;
+use csv_hash::seal::SealPoint;
 use csv_keys::{
     Mnemonic, MnemonicType, Passphrase, Seed,
     bip44::{derive_address_from_key, derive_all_chain_keys},
@@ -52,6 +54,8 @@ pub struct WalletManager {
     keystore: Arc<RwLock<KeyStore>>,
     /// Signers for each chain (Arc for cheap cloning)
     signers: Arc<RwLock<HashMap<String, Arc<dyn Signer>>>>,
+    /// Which key controls each single-use `SealPoint` this wallet tracks.
+    seal_custody: SealCustody,
 }
 
 impl WalletManager {
@@ -64,6 +68,7 @@ impl WalletManager {
             config,
             keystore: Arc::new(RwLock::new(KeyStore::new())),
             signers: Arc::new(RwLock::new(HashMap::new())),
+            seal_custody: SealCustody::new(),
         }
     }
 
@@ -244,6 +249,36 @@ impl WalletManager {
     /// Get the key store
     pub fn keystore(&self) -> Arc<RwLock<KeyStore>> {
         Arc::clone(&self.keystore)
+    }
+
+    /// Get a handle to this wallet's seal custody registry.
+    ///
+    /// The handle shares the wallet's underlying registry, so callers can
+    /// consult custody (which key controls a given `SealPoint`, whether a seal
+    /// has been consumed) without holding the `WalletManager`.
+    pub fn seal_custody(&self) -> SealCustody {
+        self.seal_custody.clone()
+    }
+
+    /// Record that `seal` (on `chain`) is controlled by this wallet's key for
+    /// that chain, returning the recorded custody.
+    ///
+    /// This binds a single-use `SealPoint` — for example the recipient's
+    /// destination seal from an invoice, or the sender's source seal — to the
+    /// concrete signer that controls it, so a later send knows which key to
+    /// sign the close with. Fails if the wallet has no signer for `chain`.
+    pub fn assign_seal_custody(&self, seal: SealPoint, chain: &str) -> Result<SealCustodyRecord> {
+        let signer = self
+            .get_signer(chain)
+            .ok_or_else(|| WalletError::UnsupportedChain(chain.to_string()))?;
+        let record = SealCustodyRecord {
+            chain: chain.to_string(),
+            key_id: Signer::as_ref(signer.as_ref()).id,
+            public_key: signer.public_key().to_vec(),
+            consumed: false,
+        };
+        self.seal_custody.record(seal, record.clone())?;
+        Ok(record)
     }
 }
 
@@ -548,6 +583,39 @@ mod tests {
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.chain(), "bitcoin");
+    }
+
+    #[test]
+    fn test_assign_seal_custody_binds_chain_key() {
+        let config = test_wallet_config(); // ethereum + solana
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        let seal = SealPoint::new(vec![0x11; 32], Some(0), None).unwrap();
+        let record = wallet
+            .assign_seal_custody(seal.clone(), "ethereum")
+            .unwrap();
+        assert_eq!(record.chain, "ethereum");
+        assert!(!record.public_key.is_empty());
+
+        // Custody is visible through the shared handle and names the eth signer's key.
+        let custody = wallet.seal_custody();
+        assert!(custody.controls(&seal));
+        let eth_pk = wallet.get_signer("ethereum").unwrap().public_key().to_vec();
+        assert_eq!(custody.custody_of(&seal).unwrap().public_key, eth_pk);
+    }
+
+    #[test]
+    fn test_assign_seal_custody_unsupported_chain_fails() {
+        let config = test_wallet_config();
+        let mnemonic = Mnemonic::generate(MnemonicType::Words24);
+        let phrase = mnemonic.as_str().to_string();
+        let wallet = WalletManager::from_mnemonic(config, &phrase, None).unwrap();
+
+        let seal = SealPoint::new(vec![0x22; 32], Some(0), None).unwrap();
+        let err = wallet.assign_seal_custody(seal, "bitcoin").unwrap_err();
+        assert!(matches!(err, WalletError::UnsupportedChain(_)));
     }
 
     #[test]

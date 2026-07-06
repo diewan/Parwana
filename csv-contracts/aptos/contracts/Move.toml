@@ -9,3 +9,10 @@ AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir 
 csv_seal = "_"
 aptos_framework = "0x1"
 CSV = "_"
+
+# Deterministic addresses for `aptos move test`. The §9.2 attestation digest binds
+# `destinationContract = @csv_seal`, so the address used at test time MUST match the one the
+# off-chain signer used to produce the committed test vectors (see tests in csv_seal.move).
+[dev-addresses]
+csv_seal = "0xCAFE"
+CSV = "0xC5F"

@@ -170,7 +170,7 @@ csv proof generate --chain ethereum <sanad_id> -o proof.json
 csv proof verify --chain sui --proof-file proof.json
 
 # Cross-chain transfers
-csv cross-chain transfer --from bitcoin --to sui --sanad-id <id> --dest-owner <addr>
+csv cross-chain materialize --from bitcoin --to sui --sanad-id <id> --dest-owner <addr>
 ```
 
 ## Architecture Notes

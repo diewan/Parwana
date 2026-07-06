@@ -7,5 +7,5 @@ edition = "2024"
 Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "testnet" }
 
 [addresses]
-csv_seal = "0x0fbc820f94deb55b7866b1f6106eb50b6eacb08e1b0832393a8892339461eee1"
+csv_seal = "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55"
 sui = "0x2"

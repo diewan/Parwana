@@ -1,8 +1,9 @@
 {
-  "manifest_version": "2.0.0",
+  "manifest_version": "2.1.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-06-23T14:49:46.416695Z",
+  "updated_at": "2026-07-06T02:00:00Z",
+  "mint_model": "thin-registry-verifier-attested (RFC-0012 §9)",
   "deployments": {
     "ethereum": {
       "network": "sepolia",
@@ -27,20 +28,37 @@
       ]
     },
     "solana": {
-      "network": "localnet",
-      "program_id": "2nVbT9d33j1ySDdHHmNKUgthfV7RbyQDTqRua8192Tn6",
-      "verified": true
+      "network": "devnet",
+      "program_id": "9ekKQYpaLkTrycYmRNRDHohYZwXycHAyfLNirUDRnRVh",
+      "deployment_tx": "58T5sTw6Sk7N3oryVbjr7e5gpzNE6d1886Xzj8gLKdqoAog2BejqVYPSZzgBEAxEJhoTwmzQ8v4v5WxpJdLWv32H",
+      "upgrade_authority": "EySRKYtj9DQLu4zQYspi5h8qGmzJrTAZVH93ZzjjUVQY",
+      "verifier_registry_pda": "HjRLE7im8KKNPH4ALyu7sAWrVW593yiP3HcrHBj2qp6v",
+      "verified": true,
+      "verifier_set": ["0x0339e90e058f0a1e6fdc584fcfde25f6a1ec665071f53c5037303ee356a2cbe077"],
+      "mint_threshold": 1,
+      "note": "TRM-ROLLOUT-001: RFC-0012 thin-registry csv_seal deployed to Solana devnet 2026-07-06 (deployed with --max-len = program size, so upgrades to a larger binary need a new buffer). program_id is the §9.2 destinationContract. Verifier registry PDA [\"verifier_registry\"] SEEDED 2026-07-06 via initialize_verifier_registry (tx 3ukSDFReXbFcagJG2egRiE1za7akv56UGCh8NqvbSSvWGzKdLJfRSdr6RsWZA6FSJSoLTrBCgCM8PnQCizG3t6YW): 1 verifier, threshold 1, authority EySRKYtj…. MINT ENABLED once the runtime holds the matching CSV_MINT_VERIFIER_KEY."
     },
     "sui": {
       "network": "testnet",
-      "package_id": "0x0fbc820f94deb55b7866b1f6106eb50b6eacb08e1b0832393a8892339461eee1",
-      "verified": true
+      "package_id": "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55",
+      "registry_id": "0x37f197aa1bf9af0898fd84a064484cbd876cf7d8078c486c7476b52b6521ac95",
+      "admin_cap": "0x0a04ef04599aa4399fb033c1472e06c88c082b0a4dbeab68105b7f0b75e968d6",
+      "upgrade_cap": "0xe1f4320d0ebdcecdc47b5cc216dd8ae549bc1c4430800297dbf250c1a2fa6856",
+      "deployment_tx": "7SsCbd3YgJ79wRDtqJ1BhpBKg5Yb5XawbFYFUvuc6PzM",
+      "verified": true,
+      "verifier_set": ["0x0339e90e058f0a1e6fdc584fcfde25f6a1ec665071f53c5037303ee356a2cbe077"],
+      "mint_threshold": 1,
+      "note": "TRM-ROLLOUT-001: RFC-0012 thin-registry csv_seal published to Sui testnet 2026-07-05. registry_id is the shared Registry object (§9.2 destinationContract); the Sui adapter resolves it via get_sui_registry_id. Verifier set SEEDED 2026-07-06: add_verifier (tx 8h5krBRDZWdwiH2V3ycAyuTYKeHaQqQgdv4Y1dTX7fmJ) + set_threshold=1 (tx CXtm925kHFL6CDW2HAgnRRFCBaRZV7DcXbBpFFJHcAVa). MINT ENABLED once the runtime holds the matching CSV_MINT_VERIFIER_KEY."
     },
     "aptos": {
       "network": "testnet",
-      "module_address": "810d95132431185b5db7a84cba4d73b5e8135950372bcbcb69e159445ef1fb9c",
-      "deployment_tx": "0x13fa44cb912109fc2209b729abc57f29cdd98f436899f38eecddb99d563e0d36",
-      "verified": true
+      "module_address": "0xd2ca32aa271cda19180c2a7739948a9299c4b8e58c475063d6bd9f48fe33c987",
+      "deployment_tx": "0x98faf924c075e2947b65f9802054177a2d65a3ea8f8b99c027923f0d82fc7574",
+      "deployment_type": "account_publish",
+      "verified": true,
+      "verifier_set": ["0x0339e90e058f0a1e6fdc584fcfde25f6a1ec665071f53c5037303ee356a2cbe077"],
+      "mint_threshold": 1,
+      "note": "TRM-ROLLOUT-001: RFC-0012 thin-registry csv_seal::CSVSeal deployed to Aptos testnet 2026-07-06 under a fresh account (module_address = @csv_seal = §9.2 destinationContract). Account (not object) deployment is required: init_mint_authority/init_registry assert signer == @csv_seal and store resources there, which an object address cannot sign. Initialized: initialize_module, init_registry (replay tables), init_mint_authority (verifier seeded, threshold 1, tx 0x2e287b0e1e161da79c160dd76606924a34619439b33a5144b821d462f1602814). The earlier object deployment 0x26f43311… is abandoned (uninitializable). MINT ENABLED once the runtime holds the matching CSV_MINT_VERIFIER_KEY."
     }
   },
   "checksums": {

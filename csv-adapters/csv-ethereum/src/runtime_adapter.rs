@@ -5,8 +5,8 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
-    TxFinality,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
+    SealRegistryStatus, TxFinality,
 };
 use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery};
 use csv_protocol::finality::ChainCapabilities;
@@ -90,49 +90,81 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         transfer: &CrossChainTransfer,
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
-        // Use the backend's mint_sanad method which properly constructs and signs the transaction
-        use csv_protocol::chain_adapter_traits::ChainSanadOps;
+        // `proof_bundle` is the runtime's canonical-CBOR `RuntimeMintRequest`
+        // (RFC-0012 §3/§9): the §9.2 attestation inputs the runtime bound after
+        // its off-chain canonical verifier already adjudicated the source proof
+        // (`validate_source_proof` on the *source* adapter, journaled by the
+        // coordinator before this call). This adapter is the thin-registry
+        // submitter: it binds `destination_contract = address(this)`, computes
+        // the frozen §9.2 digest, attaches verifier signature(s), and submits via
+        // the regenerated bindings. There is no proof root and no block hash used
+        // as a root anywhere on this path.
+        let request: RuntimeMintRequest =
+            csv_codec::from_canonical_cbor(proof_bundle).map_err(|e| {
+                AdapterError::Generic(format!("Failed to decode runtime mint request: {}", e))
+            })?;
 
-        let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
-        let source_chain = &transfer.source_chain;
+        // Bind the request to this transfer: a payload whose attestation is for a
+        // different Sanad must never be signed or submitted here.
+        if request.attestation.sanad_id != *transfer.sanad_id.as_bytes() {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Mint request Sanad {} does not match transfer Sanad {}",
+                hex::encode(request.attestation.sanad_id),
+                hex::encode(transfer.sanad_id.as_bytes())
+            )));
+        }
 
-        // Parse proof bundle to extract commitment and state_root
-        // The proof bundle is CBOR-encoded ProofBundle
-        let proof_bundle: csv_protocol::proof_taxonomy::ProofBundle =
-            ProofBundle::from_canonical_bytes(proof_bundle)
-                .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
+        #[cfg(feature = "rpc")]
+        {
+            use alloy_sol_types::SolCall;
+
+            // Bind `destination_contract` to the deployed CSVSeal address
+            // (left-padded to 32 bytes) so the signed digest is scoped to exactly
+            // one contract deployment. The runtime leaves this zero because it
+            // does not hold deployment addresses.
+            let contract_addr = self.backend.contract_address().map_err(|e| {
+                AdapterError::Generic(format!("No mint contract configured: {}", e))
+            })?;
+            let mut attestation = request.attestation.clone();
+            let mut destination_contract = [0u8; 32];
+            destination_contract[12..].copy_from_slice(&contract_addr);
+            attestation.destination_contract = destination_contract;
+
+            // Compute the frozen §9.2 digest and attest it with the configured
+            // verifier key. Fails closed (no signer -> no signature) rather than
+            // emitting an unauthenticated mint the contract would reject.
+            let digest = attestation.attestation_digest();
+            let signature = self
+                .backend
+                .sign_mint_attestation_digest(&digest)
                 .map_err(|e| {
-                    AdapterError::Generic(format!("Failed to decode proof bundle: {}", e))
+                    AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
                 })?;
+            let mut verifier_signatures = request.verifier_signatures.clone();
+            verifier_signatures.push(signature);
 
-        // Extract commitment from anchor_ref (anchor_id is Vec<u8>, need to convert to [u8; 32])
-        let mut commitment_bytes = [0u8; 32];
-        let len = proof_bundle.anchor_ref.anchor_id.len().min(32);
-        commitment_bytes[..len].copy_from_slice(&proof_bundle.anchor_ref.anchor_id[..len]);
-        let _commitment = csv_hash::Hash::new(commitment_bytes);
+            // Build the mint call through the regenerated attestation ABI and
+            // submit it. `submit_and_confirm_mint` fails closed on revert.
+            let call = build_mint_call(&attestation, &verifier_signatures);
+            let calldata = call.abi_encode();
+            let (tx_hash, block_height) = self
+                .backend
+                .submit_and_confirm_mint(calldata, "")
+                .await
+                .map_err(|e| AdapterError::Generic(format!("Failed to submit mint: {}", e)))?;
 
-        // Use the inclusion_proof directly
-        let inclusion_proof = &proof_bundle.inclusion_proof;
-
-        let result = self
-            .backend
-            .mint_sanad(
-                source_chain,
-                &sanad_id,
-                inclusion_proof,
-                "0x0000000000000000000000000000000000000000",
-            )
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to mint sanad: {}", e)))?;
-
-        // Extract tx_hash and block_height from the result (these are not Option types)
-        let tx_hash = result.transaction_hash;
-        let block_height = result.block_height;
-
-        Ok(MintResult {
-            tx_hash,
-            block_height,
-        })
+            Ok(MintResult {
+                tx_hash,
+                block_height,
+            })
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let _ = request;
+            Err(AdapterError::Generic(
+                "Cannot submit attested mint: the 'rpc' feature is not enabled".to_string(),
+            ))
+        }
     }
 
     async fn build_inclusion_proof(
@@ -539,6 +571,34 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Build the regenerated-binding `mint_sanad` call from the §9.2 attestation
+/// inputs and the attached verifier signatures.
+///
+/// This is the sole place the runtime mint request is shaped into on-chain
+/// calldata; it maps 1:1 onto `CSVSeal.mint_sanad` and carries neither a proof
+/// root nor any block hash. Factored out so the field mapping and the
+/// signature-bearing shape are unit-testable without a live signer/RPC.
+#[cfg(feature = "rpc")]
+fn build_mint_call(
+    attestation: &csv_adapter_core::MintAttestationInputs,
+    verifier_signatures: &[Vec<u8>],
+) -> crate::bindings::csv_seal::mint_sanadCall {
+    use alloy_primitives::{Bytes, FixedBytes};
+    crate::bindings::csv_seal::mint_sanadCall {
+        sanadId: FixedBytes::<32>::from(attestation.sanad_id),
+        commitment: FixedBytes::<32>::from(attestation.commitment),
+        sourceChain: FixedBytes::<32>::from(attestation.source_chain),
+        destinationOwner: Bytes::from(attestation.destination_owner.clone()),
+        lockEventId: FixedBytes::<32>::from(attestation.lock_event_id),
+        nullifier: FixedBytes::<32>::from(attestation.nullifier),
+        attestationExpiry: attestation.attestation_expiry,
+        verifierSignatures: verifier_signatures
+            .iter()
+            .map(|s| Bytes::from(s.clone()))
+            .collect(),
     }
 }
 
@@ -994,5 +1054,112 @@ mod tests {
             .await
             .expect("must accept a 0x-prefixed tx hash");
         assert_eq!(result.block_height, 100);
+    }
+
+    // ---- §9.2 attestation mint (TRM-ETH-ADPT-001) ----
+
+    fn mint_attestation(sanad_id: Hash) -> csv_adapter_core::MintAttestationInputs {
+        csv_adapter_core::MintAttestationInputs {
+            destination_chain_id: [7u8; 32],
+            destination_contract: [0u8; 32],
+            sanad_id: *sanad_id.as_bytes(),
+            commitment: [8u8; 32],
+            source_chain: [9u8; 32],
+            destination_owner: vec![],
+            lock_event_id: [0xAu8; 32],
+            nullifier: [0xBu8; 32],
+            attestation_expiry: 0,
+        }
+    }
+
+    fn runtime_mint_request_cbor(sanad_id: Hash) -> Vec<u8> {
+        let request = csv_adapter_core::RuntimeMintRequest {
+            attestation: mint_attestation(sanad_id),
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        csv_codec::to_canonical_cbor(&request).expect("encode runtime mint request")
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_request_bound_to_other_sanad() {
+        // A payload whose attestation is for a different Sanad must be rejected
+        // before any signing or submission, independent of the rpc feature.
+        let rpc = MockEthereumRpc::new(200);
+        let adapter = test_adapter(rpc);
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+        let payload = runtime_mint_request_cbor(Hash::new([9u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must reject a mint request bound to a different sanad"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_undecodable_payload() {
+        let rpc = MockEthereumRpc::new(200);
+        let adapter = test_adapter(rpc);
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, b"not-a-mint-request").await;
+        assert!(
+            result.is_err(),
+            "must reject a payload that is not a canonical RuntimeMintRequest"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn mint_sanad_fails_closed_without_verifier_signer() {
+        // The mock RPC has a configured contract address but no signer, so the
+        // adapter cannot attest the §9.2 digest. It must fail closed rather than
+        // submit an unauthenticated mint the contract would reject.
+        let rpc = MockEthereumRpc::new(200);
+        let adapter = test_adapter(rpc);
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when no verifier signer is configured"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn build_mint_call_carries_signatures_and_matches_finalized_selector() {
+        use alloy_sol_types::SolCall;
+
+        let attestation = mint_attestation(Hash::new([1u8; 32]));
+        let sig = vec![7u8; 65];
+        let call = build_mint_call(&attestation, std::slice::from_ref(&sig));
+        let encoded = call.abi_encode();
+
+        // Pinned to the deployed CSVSeal `mint_sanad` selector (0x0c6664f2); the
+        // shape carries verifier signatures and no proof root.
+        assert_eq!(
+            &encoded[..4],
+            &crate::bindings::csv_seal::mint_sanadCall::SELECTOR[..],
+            "mint call must use the finalized attestation-ABI selector"
+        );
+
+        let decoded =
+            crate::bindings::csv_seal::mint_sanadCall::abi_decode(&encoded).expect("decode mint");
+        assert_eq!(decoded.sanadId.as_slice(), &attestation.sanad_id);
+        assert_eq!(decoded.commitment.as_slice(), &attestation.commitment);
+        assert_eq!(decoded.sourceChain.as_slice(), &attestation.source_chain);
+        assert_eq!(decoded.lockEventId.as_slice(), &attestation.lock_event_id);
+        assert_eq!(decoded.nullifier.as_slice(), &attestation.nullifier);
+        assert_eq!(decoded.attestationExpiry, attestation.attestation_expiry);
+        assert_eq!(
+            decoded.verifierSignatures.len(),
+            1,
+            "the mint call must carry the attached verifier signature"
+        );
+        assert_eq!(decoded.verifierSignatures[0].len(), 65);
     }
 }

@@ -42,6 +42,16 @@ pub struct SolanaBackend {
     domain_separator: [u8; 32],
     /// Reference to seal protocol for seal creation and publishing
     seal_protocol: Arc<SolanaSealProtocol>,
+    /// secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation digest
+    /// (optional).
+    ///
+    /// Distinct from the Ed25519 wallet that submits the transaction: the
+    /// destination program authenticates a mint by recovering M-of-N secp256k1
+    /// verifier public keys from signatures over the §9.2 digest
+    /// (`secp256k1_recover`), independent of who pays gas. Absent this key the
+    /// adapter fails closed rather than emitting an unauthenticated mint the
+    /// program would reject.
+    verifier_signing_key: Option<secp256k1::SecretKey>,
 }
 
 impl SolanaBackend {
@@ -71,12 +81,70 @@ impl SolanaBackend {
             network,
             domain_separator,
             seal_protocol: Arc::new(seal),
+            verifier_signing_key: None,
         }
     }
 
     /// Get seal protocol reference
     pub fn seal_protocol(&self) -> &Arc<SolanaSealProtocol> {
         &self.seal_protocol
+    }
+
+    /// Set the secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation
+    /// digest.
+    ///
+    /// This is the mint-authority key: its compressed 33-byte public key must be
+    /// registered in the destination program's `VerifierRegistry`. It is distinct
+    /// from the Ed25519 wallet configured on the seal protocol that submits (and
+    /// pays for) the transaction.
+    pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
+        self.verifier_signing_key = Some(verifier_signing_key);
+        self
+    }
+
+    /// Canonical 32-byte identity of the destination `csv_seal` program — the
+    /// RFC-0012 §9.2 `destinationContract` bound into the attestation digest on
+    /// Solana (the program's native account id, which the on-chain
+    /// `mint_attestation_digest` reproduces as `crate::ID.to_bytes()`).
+    pub fn program_id(&self) -> ChainOpResult<[u8; 32]> {
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid program ID: {}", e)))?;
+        Ok(program_id.to_bytes())
+    }
+
+    /// Sign a 32-byte RFC-0012 §9.2 attestation digest with the configured
+    /// secp256k1 verifier key, producing a 65-byte recoverable signature
+    /// (`r(32) || s(32) || v(1)`, `v` = recovery id `∈ {0, 1}`).
+    ///
+    /// The digest is `sha256(preimage)` (the frozen §9.2 preimage). The on-chain
+    /// `secp256k1_recover` recovers the signer from `(digest, recovery_id, r||s)`,
+    /// so signing the digest directly recovers the same key on-chain. The recovery
+    /// id is emitted raw (0/1); the program's `recover_compressed_verifier` accepts
+    /// both the raw and the EVM (`+27`) form. Fails closed when no verifier key is
+    /// configured rather than emitting an unauthenticated mint.
+    pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
+        use secp256k1::{Message, Secp256k1};
+
+        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::SigningError(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set a secp256k1 verifier key via with_verifier_key())."
+                    .to_string(),
+            )
+        })?;
+
+        // Sign the digest bytes directly (no message prefix), matching the on-chain
+        // secp256k1_recover-over-digest semantics.
+        let msg = Message::from_digest(*digest);
+        let secp = Secp256k1::new();
+        let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
+        let (recovery_id, compact) = signature.serialize_compact();
+
+        let mut out = Vec::with_capacity(65);
+        out.extend_from_slice(&compact);
+        // Raw recovery id (0/1); the program accepts this and the EVM +27 form.
+        out.push(recovery_id.to_i32() as u8);
+        Ok(out)
     }
 
     /// Create from SolanaSealProtocol
@@ -89,6 +157,7 @@ impl SolanaBackend {
             network: seal.get_network(),
             domain_separator: seal.get_domain(),
             seal_protocol: seal,
+            verifier_signing_key: None,
         })
     }
 
@@ -1243,11 +1312,15 @@ fn decode_sanad_account(data: &[u8]) -> ChainOpResult<crate::types::SolanaSanadA
 
     let account_data = &data[8..];
 
-    // Decode fields according to SanadAccount layout
-    if account_data.len() < 32 {
-        return Err(ChainOpError::RpcError(
-            "Account data too short for owner".to_string(),
-        ));
+    // Decode fields according to the thin-registry SanadAccount layout. The fixed
+    // portion is 268 bytes (owner .. bump); reject anything shorter before indexing.
+    const SANAD_ACCOUNT_BODY_LEN: usize = 268;
+    if account_data.len() < SANAD_ACCOUNT_BODY_LEN {
+        return Err(ChainOpError::RpcError(format!(
+            "Account data too short for SanadAccount: need {} bytes, got {}",
+            SANAD_ACCOUNT_BODY_LEN,
+            account_data.len()
+        )));
     }
 
     let owner = Pubkey::new_from_array(
@@ -1278,36 +1351,35 @@ fn decode_sanad_account(data: &[u8]) -> ChainOpResult<crate::types::SolanaSanadA
             .try_into()
             .expect("slice length matches array size"),
         proof_system: account_data[225],
-        proof_root: account_data[226..258]
-            .try_into()
-            .expect("slice length matches array size"),
-        state: account_data[258],
+        // The RFC-0012 thin-registry `SanadAccount` dropped the legacy
+        // proof-root-era field; `state` immediately follows `proof_system`.
+        state: account_data[226],
         created_at: i64::from_le_bytes(
-            account_data[259..267]
+            account_data[227..235]
                 .try_into()
                 .expect("slice length matches array size"),
         ),
         locked_at: i64::from_le_bytes(
-            account_data[267..275]
+            account_data[235..243]
                 .try_into()
                 .expect("slice length matches array size"),
         ),
         consumed_at: i64::from_le_bytes(
-            account_data[275..283]
+            account_data[243..251]
                 .try_into()
                 .expect("slice length matches array size"),
         ),
         minted_at: i64::from_le_bytes(
-            account_data[283..291]
+            account_data[251..259]
                 .try_into()
                 .expect("slice length matches array size"),
         ),
         refunded_at: i64::from_le_bytes(
-            account_data[291..299]
+            account_data[259..267]
                 .try_into()
                 .expect("slice length matches array size"),
         ),
-        bump: account_data[299],
+        bump: account_data[267],
     })
 }
 

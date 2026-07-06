@@ -5,6 +5,11 @@
 //! any RPC operator. Every implementation must be auditable against
 //! the chain's consensus spec.
 
+use csv_hash::Hash;
+use csv_proof::zk_proof::{
+    MAX_ZK_PROOF_SIZE, ProofSystem as ZkProofSystem, ZkError, ZkPublicInputs, ZkSealProof,
+};
+
 /// Error type for anchor verification failures.
 #[derive(Debug, thiserror::Error)]
 pub enum AnchorError {
@@ -26,6 +31,14 @@ pub enum AnchorError {
     InvalidProofStructure(String),
     #[error("Hash mismatch: expected {expected:?}, got {actual:?}")]
     HashMismatch { expected: String, actual: String },
+    #[error("ZkSeal verification unavailable: {0}")]
+    ZkSealUnavailable(String),
+    #[error("ZkSeal proof malformed: {0}")]
+    ZkSealMalformed(String),
+    #[error("Unsupported ZkSeal proof system: {0}")]
+    UnsupportedZkSealProofSystem(String),
+    #[error("ZkSeal pairing check failed: {0}")]
+    ZkSealPairingCheckFailed(String),
 }
 
 /// Verified block header with cryptographic proof of validity.
@@ -105,6 +118,181 @@ pub enum ProofSystem {
     ZkHeader { circuit_id: [u8; 32] },
     /// Ethereum PoS with beacon chain finality.
     EthereumPos { finality_epochs: u8 },
+}
+
+/// Public-input binding for a ZkSeal header proof.
+///
+/// `circuit_id` identifies the source-consensus zk-light-client / CSV verifier
+/// circuit that produced the public inputs. A zero id is never accepted because
+/// it would allow an unbound verifier key namespace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZkHeader {
+    pub circuit_id: [u8; 32],
+}
+
+impl ZkHeader {
+    pub fn new(circuit_id: [u8; 32]) -> Result<Self, AnchorError> {
+        if circuit_id == [0u8; 32] {
+            return Err(AnchorError::ZkSealMalformed(
+                "ZkHeader circuit_id cannot be zero".to_string(),
+            ));
+        }
+        Ok(Self { circuit_id })
+    }
+}
+
+/// Pairing backend required to accept a Groth16 ZkSeal.
+///
+/// csv-verifier owns the structural and binding checks. The backend owns the
+/// curve-specific Groth16 pairing equation check over the canonical public
+/// inputs and verifier key. Implementations MUST return an error on any
+/// malformed proof, key, input, or failed pairing equation.
+pub trait Groth16PairingVerifier {
+    fn verify_groth16_zk_seal(
+        &self,
+        proof: &ZkSealProof,
+        header: &ZkHeader,
+    ) -> Result<(), AnchorError>;
+}
+
+/// Placeholder backend used until the prover/verifier implementation lands.
+///
+/// This deliberately fails closed. It exists so callers can wire the seam
+/// without having any accepting production path before a real pairing verifier
+/// is supplied.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnavailableGroth16Verifier;
+
+impl Groth16PairingVerifier for UnavailableGroth16Verifier {
+    fn verify_groth16_zk_seal(
+        &self,
+        _proof: &ZkSealProof,
+        _header: &ZkHeader,
+    ) -> Result<(), AnchorError> {
+        Err(AnchorError::ZkSealUnavailable(
+            "ZkSeal prover/verifier backend is not available; no proof is accepted without a real Groth16 pairing check"
+                .to_string(),
+        ))
+    }
+}
+
+/// Verify a ZkSeal proof with the fail-closed default backend.
+pub fn verify_zk_seal_unavailable(
+    proof: &ZkSealProof,
+    header: &ZkHeader,
+) -> Result<(), AnchorError> {
+    verify_zk_seal_with_pairing(proof, header, &UnavailableGroth16Verifier)
+}
+
+/// Verify a Groth16 ZkSeal proof.
+///
+/// This function is the RFC §9.5 seam. It rejects malformed envelopes before
+/// the backend is invoked, and it only returns success after the supplied
+/// backend completes the Groth16 pairing check.
+pub fn verify_zk_seal_with_pairing<V: Groth16PairingVerifier + ?Sized>(
+    proof: &ZkSealProof,
+    header: &ZkHeader,
+    verifier: &V,
+) -> Result<(), AnchorError> {
+    validate_zk_seal_envelope(proof, header)?;
+    verifier.verify_groth16_zk_seal(proof, header)
+}
+
+fn validate_zk_seal_envelope(proof: &ZkSealProof, header: &ZkHeader) -> Result<(), AnchorError> {
+    if header.circuit_id == [0u8; 32] {
+        return Err(AnchorError::ZkSealMalformed(
+            "ZkHeader circuit_id cannot be zero".to_string(),
+        ));
+    }
+
+    if proof.proof_bytes.is_empty() {
+        return Err(AnchorError::ZkSealMalformed(
+            "proof bytes cannot be empty".to_string(),
+        ));
+    }
+
+    if proof.proof_bytes.len() > MAX_ZK_PROOF_SIZE {
+        return Err(AnchorError::ZkSealMalformed(format!(
+            "proof size {} exceeds maximum {}",
+            proof.proof_bytes.len(),
+            MAX_ZK_PROOF_SIZE
+        )));
+    }
+
+    if proof.verifier_key.proof_system != ZkProofSystem::Groth16 {
+        return Err(AnchorError::UnsupportedZkSealProofSystem(
+            proof.verifier_key.proof_system.to_string(),
+        ));
+    }
+
+    if !proof.verifier_key.active {
+        return Err(AnchorError::ZkSealMalformed(
+            "verifier key is not active".to_string(),
+        ));
+    }
+
+    if proof.verifier_key.version == 0 {
+        return Err(AnchorError::ZkSealMalformed(
+            "verifier key version cannot be zero".to_string(),
+        ));
+    }
+
+    if proof.verifier_key.key_bytes.is_empty() {
+        return Err(AnchorError::ZkSealMalformed(
+            "verifier key bytes cannot be empty".to_string(),
+        ));
+    }
+
+    validate_zk_public_inputs(&proof.public_inputs)?;
+
+    if proof.public_inputs.source_chain != proof.verifier_key.chain {
+        return Err(AnchorError::ZkSealMalformed(format!(
+            "public input source chain {} does not match verifier key chain {}",
+            proof.public_inputs.source_chain, proof.verifier_key.chain
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_zk_public_inputs(inputs: &ZkPublicInputs) -> Result<(), AnchorError> {
+    if inputs.seal_ref.id.is_empty() {
+        return Err(AnchorError::ZkSealMalformed(
+            "public input seal_ref id cannot be empty".to_string(),
+        ));
+    }
+
+    if inputs.block_hash == Hash::zero() {
+        return Err(AnchorError::ZkSealMalformed(
+            "public input block_hash cannot be zero".to_string(),
+        ));
+    }
+
+    if inputs.commitment == Hash::zero() {
+        return Err(AnchorError::ZkSealMalformed(
+            "public input commitment cannot be zero".to_string(),
+        ));
+    }
+
+    if inputs.block_height == 0 {
+        return Err(AnchorError::ZkSealMalformed(
+            "public input block_height cannot be zero".to_string(),
+        ));
+    }
+
+    if inputs.timestamp == 0 {
+        return Err(AnchorError::ZkSealMalformed(
+            "public input timestamp cannot be zero".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+impl From<ZkError> for AnchorError {
+    fn from(value: ZkError) -> Self {
+        AnchorError::ZkSealMalformed(value.to_string())
+    }
 }
 
 /// The only trust boundary accepted by this protocol.
@@ -357,6 +545,122 @@ mod tests {
         }
     }
 
+    fn create_valid_zk_header() -> ZkHeader {
+        ZkHeader::new([9u8; 32]).unwrap()
+    }
+
+    fn create_valid_zk_seal_proof() -> ZkSealProof {
+        use csv_hash::ChainId;
+        use csv_hash::seal::SealPoint;
+        use csv_proof::zk_proof::VerifierKey;
+
+        let chain = ChainId::new("bitcoin");
+        ZkSealProof::new(
+            vec![1u8; 192],
+            VerifierKey::new(chain.clone(), vec![2u8; 128], ZkProofSystem::Groth16, 1),
+            ZkPublicInputs {
+                seal_ref: SealPoint::new(vec![3u8; 32], Some(1), Some(1)).unwrap(),
+                block_hash: Hash::new([4u8; 32]),
+                commitment: Hash::new([5u8; 32]),
+                source_chain: chain,
+                block_height: 100,
+                timestamp: 1_700_000_000,
+            },
+        )
+        .unwrap()
+    }
+
+    #[derive(Default)]
+    struct RejectingGroth16Verifier {
+        called: std::sync::atomic::AtomicBool,
+    }
+
+    impl Groth16PairingVerifier for RejectingGroth16Verifier {
+        fn verify_groth16_zk_seal(
+            &self,
+            _proof: &ZkSealProof,
+            _header: &ZkHeader,
+        ) -> Result<(), AnchorError> {
+            self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err(AnchorError::ZkSealPairingCheckFailed(
+                "fixture backend rejects invalid pairing equation".to_string(),
+            ))
+        }
+    }
+
+    #[test]
+    fn zk_header_rejects_zero_circuit_id() {
+        let result = ZkHeader::new([0u8; 32]);
+        assert!(matches!(result, Err(AnchorError::ZkSealMalformed(_))));
+    }
+
+    #[test]
+    fn zk_seal_default_backend_fails_closed_as_unavailable() {
+        let proof = create_valid_zk_seal_proof();
+        let header = create_valid_zk_header();
+
+        let result = verify_zk_seal_unavailable(&proof, &header);
+
+        assert!(matches!(result, Err(AnchorError::ZkSealUnavailable(_))));
+    }
+
+    #[test]
+    fn zk_seal_rejects_malformed_proof_before_pairing_backend() {
+        let mut proof = create_valid_zk_seal_proof();
+        proof.proof_bytes.clear();
+        let header = create_valid_zk_header();
+        let verifier = RejectingGroth16Verifier::default();
+
+        let result = verify_zk_seal_with_pairing(&proof, &header, &verifier);
+
+        assert!(matches!(result, Err(AnchorError::ZkSealMalformed(_))));
+        assert!(!verifier.called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn zk_seal_rejects_non_groth16_before_pairing_backend() {
+        let mut proof = create_valid_zk_seal_proof();
+        proof.verifier_key.proof_system = ZkProofSystem::SP1;
+        let header = create_valid_zk_header();
+        let verifier = RejectingGroth16Verifier::default();
+
+        let result = verify_zk_seal_with_pairing(&proof, &header, &verifier);
+
+        assert!(matches!(
+            result,
+            Err(AnchorError::UnsupportedZkSealProofSystem(_))
+        ));
+        assert!(!verifier.called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn zk_seal_rejects_chain_mismatch_before_pairing_backend() {
+        let mut proof = create_valid_zk_seal_proof();
+        proof.public_inputs.source_chain = csv_hash::ChainId::new("ethereum");
+        let header = create_valid_zk_header();
+        let verifier = RejectingGroth16Verifier::default();
+
+        let result = verify_zk_seal_with_pairing(&proof, &header, &verifier);
+
+        assert!(matches!(result, Err(AnchorError::ZkSealMalformed(_))));
+        assert!(!verifier.called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn zk_seal_surfaces_pairing_check_failure() {
+        let proof = create_valid_zk_seal_proof();
+        let header = create_valid_zk_header();
+        let verifier = RejectingGroth16Verifier::default();
+
+        let result = verify_zk_seal_with_pairing(&proof, &header, &verifier);
+
+        assert!(matches!(
+            result,
+            Err(AnchorError::ZkSealPairingCheckFailed(_))
+        ));
+        assert!(verifier.called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
     #[test]
     fn test_ethereum_anchor_verify_header_valid() {
         let anchor = EthereumAnchor::new(0);
@@ -546,7 +850,7 @@ mod tests {
             .verify_header(&header, &validator_set, &finality)
             .unwrap();
 
-        let mut proof = create_valid_inclusion_proof([99u8; 32]); // Wrong root hash
+        let proof = create_valid_inclusion_proof([99u8; 32]); // Wrong root hash
         let result = anchor.verify_inclusion(&proof, &verified);
         assert!(result.is_err());
         match result {

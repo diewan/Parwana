@@ -103,10 +103,11 @@ fn test_sdk_no_direct_solana_adapter_imports() {
 fn test_sdk_uses_adapter_build_result() {
     let sdk_source = include_str!("../src/client.rs");
 
-    // Should use AdapterBuildResult enum for factory/legacy compatibility
+    // Should use the factory AdapterResult alias for factory/legacy compatibility
     assert!(
-        sdk_source.contains("AdapterBuildResult"),
-        "SDK should use AdapterBuildResult for factory/legacy compatibility"
+        sdk_source.contains("AdapterResult as FactoryAdapterResult")
+            && sdk_source.contains("pub type AdapterResult = FactoryAdapterResult"),
+        "SDK should use the factory AdapterResult alias for factory/legacy compatibility"
     );
 }
 

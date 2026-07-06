@@ -103,6 +103,24 @@ impl TransferData {
 /// ```
 ///
 /// Terminal states: `Completed`, `RolledBack`, `Compromised`
+///
+/// # Transfer modes
+///
+/// The intermediate stages split into two mode-specific lifecycles that share
+/// the same `Initialized` entry point and the same terminal states
+/// (`Completed` / `RolledBack` / `Compromised`):
+///
+/// - **Materialize** (on-chain thin-registry mint): `LockSubmitted` →
+///   `LockConfirmed` → `AwaitingFinality` → `ProofBuilding` → `ProofValidated`
+///   → `MintSubmitted` → `MintConfirmed`. Has an asynchronous destination
+///   phase, so `resume`/`retry` progress it toward mint confirmation.
+/// - **Send** (interactive off-chain RGB-style transfer): `SealAssigned` →
+///   `SourceSealClosed` → `ConsignmentEmitted`. There is no destination
+///   transaction; resume is idempotent over source-seal close and consignment
+///   emission and must never re-close the single-use source seal or re-emit.
+///
+/// [`TransferStage::mode`] classifies a stage into its owning [`TransferMode`];
+/// the shared entry/terminal states belong to neither.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub enum TransferStage {
@@ -123,12 +141,47 @@ pub enum TransferStage {
     MintSubmitted,
     /// Mint transaction confirmed on destination chain
     MintConfirmed,
+    /// Send mode: the Sanad has been assigned to the recipient-controlled
+    /// destination seal named by the invoice (no chain mutation yet).
+    SealAssigned,
+    /// Send mode: the single-use source seal has been closed. This is the
+    /// single-use commitment — once journaled `Completed`, resume MUST NOT
+    /// re-close it.
+    SourceSealClosed,
+    /// Send mode: the consignment has been emitted for off-band delivery. The
+    /// sender's obligations are discharged; the next stage is `Completed`.
+    ConsignmentEmitted,
     /// Transfer completed successfully
     Completed,
     /// Transfer rolled back (safe failure recovery)
     RolledBack,
     /// Transfer compromised (security incident detected)
     Compromised,
+}
+
+/// The transfer mode a stage belongs to.
+///
+/// The two modes have distinct lifecycles and distinct resume semantics; see
+/// [`TransferStage`]. The shared entry (`Initialized`) and terminal states
+/// belong to neither mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum TransferMode {
+    /// On-chain transfer via the thin-registry mint (asynchronous destination
+    /// finality; `resume`/`retry` apply).
+    Materialize,
+    /// Interactive off-chain transfer (assign → close source seal → emit
+    /// consignment; resume is idempotent, no destination phase).
+    Send,
+}
+
+impl std::fmt::Display for TransferMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Materialize => write!(f, "materialize"),
+            Self::Send => write!(f, "send"),
+        }
+    }
 }
 
 impl TransferStage {
@@ -140,7 +193,10 @@ impl TransferStage {
         )
     }
 
-    /// Returns the next expected stage in the happy path.
+    /// Returns the next expected stage in the **materialize** happy path.
+    ///
+    /// Send-mode stages have no successor here; use [`TransferStage::next_send_stage`]
+    /// for the interactive off-chain lifecycle.
     pub fn next_stage(&self) -> Option<TransferStage> {
         match self {
             TransferStage::Initialized => Some(TransferStage::LockSubmitted),
@@ -153,6 +209,55 @@ impl TransferStage {
             TransferStage::MintConfirmed => Some(TransferStage::Completed),
             _ => None,
         }
+    }
+
+    /// Returns the next expected stage in the **send** (interactive off-chain)
+    /// happy path.
+    ///
+    /// The send lifecycle branches from the shared `Initialized` entry:
+    /// `Initialized` → `SealAssigned` → `SourceSealClosed` →
+    /// `ConsignmentEmitted` → `Completed`. Materialize stages have no successor
+    /// here.
+    pub fn next_send_stage(&self) -> Option<TransferStage> {
+        match self {
+            TransferStage::Initialized => Some(TransferStage::SealAssigned),
+            TransferStage::SealAssigned => Some(TransferStage::SourceSealClosed),
+            TransferStage::SourceSealClosed => Some(TransferStage::ConsignmentEmitted),
+            TransferStage::ConsignmentEmitted => Some(TransferStage::Completed),
+            _ => None,
+        }
+    }
+
+    /// Returns the mode this stage belongs to, or `None` for the shared entry
+    /// (`Initialized`) and terminal (`Completed`/`RolledBack`/`Compromised`)
+    /// states which are common to both modes.
+    pub fn mode(&self) -> Option<TransferMode> {
+        match self {
+            TransferStage::LockSubmitted
+            | TransferStage::LockConfirmed
+            | TransferStage::AwaitingFinality
+            | TransferStage::ProofBuilding
+            | TransferStage::ProofValidated
+            | TransferStage::MintSubmitted
+            | TransferStage::MintConfirmed => Some(TransferMode::Materialize),
+            TransferStage::SealAssigned
+            | TransferStage::SourceSealClosed
+            | TransferStage::ConsignmentEmitted => Some(TransferMode::Send),
+            TransferStage::Initialized
+            | TransferStage::Completed
+            | TransferStage::RolledBack
+            | TransferStage::Compromised => None,
+        }
+    }
+
+    /// Returns true if this is a send-mode stage.
+    pub fn is_send_stage(&self) -> bool {
+        matches!(self.mode(), Some(TransferMode::Send))
+    }
+
+    /// Returns true if this is a materialize-mode stage.
+    pub fn is_materialize_stage(&self) -> bool {
+        matches!(self.mode(), Some(TransferMode::Materialize))
     }
 
     /// Returns true if the transfer is in progress (not terminal, not initialized).
@@ -183,9 +288,93 @@ impl std::fmt::Display for TransferStage {
             Self::AwaitingFinality => write!(f, "awaiting_finality"),
             Self::MintSubmitted => write!(f, "mint_submitted"),
             Self::MintConfirmed => write!(f, "mint_confirmed"),
+            Self::SealAssigned => write!(f, "seal_assigned"),
+            Self::SourceSealClosed => write!(f, "source_seal_closed"),
+            Self::ConsignmentEmitted => write!(f, "consignment_emitted"),
             Self::Completed => write!(f, "completed"),
             Self::RolledBack => write!(f, "rolled_back"),
             Self::Compromised => write!(f, "compromised"),
         }
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+
+    #[test]
+    fn materialize_stages_classify_as_materialize() {
+        for stage in [
+            TransferStage::LockSubmitted,
+            TransferStage::LockConfirmed,
+            TransferStage::AwaitingFinality,
+            TransferStage::ProofBuilding,
+            TransferStage::ProofValidated,
+            TransferStage::MintSubmitted,
+            TransferStage::MintConfirmed,
+        ] {
+            assert_eq!(stage.mode(), Some(TransferMode::Materialize), "{stage:?}");
+            assert!(stage.is_materialize_stage());
+            assert!(!stage.is_send_stage());
+        }
+    }
+
+    #[test]
+    fn send_stages_classify_as_send() {
+        for stage in [
+            TransferStage::SealAssigned,
+            TransferStage::SourceSealClosed,
+            TransferStage::ConsignmentEmitted,
+        ] {
+            assert_eq!(stage.mode(), Some(TransferMode::Send), "{stage:?}");
+            assert!(stage.is_send_stage());
+            assert!(!stage.is_materialize_stage());
+        }
+    }
+
+    #[test]
+    fn shared_stages_belong_to_no_mode() {
+        for stage in [
+            TransferStage::Initialized,
+            TransferStage::Completed,
+            TransferStage::RolledBack,
+            TransferStage::Compromised,
+        ] {
+            assert_eq!(stage.mode(), None, "{stage:?}");
+            assert!(!stage.is_send_stage());
+            assert!(!stage.is_materialize_stage());
+        }
+    }
+
+    #[test]
+    fn send_happy_path_walks_from_initialized_to_completed() {
+        let mut stage = TransferStage::Initialized;
+        let expected = [
+            TransferStage::SealAssigned,
+            TransferStage::SourceSealClosed,
+            TransferStage::ConsignmentEmitted,
+            TransferStage::Completed,
+        ];
+        for want in expected {
+            stage = stage.next_send_stage().expect("send path has a successor");
+            assert_eq!(stage, want);
+        }
+        assert_eq!(stage.next_send_stage(), None);
+    }
+
+    #[test]
+    fn materialize_and_send_paths_do_not_cross() {
+        // A materialize stage has no send successor, and vice versa.
+        assert_eq!(TransferStage::LockConfirmed.next_send_stage(), None);
+        assert_eq!(TransferStage::SealAssigned.next_stage(), None);
+        assert_eq!(TransferStage::SourceSealClosed.next_stage(), None);
+        assert_eq!(TransferStage::ConsignmentEmitted.next_stage(), None);
+    }
+
+    #[test]
+    fn send_stages_are_not_terminal_before_completed() {
+        assert!(!TransferStage::SealAssigned.is_terminal());
+        assert!(!TransferStage::SourceSealClosed.is_terminal());
+        assert!(!TransferStage::ConsignmentEmitted.is_terminal());
     }
 }

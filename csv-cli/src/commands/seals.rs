@@ -194,11 +194,11 @@ async fn cmd_consume(
             match adapter.get_seal_state(&seal_hash).await {
                 Ok(canonical_state) => {
                     // Check if seal is already consumed on-chain
-                    if canonical_state.consumed_at.is_some() {
+                    if let Some(consumed_at) = canonical_state.consumed_at {
                         output::error("Seal already consumed on-chain");
                         return Err(anyhow::anyhow!(
                             "Seal replay detected: canonical state shows seal consumed at {}",
-                            canonical_state.consumed_at.unwrap()
+                            consumed_at
                         ));
                     }
                     output::info("Canonical state check passed: seal is not consumed on-chain");

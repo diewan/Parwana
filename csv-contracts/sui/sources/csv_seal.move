@@ -1,203 +1,150 @@
+/// CSVSeal — Cross-Chain Sanad materialization on Sui (thin registry).
+///
+/// Authenticity model (RFC-0012 §9 / ABI_CONSTITUTION.md §9): destination mint is a
+/// THIN REGISTRY. Cross-chain correctness is decided OFF-CHAIN by the CSV verifier; this
+/// package does NOT re-adjudicate the proof. It records a mint only when the call carries at
+/// least `threshold` distinct valid verifier signatures over the frozen §9.2 attestation
+/// digest, and it enforces on-chain replay protection (`sanadId` / `nullifier` /
+/// `lockEventId` uniqueness) via `Registry` tables.
+///
+/// The former Merkle-proof / proof-root gating model is REMOVED from the mint path (RFC-0012
+/// §4): no proof root, state root, Merkle proof bytes, or leaf position gates `mint_sanad`.
+///
+/// Sui has the strongest native single-use model: the minted `Seal` is an owned object (the
+/// object *is* the seal). Uniqueness that a single owned object cannot express — global
+/// non-replay across independently submitted mints — is enforced by the shared `Registry`.
 module csv_seal::csv_seal {
-    use sui::bcs;
+    use sui::address;
+    use sui::clock::{Self, Clock};
+    use sui::ecdsa_k1;
     use sui::event;
+    use sui::hash;
+    use sui::table::{Self, Table};
     use sui::transfer;
+    use std::hash as std_hash;
 
-    /// Chain IDs for cross-chain transfers (must match other CSV contracts)
-    #[allow(unused_const)]
-    const CHAIN_BITCOIN: u8 = 0;
-    #[allow(unused_const)]
-    const CHAIN_SUI: u8 = 1;
-    #[allow(unused_const)]
-    const CHAIN_APTOS: u8 = 2;
-    #[allow(unused_const)]
-    const CHAIN_ETHEREUM: u8 = 3;
-    #[allow(unused_const)]
-    const CHAIN_SOLANA: u8 = 4;
+    // ==================== Constants ====================
 
-    /// Asset class constants
-    #[allow(unused_const)]
+    /// Asset / proof-system defaults (metadata is NOT on the mint hot path — RFC-0012 §4).
     const ASSET_CLASS_UNSPECIFIED: u8 = 0;
-    #[allow(unused_const)]
-    const ASSET_CLASS_FUNGIBLE_TOKEN: u8 = 1;
-    #[allow(unused_const)]
-    const ASSET_CLASS_NON_FUNGIBLE_TOKEN: u8 = 2;
-    #[allow(unused_const)]
-    const ASSET_CLASS_PROOF_SANAD: u8 = 3;
-
-    /// Proof system constants
     const PROOF_SYSTEM_UNSPECIFIED: u8 = 0;
 
-    /// Error codes
-    const ESEAL_ALREADY_CONSUMED: u64 = 0;
-    const EINVALID_PROOF: u64 = 1;
-    const EALREADY_LOCKED: u64 = 2;
-    #[allow(unused_const)]
-    const EALREADY_MINTED: u64 = 3;
-    const ETIMEOUT_NOT_EXPIRED: u64 = 4;
-    const EALREADY_REFUNDED: u64 = 5;
-    const ENOT_AUTHORIZED: u64 = 6;
-    const ESANAD_NOT_FOUND: u64 = 7;
-
-    /// Canonical Sanad lifecycle state — matches Ethereum/Solana/Aptos
+    /// Canonical Sanad lifecycle state — matches Ethereum/Solana/Aptos.
     /// 0=Uncreated, 1=Created, 2=Active, 3=Locked, 4=Consumed, 5=Minted, 6=Transferred, 7=Refunded, 8=Burned, 9=Invalid
-    const SANAD_STATE_UNCREATED: u8 = 0;
     const SANAD_STATE_CREATED: u8 = 1;
-    const SANAD_STATE_ACTIVE: u8 = 2;
     const SANAD_STATE_LOCKED: u8 = 3;
     const SANAD_STATE_CONSUMED: u8 = 4;
     const SANAD_STATE_MINTED: u8 = 5;
-    const SANAD_STATE_TRANSFERRED: u8 = 6;
     const SANAD_STATE_REFUNDED: u8 = 7;
-    const SANAD_STATE_BURNED: u8 = 8;
-    const SANAD_STATE_INVALID: u8 = 9;
 
-    /// Canonical Seal lifecycle state
-    /// 0=Created, 1=Consumed, 2=Locked, 3=Minted, 4=Refunded
-    const SEAL_STATE_CREATED: u8 = 0;
-    const SEAL_STATE_CONSUMED: u8 = 1;
-    const SEAL_STATE_LOCKED: u8 = 2;
-    const SEAL_STATE_MINTED: u8 = 3;
-    const SEAL_STATE_REFUNDED: u8 = 4;
-
-    /// Refund timeout in milliseconds (24 hours)
+    /// Refund timeout in milliseconds (24 hours).
     const REFUND_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 
-    /// Canonical ProofLeafV1 schema for cross-chain proof verification
-    /// This struct matches the canonical schema defined in csv-protocol
-    public struct ProofLeafV1 has copy, drop {
-        /// Version of the proof leaf schema
-        version: u32,
-        /// Source chain identifier
-        source_chain: u8,
-        /// Destination chain identifier
-        destination_chain: u8,
-        /// Sanad identifier
-        sanad_id: vector<u8>,
-        /// Commitment hash
+    /// `secp256k1_ecrecover` / `secp256k1_verify` hash selector: 0 = keccak256, 1 = sha256.
+    /// The §9.2 digest is SHA-256, so the verifier signs `sha256(preimage)` and we recover with
+    /// this flag (the native primitive hashes the raw preimage internally).
+    const SHA256_FLAG: u8 = 1;
+
+    /// Fixed width of the opaque 32-byte hash fields in the mint ABI / digest.
+    const FIELD_LEN: u64 = 32;
+    /// Compressed secp256k1 public key length (RFC-0012 §9.2 non-EVM verifier identity form).
+    const PUBKEY_LEN: u64 = 33;
+    /// Recoverable secp256k1 signature length (r || s || v).
+    const SIGNATURE_LEN: u64 = 65;
+
+    /// Domain tag for the §9.2 mint attestation digest (23 bytes, ASCII, no NUL).
+    const MINT_ATTESTATION_DOMAIN: vector<u8> = b"csv.mint.attestation.v1";
+    /// Chain-ABI identity for Sui (RFC-0012 §6): keccak256("csv.chain.sui").
+    const CHAIN_SUI_TAG: vector<u8> = b"csv.chain.sui";
+
+    // ==================== Errors ====================
+
+    const EALREADY_MINTED: u64 = 1;
+    const ENULLIFIER_ALREADY_USED: u64 = 2;
+    const ELOCK_EVENT_ALREADY_RECORDED: u64 = 3;
+    const EINSUFFICIENT_SIGNATURES: u64 = 4;
+    const EINVALID_VERIFIER_SIGNATURE: u64 = 5;
+    const EMALFORMED_SIGNATURE: u64 = 6;
+    const EATTESTATION_EXPIRED: u64 = 7;
+    const EINVALID_THRESHOLD: u64 = 8;
+    const EINVALID_MINT_REQUEST: u64 = 9;
+    const EINVALID_PUBKEY: u64 = 10;
+    const ENOT_CONFIGURED: u64 = 11;
+    const EINVALID_FIELD_LENGTH: u64 = 12;
+    const EVERIFIER_EXISTS: u64 = 13;
+    const EVERIFIER_NOT_FOUND: u64 = 14;
+    // lifecycle
+    const ESEAL_ALREADY_CONSUMED: u64 = 20;
+    const EALREADY_LOCKED: u64 = 21;
+    const ETIMEOUT_NOT_EXPIRED: u64 = 22;
+    const ENOT_AUTHORIZED: u64 = 23;
+    const ESANAD_NOT_FOUND: u64 = 24;
+
+    // ==================== Objects / State ====================
+
+    /// Package-level authority capability. Holding it authorizes verifier-set rotation and
+    /// threshold changes (RFC-0012 §9.3). Rotation is OFF the mint path: `mint_sanad` never
+    /// consults an `AdminCap`, only the recorded verifier set and threshold.
+    public struct AdminCap has key, store {
+        id: object::UID,
+    }
+
+    /// Shared thin-registry state. Holds the authorized verifier set + threshold and the
+    /// on-chain anti-replay domain (minted sanads / nullifiers / lock events).
+    public struct Registry has key {
+        id: object::UID,
+        /// Authorized verifier identities: 33-byte compressed secp256k1 public keys.
+        verifiers: vector<vector<u8>>,
+        /// Signature threshold `M`: mint requires >= `M` distinct valid verifier signatures.
+        threshold: u64,
+        /// sanadId -> true. Primary duplicate-mint key.
+        minted_sanads: Table<vector<u8>, bool>,
+        /// nullifier -> true. Replay key.
+        nullifiers: Table<vector<u8>, bool>,
+        /// lockEventId -> true. Duplicate-source-lock key.
+        used_lock_events: Table<vector<u8>, bool>,
+        /// sanadId -> minimal mint record (auditability / settlement — RFC-0012 §3).
+        mint_records: Table<vector<u8>, MintRecord>,
+    }
+
+    /// Minimal destination-mint record (RFC-0012 §3). Stores `keccak256(destinationOwner)`;
+    /// the full bytes travel in the `SanadMinted` event.
+    public struct MintRecord has store, drop {
         commitment: vector<u8>,
-        /// Content descriptor hash (optional, default empty)
-        content_descriptor_hash: vector<u8>,
-        /// Source seal reference hash (optional, default empty)
-        source_seal_ref_hash: vector<u8>,
-        /// Destination owner hash (optional, default empty)
+        source_chain: vector<u8>,
         destination_owner_hash: vector<u8>,
-        /// Nullifier hash (optional, default empty)
-        nullifier: vector<u8>,
-        /// Lock event ID hash (optional, default empty)
         lock_event_id: vector<u8>,
-        /// Metadata hash (optional, default empty)
-        metadata_hash: vector<u8>,
-        /// Proof policy hash (optional, default empty)
-        proof_policy_hash: vector<u8>,
+        nullifier: vector<u8>,
+        minted_at: u64,
     }
 
-    /// Compute the canonical hash of a ProofLeafV1 using blake2b256 (Sui's native hash)
-    /// Uses Minimal Canonical Encoding (MCE) - fixed-width byte layout without serialization libraries
-    /// This matches the Rust ProofLeafV1::to_canonical_bytes() implementation exactly.
-    public fun hash_proof_leaf_v1(leaf: &ProofLeafV1): vector<u8> {
-        let mut data = vector::empty();
-        
-        // Domain tag (17 bytes): "csv.proof.leaf.v1"
-        let domain = b"csv.proof.leaf.v1";
-        vector::append(&mut data, domain);
-        
-        // Version (4 bytes, little-endian u32)
-        // BCS for u32 produces exactly 4 bytes LE, matching Rust's to_le_bytes()
-        let version_bytes = bcs::to_bytes(&leaf.version);
-        vector::append(&mut data, version_bytes);
-        
-        // Chain IDs (1 byte each)
-        vector::push_back(&mut data, leaf.source_chain);
-        vector::push_back(&mut data, leaf.destination_chain);
-        
-        // Fixed-width hashes (32 bytes each)
-        vector::append(&mut data, leaf.sanad_id);
-        vector::append(&mut data, leaf.commitment);
-        vector::append(&mut data, leaf.content_descriptor_hash);
-        vector::append(&mut data, leaf.source_seal_ref_hash);
-        vector::append(&mut data, leaf.destination_owner_hash);
-        vector::append(&mut data, leaf.nullifier);
-        vector::append(&mut data, leaf.lock_event_id);
-        vector::append(&mut data, leaf.metadata_hash);
-        vector::append(&mut data, leaf.proof_policy_hash);
-        
-        // Use blake2b256 (Sui's native hash)
-        sui::hash::blake2b256(&data)
-    }
-
-    /// Compute ProofLeafV1 hash using chain-specific hash function
-    /// For Sui, this uses blake2b256 (native hash function)
-    public fun hash_proof_leaf_v1_with_chain_function(leaf: &ProofLeafV1, _chain: u8): vector<u8> {
-        hash_proof_leaf_v1(leaf)
-    }
-
-    /// A seal object that can be consumed exactly once.
+    /// The materialized sanad: an owned object that IS the seal (Sui linear single-use).
     public struct Seal has key, store {
         id: object::UID,
-        /// Unique Sanad identifier (preserved across chains)
         sanad_id: vector<u8>,
-        /// Commitment hash (preserved across chains)
         commitment: vector<u8>,
-        /// State root (off-chain state commitment)
-        state_root: vector<u8>,
-        /// Nonce for replay resistance
-        nonce: u64,
-        /// Canonical lifecycle state (replaces consumed/locked booleans)
+        /// Canonical lifecycle state.
         state: u8,
-        /// Owner of the seal
         owner: address,
-        /// Asset class
+        /// Chain-ABI identity of the source chain (empty for a locally created seal).
+        source_chain: vector<u8>,
+        /// Source lock event id (empty unless minted from a cross-chain lock).
+        lock_event_id: vector<u8>,
+        /// Replay nullifier (empty unless consumed / minted).
+        nullifier: vector<u8>,
         asset_class: u8,
-        /// Asset ID
         asset_id: vector<u8>,
-        /// Metadata hash
         metadata_hash: vector<u8>,
-        /// Proof system
         proof_system: u8,
-        /// Proof root
-        proof_root: vector<u8>,
-        /// Creation timestamp (Unix epoch milliseconds)
         created_at: u64,
-        /// Lock timestamp (Unix epoch milliseconds)
         locked_at: u64,
-        /// Consumption timestamp (Unix epoch milliseconds)
         consumed_at: u64,
-        /// Mint timestamp (Unix epoch milliseconds)
         minted_at: u64,
-        /// Refund timestamp (Unix epoch milliseconds)
         refunded_at: u64,
     }
 
-    /// Lock record for refund support
-    public struct LockRecord has key, store {
-        id: object::UID,
-        /// Sanad identifier
-        sanad_id: vector<u8>,
-        /// Commitment hash
-        commitment: vector<u8>,
-        /// Original owner
-        owner: address,
-        /// Destination chain ID
-        destination_chain: u8,
-        /// Destination owner (hashed)
-        destination_owner: vector<u8>,
-        /// Lock timestamp (Unix epoch milliseconds)
-        locked_at: u64,
-        /// Whether this lock has been refunded
-        refunded: bool,
-    }
+    // ==================== Events (canonical — ABI_CONSTITUTION §Canonical Event Names) ====================
 
-    /// Minted Sanad record for replay protection
-    public struct MintedSanad has key, store {
-        id: object::UID,
-        /// Sanad identifier that was minted
-        sanad_id: vector<u8>,
-        /// When it was minted (Unix epoch milliseconds)
-        minted_at: u64,
-    }
-
-    /// Canonical: Emitted when a Sanad is created
     public struct SanadCreated has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
@@ -205,55 +152,36 @@ module csv_seal::csv_seal {
         timestamp_ms: u64,
     }
 
-    /// Canonical: Emitted when a Sanad is consumed
     public struct SanadConsumed has copy, drop {
         sanad_id: vector<u8>,
-        commitment: vector<u8>,
+        nullifier: vector<u8>,
         consumer: address,
         timestamp_ms: u64,
     }
 
-    /// Canonical: Emitted when a Sanad is locked for cross-chain transfer
-    public struct SanadLocked has copy, drop {
-        sanad_id: vector<u8>,
-        commitment: vector<u8>,
-        owner: address,
-        destination_chain: u8,
-        destination_owner: vector<u8>,
-        timestamp_ms: u64,
-    }
-
-    /// Legacy: Emitted when a Sanad is locked for cross-chain transfer (backward compatibility)
+    /// Emitted when a Sanad is locked for cross-chain transfer.
     public struct CrossChainLock has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
+        source_chain: vector<u8>,
+        destination_chain: vector<u8>,
+        lock_event_id: vector<u8>,
         owner: address,
-        destination_chain: u8,
-        destination_owner: vector<u8>,
         timestamp_ms: u64,
     }
 
-    /// Canonical: Emitted when a Sanad is minted on destination chain
+    /// Emitted when a Sanad is materialized on this destination chain (RFC-0012 §3).
+    /// Carries the FULL `destination_owner` bytes; the registry stores only its hash.
     public struct SanadMinted has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
-        owner: address,
-        source_chain: u8,
-        source_seal_ref: vector<u8>,
+        source_chain: vector<u8>,
+        destination_owner: vector<u8>,
+        lock_event_id: vector<u8>,
+        nullifier: vector<u8>,
         timestamp_ms: u64,
     }
 
-    /// Legacy: Emitted when a Sanad is minted from cross-chain transfer (backward compatibility)
-    public struct CrossChainMint has copy, drop {
-        sanad_id: vector<u8>,
-        commitment: vector<u8>,
-        owner: address,
-        source_chain: u8,
-        source_seal_ref: vector<u8>,
-        timestamp_ms: u64,
-    }
-
-    /// Canonical: Emitted when a locked Sanad is refunded
     public struct SanadRefunded has copy, drop {
         sanad_id: vector<u8>,
         commitment: vector<u8>,
@@ -262,15 +190,6 @@ module csv_seal::csv_seal {
         timestamp_ms: u64,
     }
 
-    /// Legacy: Emitted when a locked Sanad is refunded (backward compatibility)
-    public struct CrossChainRefund has copy, drop {
-        sanad_id: vector<u8>,
-        commitment: vector<u8>,
-        claimant: address,
-        timestamp_ms: u64,
-    }
-
-    /// Canonical: Emitted when Sanad ownership is transferred
     public struct SanadTransferred has copy, drop {
         sanad_id: vector<u8>,
         from: address,
@@ -278,294 +197,400 @@ module csv_seal::csv_seal {
         timestamp_ms: u64,
     }
 
-    /// Canonical: Emitted when a nullifier is registered
     public struct NullifierRegistered has copy, drop {
         nullifier: vector<u8>,
         sanad_id: vector<u8>,
+        source_chain: vector<u8>,
         timestamp_ms: u64,
     }
 
-    /// Canonical: Emitted when a commitment is anchored
     public struct CommitmentAnchored has copy, drop {
         commitment: vector<u8>,
-        seal_id: sui::object::ID,
+        seal_id: object::ID,
         owner: address,
         timestamp_ms: u64,
     }
 
-    /// Canonical: Emitted when proof root is updated
-    public struct ProofRootUpdated has copy, drop {
-        proof_root: vector<u8>,
-        timestamp_ms: u64,
-        updater: address,
+    public struct VerifierAdded has copy, drop { verifier: vector<u8> }
+    public struct VerifierRemoved has copy, drop { verifier: vector<u8> }
+    public struct ThresholdUpdated has copy, drop { threshold: u64 }
+
+    // ==================== Initialization ====================
+
+    /// Module initializer: create the shared `Registry` (empty verifier set, threshold 0 —
+    /// mint is FAIL-CLOSED until an `AdminCap` holder configures it) and hand the `AdminCap`
+    /// to the publisher.
+    fun init(ctx: &mut tx_context::TxContext) {
+        let registry = Registry {
+            id: object::new(ctx),
+            verifiers: vector::empty(),
+            threshold: 0,
+            minted_sanads: table::new(ctx),
+            nullifiers: table::new(ctx),
+            used_lock_events: table::new(ctx),
+            mint_records: table::new(ctx),
+        };
+        transfer::share_object(registry);
+        transfer::public_transfer(AdminCap { id: object::new(ctx) }, tx_context::sender(ctx));
     }
 
-    /// Canonical: Emitted when replay is detected
-    public struct ReplayDetected has copy, drop {
-        replay_id: vector<u8>,
+    // ==================== Verifier-set governance (AdminCap-gated, OFF the mint path) ====================
+
+    /// Add an authorized verifier (33-byte compressed secp256k1 public key).
+    public entry fun add_verifier(_admin: &AdminCap, registry: &mut Registry, pubkey: vector<u8>) {
+        assert!(vector::length(&pubkey) == PUBKEY_LEN, EINVALID_PUBKEY);
+        assert!(!contains_bytes(&registry.verifiers, &pubkey), EVERIFIER_EXISTS);
+        vector::push_back(&mut registry.verifiers, pubkey);
+        event::emit(VerifierAdded { verifier: pubkey });
+    }
+
+    /// Remove an authorized verifier. Aborts if the remaining set would be smaller than the
+    /// current threshold — the admin must lower the threshold first, never brick the set.
+    public entry fun remove_verifier(_admin: &AdminCap, registry: &mut Registry, pubkey: vector<u8>) {
+        let (found, idx) = index_of_bytes(&registry.verifiers, &pubkey);
+        assert!(found, EVERIFIER_NOT_FOUND);
+        vector::swap_remove(&mut registry.verifiers, idx);
+        assert!(registry.threshold <= vector::length(&registry.verifiers), EINVALID_THRESHOLD);
+        event::emit(VerifierRemoved { verifier: pubkey });
+    }
+
+    /// Set the signature threshold `M`. Must be 1..=|verifiers| (a valid M-of-N).
+    public entry fun set_threshold(_admin: &AdminCap, registry: &mut Registry, new_threshold: u64) {
+        assert!(new_threshold >= 1, EINVALID_THRESHOLD);
+        assert!(new_threshold <= vector::length(&registry.verifiers), EINVALID_THRESHOLD);
+        registry.threshold = new_threshold;
+        event::emit(ThresholdUpdated { threshold: new_threshold });
+    }
+
+    // ==================== Verifier-attested destination mint (RFC-0012 §3 / §9) ====================
+
+    /// Materialize a Sanad on this destination chain.
+    ///
+    /// THIN REGISTRY. Cross-chain validity is decided off-chain; authenticity here is a set of
+    /// verifier signatures over the frozen §9.2 attestation digest. There is NO proof root,
+    /// state root, Merkle proof, or leaf index. Uniqueness of `sanad_id` / `nullifier` /
+    /// `lock_event_id` is enforced on-chain via the `Registry` tables. On success the minted
+    /// `Seal` is transferred to `destination_owner`.
+    ///
+    /// * `source_chain` — chain-ABI identity keccak256("csv.chain.<src>") of the lock chain.
+    /// * `destination_owner` — Sui recipient; its 32-byte address is the chain-native
+    ///   `destinationOwner` bytes. `keccak256(address_bytes)` binds the digest; the full bytes
+    ///   are emitted in `SanadMinted`.
+    /// * `attestation_expiry` — u64 unix seconds; 0 = no expiry. Bound over the digest (§9.2).
+    /// * `verifier_signatures` — 65-byte (r||s||v) secp256k1 signatures over the §9.2 digest.
+    public entry fun mint_sanad(
+        registry: &mut Registry,
         sanad_id: vector<u8>,
-        timestamp_ms: u64,
-    }
-
-    /// Legacy events (backward compatibility)
-    public struct AnchorEvent has copy, drop {
         commitment: vector<u8>,
-        seal_id: sui::object::ID,
-        timestamp_ms: u64,
-    }
-    public struct ProofAccepted has copy, drop {
-        proof_root: vector<u8>,
-        protocol_version: vector<u8>,
-        timestamp_ms: u64,
-    }
-    public struct ProofRejected has copy, drop {
-        proof_root: vector<u8>,
-        reason: vector<u8>,
-        timestamp_ms: u64,
-    }
-
-    /// Create a new seal with the given parameters.
-    public fun create_seal(
-        sanad_id: vector<u8>,
-        commitment: vector<u8>,
-        state_root: vector<u8>,
-        nonce: u64,
-        owner: address,
+        source_chain: vector<u8>,
+        destination_owner: address,
+        lock_event_id: vector<u8>,
+        nullifier: vector<u8>,
+        attestation_expiry: u64,
+        verifier_signatures: vector<vector<u8>>,
+        clock: &Clock,
         ctx: &mut tx_context::TxContext,
-    ): Seal {
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
-        Seal {
+    ) {
+        // Field width + sanity: every real mint carries fixed-width, non-zero replay keys.
+        assert_field_len(&sanad_id);
+        assert_field_len(&commitment);
+        assert_field_len(&source_chain);
+        assert_field_len(&lock_event_id);
+        assert_field_len(&nullifier);
+        assert!(
+            !is_zero(&sanad_id)
+                && !is_zero(&commitment)
+                && !is_zero(&source_chain)
+                && !is_zero(&lock_event_id)
+                && !is_zero(&nullifier),
+            EINVALID_MINT_REQUEST,
+        );
+
+        // §9.2 expiry bound (attestation_expiry is unix seconds; Clock is unix ms).
+        if (attestation_expiry != 0) {
+            let now_secs = clock::timestamp_ms(clock) / 1000;
+            assert!(now_secs <= attestation_expiry, EATTESTATION_EXPIRED);
+        };
+
+        // On-chain anti-replay domain (RFC-0012 §3): reject if any uniqueness key is taken.
+        assert!(!table::contains(&registry.minted_sanads, sanad_id), EALREADY_MINTED);
+        assert!(!table::contains(&registry.nullifiers, nullifier), ENULLIFIER_ALREADY_USED);
+        assert!(!table::contains(&registry.used_lock_events, lock_event_id), ELOCK_EVENT_ALREADY_RECORDED);
+
+        let destination_owner_bytes = address::to_bytes(destination_owner);
+        let destination_owner_hash = hash::keccak256(&destination_owner_bytes);
+
+        // §9 authentication: verify M-of-N verifier signatures over the frozen §9.2 preimage.
+        let preimage = build_mint_preimage(
+            registry,
+            &sanad_id,
+            &commitment,
+            &source_chain,
+            &destination_owner_hash,
+            &lock_event_id,
+            &nullifier,
+            attestation_expiry,
+        );
+        require_verifier_threshold(registry, &preimage, &verifier_signatures);
+
+        // Consume the replay keys and record the mint.
+        let now_ms = clock::timestamp_ms(clock);
+        table::add(&mut registry.minted_sanads, sanad_id, true);
+        table::add(&mut registry.nullifiers, nullifier, true);
+        table::add(&mut registry.used_lock_events, lock_event_id, true);
+        table::add(&mut registry.mint_records, sanad_id, MintRecord {
+            commitment,
+            source_chain,
+            destination_owner_hash,
+            lock_event_id,
+            nullifier,
+            minted_at: now_ms,
+        });
+
+        event::emit(SanadMinted {
+            sanad_id,
+            commitment,
+            source_chain,
+            destination_owner: destination_owner_bytes,
+            lock_event_id,
+            nullifier,
+            timestamp_ms: now_ms,
+        });
+        event::emit(NullifierRegistered {
+            nullifier,
+            sanad_id,
+            source_chain,
+            timestamp_ms: now_ms,
+        });
+
+        let seal = Seal {
             id: object::new(ctx),
             sanad_id,
             commitment,
-            state_root,
-            nonce,
-            state: SANAD_STATE_CREATED,
-            owner,
+            state: SANAD_STATE_MINTED,
+            owner: destination_owner,
+            source_chain,
+            lock_event_id,
+            nullifier,
             asset_class: ASSET_CLASS_UNSPECIFIED,
             asset_id: vector::empty(),
             metadata_hash: vector::empty(),
             proof_system: PROOF_SYSTEM_UNSPECIFIED,
-            proof_root: vector::empty(),
+            created_at: now_ms,
+            locked_at: 0,
+            consumed_at: 0,
+            minted_at: now_ms,
+            refunded_at: 0,
+        };
+        transfer::public_transfer(seal, destination_owner);
+    }
+
+    /// Require at least `threshold` DISTINCT valid verifier signatures over `preimage`.
+    ///
+    /// Every signature MUST recover (via secp256k1 ecrecover over `sha256(preimage)`) to a
+    /// public key in the verifier set; an out-of-set recovery aborts. Distinctness is by
+    /// recovered public key, so signature malleability cannot inflate the count. Fail-closed:
+    /// an unconfigured registry (threshold 0) rejects every mint.
+    fun require_verifier_threshold(
+        registry: &Registry,
+        preimage: &vector<u8>,
+        sigs: &vector<vector<u8>>,
+    ) {
+        let m = registry.threshold;
+        assert!(m > 0, ENOT_CONFIGURED);
+
+        let n = vector::length(sigs);
+        assert!(n >= m, EINSUFFICIENT_SIGNATURES);
+
+        let mut seen = vector::empty<vector<u8>>();
+        let mut i = 0;
+        while (i < n) {
+            let sig = vector::borrow(sigs, i);
+            assert!(vector::length(sig) == SIGNATURE_LEN, EMALFORMED_SIGNATURE);
+
+            // Aborts (native) on a cryptographically unrecoverable signature.
+            let recovered = ecdsa_k1::secp256k1_ecrecover(sig, preimage, SHA256_FLAG);
+            assert!(contains_bytes(&registry.verifiers, &recovered), EINVALID_VERIFIER_SIGNATURE);
+
+            if (!contains_bytes(&seen, &recovered)) {
+                vector::push_back(&mut seen, recovered);
+            };
+            i = i + 1;
+        };
+
+        assert!(vector::length(&seen) >= m, EINSUFFICIENT_SIGNATURES);
+    }
+
+    /// Build the frozen §9.2 mint-attestation preimage (287 bytes):
+    ///   "csv.mint.attestation.v1" (23) || destinationChainId (32) || destinationContract (32)
+    ///   || sanadId (32) || commitment (32) || sourceChain (32) || keccak256(destinationOwner) (32)
+    ///   || lockEventId (32) || nullifier (32) || attestationExpiry (u64 big-endian, 8).
+    ///
+    /// `destinationChainId` = keccak256("csv.chain.sui"); `destinationContract` = this
+    /// `Registry` object's 32-byte id (the mint-authority identity on Sui — RFC-0012 §9.2
+    /// non-EVM canonical form). The verifier signs `sha256(preimage)`.
+    fun build_mint_preimage(
+        registry: &Registry,
+        sanad_id: &vector<u8>,
+        commitment: &vector<u8>,
+        source_chain: &vector<u8>,
+        destination_owner_hash: &vector<u8>,
+        lock_event_id: &vector<u8>,
+        nullifier: &vector<u8>,
+        attestation_expiry: u64,
+    ): vector<u8> {
+        assert_field_len(destination_owner_hash);
+
+        let chain_sui_tag = CHAIN_SUI_TAG;
+        let mut pre = vector::empty<u8>();
+        vector::append(&mut pre, MINT_ATTESTATION_DOMAIN);
+        vector::append(&mut pre, hash::keccak256(&chain_sui_tag));
+        vector::append(&mut pre, address::to_bytes(object::uid_to_address(&registry.id)));
+        vector::append(&mut pre, *sanad_id);
+        vector::append(&mut pre, *commitment);
+        vector::append(&mut pre, *source_chain);
+        vector::append(&mut pre, *destination_owner_hash);
+        vector::append(&mut pre, *lock_event_id);
+        vector::append(&mut pre, *nullifier);
+        vector::append(&mut pre, u64_to_be_bytes(attestation_expiry));
+        pre
+    }
+
+    /// Reproduce the frozen §9.2 mint-attestation preimage off-chain (operators / verifier).
+    public fun mint_attestation_preimage(
+        registry: &Registry,
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        source_chain: vector<u8>,
+        destination_owner_hash: vector<u8>,
+        lock_event_id: vector<u8>,
+        nullifier: vector<u8>,
+        attestation_expiry: u64,
+    ): vector<u8> {
+        build_mint_preimage(
+            registry,
+            &sanad_id,
+            &commitment,
+            &source_chain,
+            &destination_owner_hash,
+            &lock_event_id,
+            &nullifier,
+            attestation_expiry,
+        )
+    }
+
+    /// The §9.2 attestation digest = sha256(preimage). Exposed so operators and the off-chain
+    /// verifier can reproduce the exact value they must sign.
+    public fun mint_attestation_digest(
+        registry: &Registry,
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        source_chain: vector<u8>,
+        destination_owner_hash: vector<u8>,
+        lock_event_id: vector<u8>,
+        nullifier: vector<u8>,
+        attestation_expiry: u64,
+    ): vector<u8> {
+        std_hash::sha2_256(build_mint_preimage(
+            registry,
+            &sanad_id,
+            &commitment,
+            &source_chain,
+            &destination_owner_hash,
+            &lock_event_id,
+            &nullifier,
+            attestation_expiry,
+        ))
+    }
+
+    // ==================== Source-side lifecycle (owned-object linear semantics) ====================
+
+    /// Create a new (source-side) seal.
+    public fun create_seal(
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+        owner: address,
+        ctx: &mut tx_context::TxContext,
+    ): Seal {
+        let timestamp_ms = tx_context::epoch(ctx) * 1000;
+        let seal = Seal {
+            id: object::new(ctx),
+            sanad_id,
+            commitment,
+            state: SANAD_STATE_CREATED,
+            owner,
+            source_chain: vector::empty(),
+            lock_event_id: vector::empty(),
+            nullifier: vector::empty(),
+            asset_class: ASSET_CLASS_UNSPECIFIED,
+            asset_id: vector::empty(),
+            metadata_hash: vector::empty(),
+            proof_system: PROOF_SYSTEM_UNSPECIFIED,
             created_at: timestamp_ms,
             locked_at: 0,
             consumed_at: 0,
             minted_at: 0,
             refunded_at: 0,
-        }
+        };
+        event::emit(SanadCreated {
+            sanad_id: seal.sanad_id,
+            commitment: seal.commitment,
+            owner,
+            timestamp_ms,
+        });
+        seal
     }
 
-    /// Consume a seal (canonical name)
+    /// Consume a seal, binding its replay nullifier.
     public fun consume_seal(
         seal: &mut Seal,
-        commitment: vector<u8>,
+        nullifier: vector<u8>,
         ctx: &mut tx_context::TxContext,
     ) {
         assert!(seal.state != SANAD_STATE_CONSUMED, ESEAL_ALREADY_CONSUMED);
-        seal.state = SANAD_STATE_CONSUMED;
-        seal.consumed_at = tx_context::epoch(ctx) * 1000;
-
         let timestamp_ms = tx_context::epoch(ctx) * 1000;
-        let sender = tx_context::sender(ctx);
+        seal.state = SANAD_STATE_CONSUMED;
+        seal.consumed_at = timestamp_ms;
+        seal.nullifier = nullifier;
 
         event::emit(SanadConsumed {
             sanad_id: seal.sanad_id,
-            commitment: seal.commitment,
-            consumer: sender,
-            timestamp_ms,
-        });
-
-        event::emit(AnchorEvent {
-            commitment,
-            seal_id: object::uid_to_inner(&seal.id),
+            nullifier,
+            consumer: tx_context::sender(ctx),
             timestamp_ms,
         });
     }
 
-    /// Lock a Sanad for cross-chain transfer (canonical name)
+    /// Lock a Sanad for cross-chain transfer, emitting the canonical `CrossChainLock`.
     public fun lock_sanad(
         seal: &mut Seal,
-        destination_chain: u8,
-        destination_owner: vector<u8>,
+        source_chain: vector<u8>,
+        destination_chain: vector<u8>,
+        lock_event_id: vector<u8>,
         ctx: &mut tx_context::TxContext,
     ) {
         assert!(seal.state != SANAD_STATE_CONSUMED, ESEAL_ALREADY_CONSUMED);
         assert!(seal.state != SANAD_STATE_LOCKED, EALREADY_LOCKED);
 
         let timestamp_ms = tx_context::epoch(ctx) * 1000;
-
         seal.state = SANAD_STATE_LOCKED;
         seal.locked_at = timestamp_ms;
-
-        event::emit(SanadLocked {
-            sanad_id: seal.sanad_id,
-            commitment: seal.commitment,
-            owner: seal.owner,
-            destination_chain,
-            destination_owner,
-            timestamp_ms,
-        });
+        seal.source_chain = source_chain;
+        seal.lock_event_id = lock_event_id;
 
         event::emit(CrossChainLock {
             sanad_id: seal.sanad_id,
             commitment: seal.commitment,
-            owner: seal.owner,
-            destination_chain,
-            destination_owner,
-            timestamp_ms,
-        });
-    }
-
-    /// Mint a new Sanad on destination chain (canonical name)
-    public fun mint_sanad(
-        sanad_id: vector<u8>,
-        commitment: vector<u8>,
-        state_root: vector<u8>,
-        source_chain: u8,
-        source_seal_ref: vector<u8>,
-        proof: vector<u8>,
-        proof_root: vector<u8>,
-        leaf_position: u64,
-        owner: address,
-        ctx: &mut tx_context::TxContext,
-    ): Seal {
-        if (source_chain == CHAIN_BITCOIN) {
-            verify_bitcoin_proof(&sanad_id, &commitment, &proof, &proof_root, leaf_position);
-        } else {
-            verify_cross_chain_proof(&sanad_id, &commitment, source_chain, &proof, &proof_root, leaf_position);
-        };
-
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
-
-        event::emit(SanadMinted {
-            sanad_id,
-            commitment,
-            owner,
-            source_chain,
-            source_seal_ref,
-            timestamp_ms,
-        });
-
-        event::emit(CrossChainMint {
-            sanad_id,
-            commitment,
-            owner,
-            source_chain,
-            source_seal_ref,
-            timestamp_ms,
-        });
-
-        Seal {
-            id: object::new(ctx),
-            sanad_id,
-            commitment,
-            state_root,
-            nonce: 0,
-            state: SANAD_STATE_MINTED,
-            owner,
-            asset_class: ASSET_CLASS_UNSPECIFIED,
-            asset_id: vector::empty(),
-            metadata_hash: vector::empty(),
-            proof_system: PROOF_SYSTEM_UNSPECIFIED,
-            proof_root,
-            created_at: timestamp_ms,
-            minted_at: timestamp_ms,
-            locked_at: 0,
-            consumed_at: 0,
-            refunded_at: 0,
-        }
-    }
-
-    /// Mint a new Sanad using canonical ProofLeafV1 schema
-    /// This is the recommended method for cross-chain minting
-    public fun mint_sanad_with_proof_leaf(
-        sanad_id: vector<u8>,
-        commitment: vector<u8>,
-        state_root: vector<u8>,
-        source_chain: u8,
-        destination_chain: u8,
-        source_seal_ref: vector<u8>,
-        proof: vector<u8>,
-        proof_root: vector<u8>,
-        leaf_position: u64,
-        content_descriptor_hash: vector<u8>,
-        source_seal_ref_hash: vector<u8>,
-        destination_owner_hash: vector<u8>,
-        nullifier: vector<u8>,
-        lock_event_id: vector<u8>,
-        metadata_hash: vector<u8>,
-        proof_policy_hash: vector<u8>,
-        asset_class: u8,
-        asset_id: vector<u8>,
-        proof_system: u8,
-        owner: address,
-        ctx: &mut tx_context::TxContext,
-    ): Seal {
-        // Verify cross-chain proof using canonical ProofLeafV1 schema
-        verify_cross_chain_proof_with_proof_leaf(
-            &sanad_id,
-            &commitment,
             source_chain,
             destination_chain,
-            &proof,
-            &proof_root,
-            leaf_position,
-            content_descriptor_hash,
-            source_seal_ref_hash,
-            destination_owner_hash,
-            nullifier,
             lock_event_id,
-            metadata_hash,
-            proof_policy_hash,
-        );
-
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
-
-        event::emit(SanadMinted {
-            sanad_id,
-            commitment,
-            owner,
-            source_chain,
-            source_seal_ref,
+            owner: seal.owner,
             timestamp_ms,
         });
-
-        event::emit(CrossChainMint {
-            sanad_id,
-            commitment,
-            owner,
-            source_chain,
-            source_seal_ref,
-            timestamp_ms,
-        });
-
-        Seal {
-            id: object::new(ctx),
-            sanad_id,
-            commitment,
-            state_root,
-            nonce: 0,
-            state: SANAD_STATE_MINTED,
-            owner,
-            asset_class,
-            asset_id,
-            metadata_hash,
-            proof_system,
-            proof_root,
-            created_at: timestamp_ms,
-            minted_at: timestamp_ms,
-            locked_at: 0,
-            consumed_at: 0,
-            refunded_at: 0,
-        }
     }
 
-    /// Refund a locked Sanad after timeout (canonical name)
-    public fun refund_sanad(
-        seal: &mut Seal,
-        _destination_owner_hash: vector<u8>,
-        ctx: &mut tx_context::TxContext,
-    ) {
+    /// Refund a locked Sanad after the refund timeout elapses.
+    public fun refund_sanad(seal: &mut Seal, ctx: &mut tx_context::TxContext) {
         assert!(seal.state == SANAD_STATE_LOCKED, ESANAD_NOT_FOUND);
         let now = tx_context::epoch(ctx) * 1000;
         assert!(now >= seal.locked_at + REFUND_TIMEOUT_MS, ETIMEOUT_NOT_EXPIRED);
@@ -574,277 +599,137 @@ module csv_seal::csv_seal {
         seal.state = SANAD_STATE_REFUNDED;
         seal.refunded_at = now;
 
-        let timestamp_ms = now;
-        let claimant = tx_context::sender(ctx);
-
         event::emit(SanadRefunded {
             sanad_id: seal.sanad_id,
             commitment: seal.commitment,
-            claimant,
-            reason: bcs::to_bytes(&b"timeout"),
-            timestamp_ms,
-        });
-
-        event::emit(CrossChainRefund {
-            sanad_id: seal.sanad_id,
-            commitment: seal.commitment,
-            claimant,
-            timestamp_ms,
+            claimant: tx_context::sender(ctx),
+            reason: b"timeout",
+            timestamp_ms: now,
         });
     }
 
-    /// Transfer Sanad ownership (canonical name, replaces transfer_seal)
-    public fun transfer_sanad(seal: Seal, to: address, _ctx: &mut tx_context::TxContext) {
+    /// Transfer Sanad ownership (same chain).
+    public fun transfer_sanad(seal: Seal, to: address, ctx: &mut tx_context::TxContext) {
         assert!(seal.state != SANAD_STATE_CONSUMED, ESEAL_ALREADY_CONSUMED);
         assert!(seal.state != SANAD_STATE_LOCKED, EALREADY_LOCKED);
+        event::emit(SanadTransferred {
+            sanad_id: seal.sanad_id,
+            from: seal.owner,
+            to,
+            timestamp_ms: tx_context::epoch(ctx) * 1000,
+        });
         transfer::public_transfer(seal, to);
     }
 
-    /// Register nullifier for replay protection
-    public fun register_nullifier(
-        nullifier: vector<u8>,
-        sanad_id: vector<u8>,
-        ctx: &mut tx_context::TxContext,
-    ) {
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
-        event::emit(NullifierRegistered {
-            nullifier,
-            sanad_id,
-            timestamp_ms,
-        });
-    }
-
-    /// Anchor commitment on-chain
+    /// Anchor a commitment on-chain (auditability).
     public fun anchor_commitment(
         commitment: vector<u8>,
         seal: &Seal,
         ctx: &mut tx_context::TxContext,
     ) {
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
-        let seal_id = object::uid_to_inner(&seal.id);
         event::emit(CommitmentAnchored {
             commitment,
-            seal_id,
+            seal_id: object::uid_to_inner(&seal.id),
             owner: seal.owner,
-            timestamp_ms,
+            timestamp_ms: tx_context::epoch(ctx) * 1000,
         });
     }
 
-    /// Record metadata for a Sanad
+    /// Record archival metadata for a Sanad (NOT on the mint hot path — RFC-0012 §4).
     public fun record_sanad_metadata(
         seal: &mut Seal,
         asset_class: u8,
         asset_id: vector<u8>,
         metadata_hash: vector<u8>,
         proof_system: u8,
-        proof_root: vector<u8>,
     ) {
         seal.asset_class = asset_class;
         seal.asset_id = asset_id;
         seal.metadata_hash = metadata_hash;
         seal.proof_system = proof_system;
-        seal.proof_root = proof_root;
     }
 
-    /// Verify cross-chain Merkle proof (non-Bitcoin chains)
-    fun verify_cross_chain_proof(
-        sanad_id: &vector<u8>,
-        commitment: &vector<u8>,
-        source_chain: u8,
-        proof: &vector<u8>,
-        proof_root: &vector<u8>,
-        leaf_position: u64,
-    ) {
-        let mut leaf_data = vector::empty();
-        vector::append(&mut leaf_data, *sanad_id);
-        vector::append(&mut leaf_data, *commitment);
-        let chain_bytes = bcs::to_bytes(&source_chain);
-        vector::append(&mut leaf_data, chain_bytes);
+    // ==================== Internal helpers ====================
 
-        let leaf_hash = if (source_chain == CHAIN_SUI) {
-            sui::hash::blake2b256(&leaf_data)
-        } else if (source_chain == CHAIN_ETHEREUM || source_chain == CHAIN_SOLANA) {
-            sui::hash::keccak256(&leaf_data)
-        } else if (source_chain == CHAIN_APTOS) {
-            std::hash::sha3_256(leaf_data)
-        } else {
-            abort EINVALID_PROOF
-        };
-
-        let is_valid = verify_merkle_proof_with_hash(proof, proof_root, &leaf_hash, leaf_position, source_chain);
-        assert!(is_valid, EINVALID_PROOF);
+    fun assert_field_len(v: &vector<u8>) {
+        assert!(vector::length(v) == FIELD_LEN, EINVALID_FIELD_LENGTH);
     }
 
-    /// Verify cross-chain proof using canonical ProofLeafV1 schema
-    /// This is the recommended verification method for cross-chain proofs
-    fun verify_cross_chain_proof_with_proof_leaf(
-        sanad_id: &vector<u8>,
-        commitment: &vector<u8>,
-        source_chain: u8,
-        destination_chain: u8,
-        proof: &vector<u8>,
-        proof_root: &vector<u8>,
-        leaf_position: u64,
-        content_descriptor_hash: vector<u8>,
-        source_seal_ref_hash: vector<u8>,
-        destination_owner_hash: vector<u8>,
-        nullifier: vector<u8>,
-        lock_event_id: vector<u8>,
-        metadata_hash: vector<u8>,
-        proof_policy_hash: vector<u8>,
-    ) {
-        // Construct canonical ProofLeafV1
-        let leaf = ProofLeafV1 {
-            version: 1,  // ProofLeafV1 version
-            source_chain,
-            destination_chain,
-            sanad_id: *sanad_id,
-            commitment: *commitment,
-            content_descriptor_hash,
-            source_seal_ref_hash,
-            destination_owner_hash,
-            nullifier,
-            lock_event_id,
-            metadata_hash,
-            proof_policy_hash,
-        };
-
-        // Compute canonical hash using blake2b256 (Sui's native hash)
-        let leaf_hash = hash_proof_leaf_v1(&leaf);
-
-        // Verify Merkle proof using blake2b256 (Sui's native hash)
-        let is_valid = verify_merkle_proof_with_hash(proof, proof_root, &leaf_hash, leaf_position, CHAIN_SUI);
-        assert!(is_valid, EINVALID_PROOF);
-    }
-
-    /// Verify cross-chain Merkle proof for Bitcoin
-    fun verify_bitcoin_proof(
-        sanad_id: &vector<u8>,
-        commitment: &vector<u8>,
-        proof: &vector<u8>,
-        proof_root: &vector<u8>,
-        leaf_position: u64,
-    ) {
-        let mut leaf_data = vector::empty();
-        vector::append(&mut leaf_data, *sanad_id);
-        vector::append(&mut leaf_data, *commitment);
-
-        let leaf_hash = double_sha256(&leaf_data);
-        let is_valid = verify_merkle_proof(proof, proof_root, &leaf_hash, leaf_position);
-        assert!(is_valid, EINVALID_PROOF);
-    }
-
-    fun double_sha256(data: &vector<u8>): vector<u8> {
-        let first = std::hash::sha2_256(*data);
-        std::hash::sha2_256(first)
-    }
-
-    fun verify_merkle_proof(
-        proof: &vector<u8>,
-        root: &vector<u8>,
-        leaf: &vector<u8>,
-        leaf_position: u64,
-    ): bool {
-        verify_merkle_proof_with_hash(proof, root, leaf, leaf_position, 0)
-    }
-
-    fun verify_merkle_proof_with_hash(
-        proof: &vector<u8>,
-        root: &vector<u8>,
-        leaf: &vector<u8>,
-        leaf_position: u64,
-        source_chain: u8,
-    ): bool {
-        let proof_len = vector::length(proof);
-        let root_len = vector::length(root);
-        let leaf_len = vector::length(leaf);
-
-        if (proof_len == 0 || proof_len % 32 != 0) return false;
-        if (root_len != 32 || leaf_len != 32) return false;
-
-        let num_levels = proof_len / 32;
-        let mut current_hash = *leaf;
+    fun is_zero(v: &vector<u8>): bool {
         let mut i = 0;
-
-        while (i < num_levels) {
-            let start = i * 32;
-            let mut sibling_hash = vector::empty();
-            let mut j = 0;
-            while (j < 32) {
-                vector::push_back(&mut sibling_hash, *vector::borrow(proof, start + j));
-                j = j + 1;
-            };
-
-            let bit = ((leaf_position >> (i as u8)) & 1) as u8;
-            let mut hash_input = vector::empty();
-
-            if (bit == 0) {
-                vector::append(&mut hash_input, current_hash);
-                vector::append(&mut hash_input, sibling_hash);
-            } else {
-                vector::append(&mut hash_input, sibling_hash);
-                vector::append(&mut hash_input, current_hash);
-            };
-
-            current_hash = if (source_chain == CHAIN_SUI) {
-                sui::hash::blake2b256(&hash_input)
-            } else if (source_chain == CHAIN_ETHEREUM || source_chain == CHAIN_SOLANA) {
-                sui::hash::keccak256(&hash_input)
-            } else if (source_chain == CHAIN_APTOS) {
-                std::hash::sha3_256(hash_input)
-            } else {
-                sui::hash::blake2b256(&hash_input)
-            };
+        let len = vector::length(v);
+        while (i < len) {
+            if (*vector::borrow(v, i) != 0) return false;
             i = i + 1;
         };
+        true
+    }
 
-        let mut result = true;
-        let mut k = 0;
-        while (k < 32) {
-            if (*vector::borrow(&current_hash, k) != *vector::borrow(root, k)) {
-                result = false;
-                break
-            };
-            k = k + 1;
+    fun contains_bytes(haystack: &vector<vector<u8>>, needle: &vector<u8>): bool {
+        let (found, _) = index_of_bytes(haystack, needle);
+        found
+    }
+
+    fun index_of_bytes(haystack: &vector<vector<u8>>, needle: &vector<u8>): (bool, u64) {
+        let mut i = 0;
+        let len = vector::length(haystack);
+        while (i < len) {
+            if (vector::borrow(haystack, i) == needle) return (true, i);
+            i = i + 1;
         };
-
-        result
+        (false, 0)
     }
 
-    // ==================== View Functions (Canonical Names) ====================
-
-    /// Get Sanad state
-    public fun state(seal: &Seal): u8 {
-        seal.state
+    /// Big-endian 8-byte encoding of a u64 (matches EVM `abi.encodePacked(uint64)`).
+    fun u64_to_be_bytes(v: u64): vector<u8> {
+        let mut out = vector::empty<u8>();
+        let mut i = 0u64;
+        while (i < 8) {
+            let shift = ((7 - i) * 8) as u8;
+            vector::push_back(&mut out, ((v >> shift) & 0xff) as u8);
+            i = i + 1;
+        };
+        out
     }
 
-    /// Get Sanad ID
-    public fun sanad_id(seal: &Seal): vector<u8> {
-        seal.sanad_id
+    // ==================== Views ====================
+
+    public fun threshold(registry: &Registry): u64 { registry.threshold }
+
+    public fun verifier_count(registry: &Registry): u64 { vector::length(&registry.verifiers) }
+
+    public fun is_verifier(registry: &Registry, pubkey: &vector<u8>): bool {
+        contains_bytes(&registry.verifiers, pubkey)
     }
 
-    /// Check if seal is available (not consumed)
-    public fun is_seal_available(seal: &Seal): bool {
-        seal.state != SANAD_STATE_CONSUMED
+    public fun is_sanad_minted(registry: &Registry, sanad_id: vector<u8>): bool {
+        table::contains(&registry.minted_sanads, sanad_id)
     }
 
-    /// Check if seal is consumed (canonical name)
-    public fun is_seal_consumed(seal: &Seal): bool {
-        seal.state == SANAD_STATE_CONSUMED
+    public fun is_nullifier_used(registry: &Registry, nullifier: vector<u8>): bool {
+        table::contains(&registry.nullifiers, nullifier)
     }
 
-    /// Get the nonce of a seal.
-    public fun nonce(seal: &Seal): u64 {
-        seal.nonce
+    public fun is_lock_event_recorded(registry: &Registry, lock_event_id: vector<u8>): bool {
+        table::contains(&registry.used_lock_events, lock_event_id)
     }
 
-    /// Get the object ID of a seal.
-    public fun id(seal: &Seal): sui::object::ID {
-        object::uid_to_inner(&seal.id)
-    }
+    public fun state(seal: &Seal): u8 { seal.state }
 
-    /// Get the owner of a seal.
-    public fun owner(seal: &Seal): address {
-        seal.owner
+    public fun sanad_id(seal: &Seal): vector<u8> { seal.sanad_id }
+
+    public fun owner(seal: &Seal): address { seal.owner }
+
+    public fun id(seal: &Seal): object::ID { object::uid_to_inner(&seal.id) }
+
+    public fun is_seal_available(seal: &Seal): bool { seal.state != SANAD_STATE_CONSUMED }
+
+    public fun is_seal_consumed(seal: &Seal): bool { seal.state == SANAD_STATE_CONSUMED }
+
+    // ==================== Test-only ====================
+
+    #[test_only]
+    public fun init_for_testing(ctx: &mut tx_context::TxContext) {
+        init(ctx);
     }
 }

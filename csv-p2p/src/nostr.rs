@@ -20,10 +20,14 @@ use std::{fs, sync::Arc, time::Duration};
 use std::os::unix::fs::PermissionsExt;
 
 use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_wire::Consignment;
 use nostr_sdk::{Client, Keys, Kind, RelayPoolNotification};
 use tracing::{debug, info, warn};
 
-use crate::{DEFAULT_RELAYS, DeliveredProof, EventId, ProofFilter, ProofTransport, TransportError};
+use crate::{
+    ConsignmentFilter, ConsignmentTransport, DEFAULT_RELAYS, DeliveredConsignment, DeliveredProof,
+    EventId, ProofFilter, ProofTransport, TransportError,
+};
 
 /// Default path for persistent Nostr secret key storage.
 const DEFAULT_NOSTR_KEY_PATH: &str = "~/.csv/nostr_secret_key.hex";
@@ -133,6 +137,9 @@ fn extract_dest_chain(proof: &ProofBundle) -> String {
 /// Nostr event kind used for CSV proof bundles.
 pub const PROOF_EVENT_KIND: u64 = 30_345;
 
+/// Nostr event kind used for CSV consignment envelopes.
+pub const CONSIGNMENT_EVENT_KIND: u64 = 30_346;
+
 /// Nostr event kind for encrypted DM proofs (NIP-04).
 pub const ENCRYPTED_DM_KIND: u64 = 4;
 
@@ -142,6 +149,9 @@ const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Maximum proof size before compression is recommended (in bytes).
 pub const MAX_PROOF_SIZE: usize = 100_000;
+
+/// Maximum consignment envelope size before delivery is rejected (in bytes).
+pub const MAX_CONSIGNMENT_SIZE: usize = 1_000_000;
 
 /// Nostr-based proof transport.
 ///
@@ -382,6 +392,29 @@ impl NostrTransport {
             .map_err(|e| TransportError::Serialization(e.to_string()))
     }
 
+    /// Serialize a consignment envelope for Nostr event content.
+    pub fn consignment_to_content(
+        &self,
+        consignment: &Consignment,
+    ) -> Result<String, TransportError> {
+        let bytes = crate::serialize_consignment(consignment)?;
+        if bytes.len() > MAX_CONSIGNMENT_SIZE {
+            return Err(TransportError::Serialization(format!(
+                "Consignment size exceeds maximum of {} bytes (got {} bytes)",
+                MAX_CONSIGNMENT_SIZE,
+                bytes.len()
+            )));
+        }
+        Ok(hex::encode(bytes))
+    }
+
+    /// Deserialize a consignment envelope from Nostr event content.
+    pub fn content_to_consignment(&self, content: &str) -> Result<Consignment, TransportError> {
+        let bytes =
+            hex::decode(content).map_err(|e| TransportError::Serialization(e.to_string()))?;
+        crate::deserialize_consignment(&bytes)
+    }
+
     /// Build a Nostr event content string with metadata.
     pub fn build_event_content(
         &self,
@@ -509,6 +542,235 @@ impl NostrTransport {
                 "NIP-04 feature not enabled for decryption".to_string(),
             ))
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl ConsignmentTransport for NostrTransport {
+    async fn deliver_consignment(
+        &self,
+        consignment: &Consignment,
+    ) -> Result<EventId, TransportError> {
+        if !self.initialized.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(TransportError::NotInitialized);
+        }
+
+        #[cfg(feature = "nostr")]
+        {
+            use nostr_sdk::EventBuilder;
+
+            let content = self.consignment_to_content(consignment)?;
+            let invoice_id = consignment
+                .invoice
+                .canonical_id()
+                .map_err(|e| TransportError::Serialization(e.to_string()))?;
+            let destination_chain = consignment.invoice.seal.chain().to_string();
+            let tags = vec![
+                nostr_sdk::Tag::parse(&["type".to_string(), "consignment".to_string()])
+                    .map_err(|e| TransportError::Serialization(e.to_string()))?,
+                nostr_sdk::Tag::parse(&["dest_chain".to_string(), destination_chain.clone()])
+                    .map_err(|e| TransportError::Serialization(e.to_string()))?,
+                nostr_sdk::Tag::parse(&[
+                    "sanad_id".to_string(),
+                    consignment.sanad_id.bytes.clone(),
+                ])
+                .map_err(|e| TransportError::Serialization(e.to_string()))?,
+                nostr_sdk::Tag::parse(&["invoice_id".to_string(), hex::encode(invoice_id)])
+                    .map_err(|e| TransportError::Serialization(e.to_string()))?,
+                nostr_sdk::Tag::parse(&["pk".to_string(), self.keys.public_key().to_string()])
+                    .map_err(|e| TransportError::Serialization(e.to_string()))?,
+            ];
+
+            let event_builder = EventBuilder::new(
+                Kind::Custom(CONSIGNMENT_EVENT_KIND.try_into().map_err(|e| {
+                    TransportError::Serialization(format!("invalid consignment event kind: {e}"))
+                })?),
+                content,
+                tags,
+            );
+
+            let event = event_builder.to_event(&self.keys).map_err(|e| {
+                TransportError::Serialization(format!("Failed to sign consignment event: {}", e))
+            })?;
+            let event_id = event.id.to_hex();
+
+            let max_retries = 3;
+            let mut last_error = None;
+            for attempt in 0..max_retries {
+                match self.client.send_event(event.clone()).await {
+                    Ok(_) => {
+                        debug!(
+                            event_id = %event_id,
+                            destination_chain = %destination_chain,
+                            attempt = attempt + 1,
+                            "Consignment delivered via Nostr"
+                        );
+                        return Ok(EventId::new(event_id));
+                    }
+                    Err(e) => {
+                        warn!(
+                            event_id = %event_id,
+                            attempt = attempt + 1,
+                            max_retries = max_retries,
+                            error = %e,
+                            "Failed to send consignment to relay, retrying..."
+                        );
+                        last_error = Some(e);
+                        if attempt < max_retries - 1 {
+                            tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+                        }
+                    }
+                }
+            }
+
+            let message = match last_error {
+                Some(error) => format!(
+                    "Failed to deliver consignment after {} retries: {}",
+                    max_retries, error
+                ),
+                None => "Failed to deliver consignment: no relay attempt completed".to_string(),
+            };
+            Err(TransportError::Nostr(message))
+        }
+
+        #[cfg(not(feature = "nostr"))]
+        {
+            Err(TransportError::NostrNotConfigured)
+        }
+    }
+
+    async fn subscribe_consignments(
+        &self,
+        filter: ConsignmentFilter,
+    ) -> Result<tokio_stream::wrappers::ReceiverStream<DeliveredConsignment>, TransportError> {
+        if !self.initialized.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(TransportError::NotInitialized);
+        }
+
+        #[cfg(feature = "nostr")]
+        {
+            use nostr_sdk::{Filter, Kind};
+            use std::str::FromStr;
+            use tokio::sync::mpsc;
+
+            let mut nostr_filter = Filter::new()
+                .kind(Kind::Custom(CONSIGNMENT_EVENT_KIND.try_into().map_err(
+                    |e| {
+                        TransportError::Serialization(format!(
+                            "invalid consignment event kind: {e}"
+                        ))
+                    },
+                )?))
+                .limit(100);
+
+            for author in &filter.authors {
+                if let Ok(keys) = Keys::from_str(author) {
+                    nostr_filter = nostr_filter.author(keys.public_key());
+                }
+            }
+
+            let (tx, rx) = mpsc::channel(256);
+            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+            let client_clone = Arc::clone(&self.client);
+            let filter_clone = filter.clone();
+
+            let _subscription = client_clone
+                .subscribe(vec![nostr_filter], None)
+                .await
+                .map_err(|e| {
+                    TransportError::Nostr(format!(
+                        "Failed to create consignment subscription: {}",
+                        e
+                    ))
+                })?;
+
+            tokio::spawn(async move {
+                let mut notifications = client_clone.notifications();
+
+                while let Ok(notification) = notifications.recv().await {
+                    let event = match notification {
+                        RelayPoolNotification::Event { event, .. } => event,
+                        _ => continue,
+                    };
+
+                    if !filter_clone.authors.is_empty()
+                        && !filter_clone.authors.contains(&event.pubkey.to_hex())
+                    {
+                        debug!(
+                            event_id = %event.id,
+                            author = %event.pubkey,
+                            "Consignment filtered out by author criteria"
+                        );
+                        continue;
+                    }
+
+                    let consignment = match hex::decode(&event.content)
+                        .map_err(|e| TransportError::Serialization(e.to_string()))
+                        .and_then(|bytes| crate::deserialize_consignment(&bytes))
+                    {
+                        Ok(consignment) => consignment,
+                        Err(e) => {
+                            warn!(event_id = %event.id, error = %e, "Failed to parse consignment from Nostr event");
+                            continue;
+                        }
+                    };
+
+                    match filter_clone.matches_consignment(&consignment) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            debug!(event_id = %event.id, "Consignment filtered out by envelope criteria");
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!(event_id = %event.id, error = %e, "Failed to evaluate consignment filter");
+                            continue;
+                        }
+                    }
+
+                    let delivered = DeliveredConsignment {
+                        event_id: EventId::new(event.id.to_hex()),
+                        consignment,
+                        author_pubkey: event.pubkey.to_hex(),
+                        timestamp: event.created_at.as_u64(),
+                    };
+
+                    if tx.send(delivered).await.is_err() {
+                        debug!(
+                            "Consignment subscription channel closed, stopping event processing"
+                        );
+                        break;
+                    }
+                }
+            });
+
+            info!(
+                destinations = ?filter.destination_chains,
+                sanad_ids = ?filter.sanad_ids,
+                authors = ?filter.authors,
+                "Nostr consignment subscription created"
+            );
+
+            Ok(stream)
+        }
+
+        #[cfg(not(feature = "nostr"))]
+        {
+            Err(TransportError::NostrNotConfigured)
+        }
+    }
+
+    async fn is_connected(&self) -> bool {
+        self.initialized.load(std::sync::atomic::Ordering::Acquire) && !self.relays.is_empty()
+    }
+
+    fn transport_name(&self) -> &str {
+        "nostr"
+    }
+
+    async fn disconnect(&self) {
+        self.initialized
+            .store(false, std::sync::atomic::Ordering::Release);
+        info!("Disconnected from Nostr relays");
     }
 }
 

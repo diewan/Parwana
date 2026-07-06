@@ -86,9 +86,22 @@ impl AdapterFactory for AptosFactory {
         let seal_protocol = Arc::new(seal_protocol);
 
         // Create ChainBackend from seal protocol
-        let aptos_backend = Arc::new(AptosBackend::from_seal_protocol(seal_protocol).map_err(
-            |e| FactoryError::CreationFailed(format!("Failed to create backend: {}", e)),
-        )?);
+        let mut aptos_backend_inner =
+            AptosBackend::from_seal_protocol(seal_protocol).map_err(|e| {
+                FactoryError::CreationFailed(format!("Failed to create backend: {}", e))
+            })?;
+        // Attach the RFC-0012 mint verifier signing key if provided (env). Without
+        // it the backend signs no attestation and mint fails closed by design.
+        if let Some(vk) = super::load_mint_verifier_key() {
+            aptos_backend_inner = aptos_backend_inner.with_verifier_key(vk);
+            log::info!("Factory: Aptos adapter configured with mint verifier key");
+        } else {
+            log::warn!(
+                "Factory: no mint verifier key ({}) — Aptos mint will fail closed",
+                super::MINT_VERIFIER_KEY_ENV
+            );
+        }
+        let aptos_backend = Arc::new(aptos_backend_inner);
 
         let chain_backend: Arc<dyn ChainBackend> = aptos_backend.clone();
 

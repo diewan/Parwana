@@ -5,7 +5,8 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
+    SealRegistryStatus,
 };
 use csv_protocol::chain_adapter_traits::{ChainBackend, ChainQuery};
 use csv_protocol::finality::capabilities::{
@@ -116,47 +117,90 @@ impl ChainAdapter for AptosRuntimeAdapter {
         transfer: &CrossChainTransfer,
         proof_bundle: &[u8],
     ) -> Result<MintResult, AdapterError> {
-        use csv_protocol::chain_adapter_traits::ChainSanadOps;
+        // `proof_bundle` is the runtime's canonical-CBOR `RuntimeMintRequest`
+        // (RFC-0012 §3/§9): the §9.2 attestation inputs the runtime bound after
+        // its off-chain canonical verifier already adjudicated the source proof
+        // (`validate_source_proof` on the *source* adapter, journaled by the
+        // coordinator before this call). This adapter is the thin-registry
+        // submitter: it binds `destination_contract = @csv_seal` module address,
+        // forces `destination_chain_id = keccak256("csv.chain.aptos")`, computes
+        // the frozen §9.2 digest, signs it with the secp256k1 verifier key, and
+        // submits `csv_seal::mint_sanad`. There is no proof root and no Merkle
+        // proof anywhere on this path.
+        let request: RuntimeMintRequest =
+            csv_codec::from_canonical_cbor(proof_bundle).map_err(|e| {
+                AdapterError::Generic(format!("Failed to decode runtime mint request: {}", e))
+            })?;
 
-        let sanad_id = csv_hash::sanad::SanadId::new(*transfer.sanad_id.as_bytes());
-        let source_chain = &transfer.source_chain;
+        // Bind the request to this transfer: a payload whose attestation is for a
+        // different Sanad must never be signed or submitted here.
+        if request.attestation.sanad_id != *transfer.sanad_id.as_bytes() {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Mint request Sanad {} does not match transfer Sanad {}",
+                hex::encode(request.attestation.sanad_id),
+                hex::encode(transfer.sanad_id.as_bytes())
+            )));
+        }
 
-        // Parse proof bundle to extract inclusion proof
-        let proof_bundle_parsed: csv_protocol::proof_taxonomy::ProofBundle =
-            ProofBundle::from_canonical_bytes(proof_bundle)
-                .map_err(|e| format!("Failed to deserialize proof bundle: {}", e))
-                .map_err(|e| {
-                    AdapterError::Generic(format!("Failed to decode proof bundle: {}", e))
-                })?;
-
-        let inclusion_proof = &proof_bundle_parsed.inclusion_proof;
-
-        // Derive new owner from the backend's signing key
         #[cfg(feature = "rpc")]
-        let new_owner = if let Some(signing_key) = self.backend.seal_protocol.signing_key.as_ref() {
-            use sha3::{Digest, Sha3_256};
-            let public_key = signing_key.verifying_key().to_bytes();
-            let hash = Sha3_256::digest(&public_key);
-            format!("0x{}", hex::encode(&hash[..32]))
-        } else {
-            // Fallback to zero address if no signing key configured
-            "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
-        };
+        {
+            // Bind `destination_contract` to the deployed `@csv_seal` module account
+            // and force `destination_chain_id` to the frozen Aptos chain tag,
+            // exactly as the Move module derives them, so the signed digest matches
+            // the value the module recomputes on-chain.
+            let module_contract = self.backend.module_contract_id().map_err(|e| {
+                AdapterError::Generic(format!("No csv_seal module configured: {}", e))
+            })?;
+            let mut attestation = request.attestation.clone();
+            attestation.destination_contract = module_contract;
+            attestation.destination_chain_id = aptos_contract_chain_id();
 
+            // The recipient must be concrete (non-empty, non-zero) bytes. These same
+            // bytes enter the digest (via `keccak256(destination_owner)`) and the
+            // Move `destination_owner` argument, so they cannot diverge.
+            let destination_owner = crate::mint::parse_destination_owner(
+                &attestation.destination_owner,
+            )
+            .map_err(|e| {
+                AdapterError::ProofVerificationFailed(format!("Invalid mint recipient: {}", e))
+            })?;
+
+            // Compute the frozen §9.2 digest and attest it with the configured
+            // verifier key. Fails closed (no signer -> no signature) rather than
+            // emitting an unauthenticated mint the module would reject.
+            let digest = attestation.attestation_digest();
+            let signature = self
+                .backend
+                .sign_mint_attestation_digest(&digest)
+                .map_err(|e| {
+                    AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
+                })?;
+            let mut verifier_signatures = request.verifier_signatures.clone();
+            verifier_signatures.push(signature);
+
+            let args = crate::mint::build_aptos_mint_args(
+                &attestation,
+                destination_owner,
+                &verifier_signatures,
+            );
+            let result = self
+                .backend
+                .submit_attested_mint(args)
+                .await
+                .map_err(|e| AdapterError::Generic(format!("Failed to submit mint: {}", e)))?;
+
+            Ok(MintResult {
+                tx_hash: result.transaction_hash,
+                block_height: result.block_height,
+            })
+        }
         #[cfg(not(feature = "rpc"))]
-        let new_owner =
-            "0x0000000000000000000000000000000000000000000000000000000000000000".to_string();
-
-        let result = self
-            .backend
-            .mint_sanad(source_chain, &sanad_id, inclusion_proof, &new_owner)
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to mint sanad: {}", e)))?;
-
-        Ok(MintResult {
-            tx_hash: result.transaction_hash,
-            block_height: result.block_height,
-        })
+        {
+            let _ = request;
+            Err(AdapterError::Generic(
+                "Cannot submit attested mint: the 'rpc' feature is not enabled".to_string(),
+            ))
+        }
     }
 
     async fn build_inclusion_proof(
@@ -266,5 +310,213 @@ impl ChainAdapter for AptosRuntimeAdapter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Contract-layer Aptos chain identity: `keccak256("csv.chain.aptos")`.
+///
+/// The Move `csv_seal` module hardcodes this tag as `destinationChainId` in the
+/// §9.2 preimage regardless of network, so the adapter forces the same value
+/// rather than trusting the runtime-supplied destination chain name.
+#[cfg(feature = "rpc")]
+fn aptos_contract_chain_id() -> [u8; 32] {
+    use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+    *CrossChainHashAlgorithm::Keccak256
+        .hash_bytes(b"csv.chain.aptos")
+        .as_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AptosConfig, AptosNetwork, SealContractConfig};
+    use crate::ops::AptosBackend;
+    use crate::rpc::MockAptosRpc;
+    use crate::seal_protocol::AptosSealProtocol;
+    use csv_adapter_core::MintAttestationInputs;
+    use csv_hash::Hash;
+
+    const MODULE_ADDR: &str = "0x00000000000000000000000000000000000000000000000000000000000000aa";
+
+    fn test_config() -> AptosConfig {
+        AptosConfig {
+            seal_contract: SealContractConfig {
+                module_address: MODULE_ADDR.to_string(),
+                ..Default::default()
+            },
+            ..AptosConfig::new(AptosNetwork::Testnet)
+        }
+    }
+
+    fn test_backend(verifier: Option<secp256k1::SecretKey>) -> Arc<AptosBackend> {
+        let rpc = Box::new(MockAptosRpc::new(1));
+        let seal = AptosSealProtocol::from_config(test_config(), rpc)
+            .expect("seal protocol from valid config");
+        let mut backend =
+            AptosBackend::from_seal_protocol(Arc::new(seal)).expect("backend from seal protocol");
+        if let Some(v) = verifier {
+            backend = backend.with_verifier_key(v);
+        }
+        Arc::new(backend)
+    }
+
+    fn test_transfer(sanad_id: Hash) -> CrossChainTransfer {
+        CrossChainTransfer {
+            id: "aptos-transfer-1".to_string(),
+            source_chain: "ethereum".to_string(),
+            destination_chain: "aptos".to_string(),
+            lock_tx_hash: vec![0xAAu8; 32],
+            lock_output_index: 0,
+            sanad_id,
+            transition_id: vec![1u8; 32],
+        }
+    }
+
+    fn mint_attestation(sanad_id: Hash) -> MintAttestationInputs {
+        MintAttestationInputs {
+            destination_chain_id: [0u8; 32],
+            destination_contract: [0u8; 32],
+            sanad_id: *sanad_id.as_bytes(),
+            commitment: [8u8; 32],
+            source_chain: [9u8; 32],
+            destination_owner: vec![0x11u8; 32],
+            lock_event_id: [0xAu8; 32],
+            nullifier: [0xBu8; 32],
+            attestation_expiry: 0,
+        }
+    }
+
+    fn runtime_mint_request_cbor(sanad_id: Hash) -> Vec<u8> {
+        let request = RuntimeMintRequest {
+            attestation: mint_attestation(sanad_id),
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        csv_codec::to_canonical_cbor(&request).expect("encode runtime mint request")
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_request_bound_to_other_sanad() {
+        // A payload whose attestation is for a different Sanad must be rejected
+        // before any signing or submission.
+        let backend = test_backend(None);
+        let adapter = AptosRuntimeAdapter::new(backend);
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+        let payload = runtime_mint_request_cbor(Hash::new([9u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must reject a mint request bound to a different sanad"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_rejects_undecodable_payload() {
+        let backend = test_backend(None);
+        let adapter = AptosRuntimeAdapter::new(backend);
+        let transfer = test_transfer(Hash::new([2u8; 32]));
+
+        let result = adapter.mint_sanad(&transfer, b"not-a-mint-request").await;
+        assert!(
+            result.is_err(),
+            "must reject a payload that is not a canonical RuntimeMintRequest"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn mint_sanad_fails_closed_without_verifier_key() {
+        // Module configured but no secp256k1 verifier key: the adapter cannot
+        // attest the §9.2 digest and must fail closed rather than submit an
+        // unauthenticated mint.
+        let backend = test_backend(None);
+        let adapter = AptosRuntimeAdapter::new(backend);
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must fail closed when no verifier signer is configured"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn mint_sanad_rejects_unbound_destination_owner() {
+        // The runtime leaves `destination_owner` empty until owner-binding wires a
+        // recipient; an empty owner must fail closed before signing.
+        let secp = secp256k1::Secp256k1::new();
+        let (secret, _pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let backend = test_backend(Some(secret));
+        let adapter = AptosRuntimeAdapter::new(backend);
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+
+        let mut attestation = mint_attestation(sanad);
+        attestation.destination_owner = Vec::new(); // un-bound owner
+        let request = RuntimeMintRequest {
+            attestation,
+            verifier_signatures: vec![],
+            proof_bundle: vec![],
+        };
+        let payload = csv_codec::to_canonical_cbor(&request).unwrap();
+
+        let result = adapter.mint_sanad(&transfer, &payload).await;
+        assert!(
+            result.is_err(),
+            "must reject a mint with an unspecified destination owner"
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn aptos_contract_chain_id_is_keccak_of_chain_tag() {
+        use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+        let expected = *CrossChainHashAlgorithm::Keccak256
+            .hash_bytes(b"csv.chain.aptos")
+            .as_bytes();
+        assert_eq!(aptos_contract_chain_id(), expected);
+    }
+
+    #[test]
+    fn verifier_signature_recovers_to_configured_key_over_digest() {
+        // The §9.2 signature the adapter attaches must recover — over the 32-byte
+        // digest, exactly as Aptos's `secp256k1::ecdsa_recover` does — to the
+        // configured verifier public key. This pins the signature format (raw
+        // recovery id, no EVM +27) the Move module accepts.
+        use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+        use secp256k1::{Message, Secp256k1};
+
+        let secp = Secp256k1::new();
+        let (secret, expected_pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let backend = test_backend(Some(secret));
+
+        let mut attestation = mint_attestation(Hash::new([2u8; 32]));
+        attestation.destination_contract = [0xAAu8; 32];
+        attestation.destination_chain_id =
+            *csv_protocol::cross_chain::CrossChainHashAlgorithm::Keccak256
+                .hash_bytes(b"csv.chain.aptos")
+                .as_bytes();
+        let digest = attestation.attestation_digest();
+
+        let sig = backend
+            .sign_mint_attestation_digest(&digest)
+            .expect("verifier key configured");
+        assert_eq!(sig.len(), 65, "recoverable signature is r || s || v");
+
+        let recovery_id = RecoveryId::from_i32(sig[64] as i32).expect("valid recovery id");
+        let recoverable =
+            RecoverableSignature::from_compact(&sig[..64], recovery_id).expect("valid signature");
+        let msg = Message::from_digest(digest);
+        let recovered = secp
+            .recover_ecdsa(&msg, &recoverable)
+            .expect("recover verifier pubkey");
+        assert_eq!(
+            recovered, expected_pubkey,
+            "signature must recover to the configured verifier key"
+        );
     }
 }

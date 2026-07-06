@@ -36,6 +36,7 @@ sha2 = "0.10"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+secp256k1 = { version = "0.28", features = ["global-context", "rand-std", "recovery"] }
 serde_bytes = "0.11"
 bcs = "0.1.6"
 bytes = "1.5"

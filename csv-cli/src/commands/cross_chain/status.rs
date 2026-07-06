@@ -4,13 +4,14 @@ use anyhow::Result;
 
 use csv_hash::Hash;
 
+use crate::commands::cross_chain::transfer::emit_provenance_strength_warning;
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::{TransferStatus, UnifiedStateManager};
 
 pub async fn cmd_status(
     transfer_id: String,
-    config: &Config,
+    _config: &Config,
     state: &UnifiedStateManager,
 ) -> Result<()> {
     let bytes = hex::decode(transfer_id.trim_start_matches("0x"))
@@ -79,6 +80,10 @@ pub async fn cmd_status(
         if let Some(contract) = &transfer.destination_contract {
             output::kv("Contract Address", contract);
         }
+        if let Some(signal) = &transfer.provenance_strength {
+            output::header("Provenance Strength");
+            emit_provenance_strength_warning(signal);
+        }
     } else {
         output::warning("Transfer not found in local display cache");
     }
@@ -137,7 +142,10 @@ pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateMana
     }
 
     if rows.is_empty() {
-        output::info("No transfers recorded. Use 'csv cross-chain transfer' to start one.");
+        output::info(
+            "No transfers recorded. Use 'csv cross-chain send' (off-chain) or \
+             'csv cross-chain materialize' (on-chain) to start one.",
+        );
     } else {
         output::table(&headers, &rows);
     }

@@ -56,6 +56,11 @@ pub enum WalletError {
     /// RPC error
     #[error("RPC error: {0}")]
     RpcError(String),
+
+    /// Seal custody error — the controlling key for a `SealPoint` conflicts with
+    /// an existing record, or an operation referenced an untracked seal.
+    #[error("Seal custody error: {0}")]
+    SealCustody(String),
 }
 
 /// Result type for wallet operations

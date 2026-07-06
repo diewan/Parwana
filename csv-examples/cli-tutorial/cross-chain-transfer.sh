@@ -201,13 +201,13 @@ if [ -z "$SKIP_ALL" ]; then
         exit 1
     fi
     echo "Command:"
-    echo "  csv cross-chain transfer --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER"
+    echo "  csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER"
     echo ""
     read -p "Run this step? (y/n/s to skip all remaining) > " choice
     case "$choice" in 
         y|Y ) 
             echo "Running..."
-            csv cross-chain transfer --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER
+            csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER
             ;;
         n|N ) 
             echo "Skipping..."
@@ -264,7 +264,7 @@ if [ -z "$SKIP_ALL" ]; then
     echo "Description: Re-running the same transfer is a replay attempt and must fail closed"
     echo ""
     echo "Command:"
-    echo "  csv cross-chain transfer --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER"
+    echo "  csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER"
     echo ""
     read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
     if [[ "$choice" == "s" || "$choice" == "S" ]]; then
@@ -281,6 +281,84 @@ if [ -z "$SKIP_ALL" ]; then
     echo ""
     echo "Command:"
     echo "  csv proof verify --chain ethereum --proof-file proof.cbor"
+    echo ""
+    read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
+    if [[ "$choice" == "s" || "$choice" == "S" ]]; then
+        export SKIP_ALL=true
+    fi
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    echo ""
+    echo "=========================================="
+    echo "Step: Duplicate Runtime Domain Attempts"
+    echo "=========================================="
+    echo "Description: Duplicate sanadId, nullifier, and lockEventId attempts must each fail closed"
+    echo ""
+    echo "Checks:"
+    echo "  duplicate sanadId attempt"
+    echo "  duplicate nullifier attempt"
+    echo "  duplicate lockEventId attempt"
+    echo ""
+    read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
+    if [[ "$choice" == "s" || "$choice" == "S" ]]; then
+        export SKIP_ALL=true
+    fi
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    echo ""
+    echo "=========================================="
+    echo "Step: Settlement Receipt Attempt"
+    echo "=========================================="
+    echo "Description: Release source escrow only after confirmed destination mint and verifier settlement receipt"
+    echo ""
+    echo "Checks:"
+    echo "  forged settlement receipt attempt"
+    echo "  settlement submitted"
+    echo "  settlement confirmed"
+    echo ""
+    read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
+    if [[ "$choice" == "s" || "$choice" == "S" ]]; then
+        export SKIP_ALL=true
+    fi
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    echo ""
+    echo "=========================================="
+    echo "Step: Operator Observability Signals"
+    echo "=========================================="
+    echo "Description: Confirm the seven hardening metrics/log signals are visible"
+    echo ""
+    echo "Signals:"
+    echo "  verified proof built"
+    echo "  mint submitted"
+    echo "  mint confirmed"
+    echo "  settlement submitted"
+    echo "  settlement confirmed"
+    echo "  replay rejected"
+    echo "  authorization rejected"
+    echo ""
+    read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
+    if [[ "$choice" == "s" || "$choice" == "S" ]]; then
+        export SKIP_ALL=true
+    fi
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    echo ""
+    echo "=========================================="
+    echo "Step: End-to-End Chain Pair Matrix"
+    echo "=========================================="
+    echo "Description: Run the supported testnet materialization matrix"
+    echo ""
+    echo "Matrix:"
+    echo "  BTC -> Sui"
+    echo "  BTC -> Aptos"
+    echo "  BTC -> Solana"
+    echo "  ETH -> Sui"
+    echo "  Sui -> ETH"
     echo ""
     read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
     if [[ "$choice" == "s" || "$choice" == "S" ]]; then
@@ -319,17 +397,21 @@ echo "  4. csv proof generate --chain ethereum <SANAD_ID> -o proof.cbor"
 echo "  5. csv proof verify --chain ethereum --proof-file proof.cbor"
 echo "  6. csv wallet list"
 echo "     → Copy the destination chain address (e.g., Sui address)"
-echo "  7. csv cross-chain transfer --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER>"
+echo "  7. csv cross-chain materialize --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER>"
 echo "  8. csv cross-chain status <TRANSFER_ID>"
 echo "  9. csv sanad trace --chain ethereum <SANAD_ID>"
 echo "  10. Replay attempt: repeat step 7; it must fail closed"
 echo "  11. Malformed proof attempt: corrupt proof.cbor and rerun step 5; it must fail closed"
-echo "  12. csv proof verify-cross-chain --source ethereum --dest sui proof.cbor"
+echo "  12. Duplicate sanadId/nullifier/lockEventId attempts must fail closed"
+echo "  13. Forged settlement receipt attempt must fail closed"
+echo "  14. Confirm runtime metrics: verified proof built, mint submitted, mint confirmed, settlement submitted, settlement confirmed, replay rejected, authorization rejected"
+echo "  15. Run the chain pair matrix: BTC -> Sui, BTC -> Aptos, BTC -> Solana, ETH -> Sui, Sui -> ETH"
+echo "  16. csv proof verify-cross-chain --source ethereum --dest sui proof.cbor"
 echo ""
 echo "Parameter Extraction Guide:"
 echo "  - Sanad ID: Found in the output of 'csv sanad create' (line: 'Sanad ID')"
 echo "  - Dest Owner: Found in the output of 'csv wallet list' (look for destination chain address)"
-echo "  - Transfer ID: Found in the output of 'csv cross-chain transfer' (line: 'Transfer ID')"
+echo "  - Transfer ID: Found in the output of 'csv cross-chain materialize' (line: 'Transfer ID')"
 echo ""
 echo "About Trust Packages:"
 echo "  - For TESTING: Cross-chain transfers work without trust packages"

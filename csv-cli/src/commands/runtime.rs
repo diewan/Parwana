@@ -84,7 +84,7 @@ fn cmd_health() -> Result<()> {
         println!("  • Admission control pressure");
         println!();
         output::info("To see runtime health, start a runtime instance with:");
-        println!("  csv cross-chain transfer --from <chain> --to <chain> ...");
+        println!("  csv cross-chain materialize --from <chain> --to <chain> ...");
         println!("  or use csv runtime status for overall runtime state");
         return Ok(());
     }

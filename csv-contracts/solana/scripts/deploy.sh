@@ -119,82 +119,78 @@ else
 fi
 echo ""
 
-# Build the program (no wallet needed for build)
-echo "Building Anchor program..."
+# --- Build ---------------------------------------------------------------
+# GOTCHA (fixed here): `cargo build-sbf` must run from the PROGRAM directory
+# (programs/csv-seal). That crate is a nested workspace, and invoking build-sbf
+# from contracts/ silently produces NO .so (exit 0, no artifact) — which then
+# looks like a stale/missing .so at deploy time. We also do NOT delete
+# target/deploy/csv_seal-keypair.json: it is the program's on-chain identity
+# (declare_id). Deleting it mints a new random program id on every deploy.
+echo "Building SBF program (from programs/csv-seal)..."
+SBF_OUT="$(pwd)/target/deploy"
+mkdir -p "$SBF_OUT"
+rm -f "$SBF_OUT/csv_seal.so"   # clean the artifact only, keep the keypair
+( cd programs/csv-seal && cargo build-sbf --sbf-out-dir "$SBF_OUT" )
+# Best-effort IDL for off-chain clients (verifier seeding, tests). Non-fatal.
+$ANCHOR build --no-idl >/dev/null 2>&1 || true
 
-# Clean previous builds to ensure fresh compilation
-echo "Cleaning previous builds..."
-rm -rf target/deploy/ target/idl/
+# Locate the built .so robustly — build-sbf can emit to any of these.
+SO=""
+for cand in \
+    "target/deploy/csv_seal.so" \
+    "programs/csv-seal/target/deploy/csv_seal.so" \
+    "programs/csv-seal/target/sbf-solana-solana/release/csv_seal.so" \
+    "target/verifiable/csv_seal.so"; do
+    if [ -f "$cand" ]; then SO="$cand"; break; fi
+done
+if [ -z "$SO" ]; then
+    echo "ERROR: could not locate a freshly built csv_seal.so."
+    echo "Build likely failed. Try: (cd programs/csv-seal && cargo build-sbf)"
+    exit 1
+fi
+SO_SIZE=$(stat -c%s "$SO")
+echo "Program artifact: $SO (${SO_SIZE} bytes)"
 
-# Synching keys
-echo "Synching keys..."
-anchor keys sync
-
-# Build from scratch (use --verifiable for Anchor 1.0+ and --ignore-keys to skip program ID check)
-echo "Building with verifiable output..."
-$ANCHOR build --verifiable --ignore-keys 2>&1 | tail -10
+# Ensure a stable program keypair exists (identity == declare_id).
+PROGRAM_KP="target/deploy/csv_seal-keypair.json"
+if [ ! -f "$PROGRAM_KP" ]; then
+    echo "No program keypair found; generating one (this sets a NEW program id)."
+    solana-keygen new --no-bip39-passphrase --silent --outfile "$PROGRAM_KP"
+    echo "Run 'anchor keys sync' and rebuild so declare_id matches, then re-run."
+fi
 echo ""
 
-# Setup Anchor wallet arguments (Anchor 1.0.2+ syntax - use program deploy with verifiable path)
-declare -a ANCHOR_ARGS
-ANCHOR_ARGS=("program" "deploy" "target/verifiable/csv_seal.so" "--provider.cluster" "$NETWORK")
-
-# Add wallet argument if using custom keypair (Anchor 1.0.2 syntax)
+# --- Deploy --------------------------------------------------------------
+# GOTCHA (fixed here): Solana programs can be large; `solana program deploy`
+# reserves 2x the .so size for upgrade headroom by default, which can exceed a
+# modestly funded wallet's balance. We size programdata to the .so plus an
+# explicit, opt-in headroom (CSV_SOLANA_MAXLEN_HEADROOM bytes; default 0 = exact,
+# cheapest). NOTE: a later upgrade to a binary LARGER than max-len needs
+# `solana program extend <program_id> <bytes>` first.
+HEADROOM="${CSV_SOLANA_MAXLEN_HEADROOM:-0}"
+MAX_LEN=$(( SO_SIZE + HEADROOM ))
+declare -a DEPLOY_KP_ARG=()
 if [ -n "$KEYPAIR_ARG" ]; then
-    ANCHOR_ARGS+=("--provider.wallet" "$KEYPAIR_FILE")
-fi
-
-# Deploy
-echo "Deploying to ${NETWORK}..."
-if [ -n "$KEYPAIR_ARG" ]; then
-    echo "Deploying with csv wallet keypair..."
-    echo "DEBUG: KEYPAIR_FILE=$KEYPAIR_FILE"
-    
-    # Verify keypair file is valid JSON
     if ! jq empty "$KEYPAIR_FILE" 2>/dev/null; then
-        echo "ERROR: Keypair file is not valid JSON"
-        cat "$KEYPAIR_FILE"
-        exit 1
+        echo "ERROR: Keypair file is not valid JSON: $KEYPAIR_FILE"; exit 1
     fi
-    
-    echo "DEBUG: Keypair file contents (first 50 chars):"
-    head -c 50 "$KEYPAIR_FILE"
-    echo ""
-    echo ""
-    
-    echo "DEBUG: Running Anchor deploy with:"
-    echo "  Command: $ANCHOR ${ANCHOR_ARGS[@]}"
-    
-    $ANCHOR "${ANCHOR_ARGS[@]}"
-    deploy_exit_code=$?
-    
-    echo "DEBUG: Deploy command exit code: $deploy_exit_code"
-else
-    echo "Deploying with default wallet..."
-    $ANCHOR "${ANCHOR_ARGS[@]}"
-    deploy_exit_code=$?
+    DEPLOY_KP_ARG=(--keypair "$KEYPAIR_FILE")
 fi
 
-# Check if deploy failed
+echo "Deploying to ${NETWORK} (--max-len ${MAX_LEN})..."
+solana program deploy "$SO" \
+    --program-id "$PROGRAM_KP" \
+    --url "$RPC_URL" \
+    --max-len "$MAX_LEN" \
+    "${DEPLOY_KP_ARG[@]}"
+deploy_exit_code=$?
+
 if [ $deploy_exit_code -ne 0 ]; then
-    echo "ERROR: Deploy command failed with exit code $deploy_exit_code"
-    
-    # Fallback to solana program deploy if anchor fails and we have a keypair
-    if [ -n "$KEYPAIR_ARG" ] && [ -f "target/deploy/csv_seal.so" ]; then
-        echo ""
-        echo "Attempting fallback: using solana program deploy directly..."
-        
-        # Try direct deployment
-        solana program deploy --keypair "$KEYPAIR_FILE" --url "$RPC_URL" "target/deploy/csv_seal.so"
-        deploy_exit_code=$?
-        
-        if [ $deploy_exit_code -ne 0 ]; then
-            echo "ERROR: Direct deploy also failed"
-            exit 1
-        fi
-    else
-        exit 1
-    fi
+    echo "ERROR: solana program deploy failed (exit $deploy_exit_code)."
+    echo "  - 'insufficient funds': fund the wallet, or keep CSV_SOLANA_MAXLEN_HEADROOM=0."
+    echo "  - upgrading and the new binary is larger than the reserved size:"
+    echo "      solana program extend ${program_id:-<program_id>} <extra_bytes> --url $RPC_URL"
+    exit 1
 fi
 
 # Extract program ID from the keypair file
@@ -229,8 +225,10 @@ EOF
     echo ""
 fi
 
-# Initialize the LockRegistry (Anchor 1.0.2 syntax)
-echo "Initializing LockRegistry..."
+# Initialize the base registry account (Anchor 1.0.2 syntax). NOTE: this does NOT
+# enable mint. Under RFC-0012 the thin-registry mint is authorized by a verifier
+# set, which is seeded separately (see the fail-closed notice in the summary).
+echo "Initializing base registry account..."
 if [ -n "$KEYPAIR_ARG" ]; then
     $ANCHOR run initialize --provider.cluster "$NETWORK" --provider.wallet "$KEYPAIR_FILE" 2>&1 || {
         echo "Note: Registry initialization may require manual execution:"
@@ -284,18 +282,26 @@ if [ -f "$MANIFEST_PATH" ]; then
         python3 -c "
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     with open('$MANIFEST_PATH', 'r') as f:
         manifest = json.load(f)
-    
+
     # Update solana deployment info
     if 'deployments' in manifest and 'solana' in manifest['deployments']:
-        manifest['deployments']['solana']['network'] = '$NETWORK'
-        manifest['deployments']['solana']['program_id'] = '$program_id'
-        manifest['deployments']['solana']['verified'] = True
-        manifest['updated_at'] = datetime.now(datetime.UTC).isoformat() + 'Z'
+        sol = manifest['deployments']['solana']
+        sol['network'] = '$NETWORK'
+        # program_id is the RFC-0012 §9.2 destinationContract.
+        sol['program_id'] = '$program_id'
+        sol['verified'] = True
+        # A fresh program has an unseeded verifier registry PDA; mint stays
+        # fail-closed until initialize_verifier_registry(verifiers, threshold) is
+        # run. Reset recorded verifier state so the manifest never advertises stale keys.
+        sol['verifier_set'] = []
+        sol['mint_threshold'] = 0
+        # datetime.UTC needs Python 3.11+; timezone.utc works everywhere.
+        manifest['updated_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     
     with open('$MANIFEST_PATH', 'w') as f:
         json.dump(manifest, f, indent=2)
@@ -316,9 +322,35 @@ else
 fi
 
 echo ""
-echo "Deployment complete!"
+echo "IMPORTANT — mint is FAIL-CLOSED until the verifier registry is seeded."
+echo "  A freshly deployed program has an empty verifier registry. Seed it with the"
+echo "  runtime's secp256k1 compressed 33-byte verifier pubkey using the helper:"
+echo ""
+echo "    cd $(pwd)"
+echo "    npm i @coral-xyz/anchor @solana/web3.js   # one-time"
+echo "    node ../scripts/seed-verifier.js init <verifier_pubkey_hex> 1"
+echo "    node ../scripts/seed-verifier.js show     # verify"
+echo ""
+echo "  Then record verifier_set + mint_threshold in deployments/deployment-manifest.json"
+echo "  and give the matching private key to the runtime: export CSV_MINT_VERIFIER_KEY=<hex>."
+echo "  Full guide: csv-docs/runbooks/MINT_VERIFIER_OPERATIONS.md"
+if [ -n "${CSV_MINT_VERIFIER_PUBKEY:-}" ] && command -v node &>/dev/null; then
+    echo ""
+    echo "CSV_MINT_VERIFIER_PUBKEY is set — attempting to seed the verifier now..."
+    if [ -d node_modules/@coral-xyz/anchor ]; then
+        node ../scripts/seed-verifier.js init "$CSV_MINT_VERIFIER_PUBKEY" 1 || \
+            echo "  seed failed (see above); run it manually."
+    else
+        echo "  node deps not installed; run 'npm i @coral-xyz/anchor @solana/web3.js' then the helper above."
+    fi
+fi
 echo ""
 echo "Next steps:"
 echo "1. Update Anchor.toml with the program ID: ${program_id}"
 echo "2. Update your csv-cli configuration to use this program ID"
-echo "3. Run tests: anchor test --provider.cluster ${NETWORK}"
+echo ""
+echo "Build/deploy notes (fixed in this script):"
+echo "  - 'cargo build-sbf' is run from programs/csv-seal/ (nested workspace);"
+echo "    from contracts/ it silently produces no .so."
+echo "  - Deployed with '--max-len' sized to the .so (+CSV_SOLANA_MAXLEN_HEADROOM)"
+echo "    to avoid the default 2x programdata rent on large programs."

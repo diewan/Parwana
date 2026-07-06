@@ -80,7 +80,7 @@ pub const MAX_LEASE_DURATION_SECS: u64 = 300;
 /// let now = SystemTime::now();
 /// let duration = Duration::from_secs(DEFAULT_LEASE_DURATION_SECS);
 ///
-/// let lease = TransferLease::acquire(transfer_id, runtime_id, 0, now, duration)
+/// let lease = TransferLease::acquire(transfer_id.into(), runtime_id, 0, now, duration)
 ///     .expect("valid lease duration");
 /// assert!(lease.is_active(now));
 /// ```

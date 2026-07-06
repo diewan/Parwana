@@ -72,8 +72,22 @@ pub struct SuiBackend {
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     seal_protocol: Arc<SuiSealProtocol>,
-    /// Ed25519 signing key for transaction signing (optional)
+    /// Ed25519 signing key for transaction signing (optional).
+    ///
+    /// This authorizes and pays for the Sui transaction that submits the mint —
+    /// it is the gas-paying submitter identity, NOT the mint authority. Per
+    /// RFC-0012 §9 the mint is authenticated by the verifier attestation carried
+    /// in the call, never by `msg.sender`, so this key confers no mint authority.
     signing_key: Option<ed25519_dalek::SigningKey>,
+    /// secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation
+    /// digest (optional).
+    ///
+    /// Distinct from `signing_key`: the destination `Registry` authenticates a
+    /// mint by recovering M-of-N secp256k1 verifier public keys from signatures
+    /// over the §9.2 digest (`ecdsa_k1::secp256k1_ecrecover`), independent of who
+    /// submits the transaction. Absent this key the adapter fails closed rather
+    /// than emitting an unauthenticated mint the `Registry` would reject.
+    verifier_signing_key: Option<secp256k1::SecretKey>,
 }
 
 impl SuiBackend {
@@ -114,6 +128,7 @@ impl SuiBackend {
             event_builder,
             seal_protocol: Arc::new(seal),
             signing_key,
+            verifier_signing_key: None,
         }
     }
 
@@ -135,6 +150,7 @@ impl SuiBackend {
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
             signing_key: None,
+            verifier_signing_key: None,
         })
     }
 
@@ -152,6 +168,7 @@ impl SuiBackend {
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
             signing_key: Some(signing_key),
+            verifier_signing_key: None,
         })
     }
 
@@ -159,6 +176,113 @@ impl SuiBackend {
     pub fn with_key(mut self, signing_key: ed25519_dalek::SigningKey) -> Self {
         self.signing_key = Some(signing_key);
         self
+    }
+
+    /// Set the secp256k1 verifier key that signs the RFC-0012 §9.2 mint
+    /// attestation digest.
+    ///
+    /// This is the mint-authority key (its 33-byte compressed public key must be
+    /// registered in the destination `Registry`'s verifier set). It is distinct
+    /// from the Ed25519 transaction signer configured via [`Self::with_key`].
+    pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
+        self.verifier_signing_key = Some(verifier_signing_key);
+        self
+    }
+
+    /// Canonical 32-byte identity of the shared `Registry` mint-authority object
+    /// (RFC-0012 §9.2 `destinationContract` on Sui).
+    ///
+    /// Fails closed when no registry id is configured: the verifier signature is
+    /// scoped to exactly one `Registry`, so a mint cannot be built without it.
+    pub fn registry_object_id(&self) -> ChainOpResult<[u8; 32]> {
+        let registry_id = self
+            .config
+            .seal_contract
+            .registry_id
+            .as_ref()
+            .ok_or_else(|| {
+                ChainOpError::CapabilityUnavailable(
+                    "No mint Registry object id configured: set seal_contract.registry_id \
+                     (the shared Registry created at package publish)."
+                        .to_string(),
+                )
+            })?;
+        parse_object_id(registry_id)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Registry object id: {}", e)))
+    }
+
+    /// Sign a 32-byte RFC-0012 §9.2 attestation digest with the configured
+    /// secp256k1 verifier key, producing a 65-byte recoverable signature
+    /// (`r(32) || s(32) || v(1)`, `v` = recovery id `∈ {0, 1}`).
+    ///
+    /// The digest is `sha256(preimage)` (the frozen §9.2 preimage). The Sui
+    /// `Registry` recovers the signer via
+    /// `ecdsa_k1::secp256k1_ecrecover(sig, preimage, /*sha256*/ 1)`, which hashes
+    /// the preimage with SHA-256 internally — so signing the digest directly
+    /// recovers the same key on-chain. The recovery id is emitted raw (0/1), the
+    /// form the Sui native primitive expects (no EVM `+27`). Fails closed when no
+    /// verifier key is configured rather than emitting an unauthenticated mint.
+    pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
+        use secp256k1::{Message, Secp256k1};
+
+        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set a secp256k1 verifier key via with_verifier_key())."
+                    .to_string(),
+            )
+        })?;
+
+        // Sign the digest bytes directly (no message prefix), matching the
+        // on-chain ecrecover-over-sha256(preimage) semantics.
+        let msg = Message::from_digest(*digest);
+        let secp = Secp256k1::new();
+        let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
+        let (recovery_id, compact) = signature.serialize_compact();
+
+        let mut out = Vec::with_capacity(65);
+        out.extend_from_slice(&compact);
+        // Sui's secp256k1_ecrecover expects the raw recovery id (0/1) as `v`.
+        out.push(recovery_id.to_i32() as u8);
+        Ok(out)
+    }
+
+    /// Submit a verifier-attested §9.2 mint to the destination `Registry` and
+    /// wait for its effects, returning `(tx_digest_hex, checkpoint)`.
+    ///
+    /// The `args` already carry the frozen §9.2 fields and the attached verifier
+    /// signatures (built by the runtime adapter after it bound
+    /// `destinationContract`, computed the digest, and signed it). This is the
+    /// sole submission point; it fails closed on a reverted transaction.
+    #[cfg(feature = "rpc")]
+    pub async fn submit_attested_mint(
+        &self,
+        args: crate::mint::SuiMintArgs,
+    ) -> ChainOpResult<(String, u64)> {
+        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
+                    .to_string(),
+            )
+        })?;
+        let package_id = self
+            .config
+            .seal_contract
+            .package_id
+            .as_ref()
+            .ok_or_else(|| ChainOpError::InvalidInput("Package ID not configured".to_string()))?;
+        let registry_id = self
+            .config
+            .seal_contract
+            .registry_id
+            .as_ref()
+            .ok_or_else(|| {
+                ChainOpError::InvalidInput("Registry object id not configured".to_string())
+            })?;
+
+        crate::mint::submit_mint(&self.node, package_id, registry_id, signing_key, args)
+            .await
+            .map_err(|e| ChainOpError::TransactionError(format!("Minting failed: {}", e)))
     }
 
     /// Parse Sui address from string
@@ -1376,70 +1500,27 @@ impl ChainSanadOps for SuiBackend {
 
     async fn mint_sanad(
         &self,
-        source_chain: &str,
-        source_sanad_id: &SanadId,
-        lock_proof: &CoreInclusionProof,
+        _source_chain: &str,
+        _source_sanad_id: &SanadId,
+        _lock_proof: &CoreInclusionProof,
         _new_owner: &str,
     ) -> ChainOpResult<SanadOperationResult> {
-        use crate::mint::mint_sanad;
-
-        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
-            ChainOpError::CapabilityUnavailable(
-                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
-                    .to_string(),
-            )
-        })?;
-
-        let package_id = self
-            .config
-            .seal_contract
-            .package_id
-            .as_ref()
-            .ok_or_else(|| ChainOpError::InvalidInput("Package ID not configured".to_string()))?;
-
-        // Validate lock_proof is not empty/malformed
-        if lock_proof.proof_bytes.is_empty() {
-            return Err(ChainOpError::InvalidInput(
-                "Lock proof is empty - cannot mint without verified source proof".to_string(),
-            ));
-        }
-
-        // Use the source sanad_id directly (same as Ethereum reference implementation)
-        let sanad_id = source_sanad_id.clone();
-
-        // Derive commitment from the lock_proof leaf (the actual commitment being proven)
-        let commitment = lock_proof.leaf;
-
-        // Derive source_seal_ref from lock_proof block_hash (the block containing the lock transaction)
-        let source_seal_ref = lock_proof.block_hash;
-
-        let source_chain_byte = source_chain.as_bytes()[0];
-
-        let tx_digest = mint_sanad(
-            &self.node,
-            package_id,
-            signing_key,
-            sanad_id.clone(),
-            commitment,
-            source_chain_byte,
-            source_seal_ref,
-        )
-        .await
-        .map_err(|e| ChainOpError::TransactionError(format!("Minting failed: {}", e)))?;
-
-        Ok(SanadOperationResult {
-            sanad_id,
-            operation: csv_protocol::chain_adapter_traits::SanadOperation::Mint,
-            transaction_hash: tx_digest,
-            block_height: lock_proof.block_number,
-            chain_id: "sui".to_string(),
-            metadata: serde_json::to_vec(&serde_json::json!({
-                "source_chain": source_chain,
-                "lock_block_number": lock_proof.block_number,
-                "lock_block_hash": hex::encode(lock_proof.block_hash.as_bytes()),
-            }))
-            .unwrap_or_default(),
-        })
+        // Pre-RFC-0012 mint shape. Under the thin-registry model (RFC-0012 §9)
+        // a destination mint is NOT authorized by a lock/inclusion proof handed
+        // to the chain: cross-chain validity is adjudicated OFF-CHAIN by the
+        // canonical verifier, and the only on-chain authenticity check is a set
+        // of verifier signatures over the frozen §9.2 attestation digest. The
+        // authoritative mint path is `SuiRuntimeAdapter::mint_sanad`, which
+        // decodes the runtime's `RuntimeMintRequest`, binds
+        // `destinationContract = Registry` object id, signs the §9.2 digest, and
+        // calls `SuiBackend::submit_attested_mint`. Fail closed here rather than
+        // submit a mint authenticated by a proof the `Registry` never checks.
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sui mint is verifier-attested (RFC-0012 §9.2); use \
+             SuiRuntimeAdapter::mint_sanad which carries the attestation, not the \
+             pre-RFC-0012 inclusion-proof mint path."
+                .to_string(),
+        ))
     }
 
     async fn refund_sanad(
@@ -1868,10 +1949,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mint_sanad_with_valid_proof_derives_parameters() {
+    async fn test_chain_sanad_ops_mint_is_fail_closed_deprecated_path() {
         use csv_hash::Hash;
         use csv_protocol::proof_taxonomy::InclusionProof;
 
+        // The pre-RFC-0012 `ChainSanadOps::mint_sanad` (lock/inclusion-proof mint)
+        // must fail closed: under the thin-registry model a mint is authenticated
+        // by verifier signatures over the §9.2 digest, adjudicated off-chain — a
+        // lock proof handed to the chain is never sufficient. The authoritative
+        // path is `SuiRuntimeAdapter::mint_sanad`.
         let config = SuiConfig {
             seal_contract: crate::SealContractConfig {
                 package_id: Some(
@@ -1886,66 +1972,10 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
         let ops = SuiBackend::with_signing_key(config, node, Some(signing_key));
 
-        // Create a valid lock proof with non-zero values
         let source_sanad_id = SanadId::new([1u8; 32]);
+        // Even a well-formed, non-empty inclusion proof must not mint via this path.
         let lock_proof = InclusionProof {
-            proof_bytes: vec![1u8; 100], // Non-empty proof
-            block_hash: Hash::new([2u8; 32]),
-            position: 100,
-            block_number: 12345,
-            leaf: Hash::new([3u8; 32]), // This should be used as commitment
-            root: Hash::new([4u8; 32]),
-            siblings: vec![],
-            leaf_index: 0,
-            source: "ethereum".to_string(),
-        };
-
-        // Verify that mint_sanad uses the derived values
-        // Note: This will fail at RPC call since we don't have a real network,
-        // but we can verify the parameter derivation logic
-        let result = ops
-            .mint_sanad("ethereum", &source_sanad_id, &lock_proof, "0xowner")
-            .await;
-
-        // The call should fail at the RPC/network level, not at parameter validation
-        // If it fails with "Signing key not set" or "Package ID not configured", that's a test setup issue
-        // If it fails with RPC/Transaction error, that's expected since we're not on a real network
-        // The important thing is it should NOT fail with "Lock proof is empty"
-        match result {
-            Err(ChainOpError::InvalidInput(msg)) if msg.contains("empty") => {
-                panic!("Should not fail with empty proof error when proof is valid");
-            }
-            Err(_) => {
-                // Expected - will fail at RPC/network level since we're not on a real network
-            }
-            Ok(_) => {
-                // Unexpected success - would require real network
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_mint_sanad_rejects_empty_proof() {
-        use csv_hash::Hash;
-        use csv_protocol::proof_taxonomy::InclusionProof;
-
-        let config = SuiConfig {
-            seal_contract: crate::SealContractConfig {
-                package_id: Some(
-                    "0x0000000000000000000000000000000000000000000000000000000000000002"
-                        .to_string(),
-                ),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
-        let ops = SuiBackend::with_signing_key(config, node, Some(signing_key));
-
-        let source_sanad_id = SanadId::new([1u8; 32]);
-        let empty_proof = InclusionProof {
-            proof_bytes: vec![], // Empty proof - should be rejected
+            proof_bytes: vec![1u8; 100],
             block_hash: Hash::new([2u8; 32]),
             position: 100,
             block_number: 12345,
@@ -1957,28 +1987,21 @@ mod tests {
         };
 
         let result = ops
-            .mint_sanad("ethereum", &source_sanad_id, &empty_proof, "0xowner")
+            .mint_sanad("ethereum", &source_sanad_id, &lock_proof, "0xowner")
             .await;
 
-        // Should fail with InvalidInput error about empty proof
-        assert!(result.is_err());
         match result {
-            Err(ChainOpError::InvalidInput(msg)) => {
+            Err(ChainOpError::CapabilityUnavailable(msg)) => {
                 assert!(
-                    msg.contains("empty") || msg.contains("proof"),
-                    "Error message should mention empty proof: {}",
+                    msg.contains("attested") || msg.contains("§9.2"),
+                    "error must point at the verifier-attested mint path: {}",
                     msg
                 );
             }
-            Err(other) => {
-                panic!(
-                    "Expected InvalidInput error for empty proof, got: {:?}",
-                    other
-                );
-            }
-            Ok(_) => {
-                panic!("Should not succeed with empty proof");
-            }
+            other => panic!(
+                "deprecated inclusion-proof mint must fail closed, got: {:?}",
+                other
+            ),
         }
     }
 }

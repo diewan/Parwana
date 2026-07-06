@@ -38,6 +38,9 @@ contract CSVSeal {
     /// @notice Domain tag for the §9.2 mint attestation digest (23 bytes, ASCII, no NUL).
     string internal constant MINT_ATTESTATION_DOMAIN = "csv.mint.attestation.v1";
 
+    /// @notice Domain tag for the §10 settlement-receipt digest (25 bytes, ASCII, no NUL).
+    string internal constant SETTLEMENT_RECEIPT_DOMAIN = "csv.settlement.receipt.v1";
+
     // ==================== Canonical State Enum ====================
 
     /// @notice Sanad lifecycle state — canonical values across all chains
@@ -133,8 +136,27 @@ contract CSVSeal {
         bytes32 destinationOwnerRoot;
         SanadMetadata metadata;
         bool refunded;
+        /// @notice Native-token escrow held at lock time; released to the operator on a
+        ///         verifier-signed settlement receipt (§10), or refunded to `owner` on timeout.
+        uint256 escrowAmount;
+        /// @notice Set once the escrow has been released via `settle_lock`. Terminal: blocks
+        ///         any second release and any refund of an already-settled lock.
+        bool settled;
     }
     mapping(bytes32 => LockRecord) public locks;
+
+    /// @notice Source-chain settlement record (RFC-0012 §10), keyed by `lockEventId`.
+    /// @dev The `lockEventId` domain is the settlement anti-replay key: exactly one valid
+    ///      receipt may release per `lockEventId`. `released == true` is terminal.
+    struct SettlementRecord {
+        bool released;
+        bytes32 sanadId;
+        bytes32 destinationMintTxRef;
+        address operatorPayoutAddress;
+        uint256 amount;
+        uint256 releasedAt;
+    }
+    mapping(bytes32 => SettlementRecord) public settlements;
 
     /// @notice Minimal destination-mint record (RFC-0012 §3: persisted for settlement/inspection).
     /// @dev Stores `keccak256(destinationOwner)`; the full bytes travel in the `SanadMinted` event.
@@ -220,6 +242,20 @@ contract CSVSeal {
         uint256 timestamp
     );
 
+    /// @notice Emitted when a source-chain escrow is released to the operator on a
+    ///         verifier-signed settlement receipt (RFC-0012 §10).
+    /// @dev DISTINCT from `SanadMinted`: mint is a destination-chain record; this is the
+    ///      source-chain payout. Indexed on `lockEventId` (settlement replay key) and
+    ///      `operatorPayoutAddress` (the beneficiary) for settlement auditing.
+    event SettlementReleased(
+        bytes32 indexed sanadId,
+        bytes32 indexed lockEventId,
+        address indexed operatorPayoutAddress,
+        bytes32 destinationMintTxRef,
+        uint256 amount,
+        uint256 timestamp
+    );
+
     /// @notice Emitted when Sanad ownership is transferred
     event SanadTransferred(bytes32 indexed sanadId, address indexed from, address indexed to, uint256 timestamp);
 
@@ -277,6 +313,12 @@ contract CSVSeal {
     error MalformedSignature();
     error AttestationExpired();
     error InvalidThreshold();
+    // Settlement errors (RFC-0012 §10)
+    error SettlementAlreadyReleased();
+    error LockAlreadySettled();
+    error ReceiptExpired();
+    error InvalidSettlementRequest();
+    error PayoutFailed();
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
@@ -440,12 +482,15 @@ contract CSVSeal {
     }
 
     /// @notice Lock a Sanad for cross-chain transfer
+    /// @dev `payable`: any attached value is held as source-chain escrow (§10) and released to
+    ///      the operator on a verifier-signed settlement receipt, or refunded on timeout. A
+    ///      zero-value lock is a pure state-machine lock (escrow of 0), preserving prior behaviour.
     function lock_sanad(
         bytes32 sanadId,
         bytes32 commitment,
         bytes32 destinationChain,
         bytes calldata destinationOwner
-    ) external {
+    ) external payable {
         _lock_sanad_internal(sanadId, commitment, destinationChain, destinationOwner, SanadMetadata({
             assetClass: ASSET_CLASS_UNSPECIFIED,
             assetId: bytes32(0),
@@ -464,7 +509,7 @@ contract CSVSeal {
         bytes32 assetId,
         bytes32 metadataHash,
         uint8 proofSystem
-    ) external {
+    ) external payable {
         _lock_sanad_internal(sanadId, commitment, destinationChain, destinationOwner, SanadMetadata({
             assetClass: assetClass,
             assetId: assetId,
@@ -494,7 +539,9 @@ contract CSVSeal {
             destinationChain: destinationChain,
             destinationOwnerRoot: destinationOwnerRoot,
             metadata: metadata,
-            refunded: false
+            refunded: false,
+            escrowAmount: msg.value,
+            settled: false
         });
 
         sanadStates[sanadId] = SanadState.Locked;
@@ -674,6 +721,10 @@ contract CSVSeal {
     }
 
     /// @notice Refund a locked Sanad after timeout (canonical name)
+    /// @dev RFC-0012 §10 failure handling: when the destination mint never occurs, the locker
+    ///      reclaims any escrow after `REFUND_TIMEOUT`. A settled lock (escrow already released to
+    ///      the operator) can NEVER be refunded, and an escrow already released can NEVER be
+    ///      refunded — the `settled` guard makes release and refund mutually exclusive.
     function refund_sanad(bytes32 sanadId, bytes32 destinationOwnerHash) external {
         LockRecord storage lock = locks[sanadId];
 
@@ -682,8 +733,13 @@ contract CSVSeal {
         if (lock.destinationOwnerRoot != destinationOwnerHash) revert InvalidProof();
         if (lock.owner != msg.sender) revert NotOwner();
         if (lock.refunded) revert RefundAlreadyClaimed();
+        if (lock.settled) revert LockAlreadySettled();
         if (mintedSanads[sanadId]) revert SanadAlreadyMinted();
 
+        // Effects before interaction (checks-effects-interactions): drain escrow and mark
+        // refunded before transferring value, so a re-entrant call finds a spent record.
+        uint256 amount = lock.escrowAmount;
+        lock.escrowAmount = 0;
         lock.refunded = true;
         usedSeals[sanadId] = false;
 
@@ -692,6 +748,131 @@ contract CSVSeal {
         sanadLastTx[sanadId] = bytes32(0);
 
         emit SanadRefunded(sanadId, lock.commitment, msg.sender, "timeout", block.timestamp);
+
+        if (amount > 0) {
+            (bool ok, ) = payable(lock.owner).call{value: amount}("");
+            if (!ok) revert PayoutFailed();
+        }
+    }
+
+    // ==================== Source-chain settlement (RFC-0012 §10) ====================
+
+    /// @notice Release a locked Sanad's source escrow to the operator on a verifier-signed
+    ///         settlement receipt (RFC-0012 §10).
+    /// @dev THE OPERATOR CANNOT SELF-RELEASE. The proof-delivery operator is the payout
+    ///      beneficiary and merely submits this call (and pays gas); authority is a set of
+    ///      `threshold` distinct verifier signatures over the frozen §10 receipt digest — the
+    ///      SAME verifier set that authorizes the destination mint (§9.3). The escrow is released
+    ///      ONLY to `operatorPayoutAddress` as bound in the signed receipt. There is NO proof
+    ///      root: the mint this receipt settles was adjudicated off-chain by the canonical
+    ///      verifier, and the verifier signs the receipt only after observing that mint at strict
+    ///      finality.
+    /// @param sanadId Sanad whose source escrow is released; must be locked and not settled/refunded.
+    /// @param lockEventId Settlement anti-replay key; exactly one valid receipt releases per id.
+    /// @param destinationChainId keccak256("csv.chain.<dest>") the mint confirmed on.
+    /// @param destinationMintTxRef Canonical reference to the confirmed destination mint.
+    /// @param operatorPayoutAddress The sole escrow beneficiary bound in the signed receipt.
+    /// @param receiptExpiry u64 unix seconds; 0 = no expiry. Bound over the digest (§10).
+    /// @param verifierSignatures `bytes[]` of 65-byte secp256k1 signatures over the §10 digest.
+    function settle_lock(
+        bytes32 sanadId,
+        bytes32 lockEventId,
+        bytes32 destinationChainId,
+        bytes32 destinationMintTxRef,
+        address operatorPayoutAddress,
+        uint64 receiptExpiry,
+        bytes[] calldata verifierSignatures
+    ) external {
+        // Field sanity: a real settlement binds non-zero keys and a concrete beneficiary.
+        if (
+            sanadId == bytes32(0) ||
+            lockEventId == bytes32(0) ||
+            destinationChainId == bytes32(0) ||
+            destinationMintTxRef == bytes32(0)
+        ) revert InvalidSettlementRequest();
+        if (operatorPayoutAddress == address(0)) revert ZeroAddress();
+
+        // §10 receipt expiry bound.
+        if (receiptExpiry != 0 && block.timestamp > receiptExpiry) revert ReceiptExpired();
+
+        LockRecord storage lock = locks[sanadId];
+        if (lock.timestamp == 0) revert SanadNotFound();
+        if (lock.refunded) revert RefundAlreadyClaimed();
+        if (lock.settled) revert LockAlreadySettled();
+
+        // Settlement anti-replay domain: exactly one valid receipt per lockEventId (§10).
+        if (settlements[lockEventId].released) revert SettlementAlreadyReleased();
+
+        // §10 authentication: verify M-of-N verifier signatures over the frozen §10 digest.
+        bytes32 digest = settlement_receipt_digest(
+            sanadId,
+            lockEventId,
+            destinationChainId,
+            destinationMintTxRef,
+            operatorPayoutAddress,
+            receiptExpiry
+        );
+        _require_verifier_threshold(digest, verifierSignatures);
+
+        // Effects before interaction: mark settled and record the release before paying out.
+        uint256 amount = lock.escrowAmount;
+        lock.escrowAmount = 0;
+        lock.settled = true;
+
+        settlements[lockEventId] = SettlementRecord({
+            released: true,
+            sanadId: sanadId,
+            destinationMintTxRef: destinationMintTxRef,
+            operatorPayoutAddress: operatorPayoutAddress,
+            amount: amount,
+            releasedAt: block.timestamp
+        });
+
+        sanadLastTx[sanadId] = lockEventId;
+
+        emit SettlementReleased(
+            sanadId, lockEventId, operatorPayoutAddress, destinationMintTxRef, amount, block.timestamp
+        );
+
+        if (amount > 0) {
+            (bool ok, ) = payable(operatorPayoutAddress).call{value: amount}("");
+            if (!ok) revert PayoutFailed();
+        }
+    }
+
+    /// @notice Compute the frozen §10 settlement-receipt digest for a release.
+    /// @dev SHA-256 over the fixed 265-byte preimage:
+    ///      "csv.settlement.receipt.v1" (25) || sourceChainId (32) || sourceEscrowContract (32)
+    ///      || sanadId (32) || lockEventId (32) || destinationChainId (32) || destinationMintTxRef (32)
+    ///      || operatorPayoutAddress (32) || receiptExpiry (u64 big-endian, 8).
+    ///      `sourceChainId` = CHAIN_ETHEREUM (this escrow lives on Ethereum); `sourceEscrowContract`
+    ///      = this contract's address left-zero-padded to 32 bytes. Exposed as a view so operators
+    ///      and the off-chain verifier reproduce the exact digest they must sign.
+    function settlement_receipt_digest(
+        bytes32 sanadId,
+        bytes32 lockEventId,
+        bytes32 destinationChainId,
+        bytes32 destinationMintTxRef,
+        address operatorPayoutAddress,
+        uint64 receiptExpiry
+    ) public view returns (bytes32) {
+        bytes memory preimage = abi.encodePacked(
+            SETTLEMENT_RECEIPT_DOMAIN,                          // 25 bytes
+            CHAIN_ETHEREUM,                                     // sourceChainId (32)
+            bytes32(uint256(uint160(address(this)))),          // sourceEscrowContract (32, left-padded)
+            sanadId,                                            // 32
+            lockEventId,                                        // 32
+            destinationChainId,                                // 32
+            destinationMintTxRef,                              // 32
+            bytes32(uint256(uint160(operatorPayoutAddress))),  // operatorPayoutAddress (32, left-padded)
+            receiptExpiry                                       // 8 bytes, u64 big-endian
+        );
+        return sha256(preimage);
+    }
+
+    /// @notice Whether a source lock event has already had its escrow released (settlement guard).
+    function is_settlement_released(bytes32 lockEventId) external view returns (bool) {
+        return settlements[lockEventId].released;
     }
 
     /// @notice Transfer Sanad ownership (same chain)

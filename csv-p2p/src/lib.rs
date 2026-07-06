@@ -21,9 +21,10 @@ pub mod proof_delivery;
 pub use ipfs::IpfsTransport;
 #[cfg(feature = "nostr")]
 pub use nostr::NostrTransport;
-pub use proof_delivery::{ProofFilter, ProofRouter};
+pub use proof_delivery::{ConsignmentFilter, ConsignmentRouter, ProofFilter, ProofRouter};
 
 use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_wire::Consignment;
 use thiserror::Error;
 
 /// Errors that can occur during P2P proof transport operations.
@@ -95,6 +96,22 @@ pub struct DeliveredProof {
     pub timestamp: u64,
 }
 
+/// A delivered consignment received from a P2P transport.
+///
+/// This type is a transport envelope only. Callers must still run the normal
+/// client-side consignment accept validation before recording ownership.
+#[derive(Debug, Clone)]
+pub struct DeliveredConsignment {
+    /// The consignment envelope.
+    pub consignment: Consignment,
+    /// Source event ID (for deduplication).
+    pub event_id: EventId,
+    /// Author public key (hex-encoded when available).
+    pub author_pubkey: String,
+    /// Timestamp of the event.
+    pub timestamp: u64,
+}
+
 /// The primary transport trait for P2P proof delivery.
 ///
 /// Implementations can use Nostr, libp2p, or any other P2P protocol.
@@ -129,6 +146,38 @@ pub trait ProofTransport: Send + Sync {
     async fn disconnect(&self);
 }
 
+/// Transport trait for optional P2P consignment delivery.
+///
+/// Implementations deliver the canonical consignment envelope as bytes and must
+/// not validate or accept it on behalf of the recipient. The recipient's accept
+/// path remains the correctness boundary regardless of transport.
+#[async_trait::async_trait]
+pub trait ConsignmentTransport: Send + Sync {
+    /// Deliver a consignment envelope to connected peers/relays.
+    async fn deliver_consignment(
+        &self,
+        consignment: &Consignment,
+    ) -> Result<EventId, TransportError>;
+
+    /// Subscribe to incoming consignments matching the given filter.
+    #[cfg(feature = "nostr")]
+    async fn subscribe_consignments(
+        &self,
+        filter: ConsignmentFilter,
+    ) -> Result<tokio_stream::wrappers::ReceiverStream<DeliveredConsignment>, TransportError>
+    where
+        Self: Sized;
+
+    /// Check if the transport is connected and ready.
+    async fn is_connected(&self) -> bool;
+
+    /// Get the transport name (e.g., "nostr").
+    fn transport_name(&self) -> &str;
+
+    /// Disconnect and clean up resources.
+    async fn disconnect(&self);
+}
+
 /// Default Nostr relays used by the CSV protocol.
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
@@ -147,4 +196,16 @@ pub fn serialize_proof(proof: &ProofBundle) -> Result<Vec<u8>, TransportError> {
 /// Deserialize a proof bundle from canonical bytes.
 pub fn deserialize_proof(data: &[u8]) -> Result<ProofBundle, TransportError> {
     ProofBundle::from_canonical_bytes(data).map_err(TransportError::Serialization)
+}
+
+/// Serialize a consignment envelope to canonical bytes.
+pub fn serialize_consignment(consignment: &Consignment) -> Result<Vec<u8>, TransportError> {
+    consignment
+        .canonical_cbor()
+        .map_err(|e| TransportError::Serialization(e.to_string()))
+}
+
+/// Deserialize a consignment envelope from canonical bytes.
+pub fn deserialize_consignment(data: &[u8]) -> Result<Consignment, TransportError> {
+    csv_codec::from_canonical_cbor(data).map_err(|e| TransportError::Serialization(e.to_string()))
 }
