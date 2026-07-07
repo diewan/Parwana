@@ -134,8 +134,11 @@ if [ -f "$CONFIG_FILE" ]; then
     if command -v sed &> /dev/null; then
         # Create backup
         cp "$CONFIG_FILE" "${CONFIG_FILE}.backup.$(date +%s)"
-        # Update contract_address
-        sed -i.bak "s|contract_address = \".*\"|contract_address = \"$SEAL_ADDRESS\"|" "$CONFIG_FILE"
+        # Update only [chains.ethereum]. A global replacement would overwrite
+        # non-EVM package/module addresses for Sui/Aptos.
+        sed -i.bak "/^\[chains\.ethereum\]/,/^\[chains\./ {
+            /^\[chains\./! s|contract_address = \".*\"|contract_address = \"$SEAL_ADDRESS\"|
+        }" "$CONFIG_FILE"
         rm -f "${CONFIG_FILE}.bak"
         echo -e "${GREEN}  contract_address updated${NC}"
     fi

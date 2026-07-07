@@ -42,7 +42,12 @@ pub use sui::SuiFactory;
 /// RFC-0012 §9.2 mint-attestation digest with it; the destination contract
 /// verifies the recovered signer against its on-chain set. It is deliberately a
 /// process secret (env), never a chain-config field, and never logged.
-#[cfg(any(feature = "sui", feature = "solana", feature = "aptos"))]
+#[cfg(any(
+    feature = "ethereum",
+    feature = "sui",
+    feature = "solana",
+    feature = "aptos"
+))]
 pub const MINT_VERIFIER_KEY_ENV: &str = "CSV_MINT_VERIFIER_KEY";
 
 /// Load the mint verifier signing key from [`MINT_VERIFIER_KEY_ENV`], if set.
@@ -53,7 +58,12 @@ pub const MINT_VERIFIER_KEY_ENV: &str = "CSV_MINT_VERIFIER_KEY";
 /// value (bad hex, wrong length, not a valid secp256k1 scalar) also yields `None`
 /// with a warning, preserving fail-closed rather than panicking. The key material
 /// is never included in the log line.
-#[cfg(any(feature = "sui", feature = "solana", feature = "aptos"))]
+#[cfg(any(
+    feature = "ethereum",
+    feature = "sui",
+    feature = "solana",
+    feature = "aptos"
+))]
 pub(crate) fn load_mint_verifier_key() -> Option<secp256k1::SecretKey> {
     let raw = std::env::var(MINT_VERIFIER_KEY_ENV).ok()?;
     let trimmed = raw.trim().trim_start_matches("0x");

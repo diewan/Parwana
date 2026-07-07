@@ -2750,7 +2750,38 @@ impl TransferCoordinator {
                 ))
             }
             crate::recovery::TransferStage::Completed => {
-                Err(TransferCoordinatorError::AlreadyComplete)
+                let transfer = if let Some(transfer) = cached_transfer {
+                    transfer
+                } else if let Some(ctx) = recovery_entry.transfer_context {
+                    CrossChainTransfer {
+                        id: transfer_id.to_string(),
+                        source_chain: ctx.source_chain.clone(),
+                        destination_chain: ctx.destination_chain.clone(),
+                        lock_tx_hash: {
+                            let hash: csv_hash::Hash = ctx
+                                .lock_tx_hash
+                                .clone()
+                                .try_into()
+                                .unwrap_or_else(|_| csv_hash::Hash::zero());
+                            hash.as_bytes().to_vec()
+                        },
+                        lock_output_index: 0,
+                        sanad_id: {
+                            let sanad_id: csv_protocol::sanad::SanadId =
+                                ctx.sanad_id.clone().try_into().unwrap_or_else(|_| {
+                                    csv_protocol::sanad::SanadId(csv_hash::Hash::zero())
+                                });
+                            sanad_id.0
+                        },
+                        transition_id: vec![],
+                    }
+                } else {
+                    return Err(TransferCoordinatorError::AlreadyComplete);
+                };
+
+                self.completed_receipt_for(&transfer, transfer.sanad_id)
+                    .await?
+                    .ok_or(TransferCoordinatorError::AlreadyComplete)
             }
             crate::recovery::TransferStage::RolledBack => {
                 Err(TransferCoordinatorError::AlreadyRolledBack)
@@ -6368,6 +6399,35 @@ mod tests {
             mint_calls.load(std::sync::atomic::Ordering::SeqCst),
             1,
             "completed idempotent retry must not dispatch a second mint"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_completed_transfer_returns_recorded_receipt_without_second_mint() {
+        let coordinator = TransferCoordinator::new(
+            Box::new(csv_storage::InMemoryReplayDb::new()),
+            EventBus::new(),
+        );
+        let (registry, mint_calls) = strict_registry(None, true);
+        let transfer = operator_transfer("resume-completed", 42);
+        let ctx = operator_ctx(&transfer, std::time::Duration::from_millis(0), 1);
+
+        let first = coordinator
+            .execute(transfer.clone(), &registry, ctx.clone())
+            .await
+            .expect("first mint must complete");
+        let resumed = coordinator
+            .resume_transfer(&transfer.id, &registry, ctx)
+            .await
+            .expect("completed resume should return recorded receipt");
+
+        assert_eq!(first.transfer_id, resumed.transfer_id);
+        assert_eq!(first.lock_tx_hash, resumed.lock_tx_hash);
+        assert_eq!(first.mint_tx_hash, resumed.mint_tx_hash);
+        assert_eq!(
+            mint_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "completed resume must not dispatch a second mint"
         );
     }
 

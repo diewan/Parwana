@@ -308,6 +308,54 @@ impl ChainAdapter for AptosRuntimeAdapter {
         Ok(balance.total.to_string())
     }
 
+    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        #[cfg(feature = "rpc")]
+        {
+            let tx_bytes = hex::decode(tx_hash.trim_start_matches("0x")).map_err(|e| {
+                AdapterError::Generic(format!("Invalid Aptos transaction hash: {}", e))
+            })?;
+            if tx_bytes.len() != 32 {
+                return Err(AdapterError::Generic(format!(
+                    "Invalid Aptos transaction hash length: expected 32 bytes, got {}",
+                    tx_bytes.len()
+                )));
+            }
+            let mut tx_hash_bytes = [0u8; 32];
+            tx_hash_bytes.copy_from_slice(&tx_bytes);
+
+            let tx = self
+                .backend
+                .rpc()
+                .wait_for_transaction(tx_hash_bytes)
+                .await
+                .map_err(|e| {
+                    AdapterError::RpcError(format!(
+                        "Failed to confirm Aptos transaction {}: {}",
+                        tx_hash, e
+                    ))
+                })?;
+
+            if !tx.success {
+                return Err(AdapterError::ProofVerificationFailed(format!(
+                    "Aptos transaction {} reverted: {}",
+                    tx_hash, tx.vm_status
+                )));
+            }
+
+            Ok(MintResult {
+                tx_hash: hex::encode(tx_hash_bytes),
+                block_height: tx.version,
+            })
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let _ = tx_hash;
+            Err(AdapterError::Generic(
+                "Cannot confirm Aptos transaction: the 'rpc' feature is not enabled".to_string(),
+            ))
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -422,6 +470,18 @@ mod tests {
             result.is_err(),
             "must reject a payload that is not a canonical RuntimeMintRequest"
         );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[tokio::test]
+    async fn confirm_tx_returns_confirmed_ledger_version() {
+        let adapter = AptosRuntimeAdapter::new(test_backend(None));
+        let tx_hash = hex::encode([7u8; 32]);
+
+        let result = adapter.confirm_tx(&tx_hash).await.expect("confirm tx");
+
+        assert_eq!(result.tx_hash, tx_hash);
+        assert_eq!(result.block_height, 1);
     }
 
     #[cfg(feature = "rpc")]

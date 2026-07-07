@@ -129,6 +129,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             let mut destination_contract = [0u8; 32];
             destination_contract[12..].copy_from_slice(&contract_addr);
             attestation.destination_contract = destination_contract;
+            attestation.destination_chain_id = ethereum_contract_chain_id();
 
             // Compute the frozen §9.2 digest and attest it with the configured
             // verifier key. Fails closed (no signer -> no signature) rather than
@@ -600,6 +601,18 @@ fn build_mint_call(
             .map(|s| Bytes::from(s.clone()))
             .collect(),
     }
+}
+
+/// Contract-layer Ethereum chain identity: `keccak256("csv.chain.ethereum")`.
+///
+/// The EVM `CSVSeal` contract hardcodes this tag as `destinationChainId` in the
+/// §9.2 preimage, so the adapter must force the same value before signing.
+#[cfg(feature = "rpc")]
+fn ethereum_contract_chain_id() -> [u8; 32] {
+    use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+    *CrossChainHashAlgorithm::Keccak256
+        .hash_bytes(b"csv.chain.ethereum")
+        .as_bytes()
 }
 
 #[cfg(feature = "rpc")]
@@ -1127,6 +1140,16 @@ mod tests {
             result.is_err(),
             "must fail closed when no verifier signer is configured"
         );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn ethereum_contract_chain_id_is_keccak_of_chain_tag() {
+        use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+        let expected = *CrossChainHashAlgorithm::Keccak256
+            .hash_bytes(b"csv.chain.ethereum")
+            .as_bytes();
+        assert_eq!(ethereum_contract_chain_id(), expected);
     }
 
     #[cfg(feature = "rpc")]

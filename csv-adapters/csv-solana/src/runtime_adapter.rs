@@ -5,8 +5,8 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
-    SealRegistryStatus,
+    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintAttestationInputs, MintResult,
+    RuntimeMintRequest, SealRegistryStatus,
 };
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::finality::capabilities::{
@@ -15,9 +15,70 @@ use csv_protocol::finality::capabilities::{
 };
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
+use solana_sdk::pubkey::Pubkey;
 use std::sync::Arc;
 
 use crate::ops::SolanaBackend;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExistingMintRecord {
+    sanad_id: [u8; 32],
+    commitment: [u8; 32],
+    source_chain: [u8; 32],
+    destination_owner_hash: [u8; 32],
+    lock_event_id: [u8; 32],
+    nullifier: [u8; 32],
+}
+
+impl ExistingMintRecord {
+    const SIZE: usize = 8 + (6 * 32) + 8 + 1;
+    const HASH_FIELD_START: usize = 8;
+    const HASH_FIELD_END: usize = Self::HASH_FIELD_START + (6 * 32);
+
+    fn decode(data: &[u8]) -> Option<Self> {
+        if data.len() < Self::SIZE || data[..8] != anchor_account_discriminator("MintRecord") {
+            return None;
+        }
+
+        let fields = &data[Self::HASH_FIELD_START..Self::HASH_FIELD_END];
+        Some(Self {
+            sanad_id: fields[0..32].try_into().ok()?,
+            commitment: fields[32..64].try_into().ok()?,
+            source_chain: fields[64..96].try_into().ok()?,
+            destination_owner_hash: fields[96..128].try_into().ok()?,
+            lock_event_id: fields[128..160].try_into().ok()?,
+            nullifier: fields[160..192].try_into().ok()?,
+        })
+    }
+
+    fn matches_attestation(&self, attestation: &MintAttestationInputs) -> bool {
+        self.sanad_id == attestation.sanad_id
+            && self.commitment == attestation.commitment
+            && self.source_chain == attestation.source_chain
+            && self.destination_owner_hash == destination_owner_hash(&attestation.destination_owner)
+            && self.lock_event_id == attestation.lock_event_id
+            && self.nullifier == attestation.nullifier
+    }
+}
+
+fn anchor_account_discriminator(account_name: &str) -> [u8; 8] {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(format!("account:{account_name}").as_bytes());
+    let hash = hasher.finalize();
+    hash[..8]
+        .try_into()
+        .expect("SHA256 digest is at least 8 bytes")
+}
+
+fn destination_owner_hash(owner: &[u8]) -> [u8; 32] {
+    solana_program::keccak::hashv(&[owner]).to_bytes()
+}
+
+fn existing_mint_tx_ref(mint_record: &Pubkey) -> String {
+    hex::encode(mint_record.to_bytes())
+}
 
 /// Runtime adapter wrapper for Solana
 pub struct SolanaRuntimeAdapter {
@@ -60,6 +121,42 @@ impl SolanaRuntimeAdapter {
             signature_scheme,
             backend,
         }
+    }
+
+    fn idempotent_existing_mint(
+        &self,
+        mint_record: &Pubkey,
+        attestation: &MintAttestationInputs,
+    ) -> Result<Option<MintResult>, AdapterError> {
+        let account = match self.backend.rpc().get_account(mint_record) {
+            Ok(account) => account,
+            Err(_) => return Ok(None),
+        };
+
+        let record = ExistingMintRecord::decode(&account.data).ok_or_else(|| {
+            AdapterError::Generic(format!(
+                "Mint record PDA {} exists but does not decode as a CSV MintRecord",
+                mint_record
+            ))
+        })?;
+
+        if !record.matches_attestation(attestation) {
+            return Err(AdapterError::Generic(format!(
+                "Mint record PDA {} already exists for different mint inputs",
+                mint_record
+            )));
+        }
+
+        let block_height = self
+            .backend
+            .rpc()
+            .get_latest_slot()
+            .map_err(|e| AdapterError::Generic(format!("Failed to get slot: {}", e)))?;
+
+        Ok(Some(MintResult {
+            tx_hash: existing_mint_tx_ref(mint_record),
+            block_height,
+        }))
     }
 }
 
@@ -116,7 +213,6 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         // redesigned `mint_sanad` instruction. There is no proof root and no Merkle
         // proof anywhere on this path; Solana's weak native single-use is backstopped
         // by the three replay-tombstone PDAs the instruction creates.
-        use solana_sdk::pubkey::Pubkey;
         use solana_sdk::transaction::Transaction;
 
         let request: RuntimeMintRequest =
@@ -156,6 +252,12 @@ impl ChainAdapter for SolanaRuntimeAdapter {
                  recipient"
                     .to_string(),
             ));
+        }
+
+        let (mint_record, _) =
+            crate::anchor_client::pdas::mint_record(&program_id, &attestation.sanad_id);
+        if let Some(result) = self.idempotent_existing_mint(&mint_record, &attestation)? {
+            return Ok(result);
         }
 
         // Compute the frozen §9.2 digest and attest it with the configured verifier
@@ -202,11 +304,21 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         // Send the transaction (fails closed if the program rejects an
         // unauthenticated or duplicate mint at simulation/preflight).
-        let signature = self
-            .backend
-            .rpc()
-            .send_transaction(&transaction)
-            .map_err(|e| AdapterError::Generic(format!("Failed to send transaction: {}", e)))?;
+        let signature = match self.backend.rpc().send_transaction(&transaction) {
+            Ok(signature) => signature,
+            Err(e) => {
+                if format!("{}", e).contains("already in use")
+                    && let Some(result) =
+                        self.idempotent_existing_mint(&mint_record, &attestation)?
+                {
+                    return Ok(result);
+                }
+                return Err(AdapterError::Generic(format!(
+                    "Failed to send transaction: {}",
+                    e
+                )));
+            }
+        };
 
         // Get the block height - use slot as proxy since get_block_height not available in SolanaRpc
         let block_height = self
@@ -361,6 +473,69 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         Ok(balance_info.total.to_string())
     }
 
+    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        use crate::types::ConfirmationStatus;
+        use solana_sdk::signature::Signature;
+
+        if tx_hash.len() == 64
+            && tx_hash.chars().all(|c| c.is_ascii_hexdigit())
+            && let Ok(bytes) = hex::decode(tx_hash)
+            && let Ok(pubkey_bytes) = <[u8; 32]>::try_from(bytes.as_slice())
+        {
+            let mint_record = Pubkey::new_from_array(pubkey_bytes);
+            let account = self.backend.rpc().get_account(&mint_record).map_err(|e| {
+                AdapterError::RpcError(format!(
+                    "Failed to confirm Solana mint record {}: {}",
+                    mint_record, e
+                ))
+            })?;
+            ExistingMintRecord::decode(&account.data).ok_or_else(|| {
+                AdapterError::Generic(format!(
+                    "Solana mint record {} does not decode as a CSV MintRecord",
+                    mint_record
+                ))
+            })?;
+            let block_height = self.backend.rpc().get_latest_slot().map_err(|e| {
+                AdapterError::RpcError(format!("Failed to get Solana latest slot: {}", e))
+            })?;
+            return Ok(MintResult {
+                tx_hash: tx_hash.to_string(),
+                block_height,
+            });
+        }
+
+        let signature = tx_hash.parse::<Signature>().map_err(|e| {
+            AdapterError::Generic(format!("Invalid Solana transaction signature: {}", e))
+        })?;
+
+        let status = self
+            .backend
+            .rpc()
+            .wait_for_confirmation(&signature)
+            .map_err(|e| {
+                AdapterError::RpcError(format!(
+                    "Failed to confirm Solana transaction {}: {}",
+                    tx_hash, e
+                ))
+            })?;
+
+        match status {
+            ConfirmationStatus::Confirmed | ConfirmationStatus::Finalized => {
+                let block_height = self.backend.rpc().get_latest_slot().map_err(|e| {
+                    AdapterError::RpcError(format!("Failed to get Solana latest slot: {}", e))
+                })?;
+                Ok(MintResult {
+                    tx_hash: tx_hash.to_string(),
+                    block_height,
+                })
+            }
+            ConfirmationStatus::Processed => Err(AdapterError::Generic(format!(
+                "Solana transaction {} is processed but not yet confirmed",
+                tx_hash
+            ))),
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -388,18 +563,25 @@ mod tests {
     use crate::seal_protocol::SolanaSealProtocol;
     use csv_adapter_core::MintAttestationInputs;
     use csv_hash::Hash;
+    use std::str::FromStr;
 
     /// Deterministic non-default program id so the digest binding is exercised.
     const PROGRAM_ID: &str = "CCMF6BvAyTPNJAPtGMVJAR652Hv9VPy9NmVdgC9969dj";
 
     fn test_backend(verifier: Option<secp256k1::SecretKey>) -> Arc<SolanaBackend> {
+        test_backend_with_rpc(verifier, MockSolanaRpc::new())
+    }
+
+    fn test_backend_with_rpc(
+        verifier: Option<secp256k1::SecretKey>,
+        rpc: MockSolanaRpc,
+    ) -> Arc<SolanaBackend> {
         let config = SolanaConfig {
             network: Network::Devnet,
             csv_program_id: PROGRAM_ID.to_string(),
             ..Default::default()
         };
-        let seal = SolanaSealProtocol::from_config(config, Box::new(MockSolanaRpc::new()))
-            .expect("seal protocol");
+        let seal = SolanaSealProtocol::from_config(config, Box::new(rpc)).expect("seal protocol");
         let mut backend =
             SolanaBackend::from_seal_protocol(Arc::new(seal)).expect("backend from seal protocol");
         if let Some(v) = verifier {
@@ -443,6 +625,27 @@ mod tests {
         csv_codec::to_canonical_cbor(&request).expect("encode runtime mint request")
     }
 
+    fn mint_record_account(attestation: &MintAttestationInputs) -> solana_sdk::account::Account {
+        let mut data = Vec::with_capacity(ExistingMintRecord::SIZE);
+        data.extend_from_slice(&anchor_account_discriminator("MintRecord"));
+        data.extend_from_slice(&attestation.sanad_id);
+        data.extend_from_slice(&attestation.commitment);
+        data.extend_from_slice(&attestation.source_chain);
+        data.extend_from_slice(&destination_owner_hash(&attestation.destination_owner));
+        data.extend_from_slice(&attestation.lock_event_id);
+        data.extend_from_slice(&attestation.nullifier);
+        data.extend_from_slice(&123_i64.to_le_bytes());
+        data.push(255);
+
+        solana_sdk::account::Account {
+            lamports: 1_000_000,
+            data,
+            owner: Pubkey::from_str(PROGRAM_ID).expect("valid program id"),
+            executable: false,
+            rent_epoch: 0,
+        }
+    }
+
     #[tokio::test]
     async fn mint_sanad_rejects_request_bound_to_other_sanad() {
         // A payload whose attestation is for a different Sanad must be rejected
@@ -468,6 +671,46 @@ mod tests {
             result.is_err(),
             "must reject a payload that is not a canonical RuntimeMintRequest"
         );
+    }
+
+    #[tokio::test]
+    async fn confirm_tx_returns_confirmed_slot() {
+        let adapter = SolanaRuntimeAdapter::new(test_backend(None));
+        let signature = solana_sdk::signature::Signature::new_unique().to_string();
+
+        let result = adapter.confirm_tx(&signature).await.expect("confirm tx");
+
+        assert_eq!(result.tx_hash, signature);
+        assert_eq!(result.block_height, 1000);
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_existing_matching_record_is_idempotent_success() {
+        let sanad = Hash::new([2u8; 32]);
+        let mut attestation = mint_attestation(sanad);
+        attestation.destination_contract = Pubkey::from_str(PROGRAM_ID)
+            .expect("valid program id")
+            .to_bytes();
+        attestation.destination_chain_id = solana_contract_chain_id();
+        let (mint_record, _) = crate::anchor_client::pdas::mint_record(
+            &Pubkey::from_str(PROGRAM_ID).unwrap(),
+            &attestation.sanad_id,
+        );
+
+        let mut rpc = MockSolanaRpc::new();
+        rpc.add_account(mint_record, mint_record_account(&attestation));
+
+        let adapter = SolanaRuntimeAdapter::new(test_backend_with_rpc(None, rpc));
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+
+        let result = adapter
+            .mint_sanad(&transfer, &payload)
+            .await
+            .expect("matching existing mint record should be idempotent success");
+
+        assert_eq!(result.tx_hash, existing_mint_tx_ref(&mint_record));
+        assert_eq!(result.block_height, 1000);
     }
 
     #[tokio::test]

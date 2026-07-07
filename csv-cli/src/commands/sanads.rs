@@ -12,7 +12,9 @@ use csv_hash::sanad::SanadId;
 
 use crate::config::{Chain, Config, Network};
 use crate::output;
-use crate::state::{SanadRecord, SanadStatus, UnifiedStateManager, UtxoRecord};
+use crate::state::{
+    SanadRecord, SanadStatus, TransferRecord, TransferStatus, UnifiedStateManager, UtxoRecord,
+};
 
 use crate::wallet_identity::WalletIdentity;
 use csv_store::state::{CanonicalSanadState, SanadLifecycleState};
@@ -1310,12 +1312,61 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
         if let Some(nullifier) = &tracked.nullifier {
             output::kv_hash("Nullifier", nullifier.as_bytes());
         }
+        if let Some(transfer) = latest_transfer_for_sanad(&state.storage.transfers, &tracked.id) {
+            output::header("Latest Transfer");
+            output::kv("Transfer ID", &transfer.id);
+            output::kv("Status", &transfer_status_label(transfer, tracked.status));
+            output::kv("Destination Chain", transfer.dest_chain.as_ref());
+            if let Some(dest_addr) = &transfer.destination_address {
+                output::kv("Destination Owner", dest_addr);
+            }
+            if let Some(dest_tx) = &transfer.dest_tx_hash {
+                output::kv("Destination Tx", dest_tx);
+            }
+            if let Some(source_tx) = &transfer.source_tx_hash {
+                output::kv("Source Tx", source_tx);
+            }
+        }
     } else {
         output::warning("Sanad not found in local tracking");
         output::info("This Sanad may exist on-chain but hasn't been tracked locally");
     }
 
     Ok(())
+}
+
+fn latest_transfer_for_sanad<'a>(
+    transfers: &'a [TransferRecord],
+    sanad_id: &str,
+) -> Option<&'a TransferRecord> {
+    transfers
+        .iter()
+        .filter(|transfer| transfer.sanad_id == sanad_id)
+        .max_by_key(|transfer| transfer.completed_at.unwrap_or(transfer.created_at))
+}
+
+fn transfer_status_label(transfer: &TransferRecord, local_status: SanadStatus) -> String {
+    match transfer.status {
+        TransferStatus::Completed => {
+            if local_status == SanadStatus::Transferred {
+                "Transferred".to_string()
+            } else {
+                "Transfer completed".to_string()
+            }
+        }
+        TransferStatus::Locked => "Locked awaiting finality".to_string(),
+        TransferStatus::Failed => "Transfer failed".to_string(),
+        other => format!("{:?}", other),
+    }
+}
+
+fn transfer_destination_label(transfer: &TransferRecord) -> String {
+    match &transfer.destination_address {
+        Some(address) if !address.is_empty() => {
+            format!("{}:{}", transfer.dest_chain, address)
+        }
+        _ => transfer.dest_chain.to_string(),
+    }
 }
 
 /// Resolved display label and (optional) status update for a single `cmd_list` row.
@@ -1386,7 +1437,14 @@ async fn cmd_list(
         );
     }
 
-    let headers = vec!["Sanad ID", "Chain", "State"];
+    let headers = vec![
+        "Sanad ID",
+        "Chain",
+        "State",
+        "Transfer ID",
+        "Destination",
+        "Destination Tx",
+    ];
     let mut rows = Vec::new();
     let mut updates_to_apply: Vec<(String, SanadStatus)> = Vec::new();
 
@@ -1396,6 +1454,9 @@ async fn cmd_list(
         {
             continue;
         }
+
+        let latest_transfer =
+            latest_transfer_for_sanad(&state.storage.transfers, &sanad.id).cloned();
 
         // Check if sanad has a valid seal_ref (required for non-Bitcoin chains)
         let has_valid_seal = if sanad.chain.as_str() != "bitcoin" {
@@ -1413,12 +1474,21 @@ async fn cmd_list(
             None
         };
 
-        let resolved = resolve_sanad_row_status(
+        let mut resolved = resolve_sanad_row_status(
             update,
             has_valid_seal,
             sanad.status,
             on_chain_state.as_ref().map(|cs| cs.state),
         );
+
+        if let Some(transfer) = &latest_transfer
+            && transfer.status == TransferStatus::Completed
+            && transfer.dest_tx_hash.is_some()
+        {
+            resolved.label = "Transferred".to_string();
+            resolved.status_update =
+                (sanad.status != SanadStatus::Transferred).then_some(SanadStatus::Transferred);
+        }
 
         if let Some(new_status) = resolved.status_update
             && sanad.status != new_status
@@ -1426,10 +1496,27 @@ async fn cmd_list(
             updates_to_apply.push((sanad.id.clone(), new_status));
         }
 
+        let (transfer_id, destination, destination_tx) = latest_transfer
+            .as_ref()
+            .map(|transfer| {
+                (
+                    transfer.id.clone(),
+                    transfer_destination_label(transfer),
+                    transfer
+                        .dest_tx_hash
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                )
+            })
+            .unwrap_or_else(|| ("-".to_string(), "-".to_string(), "-".to_string()));
+
         rows.push(vec![
             sanad.id.clone(),
             sanad.chain.to_string(),
             resolved.label,
+            transfer_id,
+            destination,
+            destination_tx,
         ]);
     }
 

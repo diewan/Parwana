@@ -65,6 +65,12 @@ pub struct EthereumBackend {
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     pub(crate) seal_protocol: Arc<EthereumSealProtocol>,
+    /// secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation digest.
+    ///
+    /// Distinct from the EVM wallet signer that submits and pays for the transaction:
+    /// the contract authenticates mint authority by recovering this verifier from
+    /// the digest signature, independent of `msg.sender`.
+    verifier_signing_key: Option<secp256k1::SecretKey>,
 }
 
 /// Unsigned deployment transaction for contract deployment
@@ -127,6 +133,7 @@ impl EthereumBackend {
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: Arc::new(seal),
+            verifier_signing_key: None,
         })
     }
 
@@ -143,12 +150,21 @@ impl EthereumBackend {
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: seal,
+            verifier_signing_key: None,
         })
     }
 
     /// Set the seal contract address for sanad operations
     pub fn with_contract(mut self, address: [u8; 20]) -> Self {
         self.contract_address = Some(address);
+        self
+    }
+
+    /// Set the secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation
+    /// digest. This key must correspond to the verifier authorized by the deployed
+    /// CSVSeal contract; it is not used to pay gas.
+    pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
+        self.verifier_signing_key = Some(verifier_signing_key);
         self
     }
 
@@ -182,6 +198,35 @@ impl EthereumBackend {
     #[allow(dead_code)]
     fn format_address(&self, addr: [u8; 20]) -> String {
         format!("0x{}", hex::encode(addr))
+    }
+
+    /// Derive the canonical Ethereum address for a secp256k1 public key.
+    ///
+    /// Ethereum uses the last 20 bytes of Keccak256 over the 64-byte uncompressed
+    /// public key body (`x || y`), excluding the SEC1 `0x04` prefix. Callers may
+    /// provide either compressed or uncompressed SEC1 public keys.
+    fn ethereum_address_from_public_key(public_key: &[u8]) -> ChainOpResult<[u8; 20]> {
+        use secp256k1::PublicKey;
+        use sha3::{Digest, Keccak256};
+
+        let public_key = PublicKey::from_slice(public_key)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid public key: {}", e)))?;
+        let uncompressed = public_key.serialize_uncompressed();
+        let hash = Keccak256::digest(&uncompressed[1..]);
+
+        let mut addr = [0u8; 20];
+        addr.copy_from_slice(&hash[12..32]);
+        Ok(addr)
+    }
+
+    fn ethereum_address_from_secret_key(
+        secret_key: &secp256k1::SecretKey,
+    ) -> ChainOpResult<[u8; 20]> {
+        use secp256k1::{PublicKey, Secp256k1};
+
+        let secp = Secp256k1::new();
+        let public_key = PublicKey::from_secret_key(&secp, secret_key);
+        Self::ethereum_address_from_public_key(&public_key.serialize_uncompressed())
     }
 
     /// Encode a view function call with a bytes32 argument
@@ -403,8 +448,7 @@ impl EthereumBackend {
 
         // Build EIP-1559 transaction with gas bumping retry logic
         let max_retries = 3;
-        let mut current_max_fee = gas_price as u128;
-        let max_priority_fee = 1_000_000_000u128; // 1 Gwei priority fee
+        let (mut current_max_fee, max_priority_fee) = eip1559_fee_caps(gas_price as u128);
 
         for retry_count in 0..max_retries {
             let tx = TxEip1559 {
@@ -540,26 +584,17 @@ impl EthereumBackend {
     /// This is a raw ECDSA signature over the digest itself — NOT an
     /// `eth_sign`/personal-message signature — so it recovers under the
     /// contract's `ecrecover(digest, v, r, s)` verifier check. Fails closed when
-    /// no signer is configured rather than emitting an unauthenticated mint.
+    /// no verifier signer is configured rather than emitting an unauthenticated mint.
     #[cfg(feature = "rpc")]
     pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
-        use secp256k1::{Message, Secp256k1, SecretKey};
+        use secp256k1::{Message, Secp256k1};
 
-        let signer = self
-            .rpc()
-            .as_any()
-            .and_then(|any| any.downcast_ref::<crate::node::EthereumNode>())
-            .and_then(|node| node.signer())
-            .ok_or_else(|| {
-                ChainOpError::SigningError(
-                    "No verifier signer configured: cannot attest the §9.2 mint digest \
-                     (set a private key on the RPC client via with_signer())"
-                        .to_string(),
-                )
-            })?;
-
-        let secret_key = SecretKey::from_slice(&signer.credential().to_bytes()).map_err(|e| {
-            ChainOpError::SigningError(format!("Invalid verifier secret key: {}", e))
+        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+            ChainOpError::SigningError(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set CSV_MINT_VERIFIER_KEY to the verifier key registered in CSVSeal)"
+                    .to_string(),
+            )
         })?;
 
         // Sign the digest bytes directly (no Ethereum message prefix), matching
@@ -763,12 +798,7 @@ impl ChainSigner for EthereumBackend {
             ));
         }
 
-        // Ethereum address = last 20 bytes of Keccak256(public_key)
-        use sha3::{Digest, Keccak256};
-        let hash = Keccak256::digest(public_key);
-        let mut addr = [0u8; 20];
-        addr.copy_from_slice(&hash[12..32]);
-
+        let addr = Self::ethereum_address_from_public_key(public_key)?;
         Ok(format!("0x{}", hex::encode(addr)))
     }
 
@@ -1659,6 +1689,12 @@ fn canonical_sanad_state_code(expected_state: &str) -> Option<u8> {
     }
 }
 
+fn eip1559_fee_caps(gas_price: u128) -> (u128, u128) {
+    let max_priority_fee = 1_000_000_000u128; // 1 Gwei priority fee
+    let max_fee = gas_price.max(max_priority_fee);
+    (max_fee, max_priority_fee)
+}
+
 /// Parse an optional 32-byte hex field out of a metadata JSON object.
 ///
 /// Missing fields default to the zero hash (a valid, contract-supported "unset"
@@ -2094,23 +2130,15 @@ impl ChainReadinessCheck for EthereumBackend {
         // Derive signer address from private key if available
         let signer_address = if signer_configured {
             if let Some(ref secret_key) = self.seal_protocol.config().private_key {
-                use secp256k1::{PublicKey, Secp256k1, SecretKey};
-                let secp = Secp256k1::new();
+                use secp256k1::SecretKey;
                 let key_bytes = secret_key.expose_secret();
                 let secret_key_obj = SecretKey::from_slice(key_bytes).map_err(|e| {
                     ChainOpError::InvalidInput(format!("Invalid secret key: {}", e))
                 })?;
-                let public_key = PublicKey::from_secret_key(&secp, &secret_key_obj);
-                let public_key_bytes = public_key.serialize_uncompressed();
-
-                // Derive Ethereum address from public key (last 20 bytes of keccak256 hash)
-                use tiny_keccak::{Hasher, Keccak};
-                let mut hasher = Keccak::v256();
-                let mut hash = [0u8; 32];
-                hasher.update(&public_key_bytes[1..]); // Skip first byte (uncompressed prefix)
-                hasher.finalize(&mut hash);
-                let address_bytes = &hash[12..];
-                Some(format!("0x{}", hex::encode(address_bytes)))
+                Some(format!(
+                    "0x{}",
+                    hex::encode(Self::ethereum_address_from_secret_key(&secret_key_obj)?)
+                ))
             } else {
                 None
             }
@@ -2273,6 +2301,93 @@ mod tests {
         assert_eq!(canonical_sanad_state_code("invalid"), Some(9));
         assert_eq!(canonical_sanad_state_code("4"), Some(4));
         assert_eq!(canonical_sanad_state_code("not-a-state"), None);
+    }
+
+    #[test]
+    fn test_eip1559_fee_caps_keep_max_fee_at_least_priority_fee() {
+        let (max_fee, priority_fee) = eip1559_fee_caps(100_000_000);
+        assert_eq!(priority_fee, 1_000_000_000);
+        assert_eq!(max_fee, priority_fee);
+
+        let (max_fee, priority_fee) = eip1559_fee_caps(2_000_000_000);
+        assert_eq!(priority_fee, 1_000_000_000);
+        assert_eq!(max_fee, 2_000_000_000);
+    }
+
+    #[test]
+    fn ethereum_address_derivation_matches_foundry_vm_addr_semantics() {
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+        let ops = test_ops_with_contract(None);
+        let cases = [
+            (
+                "3c2277ba7f668351804ac0efa97137f338fedadb63e7b70d417de0084b7ef2f2",
+                "4691babba8bf9a962c83c42bed1cadc7c7d01073",
+            ),
+            (
+                "4809be89a096884aab1c50d0d2959bf7669a47649f39d9dc009a6ce981151f8f",
+                "643805b7b33790b310d0792f303e42eaf8d5e5ae",
+            ),
+        ];
+
+        for (key_hex, expected_address) in cases {
+            let key_bytes = hex::decode(key_hex).unwrap();
+            let secret_key = SecretKey::from_slice(&key_bytes).unwrap();
+            let secp = Secp256k1::new();
+            let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+            let expected_address_hex = format!("0x{}", expected_address);
+
+            assert_eq!(
+                ops.derive_address(&public_key.serialize_uncompressed())
+                    .unwrap(),
+                expected_address_hex
+            );
+            assert_eq!(
+                ops.derive_address(&public_key.serialize()).unwrap(),
+                expected_address_hex
+            );
+            assert_eq!(
+                hex::encode(
+                    EthereumBackend::ethereum_address_from_secret_key(&secret_key).unwrap()
+                ),
+                expected_address
+            );
+        }
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn mint_attestation_signature_recovers_configured_verifier_address() {
+        use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+        use secp256k1::{Message, Secp256k1, SecretKey};
+
+        let key_bytes =
+            hex::decode("3c2277ba7f668351804ac0efa97137f338fedadb63e7b70d417de0084b7ef2f2")
+                .unwrap();
+        let secret_key = SecretKey::from_slice(&key_bytes).unwrap();
+        let ops = test_ops_with_contract(None).with_verifier_key(secret_key);
+        let digest = [0x42u8; 32];
+
+        let signature = ops.sign_mint_attestation_digest(&digest).unwrap();
+        assert_eq!(signature.len(), 65);
+        assert!(signature[64] == 27 || signature[64] == 28);
+
+        let recovery_id = RecoveryId::from_i32((signature[64] - 27) as i32).unwrap();
+        let recoverable =
+            RecoverableSignature::from_compact(&signature[..64], recovery_id).unwrap();
+        let recovered = Secp256k1::new()
+            .recover_ecdsa(&Message::from_digest(digest), &recoverable)
+            .unwrap();
+
+        assert_eq!(
+            hex::encode(
+                EthereumBackend::ethereum_address_from_public_key(
+                    &recovered.serialize_uncompressed()
+                )
+                .unwrap()
+            ),
+            "4691babba8bf9a962c83c42bed1cadc7c7d01073"
+        );
     }
 
     #[test]

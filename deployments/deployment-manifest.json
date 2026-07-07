@@ -14,11 +14,11 @@
       "contracts": [
         {
           "name": "CSVSeal",
-          "address": "0x542c4c4ee03ec3fcb21f54613c038fab7e965216",
-          "deployment_tx": "0x598a6b12aa7cfbbc81e3d6cb9a5fc0d3548c349772ab4c07fd76eed6c4681ae2",
-          "block_number": "11084747",
-          "bytecode_hash": "7227e552d193c02a3ca5f1c57bbd4e7fc5fb77fdddd3e054efd9c1ad54efa0ab",
-          "abi_hash": "74bac11175cda72653bd80bce55b616c2d81c9fc8e9da52668235235d3f80f41",
+          "address": "0xba3838a7105b0131d418ac344bf999f420b12938",
+          "deployment_tx": "0x8c2179059733dc753526c1e50b9b7ac30adf14a459dc85e737832a17907ab217",
+          "block_number": "11225104",
+          "bytecode_hash": "0x37d99036d4e4de05aac0ec308a698053015c066520a6f190183a17310cec5e77",
+          "abi_hash": "0x482075f894b4433d4c3ea5bf2cd016a923151719012aabbd8370153b5ca2d868",
           "verified": true,
           "constructor_args": {
             "verifier": ""

@@ -82,7 +82,7 @@ impl AdapterFactory for EthereumFactory {
         }
 
         // Create ChainBackend. Fails closed (no mock fallback) if construction fails.
-        let eth_backend = Arc::new(
+        let mut eth_backend =
             EthereumBackend::new(Box::new(rpc) as Box<dyn EthereumRpc>, eth_config).map_err(
                 |e| {
                     FactoryError::CreationFailed(format!(
@@ -90,8 +90,20 @@ impl AdapterFactory for EthereumFactory {
                         e
                     ))
                 },
-            )?,
-        );
+            )?;
+        // Attach the RFC-0012 mint verifier signing key if provided (env). This is
+        // distinct from the EVM transaction signer configured above: the wallet
+        // pays gas, while this key authorizes the §9.2 attestation digest.
+        if let Some(vk) = super::load_mint_verifier_key() {
+            eth_backend = eth_backend.with_verifier_key(vk);
+            log::info!("Factory: Ethereum adapter configured with mint verifier key");
+        } else {
+            log::warn!(
+                "Factory: no mint verifier key ({}) — Ethereum mint will fail closed",
+                super::MINT_VERIFIER_KEY_ENV
+            );
+        }
+        let eth_backend = Arc::new(eth_backend);
 
         let chain_backend: Arc<dyn ChainBackend> = eth_backend.clone();
 

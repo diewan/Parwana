@@ -1468,7 +1468,7 @@ async fn drive(
     loop {
         match outcome {
             TransferOutcome::Completed(receipt) => {
-                record_completed(state, &receipt, &from, &to, &sanad_id);
+                record_completed(state, &receipt, &from, &to, &sanad_id, dest_owner.clone());
                 state.save()?;
                 output::success(&format!(
                     "Transfer {} completed. Sanad locked on source chain and minted on destination chain.",
@@ -1654,6 +1654,7 @@ fn record_completed(
     from: &Chain,
     to: &Chain,
     sanad_id: &SanadId,
+    dest_owner: Option<String>,
 ) {
     let now = chrono::Utc::now().timestamp() as u64;
     let sender = state.get_address(from).map(|s| s.to_string());
@@ -1665,7 +1666,7 @@ fn record_completed(
         dest_chain: to.clone(),
         sanad_id: sanad_hex.clone(),
         sender_address: sender,
-        destination_address: None,
+        destination_address: dest_owner,
         source_tx_hash: Some(receipt.lock_tx_hash.clone()),
         source_fee: None,
         dest_tx_hash: Some(receipt.mint_tx_hash.clone()),
@@ -1678,12 +1679,13 @@ fn record_completed(
         provenance_strength: provenance_strength_signal(from, to),
     });
 
-    // The runtime only reports Completed after the destination mint confirms and
-    // the replay entry is promoted to Consumed, so it is safe to mark the source
-    // Sanad consumed in the local display cache.
-    if let Err(e) = state.consume_sanad(&sanad_hex) {
+    // The source seal is consumed on-chain, but the user-facing Sanad lifecycle
+    // is a completed materialization onto the destination chain. Keep the local
+    // display cache searchable as Transferred and point at the transfer record
+    // for the destination mint evidence.
+    if let Err(e) = state.update_sanad_status(&sanad_hex, SanadStatus::Transferred) {
         log::warn!(
-            "Failed to mark source Sanad as consumed in local store: {}",
+            "Failed to mark source Sanad as transferred in local store: {}",
             e
         );
     }
