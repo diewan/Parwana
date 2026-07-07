@@ -16,9 +16,17 @@ pub struct ProofCommitment {
 }
 
 impl ProofCommitment {
-    /// Create a new proof commitment
-    pub fn new(data: &[u8]) -> Self {
-        let salt = [0u8; 32]; // Placeholder: use random salt
+    /// Create a new proof commitment binding `data` under the caller-supplied
+    /// `salt`.
+    ///
+    /// The salt is what gives the commitment its hiding property: without a
+    /// high-entropy, unpredictable salt this reduces to a plain hash of `data`,
+    /// so commitments to low-entropy inputs become brute-forceable and equal
+    /// inputs produce equal commitments. Callers MUST pass a cryptographically
+    /// random 32-byte salt (e.g. `rand::random()`), never a constant. The salt
+    /// is required rather than defaulted precisely so it cannot silently be
+    /// left as zero.
+    pub fn new(data: &[u8], salt: [u8; 32]) -> Self {
         let combined = Self::combine_data_and_salt(data, &salt);
         let hash = DomainSeparatedHash::<ProofBundleDomain>::hash(&combined);
         Self { hash, salt }

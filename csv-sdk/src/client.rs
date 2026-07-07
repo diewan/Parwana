@@ -473,7 +473,6 @@ impl CsvClient {
                                 .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string())
                         }
                     });
-                eprintln!("SDK LAYER: RPC URL from SDK config: {}", config_rpc_url);
                 let rpc_url = config_rpc_url;
                 let chain_config = _config.chains.get("bitcoin");
                 let mut utxos = Vec::new();

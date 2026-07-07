@@ -240,6 +240,7 @@ impl TransferManager {
         sanad_id: SanadId,
         from_chain: ChainId,
         to_chain: ChainId,
+        to_address: Option<String>,
     ) -> Result<TransferOutcome, CsvError> {
         let coordinator = self.coordinator.as_ref().ok_or_else(|| {
             CsvError::CoordinatorNotAvailable(
@@ -251,7 +252,11 @@ impl TransferManager {
             CsvError::RuntimeError(format!("Failed to lock adapter registry: {}", e))
         })?;
 
-        let runtime_ctx = build_runtime_ctx(&sanad_id, Some(&self.config))?;
+        let destination_owner = to_address
+            .as_deref()
+            .map(|address| destination_owner_bytes(&to_chain, address))
+            .transpose()?;
+        let runtime_ctx = build_runtime_ctx(&sanad_id, Some(&self.config), destination_owner)?;
 
         let outcome = coordinator
             .resume_transfer_outcome(transfer_id, &*adapter_registry, runtime_ctx)
@@ -491,7 +496,7 @@ impl TransferBuilder {
     /// [`TransferManager::resume`].
     #[allow(clippy::await_holding_lock)]
     pub async fn execute_outcome(self) -> Result<TransferOutcome, CsvError> {
-        let _to_address = self.to_address.as_ref().ok_or_else(|| {
+        let to_address = self.to_address.as_ref().ok_or_else(|| {
             CsvError::BuilderError(
                 "Destination address is required. Use .to_address() to set it.".to_string(),
             )
@@ -527,7 +532,12 @@ impl TransferBuilder {
                         transition_id: uuid::Uuid::new_v4().to_string().into(),
                     };
 
-                    let runtime_ctx = build_runtime_ctx(&self.sanad_id, self.config.as_deref())?;
+                    let destination_owner = destination_owner_bytes(&self.to_chain, to_address)?;
+                    let runtime_ctx = build_runtime_ctx(
+                        &self.sanad_id,
+                        self.config.as_deref(),
+                        Some(destination_owner),
+                    )?;
 
                     // Execute transfer through the resumable coordinator core.
                     let outcome = coordinator
@@ -601,6 +611,7 @@ impl TransferBuilder {
 fn build_runtime_ctx(
     sanad_id: &SanadId,
     config: Option<&crate::config::Config>,
+    destination_owner: Option<Vec<u8>>,
 ) -> Result<RuntimeExecutionContext, CsvError> {
     // Derive a deterministic runtime identity from the sanad so that the initial
     // execute and every subsequent in-process resume share the same lease owner
@@ -626,7 +637,27 @@ fn build_runtime_ctx(
         runtime_instance: runtime_id,
         lease,
         policy,
+        destination_owner,
     })
+}
+
+fn destination_owner_bytes(chain: &ChainId, address: &str) -> Result<Vec<u8>, CsvError> {
+    match chain.as_str() {
+        "sui" | "aptos" => {
+            let bytes = hex::decode(address.trim_start_matches("0x")).map_err(|e| {
+                CsvError::BuilderError(format!("Invalid {} destination address hex: {}", chain, e))
+            })?;
+            if bytes.len() != 32 {
+                return Err(CsvError::BuilderError(format!(
+                    "{} destination address must be 32 bytes, got {}",
+                    chain,
+                    bytes.len()
+                )));
+            }
+            Ok(bytes)
+        }
+        _ => Ok(address.as_bytes().to_vec()),
+    }
 }
 
 #[allow(dead_code)]

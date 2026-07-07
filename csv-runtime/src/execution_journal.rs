@@ -280,8 +280,15 @@ impl ExecutionJournal for RocksDbExecutionJournal {
             .lock()
             .map_err(|e| JournalError::Io(e.to_string()))?;
         let key = Self::entry_key(*sequence);
+        // Durability is the whole point of this journal: the phase MUST be on
+        // stable storage before the corresponding chain action runs, otherwise
+        // a crash between the (async) write and the action loses the entry and
+        // defeats crash-safe resume. A plain `put` only reaches the OS page
+        // cache, so force an fsync of the WAL on every record.
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
         self.db
-            .put(key, bytes)
+            .put_opt(key, bytes, &write_opts)
             .map_err(|e| JournalError::Io(e.to_string()))?;
         *sequence += 1;
         Ok(())

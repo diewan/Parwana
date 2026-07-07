@@ -1,12 +1,14 @@
 //! Output formatting helpers
 
 use colored::Colorize;
+use std::io::Write;
 
 pub fn success(msg: &str) {
     println!("{} {}", "✓".green().bold(), msg);
 }
 
 pub fn error(msg: &str) {
+    let _ = std::io::stdout().flush();
     eprintln!("{} {}", "✗".red().bold(), msg);
 }
 

@@ -158,6 +158,7 @@ fn build_runtime_mint_request(
     transfer: &CrossChainTransfer,
     proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle,
     proof_bundle_bytes: Vec<u8>,
+    destination_owner: Vec<u8>,
 ) -> RuntimeMintRequest {
     RuntimeMintRequest {
         attestation: MintAttestationInputs {
@@ -166,7 +167,7 @@ fn build_runtime_mint_request(
             sanad_id: *transfer.sanad_id.as_bytes(),
             commitment: commitment_from_bundle(proof_bundle),
             source_chain: contract_chain_id(&transfer.source_chain),
-            destination_owner: Vec::new(),
+            destination_owner,
             lock_event_id: lock_event_id(transfer),
             nullifier: mint_nullifier(proof_bundle),
             attestation_expiry: 0,
@@ -1701,8 +1702,13 @@ impl TransferCoordinator {
         // off-chain verifier above is the sole proof adjudicator; this request
         // carries attestation inputs (chain identities via keccak256, commitment,
         // lock-event id, nullifier), never a proof root.
-        let mint_request =
-            build_runtime_mint_request(&transfer, &proof_bundle, proof_bundle_bytes.clone());
+        let destination_owner = runtime_ctx.destination_owner.clone().unwrap_or_default();
+        let mint_request = build_runtime_mint_request(
+            &transfer,
+            &proof_bundle,
+            proof_bundle_bytes.clone(),
+            destination_owner,
+        );
         let mint_payload = encode_mint_request(&mint_request)?;
 
         let mut mint_result = None;
@@ -2701,9 +2707,35 @@ impl TransferCoordinator {
                     })
                     .ok_or(TransferCoordinatorError::NotFound)?;
                 if entry.mint_tx_hash == csv_hash::Hash::zero() {
-                    return Err(TransferCoordinatorError::RuntimeError(
-                        "Cannot resume from MintSubmitted phase - mint tx hash missing".to_string(),
-                    ));
+                    let transfer = cached_transfer.ok_or_else(|| {
+                        TransferCoordinatorError::RuntimeError(
+                            "Cannot recover MintSubmitted without transfer cache entry".to_string(),
+                        )
+                    })?;
+                    let proof_payload = recovery_entry.proof_payload.ok_or_else(|| {
+                        TransferCoordinatorError::RuntimeError(
+                            "Cannot recover MintSubmitted without persisted proof payload"
+                                .to_string(),
+                        )
+                    })?;
+                    if proof_payload.is_empty() {
+                        return Err(TransferCoordinatorError::RuntimeError(
+                            "Cannot recover MintSubmitted with empty proof payload".to_string(),
+                        ));
+                    }
+                    if recovery_entry.proof_hash != proof_payload_hash(&proof_payload) {
+                        return Err(TransferCoordinatorError::ProofVerificationFailed(
+                            "Persisted proof payload does not match journal digest".to_string(),
+                        ));
+                    }
+                    tracing::warn!(
+                        "Transfer {} reached MintSubmitted without durable mint tx hash; \
+                         resubmitting from persisted verified proof",
+                        transfer_id
+                    );
+                    return self
+                        .execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
+                        .await;
                 }
                 let mint_tx_hash = hex::encode(entry.mint_tx_hash.as_bytes());
                 self.execute_from_mint(transfer_id, &mint_tx_hash, adapter_registry, runtime_ctx)
@@ -3052,7 +3084,11 @@ impl TransferCoordinator {
             source_chain: transfer.source_chain.clone(),
             destination_chain: transfer.destination_chain.clone(),
             lock_tx_hash: csv_hash::Hash::new(lock_bytes).into(),
-            destination_owner: String::new(),
+            destination_owner: runtime_ctx
+                .destination_owner
+                .as_ref()
+                .map(hex::encode)
+                .unwrap_or_default(),
         };
 
         self.execution_journal
@@ -3238,8 +3274,13 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
         // Same attestation-carrying request on the resume path so a recovered
         // transfer submits the identical §9.2 mint request as a fresh one.
-        let mint_request =
-            build_runtime_mint_request(&transfer, &proof_bundle, proof_payload.clone());
+        let destination_owner = runtime_ctx.destination_owner.clone().unwrap_or_default();
+        let mint_request = build_runtime_mint_request(
+            &transfer,
+            &proof_bundle,
+            proof_payload.clone(),
+            destination_owner,
+        );
         let mint_payload = encode_mint_request(&mint_request)?;
         let mint_result = adapter_registry
             .mint_sanad(&transfer.destination_chain, &transfer, &mint_payload)
@@ -4067,6 +4108,7 @@ mod tests {
             },
             runtime_instance: owner,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
         (coordinator, registry, transfer, runtime_ctx)
     }
@@ -4278,6 +4320,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // First transfer should succeed
@@ -4324,6 +4367,7 @@ mod tests {
             lease: pending_lease.clone(),
             runtime_instance: pending_lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // First execution inserts Pending, then the mint succeeds and confirms.
@@ -4439,6 +4483,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, runtime_ctx).await;
@@ -4483,6 +4528,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: production_policy,
+            destination_owner: None,
         };
 
         let result = coordinator
@@ -4499,6 +4545,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: dev_policy,
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, runtime_ctx).await;
@@ -4546,6 +4593,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy,
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, runtime_ctx).await;
@@ -4594,6 +4642,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, runtime_ctx).await;
@@ -4684,6 +4733,7 @@ mod tests {
             lease: original_lease.clone(),
             runtime_instance: original_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // Original runtime executes successfully
@@ -4705,6 +4755,7 @@ mod tests {
             lease: failover_lease,
             runtime_instance: failover_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator
@@ -4754,6 +4805,7 @@ mod tests {
             lease: expired_lease,
             runtime_instance: original_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // Original runtime with expired lease should fail
@@ -4778,6 +4830,7 @@ mod tests {
             lease: failover_lease,
             runtime_instance: failover_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, failover_ctx).await;
@@ -4820,6 +4873,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // Execute transfer successfully
@@ -4944,6 +4998,7 @@ mod tests {
                     lease: lease_clone,
                     runtime_instance: runtime_id_clone,
                     policy: crate::policy::RuntimePolicy::new(),
+                    destination_owner: None,
                 };
                 coord.execute(transfer_clone, reg.as_ref(), ctx).await
             }));
@@ -5019,6 +5074,7 @@ mod tests {
                     lease,
                     runtime_instance: runtime_id,
                     policy: crate::policy::RuntimePolicy::new(),
+                    destination_owner: None,
                 };
                 coord.execute(transfer_clone, reg.as_ref(), ctx).await
             }));
@@ -5151,6 +5207,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // Transfer should fail due to malicious proof bundle rejection
@@ -5195,6 +5252,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // First execution should succeed
@@ -5232,6 +5290,7 @@ mod tests {
             lease: replay_lease.clone(),
             runtime_instance: replay_lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator
@@ -5281,6 +5340,7 @@ mod tests {
             lease: lease_epoch_1,
             runtime_instance: runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator
@@ -5301,6 +5361,7 @@ mod tests {
             lease: lease_epoch_2,
             runtime_instance: runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator
@@ -5321,6 +5382,7 @@ mod tests {
             lease: stale_lease,
             runtime_instance: runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, stale_ctx).await;
@@ -5364,6 +5426,7 @@ mod tests {
             lease: lease.clone(),
             runtime_instance: lease.owner_runtime_id,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         // Execute transfer successfully
@@ -5502,7 +5565,13 @@ mod tests {
         let bundle = LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id).unwrap();
         let bytes = bundle.to_canonical_bytes().unwrap();
 
-        let request = build_runtime_mint_request(&transfer, &bundle, bytes.clone());
+        let destination_owner = b"owner-bytes".to_vec();
+        let request = build_runtime_mint_request(
+            &transfer,
+            &bundle,
+            bytes.clone(),
+            destination_owner.clone(),
+        );
         let a = &request.attestation;
 
         // Contract-layer chain identities via keccak256("csv.chain.<name>").
@@ -5514,6 +5583,7 @@ mod tests {
         // Lock event id derives from the real lock outpoint; nullifier from the seal.
         assert_eq!(a.lock_event_id, lock_event_id(&transfer));
         assert_eq!(a.nullifier, mint_nullifier(&bundle));
+        assert_eq!(a.destination_owner, destination_owner);
         // The nullifier is bound to the source seal, not aliased to the sanad id.
         assert_ne!(a.nullifier, a.sanad_id);
         // Contract identity + signatures are supplied downstream by the adapter/verifier.
@@ -5675,6 +5745,7 @@ mod tests {
             },
             runtime_instance: owner,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         coordinator
@@ -5813,6 +5884,7 @@ mod tests {
             },
             runtime_instance: owner,
             policy: crate::policy::RuntimePolicy::new(),
+            destination_owner: None,
         };
 
         let result = coordinator.execute(transfer, &registry, runtime_ctx).await;
@@ -6102,6 +6174,7 @@ mod tests {
             },
             runtime_instance: owner,
             policy,
+            destination_owner: None,
         }
     }
 

@@ -1198,6 +1198,7 @@ pub async fn cmd_materialize(
     // downgrades to the attestor path.
     ensure_proof_available(proof)?;
     output::info("Authenticity: attestor (RFC §9 verifier-signed mint attestation)");
+    ensure_destination_attestor_ready(&to)?;
 
     lock_and_mint(
         from,
@@ -1210,6 +1211,28 @@ pub async fn cmd_materialize(
         state,
     )
     .await
+}
+
+fn ensure_destination_attestor_ready(to: &Chain) -> Result<()> {
+    let needs_verifier_key = matches!(to.as_str(), "sui" | "aptos" | "solana");
+    if needs_verifier_key
+        && std::env::var("CSV_MINT_VERIFIER_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_none()
+    {
+        output::error(&format!(
+            "{} materialization requires CSV_MINT_VERIFIER_KEY before the source Sanad is locked",
+            to
+        ));
+        output::info(
+            "Set CSV_MINT_VERIFIER_KEY to the secp256k1 verifier signing key registered in the destination registry, then rerun materialize or resume.",
+        );
+        return Err(anyhow::anyhow!(
+            "Destination mint verifier key missing; refusing to proceed without destination mint attestation"
+        ));
+    }
+    Ok(())
 }
 
 /// Shared lock + thin-registry mint core.
@@ -1337,7 +1360,17 @@ async fn lock_and_mint(
         .await
         .map_err(|e| anyhow::anyhow!("Transfer execution failed: {}", e))?;
 
-    drive(&manager, outcome, sanad, from, to, &opts, state).await
+    drive(
+        &manager,
+        outcome,
+        sanad,
+        from,
+        to,
+        &opts,
+        Some(dest_addr),
+        state,
+    )
+    .await
 }
 
 /// Resume an already-locked transfer that is awaiting finality (never re-locks).
@@ -1366,13 +1399,22 @@ pub async fn cmd_resume(
         ));
     };
 
+    ensure_destination_attestor_ready(&resume_ctx.to)?;
+    let dest_owner = resolve_destination_owner(&resume_ctx.to, None, state)?;
+
     let client = build_client(&resume_ctx.from, &resume_ctx.to, None, config, state).await?;
     let manager = client.transfers();
 
     let from_id = to_protocol_chain(resume_ctx.from.clone());
     let to_id = to_protocol_chain(resume_ctx.to.clone());
     let outcome = manager
-        .resume(&transfer_id, resume_ctx.sanad_id.clone(), from_id, to_id)
+        .resume(
+            &transfer_id,
+            resume_ctx.sanad_id.clone(),
+            from_id,
+            to_id,
+            dest_owner.clone(),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Resume failed: {}", e))?;
 
@@ -1383,9 +1425,26 @@ pub async fn cmd_resume(
         resume_ctx.from,
         resume_ctx.to,
         &opts,
+        dest_owner,
         state,
     )
     .await
+}
+
+fn resolve_destination_owner(
+    to: &Chain,
+    explicit: Option<String>,
+    state: &UnifiedStateManager,
+) -> Result<Option<String>> {
+    if explicit.is_some() {
+        return Ok(explicit);
+    }
+    if state.storage.wallet.mnemonic.is_some() {
+        let identity = WalletIdentity::from_state(state)?;
+        Ok(Some(identity.address(to, 0, 0)?))
+    } else {
+        Ok(state.get_address(to).map(|s| s.to_string()))
+    }
 }
 
 /// Drive an outcome to completion according to the selected wait mode.
@@ -1399,6 +1458,7 @@ async fn drive(
     from: Chain,
     to: Chain,
     opts: &WaitOpts,
+    dest_owner: Option<String>,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     let started = Instant::now();
@@ -1431,7 +1491,15 @@ async fn drive(
                 confirmations,
                 required,
             } => {
-                record_pending(state, &transfer_id, &from, &to, &sanad_id);
+                record_pending(
+                    state,
+                    &transfer_id,
+                    &lock_tx_hash,
+                    &from,
+                    &to,
+                    &sanad_id,
+                    dest_owner.clone(),
+                );
                 state.save()?;
 
                 if !transfer_id_announced {
@@ -1479,7 +1547,13 @@ async fn drive(
                 let from_id = to_protocol_chain(from.clone());
                 let to_id = to_protocol_chain(to.clone());
                 outcome = manager
-                    .resume(&transfer_id, sanad_id.clone(), from_id, to_id)
+                    .resume(
+                        &transfer_id,
+                        sanad_id.clone(),
+                        from_id,
+                        to_id,
+                        dest_owner.clone(),
+                    )
                     .await
                     .map_err(|e| anyhow::anyhow!("Resume failed: {}", e))?;
             }
@@ -1619,9 +1693,11 @@ fn record_completed(
 fn record_pending(
     state: &mut UnifiedStateManager,
     transfer_id: &str,
+    lock_tx_hash: &str,
     from: &Chain,
     to: &Chain,
     sanad_id: &SanadId,
+    dest_owner: Option<String>,
 ) {
     let now = chrono::Utc::now().timestamp() as u64;
     let sender = state.get_address(from).map(|s| s.to_string());
@@ -1631,10 +1707,10 @@ fn record_pending(
         id: transfer_id.to_string(),
         source_chain: from.clone(),
         dest_chain: to.clone(),
-        sanad_id: sanad_hex,
+        sanad_id: sanad_hex.clone(),
         sender_address: sender,
-        destination_address: None,
-        source_tx_hash: None,
+        destination_address: dest_owner,
+        source_tx_hash: Some(display_tx_hash(from, lock_tx_hash)),
         source_fee: None,
         dest_tx_hash: None,
         dest_fee: None,
@@ -1645,6 +1721,17 @@ fn record_pending(
         completed_at: None,
         provenance_strength: provenance_strength_signal(from, to),
     });
+
+    // The local Sanad cache has no Locked state. Once the source lock is
+    // broadcast the original source seal is no longer active, so Consumed is
+    // the least misleading local display state until runtime-backed canonical
+    // transfer state is shown here.
+    if let Err(e) = state.consume_sanad(&sanad_hex) {
+        log::warn!(
+            "Failed to mark locked source Sanad as consumed in local store: {}",
+            e
+        );
+    }
 }
 
 /// Persist a completed send-mode transfer to the local display cache.

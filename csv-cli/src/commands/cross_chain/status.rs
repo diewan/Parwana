@@ -2,8 +2,6 @@
 
 use anyhow::Result;
 
-use csv_hash::Hash;
-
 use crate::commands::cross_chain::transfer::emit_provenance_strength_warning;
 use crate::config::{Chain, Config};
 use crate::output;
@@ -14,19 +12,13 @@ pub async fn cmd_status(
     _config: &Config,
     state: &UnifiedStateManager,
 ) -> Result<()> {
-    let bytes = hex::decode(transfer_id.trim_start_matches("0x"))
-        .map_err(|e| anyhow::anyhow!("Invalid Transfer ID: {}", e))?;
-    let mut hash_bytes = [0u8; 32];
-    hash_bytes.copy_from_slice(&bytes[..32]);
-    let transfer_id_hash = Hash::new(hash_bytes);
-
     output::header(&format!("Transfer: {}", transfer_id));
 
     // Try to get canonical transfer state from runtime (CLI-STATE-001)
     // For now, we display local state but label it as non-canonical
     // Full runtime-backed transfer state requires csv-runtime TransferCoordinator integration
 
-    if let Some(transfer) = state.get_transfer(&transfer_id_hash.to_string()) {
+    if let Some(transfer) = state.get_transfer(&transfer_id) {
         output::header("📋 Cross-Chain Transfer Report");
         output::info("Source: Local display cache (non-canonical)");
         output::info(
@@ -60,7 +52,7 @@ pub async fn cmd_status(
             output::kv("Sender Address", sender);
         }
         if let Some(source_tx) = &transfer.source_tx_hash {
-            output::kv_hash("Transaction ID", source_tx.as_bytes());
+            output::kv("Transaction ID", source_tx);
         }
         if let Some(fee) = transfer.source_fee {
             output::kv("Transaction Fee", &fee.to_string());
@@ -72,7 +64,7 @@ pub async fn cmd_status(
             output::kv("Destination Address", dest_addr);
         }
         if let Some(dest_tx) = &transfer.dest_tx_hash {
-            output::kv_hash("Transaction ID", dest_tx.as_bytes());
+            output::kv("Transaction ID", dest_tx);
         }
         if let Some(fee) = transfer.dest_fee {
             output::kv("Transaction Fee", &fee.to_string());
@@ -161,15 +153,8 @@ pub fn cmd_retry(
     output::header("Retrying Transfer");
     output::kv("Transfer ID", &transfer_id);
 
-    // Parse transfer ID
-    let bytes = hex::decode(transfer_id.trim_start_matches("0x"))
-        .map_err(|e| anyhow::anyhow!("Invalid Transfer ID: {}", e))?;
-    let mut hash_bytes = [0u8; 32];
-    hash_bytes.copy_from_slice(&bytes[..32]);
-    let transfer_id_hash = Hash::new(hash_bytes);
-
     // Look up transfer
-    let transfer = state.get_transfer(&transfer_id_hash.to_string());
+    let transfer = state.get_transfer(&transfer_id);
     match transfer {
         Some(t) => {
             output::kv("Source", t.source_chain.as_ref());

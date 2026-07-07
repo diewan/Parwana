@@ -347,6 +347,113 @@ impl ChainAdapter for SuiRuntimeAdapter {
         Ok(balance_info.total.to_string())
     }
 
+    async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
+        #[cfg(feature = "rpc")]
+        {
+            use sui_rpc::proto::sui::rpc::v2::{GetCheckpointRequest, GetTransactionRequest};
+
+            let tx_bytes = hex::decode(tx_hash.trim_start_matches("0x")).map_err(|e| {
+                AdapterError::Generic(format!("Invalid Sui transaction digest: {}", e))
+            })?;
+            if tx_bytes.len() != 32 {
+                return Err(AdapterError::Generic(format!(
+                    "Invalid Sui transaction digest length: expected 32 bytes, got {}",
+                    tx_bytes.len()
+                )));
+            }
+            let sui_digest = bs58::encode(&tx_bytes).into_string();
+            let client = self.backend.node().client();
+            let mut client_guard = client.lock().await;
+            let mut request = GetTransactionRequest::default();
+            request.digest = Some(sui_digest);
+            request.read_mask = Some(prost_types::FieldMask {
+                paths: vec![
+                    "digest".to_string(),
+                    "effects".to_string(),
+                    "checkpoint".to_string(),
+                ],
+            });
+
+            let tx = (*client_guard)
+                .ledger_client()
+                .get_transaction(request)
+                .await
+                .map_err(|e| {
+                    AdapterError::RpcError(format!(
+                        "Failed to fetch Sui transaction {}: {}",
+                        tx_hash, e
+                    ))
+                })?
+                .into_inner()
+                .transaction
+                .ok_or_else(|| {
+                    AdapterError::Generic(format!("Sui transaction {} was not found", tx_hash))
+                })?;
+
+            let effects = tx.effects.ok_or_else(|| {
+                AdapterError::Generic(format!(
+                    "Sui transaction {} is not yet confirmed (effects missing)",
+                    tx_hash
+                ))
+            })?;
+            let status = effects.status.ok_or_else(|| {
+                AdapterError::Generic(format!(
+                    "Sui transaction {} has no execution status",
+                    tx_hash
+                ))
+            })?;
+            if status.success != Some(true) {
+                return Err(AdapterError::ProofVerificationFailed(format!(
+                    "Sui transaction {} reverted: {:?}",
+                    tx_hash, status.error
+                )));
+            }
+
+            let checkpoint = tx.checkpoint.ok_or_else(|| {
+                AdapterError::Generic(format!("Sui transaction {} has no checkpoint yet", tx_hash))
+            })?;
+            let mut checkpoint_request = GetCheckpointRequest::by_sequence_number(checkpoint);
+            checkpoint_request.read_mask = Some(prost_types::FieldMask {
+                paths: vec![
+                    "sequence_number".to_string(),
+                    "digest".to_string(),
+                    "signature".to_string(),
+                ],
+            });
+            let checkpoint_response = (*client_guard)
+                .ledger_client()
+                .get_checkpoint(checkpoint_request)
+                .await
+                .map_err(|e| {
+                    AdapterError::RpcError(format!(
+                        "Failed to fetch Sui checkpoint {}: {}",
+                        checkpoint, e
+                    ))
+                })?;
+            let checkpoint_info = checkpoint_response.into_inner().checkpoint.ok_or_else(|| {
+                AdapterError::Generic(format!("Sui checkpoint {} was not found", checkpoint))
+            })?;
+            if checkpoint_info.signature.is_none() {
+                return Err(AdapterError::Generic(format!(
+                    "Sui transaction {} checkpoint {} is not certified yet",
+                    tx_hash, checkpoint
+                )));
+            }
+
+            Ok(MintResult {
+                tx_hash: tx_hash.trim_start_matches("0x").to_string(),
+                block_height: checkpoint,
+            })
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let _ = tx_hash;
+            Err(AdapterError::Generic(
+                "Cannot confirm Sui transaction: the 'rpc' feature is not enabled".to_string(),
+            ))
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -193,6 +193,10 @@ fn parse_opt_hash(value: &Option<String>, label: &str) -> Result<Option<Hash>> {
     Ok(Some(Hash::new(hash_bytes)))
 }
 
+fn default_content_hash(domain: &str) -> Hash {
+    Hash::sha256(domain.as_bytes())
+}
+
 async fn cmd_create(
     chain: Chain,
     value: Option<u64>,
@@ -208,7 +212,7 @@ async fn cmd_create(
     schema_hash: Option<String>,
     disclosure_policy_hash: Option<String>,
     proof_policy_hash: Option<String>,
-    canonical: bool,
+    _canonical: bool,
     config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
@@ -612,8 +616,6 @@ async fn cmd_create(
 
     // Convert chain config to SDK format
     let chain_cfg = config.chain(&chain)?;
-    eprintln!("CLI LAYER: RPC URL from config: {}", chain_cfg.rpc_url);
-    eprintln!("CLI LAYER: Account: {}, Index: {}", account, index);
 
     // Derive seed for SDK config (Bitcoin needs 64-byte BIP-39 seed in config)
     let seed_array = *identity.seed();
@@ -694,14 +696,6 @@ async fn cmd_create(
     let private_keys = identity.signing_map(&[(&chain, account, index)], state)?;
 
     // Build CSV client with the requested chain enabled
-    eprintln!(
-        "CLI LAYER: Building client with SDK config RPC URL: {}",
-        sdk_config
-            .chains
-            .get(chain.as_str())
-            .map(|c| &c.rpc.url)
-            .unwrap_or(&"N/A".to_string())
-    );
     let client = CsvClient::builder()
         .with_chain(core_chain.clone())
         .with_config(sdk_config)
@@ -839,28 +833,26 @@ async fn cmd_create(
         parse_opt_hash(&disclosure_policy_hash, "disclosure policy hash")?;
     let proof_policy_hash_parsed = parse_opt_hash(&proof_policy_hash, "proof policy hash")?;
 
-    // Resolve each required descriptor field. In `--canonical` mode, any field
-    // the user did not supply is filled with a deterministic, REAL (non-zero)
-    // default hash so a fully-canonical Sanad can be created without hand-passing
-    // every hash. This never fabricates a zero hash and only applies when the
-    // caller explicitly opted into canonical mode; without `--canonical` the
-    // fields stay `None` and the SDK's fail-closed gate rejects the create.
-    let canonical_default =
-        |domain: &str| -> Option<Hash> { canonical.then(|| Hash::sha256(domain.as_bytes())) };
+    // Resolve each required descriptor field. The simple CLI create path uses
+    // deterministic, non-zero default hashes for omitted content metadata so
+    // `csv sanad create --chain <chain> --value <n>` creates a real published
+    // Sanad without requiring hidden descriptor flags. Explicit user-provided
+    // hashes always take precedence, and the SDK still fails closed if any
+    // required field reaches it as `None`.
     let content_descriptor = csv_sdk::sanads::ContentDescriptorInput {
         schema_id: None,
         schema_hash: schema_hash_legacy
             .or(schema_hash_final)
-            .or_else(|| canonical_default("csv.sanad.default.schema.v1")),
+            .or_else(|| Some(default_content_hash("csv.sanad.default.schema.v1"))),
         payload_codec: None,
         payload_hash: payload_hash_final
-            .or_else(|| canonical_default("csv.sanad.default.payload.v1")),
+            .or_else(|| Some(default_content_hash("csv.sanad.default.payload.v1"))),
         content_root: content_root_parsed,
         attachment_root: attachment_root_final,
         disclosure_policy_hash: disclosure_policy_hash_parsed
-            .or_else(|| canonical_default("csv.sanad.default.disclosure.v1")),
+            .or_else(|| Some(default_content_hash("csv.sanad.default.disclosure.v1"))),
         proof_policy_hash: proof_policy_hash_parsed
-            .or_else(|| canonical_default("csv.sanad.default.proof.v1")),
+            .or_else(|| Some(default_content_hash("csv.sanad.default.proof.v1"))),
     };
 
     let publish_policy = if skip_publish {
@@ -936,14 +928,9 @@ async fn cmd_create(
             if txid_bytes.len() != 32 {
                 return Err(anyhow::anyhow!("Invalid txid length"));
             }
-            eprintln!(
-                "DEBUG: SDK config txid (display): {}",
-                hex::encode(&txid_bytes)
-            );
             let mut txid_array = [0u8; 32];
             txid_array.copy_from_slice(&txid_bytes);
             txid_array.reverse(); // Convert display to internal byte order
-            eprintln!("DEBUG: Seal txid (internal): {}", hex::encode(&txid_array));
 
             // Create a seal from the UTXO
             let mut id_bytes = Vec::with_capacity(36);
@@ -1104,17 +1091,28 @@ async fn cmd_create(
         let message = Message::from_digest_slice(commitment.as_bytes())
             .map_err(|e| anyhow::anyhow!("Failed to create message: {}", e))?;
         let signature = secp.sign_ecdsa(&message, &private_key);
-        signature.serialize_compact().to_vec()
+        Some(signature.serialize_compact().to_vec())
     } else {
-        // For other chains, use the seed as a simple signature placeholder
-        // TODO: Implement proper signing for other chains
-        seed_array[..32].to_vec()
+        // Fail closed: only Bitcoin has a real ownership-proof signing path
+        // wired here. Emitting anything else (previously the raw wallet seed,
+        // which leaked key material) would persist a forged proof labeled as a
+        // valid signature. Leave the proof unsigned; the publish path below
+        // refuses to finalize it, while --skip-publish can still build a local
+        // unsigned draft.
+        None
     };
 
-    let ownership_proof = csv_protocol::OwnershipProof {
-        owner: owner_address.as_bytes().to_vec(),
-        proof: proof_bytes,
-        scheme: Some(csv_protocol::SignatureScheme::Secp256k1),
+    let ownership_proof = match &proof_bytes {
+        Some(sig) => csv_protocol::OwnershipProof {
+            owner: owner_address.as_bytes().to_vec(),
+            proof: sig.clone(),
+            scheme: Some(csv_protocol::SignatureScheme::Secp256k1),
+        },
+        None => csv_protocol::OwnershipProof {
+            owner: owner_address.as_bytes().to_vec(),
+            proof: vec![],
+            scheme: None,
+        },
     };
 
     // `--skip-publish` can, at most, produce a local unsigned/unpublished
@@ -1151,6 +1149,19 @@ async fn cmd_create(
         );
 
         return Ok(());
+    }
+
+    // Fail closed: never persist a published, Active sanad with an unsigned
+    // ownership proof. Only Bitcoin can currently produce a real signature
+    // above; other chains reach here with `proof_bytes == None`.
+    if proof_bytes.is_none() {
+        return Err(anyhow::anyhow!(
+            "Cannot publish a sanad on chain '{}': ownership-proof signing is \
+             not implemented for this chain. Only 'bitcoin' is supported for \
+             canonical (published) sanad creation at this time. Re-run with \
+             --skip-publish to produce an unsigned local draft instead.",
+            chain.as_str()
+        ));
     }
 
     // Create the sanad through the runtime and persist the canonical,
@@ -1287,7 +1298,7 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
 
     if let Some(tracked) = state.get_sanad(&sanad_id_hash.to_hex()) {
         output::kv("Chain", tracked.chain.as_ref());
-        output::kv_hash("Commitment", tracked.commitment.as_bytes());
+        output::kv("Commitment", &tracked.commitment);
         output::kv(
             "Local Status",
             match tracked.status {
@@ -1671,9 +1682,21 @@ async fn cmd_state(
             match adapter.get_sanad_state(&sanad_id_parsed).await {
                 Ok(canonical_state) => {
                     // Display canonical state from chain
-                    output::kv("State", &format!("State({})", canonical_state.state));
+                    let lifecycle_state = SanadLifecycleState::from_u8(canonical_state.state);
+                    output::kv("State", lifecycle_state.label());
                     output::kv("Owner", &canonical_state.owner);
-                    output::kv_hash("Commitment", canonical_state.commitment.as_bytes());
+                    if canonical_state.commitment.as_bytes() == &[0u8; 32] {
+                        if let Some(local) = state.get_sanad(&sanad_id_hex) {
+                            output::kv(
+                                "Commitment",
+                                &format!("{} (local cache)", local.commitment),
+                            );
+                        } else {
+                            output::kv("Commitment", "unknown on this chain");
+                        }
+                    } else {
+                        output::kv_hash("Commitment", canonical_state.commitment.as_bytes());
+                    }
                     if let Some(nullifier) = &canonical_state.nullifier {
                         output::kv_hash("Nullifier", nullifier.as_bytes());
                     }
@@ -2070,6 +2093,50 @@ mod state_tests {
         );
         assert_eq!(resolved.label, "Active");
         assert_eq!(resolved.status_update, Some(SanadStatus::Active));
+    }
+}
+
+#[cfg(test)]
+mod create_defaults_tests {
+    use super::*;
+
+    #[test]
+    fn default_content_hashes_are_non_zero_and_buildable() {
+        let content_descriptor = csv_sdk::sanads::ContentDescriptorInput {
+            schema_id: None,
+            schema_hash: Some(default_content_hash("csv.sanad.default.schema.v1")),
+            payload_codec: None,
+            payload_hash: Some(default_content_hash("csv.sanad.default.payload.v1")),
+            content_root: None,
+            attachment_root: None,
+            disclosure_policy_hash: Some(default_content_hash("csv.sanad.default.disclosure.v1")),
+            proof_policy_hash: Some(default_content_hash("csv.sanad.default.proof.v1")),
+        };
+
+        for hash in [
+            content_descriptor.schema_hash,
+            content_descriptor.payload_hash,
+            content_descriptor.disclosure_policy_hash,
+            content_descriptor.proof_policy_hash,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert_ne!(hash.as_bytes(), &[0u8; 32]);
+        }
+
+        let request = csv_sdk::sanads::CreateSanadRequest {
+            chain: ChainId::new("bitcoin"),
+            owner: b"owner".to_vec(),
+            value: Some(100_000),
+            content_descriptor,
+            funding_selector: csv_sdk::sanads::FundingSelector::Automatic,
+            publish_policy: csv_sdk::sanads::PublishPolicy::Publish,
+        };
+
+        request
+            .build_descriptor()
+            .expect("CLI default descriptor hashes should satisfy SDK validation");
     }
 }
 

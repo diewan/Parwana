@@ -3406,6 +3406,7 @@ dependencies = [
  "base64 0.22.1",
  "bcs",
  "blake2",
+ "bs58",
  "bytes",
  "chrono",
  "csv-adapter-core",

@@ -130,6 +130,29 @@ fn parse_object_id(s: &str) -> Result<[u8; 32], String> {
     Ok(id)
 }
 
+#[cfg(feature = "rpc")]
+fn tx_digest_to_runtime_hex(digest: &str) -> Result<String, String> {
+    let digest = digest.trim();
+    if digest.is_empty() {
+        return Err("empty transaction digest".to_string());
+    }
+    if let Ok(bytes) = hex::decode(digest.trim_start_matches("0x")) {
+        if bytes.len() == 32 {
+            return Ok(hex::encode(bytes));
+        }
+    }
+    let bytes = bs58::decode(digest)
+        .into_vec()
+        .map_err(|e| format!("invalid Sui transaction digest: {}", e))?;
+    if bytes.len() != 32 {
+        return Err(format!(
+            "Sui transaction digest must decode to 32 bytes, got {}",
+            bytes.len()
+        ));
+    }
+    Ok(hex::encode(bytes))
+}
+
 /// Fetch a shared object's `initial_shared_version`, required to reference it as
 /// an input in a programmable transaction.
 #[cfg(feature = "rpc")]
@@ -137,11 +160,14 @@ async fn fetch_initial_shared_version(
     node: &Arc<SuiNode>,
     object_id: &sui_sdk_types::Address,
 ) -> SuiResult<u64> {
-    use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
+    use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, owner::OwnerKind};
 
     let client = node.client();
     let mut client_guard = client.lock().await;
-    let request = GetObjectRequest::new(object_id);
+    let mut request = GetObjectRequest::new(object_id);
+    request.read_mask = Some(prost_types::FieldMask {
+        paths: vec!["owner".to_string()],
+    });
     let response = (*client_guard)
         .ledger_client()
         .get_object(request)
@@ -156,9 +182,21 @@ async fn fetch_initial_shared_version(
         .ok_or_else(|| SuiError::TransactionFailed("Registry object not found".to_string()))?;
 
     // For a shared object the owner carries `initial_shared_version` in `version`.
-    object.owner.and_then(|owner| owner.version).ok_or_else(|| {
+    let owner = object.owner.ok_or_else(|| {
         SuiError::TransactionFailed(
-            "Registry is not a shared object (no initial_shared_version)".to_string(),
+            "Registry owner was not returned by Sui RPC; cannot fetch initial_shared_version"
+                .to_string(),
+        )
+    })?;
+    if owner.kind != Some(OwnerKind::Shared as i32) {
+        return Err(SuiError::TransactionFailed(format!(
+            "Registry is not a shared object (owner kind {:?})",
+            owner.kind
+        )));
+    }
+    owner.version.ok_or_else(|| {
+        SuiError::TransactionFailed(
+            "Registry is shared but initial_shared_version was not returned".to_string(),
         )
     })
 }
@@ -225,7 +263,7 @@ pub async fn submit_mint(
 
     let mut tx_builder = TransactionBuilder::new();
     tx_builder.set_sender(sender_address);
-    tx_builder.set_gas_budget(10_000_000);
+    tx_builder.set_gas_budget(100_000_000);
     tx_builder.set_gas_price(1000);
     tx_builder.add_gas_objects(gas_objects);
 
@@ -340,25 +378,14 @@ pub async fn submit_mint(
         }
     }
 
-    let tx_digest_str = if let Some(digest) = executed_tx.digest {
-        digest
-    } else {
-        use blake2::Blake2b;
-        let mut hasher = Blake2b::new();
-        hasher.update(&tx_bytes);
-        let digest: [u8; 32] = hasher.finalize().into();
-        hex::encode(digest)
-    };
-    let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
-        .map_err(|e| SuiError::TransactionFailed(format!("Invalid digest hex: {}", e)))?;
-    if digest_bytes.len() < 32 {
-        return Err(SuiError::TransactionFailed(
-            "Mint transaction digest shorter than 32 bytes".to_string(),
-        ));
-    }
+    let tx_digest_str = executed_tx.digest.ok_or_else(|| {
+        SuiError::TransactionFailed("Mint response did not include transaction digest".to_string())
+    })?;
+    let tx_digest_hex =
+        tx_digest_to_runtime_hex(&tx_digest_str).map_err(SuiError::TransactionFailed)?;
     let checkpoint = executed_tx.checkpoint.unwrap_or(0);
 
-    Ok((hex::encode(&digest_bytes[..32]), checkpoint))
+    Ok((tx_digest_hex, checkpoint))
 }
 
 #[cfg(test)]

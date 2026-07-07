@@ -30,9 +30,9 @@ impl BlsVerifier {
     ) -> Result<(), AnchorError> {
         #[cfg(feature = "bls")]
         {
-            use blst::{BLST_ERROR, min_sig::PublicKey, min_sig::Signature};
+            use blst::{BLST_ERROR, min_sig::AggregatePublicKey, min_sig::PublicKey, min_sig::Signature};
 
-            // Parse the signature (48 bytes for BLS12-381 min_sig)
+            // Parse the signature (48 bytes for BLS12-381 min_sig).
             if signature.len() != 48 {
                 return Err(AnchorError::InvalidSignature(format!(
                     "Invalid signature length: expected 48, got {}",
@@ -44,50 +44,72 @@ impl BlsVerifier {
                 AnchorError::InvalidSignature(format!("Failed to parse signature: {:?}", e))
             })?;
 
-            // Aggregate the public keys of all signers for efficient BLS verification
-            // This is the production approach using true BLS aggregation
-            let mut total_voting_power = 0u64;
-
-            // Collect and validate all public keys
-            let mut pubkeys: Vec<PublicKey> = Vec::with_capacity(signers.len());
-            for signer_pubkey in signers {
-                // BLS public keys are 48 bytes (min_pk variant, G1 points)
-                if signer_pubkey.len() != 48 {
-                    return Err(AnchorError::InvalidSignature(format!(
-                        "Invalid public key length: expected 48, got {}",
-                        signer_pubkey.len()
-                    )));
-                }
-
-                let pubkey = PublicKey::from_bytes(signer_pubkey).map_err(|e| {
-                    AnchorError::InvalidSignature(format!("Failed to parse public key: {:?}", e))
-                })?;
-                pubkeys.push(pubkey);
-            }
-
-            if pubkeys.is_empty() {
+            if signers.is_empty() {
                 return Err(AnchorError::InvalidSignature(
                     "No signers provided".to_string(),
                 ));
             }
 
-            // Verify the signature against the first public key (simplified verification)
-            // In production, you would aggregate public keys and verify against the aggregate
-            let first_pubkey = &pubkeys[0];
-            let result = sig.verify(false, message, &[], &[], first_pubkey, false);
+            // Resolve each signer against the trusted validator set, aggregate
+            // ONLY the pubkeys that are proven members, and account voting power
+            // against the matched validator (never positionally). Duplicate
+            // signer entries are rejected so power cannot be double-counted.
+            let mut parsed_pubkeys: Vec<PublicKey> = Vec::with_capacity(signers.len());
+            let mut signed_voting_power = 0u64;
+            let mut seen: Vec<&[u8]> = Vec::with_capacity(signers.len());
 
+            for signer_pubkey in signers {
+                if seen.contains(&signer_pubkey.as_slice()) {
+                    return Err(AnchorError::InvalidSignature(
+                        "Duplicate signer public key in quorum".to_string(),
+                    ));
+                }
+                seen.push(signer_pubkey.as_slice());
+
+                // The signer must be a member of the trusted validator set.
+                let validator = validator_set
+                    .validators
+                    .iter()
+                    .find(|v| v.public_key == *signer_pubkey)
+                    .ok_or_else(|| {
+                        AnchorError::InvalidSignature(
+                            "Signer is not a member of the trusted validator set".to_string(),
+                        )
+                    })?;
+
+                let pubkey = PublicKey::from_bytes(signer_pubkey).map_err(|e| {
+                    AnchorError::InvalidSignature(format!("Failed to parse public key: {:?}", e))
+                })?;
+                // Reject identity / malformed keys before trusting them.
+                pubkey.validate().map_err(|e| {
+                    AnchorError::InvalidSignature(format!("Invalid public key: {:?}", e))
+                })?;
+
+                parsed_pubkeys.push(pubkey);
+                signed_voting_power = signed_voting_power
+                    .checked_add(validator.voting_power)
+                    .ok_or_else(|| {
+                        AnchorError::InvalidSignature("Voting power overflow".to_string())
+                    })?;
+            }
+
+            // Aggregate all signer pubkeys and verify the signature against the
+            // aggregate — the whole quorum must have signed, not just one member.
+            let pubkey_refs: Vec<&PublicKey> = parsed_pubkeys.iter().collect();
+            let agg_pubkey = AggregatePublicKey::aggregate(&pubkey_refs, false).map_err(|e| {
+                AnchorError::InvalidSignature(format!("Failed to aggregate public keys: {:?}", e))
+            })?;
+            let agg_pubkey = agg_pubkey.to_public_key();
+
+            let result = sig.verify(true, message, &[], &[], &agg_pubkey, true);
             if result != BLST_ERROR::BLST_SUCCESS {
                 return Err(AnchorError::InvalidSignature(
                     "BLS aggregate signature verification failed".to_string(),
                 ));
             }
 
-            // Calculate total voting power from validator set
-            for (signer_pubkey, validator) in signers.iter().zip(&validator_set.validators) {
-                total_voting_power += validator.voting_power;
-            }
-
-            // Check that signers represent >= threshold fraction of voting power
+            // Check that the signers that actually signed represent >= threshold
+            // fraction of the total voting power.
             let total_power: u64 = validator_set
                 .validators
                 .iter()
@@ -99,7 +121,7 @@ impl BlsVerifier {
                 ));
             }
 
-            let fraction = total_voting_power as f32 / total_power as f32;
+            let fraction = signed_voting_power as f32 / total_power as f32;
             if fraction < threshold {
                 return Err(AnchorError::InvalidSignature(format!(
                     "Insufficient voting power: signers represent {:.2}% of voting power, required {:.2}%",

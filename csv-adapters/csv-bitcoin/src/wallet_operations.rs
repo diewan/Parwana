@@ -6,7 +6,6 @@
 use crate::rpc::BitcoinRpc;
 use crate::wallet::{Bip86Path, SealWallet};
 use async_trait::async_trait;
-use bitcoin::secp256k1::{PublicKey as SecpPublicKey, Secp256k1, SecretKey};
 use bitcoin::{Network as BtcNetwork, OutPoint, Txid, hashes::Hash};
 use csv_hash::chain_id::ChainId;
 use csv_wallet::error::WalletError;
@@ -157,31 +156,20 @@ impl WalletOperations for BitcoinWalletOperations {
         }
     }
 
-    async fn sign_transaction(&self, seed: &[u8], tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
-        let mut seed_array = [0u8; 64];
-        if seed.len() >= 64 {
-            seed_array.copy_from_slice(&seed[..64]);
-        } else {
-            return Err(WalletError::KeyDerivation(format!(
-                "Seed must be at least 64 bytes, got {}",
-                seed.len()
-            )));
-        }
-
-        // Derive secp256k1 private key from seed
-        let secret_key = SecretKey::from_slice(&seed_array[..32]).map_err(|e| {
-            WalletError::KeyDerivation(format!("Failed to derive private key: {}", e))
-        })?;
-
-        let secp = Secp256k1::new();
-        let _public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
-
-        // Sign the transaction data (simplified - in production would use proper Bitcoin transaction signing)
-        let message = secp256k1::Message::from_digest_slice(tx_data)
-            .map_err(|e| WalletError::Signing(format!("Failed to create message: {}", e)))?;
-        let signature = secp.sign_ecdsa(&message, &secret_key);
-
-        Ok(signature.serialize_compact().to_vec())
+    async fn sign_transaction(&self, _seed: &[u8], _tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
+        // Fail closed. The previous implementation treated `tx_data` as a raw
+        // 32-byte digest and produced a bare ECDSA signature over it, with no
+        // sighash construction, no input/prevout binding, and no witness
+        // assembly. That is not a spendable Bitcoin signature and must never be
+        // returned. A real implementation must build the correct sighash for
+        // each input and assemble a valid signed transaction.
+        Err(WalletError::Signing(
+            "Bitcoin transaction signing is not implemented: refusing to \
+             produce a bare ECDSA signature that is not bound to a proper \
+             sighash. Use a real Bitcoin transaction signing path before \
+             broadcasting."
+                .to_string(),
+        ))
     }
 
     async fn broadcast_transaction(&self, _signed_tx: &[u8]) -> Result<String, WalletError> {

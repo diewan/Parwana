@@ -82,7 +82,7 @@ Example:
 
 ```bash
 csv --verbose wallet list
-csv --canonical proof verify --chain ethereum --proof-file proof.json
+csv --canonical proof verify ethereum --proof proof.cbor
 ```
 
 ---
@@ -98,7 +98,7 @@ csv chain list
 ### Check Chain Status
 
 ```bash
-csv chain status --chain ethereum
+csv chain status ethereum
 ```
 
 Output:
@@ -120,19 +120,53 @@ Ethereum Status
 ### Set Custom RPC URL
 
 ```bash
-csv chain set-rpc --chain ethereum https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+csv chain set-rpc ethereum https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 ```
 
 ### Set Contract Address
 
 ```bash
-csv chain set-contract --chain ethereum 0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820
+csv chain set-contract ethereum 0x70A035318c72C3dAa21F47Dd0f6A1C8633a05820
 ```
 
 ### Change Network
 
 ```bash
-csv chain set-network --chain ethereum --network main
+csv chain set-network ethereum main
+```
+
+### Show RPC Info
+
+```bash
+csv chain info ethereum
+```
+
+### Check Readiness
+
+Use readiness before any command that writes to a chain. It checks the configured signer, contract/package address, and runtime write capability.
+
+```bash
+csv chain readiness ethereum
+csv chain readiness ethereum --json
+```
+
+### Show Capabilities
+
+```bash
+csv chain capabilities
+csv chain capabilities ethereum --json
+```
+
+### Chain Configuration Files
+
+The `chain-management` namespace works with `chains/*.toml` configuration files and adapter discovery.
+
+```bash
+csv chain-management list
+csv chain-management discover --directory chains
+csv chain-management validate --directory chains
+csv chain-management show ethereum
+csv chain-management create-template celestia "Celestia Testnet" --output-dir chains
 ```
 
 ---
@@ -144,7 +178,7 @@ csv chain set-network --chain ethereum --network main
 This generates a BIP-39 mnemonic, derives keys for all 5 chains, and stores everything encrypted:
 
 ```bash
-csv wallet init --network test --words 12
+csv wallet init test --words 12
 ```
 
 Output:
@@ -170,7 +204,7 @@ Wallet Initialization
 ### Import Existing Wallet
 
 ```bash
-csv wallet import "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --network test
+csv wallet import "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" test
 ```
 
 ### Export Wallet (View Mnemonic)
@@ -192,13 +226,13 @@ Wallet Export
 ### Generate Wallet for Specific Chain
 
 ```bash
-csv wallet generate --chain bitcoin --network test
+csv wallet generate bitcoin test
 ```
 
 ### Check Wallet Balance
 
 ```bash
-csv wallet balance --chain ethereum
+csv wallet balance ethereum
 ```
 
 Output:
@@ -216,6 +250,7 @@ Ethereum Balance
 
 ```bash
 csv wallet list
+csv wallet list ethereum
 ```
 
 Output:
@@ -236,7 +271,20 @@ Wallet Addresses
 ### View Private Key (Use with Caution)
 
 ```bash
-csv wallet private-key --chain ethereum
+csv wallet private-key ethereum
+```
+
+### Show a Funding Address
+
+```bash
+csv wallet address ethereum
+csv wallet address bitcoin --account 0 --index 3
+```
+
+### Scan Bitcoin UTXOs
+
+```bash
+csv wallet scan bitcoin --account 0 --gap-limit 20
 ```
 
 Output:
@@ -331,7 +379,21 @@ csv sanad transfer 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345
 ### Consume a Sanad
 
 ```bash
-csv sanad consume 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+csv sanad consume --chain bitcoin 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+```
+
+### Remove Local Tracking
+
+```bash
+csv sanad remove 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+csv sanad remove --all
+```
+
+### Query Canonical State and Trace
+
+```bash
+csv sanad state --chain ethereum 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+csv sanad trace --chain ethereum 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
 ```
 
 ---
@@ -343,7 +405,7 @@ csv sanad consume 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef123456
 Generate an inclusion proof for a Sanad on Ethereum:
 
 ```bash
-csv proof generate --chain ethereum 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 -o proof.json
+csv proof generate ethereum 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 -o proof.cbor
 ```
 
 Output:
@@ -359,38 +421,34 @@ Generate Proof
   [2/3] Building Merkle Patricia Trie proof...
   [3/3] Saving proof bundle...
   ─────────────────────────────────────────────────────────────
-  ✓ Proof generated and saved to proof.json
+  ✓ Proof generated and saved to proof.cbor
 ```
 
 View the proof:
 
 ```bash
-cat proof.json
+csv proof generate ethereum 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 --json-summary
 ```
 
 Output:
 
 ```json
 {
-  "seal_ref": {
-    "id": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-  },
-  "anchor_ref": {
-    "anchor_id": "0xabcdef...1234",
-    "block_height": 4567890,
-    "metadata": "ethereum"
-  },
-  "inclusion_proof": {
-    "key": "...",
-    "value": "...",
-    "proof": ["0x...", "0x..."],
-    "root_hash": "0x..."
-  },
-  "transition_dag": {
-    "nodes": [...]
-  },
-  "proof_type": "mpt",
-  "signature_scheme": "secp256k1"
+  "chain": "ethereum",
+  "sanad_id": "0xabcdef...",
+  "version": 1,
+  "seal_id": "1234567890abcdef...",
+  "anchor_id": "abcdef...",
+  "anchor_block_height": 4567890,
+  "inclusion_block_number": 4567890,
+  "inclusion_leaf_index": 0,
+  "finality_confirmations": 15,
+  "finality_is_deterministic": false,
+  "signature_count": 1,
+  "signature_scheme": "Secp256k1",
+  "dag_root_commitment": "0x...",
+  "dag_node_count": 2,
+  "artifact_bytes": 1024
 }
 ```
 
@@ -399,7 +457,7 @@ Output:
 Verify the proof on the destination chain (Sui testnet):
 
 ```bash
-csv proof verify --chain sui --proof-file proof.json
+csv proof verify sui --proof proof.cbor
 ```
 
 Output:
@@ -422,7 +480,7 @@ Verify Proof on Sui
 ### Verify Cross-Chain Proof
 
 ```bash
-csv proof verify-cross-chain --source ethereum --dest sui proof.json
+csv proof verify-cross-chain --source ethereum --dest sui --sanad-id 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 proof.cbor
 ```
 
 Output:
@@ -449,25 +507,36 @@ Cross-Chain Proof Verification
 ### Generate Proof with Canonical CBOR
 
 ```bash
-csv --canonical proof generate --chain bitcoin 0xabcdef... -o proof.cbor
+csv proof generate bitcoin 0xabcdef... -o proof.cbor
+csv proof generate bitcoin 0xabcdef... --hex -o proof.hex
 ```
 
 ### Generate Proof with Proof Tree Structure
 
 ```bash
-csv --proof-tree proof generate --chain ethereum 0xabcdef... -o proof-tree.json
+csv --proof-tree proof generate ethereum 0xabcdef... -o proof.cbor
 ```
 
 ---
 
 ## Cross-Chain Transfers
 
-### Initiate a Cross-Chain Transfer
+The old `csv cross-chain transfer` verb is deprecated and intentionally exits with guidance. Pick an explicit mode:
 
-Transfer a Sanad from Bitcoin to Sui:
+- `materialize`: on-chain destination mint via the thin registry
+- `invoice` + `send` + `accept`: interactive off-chain transfer using an off-band consignment
+
+### Materialize On-Chain
+
+Materialize a Sanad from Bitcoin to Sui:
 
 ```bash
-csv cross-chain transfer --from bitcoin --to sui --sanad-id 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 --dest-owner 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678
+csv cross-chain materialize \
+  --from bitcoin \
+  --to sui \
+  --sanad-id 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 \
+  --dest-owner 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678 \
+  --proof attestor
 ```
 
 Output:
@@ -487,10 +556,57 @@ Cross-Chain Transfer
   [4/5] Verifying on Sui...
   [5/5] Minting destination Sanad...
   ─────────────────────────────────────────────────────────────
-  ✓ Transfer initiated successfully
+  ✓ Transfer journaled and awaiting source finality
   Transfer ID      0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
-  Status           Processing
+  Status           AwaitingFinality
   Estimated Time   30-60 minutes
+```
+
+Use `--wait` when you want one invocation to poll source finality and complete the destination phase:
+
+```bash
+csv cross-chain materialize \
+  --from bitcoin \
+  --to sui \
+  --sanad-id 0xabcdef... \
+  --dest-owner 0x1234... \
+  --proof attestor \
+  --wait \
+  --poll-interval-secs 60 \
+  --timeout-secs 3600
+```
+
+`--proof zk` is reserved for the RFC 9.5 ZkSeal path and returns a not-available error until the prover is available.
+
+### Resume a Materialization
+
+```bash
+csv cross-chain resume 0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+csv cross-chain resume 0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210 --wait
+```
+
+### Interactive Off-Chain Transfer
+
+The recipient first creates an invoice bound to a destination seal they control:
+
+```bash
+csv cross-chain invoice --schema sanad.standard.v1 --seal sui:0xDEST_OBJECT_ID:1
+```
+
+The sender uses that invoice to close the source seal and write a canonical consignment:
+
+```bash
+csv cross-chain send \
+  --from bitcoin \
+  --sanad-id 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 \
+  --invoice <INVOICE_BLOB> \
+  --output consignment.cbor
+```
+
+The recipient validates and accepts the consignment locally. This mode does not submit a destination-chain transaction, so `resume` and `retry` do not apply.
+
+```bash
+csv cross-chain accept consignment.cbor
 ```
 
 ### Check Transfer Status
@@ -552,7 +668,7 @@ csv cross-chain retry 0x1234567890abcdef1234567890abcdef1234567890abcdef12345678
 ### Create a Seal
 
 ```bash
-csv seal create --chain ethereum --value 1000000000000000000
+csv seal create ethereum --value 1000000000000000000
 ```
 
 Output:
@@ -576,13 +692,13 @@ Create Seal
 ### Consume a Seal
 
 ```bash
-csv seal consume --chain ethereum 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+csv seal consume ethereum 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
 ```
 
 ### Verify a Seal
 
 ```bash
-csv seal verify --chain ethereum 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+csv seal verify ethereum 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
 ```
 
 Output:
@@ -651,7 +767,7 @@ Create Content Tree
 Generate a proof for leaf index 1:
 
 ```bash
-csv content prove --tree content-tree.json --index 1
+csv content prove content-tree.json --index 1
 ```
 
 Output:
@@ -682,7 +798,7 @@ Generate Merkle Proof
 ### Verify a Content Tree
 
 ```bash
-csv content verify --tree content-tree.json
+csv content verify content-tree.json
 ```
 
 Output:
@@ -703,7 +819,7 @@ Verify Content Tree
 Verify with leaf inclusion:
 
 ```bash
-csv content verify --tree content-tree.json --leaf "This is a test" --leaf-index 1
+csv content verify content-tree.json --leaf "This is a test" --leaf-index 1
 ```
 
 Output:
@@ -727,7 +843,7 @@ Verify Content Tree
 ### Encrypt a Subtree
 
 ```bash
-csv content encrypt --tree content-tree.json --key-id my-encryption-key --algorithm aes-256-gcm
+csv content encrypt content-tree.json --key-id 0000000000000000000000000000000000000000000000000000000000000000 --algorithm aes-256-gcm
 ```
 
 Output:
@@ -743,24 +859,30 @@ Encrypt Content Subtree
   Tree Root        0xabcdef...7890
   ✓ Encryption descriptor created
   Algorithm        aes-256-gcm
-  Key ID           my-encryption-key
+  Key ID           0000000000000000000000000000000000000000000000000000000000000000
 
   {
     "ciphertext": [],
     "tag": [],
     "descriptor": {
       "algorithm": "aes-256-gcm",
-      "key_id": "my-encryption-key",
+      "key_id": "0000000000000000000000000000000000000000000000000000000000000000",
       "nonce": "000000000000000000000000",
       "aad": []
     }
   }
 ```
 
+### Decrypt Content
+
+```bash
+csv content decrypt encrypted-envelope.json --key-id 0000000000000000000000000000000000000000000000000000000000000000
+```
+
 ### Create Selective Disclosure Proof
 
 ```bash
-csv content disclose --tree content-tree.json --include 0,2
+csv content disclose content-tree.json --include 0,2
 ```
 
 Output:
@@ -791,7 +913,7 @@ Selective Disclosure
 ### Add Attachment Reference
 
 ```bash
-csv content attach add --tree content-tree.json --file document.pdf --media-type pdf
+csv content attach add content-tree.json document.pdf --media-type application/pdf
 ```
 
 Output:
@@ -807,10 +929,16 @@ Add Attachment Reference
   ✓ Attachment reference created
 ```
 
+### List Attachment References
+
+```bash
+csv content attach list content-tree.json
+```
+
 ### Add Participant
 
 ```bash
-csv content participants add --tree content-tree.json --key 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678 --role creator
+csv content participants add content-tree.json --key 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678 --role creator
 ```
 
 Output:
@@ -825,10 +953,16 @@ Add Participant
   ✓ Participant created
 ```
 
+### List Participants
+
+```bash
+csv content participants list content-tree.json
+```
+
 ### Create Content Claim
 
 ```bash
-csv content claims create --tree content-tree.json --predicate authentic --description "This content was created by Alice and verified on 2024-01-15"
+csv content claims create content-tree.json --predicate authentic --description "This content was created by Alice and verified on 2024-01-15"
 ```
 
 Output:
@@ -846,6 +980,12 @@ Create Content Claim
   }
 
   ✓ Claim created
+```
+
+### List Content Claims
+
+```bash
+csv content claims list content-tree.json
 ```
 
 ---
@@ -1074,7 +1214,7 @@ Runtime Events
 ### Validate a Consignment
 
 ```bash
-csv validate consignment consignment.json
+csv validate consignment consignment.cbor
 ```
 
 Output:
@@ -1097,6 +1237,8 @@ Validating Consignment
 csv validate proof proof.json --chain ethereum
 ```
 
+`validate proof` expects a JSON wrapper containing hex canonical proof data. Use `proof verify` or `validate offline` for the raw canonical artifact emitted by `csv proof generate`.
+
 ### Validate Seal Consumption
 
 ```bash
@@ -1118,7 +1260,7 @@ Validating Seal Consumption
 ### Offline Proof Verification
 
 ```bash
-csv validate offline --file proof.json
+csv validate offline --file proof.cbor
 ```
 
 Output:
@@ -1143,6 +1285,12 @@ Offline Proof Verification
     Destination      https://suiscan.xyz/testnet
   ✓ Proof bundle is cryptographically valid
   ✓ Offline verification successful
+```
+
+### Validate a Commitment Chain
+
+```bash
+csv validate commitment-chain commitments.json
 ```
 
 ### Inspect Replay Registry
@@ -1208,7 +1356,7 @@ Running Test: bitcoin -> sui
 ### Run All Tests
 
 ```bash
-csv test run-all
+csv test run --all
 ```
 
 Output:
@@ -1254,7 +1402,7 @@ Here's a complete end-to-end workflow demonstrating the full CSV Protocol CLI ca
 
 ```bash
 # Generate a new wallet with 12-word mnemonic
-csv wallet init --network test --words 12
+csv wallet init test --words 12
 ```
 
 Save your mnemonic phrase securely! This is the only way to recover your wallet.
@@ -1273,8 +1421,8 @@ Get testnet tokens from faucets:
 
 ```bash
 csv wallet list
-csv wallet balance --chain ethereum
-csv wallet balance --chain bitcoin
+csv wallet balance ethereum
+csv wallet balance bitcoin
 ```
 
 ### Step 4: Create a Sanad
@@ -1290,7 +1438,7 @@ Note the Sanad ID from the output.
 
 ```bash
 # Generate an inclusion proof for your Sanad
-csv proof generate --chain ethereum <SANAD_ID> -o proof.json
+csv proof generate ethereum <SANAD_ID> -o proof.cbor
 ```
 
 ### Step 6: Create a Content Tree
@@ -1305,7 +1453,7 @@ csv content create --input sanad-metadata.txt --output sanad-content.json
 
 ```bash
 # Generate a Merkle proof for the Sanad ID leaf
-csv content prove --tree sanad-content.json --index 0
+csv content prove sanad-content.json --index 0
 ```
 
 ### Step 8: Set Up Trust
@@ -1322,11 +1470,12 @@ csv trust import trusted-trust-package.json
 
 ```bash
 # Transfer your Sanad from Ethereum to Sui
-csv cross-chain transfer \
+csv cross-chain materialize \
   --from ethereum \
   --to sui \
   --sanad-id <SANAD_ID> \
-  --dest-owner 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678
+  --dest-owner 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678 \
+  --proof attestor
 ```
 
 ### Step 10: Monitor the Transfer
@@ -1344,20 +1493,20 @@ csv runtime health
 
 ```bash
 # Verify the proof on the destination chain
-csv proof verify-cross-chain --source ethereum --dest sui proof.json
+csv proof verify-cross-chain --source ethereum --dest sui --sanad-id <SANAD_ID> proof.cbor
 ```
 
 ### Step 12: Validate Everything
 
 ```bash
-# Validate the proof
+# Validate a JSON proof wrapper, if you exported one
 csv validate proof proof.json --chain sui
 
 # Validate seal consumption
 csv validate seal <SEAL_REF>
 
 # Offline verification
-csv validate offline --file proof.json
+csv validate offline --file proof.cbor
 ```
 
 ### Step 13: Check Final Status
@@ -1383,10 +1532,10 @@ csv runtime admission
 
 ```bash
 # Check chain status
-csv chain status --chain ethereum
+csv chain status ethereum
 
 # Set a different RPC URL
-csv chain set-rpc --chain ethereum https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
+csv chain set-rpc ethereum https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
 ```
 
 **Transfer Stuck**
@@ -1416,7 +1565,7 @@ csv trust import new-trust-package.json
 
 ```bash
 # Verify offline
-csv validate offline --file proof.json
+csv validate offline --file proof.cbor
 
 # Check seal consumption
 csv validate seal <SEAL_REF>
@@ -1427,6 +1576,6 @@ csv validate seal <SEAL_REF>
 ## Next Steps
 
 - Explore the code examples in `csv-examples/`
-- Run the full test suite: `csv test run-all`
+- Run the full test matrix: `csv test run --all`
 - Read the protocol documentation in `csv-docs/`
 - Contribute to the project: <https://github.com/Diewan/csv-protocol>

@@ -75,11 +75,19 @@ echo "  Destination Owner: (will be extracted from wallet)"
 echo ""
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Check Source Chain Status" "Verifies connection to Ethereum Sepolia testnet" "csv chain status --chain ethereum"
+    prompt_step "Check Source Chain Status" "Shows Ethereum Sepolia chain configuration" "csv chain status ethereum"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Check Destination Chain Status" "Verifies connection to Sui testnet" "csv chain status --chain sui"
+    prompt_step "Check Destination Chain Status" "Shows Sui testnet chain configuration" "csv chain status sui"
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    prompt_step "Check Source Chain Readiness" "Checks signer and contract readiness before submitting work" "csv chain readiness ethereum --json"
+fi
+
+if [ -z "$SKIP_ALL" ]; then
+    prompt_step "Show Chain Capabilities" "Shows which chains support materialization and verification" "csv chain capabilities --json"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
@@ -174,11 +182,11 @@ if [ -z "$SKIP_ALL" ]; then
         echo "Please complete the create step or enter a Sanad ID manually."
         exit 1
     fi
-    prompt_step "Generate Source Proof" "Writes the canonical source proof artifact for the Sanad" "csv proof generate --chain ethereum $SANAD_ID -o proof.cbor"
+    prompt_step "Generate Source Proof" "Writes the canonical source proof artifact for the Sanad" "csv proof generate ethereum $SANAD_ID -o proof.cbor"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Verify Source Proof" "Verifies the canonical source proof artifact locally" "csv proof verify --chain ethereum --proof-file proof.cbor"
+    prompt_step "Verify Source Proof" "Verifies the canonical source proof artifact locally" "csv proof verify ethereum --proof proof.cbor"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
@@ -201,13 +209,13 @@ if [ -z "$SKIP_ALL" ]; then
         exit 1
     fi
     echo "Command:"
-    echo "  csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER"
+    echo "  csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER --proof attestor"
     echo ""
     read -p "Run this step? (y/n/s to skip all remaining) > " choice
     case "$choice" in 
         y|Y ) 
             echo "Running..."
-            csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER
+            csv cross-chain materialize --from ethereum --to sui --sanad-id $SANAD_ID --dest-owner $DEST_OWNER --proof attestor
             ;;
         n|N ) 
             echo "Skipping..."
@@ -231,6 +239,7 @@ if [ -z "$SKIP_ALL" ]; then
     echo ""
     echo "Command:"
     echo "  csv cross-chain status <TRANSFER_ID>"
+    echo "  csv cross-chain resume <TRANSFER_ID> --wait"
     echo ""
     echo "Note: Replace <TRANSFER_ID> with the actual ID from the previous step"
     echo ""
@@ -280,7 +289,7 @@ if [ -z "$SKIP_ALL" ]; then
     echo "Description: Corrupting proof.cbor and verifying it is a malformed proof attempt that must fail closed"
     echo ""
     echo "Command:"
-    echo "  csv proof verify --chain ethereum --proof-file proof.cbor"
+    echo "  csv proof verify ethereum --proof proof.cbor"
     echo ""
     read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
     if [[ "$choice" == "s" || "$choice" == "S" ]]; then
@@ -374,7 +383,7 @@ if [ -z "$SKIP_ALL" ]; then
     echo "Description: Verifies the cross-chain proof for the transfer"
     echo ""
     echo "Command:"
-    echo "  csv proof verify-cross-chain --source ethereum --dest sui proof.cbor"
+    echo "  csv proof verify-cross-chain --source ethereum --dest sui --sanad-id $SANAD_ID proof.cbor"
     echo ""
     echo "Note: proof.cbor should be generated from the transfer"
     echo ""
@@ -389,15 +398,15 @@ echo "  Cross-Chain Transfer Demo Complete"
 echo "=============================================="
 echo ""
 echo "Full workflow:"
-echo "  1. csv wallet init --network test --words 12"
+echo "  1. csv wallet init test --words 12"
 echo "  2. csv sanad create --chain ethereum --value 1000000000000000000"
 echo "     → Copy the 'Sanad ID' from the output"
 echo "  3. csv sanad state --chain ethereum <SANAD_ID>"
-echo "  4. csv proof generate --chain ethereum <SANAD_ID> -o proof.cbor"
-echo "  5. csv proof verify --chain ethereum --proof-file proof.cbor"
+echo "  4. csv proof generate ethereum <SANAD_ID> -o proof.cbor"
+echo "  5. csv proof verify ethereum --proof proof.cbor"
 echo "  6. csv wallet list"
 echo "     → Copy the destination chain address (e.g., Sui address)"
-echo "  7. csv cross-chain materialize --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER>"
+echo "  7. csv cross-chain materialize --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER> --proof attestor"
 echo "  8. csv cross-chain status <TRANSFER_ID>"
 echo "  9. csv sanad trace --chain ethereum <SANAD_ID>"
 echo "  10. Replay attempt: repeat step 7; it must fail closed"
@@ -406,7 +415,7 @@ echo "  12. Duplicate sanadId/nullifier/lockEventId attempts must fail closed"
 echo "  13. Forged settlement receipt attempt must fail closed"
 echo "  14. Confirm runtime metrics: verified proof built, mint submitted, mint confirmed, settlement submitted, settlement confirmed, replay rejected, authorization rejected"
 echo "  15. Run the chain pair matrix: BTC -> Sui, BTC -> Aptos, BTC -> Solana, ETH -> Sui, Sui -> ETH"
-echo "  16. csv proof verify-cross-chain --source ethereum --dest sui proof.cbor"
+echo "  16. csv proof verify-cross-chain --source ethereum --dest sui --sanad-id <SANAD_ID> proof.cbor"
 echo ""
 echo "Parameter Extraction Guide:"
 echo "  - Sanad ID: Found in the output of 'csv sanad create' (line: 'Sanad ID')"

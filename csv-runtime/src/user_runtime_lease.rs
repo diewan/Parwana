@@ -118,6 +118,8 @@ pub struct RuntimeExecutionContext {
     pub runtime_instance: RuntimeId,
     /// Runtime policy for this execution
     pub policy: crate::policy::RuntimePolicy,
+    /// Destination owner bytes bound into destination mint attestations.
+    pub destination_owner: Option<Vec<u8>>,
 }
 
 impl TransferLease {
@@ -224,6 +226,7 @@ impl RuntimeExecutionContext {
             lease,
             runtime_instance,
             policy,
+            destination_owner: None,
         }
     }
 
@@ -243,6 +246,7 @@ impl RuntimeExecutionContext {
             lease,
             runtime_instance,
             policy,
+            destination_owner: None,
         })
     }
 

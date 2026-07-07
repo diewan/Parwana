@@ -11,10 +11,6 @@ use csv_wallet::wallet_traits::WalletOperations;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use secp256k1::{PublicKey as SecpPublicKey, Secp256k1, SecretKey};
-
-#[cfg(feature = "rpc")]
-use k256::ecdsa::SigningKey;
 #[cfg(feature = "rpc")]
 use reqwest::Client as ReqwestClient;
 #[cfg(feature = "rpc")]
@@ -151,42 +147,19 @@ impl WalletOperations for EthereumWalletOperations {
         }
     }
 
-    async fn sign_transaction(&self, seed: &[u8], tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
-        #[cfg(feature = "rpc")]
-        {
-            let mut seed_array = [0u8; 64];
-            if seed.len() >= 64 {
-                seed_array.copy_from_slice(&seed[..64]);
-            } else {
-                return Err(WalletError::KeyDerivation(format!(
-                    "Seed must be at least 64 bytes, got {}",
-                    seed.len()
-                )));
-            }
-
-            // Derive secp256k1 private key from seed
-            let secret_key = SecretKey::from_slice(&seed_array[..32]).map_err(|e| {
-                WalletError::KeyDerivation(format!("Failed to derive private key: {}", e))
-            })?;
-
-            let secp = Secp256k1::new();
-            let _public_key = SecpPublicKey::from_secret_key(&secp, &secret_key);
-
-            // Sign the transaction data (simplified - in production would use proper Ethereum transaction signing)
-            let signing_key = SigningKey::from_slice(&seed_array[..32]).map_err(|e| {
-                WalletError::KeyDerivation(format!("Failed to derive signing key: {}", e))
-            })?;
-
-            use k256::ecdsa::signature::Signer;
-            let signature: k256::ecdsa::Signature = signing_key.sign(tx_data);
-
-            Ok(signature.to_bytes().to_vec())
-        }
-
-        #[cfg(not(feature = "rpc"))]
-        {
-            Err(WalletError::RpcNotConfigured("Ethereum".to_string()))
-        }
+    async fn sign_transaction(&self, _seed: &[u8], _tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
+        // Fail closed. The previous implementation signed the raw `tx_data`
+        // blob directly with a seed-derived key: no EIP-155 chain-id binding,
+        // no nonce, no RLP transaction envelope. Such a signature is not a
+        // valid Ethereum transaction and is replayable across chains, so it
+        // must never be produced. A real implementation must construct and
+        // sign a properly encoded EIP-1559/EIP-155 transaction.
+        Err(WalletError::Signing(
+            "Ethereum transaction signing is not implemented: refusing to \
+             produce a raw, chain-unbound signature. Use a real EIP-155 \
+             transaction signing path before broadcasting."
+                .to_string(),
+        ))
     }
 
     async fn broadcast_transaction(&self, signed_tx: &[u8]) -> Result<String, WalletError> {
