@@ -12,6 +12,7 @@
 //! The `resume` subcommand advances an already-locked transfer without re-locking.
 
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -1198,7 +1199,7 @@ pub async fn cmd_materialize(
     // downgrades to the attestor path.
     ensure_proof_available(proof)?;
     output::info("Authenticity: attestor (RFC §9 verifier-signed mint attestation)");
-    ensure_destination_attestor_ready(&to)?;
+    ensure_destination_attestor_ready(&to, config).await?;
 
     lock_and_mint(
         from,
@@ -1213,14 +1214,13 @@ pub async fn cmd_materialize(
     .await
 }
 
-fn ensure_destination_attestor_ready(to: &Chain) -> Result<()> {
+async fn ensure_destination_attestor_ready(to: &Chain, config: &Config) -> Result<()> {
     let needs_verifier_key = matches!(to.as_str(), "sui" | "aptos" | "solana");
-    if needs_verifier_key
-        && std::env::var("CSV_MINT_VERIFIER_KEY")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .is_none()
-    {
+    let verifier_key = std::env::var("CSV_MINT_VERIFIER_KEY")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    if needs_verifier_key && verifier_key.is_none() {
         output::error(&format!(
             "{} materialization requires CSV_MINT_VERIFIER_KEY before the source Sanad is locked",
             to
@@ -1232,7 +1232,160 @@ fn ensure_destination_attestor_ready(to: &Chain) -> Result<()> {
             "Destination mint verifier key missing; refusing to proceed without destination mint attestation"
         ));
     }
+    if to.as_str() == "solana" {
+        ensure_solana_verifier_registered(config, verifier_key.as_deref().unwrap()).await?;
+    }
     Ok(())
+}
+
+async fn ensure_solana_verifier_registered(config: &Config, verifier_key_hex: &str) -> Result<()> {
+    let chain_config = config.chain(&Chain::new("solana"))?;
+    let program_id = chain_config
+        .program_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("Solana program_id is not configured"))?;
+    let program_id = solana_sdk::pubkey::Pubkey::from_str(program_id)
+        .map_err(|e| anyhow::anyhow!("Invalid Solana program_id: {}", e))?;
+    let rpc_url = chain_config.rpc_url.trim();
+    if rpc_url.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Solana RPC URL is not configured; cannot preflight verifier registry"
+        ));
+    }
+
+    let verifier_pubkey = compressed_secp256k1_pubkey(verifier_key_hex)?;
+    let registry = solana_verifier_registry_pda(&program_id);
+    let registry_account = fetch_solana_account_data(rpc_url, &registry).await?;
+    let registered = decode_solana_verifier_registry(&registry_account)?;
+    if !registered.iter().any(|v| v == &verifier_pubkey) {
+        output::error("CSV_MINT_VERIFIER_KEY is not registered in the Solana verifier registry");
+        output::kv("Program ID", &program_id.to_string());
+        output::kv("Registry PDA", &registry.to_string());
+        output::kv(
+            "Env Verifier Pubkey",
+            &format!("0x{}", hex::encode(verifier_pubkey)),
+        );
+        output::kv(
+            "Registered Verifiers",
+            &registered
+                .iter()
+                .map(|v| format!("0x{}", hex::encode(v)))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output::info(
+            "Seed or rotate the Solana verifier registry to include this compressed secp256k1 pubkey, or use the matching registered CSV_MINT_VERIFIER_KEY.",
+        );
+        return Err(anyhow::anyhow!(
+            "Solana destination verifier key is not registered"
+        ));
+    }
+    Ok(())
+}
+
+fn compressed_secp256k1_pubkey(secret_hex: &str) -> Result<[u8; 33]> {
+    let bytes = hex::decode(secret_hex.trim_start_matches("0x"))
+        .map_err(|e| anyhow::anyhow!("CSV_MINT_VERIFIER_KEY must be hex: {}", e))?;
+    let secret = secp256k1::SecretKey::from_slice(&bytes)
+        .map_err(|e| anyhow::anyhow!("CSV_MINT_VERIFIER_KEY is not a secp256k1 key: {}", e))?;
+    let secp = secp256k1::Secp256k1::new();
+    Ok(secp256k1::PublicKey::from_secret_key(&secp, &secret).serialize())
+}
+
+fn solana_verifier_registry_pda(
+    program_id: &solana_sdk::pubkey::Pubkey,
+) -> solana_sdk::pubkey::Pubkey {
+    solana_sdk::pubkey::Pubkey::find_program_address(&[b"verifier_registry"], program_id).0
+}
+
+async fn fetch_solana_account_data(
+    rpc_url: &str,
+    pubkey: &solana_sdk::pubkey::Pubkey,
+) -> Result<Vec<u8>> {
+    #[derive(serde::Deserialize)]
+    struct RpcResponse {
+        result: Option<RpcResult>,
+        error: Option<serde_json::Value>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct RpcResult {
+        value: Option<RpcAccount>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct RpcAccount {
+        data: (String, String),
+    }
+
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getAccountInfo",
+        "params": [
+            pubkey.to_string(),
+            { "encoding": "base64", "commitment": "confirmed" }
+        ]
+    });
+    let response: RpcResponse = reqwest::Client::new()
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    if let Some(error) = response.error {
+        return Err(anyhow::anyhow!(
+            "Solana RPC getAccountInfo failed for {}: {}",
+            pubkey,
+            error
+        ));
+    }
+    let account = response
+        .result
+        .and_then(|r| r.value)
+        .ok_or_else(|| anyhow::anyhow!("Solana verifier registry {} is not initialized", pubkey))?;
+    if account.data.1 != "base64" {
+        return Err(anyhow::anyhow!(
+            "Unexpected Solana account encoding for verifier registry: {}",
+            account.data.1
+        ));
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(account.data.0)
+        .map_err(|e| anyhow::anyhow!("Failed to decode Solana verifier registry: {}", e))
+}
+
+fn decode_solana_verifier_registry(data: &[u8]) -> Result<Vec<[u8; 33]>> {
+    const DISCRIMINATOR: usize = 8;
+    const AUTHORITY: usize = 32;
+    const THRESHOLD: usize = 1;
+    const VEC_LEN: usize = 4;
+    let offset = DISCRIMINATOR + AUTHORITY + THRESHOLD;
+    if data.len() < offset + VEC_LEN {
+        return Err(anyhow::anyhow!(
+            "Solana verifier registry account is truncated"
+        ));
+    }
+    let count = u32::from_le_bytes(data[offset..offset + VEC_LEN].try_into().unwrap()) as usize;
+    let mut cursor = offset + VEC_LEN;
+    let needed = cursor + count * 33;
+    if data.len() < needed {
+        return Err(anyhow::anyhow!(
+            "Solana verifier registry declares {} verifier(s) but account data is truncated",
+            count
+        ));
+    }
+    let mut verifiers = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut verifier = [0u8; 33];
+        verifier.copy_from_slice(&data[cursor..cursor + 33]);
+        verifiers.push(verifier);
+        cursor += 33;
+    }
+    Ok(verifiers)
 }
 
 /// Shared lock + thin-registry mint core.
@@ -1399,7 +1552,7 @@ pub async fn cmd_resume(
         ));
     };
 
-    ensure_destination_attestor_ready(&resume_ctx.to)?;
+    ensure_destination_attestor_ready(&resume_ctx.to, config).await?;
     let dest_owner = resolve_destination_owner(&resume_ctx.to, None, state)?;
 
     let client = build_client(&resume_ctx.from, &resume_ctx.to, None, config, state).await?;

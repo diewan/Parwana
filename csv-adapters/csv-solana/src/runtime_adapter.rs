@@ -304,8 +304,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         // Send the transaction (fails closed if the program rejects an
         // unauthenticated or duplicate mint at simulation/preflight).
-        let signature = match self.backend.rpc().send_transaction(&transaction) {
-            Ok(signature) => signature,
+        match self.backend.rpc().send_transaction(&transaction) {
+            Ok(_signature) => {}
             Err(e) => {
                 if format!("{}", e).contains("already in use")
                     && let Some(result) =
@@ -318,7 +318,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
                     e
                 )));
             }
-        };
+        }
 
         // Get the block height - use slot as proxy since get_block_height not available in SolanaRpc
         let block_height = self
@@ -328,7 +328,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             .map_err(|e| AdapterError::Generic(format!("Failed to get slot: {}", e)))?;
 
         Ok(MintResult {
-            tx_hash: signature.to_string(),
+            tx_hash: existing_mint_tx_ref(&mint_record),
             block_height,
         })
     }
@@ -579,6 +579,7 @@ mod tests {
         let config = SolanaConfig {
             network: Network::Devnet,
             csv_program_id: PROGRAM_ID.to_string(),
+            keypair: Some(csv_keys::memory::SecretKey::new([7u8; 32])),
             ..Default::default()
         };
         let seal = SolanaSealProtocol::from_config(config, Box::new(rpc)).expect("seal protocol");
@@ -711,6 +712,29 @@ mod tests {
 
         assert_eq!(result.tx_hash, existing_mint_tx_ref(&mint_record));
         assert_eq!(result.block_height, 1000);
+    }
+
+    #[tokio::test]
+    async fn mint_sanad_returns_stable_hex_mint_record_ref_after_submission() {
+        let secp = secp256k1::Secp256k1::new();
+        let (secret, _pubkey) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let adapter = SolanaRuntimeAdapter::new(test_backend(Some(secret)));
+        let sanad = Hash::new([2u8; 32]);
+        let transfer = test_transfer(sanad);
+        let payload = runtime_mint_request_cbor(sanad);
+        let (mint_record, _) = crate::anchor_client::pdas::mint_record(
+            &Pubkey::from_str(PROGRAM_ID).unwrap(),
+            sanad.as_bytes(),
+        );
+
+        let result = adapter
+            .mint_sanad(&transfer, &payload)
+            .await
+            .expect("mint submission should return a runtime-compatible tx ref");
+
+        assert_eq!(result.tx_hash, existing_mint_tx_ref(&mint_record));
+        assert_eq!(result.tx_hash.len(), 64);
+        assert!(result.tx_hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[tokio::test]

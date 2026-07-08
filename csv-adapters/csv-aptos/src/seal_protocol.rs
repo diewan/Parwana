@@ -58,6 +58,11 @@ pub struct AptosSealProtocol {
 }
 
 impl AptosSealProtocol {
+    #[cfg(feature = "rpc")]
+    fn is_sequence_number_too_old_error(error: &str) -> bool {
+        error.contains("SEQUENCE_NUMBER_TOO_OLD")
+    }
+
     pub(crate) fn config(&self) -> &AptosConfig {
         &self.config
     }
@@ -1912,67 +1917,89 @@ impl AptosSealProtocol {
         let mut sender = [0u8; 32];
         sender.copy_from_slice(&hash[..32]);
 
-        // Get account sequence number
-        let sequence_number = self
-            .rpc
-            .get_account_sequence_number(sender)
-            .await
-            .map_err(|e| format!("Failed to get sequence number: {}", e))?;
-
-        // Get ledger info
-        let ledger = self
-            .rpc
-            .get_ledger_info()
-            .await
-            .map_err(|e| format!("Failed to get ledger info: {}", e))?;
-
-        let expiration_secs = (ledger.ledger_timestamp / 1_000_000) + 600;
         let module_address = &self.config.seal_contract.module_address;
 
-        // Build transaction for create_seal
-        log::debug!("APTOS: Building create_seal transaction");
-        let raw_transaction = self
-            .build_create_seal_transaction(
-                sender,
-                sequence_number,
-                expiration_secs,
-                module_address,
-                nonce,
-            )
-            .map_err(|e| format!("Failed to build create_seal transaction: {}", e))?;
+        let tx_hash = {
+            let max_attempts = 3;
+            let mut attempt = 0;
 
-        // Sign the transaction
-        let (public_key, signature, _signing_message) =
-            Self::sign_raw_transaction(&raw_transaction, signing_key)?;
+            loop {
+                attempt += 1;
 
-        // Build the signed transaction JSON
-        let sender_hex = format_address(sender);
-        let signed_tx = serde_json::json!({
-            "sender": sender_hex,
-            "sequence_number": sequence_number.to_string(),
-            "max_gas_amount": self.config.transaction.max_gas.to_string(),
-            "gas_unit_price": "100",
-            "expiration_timestamp_secs": expiration_secs.to_string(),
-            "payload": {
-                "type": "entry_function_payload",
-                "function": format!("{}::CSVSeal::create_seal", module_address),
-                "type_arguments": [],
-                "arguments": [nonce.to_string()]
-            },
-            "signature": {
-                "type": "ed25519_signature",
-                "public_key": format!("0x{}", hex::encode(public_key.to_bytes())),
-                "signature": format!("0x{}", hex::encode(signature.to_bytes()))
+                let sequence_number = self
+                    .rpc
+                    .get_account_sequence_number(sender)
+                    .await
+                    .map_err(|e| format!("Failed to get sequence number: {}", e))?;
+
+                let ledger = self
+                    .rpc
+                    .get_ledger_info()
+                    .await
+                    .map_err(|e| format!("Failed to get ledger info: {}", e))?;
+
+                let expiration_secs = (ledger.ledger_timestamp / 1_000_000) + 600;
+
+                log::debug!(
+                    "APTOS: Building create_seal transaction with sequence number {} (attempt {}/{})",
+                    sequence_number,
+                    attempt,
+                    max_attempts
+                );
+                let raw_transaction = self
+                    .build_create_seal_transaction(
+                        sender,
+                        sequence_number,
+                        expiration_secs,
+                        module_address,
+                        nonce,
+                    )
+                    .map_err(|e| format!("Failed to build create_seal transaction: {}", e))?;
+
+                let (public_key, signature, _signing_message) =
+                    Self::sign_raw_transaction(&raw_transaction, signing_key)?;
+
+                let sender_hex = format_address(sender);
+                let signed_tx = serde_json::json!({
+                    "sender": sender_hex,
+                    "sequence_number": sequence_number.to_string(),
+                    "max_gas_amount": self.config.transaction.max_gas.to_string(),
+                    "gas_unit_price": "100",
+                    "expiration_timestamp_secs": expiration_secs.to_string(),
+                    "payload": {
+                        "type": "entry_function_payload",
+                        "function": format!("{}::CSVSeal::create_seal", module_address),
+                        "type_arguments": [],
+                        "arguments": [nonce.to_string()]
+                    },
+                    "signature": {
+                        "type": "ed25519_signature",
+                        "public_key": format!("0x{}", hex::encode(public_key.to_bytes())),
+                        "signature": format!("0x{}", hex::encode(signature.to_bytes()))
+                    }
+                });
+
+                log::debug!("APTOS: Submitting create_seal transaction");
+                match self.rpc.submit_signed_transaction(signed_tx).await {
+                    Ok(tx_hash) => break tx_hash,
+                    Err(e) => {
+                        let error = e.to_string();
+                        if attempt < max_attempts && Self::is_sequence_number_too_old_error(&error)
+                        {
+                            log::warn!(
+                                "APTOS: create_seal rejected with stale sequence number; refetching and retrying"
+                            );
+                            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                            continue;
+                        }
+
+                        return Err(
+                            format!("Failed to submit create_seal transaction: {}", error).into(),
+                        );
+                    }
+                }
             }
-        });
-
-        // Submit the transaction using the JSON format
-        log::debug!("APTOS: Submitting create_seal transaction");
-        let tx_hash = self
-            .rpc
-            .submit_signed_transaction(signed_tx.clone())
-            .await
-            .map_err(|e| format!("Failed to submit create_seal transaction: {}", e))?;
+        };
 
         log::debug!("APTOS: create_seal transaction submitted successfully");
 
@@ -2111,6 +2138,17 @@ mod tests {
         let adapter = test_adapter();
         assert_eq!(&adapter.domain_separator()[..10], b"CSV-APTOS-");
         assert_eq!(adapter.domain_separator()[10], 4); // Devnet chain_id
+    }
+
+    #[test]
+    #[cfg(feature = "rpc")]
+    fn test_sequence_number_too_old_error_detection() {
+        let error = "Aptos transaction submission failed: \"vm_error\" - Some(String(\"Invalid transaction: Type: Validation Code: SEQUENCE_NUMBER_TOO_OLD\"))";
+
+        assert!(AptosSealProtocol::is_sequence_number_too_old_error(error));
+        assert!(!AptosSealProtocol::is_sequence_number_too_old_error(
+            "Aptos transaction submission failed: vm_error - OUT_OF_GAS"
+        ));
     }
 
     #[test]
