@@ -8,13 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **PostgreSQL execution journal**: `PostgresExecutionJournal` in `postgres_store.rs` with async operations via `spawn_blocking`
 - **Health monitoring**: Integrated `RuntimeHealth` from csv-observability, replaced `HealthMonitor`
 - **Health status**: Added `HealthStatus` enum as backward-compatible alias mapping to `RuntimeHealth`
-- **Module declarations**: Added `postgres_store` and `replay_record` module exports
 - **Lease configuration**: Added `LeaseConfig` with configurable defaults
 
 ### Changed
+- **PostgreSQL runtime scope**: Archived unused HA/event-store scaffolding; the `postgres` feature now exposes only the `csv-storage` replay database backend.
 - **Lease durations**: Aligned `LeaseConfig` defaults with lease module constants (30s default, 300s max)
 - **Dependency updates**: Now depends on csv-protocol, csv-coordinator, csv-admission, csv-observability (no csv-core)
 - **Runtime mode**: Added `HealthStatus` enum with `From<RuntimeHealth>` impl

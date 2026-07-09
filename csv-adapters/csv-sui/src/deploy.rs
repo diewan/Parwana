@@ -26,6 +26,8 @@ pub struct PackageDeployment {
 /// Package deployer for publishing Move packages to Sui.
 pub struct PackageDeployer {
     /// Sui configuration.
+    // Held for the deploy flow; the gRPC client below carries the endpoint.
+    #[allow(dead_code)]
     config: SuiConfig,
     /// Sui gRPC client.
     node: Arc<SuiNode>,

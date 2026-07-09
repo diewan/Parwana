@@ -11,7 +11,6 @@
 
 #![warn(missing_docs)]
 #![allow(missing_docs)]
-#![allow(dead_code)]
 
 pub mod adapter_impl;
 pub mod bip341;

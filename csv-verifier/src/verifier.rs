@@ -424,9 +424,11 @@ pub struct VerifierConfig {
     /// plus the context's observed tip give a real, deterministic age in blocks.
     /// It is the *upper* bound on the same `tip - anchor_height` quantity that
     /// finality lower-bounds. `None` disables the check (the default), because a
-    /// meaningful bound is deployment/chain-specific and an always-on default
-    /// would reject the `u64::MAX` "instant-final" confirmation sentinel used by
-    /// chains without a depth model.
+    /// meaningful bound is deployment/chain-specific. Production constructors
+    /// must set it from source-chain configuration; `None` is reserved for
+    /// tests and explicit deployments that disable freshness. The `u64::MAX`
+    /// "instant-final" confirmation sentinel used by chains without a depth
+    /// model remains exempt when the bound is set.
     pub max_anchor_age_blocks: Option<u64>,
 }
 
@@ -765,13 +767,19 @@ pub fn verify_proof(
     )
 }
 
-/// Offline proof verification with an explicit expected-domain binding
-/// (VERIFY-DOMAIN-SEPARATION-001).
+/// Offline proof verification with explicit expected-domain binding
+/// (VERIFY-DOMAIN-SEPARATION-001) and optional caller-supplied freshness data.
 ///
 /// Identical to [`verify_proof`] but additionally binds the bundle to the caller's
 /// trusted `ExpectedDomain` (Sanad id and/or source chain). The recipient accept
 /// path builds `expected` from the invoice/consignment it trusts and thereby
 /// rejects a bundle that does not match the transfer it intends to accept.
+///
+/// Offline verification cannot discover a live source-chain tip by itself. When
+/// `expected.observed_source_tip` and `expected.max_anchor_age_blocks` are both
+/// populated, this function enforces the same height-based freshness cap as the
+/// runtime path. Production accept callers must supply those fields or perform an
+/// equivalent chain-backed check before recording ownership.
 pub fn verify_proof_bound(
     bundle: &ProofBundle,
     seal_registry: impl Fn(&[u8]) -> bool,
@@ -829,8 +837,12 @@ pub fn verify_proof_bound(
         return VerificationResult::from_protocol_error(&e);
     }
 
-    // Step 3: Validate proof timestamp (prevent replay of old proofs)
+    // Step 3: Validate proof anchor height and optional caller-supplied
+    // freshness bounds (prevent replay of old proofs).
     if let Err(e) = validate_proof_timestamp(bundle) {
+        return VerificationResult::from_protocol_error(&e);
+    }
+    if let Err(e) = validate_expected_freshness(bundle, expected) {
         return VerificationResult::from_protocol_error(&e);
     }
 
@@ -934,6 +946,38 @@ fn validate_proof_timestamp(bundle: &ProofBundle) -> Result<()> {
     Ok(())
 }
 
+fn validate_expected_freshness(bundle: &ProofBundle, expected: &ExpectedDomain) -> Result<()> {
+    match (
+        expected.observed_source_tip,
+        expected.max_anchor_age_blocks,
+    ) {
+        (Some(observed_tip), Some(max_age)) => {
+            if observed_tip == u64::MAX {
+                return Ok(());
+            }
+            let age = observed_tip
+                .checked_sub(bundle.anchor_ref.block_height)
+                .ok_or_else(|| {
+                    ProtocolError::Generic(format!(
+                        "Invalid freshness context: observed source tip {} is below anchor height {}",
+                        observed_tip, bundle.anchor_ref.block_height
+                    ))
+                })?;
+            if age > max_age {
+                return Err(ProtocolError::ProofExpired(format!(
+                    "anchor is {age} blocks below tip, exceeds max age {max_age}"
+                )));
+            }
+            Ok(())
+        }
+        (Some(_), None) | (None, Some(_)) => Err(ProtocolError::Generic(
+            "Incomplete freshness context: observed_source_tip and max_anchor_age_blocks must be supplied together"
+                .to_string(),
+        )),
+        (None, None) => Ok(()),
+    }
+}
+
 /// Validate domain separation to prevent cross-domain attacks.
 ///
 /// # Security
@@ -976,6 +1020,10 @@ pub struct ExpectedDomain {
     pub sanad_id: Option<[u8; 32]>,
     /// Expected source-chain tag (compared to the bundle's proof `source` when set).
     pub source_chain: Option<String>,
+    /// Caller-supplied observed source-chain tip for offline freshness checks.
+    pub observed_source_tip: Option<u64>,
+    /// Maximum allowed anchor age, in blocks below `observed_source_tip`.
+    pub max_anchor_age_blocks: Option<u64>,
 }
 
 /// Bind a proof bundle to the transfer/domain it is being verified for
@@ -1425,6 +1473,8 @@ mod tests {
         let expected = ExpectedDomain {
             sanad_id: Some([0xABu8; 32]),
             source_chain: None,
+            observed_source_tip: None,
+            max_anchor_age_blocks: None,
         };
         let result = verify_proof_bound(
             &bundle,
@@ -1518,6 +1568,17 @@ mod tests {
     }
 
     #[test]
+    fn verify_finality_accepts_anchor_exactly_at_max_age() {
+        let verifier = CanonicalVerifierImpl::new(VerifierConfig {
+            max_anchor_age_blocks: Some(100),
+            ..VerifierConfig::default()
+        });
+        let anchor_height = 1_000u64;
+        let ctx = freshness_context(anchor_height + 100);
+        assert!(verifier.verify_finality(anchor_height, &ctx).is_ok());
+    }
+
+    #[test]
     fn verify_finality_freshness_exempts_instant_final_sentinel() {
         // u64::MAX confirmations is the "instant-final" sentinel; its age is not
         // measured in blocks and must not be rejected as stale.
@@ -1536,6 +1597,80 @@ mod tests {
         let verifier = CanonicalVerifierImpl::default();
         let ctx = freshness_context(1_000_000);
         assert!(verifier.verify_finality(1, &ctx).is_ok());
+    }
+
+    #[test]
+    fn verify_proof_bound_rejects_stale_anchor_beyond_expected_max_age() {
+        let bundle = test_bundle_with_signatures().unwrap();
+        let seal_registry = |_seal_id: &[u8]| false;
+        let expected = ExpectedDomain {
+            observed_source_tip: Some(bundle.anchor_ref.block_height + 101),
+            max_anchor_age_blocks: Some(100),
+            ..ExpectedDomain::default()
+        };
+
+        let result = verify_proof_bound(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+            &expected,
+        );
+        assert!(
+            !result.is_valid,
+            "offline bound verification must reject anchors older than the configured max age"
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("Proof expired")),
+            "stale anchor must surface proof expiry, got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_proof_bound_accepts_anchor_exactly_at_expected_max_age() {
+        let bundle = test_bundle_with_signatures().unwrap();
+        let seal_registry = |_seal_id: &[u8]| false;
+        let expected = ExpectedDomain {
+            observed_source_tip: Some(bundle.anchor_ref.block_height + 100),
+            max_anchor_age_blocks: Some(100),
+            ..ExpectedDomain::default()
+        };
+
+        let result = verify_proof_bound(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+            &expected,
+        );
+        assert!(
+            result.is_valid,
+            "offline bound verification must allow anchors exactly at the configured max age"
+        );
+    }
+
+    #[test]
+    fn verify_proof_bound_freshness_exempts_instant_final_sentinel() {
+        let bundle = test_bundle_with_signatures().unwrap();
+        let seal_registry = |_seal_id: &[u8]| false;
+        let expected = ExpectedDomain {
+            observed_source_tip: Some(u64::MAX),
+            max_anchor_age_blocks: Some(100),
+            ..ExpectedDomain::default()
+        };
+
+        let result = verify_proof_bound(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+            &expected,
+        );
+        assert!(result.is_valid);
     }
 
     #[test]

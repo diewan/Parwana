@@ -262,6 +262,8 @@ pub struct SuiBackend {
     /// Domain separator for proof generation
     domain_separator: [u8; 32],
     /// Commitment event builder for proof construction
+    // Constructed with the adapter; the runtime proof path builds events itself.
+    #[allow(dead_code)]
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     seal_protocol: Arc<SuiSealProtocol>,
@@ -535,10 +537,13 @@ impl SuiBackend {
     }
 
     /// Format Sui address for display
+    #[allow(dead_code)]
     fn format_address(&self, addr: [u8; 32]) -> String {
         format!("0x{}", hex::encode(addr))
     }
 
+    /// Retained signing seam; the seal protocol signs its own transaction bytes.
+    #[allow(dead_code)]
     fn sign_transaction_bytes(&self, tx_bytes: &[u8]) -> ChainOpResult<(Vec<u8>, Vec<u8>)> {
         use ed25519_dalek::Signer;
 
@@ -557,6 +562,9 @@ impl SuiBackend {
     }
 
     /// Build a lock transaction for Sui
+    ///
+    /// Retained builder seam; the runtime adapter builds its own lock transaction.
+    #[allow(dead_code)]
     fn build_lock_transaction_bytes(
         &self,
         seal_object_id: &[u8; 32],

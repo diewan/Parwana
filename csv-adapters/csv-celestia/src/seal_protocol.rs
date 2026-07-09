@@ -21,8 +21,6 @@
 //! 3. Seal is now "consumed" (cannot publish different commitment there)
 //! ```
 
-use sha2::Digest;
-
 use async_trait::async_trait;
 use csv_hash::Hash;
 use csv_hash::dag::DAGSegment;
@@ -45,9 +43,6 @@ pub struct CelestiaSealProtocol<C, I> {
     da_layer: CelestiaDaLayer<C, I>,
     /// Default namespace for seals
     namespace: Namespace,
-    /// Consumed seals (in-memory cache for testing)
-    #[allow(dead_code)]
-    consumed_seals: std::sync::Arc<tokio::sync::RwLock<std::collections::HashSet<ProofId>>>,
 }
 
 impl<C, I> CelestiaSealProtocol<C, I>
@@ -60,9 +55,6 @@ where
         Self {
             da_layer,
             namespace,
-            consumed_seals: std::sync::Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashSet::new(),
-            )),
         }
     }
 
@@ -85,12 +77,11 @@ where
         Ok(Self::new(da_layer, Namespace::metadata()))
     }
 
-    /// Check if a seal is consumed (would query DA in production)
-    async fn is_seal_consumed(&self, proof_id: &ProofId) -> Result<bool> {
-        // In production, this would query the DA layer to see if
-        // the location already has data (meaning the seal was used)
-        let available = self.da_layer.verify_availability(proof_id, 1).await?;
-        Ok(available)
+    /// Celestia remains DA-only for transfers: this adapter verifies blob
+    /// availability/finality but is intentionally not registered as a minting
+    /// or transfer-authority adapter.
+    pub fn is_da_only(&self) -> bool {
+        true
     }
 }
 
@@ -133,31 +124,18 @@ where
         // The commitment becomes the blob commitment
         let blob_commitment = BlobCommitment::new(*commitment.as_bytes());
 
-        // SECURITY CRITICAL: Derive actual block hash and tx hash from chain state
-        // instead of using placeholder zeros
+        let header = self.da_layer.get_header(seal.height).await?;
+        if header.hash == [0u8; 32] {
+            return Err(Box::new(CelestiaError::InvalidProofId(
+                "Celestia header is missing block hash".to_string(),
+            )));
+        }
 
-        // Derive block hash from commitment and height (since get_block_hash method doesn't exist)
-        let mut block_hasher = sha2::Sha256::new();
-        block_hasher.update(b"CSV-CELESTIA-BLOCK-");
-        block_hasher.update(commitment.as_bytes());
-        block_hasher.update(seal.height.to_le_bytes());
-        let block_hash: [u8; 32] = block_hasher.finalize().into();
-
-        // Derive tx hash from the proof_id (which contains the namespace and commitment)
-        let mut tx_hasher = sha2::Sha256::new();
-        tx_hasher.update(seal.proof_id.to_bytes());
-        tx_hasher.update(seal.height.to_le_bytes());
-        let tx_hash: [u8; 32] = tx_hasher.finalize().into();
-
-        log::info!(
-            "CELESTIA: Derived block hash for height {}: 0x{}",
-            seal.height,
-            hex::encode(block_hash)
-        );
-        log::info!(
-            "CELESTIA: Derived tx hash from proof_id: 0x{}",
-            hex::encode(tx_hash)
-        );
+        // Celestia DA anchors are located by height/namespace/blob commitment.
+        // There is no destination mint transaction here, so carry the blob
+        // commitment as the stable DA anchor identifier in the legacy tx_hash
+        // field used by the shared CommitAnchor type.
+        let tx_hash = seal.proof_id.commitment;
 
         // Create the anchor
         let anchor = CelestiaAnchor::new(
@@ -165,7 +143,7 @@ where
                 proof_id: seal.proof_id,
             },
             seal.height,
-            block_hash,
+            header.hash,
             blob_commitment,
             tx_hash,
         );
@@ -177,16 +155,37 @@ where
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::InclusionProof, Box<dyn std::error::Error + 'static>> {
-        // In production, this would verify the inclusion proof from Celestia
-        // Create a minimal commitment proof for testing
-        let proof = CommitmentProof::new(
-            anchor.height,
-            self.namespace,
-            anchor.commitment,
-            [0u8; 32], // row_root
-            [0u8; 32], // data_root
-            anchor.block_hash,
-        );
+        let proof_id = anchor.proof_id();
+        if proof_id.height != anchor.height {
+            return Err(Box::new(CelestiaError::CommitmentVerificationFailed(
+                "Anchor height does not match proof location".to_string(),
+            )));
+        }
+
+        let proof = self.da_layer.get_commitment_proof(&proof_id).await?;
+        proof.verify_structure()?;
+
+        if proof.height != anchor.height {
+            return Err(Box::new(CelestiaError::CommitmentVerificationFailed(
+                "Celestia inclusion proof height mismatch".to_string(),
+            )));
+        }
+        if proof.namespace != proof_id.namespace {
+            return Err(Box::new(CelestiaError::NamespaceMismatch {
+                expected: proof_id.namespace.to_hex(),
+                actual: proof.namespace.to_hex(),
+            }));
+        }
+        if proof.commitment != anchor.commitment {
+            return Err(Box::new(CelestiaError::CommitmentVerificationFailed(
+                "Celestia inclusion proof commitment mismatch".to_string(),
+            )));
+        }
+        if proof.block_hash != anchor.block_hash {
+            return Err(Box::new(CelestiaError::CommitmentVerificationFailed(
+                "Celestia inclusion proof block hash mismatch".to_string(),
+            )));
+        }
 
         Ok(proof)
     }
@@ -195,13 +194,31 @@ where
         &self,
         anchor: Self::CommitAnchor,
     ) -> std::result::Result<Self::FinalityProof, Box<dyn std::error::Error + 'static>> {
-        // Tendermint has deterministic finality
-        let proof = CelestiaFinalityProof::new(
-            anchor.height,
-            anchor.block_hash,
-            [0u8; 32], // data_root
-        )
-        .with_quorum(vec![]);
+        let proof_id = anchor.proof_id();
+        if proof_id.height != anchor.height {
+            return Err(Box::new(CelestiaError::InvalidProofId(
+                "Anchor height does not match proof location".to_string(),
+            )));
+        }
+
+        let proof = self.da_layer.verify_finality(&proof_id).await?;
+        proof.verify_structure()?;
+        if !proof.is_finalized() {
+            return Err(Box::new(CelestiaError::InvalidProofId(
+                "Celestia finality proof is missing quorum evidence".to_string(),
+            )));
+        }
+
+        if proof.height != anchor.height {
+            return Err(Box::new(CelestiaError::InvalidProofId(
+                "Celestia finality proof height mismatch".to_string(),
+            )));
+        }
+        if proof.block_hash != anchor.block_hash {
+            return Err(Box::new(CelestiaError::InvalidProofId(
+                "Celestia finality proof block hash mismatch".to_string(),
+            )));
+        }
 
         Ok(proof)
     }
@@ -232,6 +249,7 @@ where
 
         // SECURITY CRITICAL: Derive actual commitment from namespace and height
         // instead of using placeholder zeros
+        use sha2::Digest;
         let mut commitment_hasher = sha2::Sha256::new();
         commitment_hasher.update(b"CSV-CELESTIA-SEAL-");
         commitment_hasher.update(self.namespace.as_bytes());
@@ -654,16 +672,52 @@ mod tests {
 
         let anchor = CelestiaAnchor::new(
             crate::proof_id::ProofLocation::Celestia {
-                proof_id: ProofId::new(12345, Namespace::metadata(), [0u8; 32]),
+                proof_id: ProofId::new(12345, Namespace::metadata(), [9u8; 32]),
             },
             12345,
-            [0u8; 32],
-            BlobCommitment::new([0u8; 32]),
-            [0u8; 32],
+            [12345u64 as u8; 32],
+            BlobCommitment::new([9u8; 32]),
+            [8u8; 32],
         );
 
         let proof = protocol.verify_inclusion(anchor).await;
         assert!(proof.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_verify_inclusion_rejects_anchor_mismatch() {
+        let protocol = create_test_protocol().await;
+
+        let anchor = CelestiaAnchor::new(
+            crate::proof_id::ProofLocation::Celestia {
+                proof_id: ProofId::new(12345, Namespace::metadata(), [9u8; 32]),
+            },
+            12345,
+            [7u8; 32],
+            BlobCommitment::new([9u8; 32]),
+            [8u8; 32],
+        );
+
+        let proof = protocol.verify_inclusion(anchor).await;
+        assert!(proof.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_verify_finality_rejects_anchor_mismatch() {
+        let protocol = create_test_protocol().await;
+
+        let anchor = CelestiaAnchor::new(
+            crate::proof_id::ProofLocation::Celestia {
+                proof_id: ProofId::new(12345, Namespace::metadata(), [9u8; 32]),
+            },
+            12345,
+            [7u8; 32],
+            BlobCommitment::new([9u8; 32]),
+            [8u8; 32],
+        );
+
+        let proof = protocol.verify_finality(anchor).await;
+        assert!(proof.is_err());
     }
 
     #[tokio::test]

@@ -1273,10 +1273,13 @@ impl CsvClient {
 #[allow(dead_code)]
 pub(crate) struct ClientRef {
     pub(crate) enabled_chains: HashSet<ChainId>,
+    // Wallet is configured on the builder and consumed by the runtime, not read back here.
     #[allow(dead_code)]
     pub(crate) wallet: Option<Wallet>,
+    // Store handle is held for the client's lifetime; access goes through the managers.
     #[allow(dead_code)]
     pub(crate) store: Arc<std::sync::Mutex<StoreHandle>>,
+    // Store handle is held for the client's lifetime; access goes through the managers.
     #[allow(dead_code)]
     pub(crate) config: Config,
     #[cfg(feature = "tokio")]

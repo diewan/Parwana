@@ -14,7 +14,6 @@
 //! # Sanad operations
 //! csv sanad create --chain bitcoin --value 100000
 
-#![allow(dead_code)]
 #![allow(deprecated)]
 #![allow(clippy::collapsible_if)]
 #![allow(clippy::field_reassign_with_default)]

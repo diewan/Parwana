@@ -287,6 +287,9 @@ impl MempoolSignetRpc {
     }
 
     /// Get full transaction details (inputs, outputs, fee, etc.)
+    ///
+    /// Part of the mempool.space REST surface; the adapter reads UTXOs and status only.
+    #[allow(dead_code)]
     async fn get_tx(
         &self,
         txid: &str,
@@ -296,6 +299,9 @@ impl MempoolSignetRpc {
     }
 
     /// Get raw transaction hex
+    ///
+    /// Part of the mempool.space REST surface; the adapter reads UTXOs and status only.
+    #[allow(dead_code)]
     async fn get_tx_hex(
         &self,
         txid: &str,

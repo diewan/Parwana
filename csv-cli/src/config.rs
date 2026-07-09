@@ -1,96 +1,21 @@
 //! CLI configuration management
 
-#![allow(dead_code)]
-#![allow(deprecated)]
-
 // Configuration management — chains, wallets, RPC endpoints
 // Uses unified storage types from csv-store for compatibility with csv-wallet.
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 // Re-export unified types from csv-store
-pub use csv_store::state::{Chain, ChainConfig, ChainId, Network, WalletAccount};
+pub use csv_store::state::{Chain, ChainConfig, ChainId, Network};
 
 // Import deployment manifest reader
 use csv_protocol::deployment_manifest::{
     get_aptos_contract_address, get_ethereum_contract_address, get_solana_program_id,
     get_sui_package_id,
 };
-
-/// CSV Wallet exported JSON format (legacy, for migration from csv-wallet < 0.4)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CsvWalletData {
-    accounts: Vec<CsvAccount>,
-    selected_account_id: Option<String>,
-}
-
-/// CSV Wallet account entry (legacy format)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CsvAccount {
-    id: String,
-    chain: String,
-    name: String,
-    private_key: String,
-    address: String,
-}
-
-impl CsvWalletData {
-    /// Load from csv-wallet JSON file (legacy format)
-    fn load_from_file(path: &str) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let data: CsvWalletData = serde_json::from_str(&content)?;
-        Ok(data)
-    }
-
-    /// Find account by chain name (case-insensitive)
-    fn find_account(&self, chain: &str) -> Option<&CsvAccount> {
-        self.accounts
-            .iter()
-            .find(|a| a.chain.eq_ignore_ascii_case(chain))
-    }
-}
-
-/// Global cache for csv-wallet configs loaded at runtime
-static CSV_WALLET_CACHE: OnceLock<Mutex<HashMap<Chain, LegacyWalletConfig>>> = OnceLock::new();
-
-fn get_csv_wallet_cache() -> &'static Mutex<HashMap<Chain, LegacyWalletConfig>> {
-    CSV_WALLET_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Legacy wallet config for backwards compatibility (maps to unified WalletAccount)
-#[derive(Debug, Clone)]
-pub(crate) struct LegacyWalletConfig {
-    /// Private key (raw string for TOML deserialization only - converted to SecretHandle immediately)
-    pub private_key: Option<String>,
-    pub xpub: Option<String>,
-    pub mnemonic: Option<String>,
-    pub mnemonic_passphrase: Option<String>,
-    pub derivation_path: Option<String>,
-}
-
-impl LegacyWalletConfig {
-    /// Convert private_key String to typed SecretHandle (zeroize-on-drop)
-    /// This should be called immediately after deserialization to ensure secrets are never exposed as raw strings
-    pub fn to_secret_handle(&self, _chain: &str) -> Option<csv_wallet::SecretHandle> {
-        self.private_key.as_ref().map(|pk| {
-            let bytes = hex::decode(pk).unwrap_or_else(|_| pk.as_bytes().to_vec());
-            let key_array: [u8; 32] = if bytes.len() >= 32 {
-                bytes[..32].try_into().unwrap_or([0u8; 32])
-            } else {
-                let mut arr = [0u8; 32];
-                let len = bytes.len().min(32);
-                arr[..len].copy_from_slice(&bytes[..len]);
-                arr
-            };
-            let secret_key = csv_keys::memory::SecretKey::new(key_array);
-            csv_wallet::SecretHandle::from_key(secret_key)
-        })
-    }
-}
 
 /// Parse chain from string (for clap)
 pub fn parse_chain(s: &str) -> anyhow::Result<Chain> {
@@ -101,16 +26,6 @@ pub fn parse_chain(s: &str) -> anyhow::Result<Chain> {
         "aptos" => Ok(ChainId::new("aptos")),
         "solana" => Ok(ChainId::new("solana")),
         _ => Err(anyhow::anyhow!("Unknown chain: {}", s)),
-    }
-}
-
-/// Parse network from string (for clap)
-pub fn parse_network(s: &str) -> anyhow::Result<Network> {
-    match s.to_lowercase().as_str() {
-        "dev" => Ok(Network::Dev),
-        "test" => Ok(Network::Test),
-        "main" => Ok(Network::Main),
-        _ => Err(anyhow::anyhow!("Unknown network: {}", s)),
     }
 }
 
@@ -166,7 +81,7 @@ impl Config {
     }
 }
 
-/// Legacy wallet config for TOML parsing (will be migrated to unified WalletAccount)
+/// Wallet config fields accepted from CLI TOML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LegacyWalletConfigToml {
     pub private_key: Option<String>,
@@ -174,18 +89,6 @@ pub struct LegacyWalletConfigToml {
     pub mnemonic: Option<String>,
     pub mnemonic_passphrase: Option<String>,
     pub derivation_path: Option<String>,
-}
-
-impl From<LegacyWalletConfigToml> for LegacyWalletConfig {
-    fn from(cfg: LegacyWalletConfigToml) -> Self {
-        Self {
-            private_key: cfg.private_key,
-            xpub: cfg.xpub,
-            mnemonic: cfg.mnemonic,
-            mnemonic_passphrase: cfg.mnemonic_passphrase,
-            derivation_path: cfg.derivation_path,
-        }
-    }
 }
 
 fn default_data_dir() -> String {
@@ -311,7 +214,6 @@ impl Default for Config {
     }
 }
 
-#[allow(dead_code)]
 impl Config {
     /// Get default network
     pub fn network(&self) -> Network {
@@ -424,65 +326,6 @@ impl Config {
             .ok_or_else(|| anyhow::anyhow!("Chain {} not configured", chain))
     }
 
-    /// Get wallet configuration (legacy - use unified storage instead)
-    /// First checks config.toml, then falls back to ~/.csv/wallet/csv-wallet.json
-    #[deprecated(since = "0.4.0", note = "Use unified storage WalletConfig instead")]
-    pub fn wallet(&self, chain: &Chain) -> Option<LegacyWalletConfig> {
-        // First check config.toml wallets
-        if let Some(wallet) = self.wallets.get(chain) {
-            return Some(wallet.clone().into());
-        }
-
-        // Fall back to csv-wallet exported JSON (legacy format)
-        let csv_wallet_path = expand_path("~/.csv/wallet/csv-wallet.json");
-        if let Ok(csv_wallet) = CsvWalletData::load_from_file(&csv_wallet_path)
-            && let Some(account) = csv_wallet.find_account(chain.as_ref())
-        {
-            // Create a LegacyWalletConfig from the CSV account
-            return get_cached_wallet_config(chain, account);
-        }
-
-        None
-    }
-
-    /// Get unified wallet account for a chain (preferred method)
-    pub fn wallet_account(&self, chain: &Chain) -> Option<WalletAccount> {
-        // Fall back to legacy config.toml
-        if let Some(legacy) = self.wallets.get(chain) {
-            return Some(WalletAccount {
-                id: format!("{}-legacy", chain),
-                chain: chain.clone(),
-                name: format!("{} Legacy", chain),
-                address: String::new(), // Will be derived from private key
-                xpub: legacy.xpub.clone(),
-                derivation_path: legacy.derivation_path.clone(),
-                keystore_ref: None,
-            });
-        }
-
-        None
-    }
-
-    /// Set chain configuration
-    pub fn set_chain(&mut self, chain: Chain, config: ChainConfig) {
-        self.chains.insert(chain, config);
-    }
-
-    /// Set wallet configuration (legacy TOML format)
-    pub fn set_wallet(&mut self, chain: Chain, config: LegacyWalletConfigToml) {
-        self.wallets.insert(chain, config);
-    }
-
-    /// Set unified wallet account
-    pub fn set_wallet_account(
-        &mut self,
-        _chain: Chain,
-        _account: WalletAccount,
-    ) -> anyhow::Result<()> {
-        // Unified storage is managed separately via UnifiedStateManager
-        Ok(())
-    }
-
     /// Get RPC URL for a chain
     pub fn get_rpc_url(&self, chain: &Chain) -> String {
         // First check if chain config has an RPC URL
@@ -512,26 +355,6 @@ impl Config {
 fn is_hex_address_len(value: &str, expected_bytes: usize) -> bool {
     let value = value.strip_prefix("0x").unwrap_or(value);
     value.len() == expected_bytes * 2 && hex::decode(value).is_ok()
-}
-
-/// Get cached wallet config from csv-wallet data (internal helper, legacy format)
-fn get_cached_wallet_config(chain: &Chain, _account: &CsvAccount) -> Option<LegacyWalletConfig> {
-    let cache = get_csv_wallet_cache();
-    let mut cache = cache.lock().ok()?;
-
-    // Insert if not exists
-    // Note: private keys are no longer stored in WalletAccount
-    cache
-        .entry(chain.clone())
-        .or_insert_with(|| LegacyWalletConfig {
-            private_key: None,
-            xpub: None,
-            mnemonic: None,
-            mnemonic_passphrase: None,
-            derivation_path: None,
-        });
-
-    cache.get(chain).cloned()
 }
 
 /// Expand ~ to home directory
@@ -848,7 +671,7 @@ rpc_url = "missing bracket"
             default_fee: Some(1000),
             program_id: None,
         };
-        config.set_chain(ChainId::new("solana"), new_chain);
+        config.chains.insert(ChainId::new("solana"), new_chain);
 
         assert!(config.chains.contains_key(&ChainId::new("solana")));
 
@@ -860,7 +683,7 @@ rpc_url = "missing bracket"
             mnemonic_passphrase: None,
             derivation_path: None,
         };
-        config.set_wallet(ChainId::new("bitcoin"), wallet);
+        config.wallets.insert(ChainId::new("bitcoin"), wallet);
 
         assert!(config.wallets.contains_key(&ChainId::new("bitcoin")));
     }

@@ -25,6 +25,8 @@ pub struct BitcoinRuntimeAdapter {
     /// Chain identifier
     chain_id: String,
     /// Network (mainnet/testnet/signet)
+    // Retained for address encoding once the adapter derives addresses itself.
+    #[allow(dead_code)]
     network: Network,
     /// Sanad operations implementation
     sanad_ops: Arc<BitcoinChainSanadOps>,

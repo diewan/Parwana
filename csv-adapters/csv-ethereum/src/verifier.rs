@@ -14,6 +14,7 @@ use crate::rpc::EthereumRpc;
 pub struct EthereumVerifier {
     rpc: Box<dyn EthereumRpc>,
     csv_seal_address: [u8; 20],
+    // Held for RPC/address configuration; the verifier reads the fields above.
     #[allow(dead_code)]
     config: EthereumConfig,
 }

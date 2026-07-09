@@ -27,7 +27,8 @@
 //!     let client = CsvClient::builder()
 //!         .with_chain(ChainId::new("bitcoin"))
 //!         .with_store_backend(StoreBackend::InMemory)
-//!         .build()?;
+//!         .build()
+//!         .await?;
 //!
 //!     // Access managers
 //!     let sanads = client.sanads();

@@ -272,12 +272,6 @@ impl EventProofVerifierTrait for EventProofVerifier {
     }
 }
 
-/// Convert hex string to bytes (local helper for proof verification)
-fn hex_to_bytes_for_proof(hex: &str) -> Result<Vec<u8>, String> {
-    let hex_str = hex.strip_prefix("0x").unwrap_or(hex);
-    hex::decode(hex_str).map_err(|e| format!("Invalid hex: {}", e))
-}
-
 /// Builder for commitment events emitted when seals are consumed.
 pub struct CommitmentEventBuilder {
     /// Package ID of the CSV seal module

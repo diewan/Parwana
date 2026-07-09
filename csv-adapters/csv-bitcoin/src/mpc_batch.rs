@@ -78,6 +78,8 @@ pub struct MpcBatcher {
     /// Minimum commitments before auto-batch (0 = no auto-batch)
     min_batch_size: usize,
     /// Maximum seconds to wait before forcing a batch (0 = no timeout)
+    // Configured but not yet enforced: the batcher flushes on size only.
+    #[allow(dead_code)]
     max_wait_seconds: u64,
     /// Maximum queue depth for backpressure
     max_queue_depth: usize,

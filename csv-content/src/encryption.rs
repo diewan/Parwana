@@ -1,6 +1,20 @@
 //! Encryption envelope for content subtrees
 //!
-//! Provides encryption capabilities for sensitive content in Sanads.
+//! Provides the envelope and descriptor **types** for sensitive content in
+//! Sanads. This module performs no cryptography: it describes how a subtree was
+//! encrypted (`algorithm`, `key_id`, `nonce`, `aad`) and carries the resulting
+//! `ciphertext` / `tag`. The AES-256-GCM operations for this path currently live
+//! in `csv-cli/src/commands/content.rs`, which takes a raw 32-byte key with no
+//! key-derivation function.
+//!
+//! # Not to be confused with `csv_store::encrypted_storage` (STORE-ENCRYPTION-DEDUP-001)
+//!
+//! `csv-store`'s encrypted storage is a separate, browser-only (wasm32) at-rest
+//! layer for IndexedDB. It derives its key from a user password via
+//! PBKDF2-HMAC-SHA256 and adds an HMAC-SHA256 tag on top of the AEAD tag. The
+//! two have different key handling and different authentication models; they are
+//! not alternatives for one another. Do not route this module's types through
+//! that implementation, or vice versa.
 
 use serde::{Deserialize, Serialize};
 

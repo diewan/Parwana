@@ -137,11 +137,14 @@ fn extract_storage_root_from_account_proof(account_proof: &[Bytes]) -> Option<B2
 /// RLP-encoded Ethereum account structure
 #[derive(Debug)]
 struct AccountRlp {
+    // RLP account fields decoded to advance the decoder; only storage_root is consumed.
     #[allow(dead_code)]
     nonce: U256,
+    // Decoded to advance the RLP cursor; unused by the proof check.
     #[allow(dead_code)]
     balance: U256,
     storage_root: B256,
+    // Decoded to advance the RLP cursor; unused by the proof check.
     #[allow(dead_code)]
     code_hash: B256,
 }

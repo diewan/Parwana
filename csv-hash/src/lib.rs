@@ -55,7 +55,6 @@
 #![allow(clippy::manual_is_multiple_of)]
 #![allow(clippy::range_plus_one)]
 #![allow(clippy::format_in_format_args)]
-#![allow(dead_code)]
 #![allow(clippy::empty_line_after_doc_comments)]
 
 pub mod chain_id;

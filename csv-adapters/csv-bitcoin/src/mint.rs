@@ -25,9 +25,6 @@ use std::str::FromStr;
 /// Tapret commitment output size in bytes
 const TAPRET_OUTPUT_SIZE: usize = 80;
 
-/// Minimum relay fee rate (satoshis per byte)
-const MIN_FEE_RATE: u64 = 1;
-
 /// Default fee rate (satoshis per byte)
 const DEFAULT_FEE_RATE: u64 = 10;
 

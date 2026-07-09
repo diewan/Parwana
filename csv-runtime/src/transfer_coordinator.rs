@@ -26,7 +26,7 @@ use csv_hash::seal::SealPoint;
 use csv_observability::metrics::{MetricsCollector, RuntimeFlowSnapshot};
 use csv_protocol::finality::CapabilityRequirements;
 use csv_storage::{ReplayDatabase, ReplayDbError};
-use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
+use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext, VerifierConfig};
 use uuid::Uuid;
 
 const LOCK_OUTPUT_INDEX_BYTES: usize = std::mem::size_of::<u32>();
@@ -467,7 +467,10 @@ fn registry_entry_to_transfer(
 #[derive(Debug, Clone)]
 pub enum TransferOutcome {
     /// The transfer completed: destination mint confirmed, replay entry consumed.
-    Completed(TransferReceipt),
+    ///
+    /// Boxed: the receipt carries destination materialization metadata, making it
+    /// several times larger than `Pending`.
+    Completed(Box<TransferReceipt>),
     /// The lock has not yet reached the required confirmation depth. The lock is
     /// on-chain and journaled; re-invoking `advance`/resume later will progress
     /// it once confirmations accrue. Never re-locks.
@@ -611,6 +614,31 @@ impl TransferCoordinator {
     /// Return the current admission pressure snapshot.
     pub fn admission_snapshot(&self) -> AdmissionSnapshot {
         self.admission_controller.snapshot()
+    }
+
+    fn verifier_for_source_chain(
+        policy: &crate::policy::RuntimePolicy,
+        source_chain: &str,
+    ) -> Result<CanonicalVerifierImpl, TransferCoordinatorError> {
+        #[cfg(test)]
+        if source_chain == "test-chain" {
+            return Ok(CanonicalVerifierImpl::new(VerifierConfig {
+                max_anchor_age_blocks: Some(100),
+                ..VerifierConfig::default()
+            }));
+        }
+
+        let max_anchor_age_blocks = policy
+            .max_proof_age_blocks_for_chain(source_chain)
+            .ok_or_else(|| {
+                TransferCoordinatorError::ProofVerificationFailed(format!(
+                    "No max proof age configured for source chain: {source_chain}"
+                ))
+            })?;
+        Ok(CanonicalVerifierImpl::new(VerifierConfig {
+            max_anchor_age_blocks: Some(max_anchor_age_blocks),
+            ..VerifierConfig::default()
+        }))
     }
 
     /// Snapshot the operator-facing transfer flow metrics.
@@ -764,7 +792,7 @@ impl TransferCoordinator {
             .execute_outcome(transfer, adapter_registry, runtime_ctx)
             .await?
         {
-            TransferOutcome::Completed(receipt) => Ok(receipt),
+            TransferOutcome::Completed(receipt) => Ok(*receipt),
             TransferOutcome::Pending {
                 confirmations,
                 required,
@@ -911,7 +939,7 @@ impl TransferCoordinator {
                 "Transfer {} already consumed; returning recorded receipt without remint",
                 transfer.id
             );
-            return Ok(TransferOutcome::Completed(receipt));
+            return Ok(TransferOutcome::Completed(Box::new(receipt)));
         }
 
         // Record phase entry: Initialized (Entered)
@@ -1524,10 +1552,9 @@ impl TransferCoordinator {
             .await
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
 
-        match self
-            .verifier
-            .verify_proof_bundle(&proof_bundle, &verification_context)
-        {
+        let source_verifier =
+            Self::verifier_for_source_chain(&runtime_ctx.policy, &transfer.source_chain)?;
+        match source_verifier.verify_proof_bundle(&proof_bundle, &verification_context) {
             Ok(result) => {
                 if !result.is_valid {
                     self.with_metrics(|metrics| metrics.record_authorization_rejected());
@@ -1933,13 +1960,13 @@ impl TransferCoordinator {
             })
             .map_err(|e| TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e)))?;
 
-        Ok(TransferOutcome::Completed(TransferReceipt {
+        Ok(TransferOutcome::Completed(Box::new(TransferReceipt {
             transfer_id: transfer.id,
             replay_id,
             lock_tx_hash: lock_result.tx_hash,
             mint_tx_hash: mint_result.tx_hash,
             materialization: mint_result.materialization,
-        }))
+        })))
     }
 
     /// Subscribe to transfer events
@@ -2909,7 +2936,7 @@ impl TransferCoordinator {
             _ => self
                 .resume_transfer(transfer_id, adapter_registry, runtime_ctx)
                 .await
-                .map(TransferOutcome::Completed),
+                .map(|receipt| TransferOutcome::Completed(Box::new(receipt))),
         }
     }
 
@@ -3074,8 +3101,9 @@ impl TransferCoordinator {
             .validate_source_proof(&transfer.source_chain, transfer, proof_bundle)
             .await
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
-        let result = self
-            .verifier
+        let source_verifier =
+            Self::verifier_for_source_chain(&runtime_ctx.policy, &transfer.source_chain)?;
+        let result = source_verifier
             .verify_proof_bundle(proof_bundle, &verification_context)
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
         if result.is_valid {
@@ -3102,7 +3130,7 @@ impl TransferCoordinator {
             .execute_from_lock_outcome(transfer, adapter_registry, runtime_ctx)
             .await?
         {
-            TransferOutcome::Completed(receipt) => Ok(receipt),
+            TransferOutcome::Completed(receipt) => Ok(*receipt),
             TransferOutcome::Pending {
                 confirmations,
                 required,
@@ -3274,7 +3302,7 @@ impl TransferCoordinator {
         let receipt = self
             .execute_from_proof(transfer, proof_payload, adapter_registry, runtime_ctx)
             .await?;
-        Ok(TransferOutcome::Completed(receipt))
+        Ok(TransferOutcome::Completed(Box::new(receipt)))
     }
 
     /// Execute transfer from proof phase (skip proof generation, go to mint).
@@ -4310,6 +4338,58 @@ mod tests {
             Some(TransferStage::Completed),
             "an under-confirmed transfer must not reach Completed"
         );
+    }
+
+    #[test]
+    fn source_chain_verifier_rejects_anchor_beyond_configured_max_age() {
+        let mut policy = crate::policy::RuntimePolicy::new();
+        policy.set_max_proof_age_blocks("bitcoin".to_string(), 100);
+        let verifier = TransferCoordinator::verifier_for_source_chain(&policy, "bitcoin").unwrap();
+        let ctx = VerificationContext {
+            chain_id: "bitcoin".to_string(),
+            signature_scheme: csv_protocol::SignatureScheme::Ed25519,
+            required_confirmations: 1,
+            current_block_height: Some(201),
+            seal_registry: None,
+            chain_data: None,
+            native_proof_validated: true,
+            sanad_id: None,
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
+            authorized_signers: Vec::new(),
+        };
+
+        let result = verifier.verify_finality(100, &ctx);
+        assert!(
+            matches!(result, Err(csv_protocol::ProtocolError::ProofExpired(_))),
+            "source-chain verifier must reject over-age anchors, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn source_chain_verifier_accepts_anchor_exactly_at_configured_max_age() {
+        let mut policy = crate::policy::RuntimePolicy::new();
+        policy.set_max_proof_age_blocks("bitcoin".to_string(), 100);
+        let verifier = TransferCoordinator::verifier_for_source_chain(&policy, "bitcoin").unwrap();
+        let ctx = VerificationContext {
+            chain_id: "bitcoin".to_string(),
+            signature_scheme: csv_protocol::SignatureScheme::Ed25519,
+            required_confirmations: 1,
+            current_block_height: Some(200),
+            seal_registry: None,
+            chain_data: None,
+            native_proof_validated: true,
+            sanad_id: None,
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
+            authorized_signers: Vec::new(),
+        };
+
+        assert!(verifier.verify_finality(100, &ctx).is_ok());
     }
 
     #[tokio::test]

@@ -35,7 +35,6 @@
 
 #![warn(missing_docs)]
 #![allow(missing_docs)]
-#![allow(dead_code)]
 
 pub mod address_utils;
 pub mod anchor;

@@ -11,6 +11,8 @@
 //! according to runtime-provided policies.
 
 use crate::runtime_mode::RuntimeMode;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Runtime policy configuration
@@ -24,7 +26,10 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct RuntimePolicy {
     /// Finality depth required for each chain (defaults from csv-protocol)
-    pub finality_depths: std::collections::HashMap<String, u64>,
+    pub finality_depths: HashMap<String, u64>,
+
+    /// Maximum proof-anchor age in blocks, per source chain.
+    pub max_proof_age_blocks: HashMap<String, u64>,
 
     /// Whether to allow RPC fallback to simulated mode
     pub allow_rpc_fallback: bool,
@@ -46,7 +51,7 @@ impl RuntimePolicy {
     /// Create a new runtime policy with default values sourced from csv-protocol.
     pub fn new() -> Self {
         let core_depths = csv_protocol::finality::capabilities::FinalityDepths::defaults();
-        let mut finality_depths = std::collections::HashMap::new();
+        let mut finality_depths = HashMap::new();
 
         // Populate from csv-protocol protocol defaults
         if let Some(d) = core_depths.for_chain("bitcoin") {
@@ -68,8 +73,11 @@ impl RuntimePolicy {
             finality_depths.insert("celestia".to_string(), d);
         }
 
+        let max_proof_age_blocks = load_configured_max_proof_age_blocks();
+
         Self {
             finality_depths,
+            max_proof_age_blocks,
             allow_rpc_fallback: false,
             max_retries: 3,
             retry_delay: Duration::from_secs(5),
@@ -116,6 +124,26 @@ impl RuntimePolicy {
         self.finality_depths.insert(chain_id, depth);
     }
 
+    /// Get the maximum proof-anchor age in blocks for a chain.
+    ///
+    /// Unlike finality depth, this intentionally has no hard-coded fallback:
+    /// stale-proof rejection is a chain-specific safety bound and production
+    /// verification must fail closed when it is absent.
+    pub fn max_proof_age_blocks_for_chain(&self, chain_id: &str) -> Option<u64> {
+        self.max_proof_age_blocks
+            .get(chain_id)
+            .copied()
+            .or_else(|| {
+                let canonical = canonical_chain_id(chain_id);
+                self.max_proof_age_blocks.get(canonical).copied()
+            })
+    }
+
+    /// Set the maximum proof-anchor age for a specific chain.
+    pub fn set_max_proof_age_blocks(&mut self, chain_id: String, max_age: u64) {
+        self.max_proof_age_blocks.insert(chain_id, max_age);
+    }
+
     /// Check that the observed finality depth meets the required threshold for a chain.
     ///
     /// Returns `Err` if `observed < required` for the given chain.
@@ -146,6 +174,54 @@ impl RuntimePolicy {
     pub fn unsafe_mode() -> Self {
         Self::with_mode(RuntimeMode::Unsafe)
     }
+}
+
+fn load_configured_max_proof_age_blocks() -> HashMap<String, u64> {
+    let mut ages = HashMap::new();
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let Some(workspace_root) = manifest_dir.parent() else {
+        return ages;
+    };
+    let chains_dir = workspace_root.join("chains");
+    let Ok(entries) = std::fs::read_dir(chains_dir) else {
+        return ages;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = content.parse::<toml::Value>() else {
+            continue;
+        };
+        let Some(chain_id) = value.get("chain_id").and_then(toml::Value::as_str) else {
+            continue;
+        };
+        let Some(max_age) = value
+            .get("finality_guarantee")
+            .and_then(|v| v.get("max_proof_age_blocks"))
+            .and_then(toml::Value::as_integer)
+            .and_then(|v| u64::try_from(v).ok())
+        else {
+            continue;
+        };
+        ages.insert(chain_id.to_string(), max_age);
+        ages.entry(canonical_chain_id(chain_id).to_string())
+            .or_insert(max_age);
+    }
+
+    ages
+}
+
+fn canonical_chain_id(chain_id: &str) -> &str {
+    chain_id
+        .split_once('-')
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(chain_id)
 }
 
 impl Default for RuntimePolicy {
@@ -191,6 +267,18 @@ mod tests {
         policy.finality_depths.remove("bitcoin");
         // Should fall back to csv-protocol default
         assert_eq!(policy.finality_depth_for_chain("bitcoin"), Some(6));
+    }
+
+    #[test]
+    fn test_max_proof_age_blocks_loaded_from_chain_configs() {
+        let policy = RuntimePolicy::new();
+        assert_eq!(policy.max_proof_age_blocks_for_chain("bitcoin"), Some(100));
+        assert_eq!(
+            policy.max_proof_age_blocks_for_chain("bitcoin-signet"),
+            Some(100)
+        );
+        assert_eq!(policy.max_proof_age_blocks_for_chain("solana"), Some(100));
+        assert_eq!(policy.max_proof_age_blocks_for_chain("test-chain"), None);
     }
 
     #[test]

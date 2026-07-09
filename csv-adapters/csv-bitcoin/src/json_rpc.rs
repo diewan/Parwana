@@ -466,9 +466,11 @@ struct JsonRpcResponse<T> {
     #[serde(default)]
     error: Option<JsonRpcError>,
     #[serde(default)]
+    // Deserialized from the node response; only the result/error payloads are surfaced.
     #[allow(dead_code)]
     id: Option<Value>,
     #[serde(default)]
+    // Echoed by the node; the client matches responses positionally.
     #[allow(dead_code)]
     jsonrpc: Option<String>,
 }
@@ -476,6 +478,8 @@ struct JsonRpcResponse<T> {
 /// JSON-RPC error
 #[derive(Debug, Deserialize)]
 struct JsonRpcError {
+    // Deserialized from the node response for completeness; only `message` is surfaced.
+    #[allow(dead_code)]
     #[serde(default)]
     code: Option<i32>,
     #[serde(default)]

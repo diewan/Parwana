@@ -29,8 +29,6 @@ serde_json = "1.0"
 hex = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 toml = "0.8"
-sqlx = { version = "0.8.2", features = ["postgres", "_rt-tokio", "tls-rustls", "chrono", "uuid"], optional = true }
-chrono = { version = "0.4", features = ["serde"], optional = true }
 
 # csv-runtime is native-only (depends on tokio net, etc.)
 # wasm32 is not supported - see compile_error! in lib.rs
@@ -48,7 +46,7 @@ ed25519-dalek = "2"
 [features]
 default = ["persistent"]
 persistent = ["csv-storage/rocksdb", "dep:rocksdb"]
-postgres = ["dep:sqlx", "dep:chrono", "csv-storage/postgres"]
+postgres = ["csv-storage/postgres"]
 serde = []
 
 [dependencies.rocksdb]

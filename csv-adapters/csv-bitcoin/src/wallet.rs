@@ -23,9 +23,6 @@ use hex;
 #[allow(unused_imports)]
 use crate::types::{BitcoinSealPoint, UtxoProvenance};
 
-/// Hardened derivation constant
-const HARDENED: u32 = 0x8000_0000;
-
 /// BIP-86 purpose for single-key P2TR
 const BIP86_PURPOSE: u32 = 86;
 

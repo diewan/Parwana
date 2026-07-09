@@ -34,6 +34,10 @@ pub struct TrustPackage {
 
 impl TrustPackage {
     /// Create a new trust package
+    ///
+    /// The trust-package format is consumed today (verify/import paths); nothing
+    /// in tree constructs one yet. Kept as the canonical constructor.
+    #[allow(dead_code)]
     pub fn new(
         genesis_hash: [u8; 32],
         checkpoint_height: u64,

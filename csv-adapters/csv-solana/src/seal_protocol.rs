@@ -15,16 +15,6 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use std::str::FromStr;
 
-// System instruction data for CreateAccount
-fn create_account_instruction_data(lamports: u64, space: u64, owner: &Pubkey) -> Vec<u8> {
-    let mut data = Vec::with_capacity(4 + 8 + 8 + 32);
-    data.extend_from_slice(&0u32.to_le_bytes()); // CreateAccount discriminator
-    data.extend_from_slice(&lamports.to_le_bytes());
-    data.extend_from_slice(&space.to_le_bytes());
-    data.extend_from_slice(owner.as_ref());
-    data
-}
-
 use crate::config::SolanaConfig;
 use crate::error::{SolanaError, SolanaResult};
 use crate::rpc::SolanaRpc;
@@ -40,9 +30,11 @@ const SOLANA_DOMAIN_SEPARATOR: [u8; 32] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 
-/// Program instruction discriminators
-const INSTRUCTION_CREATE_SEAL: u8 = 0x01;
-const INSTRUCTION_CONSUME_SEAL: u8 = 0x02;
+/// Program instruction discriminator.
+///
+/// The `create_seal` / `consume_seal` raw discriminators were removed: those
+/// paths go through the Anchor discriminators in `anchor_client`
+/// (LINT-DEADCODE-HYGIENE-001).
 const INSTRUCTION_PUBLISH_COMMITMENT: u8 = 0x03;
 
 /// Solana adapter for CSV (Client-Side Validation)
@@ -164,6 +156,9 @@ impl SolanaSealProtocol {
     }
 
     /// Derive commitment PDA from commitment hash
+    ///
+    /// PDA derivation seam; the attested-mint path derives its PDAs in `anchor_client`.
+    #[allow(dead_code)]
     fn derive_commitment_pda(&self, commitment: &Hash) -> SolanaResult<Pubkey> {
         let program_id = self.csv_program_id()?;
         let (pda, _bump) =
@@ -185,6 +180,9 @@ impl SolanaSealProtocol {
     }
 
     /// Find seal by account
+    ///
+    /// Local active-seal lookup; the runtime consults on-chain state instead.
+    #[allow(dead_code)]
     fn find_seal(&self, account: &Pubkey) -> Option<SolanaSealPoint> {
         if let Ok(seals) = self.active_seals.lock() {
             seals.iter().find(|s| &s.account == account).cloned()
@@ -679,20 +677,14 @@ impl SolanaSealProtocol {
 }
 
 /// Helper struct for serializing Solana-specific proof data
+///
+/// Retained as the Solana proof wire shape; the runtime proof path uses `ProofBundle`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SolanaProofData {
     signature: String,
     slot: u64,
     confirmation_status: String,
-}
-
-impl SolanaSealProtocol {
-    /// Generate a unique sanad ID
-    fn generate_sanad_id() -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-        rand::Rng::fill(&mut rand::thread_rng(), &mut bytes);
-        bytes
-    }
 }
 
 impl Default for SolanaSealProtocol {

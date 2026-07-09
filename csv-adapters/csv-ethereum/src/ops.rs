@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![allow(unused_variables)]
 //! Chain Operation Traits Implementation for Ethereum
 //!
@@ -62,6 +61,8 @@ pub struct EthereumBackend {
     #[allow(dead_code)]
     proof_verifier: EventProofVerifier,
     /// Commitment event builder
+    // Constructed with the adapter; the runtime proof path builds events itself.
+    #[allow(dead_code)]
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     pub(crate) seal_protocol: Arc<EthereumSealProtocol>,

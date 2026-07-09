@@ -18,6 +18,7 @@ pub use csv_store::state::{
 
 // Unified state manager for CLI
 
+// The unified state manager exposes the full CLI state surface; not every accessor has a command yet.
 #[allow(dead_code)]
 #[allow(deprecated)]
 /// Unified state manager for CLI.
@@ -85,6 +86,10 @@ impl UnifiedStateManager {
     }
 
     /// Load from a specific path with passphrase.
+    ///
+    /// Non-default state paths are used by tests and by operators pointing the CLI
+    /// at an alternate state file; no in-tree command wires it yet.
+    #[allow(dead_code)]
     pub fn load_from(path: &str, passphrase: &str) -> anyhow::Result<Self> {
         let storage = if Path::new(path).exists() {
             let content = std::fs::read_to_string(path)?;
@@ -108,6 +113,10 @@ impl UnifiedStateManager {
     }
 
     /// Create new with defaults (requires passphrase for encryption).
+    ///
+    /// Commands construct state via `load`/`load_from`; this bare constructor is
+    /// the seam for a future `csv init`.
+    #[allow(dead_code)]
     pub fn new(passphrase: &str) -> Self {
         Self {
             storage: UnifiedStorage::new().with_defaults(),
@@ -125,6 +134,9 @@ impl UnifiedStateManager {
     }
 
     /// Passphrase used to decrypt the loaded CLI state.
+    ///
+    /// Read by callers that re-save state under the same passphrase; none in tree yet.
+    #[allow(dead_code)]
     pub fn passphrase(&self) -> &str {
         &self.passphrase
     }
@@ -204,6 +216,8 @@ impl UnifiedStateManager {
     }
 
     /// Update transfer status
+    /// Transfer status is written through the runtime journal; no command calls this yet.
+    #[allow(dead_code)]
     pub fn update_transfer_status(
         &mut self,
         id: &str,
@@ -268,6 +282,8 @@ impl UnifiedStateManager {
     }
 
     /// Get all deployed contracts for a chain
+    /// Contract records are read by upcoming deploy/status commands.
+    #[allow(dead_code)]
     pub fn get_contracts(&self, chain: &Chain) -> Vec<&ContractRecord> {
         self.storage.get_contracts(chain)
     }
@@ -298,6 +314,8 @@ impl UnifiedStateManager {
     }
 
     /// Store a gas payment account for a chain
+    /// Gas-account tracking is populated by upcoming faucet/gas commands.
+    #[allow(dead_code)]
     pub fn store_gas_account(&mut self, chain: Chain, address: String) {
         // Remove existing
         self.storage.gas_accounts.retain(|g| g.chain != chain);
@@ -308,6 +326,8 @@ impl UnifiedStateManager {
 
     /// Get gas payment account for a chain
     /// Falls back to regular wallet address if no dedicated gas account exists
+    /// Read by upcoming faucet/gas commands; paired with `store_gas_account`.
+    #[allow(dead_code)]
     pub fn get_gas_account(&self, chain: &Chain) -> Option<&str> {
         self.storage.get_gas_account(chain)
     }
@@ -315,11 +335,15 @@ impl UnifiedStateManager {
     // --- Chain Configuration ---
 
     /// Get chain configuration
+    /// Chain config is read from `Config` today; this is the state-backed accessor.
+    #[allow(dead_code)]
     pub fn chain_config(&self, chain: &Chain) -> Option<&crate::config::ChainConfig> {
         self.storage.chains.get(chain)
     }
 
     /// Set chain configuration
+    /// Chain config is read from `Config` today; this is the state-backed setter.
+    #[allow(dead_code)]
     pub fn set_chain_config(&mut self, chain: Chain, config: crate::config::ChainConfig) {
         self.storage.chains.insert(chain, config);
     }
@@ -327,6 +351,8 @@ impl UnifiedStateManager {
     // --- Wallet/Account Access ---
 
     /// Get wallet account for a chain
+    /// Wallet accounts are read via `get_address`; this returns the full record.
+    #[allow(dead_code)]
     pub fn get_account(&self, chain: &Chain) -> Option<&WalletAccount> {
         self.storage.get_account(chain)
     }
@@ -337,11 +363,15 @@ impl UnifiedStateManager {
     }
 
     /// Export for wallet import
+    /// State import/export surface for backup tooling; no command wired yet.
+    #[allow(dead_code)]
     pub fn export_json(&self) -> anyhow::Result<String> {
         Ok(serde_json::to_string_pretty(&self.storage)?)
     }
 
     /// Import from wallet export
+    /// State import/export surface for backup tooling; no command wired yet.
+    #[allow(dead_code)]
     pub fn import_json(&mut self, json: &str) -> anyhow::Result<()> {
         self.storage = serde_json::from_str(json)?;
         Ok(())
@@ -350,6 +380,8 @@ impl UnifiedStateManager {
     // --- Transaction Recording ---
 
     /// Record a transaction from a transfer
+    /// Transaction history is journaled by the runtime; this mirrors it into local state.
+    #[allow(dead_code)]
     pub fn record_transaction_from_transfer(
         &mut self,
         transfer: &TransferRecord,

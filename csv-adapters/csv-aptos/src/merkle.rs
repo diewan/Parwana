@@ -155,6 +155,10 @@ impl MerkleAccumulator {
     }
 
     /// Build a Merkle tree from a slice of nodes — optimized to avoid deep clones.
+    ///
+    /// Retained as the reference tree builder; the adapter verifies supplied proofs
+    /// rather than constructing trees.
+    #[allow(dead_code)]
     fn build_tree(nodes: &[MerkleNode]) -> MerkleNode {
         if nodes.is_empty() {
             return MerkleNode::Empty;

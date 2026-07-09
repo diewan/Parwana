@@ -57,11 +57,13 @@ pub struct ChainConfig {
     pub enabled: bool,
 }
 
+// serde default for the `enabled` field; called by the deserializer, not by us.
 #[allow(dead_code)]
 fn default_enabled() -> bool {
     true
 }
 
+// serde default; called by the deserializer, not by us.
 #[allow(dead_code)]
 fn default_network() -> String {
     "mainnet".to_string()

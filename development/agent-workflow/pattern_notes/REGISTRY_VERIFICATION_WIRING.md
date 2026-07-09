@@ -1,276 +1,124 @@
-# Pattern Note: Registry Verification Wiring
+# Pattern: on-chain seal registry verification, local state is only a cache
 
-> **Drift warning (verified 2026-07-09).** Two parts of this note no longer match
-> the tree:
->
-> - The "Fix Placeholder Commitments" example below shows a `ProofLeafV1`
->   construction in `csv-adapters/csv-ethereum/src/runtime_adapter.rs`.
->   `ProofLeafV1` no longer appears anywhere in the Ethereum adapter — the
->   proof-root mint was removed by the thin-registry rewrite (`TRM-ETH-*`). The
->   *principle* (bind commitments to real on-chain transaction data, never to
->   `sanad_id`) still holds; the code excerpt is historical.
-> - The "Repository-Wide Application" checklist is still unresolved.
->   `verify_seal_registry` exists **only** in `csv-ethereum`
->   (`seal_protocol.rs`, `verifier.rs`). Bitcoin, Solana, Sui, Aptos, and
->   Celestia have no such function.
+**Resolved in:** `A-ETH-REGISTRY-001` (no context pack; predates the current ticket flow)
+**Reference file:** `csv-adapters/csv-ethereum/src/verifier.rs`, `csv-adapters/csv-ethereum/src/seal_protocol.rs`
+**Applies to:** every adapter implementing `SealProtocol::enforce_seal`
 
-## Context
+> **Rollout status (verified 2026-07-10).** Ethereum is the *only* adapter with
+> this pattern. `verify_seal_registry` exists solely in `csv-ethereum`. Bitcoin,
+> Solana, Sui, Aptos, and Celestia enforce seals against local registry state
+> alone. Treat this note as one worked example plus an open rollout, not as a
+> description of the repository.
 
-This pattern note documents the security-critical pattern for wiring on-chain seal registry verification into production paths for chain adapters.
+## What the gap was
 
-## Problem
+`enforce_seal` decided whether a seal had been consumed by consulting only the
+adapter's in-process `seal_registry`. Local state is a cache: it can be corrupted,
+it can be cold after a restart, and two processes on different machines each hold
+their own. Nothing in that path consults the chain, which is the only authority on
+whether a single-use seal has already been spent — so the single-use guarantee
+held only for a single long-lived process.
 
-Chain adapters were implementing seal consumption checks using only local registry state, bypassing authoritative on-chain verification. This created a security vulnerability where:
+## Correct implementation shape
 
-- Local state corruption could allow replay attacks
-- Concurrent processes on different machines could bypass single-use guarantees
-- Placeholder commitments (e.g., using `sanad_id` instead of actual transaction data) weakened proof binding
+- The chain is authoritative; the local registry is a **fast negative cache**.
+  Check local first to short-circuit an obvious replay, then always confirm
+  against the chain before allowing the seal through.
+- On-chain verification lives in the adapter's verifier module behind the `rpc`
+  feature, and issues a real contract call (`isSealUsed` or equivalent) — never
+  an inferred or assumed result.
+- Mark the seal used in local state **after** the on-chain check returns, not
+  before. The reverse order lets a failed on-chain read leave a seal poisoned.
+- Compile without `rpc` and the function must return `Err`, naming the missing
+  feature. A build that cannot reach the chain must not fall back to local state:
+  the fallback is precisely the vulnerability.
+- Verification failures are typed (`VerificationFailure::ReplayDetected`), not
+  stringly-typed.
 
-## Solution Pattern
+See `FEATURE_GATED_CRYPTO_FAIL_CLOSED.md` for the general three-part
+feature-gate shape (forwarding feature, real arm, error-naming-the-feature arm)
+that this is an instance of.
 
-### 1. Implement Authoritative On-Chain Verification
-
-**Location:** Adapter-specific verifier module (e.g., `csv-adapters/csv-ethereum/src/verifier.rs`)
-
-```rust
-#[cfg(feature = "rpc")]
-pub async fn verify_seal_registry(
-    &self,
-    seal_id: Hash,
-) -> Result<VerificationResult, Box<dyn std::error::Error>> {
-    // Construct contract call to isSealUsed or equivalent
-    let call = Contract::is_seal_used_call { sealId: seal_id_fixed };
-    let call_data = call.abi_encode();
-    
-    // Execute eth_call on-chain
-    let result = self.rpc.eth_call(call_params, "latest").await?;
-    
-    // Parse boolean response (32 bytes, last byte = 0x00 for false, 0x01 for true)
-    let is_used = result[31] == 1;
-    
-    Ok(VerificationResult {
-        valid: !is_used,
-        assurance: VerificationAssurance::Cryptographic,
-        verified_components: VerifiedComponents {
-            replay_checked: true,
-            // ...
-        },
-        error: if is_used { Some(VerificationFailure::ReplayDetected) } else { None },
-    })
-}
-
-#[cfg(not(feature = "rpc"))]
-pub async fn verify_seal_registry(
-    &self,
-    _seal_id: Hash,
-) -> Result<VerificationResult, Box<dyn std::error::Error>> {
-    // Fail closed: security-critical checks must not be silently bypassed
-    Err(Box::new(EthereumError::RpcError(
-        "On-chain seal registry verification requires RPC feature".to_string()
-    )))
-}
-```
-
-**Key Principles:**
-
-- Use feature gates to separate RPC-dependent code
-- Fail closed when verification is unavailable
-- Return typed errors (VerificationFailure::ReplayDetected) not strings
-- Use proper cryptographic assurance level
-
-### 2. Wire Verification into Production Path
-
-**Location:** SealProtocol implementation (e.g., `csv-adapters/csv-ethereum/src/seal_protocol.rs`)
+## Minimal reference excerpt
 
 ```rust
-async fn enforce_seal(
-    &self,
-    seal: Self::SealPoint,
-) -> Result<(), Box<dyn std::error::Error + 'static>> {
-    // Step 1: Check local registry (fast path)
-    let registry = self.seal_registry.lock().map_err(...)?;
-    if registry.is_seal_used(&seal) {
-        return Err(Box::new(ProtocolError::SealReplay(...)));
+// csv-adapters/csv-ethereum/src/seal_protocol.rs
+async fn enforce_seal(&self, seal: Self::SealPoint) -> Result<(), Box<dyn Error>> {
+    // Fast path: an obvious replay never needs an RPC round-trip.
+    if self.seal_registry.lock()?.is_seal_used(&seal) {
+        return Err(Box::new(ProtocolError::SealReplay(..)));
     }
-    drop(registry);
 
-    // Step 2: Check on-chain state (authoritative check)
+    // Authoritative path.
     #[cfg(feature = "rpc")]
     {
-        let verification_result = self.verifier.verify_seal_registry(seal_id).await?;
-        if !verification_result.valid {
-            return Err(Box::new(ProtocolError::SealReplay(
-                verification_result.error.unwrap_or_else(|| "Seal already consumed".to_string())
-            )));
+        let result = self.verifier.verify_seal_registry(seal_id).await?;
+        if !result.valid {
+            return Err(Box::new(ProtocolError::SealReplay(..)));
         }
     }
-
     #[cfg(not(feature = "rpc"))]
-    {
-        // Fail closed: security-critical checks must not be silently bypassed
-        return Err(Box::new(ProtocolError::NetworkError(
-            "On-chain seal registry verification requires RPC feature".to_string()
-        )));
-    }
+    return Err(Box::new(ProtocolError::NetworkError(
+        "On-chain seal registry verification requires the 'rpc' feature".to_string(),
+    )));
 
-    // Step 3: Mark seal as used in local registry (after on-chain check)
-    let registry = self.seal_registry.lock().map_err(...)?;
-    registry.mark_seal_used(&seal)?;
-    
+    // Only now is the cache allowed to learn about it.
+    self.seal_registry.lock()?.mark_seal_used(&seal)?;
     Ok(())
 }
 ```
 
-**Key Principles:**
+## Chain-specific notes
 
-- Check local registry first (fast path)
-- Always perform on-chain verification when RPC available
-- Fail closed when RPC unavailable
-- Update local state AFTER on-chain verification (prevents race conditions)
+| Adapter | Required lookup | Edge cases |
+|---|---|---|
+| csv-ethereum | `eth_call` → `isSealUsed(bytes32)`; bool is the last byte of a 32-byte word | Done. Do not read `result[31]` without checking the word is 32 bytes |
+| csv-sui | Registry object read; consumed seals live in a `Table` | Registry object id ≠ package id |
+| csv-aptos | Resource/table read under `@csv_seal` | Resource address ≠ module address |
+| csv-solana | Nullifier / minted PDA read | A closed PDA is not an absent PDA — check the never-closed tombstone PDAs |
+| csv-bitcoin | Outpoint is spent-or-not; ask the UTXO set | Needs a REST indexer; JSON-RPC alone cannot scan |
+| csv-celestia | — | Not a seal-enforcement surface |
 
-### 3. Fix Placeholder Commitments
+## Tests added
 
-**Location:** Runtime adapter (e.g., `csv-adapters/csv-ethereum/src/runtime_adapter.rs`)
+All in `csv-adapters/csv-ethereum/src/seal_protocol.rs`:
 
-**Before (INCORRECT):**
+- Positive: `test_enforce_seal_replay` — a seal already in the local registry is
+  rejected on the fast path.
+- Negative/adversarial: `test_enforce_seal_on_chain_consumed` — mock RPC reports
+  the seal consumed → `enforce_seal` returns `SealReplay` even though the local
+  registry believes the seal is fresh. This is the test that proves local state
+  is not trusted.
+- Regression/constitution: `test_enforce_seal_fails_closed_without_rpc` — built
+  `#[cfg(not(feature = "rpc"))]`, `enforce_seal` errors rather than falling back
+  to local state.
 
-```rust
-let proof_leaf = ProofLeafV1::new(
-    transfer.source_chain.clone(),
-    transfer.destination_chain.clone(),
-    transfer.sanad_id,
-    transfer.sanad_id, // ❌ Placeholder: using sanad_id as commitment
-);
-```
+Missing: there is no test for the fully-successful on-chain path (chain reports
+unused → seal enforced → local cache updated). `test_create_seal` does not cover
+it. Worth adding when this pattern is ported to the next adapter.
 
-**After (CORRECT):**
+## Gotchas
 
-```rust
-// The commitment is the lock transaction hash, which was actually published to the chain
-let commitment = lock_tx_hash;
+**A cache consulted first is not a cache trusted.** The fast-path local check is
+only sound because it can *reject*, never *accept*. If you ever let a local
+"unused" verdict skip the chain read, you have rebuilt the original bug. Any
+refactor that makes the on-chain call conditional deserves the same scrutiny as
+removing it.
 
-let proof_leaf = ProofLeafV1::new(
-    transfer.source_chain.clone(),
-    transfer.destination_chain.clone(),
-    transfer.sanad_id,
-    commitment, // ✅ Actual commitment from on-chain transaction
-);
-```
+**Commitments must bind to on-chain transaction data.** The original ticket also
+removed a placeholder that used `sanad_id` as its own commitment. Bind to
+something the chain actually observed — the lock transaction hash, a receipt
+log — never to an identifier the caller supplied. (The `ProofLeafV1` code that
+this note used to illustrate here was deleted by the thin-registry rewrite,
+`TRM-ETH-*`; the principle outlived the code.)
 
-**Key Principles:**
-
-- Commitments must bind to actual on-chain transaction data
-- Use transaction hash or derived commitment from lock result
-- Never use placeholder values like sanad_id
-
-### 4. Add Negative Tests
-
-**Location:** SealProtocol tests
-
-```rust
-#[cfg(not(feature = "rpc"))]
-#[tokio::test]
-async fn test_enforce_seal_fails_closed_without_rpc() {
-    let adapter = test_adapter();
-    let seal = adapter.create_seal(None).await.unwrap();
-    
-    // Without RPC feature, enforce_seal should fail closed
-    let result = adapter.enforce_seal(seal).await;
-    assert!(result.is_err());
-    
-    let error_msg = format!("{:?}", result.unwrap_err());
-    assert!(error_msg.contains("NetworkError") || error_msg.contains("RPC"));
-}
-
-#[cfg(feature = "rpc")]
-#[tokio::test]
-async fn test_enforce_seal_on_chain_consumed() {
-    // Mock RPC to return that seal is consumed
-    // Verify that error is returned
-}
-```
-
-**Key Principles:**
-
-- Test fail-closed behavior without RPC
-- Test on-chain verification path with RPC
-- Verify proper error types and messages
-
-## Security Invariants
-
-1. **No bypass paths:** All production paths must call on-chain verification
-2. **Fail closed:** If verification is unavailable, return error instead of silently skipping
-3. **Typed errors:** Use VerificationFailure enum, not String
-4. **Proper commitments:** Bind to actual transaction data, not placeholders
-5. **Authoritative source:** On-chain state is authoritative, local state is cache
-
-## Anti-Patterns to Avoid
-
-❌ **Skipping verification with TODO comments:**
-
-```rust
-// TODO: Implement verify_seal_registry
-// For now, skip on-chain verification
-let _ = seal_id;
-```
-
-❌ **Silent fallback to local state:**
-
-```rust
-#[cfg(not(feature = "rpc"))]
-{
-    // Without RPC, rely on local registry only
-    let _ = seal_id;
-}
-```
-
-❌ **Placeholder commitments:**
-
-```rust
-transfer.sanad_id, // Use sanad_id as commitment for now
-```
-
-❌ **Ok(true) in verification paths:**
-
-```rust
-Ok(VerificationResult {
-    valid: true,
-    // ... without actual verification
-})
-```
-
-## Repository-Wide Application
-
-This pattern should be applied to all chain adapters that have seal registry verification:
-
-Status re-verified 2026-07-09 by grepping for `verify_seal_registry`:
-
-- ✅ Ethereum: Completed (A-ETH-REGISTRY-001) — `seal_protocol.rs`, `verifier.rs`
-- ❌ Bitcoin: not implemented
-- ❌ Solana: not implemented (no reference implementation exists, contrary to the
-  earlier note)
-- ❌ Sui: not implemented
-- ❌ Aptos: not implemented
-- ❌ Celestia: not implemented
-
-## Verification Commands
-
-```bash
-# Check compilation
-cargo check -p <adapter>
-
-# Run tests
-cargo test -p <adapter>
-
-# Search for anti-patterns
-grep -r "TODO.*verify.*seal" csv-adapters/
-grep -r "skip.*on-chain" csv-adapters/
-grep -r "sanad_id.*commitment.*for now" csv-adapters/
-```
+**Anti-patterns that mean this pattern was undone:** a `// TODO: implement
+verify_seal_registry` with a `let _ = seal_id;`, a `#[cfg(not(feature = "rpc"))]`
+arm that comments "rely on local registry only", or a `VerificationResult` built
+with `valid: true` and no preceding chain read.
 
 ## References
 
-- Ticket: A-ETH-REGISTRY-001
-- Agent rules: csv-adapters/.agents/AGENT.md
-- Protocol invariants: csv-docs/PROTOCOL_INVARIANTS.md
-- Threat model: csv-docs/THREAT_MODEL.md
+- Agent rules: `csv-adapters/.agents/AGENT.md`
+- Protocol invariants: `csv-docs/PROTOCOL_INVARIANTS.md`
+- Threat model: `csv-docs/THREAT_MODEL.md`

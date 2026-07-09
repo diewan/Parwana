@@ -111,12 +111,6 @@ impl AptosNode {
             .ok_or_else(|| Self::missing_field(field))
     }
 
-    fn required_bool(value: &Value, field: &str) -> RpcResult<bool> {
-        Self::required_field(value, field)?
-            .as_bool()
-            .ok_or_else(|| Self::missing_field(field))
-    }
-
     /// Parse hex string to 32-byte array.
     fn parse_hex_bytes(field: &str, hex_str: &str) -> RpcResult<[u8; 32]> {
         let hex = hex_str.trim_start_matches("0x");

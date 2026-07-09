@@ -15,9 +15,31 @@ pub struct HashWire {
 }
 
 impl HashWire {
-    /// Get the raw bytes of the hash (decodes hex string)
+    /// Get the raw bytes of the hash (decodes hex string).
+    ///
+    /// This validates the hex encoding but **not** the length. Hashing,
+    /// nullifier, and fixed-width encoding paths must use [`HashWire::to_hash`]
+    /// instead, which additionally enforces the 32-byte width
+    /// (`DECODE-ZEROFILL-FAILCLOSED-001`).
     pub fn as_bytes(&self) -> Result<Vec<u8>, String> {
         hex::decode(&self.bytes).map_err(|e| format!("Invalid hash hex: {}", e))
+    }
+
+    /// Decode into a 32-byte [`Hash`], failing closed on malformed hex or on
+    /// any length other than 32 bytes.
+    ///
+    /// This is the canonical decoder for every hashing / nullifier / canonical
+    /// encoding path. Callers must propagate the error rather than substituting
+    /// a zero-filled hash: a zero-filled key is attacker-influenceable
+    /// degeneracy, because two distinct malformed inputs collapse to the same
+    /// value (`DECODE-ZEROFILL-FAILCLOSED-001`).
+    pub fn to_hash(&self) -> Result<Hash, String> {
+        let bytes = self.as_bytes()?;
+        let arr: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("Hash must be 32 bytes, got {} bytes", bytes.len()))?;
+        Ok(Hash::new(arr))
     }
 }
 
@@ -33,15 +55,7 @@ impl TryFrom<HashWire> for Hash {
     type Error = String;
 
     fn try_from(wire: HashWire) -> Result<Self, String> {
-        let bytes = hex::decode(&wire.bytes).map_err(|e| format!("Invalid hash hex: {}", e))?;
-
-        if bytes.len() != 32 {
-            return Err("Hash must be 32 bytes".to_string());
-        }
-
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&bytes);
-        Ok(Hash::new(arr))
+        wire.to_hash()
     }
 }
 
@@ -52,9 +66,28 @@ pub struct SanadIdWire {
 }
 
 impl SanadIdWire {
-    /// Get the raw bytes of the sanad_id (decodes hex string)
+    /// Get the raw bytes of the sanad_id (decodes hex string).
+    ///
+    /// Validates the hex encoding but not the length; see
+    /// [`SanadIdWire::to_sanad_id`].
     pub fn as_bytes(&self) -> Result<Vec<u8>, String> {
         hex::decode(&self.bytes).map_err(|e| format!("Invalid sanad_id hex: {}", e))
+    }
+
+    /// Decode into a [`SanadId`], failing closed on malformed hex or on any
+    /// length other than 32 bytes.
+    ///
+    /// Do not route this through [`SanadId::from_bytes`]: that constructor
+    /// *hashes* any input that is not exactly 32 bytes, so a truncated wire
+    /// value would silently decode to a well-formed but entirely different
+    /// SanadId instead of being rejected (`DECODE-ZEROFILL-FAILCLOSED-001`).
+    pub fn to_sanad_id(&self) -> Result<SanadId, String> {
+        let bytes = self.as_bytes()?;
+        let arr: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("SanadId must be 32 bytes, got {} bytes", bytes.len()))?;
+        Ok(SanadId::new(arr))
     }
 }
 
@@ -70,9 +103,7 @@ impl TryFrom<SanadIdWire> for SanadId {
     type Error = String;
 
     fn try_from(wire: SanadIdWire) -> Result<Self, String> {
-        let bytes = hex::decode(&wire.bytes).map_err(|e| format!("Invalid sanad_id hex: {}", e))?;
-
-        Ok(SanadId::from_bytes(&bytes))
+        wire.to_sanad_id()
     }
 }
 

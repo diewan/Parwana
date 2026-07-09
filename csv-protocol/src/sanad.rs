@@ -25,6 +25,37 @@ use crate::wire::{HashWire, SanadIdWire};
 use csv_hash::canonical::{from_canonical_cbor, to_canonical_cbor};
 use csv_hash::{Commitment, Hash};
 
+/// Decode a wire hash field into its canonical 32 bytes, failing closed.
+///
+/// Canonical MCE encoding is fixed-width: a hash field that decoded to anything
+/// other than 32 bytes would silently shift every subsequent field, so a short
+/// or malformed value must abort the encode rather than be padded. The previous
+/// code substituted `vec![0u8; 32]` on decode failure, which both hid the error
+/// and fed an all-zero value into the hashed preimage
+/// (`DECODE-ZEROFILL-FAILCLOSED-001`).
+fn hash_field(wire: &HashWire, field: &str) -> csv_codec::CodecResult<[u8; 32]> {
+    wire.to_hash().map(|hash| *hash.as_bytes()).map_err(|e| {
+        CodecError::SerializationError(format!("Invalid `{}` hash field: {}", field, e))
+    })
+}
+
+/// Same as [`hash_field`] for an optional field: `None` stays `None`, but a
+/// present-but-malformed value fails closed rather than encoding as zeros.
+fn optional_hash_field(
+    wire: Option<&HashWire>,
+    field: &str,
+) -> csv_codec::CodecResult<Option<Vec<u8>>> {
+    wire.map(|w| hash_field(w, field).map(|bytes| bytes.to_vec()))
+        .transpose()
+}
+
+/// [`hash_field`] for the `SanadIdWire`-typed id, which has its own decoder.
+fn sanad_id_field(wire: &SanadIdWire, field: &str) -> csv_codec::CodecResult<[u8; 32]> {
+    wire.to_sanad_id().map(|id| *id.as_bytes()).map_err(|e| {
+        CodecError::SerializationError(format!("Invalid `{}` sanad id field: {}", field, e))
+    })
+}
+
 /// Canonical payload descriptor for a Sanad.
 ///
 /// This descriptor binds all content metadata to the Sanad identity.
@@ -161,79 +192,49 @@ impl CanonicalEncoding for SanadPayloadDescriptor {
                 result.extend_from_slice(schema_id_bytes);
 
                 // schema_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .schema_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(&self.schema_hash, "schema_hash")?);
 
                 // payload_codec: 1 byte
                 result.push(self.payload_codec);
 
                 // payload_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .payload_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(&self.payload_hash, "payload_hash")?);
 
                 // content_root: optional 32 bytes (1 byte flag + 32 bytes if present)
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .content_root
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.content_root.as_ref(), "content_root")?,
                 ));
 
                 // attachment_root: optional 32 bytes
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .attachment_root
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.attachment_root.as_ref(), "attachment_root")?,
                 ));
 
                 // claims_root: optional 32 bytes
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .claims_root
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.claims_root.as_ref(), "claims_root")?,
                 ));
 
                 // participants_root: optional 32 bytes
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .participants_root
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.participants_root.as_ref(), "participants_root")?,
                 ));
 
                 // disclosure_policy_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .disclosure_policy_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(
+                    &self.disclosure_policy_hash,
+                    "disclosure_policy_hash",
+                )?);
 
                 // proof_policy_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .proof_policy_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result
+                    .extend_from_slice(&hash_field(&self.proof_policy_hash, "proof_policy_hash")?);
 
                 // resource_limits_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .resource_limits_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(
+                    &self.resource_limits_hash,
+                    "resource_limits_hash",
+                )?);
 
                 Ok(result)
             }
@@ -700,13 +701,11 @@ impl CanonicalEncoding for Sanad {
                 let mut result = Vec::new();
 
                 // id: length-prefixed bytes
-                let id_bytes = self.id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
+                let id_bytes = sanad_id_field(&self.id, "id")?;
                 result.extend_from_slice(&ManualEncoder::encode_bytes(&id_bytes));
 
                 // commitment: 32 bytes
-                result.extend_from_slice(
-                    &self.commitment.as_bytes().unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(&self.commitment, "commitment")?);
 
                 // owner: length-prefixed bytes
                 result.extend_from_slice(&ManualEncoder::encode_bytes(&self.owner.encode_mce()?));
@@ -716,19 +715,11 @@ impl CanonicalEncoding for Sanad {
 
                 // nullifier: optional 32 bytes
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .nullifier
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.nullifier.as_ref(), "nullifier")?,
                 ));
 
                 // descriptor_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .descriptor_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(&self.descriptor_hash, "descriptor_hash")?);
 
                 Ok(result)
             }
@@ -830,23 +821,26 @@ impl SanadEnvelope {
     pub const SCHEMA_ID: &'static str = "csv.sanad.envelope.v2";
 
     /// Build envelope from a [`Sanad`].
-    pub fn from_sanad(sanad: &Sanad) -> Self {
-        let id_bytes = sanad.id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]);
-        let mut arr = [0u8; 32];
-        if id_bytes.len() == 32 {
-            arr.copy_from_slice(&id_bytes);
-        }
+    ///
+    /// Fails closed if the Sanad's id is not a well-formed 32-byte hash, rather
+    /// than emitting an envelope whose `sanad_id` is all zeros
+    /// (`DECODE-ZEROFILL-FAILCLOSED-001`).
+    pub fn from_sanad(sanad: &Sanad) -> Result<Self> {
+        let id = sanad
+            .id
+            .to_sanad_id()
+            .map_err(|e| ProtocolError::SerializationError(format!("Invalid Sanad id: {}", e)))?;
 
-        Self {
+        Ok(Self {
             version: 2,
             schema_id: Self::SCHEMA_ID.to_string(),
             sanad_id: HashWire {
-                bytes: hex::encode(arr),
+                bytes: hex::encode(id.as_bytes()),
             },
             payload_hash: sanad.commitment.clone(),
             merkle_root: None,
             descriptor_hash: Some(sanad.descriptor_hash.clone()),
-        }
+        })
     }
 }
 
@@ -867,31 +861,19 @@ impl CanonicalEncoding for SanadEnvelope {
                 result.extend_from_slice(schema_id_bytes);
 
                 // sanad_id: 32 bytes
-                result
-                    .extend_from_slice(&self.sanad_id.as_bytes().unwrap_or_else(|_| vec![0u8; 32]));
+                result.extend_from_slice(&hash_field(&self.sanad_id, "sanad_id")?);
 
                 // payload_hash: 32 bytes
-                result.extend_from_slice(
-                    &self
-                        .payload_hash
-                        .as_bytes()
-                        .unwrap_or_else(|_| vec![0u8; 32]),
-                );
+                result.extend_from_slice(&hash_field(&self.payload_hash, "payload_hash")?);
 
                 // merkle_root: optional 32 bytes
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .merkle_root
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.merkle_root.as_ref(), "merkle_root")?,
                 ));
 
                 // descriptor_hash: optional 32 bytes
                 result.extend_from_slice(&ManualEncoder::encode_option_bytes(
-                    &self
-                        .descriptor_hash
-                        .as_ref()
-                        .map(|h| h.as_bytes().unwrap_or_else(|_| vec![0u8; 32])),
+                    &optional_hash_field(self.descriptor_hash.as_ref(), "descriptor_hash")?,
                 ));
 
                 Ok(result)

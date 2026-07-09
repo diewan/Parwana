@@ -45,6 +45,18 @@ use crate::types::{CelestiaFinalityProof, CelestiaHeader};
 #[cfg(all(feature = "rpc", feature = "quorum"))]
 use csv_protocol::rpc::{QuorumClient, QuorumConfig, RpcProvider};
 
+#[cfg(feature = "rpc")]
+fn decode_hex_array<const N: usize>(value: &serde_json::Value, field: &str) -> Result<[u8; N]> {
+    let hex_value = value[field]
+        .as_str()
+        .ok_or_else(|| CelestiaError::RpcError(format!("Missing {} in response", field)))?;
+    let bytes = hex::decode(hex_value)
+        .map_err(|e| CelestiaError::RpcError(format!("Invalid {} hex: {}", field, e)))?;
+    bytes
+        .try_into()
+        .map_err(|_| CelestiaError::RpcError(format!("Invalid {} length", field)))
+}
+
 /// Celestia node RPC client
 #[derive(Clone, Debug)]
 pub struct CelestiaNode {
@@ -261,25 +273,16 @@ impl CelestiaRpc for CelestiaNode {
 
         let chain_id = header_json["chain_id"]
             .as_str()
-            .unwrap_or("celestia")
+            .ok_or_else(|| CelestiaError::RpcError("Missing chain_id in response".to_string()))?
             .to_string();
 
         let header_height = header_json["height"]
             .as_str()
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(height);
+            .ok_or_else(|| CelestiaError::RpcError("Missing height in response".to_string()))?;
 
-        let hash = header_json["hash"]
-            .as_str()
-            .and_then(|s| hex::decode(s).ok())
-            .and_then(|b| b.try_into().ok())
-            .unwrap_or([0u8; 32]);
-
-        let data_root = header_json["data_hash"]
-            .as_str()
-            .and_then(|s| hex::decode(s).ok())
-            .and_then(|b| b.try_into().ok())
-            .unwrap_or([0u8; 32]);
+        let hash = decode_hex_array::<32>(header_json, "hash")?;
+        let data_root = decode_hex_array::<32>(header_json, "data_hash")?;
 
         Ok(CelestiaHeader::new(
             chain_id,
@@ -325,14 +328,7 @@ impl CelestiaRpc for CelestiaNode {
         let proof_result = &result["result"];
 
         // Extract row_root from the proof (hex-encoded, 32 bytes)
-        let row_root = proof_result["row_root"]
-            .as_str()
-            .and_then(|s| hex::decode(s).ok())
-            .and_then(|b| b.try_into().ok())
-            .unwrap_or_else(|| {
-                log::warn!("Missing or invalid row_root in Celestia GetProof response");
-                [0u8; 32]
-            });
+        let row_root = decode_hex_array::<32>(proof_result, "row_root")?;
 
         // Get the block header to extract data_root and block_hash
         let header = self.get_header(height).await?;
@@ -348,11 +344,10 @@ impl CelestiaRpc for CelestiaNode {
     }
 
     async fn get_finality_proof(&self, height: u64) -> Result<CelestiaFinalityProof> {
-        // Tendermint finality is deterministic
-        let header = self.get_header(height).await?;
-
-        Ok(CelestiaFinalityProof::new(height, header.hash, header.data_root).with_quorum(vec![]))
-        // Real impl would fetch signatures
+        let _header = self.get_header(height).await?;
+        Err(CelestiaError::RpcError(
+            "Celestia RPC finality proof requires validator commit signatures".to_string(),
+        ))
     }
 }
 

@@ -45,6 +45,9 @@ async fn main() -> Result<()> {
                 owner: vec![],
                 proof: vec![],
                 scheme: None,
+                // Unsigned draft: an empty public_key fails closed before this proof
+                // could ever be treated as authoritative (SANAD-OWNERSHIP-PROOF-VERIFY-001).
+                public_key: vec![],
             },
             &[],
             ChainId::new("bitcoin"),
@@ -89,6 +92,10 @@ async fn main() -> Result<()> {
                             owner: vec![],
                             proof: vec![],
                             scheme: None,
+                            // Unsigned draft: an empty public_key fails closed before this
+                            // proof could be treated as authoritative
+                            // (SANAD-OWNERSHIP-PROOF-VERIFY-001).
+                            public_key: vec![],
                         },
                         &[],
                         ChainId::new("ethereum"),
@@ -131,6 +138,9 @@ async fn main() -> Result<()> {
             owner: vec![],
             proof: vec![],
             scheme: None,
+            // Unsigned draft: an empty public_key fails closed before this proof
+            // could ever be treated as authoritative (SANAD-OWNERSHIP-PROOF-VERIFY-001).
+            public_key: vec![],
         },
         &[],
         ChainId::new("bitcoin"),

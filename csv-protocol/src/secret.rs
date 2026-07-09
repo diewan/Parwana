@@ -65,6 +65,7 @@ enum SecretSource {
     Keystore {
         /// Path to the keystore file
         path: PathBuf,
+        // Passphrase is carried with the keystore reference and consumed on unlock.
         #[allow(dead_code)]
         /// Passphrase for decrypting the keystore
         passphrase: csv_keys::memory::Passphrase,

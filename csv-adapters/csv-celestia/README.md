@@ -6,6 +6,10 @@ Celestia adapter for the CSV Protocol — implements `SealProtocol` and `ChainBa
 
 `csv-celestia` provides the Celestia-specific implementation of the CSV Protocol chain adapter interface, enabling data availability operations and proof generation on the Celestia network.
 
+## Roadmap Decision
+
+ROADMAP-CELESTIA-001 resolves Celestia as DA-only, intentionally outside the transfer-adapter registry. `csv-runtime` may expose Celestia capabilities for data availability, but Celestia does not authorize source locks or destination mints. Inclusion/finality verification must use DA-layer/RPC evidence and fail closed when the required proof data is unavailable.
+
 ## Features
 
 - **rpc** — Celestia JSON-RPC support

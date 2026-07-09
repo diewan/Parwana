@@ -1,6 +1,5 @@
 //! CLI command implementations
 
-#![allow(dead_code)]
 #![allow(deprecated)]
 
 pub mod chain;

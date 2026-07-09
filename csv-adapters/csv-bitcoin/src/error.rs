@@ -28,14 +28,6 @@ pub trait HasErrorSuggestion {
 }
 
 mod error_codes {
-    pub const BITCOIN_RPC_ERROR: u32 = 3001;
-    pub const BITCOIN_TX_NOT_FOUND: u32 = 3002;
-    pub const BITCOIN_UTXO_SPENT: u32 = 3003;
-    pub const BITCOIN_MERKLE_PROOF: u32 = 3004;
-    pub const BITCOIN_REORG: u32 = 3005;
-    pub const BITCOIN_REGISTRY_FULL: u32 = 3006;
-    pub const BITCOIN_INSUFFICIENT_CONFIRMATIONS: u32 = 3007;
-    pub const BITCOIN_INSUFFICIENT_FUNDS: u32 = 3008;
     pub const BTC_RPC_ERROR: u32 = 3001;
     pub const BTC_TRANSACTION_NOT_FOUND: u32 = 3002;
     pub const BTC_UTXO_SPENT: u32 = 3003;

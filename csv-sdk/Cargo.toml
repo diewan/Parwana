@@ -124,7 +124,10 @@ runtime-coordinator = ["dep:csv-storage", "csv-storage/rocksdb", "csv-runtime/pe
 # Wallet / crypto
 wallet = ["dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]
 
-# P2P proof delivery
+# P2P proof delivery.
+# ROADMAP-P2P-001 decision: this remains an SDK opt-in feature. The shipped
+# csv-cli does not enable it until P2P consignment delivery has an operator
+# runbook and stable CLI workflow; see csv-docs/CONCEPTS.md "future" table.
 p2p = ["dep:csv-p2p"]
 
 # Native-only features (require non-wasm32 target)

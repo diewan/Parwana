@@ -95,6 +95,7 @@ pub enum Priority {
 /// # }
 /// ```
 pub struct TransferManager {
+    // Held to keep the client alive for the manager's lifetime; calls go through the runtime.
     #[allow(dead_code)]
     client: Arc<ClientRef>,
     /// Local transfer records wrapped in Arc for shared ownership
@@ -301,7 +302,7 @@ impl TransferManager {
 
         Ok(match outcome {
             csv_runtime::TransferOutcome::Completed(receipt) => {
-                TransferOutcome::Completed(TransferReceipt {
+                TransferOutcome::Completed(Box::new(TransferReceipt {
                     transfer_id: receipt.transfer_id,
                     replay_id: receipt.replay_id,
                     source_chain: from_chain,
@@ -309,7 +310,7 @@ impl TransferManager {
                     lock_tx_hash: receipt.lock_tx_hash,
                     mint_tx_hash: receipt.mint_tx_hash,
                     materialization: receipt.materialization,
-                })
+                }))
             }
             csv_runtime::TransferOutcome::Pending {
                 lock_tx_hash,
@@ -367,7 +368,10 @@ impl std::fmt::Display for TransferReceipt {
 #[derive(Debug, Clone)]
 pub enum TransferOutcome {
     /// Transfer completed: destination mint confirmed.
-    Completed(TransferReceipt),
+    ///
+    /// Boxed: the receipt carries destination materialization metadata, making it
+    /// several times larger than `Pending`.
+    Completed(Box<TransferReceipt>),
     /// Lock is on-chain but not yet at the required finality depth.
     Pending {
         /// Runtime-assigned transfer identifier (needed to resume later).
@@ -509,7 +513,7 @@ impl TransferBuilder {
     #[allow(clippy::await_holding_lock)]
     pub async fn execute(self) -> Result<TransferReceipt, CsvError> {
         match self.execute_outcome().await? {
-            TransferOutcome::Completed(receipt) => Ok(receipt),
+            TransferOutcome::Completed(receipt) => Ok(*receipt),
             TransferOutcome::Pending {
                 confirmations,
                 required,
@@ -592,7 +596,7 @@ impl TransferBuilder {
                                 "TransferBuilder: Transfer completed, transfer_id={}",
                                 receipt.transfer_id
                             );
-                            TransferOutcome::Completed(TransferReceipt {
+                            TransferOutcome::Completed(Box::new(TransferReceipt {
                                 transfer_id: receipt.transfer_id,
                                 replay_id: receipt.replay_id,
                                 source_chain: self.from_chain,
@@ -600,7 +604,7 @@ impl TransferBuilder {
                                 lock_tx_hash: receipt.lock_tx_hash,
                                 mint_tx_hash: receipt.mint_tx_hash,
                                 materialization: receipt.materialization,
-                            })
+                            }))
                         }
                         csv_runtime::TransferOutcome::Pending {
                             lock_tx_hash,
@@ -700,6 +704,7 @@ fn destination_owner_bytes(chain: &ChainId, address: &str) -> Result<Vec<u8>, Cs
     }
 }
 
+// Timestamp helper retained for receipt formatting; not on the current code path.
 #[allow(dead_code)]
 fn iso_timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};

@@ -172,6 +172,19 @@ impl ChainRuntime {
         })
     }
 
+    /// Return the latest observed block height for a chain through the
+    /// registered runtime adapter.
+    pub async fn latest_block_height(&self, chain: ChainId) -> Result<u64, CsvError> {
+        let adapter = self.get_adapter(chain.clone()).await?;
+        adapter
+            .get_latest_block_height()
+            .await
+            .map_err(|e| CsvError::ProtocolError {
+                chain,
+                message: format!("Latest block height query failed: {}", e),
+            })
+    }
+
     /// Sign a transaction using the wallet's key identifier.
     ///
     /// This runtime function is used by CLI and wallet for transaction signing.

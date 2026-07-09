@@ -2,6 +2,32 @@
 //!
 //! CRITICAL FIX: Replaces unencrypted localStorage with AES-GCM encrypted IndexedDB.
 //! All seal nullifiers and sensitive state are encrypted at rest with HMAC integrity.
+//!
+//! # Scope, and why this is not a duplicate of `csv-content` (STORE-ENCRYPTION-DEDUP-001)
+//!
+//! This module is **browser-only at-rest storage**: it is gated behind the
+//! `encrypted-storage` feature, and its operative code is `#[cfg(target_arch =
+//! "wasm32")]`. It encrypts seal nullifiers and wallet state written to
+//! IndexedDB, using a key derived from a user password via PBKDF2-HMAC-SHA256
+//! (600,000 iterations), plus an HMAC-SHA256 tag over `ciphertext || nonce` on
+//! top of AES-GCM's own authentication tag.
+//!
+//! It is **not** interchangeable with `csv_content::encryption`, and neither
+//! should be folded into the other:
+//!
+//! - `csv_content::encryption` defines the `EncryptionDescriptor` /
+//!   `EncryptionEnvelope` *wire types* for encrypted content subtrees inside a
+//!   Sanad. It performs no cryptography at all; the AES-GCM work for that path
+//!   lives in `csv-cli/src/commands/content.rs` and takes a raw 32-byte key with
+//!   no KDF.
+//! - This module performs cryptography, owns a password KDF, and never leaves
+//!   the browser.
+//!
+//! [`EncryptedEnvelope`] is deliberately private and is not re-exported from
+//! `csv-store`'s crate root, so no caller can reach for it by mistake in place
+//! of the content envelope types. Keep it that way: making it public would
+//! create exactly the ambiguity (password+PBKDF2 vs. raw-key, double-MAC vs.
+//! single AEAD tag) that this note exists to prevent.
 
 use aes_gcm::{
     Aes256Gcm, Nonce,

@@ -75,7 +75,6 @@
 
 #![warn(missing_docs)]
 #![allow(missing_docs)]
-#![allow(dead_code)]
 
 pub mod blob;
 pub mod client;

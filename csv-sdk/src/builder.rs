@@ -45,7 +45,7 @@ use csv_storage::InMemoryReplayDb;
 #[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
 use csv_storage::RocksDbReplayDb;
 #[cfg(feature = "runtime-coordinator")]
-use csv_verifier::CanonicalVerifierImpl;
+use csv_verifier::{CanonicalVerifierImpl, VerifierConfig};
 
 #[cfg(feature = "runtime-coordinator")]
 type RuntimeStores = (
@@ -270,7 +270,14 @@ impl ClientBuilder {
             // Initialize runtime components.
             let (replay_db, event_store, execution_journal) = Self::runtime_stores(&config)?;
             let event_bus = EventBus::new();
-            let verifier = CanonicalVerifierImpl::default();
+            // TransferCoordinator constructs the production verifier per source
+            // chain at verification time. This stored verifier remains only for
+            // constructor/API compatibility, so configure it to fail closed if
+            // it is ever used directly.
+            let verifier = CanonicalVerifierImpl::new(VerifierConfig {
+                max_anchor_age_blocks: Some(0),
+                ..VerifierConfig::default()
+            });
 
             // For single-instance deployments (CLI, SDK), do not configure a distributed coordinator lease.
             // The assert_single_active_coordinator check will be skipped when coordinator_lease is None,

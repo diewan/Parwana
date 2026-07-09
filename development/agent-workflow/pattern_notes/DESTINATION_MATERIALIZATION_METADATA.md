@@ -72,7 +72,7 @@ Ok(MintResult {
 | csv-ethereum | `unavailable(...)` today; would need the `SanadMinted` event log | Do not use the mint tx hash as an object id |
 | csv-bitcoin | Not a mint destination; `unavailable(...)` | — |
 | csv-solana | `unavailable(...)` today; would need the minted PDA | Tombstone PDAs are not the Sanad record |
-| csv-celestia | `unavailable(...)` | — |
+| csv-celestia | n/a — no runtime adapter, no `MintResult` | Not a mint destination; nothing to fill |
 
 ## Tests added
 

@@ -2131,8 +2131,6 @@ impl ChainSigner for BitcoinBackend {
     }
 
     fn signature_scheme(&self) -> SignatureScheme {
-        // let signer = BitcoinChainSigner::new(self.network);
-        // signer.signature_scheme()
         SignatureScheme::Secp256k1
     }
 }
@@ -2430,6 +2428,8 @@ struct TxInput {
     txid: [u8; 32],
     vout: u32,
     sequence: u32,
+    // Parsed off the wire to advance the cursor; segwit inputs carry an empty script_sig.
+    #[allow(dead_code)]
     script_sig: Vec<u8>,
 }
 

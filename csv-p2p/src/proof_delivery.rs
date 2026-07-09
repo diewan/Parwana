@@ -183,8 +183,10 @@ impl ProofFilter {
 pub struct ProofCache {
     seen_event_ids: HashSet<String>,
     max_size: usize,
+    // Cache TTL is configured but eviction is size-based today.
     #[allow(dead_code)]
     ttl: Duration,
+    // Reserved cache tuning knob; not yet enforced.
     #[allow(dead_code)]
     last_cleanup: Instant,
 }

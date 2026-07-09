@@ -47,23 +47,6 @@ impl SealRegistry {
         ))
     }
 
-    /// Load used seals from storage into memory
-    /// NOTE: Disabled - SqliteSealStore implementation is commented out in csv-store
-    #[cfg(feature = "rpc")]
-    fn load_from_storage(&mut self) -> BitcoinResult<()> {
-        // No-op since storage is disabled
-        Ok(())
-    }
-
-    /// Persist a seal to storage (internal helper)
-    /// Called by mark_seal_used_with_storage after marking in memory
-    #[cfg(feature = "rpc")]
-    fn persist_seal(&self, _seal: &BitcoinSealPoint, _height: u64) -> BitcoinResult<()> {
-        // This method is kept for API compatibility
-        // Actual persistence happens in mark_seal_used_with_storage which has &mut self
-        Ok(())
-    }
-
     /// Mark a seal as used and persist to storage (requires &mut self for storage)
     #[cfg(feature = "rpc")]
     pub fn mark_seal_used_with_storage(

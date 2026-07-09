@@ -207,11 +207,6 @@ impl SolanaBackend {
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Solana address: {}", e)))
     }
 
-    /// Format Solana address for display
-    fn format_address(&self, addr: Pubkey) -> String {
-        addr.to_string()
-    }
-
     /// Parse transaction signature
     fn parse_signature(&self, sig: &str) -> ChainOpResult<Signature> {
         let bytes = bs58::decode(sig)

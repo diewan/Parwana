@@ -9,8 +9,6 @@
 //! - **Anchors**: Events emitted when seal resources are consumed
 //! - **Finality**: HotStuff consensus provides deterministic finality via 2f+1 certification
 
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 use std::sync::Mutex;
 use tokio::runtime::Handle;
@@ -841,6 +839,9 @@ impl AptosSealProtocol {
     }
 
     /// Verify the event in a published anchor matches the expected commitment.
+    ///
+    /// Kept as the anchor-event check; publish currently verifies via the runtime path.
+    #[allow(dead_code)]
     fn verify_anchor_event(
         &self,
         anchor: &AptosCommitAnchor,
@@ -1544,6 +1545,8 @@ impl AptosSealProtocol {
         self.rpc.as_ref()
     }
 
+    /// Adapter seam for submitting via the RPC client; no in-tree caller yet.
+    #[allow(dead_code)]
     pub(crate) fn rpc_as_transaction_submitter(
         &self,
     ) -> &(dyn AptosTransactionSubmitter + Send + Sync) {

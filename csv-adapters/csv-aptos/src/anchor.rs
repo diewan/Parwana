@@ -11,6 +11,8 @@ use csv_verifier::{
 /// Aptos-specific cryptographic anchor.
 pub struct AptosAnchor {
     /// Known validator set from genesis/trusted checkpoint.
+    // Held for the BLS quorum check; the verifier below currently carries its own copy.
+    #[allow(dead_code)]
     validator_set: ValidatorSet,
     /// BLS verifier for aggregate signatures.
     bls_verifier: BlsVerifier,

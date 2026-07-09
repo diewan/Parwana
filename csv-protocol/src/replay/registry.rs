@@ -392,14 +392,14 @@ impl NullifierRegistry {
     }
 
     /// Register a replay nullifier.
+    ///
+    /// Both index keys are derived through the fail-closed decoder: a malformed
+    /// `nullifier` or `sanad_id` is rejected rather than indexed under an
+    /// all-zero key, which would alias distinct malformed entries onto one
+    /// registry slot (`DECODE-ZEROFILL-FAILCLOSED-001`).
     pub fn register(&mut self, nullifier: ReplayNullifier) -> Result<(), ReplayError> {
-        let nullifier_key: String = hex::encode(
-            nullifier
-                .nullifier
-                .as_bytes()
-                .unwrap_or_else(|_| vec![0u8; 32])
-                .as_slice(),
-        );
+        let nullifier_key: String = hex::encode(nullifier_index_key(&nullifier.nullifier)?);
+        let sanad_key: String = hex::encode(nullifier_index_key(&nullifier.sanad_id)?);
 
         // Check if nullifier already exists
         if self.nullifiers.contains_key(&nullifier_key) {
@@ -411,13 +411,6 @@ impl NullifierRegistry {
             .insert(nullifier_key.clone(), nullifier.clone());
 
         // Add to sanad ID index
-        let sanad_key: String = hex::encode(
-            nullifier
-                .sanad_id
-                .as_bytes()
-                .unwrap_or_else(|_| vec![0u8; 32])
-                .as_slice(),
-        );
         self.by_sanad_id
             .entry(sanad_key)
             .or_default()
@@ -476,7 +469,12 @@ impl NullifierRegistry {
     }
 
     /// Clean up expired nullifiers.
-    pub fn cleanup_expired(&mut self) -> usize {
+    ///
+    /// Returns the number of entries removed. Fails closed if a stored entry's
+    /// `sanad_id` cannot be decoded: such an entry cannot be un-indexed
+    /// correctly, and silently zero-filling its index key would strand the real
+    /// index entry behind (`DECODE-ZEROFILL-FAILCLOSED-001`).
+    pub fn cleanup_expired(&mut self) -> Result<usize, ReplayError> {
         let mut to_remove = Vec::new();
 
         for (key, nullifier) in &self.nullifiers {
@@ -486,23 +484,17 @@ impl NullifierRegistry {
         }
 
         for key in &to_remove {
-            self.remove(key);
+            self.remove(key)?;
         }
 
-        to_remove.len()
+        Ok(to_remove.len())
     }
 
     /// Remove a nullifier from the registry.
-    fn remove(&mut self, nullifier_key: &str) {
+    fn remove(&mut self, nullifier_key: &str) -> Result<(), ReplayError> {
         if let Some(nullifier) = self.nullifiers.remove(nullifier_key) {
             // Remove from sanad ID index
-            let sanad_key: String = hex::encode(
-                nullifier
-                    .sanad_id
-                    .as_bytes()
-                    .unwrap_or_else(|_| vec![0u8; 32])
-                    .as_slice(),
-            );
+            let sanad_key: String = hex::encode(nullifier_index_key(&nullifier.sanad_id)?);
             if let Some(keys) = self.by_sanad_id.get_mut(&sanad_key) {
                 keys.retain(|k| k != nullifier_key);
                 if keys.is_empty() {
@@ -518,6 +510,8 @@ impl NullifierRegistry {
                 }
             }
         }
+
+        Ok(())
     }
 
     /// Get statistics about the registry.
@@ -571,6 +565,18 @@ pub enum ReplayError {
     RegistryError(String),
 }
 
+/// Decode a wire hash into the 32-byte registry index key, failing closed.
+///
+/// Rejects malformed hex and any width other than 32 bytes. Never substitutes a
+/// zero-filled key: doing so would map every malformed input onto the same
+/// registry slot, so a bad entry could evict or alias a good one
+/// (`DECODE-ZEROFILL-FAILCLOSED-001`).
+fn nullifier_index_key(wire: &HashWire) -> Result<[u8; 32], ReplayError> {
+    wire.to_hash()
+        .map(|hash| *hash.as_bytes())
+        .map_err(|e| ReplayError::RegistryError(format!("Malformed nullifier field: {}", e)))
+}
+
 /// Replay constitution validator.
 pub struct ReplayConstitutionValidator;
 
@@ -605,29 +611,24 @@ impl ReplayConstitutionValidator {
             return Err(ReplayError::InvalidNullifier);
         }
 
-        // Check nullifier hash matches computed value
-        let sanad_id_bytes = nullifier
+        // Check nullifier hash matches computed value.
+        //
+        // A malformed `sanad_id` / `source_seal_ref` must reject outright. The
+        // previous code substituted 32 zero bytes on decode failure and, because
+        // the substituted length was 32, went on to compute the nullifier over an
+        // all-zero key — collapsing distinct malformed inputs onto one value
+        // instead of rejecting them (`DECODE-ZEROFILL-FAILCLOSED-001`).
+        let sanad_id = nullifier
             .sanad_id
-            .as_bytes()
-            .unwrap_or_else(|_| vec![0u8; 32]);
-        let source_seal_ref_bytes = nullifier
+            .to_hash()
+            .map_err(|_| ReplayError::InvalidNullifier)?;
+        let source_seal_ref = nullifier
             .source_seal_ref
-            .as_bytes()
-            .unwrap_or_else(|_| vec![0u8; 32]);
-        let mut sanad_id_arr = [0u8; 32];
-        let mut source_seal_ref_arr = [0u8; 32];
-        if sanad_id_bytes.len() == 32 {
-            sanad_id_arr.copy_from_slice(&sanad_id_bytes);
-        }
-        if source_seal_ref_bytes.len() == 32 {
-            source_seal_ref_arr.copy_from_slice(&source_seal_ref_bytes);
-        }
+            .to_hash()
+            .map_err(|_| ReplayError::InvalidNullifier)?;
 
-        let computed = ReplayNullifier::compute_nullifier(
-            Hash::new(sanad_id_arr),
-            nullifier.source_chain,
-            Hash::new(source_seal_ref_arr),
-        );
+        let computed =
+            ReplayNullifier::compute_nullifier(sanad_id, nullifier.source_chain, source_seal_ref);
         if HashWire::from(computed) != nullifier.nullifier {
             return Err(ReplayError::InvalidNullifier);
         }
@@ -848,5 +849,123 @@ mod tests {
         // Attempt to consume - should detect replay attack
         let result = registry.consume_if_unconsumed(key.clone(), 2000);
         assert!(result.is_err(), "Should detect replay attack");
+    }
+
+    /// DECODE-ZEROFILL-FAILCLOSED-001 fixtures: a well-formed nullifier whose
+    /// wire fields can then be corrupted individually.
+    fn valid_nullifier() -> ReplayNullifier {
+        ReplayNullifier::new(Hash::new([1u8; 32]), 0, Hash::new([2u8; 32]))
+    }
+
+    #[test]
+    fn validate_nullifier_accepts_well_formed() {
+        assert!(ReplayConstitutionValidator::validate_nullifier(&valid_nullifier()).is_ok());
+    }
+
+    /// DECODE-ZEROFILL-FAILCLOSED-001: a malformed `sanad_id` must reject, not
+    /// collapse to an all-zero key and compute a nullifier over it.
+    #[test]
+    fn validate_nullifier_rejects_short_sanad_id() {
+        let mut nullifier = valid_nullifier();
+        nullifier.sanad_id = HashWire {
+            bytes: hex::encode([1u8; 16]), // 16 bytes, not 32
+        };
+
+        assert!(matches!(
+            ReplayConstitutionValidator::validate_nullifier(&nullifier),
+            Err(ReplayError::InvalidNullifier)
+        ));
+    }
+
+    #[test]
+    fn validate_nullifier_rejects_non_hex_source_seal_ref() {
+        let mut nullifier = valid_nullifier();
+        nullifier.source_seal_ref = HashWire {
+            bytes: "zzzz".to_string(),
+        };
+
+        assert!(matches!(
+            ReplayConstitutionValidator::validate_nullifier(&nullifier),
+            Err(ReplayError::InvalidNullifier)
+        ));
+    }
+
+    /// The actual forgery the zero-fill enabled, and the regression test that
+    /// distinguishes the fixed code from the broken code.
+    ///
+    /// Under the old implementation a short-but-valid-hex `sanad_id` /
+    /// `source_seal_ref` collapsed to all-zero 32-byte arrays, and the validator
+    /// then recomputed the nullifier *over those zeros*. An attacker who supplied
+    /// the matching zero-key nullifier therefore passed every check: the
+    /// "is not zero" guards look at the wire fields (which are non-zero), while
+    /// the recomputation looks at the zero-filled arrays.
+    ///
+    /// Both malformed values must now be rejected at decode, before any hashing.
+    #[test]
+    fn zero_key_nullifier_forgery_is_rejected() {
+        let zero = Hash::new([0u8; 32]);
+        let source_chain = 0u8;
+
+        // The nullifier the old code would have computed for any malformed input.
+        let zero_key_nullifier = ReplayNullifier::compute_nullifier(zero, source_chain, zero);
+
+        let mut forged = valid_nullifier();
+        forged.source_chain = source_chain;
+        forged.nullifier = zero_key_nullifier.into();
+        // Non-zero on the wire (so the "is not zero" guards pass) but not 32 bytes.
+        forged.sanad_id = HashWire {
+            bytes: hex::encode([0xAAu8; 8]),
+        };
+        forged.source_seal_ref = HashWire {
+            bytes: hex::encode([0xBBu8; 4]),
+        };
+
+        assert!(
+            matches!(
+                ReplayConstitutionValidator::validate_nullifier(&forged),
+                Err(ReplayError::InvalidNullifier)
+            ),
+            "a zero-key nullifier over malformed fields must not validate"
+        );
+    }
+
+    /// Two *distinct* malformed inputs previously both zero-filled to the same
+    /// 32-byte key. Neither may validate now.
+    #[test]
+    fn distinct_malformed_sanad_ids_do_not_collapse_to_one_nullifier() {
+        let mut short = valid_nullifier();
+        short.sanad_id = HashWire {
+            bytes: hex::encode([0xAAu8; 8]),
+        };
+
+        let mut shorter = valid_nullifier();
+        shorter.sanad_id = HashWire {
+            bytes: hex::encode([0xBBu8; 4]),
+        };
+
+        assert!(ReplayConstitutionValidator::validate_nullifier(&short).is_err());
+        assert!(ReplayConstitutionValidator::validate_nullifier(&shorter).is_err());
+    }
+
+    /// A malformed field must not be indexed under a zero-filled registry key,
+    /// where it could alias or evict a legitimate entry.
+    #[test]
+    fn register_rejects_malformed_sanad_id() {
+        let mut registry = NullifierRegistry::new();
+        let mut nullifier = valid_nullifier();
+        nullifier.sanad_id = HashWire {
+            bytes: hex::encode([7u8; 31]), // one byte short
+        };
+
+        let result = registry.register(nullifier);
+        assert!(matches!(result, Err(ReplayError::RegistryError(_))));
+        assert_eq!(registry.stats().total, 0, "nothing may be indexed");
+    }
+
+    #[test]
+    fn register_accepts_well_formed_nullifier() {
+        let mut registry = NullifierRegistry::new();
+        assert!(registry.register(valid_nullifier()).is_ok());
+        assert_eq!(registry.stats().total, 1);
     }
 }

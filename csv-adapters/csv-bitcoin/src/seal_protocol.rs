@@ -9,8 +9,6 @@
 //! - **Commitments**: Published via Taproot OP_RETURN or Tapscript tapret
 //! - **Finality**: Based on confirmation depth
 
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 use bitcoin;
 use bitcoin_hashes::Hash as _;
@@ -839,15 +837,6 @@ impl BitcoinSealProtocol {
     pub(crate) fn domain(&self) -> [u8; 32] {
         self.domain_separator
     }
-}
-
-/// Helper to get address UTXOs from any RPC implementation
-fn get_address_utxos(
-    _rpc: &dyn BitcoinRpc,
-    _address: &bitcoin::Address,
-) -> Result<Vec<(bitcoin::OutPoint, u64)>, String> {
-    // This is a temporary implementation - actual implementation depends on the RPC backend
-    Err("get_address_utxos not implemented for this RPC backend".to_string())
 }
 
 #[async_trait]

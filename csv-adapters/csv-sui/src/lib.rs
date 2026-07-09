@@ -36,7 +36,6 @@
 
 #![warn(missing_docs)]
 #![allow(missing_docs)]
-#![allow(dead_code)]
 
 pub mod chain_verification;
 pub mod checkpoint;

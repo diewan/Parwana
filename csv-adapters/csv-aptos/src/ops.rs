@@ -40,6 +40,8 @@ pub struct AptosBackend {
     /// Domain separator for proof generation
     domain_separator: [u8; 32],
     /// Commitment event builder
+    // Constructed with the adapter; the runtime proof path builds events itself.
+    #[allow(dead_code)]
     event_builder: CommitmentEventBuilder,
     /// Reference to seal protocol for seal creation and publishing
     pub(crate) seal_protocol: Arc<AptosSealProtocol>,

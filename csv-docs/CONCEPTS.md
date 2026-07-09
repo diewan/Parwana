@@ -772,7 +772,7 @@ Be honest about these when reasoning about guarantees:
 |---|---|
 | **ZK prover seam** (`Proof::ZK`, `ZkPublicInputs`, `ZkHeader`) | designed; replaces the trusted attestor on the materialization path |
 | **Stage-3 light client** | needed for *fully* offline header verification; today Stage 1 uses RPC quorum |
-| **P2P consignment delivery** (`csv-p2p`) | deferred |
+| **P2P consignment delivery** (`csv-p2p`) | deferred; SDK opt-in only, not enabled in the shipped CLI until an operator runbook and stable command surface exist |
 | **Explorer / Indexer** | partial |
 | **On-chain SPV (Model A)** | intentionally deferred; RFC-0012 keeps a non-breaking upgrade seam for it |
 | **`SanadEnvelope` merkleized payloads** | Priority-1 gap |

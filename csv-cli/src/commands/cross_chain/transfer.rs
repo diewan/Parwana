@@ -176,6 +176,66 @@ fn consignment_source_chain(consignment: &WireConsignment) -> Option<Chain> {
         .and_then(chain_from_proof_source)
 }
 
+fn configured_max_proof_age_blocks(source_chain: &Chain) -> Result<u64> {
+    let chains_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("chains"))
+        .ok_or_else(|| anyhow::anyhow!("Cannot locate chain registry directory"))?;
+    let source = source_chain.as_str();
+    let entries = std::fs::read_dir(&chains_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to read chain registry: {}", e))?;
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to read chain config {:?}: {}", path, e))?;
+        let value = content
+            .parse::<toml::Value>()
+            .map_err(|e| anyhow::anyhow!("Invalid chain config {:?}: {}", path, e))?;
+        let Some(chain_id) = value.get("chain_id").and_then(toml::Value::as_str) else {
+            continue;
+        };
+        let matches_source = chain_id == source
+            || chain_id
+                .split_once('-')
+                .map(|(prefix, _)| prefix == source)
+                .unwrap_or(false);
+        if !matches_source {
+            continue;
+        }
+        let max_age = value
+            .get("finality_guarantee")
+            .and_then(|v| v.get("max_proof_age_blocks"))
+            .and_then(toml::Value::as_integer)
+            .and_then(|v| u64::try_from(v).ok())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No max proof age configured for source chain {}; refusing to accept stale-unbounded proof",
+                    source
+                )
+            })?;
+        return Ok(max_age);
+    }
+    Err(anyhow::anyhow!(
+        "No max proof age configured for source chain {}; refusing to accept stale-unbounded proof",
+        source
+    ))
+}
+
+fn observed_source_tip_from_proof(
+    bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+) -> Option<u64> {
+    if bundle.finality_proof.confirmations == u64::MAX {
+        return Some(u64::MAX);
+    }
+    bundle
+        .anchor_ref
+        .block_height
+        .checked_add(bundle.finality_proof.confirmations)
+}
+
 struct ResumeContext {
     from: Chain,
     to: Chain,
@@ -863,9 +923,15 @@ pub struct AcceptedConsignment {
     pub source_chain: Option<Chain>,
     pub dest_chain: csv_hash::ChainId,
     pub seal_ref: String,
+    /// Verified seal id. Retained on the accepted record for callers and audit;
+    /// the CLI display path prints `seal_ref` instead.
+    #[allow(dead_code)]
     pub seal_id: String,
     pub owner: String,
     pub commitment: String,
+    /// Anchor height the proof was verified against. Retained for audit; the CLI
+    /// display path does not print it.
+    #[allow(dead_code)]
     pub anchor_height: u64,
     pub verification_level: VerificationLevel,
     pub provenance_strength: Option<ProvenanceStrengthSignal>,
@@ -878,6 +944,24 @@ pub fn validate_consignment_bytes(
     bytes: &[u8],
     state: &UnifiedStateManager,
     authorized_signers: &[Vec<u8>],
+) -> Result<AcceptedConsignment> {
+    validate_consignment_bytes_inner(bytes, state, authorized_signers, None)
+}
+
+fn validate_consignment_bytes_with_observed_tip(
+    bytes: &[u8],
+    state: &UnifiedStateManager,
+    authorized_signers: &[Vec<u8>],
+    observed_source_tip: u64,
+) -> Result<AcceptedConsignment> {
+    validate_consignment_bytes_inner(bytes, state, authorized_signers, Some(observed_source_tip))
+}
+
+fn validate_consignment_bytes_inner(
+    bytes: &[u8],
+    state: &UnifiedStateManager,
+    authorized_signers: &[Vec<u8>],
+    observed_source_tip_override: Option<u64>,
 ) -> Result<AcceptedConsignment> {
     let consignment: WireConsignment = csv_codec::from_canonical_cbor(bytes)
         .map_err(|e| anyhow::anyhow!("Invalid canonical consignment CBOR: {}", e))?;
@@ -933,6 +1017,23 @@ pub fn validate_consignment_bytes(
              in ~/.csv/config.toml, then retry accept."
         ));
     }
+    let source_chain = consignment_source_chain(&consignment).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Consignment is missing recognized source-chain provenance; refusing to accept \
+             because provenance strength cannot be evaluated"
+        )
+    })?;
+    let max_anchor_age_blocks = configured_max_proof_age_blocks(&source_chain)?;
+    let observed_source_tip = match observed_source_tip_override {
+        Some(tip) => tip,
+        None => observed_source_tip_from_proof(&consignment.proof_bundle).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Consignment proof is missing a bounded source-chain tip observation; refusing \
+                 to accept because proof freshness cannot be evaluated"
+            )
+        })?,
+    };
+
     // VERIFY-DOMAIN-SEPARATION-001: bind the proof bundle to the Sanad this
     // consignment declares (the bundle's anchor must match), rejecting a bundle
     // built for a different transfer/domain. `sanad_id` is the normalized 32-byte
@@ -945,7 +1046,9 @@ pub fn validate_consignment_bytes(
         arr.copy_from_slice(&bytes);
         csv_verifier::ExpectedDomain {
             sanad_id: Some(arr),
-            source_chain: None,
+            source_chain: Some(source_chain.as_str().to_string()),
+            observed_source_tip: Some(observed_source_tip),
+            max_anchor_age_blocks: Some(max_anchor_age_blocks),
         }
     };
     let result = csv_verifier::verify_proof_bound(
@@ -965,12 +1068,6 @@ pub fn validate_consignment_bytes(
     validate_algebra_acceptance(&consignment)?;
 
     let dest_chain = csv_hash::ChainId::new(consignment.invoice.seal.chain());
-    let source_chain = consignment_source_chain(&consignment).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Consignment is missing recognized source-chain provenance; refusing to accept \
-             because provenance strength cannot be evaluated"
-        )
-    })?;
     let provenance_strength = provenance_strength_signal(&source_chain, &dest_chain);
     let owner = owner_from_invoice(&consignment.invoice)?;
     let commitment = hex::encode(
@@ -1158,7 +1255,13 @@ pub async fn cmd_accept(
     let bytes = std::fs::read(&consignment)
         .map_err(|e| anyhow::anyhow!("Failed to read consignment file: {}", e))?;
     output::progress(1, 5, "Decoding canonical consignment...");
-    let accepted = validate_consignment_bytes(&bytes, state, &authorized_signers)?;
+    let observed_source_tip = live_source_tip_for_consignment(&bytes, config, state).await?;
+    let accepted = validate_consignment_bytes_with_observed_tip(
+        &bytes,
+        state,
+        &authorized_signers,
+        observed_source_tip,
+    )?;
 
     output::progress(2, 5, "Verifying invoice seal binding...");
     output::kv("Sanad", &accepted.sanad_id);
@@ -1187,6 +1290,34 @@ pub async fn cmd_accept(
     );
     output::success("Consignment accepted and ownership recorded");
     Ok(())
+}
+
+async fn live_source_tip_for_consignment(
+    bytes: &[u8],
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<u64> {
+    let consignment: WireConsignment = csv_codec::from_canonical_cbor(bytes)
+        .map_err(|e| anyhow::anyhow!("Invalid canonical consignment CBOR: {}", e))?;
+    let source_chain = consignment_source_chain(&consignment).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Consignment is missing recognized source-chain provenance; refusing to accept \
+             because source-chain freshness cannot be evaluated"
+        )
+    })?;
+    let dest_chain = Chain::new(consignment.invoice.seal.chain());
+    let client = build_client(&source_chain, &dest_chain, None, config, state).await?;
+    client
+        .chain_runtime()
+        .latest_block_height(to_protocol_chain(source_chain.clone()))
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to observe live {} tip for proof freshness: {}",
+                source_chain.as_str(),
+                e
+            )
+        })
 }
 
 /// Materialize a Sanad as an on-chain object via the thin-registry mint.
@@ -2528,6 +2659,21 @@ mod tests {
             accepted.verification_level,
             VerificationLevel::FullyVerified
         ));
+    }
+
+    #[test]
+    fn accept_validator_rejects_stale_proof_beyond_configured_max_age() {
+        let (_dir, state) = temp_state();
+        let mut consignment = signed_consignment(9);
+        consignment.proof_bundle.finality_proof.confirmations = 101;
+
+        let err = validate_consignment_bytes(
+            &consignment.canonical_cbor().unwrap(),
+            &state,
+            &authorized(),
+        )
+        .expect_err("proof older than the configured source-chain max age must fail closed");
+        assert!(err.to_string().contains("verification failed"));
     }
 
     #[test]

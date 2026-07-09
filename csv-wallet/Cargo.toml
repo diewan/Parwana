@@ -28,3 +28,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [features]
 default = []
 wasm = ["getrandom/js"]
+# Post-quantum signing (ML-DSA-65 / FIPS 204). Forwards to csv-protocol's `pq`
+# feature, which owns the pqcrypto-dilithium implementation. Without this
+# feature every MlDsa65 wallet surface fails closed (PQ-MLDSA-001).
+pq = ["csv-protocol/pq"]

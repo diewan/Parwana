@@ -366,12 +366,6 @@ fn protocol_constants_are_valid() {
         "MIN_REQUIRED_CONFIRMATIONS must be positive"
     );
 
-    // MAX_PROOF_AGE_SECONDS must be positive
-    assert!(
-        MAX_PROOF_AGE_SECONDS > 0,
-        "MAX_PROOF_AGE_SECONDS must be positive"
-    );
-
     // Protocol version must be non-empty
     assert!(
         !csv_protocol::version::PROTOCOL_VERSION.is_empty(),

@@ -15,16 +15,12 @@ use crate::Hash;
 #[derive(Debug, Clone)]
 pub struct StreamingMerkleBuilder {
     leaves: Vec<Hash>,
-    balanced_count: usize,
 }
 
 impl StreamingMerkleBuilder {
     /// Create a new streaming Merkle builder.
     pub fn new() -> Self {
-        Self {
-            leaves: Vec::new(),
-            balanced_count: 0,
-        }
+        Self { leaves: Vec::new() }
     }
 
     /// Add a leaf to the tree.

@@ -61,7 +61,7 @@ fn secret_key_for(&self, key_id: &str) -> ChainOpResult<secp256k1::SecretKey> {
 
 | Adapter | Required lookup | Edge cases |
 |---|---|---|
-| csv-bitcoin | `BitcoinSigningKeyStore` (done) | Runtime adapter still constructs `BitcoinChainSigner::new(..)` — see gotchas |
+| csv-bitcoin | `BitcoinSigningKeyStore` (done) | `BitcoinBackend` still constructs `BitcoinChainSigner::new(..)` — see gotchas |
 | csv-ethereum | secp256k1 resolver; same shape | Signing digest differs (EIP-191/712), key handling identical |
 | csv-solana | Ed25519 resolver | 32-byte seed vs 64-byte expanded key |
 | csv-sui | Ed25519 resolver | Adapter currently reads `signer_private_key` from `SuiConfig` — same anti-pattern, different door |
@@ -86,12 +86,16 @@ merge them: one authorizes a mint, the other spends a UTXO.
 
 ## Gotchas
 
-**Fail-closed is not the same as wired up.** `BitcoinRuntimeAdapter`'s
-`sign_message` (`ops.rs`, near the bottom) still builds its signer with
-`BitcoinChainSigner::new(self.network)` — no keystore — so that entry point now
-*always* errors. Correct per the ticket, but it means the path is inert. Injecting
-a keystore into the runtime adapter is unfinished work, not settled design. Check
-before assuming Bitcoin signing works end-to-end through the runtime.
+**Fail-closed is not the same as wired up.** The `impl ChainSigner for
+BitcoinBackend` block in `ops.rs` (search for `fn sign_message`, ~line 2118)
+still builds its signer with `BitcoinChainSigner::new(self.network)` — no
+keystore — so `sign_message` and `sign_transaction` through `BitcoinBackend` now
+*always* error. Correct per the ticket, but it means the path is inert. Injecting
+a keystore into `BitcoinBackend` is unfinished work, not settled design. Check
+before assuming Bitcoin signing works end-to-end through the backend.
+
+Note this is `BitcoinBackend`, **not** `BitcoinRuntimeAdapter` — the latter
+contains no signing code at all and is not where this gap lives.
 
 Do not "helpfully" restore a hex-parsing branch behind `#[cfg(test)]` or a
 `dev`/`insecure` feature. Tests should supply an in-memory keystore instead —

@@ -4,8 +4,6 @@
 //! using storage slots as single-use seals and LOG events for commitment publication.
 //! When the `rpc` feature is enabled, real Alloy-based RPC is used.
 
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 use std::sync::Mutex;
 

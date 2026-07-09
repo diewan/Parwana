@@ -60,21 +60,39 @@ fn test_wallet_identity_resolver_consistency() {
         "Different indices should produce different addresses"
     );
 
-    // Ethereum and Sui address derivation must FAIL CLOSED in this resolver
-    // (SDK-WALLET-FALLBACK-001): the previous behavior encoded raw seed bytes as
-    // a fake address, which is a security hole. The resolver now returns an error
-    // rather than fabricating an address for chains it cannot derive offline.
-    let eth_chain = ChainId::new("ethereum");
-    assert!(
-        resolver.derive_address(eth_chain, 0, 0).is_err(),
-        "Ethereum derivation must fail closed instead of encoding seed bytes"
-    );
+    // SDK-WALLET-FALLBACK-001: the previous behavior encoded raw seed bytes as a
+    // fake address. The invariant is that the resolver never returns seed-derived
+    // filler — it must either derive a real address or fail closed.
+    //
+    // Which of the two happens depends on csv-sdk's `wallet` feature: with it, the
+    // resolver performs real BIP-32/SLIP-10 derivation and succeeds; without it,
+    // there is no derivation available and it errors. Asserting `is_err()`
+    // unconditionally encoded the feature-off behavior as if it were the invariant,
+    // so the test failed under `--workspace --all-features` (where feature
+    // unification enables `wallet`). Assert the actual invariant instead.
+    for chain in ["ethereum", "sui"] {
+        let result = resolver.derive_address(ChainId::new(chain), 0, 0);
 
-    let sui_chain = ChainId::new("sui");
-    assert!(
-        resolver.derive_address(sui_chain, 0, 0).is_err(),
-        "Sui derivation must fail closed instead of encoding seed bytes"
-    );
+        if let Ok(address) = result {
+            // A real derivation. It must not be the seed bytes wearing an address
+            // prefix — that is exactly the hole this ticket closed.
+            let seed_prefix_20 = format!("0x{}", hex::encode(&seed_array[0..20]));
+            let seed_prefix_32 = format!("0x{}", hex::encode(&seed_array[0..32]));
+            assert_ne!(
+                address, seed_prefix_20,
+                "{chain} address must not be the first 20 seed bytes"
+            );
+            assert_ne!(
+                address, seed_prefix_32,
+                "{chain} address must not be the first 32 seed bytes"
+            );
+            assert!(
+                !address.contains(&hex::encode(&seed_array[0..8])),
+                "{chain} address must not embed raw seed material"
+            );
+        }
+        // Err is equally acceptable: failing closed is the other half of the fix.
+    }
 }
 
 /// Test that wallet balance command uses the centralized wallet identity.

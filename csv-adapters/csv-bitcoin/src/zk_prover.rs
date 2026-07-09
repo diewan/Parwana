@@ -33,6 +33,8 @@ use csv_protocol::version::builtin;
 /// without requiring the verifier to query Bitcoin RPC.
 pub struct BitcoinSpvProver {
     /// SP1 prover key (if available)
+    // Populated when SP1 is present; consumed once real SP1 proving is wired.
+    #[allow(dead_code)]
     prover_key: Option<Vec<u8>>,
     /// Whether SP1 is available on this platform
     sp1_available: bool,

@@ -93,10 +93,51 @@ impl WalletManager {
                 })?);
                 Ok(VerifyingKey::from(&sk).to_bytes().to_vec())
             }
+            // ML-DSA-65 public keys cannot be recovered from a secret key: the
+            // FIPS 204 / Dilithium3 API exposes keypair generation only, and
+            // pqcrypto's `SecretKey` carries no public-key derivation. Callers
+            // must generate the pair together — see
+            // [`WalletManager::generate_ml_dsa65_keypair`]. Failing closed here
+            // is the correct behavior, not a placeholder (PQ-MLDSA-001).
             SignatureScheme::MlDsa65 => Err(WalletError::KeyDerivation(
-                "ML-DSA-65 public key derivation not yet implemented".to_string(),
+                "ML-DSA-65 public keys cannot be derived from a secret key; \
+                 generate the keypair with WalletManager::generate_ml_dsa65_keypair"
+                    .to_string(),
             )),
         }
+    }
+
+    /// Generate an ML-DSA-65 (FIPS 204) keypair, returning `(public_key, secret_key)`.
+    ///
+    /// ML-DSA has no secret-to-public derivation, so this is the only way to
+    /// obtain a usable post-quantum signing key. Feed the result into
+    /// [`MemorySigner::new`] with [`SignatureScheme::MlDsa65`].
+    #[cfg(feature = "pq")]
+    pub fn generate_ml_dsa65_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
+        csv_protocol::signature::generate_ml_dsa65_keys().map_err(|e| {
+            WalletError::KeyGeneration(format!("ML-DSA-65 key generation failed: {}", e))
+        })
+    }
+
+    /// Fail closed when the `pq` feature is not enabled.
+    #[cfg(not(feature = "pq"))]
+    pub fn generate_ml_dsa65_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
+        Err(WalletError::KeyGeneration(
+            "ML-DSA-65 key generation requires the 'pq' feature to be enabled on csv-wallet"
+                .to_string(),
+        ))
+    }
+
+    /// Build an in-memory ML-DSA-65 signer with a freshly generated keypair.
+    pub fn generate_ml_dsa65_signer(id: String, chain: String) -> Result<Arc<MemorySigner>> {
+        let (public_key, secret_key) = Self::generate_ml_dsa65_keypair()?;
+        Ok(Arc::new(MemorySigner::new(
+            id,
+            chain,
+            secret_key,
+            public_key,
+            SignatureScheme::MlDsa65,
+        )))
     }
 
     /// Initialize a wallet from a mnemonic phrase

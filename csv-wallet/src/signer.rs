@@ -144,9 +144,7 @@ impl Signer for MemorySigner {
         match self.scheme {
             SignatureScheme::Secp256k1 => self.sign_secp256k1(message),
             SignatureScheme::Ed25519 => self.sign_ed25519(message),
-            SignatureScheme::MlDsa65 => Err(crate::error::WalletError::SigningFailed(
-                "MlDsa65 signing not yet implemented".to_string(),
-            )),
+            SignatureScheme::MlDsa65 => self.sign_ml_dsa65(message),
         }
     }
 
@@ -214,5 +212,124 @@ impl MemorySigner {
             bytes: signature_bytes,
             scheme: SignatureScheme::Ed25519,
         })
+    }
+
+    /// Sign with ML-DSA-65 (FIPS 204), delegating to `csv-protocol`'s
+    /// pqcrypto-dilithium implementation (PQ-MLDSA-001).
+    ///
+    /// Note the signature format: `csv_protocol::signature::sign_ml_dsa65`
+    /// returns a *signed message* (signature ‖ message), not a detached
+    /// signature, because verification uses `dilithium3::open`. Callers must not
+    /// assume a fixed 3309-byte length.
+    #[cfg(feature = "pq")]
+    fn sign_ml_dsa65(&self, message: &[u8]) -> Result<Signature, crate::error::WalletError> {
+        let bytes =
+            csv_protocol::signature::sign_ml_dsa65(message, self.secret_key.expose_secret())
+                .map_err(|e| {
+                    crate::error::WalletError::SigningFailed(format!(
+                        "ML-DSA-65 signing failed: {}",
+                        e
+                    ))
+                })?;
+
+        Ok(Signature {
+            bytes,
+            scheme: SignatureScheme::MlDsa65,
+        })
+    }
+
+    /// Fail closed when the `pq` feature is not enabled.
+    ///
+    /// Never fabricate or stub a post-quantum signature: a caller that asked for
+    /// MlDsa65 must get a real ML-DSA-65 signature or an error.
+    #[cfg(not(feature = "pq"))]
+    fn sign_ml_dsa65(&self, _message: &[u8]) -> Result<Signature, crate::error::WalletError> {
+        Err(crate::error::WalletError::SigningFailed(
+            "ML-DSA-65 signing requires the 'pq' feature to be enabled on csv-wallet".to_string(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod pq_tests {
+    use super::*;
+
+    /// PQ-MLDSA-001: with the `pq` feature, a MemorySigner must produce a real
+    /// ML-DSA-65 signature that verifies through the protocol verify path.
+    #[cfg(feature = "pq")]
+    #[tokio::test]
+    async fn ml_dsa65_signature_round_trips_through_protocol_verify() {
+        use csv_protocol::signature::{Signature as ProtoSignature, verify_signatures};
+
+        let (public_key, secret_key) =
+            csv_protocol::signature::generate_ml_dsa65_keys().expect("keygen");
+
+        let signer = MemorySigner::new(
+            "pq:0:0".to_string(),
+            "csv".to_string(),
+            secret_key,
+            public_key.clone(),
+            SignatureScheme::MlDsa65,
+        );
+
+        let message = b"csv post-quantum proof bundle";
+        let signature = signer.sign(message).await.expect("ml-dsa-65 signing");
+
+        assert_eq!(signature.scheme, SignatureScheme::MlDsa65);
+        assert!(
+            !signature.bytes.is_empty(),
+            "signature must carry real bytes"
+        );
+
+        let proto = ProtoSignature::new(signature.bytes, public_key, message.to_vec());
+        verify_signatures(&[proto], SignatureScheme::MlDsa65).expect("signature must verify");
+    }
+
+    /// A tampered ML-DSA-65 signature must not verify.
+    #[cfg(feature = "pq")]
+    #[tokio::test]
+    async fn tampered_ml_dsa65_signature_is_rejected() {
+        use csv_protocol::signature::{Signature as ProtoSignature, verify_signatures};
+
+        let (public_key, secret_key) =
+            csv_protocol::signature::generate_ml_dsa65_keys().expect("keygen");
+        let signer = MemorySigner::new(
+            "pq:0:0".to_string(),
+            "csv".to_string(),
+            secret_key,
+            public_key.clone(),
+            SignatureScheme::MlDsa65,
+        );
+
+        let message = b"csv post-quantum proof bundle";
+        let mut signature = signer.sign(message).await.expect("signing").bytes;
+        signature[0] ^= 0xFF;
+
+        let proto = ProtoSignature::new(signature, public_key, message.to_vec());
+        assert!(
+            verify_signatures(&[proto], SignatureScheme::MlDsa65).is_err(),
+            "tampered signature must not verify"
+        );
+    }
+
+    /// PQ-MLDSA-001: without the `pq` feature, MlDsa65 signing fails closed and
+    /// never returns a fabricated signature.
+    #[cfg(not(feature = "pq"))]
+    #[tokio::test]
+    async fn ml_dsa65_fails_closed_without_pq_feature() {
+        let signer = MemorySigner::new(
+            "pq:0:0".to_string(),
+            "csv".to_string(),
+            vec![7u8; 4032],
+            vec![9u8; 1952],
+            SignatureScheme::MlDsa65,
+        );
+
+        let result = signer.sign(b"message").await;
+        let error = result.expect_err("must fail closed without the pq feature");
+        assert!(
+            format!("{error}").contains("'pq' feature"),
+            "error must name the missing feature: {error}"
+        );
     }
 }

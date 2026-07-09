@@ -4,10 +4,12 @@ use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::Subcommand;
 use sha2::Digest;
+use std::path::Path;
 
 use csv_content::ContentTree;
 use csv_hash::ChainId;
 use csv_hash::Hash;
+use csv_hash::csv_tagged_hash;
 use csv_hash::sanad::SanadId;
 
 use crate::config::{Chain, Config, Network};
@@ -197,6 +199,44 @@ fn parse_opt_hash(value: &Option<String>, label: &str) -> Result<Option<Hash>> {
 
 fn default_content_hash(domain: &str) -> Hash {
     Hash::sha256(domain.as_bytes())
+}
+
+const DISCLOSURE_POLICY_HASH_DOMAIN: &str = "sanad-disclosure-policy-v1";
+const PROOF_POLICY_HASH_DOMAIN: &str = "sanad-proof-policy-v1";
+
+fn parse_content_policy_hash(
+    value: &Option<String>,
+    label: &str,
+    domain: &str,
+) -> Result<Option<Hash>> {
+    let Some(input) = value.as_deref() else {
+        return Ok(None);
+    };
+    if input.trim().is_empty() {
+        return Err(anyhow::anyhow!("{label} cannot be empty"));
+    }
+
+    let path = Path::new(input);
+    let (policy_bytes, must_be_json) = if path.is_file() {
+        let bytes = std::fs::read(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {label} file {input}: {e}"))?;
+        let is_json = path.extension().is_some_and(|ext| ext == "json");
+        (bytes, is_json)
+    } else {
+        let trimmed = input.trim();
+        let is_json = trimmed.starts_with('{') || trimmed.starts_with('[');
+        (trimmed.as_bytes().to_vec(), is_json)
+    };
+
+    if policy_bytes.is_empty() {
+        return Err(anyhow::anyhow!("{label} cannot be empty"));
+    }
+    if must_be_json {
+        serde_json::from_slice::<serde_json::Value>(&policy_bytes)
+            .map_err(|e| anyhow::anyhow!("Invalid {label} JSON: {e}"))?;
+    }
+
+    Ok(Some(Hash::new(csv_tagged_hash(domain, &policy_bytes))))
 }
 
 /// Sign a canonical ownership proof for `chain` using the wallet-derived key.
@@ -406,9 +446,17 @@ async fn cmd_create(
 
     // Handle content descriptor parameters (B-013)
     // Parse schema file, load payload, process attachments
-    let (schema_hash_final, payload_hash_final, attachment_root_final) = if schema.is_some()
+    let (
+        schema_hash_final,
+        payload_hash_final,
+        attachment_root_final,
+        disclosure_policy_hash_final,
+        proof_policy_hash_final,
+    ) = if schema.is_some()
         || payload.is_some()
         || attachments.is_some()
+        || disclosure_policy.is_some()
+        || proof_policy.is_some()
     {
         output::info("Processing content descriptor parameters (B-013)");
 
@@ -541,29 +589,43 @@ async fn cmd_create(
             None
         };
 
-        // Parse disclosure policy if provided
-        if let Some(ref disclosure_policy_path) = disclosure_policy {
-            output::kv("Disclosure policy", disclosure_policy_path);
-            return Err(anyhow::anyhow!(
-                "Disclosure policy parsing is not yet implemented. Policy file: {}. \
-                 This feature requires Phase 5 policy engine integration.",
-                disclosure_policy_path
-            ));
-        }
+        let disclosure_policy_hash_val =
+            if let Some(ref disclosure_policy_input) = disclosure_policy {
+                output::kv("Disclosure policy", disclosure_policy_input);
+                let hash = parse_content_policy_hash(
+                    &disclosure_policy,
+                    "disclosure policy",
+                    DISCLOSURE_POLICY_HASH_DOMAIN,
+                )?;
+                if let Some(hash) = hash {
+                    output::kv("Disclosure policy hash", &hex::encode(hash.as_bytes()));
+                }
+                hash
+            } else {
+                None
+            };
 
-        // Parse proof policy if provided
-        if let Some(ref proof_policy_path) = proof_policy {
-            output::kv("Proof policy", proof_policy_path);
-            return Err(anyhow::anyhow!(
-                "Proof policy parsing is not yet implemented. Policy file: {}. \
-                 This feature requires Phase 5 policy engine integration.",
-                proof_policy_path
-            ));
-        }
+        let proof_policy_hash_val = if let Some(ref proof_policy_input) = proof_policy {
+            output::kv("Proof policy", proof_policy_input);
+            let hash =
+                parse_content_policy_hash(&proof_policy, "proof policy", PROOF_POLICY_HASH_DOMAIN)?;
+            if let Some(hash) = hash {
+                output::kv("Proof policy hash", &hex::encode(hash.as_bytes()));
+            }
+            hash
+        } else {
+            None
+        };
 
-        (schema_hash_val, payload_hash_val, attachment_root_val)
+        (
+            schema_hash_val,
+            payload_hash_val,
+            attachment_root_val,
+            disclosure_policy_hash_val,
+            proof_policy_hash_val,
+        )
     } else {
-        (None, None, None)
+        (None, None, None, None, None)
     };
 
     // Show derivation parameters for Bitcoin
@@ -932,8 +994,10 @@ async fn cmd_create(
         content_root: content_root_parsed,
         attachment_root: attachment_root_final,
         disclosure_policy_hash: disclosure_policy_hash_parsed
+            .or(disclosure_policy_hash_final)
             .or_else(|| Some(default_content_hash("csv.sanad.default.disclosure.v1"))),
         proof_policy_hash: proof_policy_hash_parsed
+            .or(proof_policy_hash_final)
             .or_else(|| Some(default_content_hash("csv.sanad.default.proof.v1"))),
     };
 
@@ -2418,6 +2482,55 @@ mod create_defaults_tests {
         request
             .build_descriptor()
             .expect("CLI default descriptor hashes should satisfy SDK validation");
+    }
+
+    #[test]
+    fn content_policy_hash_is_domain_separated_and_stable() {
+        let input = Some(r#"{"allow":["owner"],"redact":["ssn"]}"#.to_string());
+        let disclosure =
+            parse_content_policy_hash(&input, "disclosure policy", DISCLOSURE_POLICY_HASH_DOMAIN)
+                .unwrap()
+                .unwrap();
+        let proof = parse_content_policy_hash(&input, "proof policy", PROOF_POLICY_HASH_DOMAIN)
+            .unwrap()
+            .unwrap();
+        let disclosure_again =
+            parse_content_policy_hash(&input, "disclosure policy", DISCLOSURE_POLICY_HASH_DOMAIN)
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(disclosure, disclosure_again);
+        assert_ne!(disclosure, proof);
+        assert_ne!(disclosure.as_bytes(), &[0u8; 32]);
+    }
+
+    #[test]
+    fn content_policy_file_rejects_malformed_json() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let policy_path = temp_dir.path().join("policy.json");
+        std::fs::write(&policy_path, b"{not-json").unwrap();
+
+        let err = parse_content_policy_hash(
+            &Some(policy_path.to_string_lossy().to_string()),
+            "disclosure policy",
+            DISCLOSURE_POLICY_HASH_DOMAIN,
+        )
+        .expect_err("malformed JSON policy files must fail closed");
+
+        assert!(err.to_string().contains("Invalid disclosure policy JSON"));
+    }
+
+    #[test]
+    fn explicit_policy_hash_overrides_policy_file_hash() {
+        let file_hash = parse_content_policy_hash(
+            &Some(r#"{"allow":["holder"]}"#.to_string()),
+            "proof policy",
+            PROOF_POLICY_HASH_DOMAIN,
+        )
+        .unwrap();
+        let explicit = Some(Hash::new([0x42u8; 32]));
+
+        assert_eq!(explicit.or(file_hash), explicit);
     }
 }
 

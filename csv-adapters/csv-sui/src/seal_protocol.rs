@@ -9,8 +9,6 @@
 //! - **Anchors**: Dynamic fields created when seal objects are consumed
 //! - **Finality**: Narwhal consensus provides deterministic finality via checkpoint certification
 
-#![allow(dead_code)]
-
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,6 +18,8 @@ use csv_protocol::error::ProtocolError;
 use csv_protocol::error::Result as CoreResult;
 
 #[cfg(feature = "rpc")]
+// Return shape of `build_and_sign_move_call`, which is itself a retained seam.
+#[allow(dead_code)]
 type SignedTransaction = (Vec<u8>, Vec<u8>, Vec<u8>);
 use csv_hash::Hash;
 use csv_hash::seal::SealPoint as CoreSealPoint;
@@ -428,6 +428,9 @@ impl SuiSealProtocol {
     /// Build a MoveCall transaction for csv_seal::consume_seal() and sign it.
     ///
     /// Returns (transaction_bytes, signature, public_key) ready for execution.
+    /// Retained as the generic Move-call builder; `create_seal` and `publish` build
+    /// their transactions inline against their own gas-object selection.
+    #[allow(dead_code)]
     #[cfg(feature = "rpc")]
     async fn build_and_sign_move_call(
         &self,
@@ -509,6 +512,9 @@ impl SuiSealProtocol {
     }
 
     /// Verify the event in a published anchor matches the expected commitment.
+    ///
+    /// Kept as the anchor-event check; publish verifies via the runtime proof path.
+    #[allow(dead_code)]
     #[cfg(feature = "rpc")]
     async fn verify_anchor_event(
         &self,

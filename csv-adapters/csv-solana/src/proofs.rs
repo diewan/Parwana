@@ -384,6 +384,9 @@ pub fn verify_finality_proof(proof: &FinalityProof, required_confirmations: u64)
 /// It checks both inclusion and finality, ensuring the transaction
 /// is both included in a block AND has sufficient confirmations.
 /// Delegates to csv-verifier canonical chain bundle verification (RULE 1).
+/// Chain-native proof verifier impl, not yet registered with `csv-verifier`.
+/// Kept as the seam for Solana native proof validation.
+#[allow(dead_code)]
 struct SolanaNativeVerifier;
 
 impl csv_verifier::ChainNativeProofVerifier for SolanaNativeVerifier {
