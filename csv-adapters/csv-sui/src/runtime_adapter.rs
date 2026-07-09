@@ -5,8 +5,8 @@
 //! runtime orchestration layer.
 
 use csv_adapter_core::{
-    AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
-    SealRegistryStatus,
+    AdapterError, ChainAdapter, CrossChainTransfer, DestinationMaterialization, LockResult,
+    MintResult, RuntimeMintRequest, SealRegistryStatus,
 };
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::finality::capabilities::{
@@ -161,14 +161,14 @@ impl ChainAdapter for SuiRuntimeAdapter {
             // verifier key. Fails closed (no signer -> no signature) rather than
             // emitting an unauthenticated mint the Registry would reject.
             let digest = attestation.attestation_digest();
-            let signature = self
+            let signatures = self
                 .backend
-                .sign_mint_attestation_digest(&digest)
+                .sign_mint_attestation_digests(&digest)
                 .map_err(|e| {
                     AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
                 })?;
             let mut verifier_signatures = request.verifier_signatures.clone();
-            verifier_signatures.push(signature);
+            verifier_signatures.extend(signatures);
 
             let args = crate::mint::build_sui_mint_args(
                 &attestation,
@@ -184,6 +184,14 @@ impl ChainAdapter for SuiRuntimeAdapter {
             Ok(MintResult {
                 tx_hash,
                 block_height,
+                materialization: DestinationMaterialization {
+                    chain_id: self.chain_id.clone(),
+                    object_id: None,
+                    seal_ref: None,
+                    registry_ref: Some(format!("0x{}", hex::encode(registry_id))),
+                    commitment: Some(attestation.commitment),
+                    owner: Some(attestation.destination_owner),
+                },
             })
         }
         #[cfg(not(feature = "rpc"))]
@@ -228,8 +236,11 @@ impl ChainAdapter for SuiRuntimeAdapter {
 
         let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)
             .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
+        // Runtime/domain binding convention: the commit anchor id carries the
+        // Sanad being transferred. The lock transaction hash remains the
+        // inclusion-proof anchor/commitment input below.
         let commit_anchor = CommitAnchor::new(
-            lock_tx_hash.as_bytes().to_vec(),
+            transfer.sanad_id.as_bytes().to_vec(),
             lock_result.block_height,
             vec![],
         )
@@ -443,6 +454,7 @@ impl ChainAdapter for SuiRuntimeAdapter {
             Ok(MintResult {
                 tx_hash: tx_hash.trim_start_matches("0x").to_string(),
                 block_height: checkpoint,
+                materialization: DestinationMaterialization::unavailable(self.chain_id.clone()),
             })
         }
         #[cfg(not(feature = "rpc"))]

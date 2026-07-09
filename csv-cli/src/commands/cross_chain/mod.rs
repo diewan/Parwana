@@ -120,6 +120,17 @@ pub enum CrossChainAction {
         /// Transfer ID (hex)
         transfer_id: String,
     },
+    /// Query runtime-recorded source escrow settlement status/evidence
+    SettlementStatus {
+        /// Sanad ID (hex)
+        sanad_id: String,
+        /// Source chain. Optional when the local display cache has the transfer.
+        #[arg(long, value_enum)]
+        from: Option<Chain>,
+        /// Destination chain. Optional when the local display cache has the transfer.
+        #[arg(long, value_enum)]
+        to: Option<Chain>,
+    },
     /// List all transfers
     List {
         /// Filter by source chain
@@ -191,6 +202,9 @@ pub async fn execute(
         }
         CrossChainAction::Status { transfer_id } => {
             status::cmd_status(transfer_id, config, state).await
+        }
+        CrossChainAction::SettlementStatus { sanad_id, from, to } => {
+            status::cmd_settlement_status(sanad_id, from, to, config, state).await
         }
         CrossChainAction::List { from, to } => status::cmd_list(from, to, state),
         CrossChainAction::Retry { transfer_id } => status::cmd_retry(transfer_id, config, state),
@@ -330,6 +344,18 @@ mod tests {
         assert!(matches!(
             parse(&["status", "abc123"]).unwrap(),
             CrossChainAction::Status { .. }
+        ));
+        assert!(matches!(
+            parse(&[
+                "settlement-status",
+                &"11".repeat(32),
+                "--from",
+                "bitcoin",
+                "--to",
+                "sui"
+            ])
+            .unwrap(),
+            CrossChainAction::SettlementStatus { .. }
         ));
         assert!(matches!(
             parse(&["list"]).unwrap(),

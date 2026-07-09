@@ -25,42 +25,56 @@ fn test_wallet_identity_resolver_consistency() {
 
     // Test Bitcoin address derivation consistency
     let btc_chain = ChainId::new("bitcoin");
-    let btc_addr_1 = resolver.derive_address(btc_chain.clone(), 0, 0);
-    let btc_addr_2 = resolver.derive_address(btc_chain.clone(), 0, 0);
+    let btc_addr_1 = resolver
+        .derive_address(btc_chain.clone(), 0, 0)
+        .expect("address derivation should succeed for a valid seed");
+    let btc_addr_2 = resolver
+        .derive_address(btc_chain.clone(), 0, 0)
+        .expect("address derivation should succeed for a valid seed");
     assert_eq!(
         btc_addr_1, btc_addr_2,
         "WalletIdentityResolver should produce consistent addresses for same parameters"
     );
 
     // Test that different accounts produce different addresses
-    let btc_addr_account_1 = resolver.derive_address(btc_chain.clone(), 0, 0);
-    let btc_addr_account_2 = resolver.derive_address(btc_chain.clone(), 1, 0);
+    let btc_addr_account_1 = resolver
+        .derive_address(btc_chain.clone(), 0, 0)
+        .expect("address derivation should succeed for a valid seed");
+    let btc_addr_account_2 = resolver
+        .derive_address(btc_chain.clone(), 1, 0)
+        .expect("address derivation should succeed for a valid seed");
     assert_ne!(
         btc_addr_account_1, btc_addr_account_2,
         "Different accounts should produce different addresses"
     );
 
     // Test that different indices produce different addresses
-    let btc_addr_index_0 = resolver.derive_address(btc_chain.clone(), 0, 0);
-    let btc_addr_index_1 = resolver.derive_address(btc_chain.clone(), 0, 1);
+    let btc_addr_index_0 = resolver
+        .derive_address(btc_chain.clone(), 0, 0)
+        .expect("address derivation should succeed for a valid seed");
+    let btc_addr_index_1 = resolver
+        .derive_address(btc_chain.clone(), 0, 1)
+        .expect("address derivation should succeed for a valid seed");
     assert_ne!(
         btc_addr_index_0, btc_addr_index_1,
         "Different indices should produce different addresses"
     );
 
-    // Test Ethereum address derivation
+    // Ethereum and Sui address derivation must FAIL CLOSED in this resolver
+    // (SDK-WALLET-FALLBACK-001): the previous behavior encoded raw seed bytes as
+    // a fake address, which is a security hole. The resolver now returns an error
+    // rather than fabricating an address for chains it cannot derive offline.
     let eth_chain = ChainId::new("ethereum");
-    let eth_addr = resolver.derive_address(eth_chain, 0, 0);
-    assert!(!eth_addr.is_empty(), "Ethereum address should not be empty");
     assert!(
-        eth_addr.starts_with("0x"),
-        "Ethereum address should start with 0x"
+        resolver.derive_address(eth_chain, 0, 0).is_err(),
+        "Ethereum derivation must fail closed instead of encoding seed bytes"
     );
 
-    // Test Sui address derivation
     let sui_chain = ChainId::new("sui");
-    let sui_addr = resolver.derive_address(sui_chain, 0, 0);
-    assert!(!sui_addr.is_empty(), "Sui address should not be empty");
+    assert!(
+        resolver.derive_address(sui_chain, 0, 0).is_err(),
+        "Sui derivation must fail closed instead of encoding seed bytes"
+    );
 }
 
 /// Test that wallet balance command uses the centralized wallet identity.

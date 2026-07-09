@@ -85,7 +85,8 @@ pub use send_transfer::{
     SendTransfer,
 };
 pub use transfer_coordinator::{
-    RecoveryContextProvider, TransferCoordinator, TransferOutcome, TransferReceipt,
+    RecoveryContextProvider, SettlementEvidence, SettlementReleaseRecord, SettlementStatus,
+    TransferCoordinator, TransferOutcome, TransferReceipt,
 };
 pub use user_runtime_lease::{
     DEFAULT_LEASE_DURATION_SECS, LeaseValidationError, MAX_LEASE_DURATION_SECS,

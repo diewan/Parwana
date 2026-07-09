@@ -405,6 +405,140 @@ pub fn derive_address_from_chain_id_with_network(
     derive_address_from_key_with_network(key_bytes, chain_id, network)
 }
 
+/// Derive an address from a raw public key for a specific chain.
+///
+/// This is the verification-side counterpart to
+/// [`derive_address_from_key`]: given the *public* key that accompanies an
+/// ownership proof, it reproduces the on-chain address so a verifier can check
+/// that the signer's key actually corresponds to the claimed owner address
+/// (`SANAD-OWNERSHIP-PROOF-VERIFY-001`). Testnet is used for Bitcoin unless the
+/// explicit-network variant is called.
+///
+/// # Arguments
+/// * `pubkey` — Public key bytes. Accepted encodings per chain:
+///   - Bitcoin: 33-byte compressed, 65-byte uncompressed, or 32-byte x-only secp256k1.
+///   - Ethereum: 33-byte compressed or 65-byte uncompressed secp256k1.
+///   - Sui / Aptos / Solana: 32-byte Ed25519 public key.
+/// * `chain` — Target blockchain.
+pub fn derive_address_from_pubkey(pubkey: &[u8], chain: &ChainId) -> Result<String, Bip44Error> {
+    derive_address_from_pubkey_with_network(pubkey, chain, bitcoin::Network::Testnet)
+}
+
+/// Derive an address from a raw public key for a specific chain with explicit
+/// Bitcoin network (only relevant for Bitcoin).
+pub fn derive_address_from_pubkey_with_network(
+    pubkey: &[u8],
+    chain: &ChainId,
+    network: bitcoin::Network,
+) -> Result<String, Bip44Error> {
+    match chain.as_str() {
+        "bitcoin" => derive_bitcoin_address_from_pubkey(pubkey, network),
+        "ethereum" => derive_ethereum_address_from_pubkey(pubkey),
+        "sui" => derive_sui_address_from_pubkey(pubkey),
+        "aptos" => derive_aptos_address_from_pubkey(pubkey),
+        "solana" => derive_solana_address_from_pubkey(pubkey),
+        _ => Err(Bip44Error::UnsupportedChain(chain.clone())),
+    }
+}
+
+fn secp256k1_pubkey_from_bytes(pubkey: &[u8]) -> Result<secp256k1::PublicKey, Bip44Error> {
+    use secp256k1::PublicKey;
+    // 33-byte compressed or 65-byte uncompressed are parsed directly. A 32-byte
+    // x-only key is lifted with even parity (BIP-340 / Taproot convention).
+    if pubkey.len() == 32 {
+        let xonly = secp256k1::XOnlyPublicKey::from_slice(pubkey).map_err(|e| {
+            Bip44Error::DerivationFailed(format!("Invalid x-only secp256k1 public key: {}", e))
+        })?;
+        return Ok(PublicKey::from_x_only_public_key(
+            xonly,
+            secp256k1::Parity::Even,
+        ));
+    }
+    PublicKey::from_slice(pubkey)
+        .map_err(|e| Bip44Error::DerivationFailed(format!("Invalid secp256k1 public key: {}", e)))
+}
+
+fn derive_bitcoin_address_from_pubkey(
+    pubkey: &[u8],
+    network: bitcoin::Network,
+) -> Result<String, Bip44Error> {
+    use bitcoin::address::KnownHrp;
+    use secp256k1::Secp256k1;
+
+    let public_key = secp256k1_pubkey_from_bytes(pubkey)?;
+    let (xonly_pubkey, _parity) = public_key.x_only_public_key();
+
+    let secp = Secp256k1::verification_only();
+    let hrp = match network {
+        bitcoin::Network::Bitcoin => KnownHrp::Mainnet,
+        bitcoin::Network::Testnet
+        | bitcoin::Network::Testnet4
+        | bitcoin::Network::Signet
+        | bitcoin::Network::Regtest => KnownHrp::Testnets,
+    };
+
+    let address = bitcoin::Address::p2tr(&secp, xonly_pubkey, None, hrp);
+    Ok(address.to_string())
+}
+
+fn derive_ethereum_address_from_pubkey(pubkey: &[u8]) -> Result<String, Bip44Error> {
+    use sha3::{Digest, Keccak256};
+
+    let public_key = secp256k1_pubkey_from_bytes(pubkey)?;
+    let pubkey_bytes = public_key.serialize_uncompressed();
+
+    let mut hasher = Keccak256::new();
+    hasher.update(&pubkey_bytes[1..]); // Skip the 0x04 prefix
+    let hash = hasher.finalize();
+
+    Ok(format!("0x{}", hex::encode(&hash[12..])))
+}
+
+fn ed25519_verifying_key_from_bytes(
+    pubkey: &[u8],
+) -> Result<ed25519_dalek::VerifyingKey, Bip44Error> {
+    use ed25519_dalek::VerifyingKey;
+    let key_array: [u8; 32] = pubkey.try_into().map_err(|_| {
+        Bip44Error::DerivationFailed(format!(
+            "Invalid Ed25519 public key length: {} (expected 32)",
+            pubkey.len()
+        ))
+    })?;
+    VerifyingKey::from_bytes(&key_array)
+        .map_err(|e| Bip44Error::DerivationFailed(format!("Invalid Ed25519 public key: {}", e)))
+}
+
+fn derive_sui_address_from_pubkey(pubkey: &[u8]) -> Result<String, Bip44Error> {
+    use blake2::{Blake2b, Digest};
+
+    let verifying_key = ed25519_verifying_key_from_bytes(pubkey)?;
+
+    let mut hasher = Blake2b::new();
+    hasher.update([0x00]); // Sui address prefix (Ed25519 flag)
+    hasher.update(verifying_key.as_bytes());
+    let hash: [u8; 32] = hasher.finalize().into();
+
+    Ok(format!("0x{}", hex::encode(&hash[..])))
+}
+
+fn derive_aptos_address_from_pubkey(pubkey: &[u8]) -> Result<String, Bip44Error> {
+    use sha3::{Digest, Sha3_256};
+
+    let verifying_key = ed25519_verifying_key_from_bytes(pubkey)?;
+
+    let mut hasher = Sha3_256::new();
+    hasher.update(verifying_key.as_bytes());
+    hasher.update([0x00]); // Aptos address suffix (single-Ed25519 scheme)
+    let hash: [u8; 32] = hasher.finalize().into();
+
+    Ok(format!("0x{}", hex::encode(&hash[..])))
+}
+
+fn derive_solana_address_from_pubkey(pubkey: &[u8]) -> Result<String, Bip44Error> {
+    let verifying_key = ed25519_verifying_key_from_bytes(pubkey)?;
+    Ok(bs58::encode(verifying_key.as_bytes()).into_string())
+}
+
 fn derive_bitcoin_address_from_key(
     key_bytes: &[u8],
     network: bitcoin::Network,
@@ -614,6 +748,53 @@ mod tests {
             key1.as_bytes(),
             "Different address indices must produce different Ed25519 keys"
         );
+    }
+
+    fn ed25519_pubkey(sk: &[u8]) -> Vec<u8> {
+        use ed25519_dalek::{SigningKey, VerifyingKey};
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(sk);
+        let signing = SigningKey::from_bytes(&arr);
+        VerifyingKey::from(&signing).to_bytes().to_vec()
+    }
+
+    fn secp_pubkey(sk: &[u8]) -> Vec<u8> {
+        use secp256k1::{Secp256k1, SecretKey};
+        let secp = Secp256k1::new();
+        let secret = SecretKey::from_slice(sk).unwrap();
+        secret.public_key(&secp).serialize().to_vec()
+    }
+
+    #[test]
+    fn test_pubkey_address_matches_key_address() {
+        let seed = [0x77u8; 64];
+        for chain_name in ["bitcoin", "ethereum", "sui", "aptos", "solana"] {
+            let chain = ChainId::new(chain_name);
+            let key = derive_key(&seed, &chain, 0, 0).unwrap();
+            let sk = key.as_bytes();
+            let pubkey = match chain_name {
+                "bitcoin" | "ethereum" => secp_pubkey(sk),
+                _ => ed25519_pubkey(sk),
+            };
+
+            let addr_from_key = derive_address_from_key(sk, &chain).unwrap();
+            let addr_from_pubkey = derive_address_from_pubkey(&pubkey, &chain).unwrap();
+            assert_eq!(
+                addr_from_key, addr_from_pubkey,
+                "pubkey-derived address must match key-derived address for {}",
+                chain_name
+            );
+        }
+    }
+
+    #[test]
+    fn test_pubkey_address_rejects_malformed() {
+        // Wrong-length Ed25519 key fails closed.
+        assert!(derive_address_from_pubkey(&[0u8; 10], &ChainId::new("solana")).is_err());
+        // Garbage secp256k1 key fails closed.
+        assert!(derive_address_from_pubkey(&[0xFFu8; 33], &ChainId::new("ethereum")).is_err());
+        // Unsupported chain fails closed.
+        assert!(derive_address_from_pubkey(&[0u8; 32], &ChainId::new("dogecoin")).is_err());
     }
 
     #[test]

@@ -13,6 +13,10 @@ pub enum ProofError {
     #[error("Proof verification failed: {0}")]
     VerificationFailed(String),
 
+    /// Requested proof system is not implemented
+    #[error("Proof system not implemented: {0}")]
+    NotImplemented(String),
+
     /// Serialization error
     #[error("Serialization error: {0}")]
     SerializationError(String),

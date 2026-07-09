@@ -492,6 +492,8 @@ pub struct TransferReceipt {
     pub lock_tx_hash: String,
     /// Transaction hash of the mint on destination chain
     pub mint_tx_hash: String,
+    /// Destination-side materialization metadata observed by the destination adapter.
+    pub materialization: csv_adapter_core::DestinationMaterialization,
 }
 
 /// The single source of truth for cross-chain transfer execution.
@@ -828,6 +830,9 @@ impl TransferCoordinator {
                     replay_id,
                     lock_tx_hash: hex::encode(entry.lock_tx_hash.as_bytes()),
                     mint_tx_hash: hex::encode(entry.mint_tx_hash.as_bytes()),
+                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                        transfer.destination_chain.clone(),
+                    ),
                 }));
             }
         }
@@ -1482,11 +1487,20 @@ impl TransferCoordinator {
             .policy
             .finality_depth_for_chain(&transfer.source_chain)
             .unwrap_or(6);
+        // RUNTIME-FINALITY-TAUTOLOGY-001: current_block_height must be an actual
+        // observation of the source-chain tip, not `lock_height +
+        // required_confirmations` (which made verify_finality pass by
+        // construction). Reuse the real finality observation taken by the gate
+        // above (`finality`), where the tip = confirming height + confirmations.
+        // The gate already returned Pending if confirmations were insufficient,
+        // so here verify_finality re-checks against the same observed tip rather
+        // than a synthesized one.
+        let observed_tip = finality.block_height.saturating_add(finality.confirmations);
         let verification_context = VerificationContext {
             chain_id: transfer.source_chain.clone(),
             signature_scheme,
             required_confirmations,
-            current_block_height: Some(lock_result.block_height + required_confirmations),
+            current_block_height: Some(observed_tip),
             seal_registry: Some(Box::new(move |seal_id: &[u8]| {
                 seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
             })),
@@ -1497,6 +1511,12 @@ impl TransferCoordinator {
             lock_output_index: Some(transfer.lock_output_index),
             transition_id: Some(transfer.transition_id.clone()),
             destination_chain: Some(transfer.destination_chain.clone()),
+            // Runtime path: destination materialization is authorized by the
+            // on-chain §9.2 verifier-attested mint plus native_proof_validated
+            // above, so the DAG-signature approved-verifier binding is not the
+            // gate here (VERIFY-SIGNER-BINDING-001). The offline recipient accept
+            // path supplies and enforces this set instead.
+            authorized_signers: Vec::new(),
         };
 
         adapter_registry
@@ -1918,6 +1938,7 @@ impl TransferCoordinator {
             replay_id,
             lock_tx_hash: lock_result.tx_hash,
             mint_tx_hash: mint_result.tx_hash,
+            materialization: mint_result.materialization,
         }))
     }
 
@@ -3011,11 +3032,29 @@ impl TransferCoordinator {
         // `metadata == inclusion_proof.proof_bytes`), so it must not be
         // reinterpreted here as the ASCII hex of the lock txid.
 
+        // RUNTIME-FINALITY-TAUTOLOGY-001: source current_block_height from a real
+        // observation of the source-chain tip, not `confirmed_height +
+        // required_confirmations` (which made verify_finality pass by
+        // construction on the recovery path too). Observe the lock's true
+        // confirmation depth and fail closed if it has not reached the required
+        // depth on the real chain, rather than synthesizing a passing height.
+        let finality = self
+            .lock_finality_status(transfer, adapter_registry)
+            .await?;
+        if finality.confirmations < required_confirmations {
+            return Err(TransferCoordinatorError::FinalityFailed(format!(
+                "Source lock has {}/{} confirmations on the real chain; refusing to \
+                 finalize on the recovery path",
+                finality.confirmations, required_confirmations
+            )));
+        }
+        let observed_tip = finality.block_height.saturating_add(finality.confirmations);
+
         let verification_context = VerificationContext {
             chain_id: transfer.source_chain.clone(),
             signature_scheme,
             required_confirmations,
-            current_block_height: Some(confirmed_height + required_confirmations),
+            current_block_height: Some(observed_tip),
             seal_registry: Some(Box::new(move |seal_id: &[u8]| {
                 seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
             })),
@@ -3026,6 +3065,10 @@ impl TransferCoordinator {
             lock_output_index: Some(transfer.lock_output_index),
             transition_id: Some(transfer.transition_id.clone()),
             destination_chain: Some(transfer.destination_chain.clone()),
+            // Runtime path is gated by the on-chain §9.2 attested mint +
+            // native_proof_validated; see the other construction site
+            // (VERIFY-SIGNER-BINDING-001).
+            authorized_signers: Vec::new(),
         };
         adapter_registry
             .validate_source_proof(&transfer.source_chain, transfer, proof_bundle)
@@ -3472,6 +3515,7 @@ impl TransferCoordinator {
             replay_id,
             lock_tx_hash: hex::encode(transfer.lock_tx_hash),
             mint_tx_hash: mint_result.tx_hash,
+            materialization: mint_result.materialization,
         })
     }
 
@@ -3919,15 +3963,28 @@ mod tests {
     // Local test adapter to avoid orphan rule
     struct LocalTestAdapter {
         caps: ChainCapabilities,
+        /// When set, `tx_finality` reports this confirmation count instead of the
+        /// default `u64::MAX`, so tests can exercise the real finality gate
+        /// (RUNTIME-FINALITY-TAUTOLOGY-001).
+        finality_confirmations: Option<u64>,
     }
 
     impl LocalTestAdapter {
         fn new(caps: ChainCapabilities) -> Self {
-            Self { caps }
+            Self {
+                caps,
+                finality_confirmations: None,
+            }
         }
 
         fn new_bitcoin() -> Self {
             Self::new(ChainCapabilities::bitcoin())
+        }
+
+        fn new_bitcoin_with_confirmations(confirmations: u64) -> Self {
+            let mut adapter = Self::new(ChainCapabilities::bitcoin());
+            adapter.finality_confirmations = Some(confirmations);
+            adapter
         }
 
         fn build_fake_lock_result() -> LockResult {
@@ -3941,6 +3998,9 @@ mod tests {
             MintResult {
                 tx_hash: hex::encode([0u8; 32]),
                 block_height: 100,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             }
         }
 
@@ -4063,7 +4123,31 @@ mod tests {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             })
+        }
+
+        async fn tx_finality(
+            &self,
+            tx_hash: &str,
+        ) -> Result<csv_adapter_core::TxFinality, csv_adapter_core::AdapterError> {
+            match self.finality_confirmations {
+                Some(confirmations) => Ok(csv_adapter_core::TxFinality {
+                    block_height: 100,
+                    confirmations,
+                }),
+                // Default: delegate to confirm_tx and treat as final (u64::MAX),
+                // matching the trait default.
+                None => {
+                    let confirmed = self.confirm_tx(tx_hash).await?;
+                    Ok(csv_adapter_core::TxFinality {
+                        block_height: confirmed.block_height,
+                        confirmations: u64::MAX,
+                    })
+                }
+            }
         }
 
         async fn get_balance(
@@ -4081,6 +4165,19 @@ mod tests {
     async fn recovery_fixture(
         phase: TransferStage,
         proof_payload: Option<Vec<u8>>,
+    ) -> (
+        TransferCoordinator,
+        AdapterRegistryImpl,
+        CrossChainTransfer,
+        crate::user_runtime_lease::RuntimeExecutionContext,
+    ) {
+        recovery_fixture_with_adapter(phase, proof_payload, LocalTestAdapter::new_bitcoin()).await
+    }
+
+    async fn recovery_fixture_with_adapter(
+        phase: TransferStage,
+        proof_payload: Option<Vec<u8>>,
+        adapter: LocalTestAdapter,
     ) -> (
         TransferCoordinator,
         AdapterRegistryImpl,
@@ -4125,9 +4222,7 @@ mod tests {
             })
             .unwrap();
         let mut registry = AdapterRegistryImpl::new();
-        registry
-            .register_adapter(Box::new(LocalTestAdapter::new_bitcoin()))
-            .unwrap();
+        registry.register_adapter(Box::new(adapter)).unwrap();
         let owner = uuid::Uuid::new_v4();
         let runtime_ctx = crate::user_runtime_lease::RuntimeExecutionContext {
             lease: crate::user_runtime_lease::TransferLease {
@@ -4180,6 +4275,40 @@ mod tests {
                 .latest_phase(&transfer.id)
                 .unwrap(),
             Some(TransferStage::Completed)
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_fails_closed_when_lock_below_required_confirmations() {
+        // RUNTIME-FINALITY-TAUTOLOGY-001: on the recovery path, current_block_height
+        // must come from a real tip observation. With the source chain reporting
+        // fewer confirmations than the required finality depth, the transfer must
+        // NOT be finalized — it must fail closed rather than synthesize a passing
+        // height from `confirmed_height + required_confirmations`.
+        let (coordinator, registry, transfer, runtime_ctx) = recovery_fixture_with_adapter(
+            TransferStage::AwaitingFinality,
+            None,
+            // 0 confirmations is below the "test-chain" finality depth (the
+            // absolute-minimum fallback of 1), so the lock is not yet final.
+            LocalTestAdapter::new_bitcoin_with_confirmations(0),
+        )
+        .await;
+
+        // Resume must NOT finalize: the real observed tip is below the required
+        // finality depth. Whether the path returns
+        // Pending (Ok) or a FinalityFailed error, the invariant is that the
+        // transfer is never advanced to Completed off a synthesized height.
+        let _ = coordinator
+            .resume_transfer(&transfer.id, &registry, runtime_ctx)
+            .await;
+
+        assert_ne!(
+            coordinator
+                .execution_journal()
+                .latest_phase(&transfer.id)
+                .unwrap(),
+            Some(TransferStage::Completed),
+            "an under-confirmed transfer must not reach Completed"
         );
     }
 
@@ -5708,6 +5837,9 @@ mod tests {
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height: 100,
+                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                        "test-chain",
+                    ),
                 })
             }
             async fn get_balance(
@@ -5869,6 +6001,9 @@ mod tests {
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height: 100,
+                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                        "test-chain",
+                    ),
                 })
             }
             async fn get_balance(
@@ -5974,6 +6109,9 @@ mod tests {
             Ok(MintResult {
                 tx_hash: hex::encode([0x7u8; 32]),
                 block_height: 4242,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             })
         }
         async fn build_inclusion_proof(
@@ -6009,6 +6147,9 @@ mod tests {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             })
         }
         async fn get_balance(
@@ -6111,6 +6252,9 @@ mod tests {
             Ok(MintResult {
                 tx_hash: hex::encode([0xA0 | call; 32]),
                 block_height: 700 + u64::from(call),
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             })
         }
         async fn build_inclusion_proof(
@@ -6150,6 +6294,9 @@ mod tests {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             })
         }
         async fn get_balance(
@@ -6664,6 +6811,9 @@ mod tests {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "test-chain",
+                ),
             })
         }
         async fn get_balance(

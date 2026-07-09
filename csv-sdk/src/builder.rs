@@ -47,6 +47,13 @@ use csv_storage::RocksDbReplayDb;
 #[cfg(feature = "runtime-coordinator")]
 use csv_verifier::CanonicalVerifierImpl;
 
+#[cfg(feature = "runtime-coordinator")]
+type RuntimeStores = (
+    Box<dyn csv_storage::ReplayDatabase>,
+    Box<dyn csv_runtime::EventStore>,
+    Box<dyn csv_runtime::ExecutionJournal>,
+);
+
 /// Storage backend for seal and anchor persistence.
 #[derive(Debug, Clone)]
 pub enum StoreBackend {
@@ -364,16 +371,7 @@ impl ClientBuilder {
     }
 
     #[cfg(feature = "runtime-coordinator")]
-    fn runtime_stores(
-        config: &Config,
-    ) -> Result<
-        (
-            Box<dyn csv_storage::ReplayDatabase>,
-            Box<dyn csv_runtime::EventStore>,
-            Box<dyn csv_runtime::ExecutionJournal>,
-        ),
-        CsvError,
-    > {
+    fn runtime_stores(config: &Config) -> Result<RuntimeStores, CsvError> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let runtime_dir = Self::runtime_data_dir(config);

@@ -235,42 +235,75 @@ impl AptosSealProtocol {
             }
         }
 
-        // Check on-chain resource existence via RPC
+        // Check on-chain resource existence via RPC.
+        //
+        // NOTE: `Seal` (CSVSeal.move) has abilities `store, drop` only — it is never a
+        // top-level account resource. It lives nested inside `SealCollection.seals`
+        // (a `SmartTable<u64, Seal>`). So availability must be checked by confirming
+        // `SealCollection` exists and that `seal.nonce < next_nonce`, mirroring the
+        // check `enforce_seal` already performs below.
         #[cfg(feature = "rpc")]
-        let exists = {
-            // Verify seal resource exists on-chain before consumption
-            // This ensures the seal was properly created and deployed
-            let seal_resource_type = format!(
-                "{}::CSVSeal::Seal",
+        {
+            let seal_collection_type = format!(
+                "{}::CSVSeal::SealCollection",
                 self.config.seal_contract.module_address
             );
-            StateProofVerifier::verify_resource_exists_async(
+            let collection_exists = StateProofVerifier::verify_resource_exists_async(
                 seal.account_address,
-                &seal_resource_type,
+                &seal_collection_type,
                 self.rpc.as_ref() as &(dyn crate::rpc::AptosAccountReader + Send + Sync),
             )
             .await
             .map_err(|e| {
                 AptosError::StateProofFailed(format!(
-                    "Failed to verify seal resource on-chain: {}",
+                    "Failed to verify seal collection on-chain: {}",
                     e
                 ))
-            })?
-        };
+            })?;
+
+            if !collection_exists {
+                return Err(AptosError::StateProofFailed(format!(
+                    "Seal collection does not exist at {}",
+                    format_address(seal.account_address)
+                )));
+            }
+
+            let seal_collection_data = self
+                .rpc
+                .get_resource(seal.account_address, &seal_collection_type, None)
+                .await
+                .map_err(|e| {
+                    AptosError::StateProofFailed(format!(
+                        "Failed to query seal collection data: {}",
+                        e
+                    ))
+                })?
+                .ok_or_else(|| {
+                    AptosError::StateProofFailed("Seal collection resource not found".to_string())
+                })?;
+
+            let next_nonce = seal_collection_data
+                .parse_u64_field("next_nonce")
+                .map_err(|e| {
+                    AptosError::StateProofFailed(format!(
+                        "Failed to parse next_nonce from seal collection: {}",
+                        e
+                    ))
+                })?;
+
+            if seal.nonce >= next_nonce {
+                return Err(AptosError::StateProofFailed(format!(
+                    "Seal with nonce {} does not exist on-chain (next_nonce: {})",
+                    seal.nonce, next_nonce
+                )));
+            }
+        }
 
         #[cfg(not(feature = "rpc"))]
-        let exists: AptosResult<bool> = Err(AptosError::FeatureNotEnabled(
-            "Aptos seal availability requires the 'rpc' feature; refusing to assume the on-chain resource exists".to_string(),
-        ));
-
-        #[cfg(not(feature = "rpc"))]
-        let exists = exists.map_err(|e: AptosError| ProtocolError::from(e))?;
-
-        if !exists {
-            return Err(AptosError::StateProofFailed(format!(
-                "Seal resource at {} does not exist on-chain",
-                format_address(seal.account_address)
-            )));
+        {
+            return Err(AptosError::FeatureNotEnabled(
+                "Aptos seal availability requires the 'rpc' feature; refusing to assume the on-chain resource exists".to_string(),
+            ));
         }
 
         Ok(())

@@ -53,14 +53,17 @@ pub fn execute(action: ValidateAction, config: &Config, state: &UnifiedStateMana
     }
 }
 
-fn cmd_consignment(file: String, _config: &Config, state: &UnifiedStateManager) -> Result<()> {
+fn cmd_consignment(file: String, config: &Config, state: &UnifiedStateManager) -> Result<()> {
     output::header("Validating Consignment");
 
     let content = std::fs::read(&file)
         .map_err(|e| anyhow::anyhow!("Failed to read consignment file: {}", e))?;
 
+    // VERIFY-SIGNER-BINDING-001: bind proof signatures to the approved verifier
+    // set from trusted local config (fails closed if unset).
+    let authorized_signers = config.approved_verifier_keys()?;
     output::progress(1, 4, "Decoding canonical consignment...");
-    let accepted = transfer::validate_consignment_bytes(&content, state)?;
+    let accepted = transfer::validate_consignment_bytes(&content, state, &authorized_signers)?;
 
     output::progress(2, 4, "Verifying invoice seal binding...");
     output::kv("Sanad", &accepted.sanad_id);
@@ -88,7 +91,7 @@ fn cmd_consignment(file: String, _config: &Config, state: &UnifiedStateManager) 
 fn cmd_proof(
     proof_file: String,
     chain: Chain,
-    _config: &Config,
+    config: &Config,
     _state: &UnifiedStateManager,
 ) -> Result<()> {
     output::header(&format!("Validating Proof on {}", chain));
@@ -139,7 +142,15 @@ fn cmd_proof(
 
     let seal_registry = |_seal_id: &[u8]| false;
 
-    let result = csv_verifier::verify_proof(&proof_bundle, seal_registry, signature_scheme);
+    // VERIFY-SIGNER-BINDING-001: bind to the approved verifier set (fails closed
+    // if unset).
+    let authorized_signers = config.approved_verifier_keys()?;
+    let result = csv_verifier::verify_proof(
+        &proof_bundle,
+        seal_registry,
+        signature_scheme,
+        &authorized_signers,
+    );
 
     output::kv(
         "Verification Level",
@@ -217,7 +228,7 @@ fn cmd_commitment_chain(
     Ok(())
 }
 
-fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> Result<()> {
+fn cmd_offline(file: String, config: &Config, state: &UnifiedStateManager) -> Result<()> {
     output::header("Offline Proof Verification");
 
     // Read and parse proof bundle from file
@@ -279,7 +290,15 @@ fn cmd_offline(file: String, _config: &Config, state: &UnifiedStateManager) -> R
         _ => SignatureScheme::Secp256k1,
     };
 
-    let result = csv_verifier::verify_proof(&proof_bundle, seal_registry, signature_scheme);
+    // VERIFY-SIGNER-BINDING-001: bind to the approved verifier set (fails closed
+    // if unset).
+    let authorized_signers = config.approved_verifier_keys()?;
+    let result = csv_verifier::verify_proof(
+        &proof_bundle,
+        seal_registry,
+        signature_scheme,
+        &authorized_signers,
+    );
 
     output::kv(
         "Verification Level",

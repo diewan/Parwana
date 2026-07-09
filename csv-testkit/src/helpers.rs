@@ -34,6 +34,7 @@ impl TestContext {
             lock_output_index: None,
             transition_id: None,
             destination_chain: None,
+            authorized_signers: Vec::new(),
         }
     }
 }

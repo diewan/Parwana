@@ -21,6 +21,24 @@ pub async fn fetch_gas_objects(
     node: &Arc<SuiNode>,
     address: &sui_sdk_types::Address,
 ) -> Result<Vec<sui_transaction_builder::ObjectInput>, SuiError> {
+    Ok(fetch_gas_objects_with_digest(node, address).await?.0)
+}
+
+/// Fetch SUI gas objects and a commitment to the exact on-chain objects
+/// consumed.
+///
+/// The second return value is a domain-separated digest over each gas object's
+/// real `(object_id, version, content-digest)` — i.e. genuine Sui chain state,
+/// not wall-clock time or purely local inputs. Callers that must derive
+/// deterministic, chain-bound values (e.g. `create_seal`) use it so the derived
+/// values commit to the specific coins spent by the transaction and can be
+/// reconstructed by any verifier who inspects the transaction
+/// (`SUI-CREATE-SEAL-STATE-001`).
+#[cfg(feature = "rpc")]
+pub async fn fetch_gas_objects_with_digest(
+    node: &Arc<SuiNode>,
+    address: &sui_sdk_types::Address,
+) -> Result<(Vec<sui_transaction_builder::ObjectInput>, [u8; 32]), SuiError> {
     use sui_rpc::proto::sui::rpc::v2::ListOwnedObjectsRequest;
 
     let client = node.client();
@@ -74,8 +92,13 @@ pub async fn fetch_gas_objects(
         ));
     }
 
-    // Convert objects to ObjectInput for gas
+    // Convert objects to ObjectInput for gas, accumulating a canonical preimage
+    // over the real (object_id, version, content-digest) of each consumed coin.
+    use blake2::{Blake2b, Digest as Blake2Digest};
     let mut gas_inputs = Vec::new();
+    let mut ref_hasher = Blake2b::new();
+    ref_hasher.update(b"csv.sui.gas-ref.v1");
+    let mut ref_count: u32 = 0;
     for obj in objects {
         if let Some(object_id) = obj.object_id {
             let id_bytes = hex::decode(object_id.trim_start_matches("0x")).map_err(|e| {
@@ -99,16 +122,30 @@ pub async fn fetch_gas_objects(
                 sui_sdk_types::Digest::ZERO
             };
 
+            // Bind the real chain-state reference into the commitment.
+            ref_hasher.update(id_array);
+            ref_hasher.update(version.to_le_bytes());
+            ref_hasher.update(digest.as_bytes());
+            ref_count += 1;
+
             gas_inputs.push(sui_transaction_builder::ObjectInput::owned(
                 addr, version, digest,
             ));
         }
     }
 
+    if ref_count == 0 {
+        return Err(SuiError::TransactionFailed(
+            "No usable SUI gas objects with a valid object reference were found".to_string(),
+        ));
+    }
+
+    let gas_ref_digest: [u8; 32] = ref_hasher.finalize().into();
+
     log::info!(
         "SUI: Fetched {} gas objects for address {}",
         gas_inputs.len(),
         address
     );
-    Ok(gas_inputs)
+    Ok((gas_inputs, gas_ref_digest))
 }

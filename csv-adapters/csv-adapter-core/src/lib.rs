@@ -487,6 +487,53 @@ pub struct MintResult {
     pub tx_hash: String,
     /// Block height of the mint
     pub block_height: u64,
+    /// Destination-side materialization data observed by the adapter.
+    pub materialization: DestinationMaterialization,
+}
+
+/// Destination-side metadata for a completed materialization.
+///
+/// Fields are optional because not every chain adapter can recover all
+/// destination display data at mint time. Adapters must leave fields absent
+/// rather than synthesize object ids, seal references, owners, or commitments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DestinationMaterialization {
+    /// Destination chain that produced the metadata.
+    pub chain_id: String,
+    /// Destination object/account/resource id, when observed.
+    pub object_id: Option<String>,
+    /// Destination seal reference, when observed.
+    pub seal_ref: Option<String>,
+    /// Destination registry reference, when observed.
+    pub registry_ref: Option<String>,
+    /// Commitment recorded by the destination chain, when observed.
+    pub commitment: Option<[u8; 32]>,
+    /// Destination owner bytes recorded by the destination chain, when observed.
+    pub owner: Option<Vec<u8>>,
+}
+
+impl DestinationMaterialization {
+    /// Explicitly mark destination metadata as unavailable.
+    pub fn unavailable(chain_id: impl Into<String>) -> Self {
+        Self {
+            chain_id: chain_id.into(),
+            object_id: None,
+            seal_ref: None,
+            registry_ref: None,
+            commitment: None,
+            owner: None,
+        }
+    }
+
+    /// True when the metadata contains displayable destination state beyond
+    /// the mint transaction hash.
+    pub fn has_display_metadata(&self) -> bool {
+        self.object_id.is_some()
+            || self.seal_ref.is_some()
+            || self.registry_ref.is_some()
+            || self.commitment.is_some()
+            || self.owner.is_some()
+    }
 }
 
 /// Domain-separation tag for the RFC-0012 §9.2 attestation digest preimage.

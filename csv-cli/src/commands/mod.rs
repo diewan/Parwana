@@ -11,6 +11,7 @@ pub mod cross_chain;
 pub mod inspect;
 pub mod proofs;
 pub mod runtime;
+pub mod sanad_manifest;
 pub mod sanads;
 pub mod schema_cmd;
 pub mod seals;

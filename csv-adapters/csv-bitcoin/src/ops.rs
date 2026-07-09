@@ -245,15 +245,60 @@ impl ChainQuery for BitcoinChainQuery {
 }
 
 /// Bitcoin implementation of ChainSigner trait
-#[derive(Debug)]
 pub struct BitcoinChainSigner {
     network: Network,
+    key_store: Option<Arc<dyn BitcoinSigningKeyStore>>,
+}
+
+impl std::fmt::Debug for BitcoinChainSigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BitcoinChainSigner")
+            .field("network", &self.network)
+            .field(
+                "key_store",
+                &self.key_store.as_ref().map(|_| "[configured]"),
+            )
+            .finish()
+    }
+}
+
+/// Keystore abstraction used by Bitcoin signing paths.
+///
+/// `key_id` is an opaque identifier. Implementations may resolve it from an
+/// unlocked file keystore session, HSM, browser keystore, or test fixture, but
+/// callers must never pass raw private key material in this field.
+pub trait BitcoinSigningKeyStore: Send + Sync {
+    /// Resolve an opaque key ID to signing material.
+    fn signing_key(&self, key_id: &str) -> ChainOpResult<csv_keys::SecretKey>;
 }
 
 impl BitcoinChainSigner {
     /// Create a new Bitcoin chain signer
     pub fn new(network: Network) -> Self {
-        Self { network }
+        Self {
+            network,
+            key_store: None,
+        }
+    }
+
+    /// Create a signer backed by a keystore resolver.
+    pub fn with_key_store(network: Network, key_store: Arc<dyn BitcoinSigningKeyStore>) -> Self {
+        Self {
+            network,
+            key_store: Some(key_store),
+        }
+    }
+
+    fn secret_key_for(&self, key_id: &str) -> ChainOpResult<secp256k1::SecretKey> {
+        let key_store = self.key_store.as_ref().ok_or_else(|| {
+            ChainOpError::SigningError(
+                "Bitcoin signing key store is not configured; refusing to treat key_id as raw key material"
+                    .to_string(),
+            )
+        })?;
+        let key = key_store.signing_key(key_id)?;
+        secp256k1::SecretKey::from_slice(key.expose_secret())
+            .map_err(|e| ChainOpError::SigningError(format!("Invalid keystore secret key: {}", e)))
     }
 }
 
@@ -278,21 +323,7 @@ impl ChainSigner for BitcoinChainSigner {
     }
 
     async fn sign_transaction(&self, tx_data: &[u8], key_id: &str) -> ChainOpResult<Vec<u8>> {
-        // Parse key_id as hex-encoded private key (32 bytes)
-        let key_bytes = hex::decode(key_id).map_err(|_| {
-            ChainOpError::SigningError(
-                "Invalid key_id format. Expected hex-encoded 32-byte key.".to_string(),
-            )
-        })?;
-
-        if key_bytes.len() != 32 {
-            return Err(ChainOpError::SigningError(
-                "Invalid key length. Expected 32 bytes.".to_string(),
-            ));
-        }
-
-        let secret_key = secp256k1::SecretKey::from_slice(&key_bytes)
-            .map_err(|e| ChainOpError::SigningError(format!("Invalid secret key: {}", e)))?;
+        let secret_key = self.secret_key_for(key_id)?;
 
         // Parse the transaction from bytes
         // Expected format: version (4) + marker+flag (2 for segwit) + inputs + outputs + witness + locktime
@@ -338,36 +369,13 @@ impl ChainSigner for BitcoinChainSigner {
     }
 
     async fn sign_message(&self, message: &[u8], key_id: &str) -> ChainOpResult<Vec<u8>> {
-        // Sign a message using Bitcoin message signing format
-        // The key_id should reference a private key in the keystore
-        // For production, this would retrieve the key from secure storage
-
         use bitcoin_hashes::{Hash, sha256d};
-        use secp256k1::{Message, Secp256k1, SecretKey};
+        use secp256k1::{Message, Secp256k1};
 
         // Bitcoin message signing prefix
         const BITCOIN_SIGNED_MESSAGE_PREFIX: &[u8] = b"\x18Bitcoin Signed Message:\n";
 
-        // Note: In production, the key_id would be used to retrieve the key from secure storage
-        // This implementation assumes the key_id encodes the necessary signing material
-        // For now, we return an error indicating keystore integration is required
-
-        // Parse key_id as hex-encoded secret key (for testing/development only)
-        // In production, this should use the keystore crate
-        let key_bytes = hex::decode(key_id).map_err(|_| {
-            ChainOpError::SigningError(
-                "Invalid key_id format. Expected hex-encoded key reference.".to_string(),
-            )
-        })?;
-
-        if key_bytes.len() != 32 {
-            return Err(ChainOpError::SigningError(
-                "Invalid key length. Expected 32 bytes.".to_string(),
-            ));
-        }
-
-        let secret_key = SecretKey::from_slice(&key_bytes)
-            .map_err(|e| ChainOpError::SigningError(format!("Invalid secret key: {}", e)))?;
+        let secret_key = self.secret_key_for(key_id)?;
 
         // Create Bitcoin message hash: SHA256D(prefix || varint(len(message)) || message)
         let mut message_to_hash = Vec::new();
@@ -446,21 +454,7 @@ impl BitcoinChainSignerExt for BitcoinChainSigner {
         key_id: &str,
         prevout_amounts: Vec<(usize, u64)>,
     ) -> ChainOpResult<Vec<u8>> {
-        // Parse key_id as hex-encoded private key (32 bytes)
-        let key_bytes = hex::decode(key_id).map_err(|_| {
-            ChainOpError::SigningError(
-                "Invalid key_id format. Expected hex-encoded 32-byte key.".to_string(),
-            )
-        })?;
-
-        if key_bytes.len() != 32 {
-            return Err(ChainOpError::SigningError(
-                "Invalid key length. Expected 32 bytes.".to_string(),
-            ));
-        }
-
-        let secret_key = secp256k1::SecretKey::from_slice(&key_bytes)
-            .map_err(|e| ChainOpError::SigningError(format!("Invalid secret key: {}", e)))?;
+        let secret_key = self.secret_key_for(key_id)?;
 
         // Parse the transaction from bytes
         let tx = parse_bitcoin_tx(tx_data).map_err(|e| {
@@ -3088,6 +3082,80 @@ mod tests {
     use crate::rpc::TestBitcoinRpc;
     use crate::seal_protocol::BitcoinSealProtocol;
     use bitcoin::Network;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct TestSigningKeyStore {
+        keys: HashMap<String, csv_keys::SecretKey>,
+    }
+
+    impl TestSigningKeyStore {
+        fn with_key(mut self, id: &str, key: [u8; 32]) -> Self {
+            self.keys
+                .insert(id.to_string(), csv_keys::SecretKey::new(key));
+            self
+        }
+    }
+
+    impl BitcoinSigningKeyStore for TestSigningKeyStore {
+        fn signing_key(&self, key_id: &str) -> ChainOpResult<csv_keys::SecretKey> {
+            self.keys.get(key_id).cloned().ok_or_else(|| {
+                ChainOpError::SigningError(format!("Bitcoin signing key not found: {}", key_id))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_message_uses_keystore_resolved_key() {
+        let key_bytes = [0x11u8; 32];
+        let key_store = Arc::new(TestSigningKeyStore::default().with_key("wallet-main", key_bytes));
+        let signer = BitcoinChainSigner::with_key_store(Network::Signet, key_store);
+
+        let message = b"csv bitcoin message";
+        let signature = signer
+            .sign_message(message, "wallet-main")
+            .await
+            .expect("keystore key should sign");
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key = secp256k1::SecretKey::from_slice(&key_bytes).unwrap();
+        let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+
+        assert_eq!(signature.len(), 64);
+        assert!(
+            signer
+                .verify_signature(message, &signature, &public_key.serialize())
+                .expect("signature verification should run")
+        );
+    }
+
+    #[tokio::test]
+    async fn sign_message_unknown_key_fails_closed() {
+        let key_store = Arc::new(TestSigningKeyStore::default());
+        let signer = BitcoinChainSigner::with_key_store(Network::Signet, key_store);
+
+        let result = signer.sign_message(b"csv bitcoin message", "missing").await;
+
+        assert!(
+            matches!(result, Err(ChainOpError::SigningError(ref message)) if message.contains("not found")),
+            "unknown key_id must not produce a signature: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sign_message_raw_hex_key_id_without_keystore_fails_closed() {
+        let signer = BitcoinChainSigner::new(Network::Signet);
+        let raw_private_key_id = hex::encode([0x11u8; 32]);
+
+        let result = signer
+            .sign_message(b"csv bitcoin message", &raw_private_key_id)
+            .await;
+
+        assert!(
+            matches!(result, Err(ChainOpError::SigningError(ref message)) if message.contains("key store is not configured")),
+            "raw hex key_id must not be accepted as signing material: {result:?}"
+        );
+    }
 
     #[tokio::test]
     async fn test_create_sanad_with_utxo_selection() {

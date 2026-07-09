@@ -1,8 +1,10 @@
 //! Cross-chain transfer status commands
 
 use anyhow::Result;
+use csv_hash::sanad::SanadId;
+use csv_runtime::SettlementStatus;
 
-use crate::commands::cross_chain::transfer::emit_provenance_strength_warning;
+use crate::commands::cross_chain::transfer::{build_client, emit_provenance_strength_warning};
 use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::{TransferStatus, UnifiedStateManager};
@@ -143,6 +145,106 @@ pub fn cmd_list(from: Option<Chain>, to: Option<Chain>, state: &UnifiedStateMana
     }
 
     Ok(())
+}
+
+pub async fn cmd_settlement_status(
+    sanad_id: String,
+    from: Option<Chain>,
+    to: Option<Chain>,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<()> {
+    let sanad =
+        SanadId::parse_hex(&sanad_id).map_err(|e| anyhow::anyhow!("Invalid Sanad ID: {}", e))?;
+    let (from, to) = resolve_settlement_query_chains(&sanad_id, from, to, state)?;
+    let client = build_client(&from, &to, None, config, state).await?;
+    let transfers = client.transfers();
+
+    output::header("Settlement Status");
+    output::info("Source: Runtime event store (canonical)");
+    output::kv("Sanad ID", &hex::encode(sanad.as_bytes()));
+    output::kv("Source Chain", from.as_str());
+    output::kv("Destination Chain", to.as_str());
+
+    match transfers.settlement_status(&sanad)? {
+        SettlementStatus::Unsettled => {
+            output::kv("Status", "Unsettled");
+            output::info("No source escrow release or refund has been recorded.");
+        }
+        SettlementStatus::Released(record) => {
+            output::kv("Status", "Released");
+            output_settlement_record(&record);
+        }
+        SettlementStatus::Refunded(record) => {
+            output::kv("Status", "Refunded");
+            output_settlement_record(&record);
+        }
+    }
+
+    match transfers.settlement_evidence(&sanad)? {
+        Some(evidence) => {
+            output::header("Settlement Evidence");
+            output::kv("Transfer ID", &evidence.transfer_id);
+            output::kv("Mint Tx Hash", &evidence.mint_tx_hash);
+            output::kv("Mint Block Height", &evidence.mint_block_height.to_string());
+            output::kv("Lock Event ID", &hex::encode(evidence.lock_event_id));
+            output::kv("Nullifier", &hex::encode(evidence.nullifier));
+            output::kv("Commitment", &hex::encode(evidence.commitment));
+            output::kv("Recorded At", &evidence.recorded_at.to_string());
+        }
+        None => output::info("No destination mint settlement evidence recorded yet."),
+    }
+
+    Ok(())
+}
+
+fn resolve_settlement_query_chains(
+    sanad_id: &str,
+    from: Option<Chain>,
+    to: Option<Chain>,
+    state: &UnifiedStateManager,
+) -> Result<(Chain, Chain)> {
+    match (from, to) {
+        (Some(from), Some(to)) => Ok((from, to)),
+        (from, to) => {
+            let cached = state
+                .storage
+                .transfers
+                .iter()
+                .find(|transfer| transfer.sanad_id == sanad_id);
+            match (from, to, cached) {
+                (Some(from), Some(to), _) => Ok((from, to)),
+                (Some(from), None, Some(transfer)) => Ok((from, transfer.dest_chain.clone())),
+                (None, Some(to), Some(transfer)) => Ok((transfer.source_chain.clone(), to)),
+                (None, None, Some(transfer)) => {
+                    Ok((transfer.source_chain.clone(), transfer.dest_chain.clone()))
+                }
+                _ => Err(anyhow::anyhow!(
+                    "Settlement query needs source and destination chain configuration; pass --from and --to"
+                )),
+            }
+        }
+    }
+}
+
+fn output_settlement_record(record: &csv_runtime::SettlementReleaseRecord) {
+    output::kv("Transfer ID", &record.transfer_id);
+    output::kv("Source Chain", &record.source_chain);
+    output::kv("Settlement Tx Hash", &record.settlement_tx_hash);
+    output::kv(
+        "Settlement Block Height",
+        &record.settlement_block_height.to_string(),
+    );
+    output::kv("Lock Event ID", &hex::encode(record.lock_event_id));
+    output::kv(
+        "Destination Mint Tx Ref",
+        &hex::encode(record.destination_mint_tx_ref),
+    );
+    output::kv(
+        "Operator Payout Address",
+        &hex::encode(record.operator_payout_address),
+    );
+    output::kv("Settled At", &record.settled_at.to_string());
 }
 
 pub fn cmd_retry(

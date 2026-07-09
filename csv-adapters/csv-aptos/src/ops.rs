@@ -50,9 +50,11 @@ pub struct AptosBackend {
     /// destination `csv_seal` module authenticates a mint by recovering M-of-N
     /// secp256k1 verifier public keys from signatures over the §9.2 digest
     /// (`secp256k1::ecdsa_recover`), independent of who submits the transaction.
-    /// Absent this key the adapter fails closed rather than emitting an
-    /// unauthenticated mint the module would reject.
-    verifier_signing_key: Option<secp256k1::SecretKey>,
+    /// Absent any key the adapter fails closed rather than emitting an
+    /// unauthenticated mint the module would reject. Multiple keys attach one
+    /// verifier signature each, satisfying an M-of-N `MintAuthority` in a single
+    /// mint (see MINT-KEYS-001).
+    verifier_signing_keys: Vec<secp256k1::SecretKey>,
 }
 
 impl AptosBackend {
@@ -90,7 +92,7 @@ impl AptosBackend {
             domain_separator,
             event_builder,
             seal_protocol: Arc::new(seal),
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 
@@ -103,7 +105,7 @@ impl AptosBackend {
             domain_separator: seal.domain(),
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 
@@ -114,7 +116,20 @@ impl AptosBackend {
     /// registered in the destination module's `MintAuthority` verifier set). It is
     /// distinct from the Ed25519 transaction signer held by the seal protocol.
     pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
-        self.verifier_signing_key = Some(verifier_signing_key);
+        self.verifier_signing_keys.push(verifier_signing_key);
+        self
+    }
+
+    /// Set the full set of secp256k1 verifier keys that sign the RFC-0012 §9.2
+    /// mint attestation digest (MINT-KEYS-001).
+    ///
+    /// Replaces any previously configured keys. Each key's 33-byte compressed
+    /// public key must be registered in the destination module's `MintAuthority`
+    /// verifier set; the adapter attaches one signature per key so a single mint
+    /// can satisfy an M-of-N threshold. An empty set leaves the backend
+    /// fail-closed (no attestation signature).
+    pub fn with_verifier_keys(mut self, verifier_signing_keys: Vec<secp256k1::SecretKey>) -> Self {
+        self.verifier_signing_keys = verifier_signing_keys;
         self
     }
 
@@ -145,28 +160,53 @@ impl AptosBackend {
     /// tolerates the EVM `+27` form). Fails closed when no verifier key is
     /// configured rather than emitting an unauthenticated mint.
     pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
-        use secp256k1::{Message, Secp256k1};
-
-        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+        // The first configured verifier key (fail-closed on none). Retained for
+        // single-signer callers/tests; the mint path uses the plural form below.
+        let secret_key = self.verifier_signing_keys.first().ok_or_else(|| {
             ChainOpError::CapabilityUnavailable(
                 "No verifier signer configured: cannot attest the §9.2 mint digest \
                  (set a secp256k1 verifier key via with_verifier_key())."
                     .to_string(),
             )
         })?;
+        Ok(Self::sign_digest_with(secret_key, digest))
+    }
 
-        // Sign the digest bytes directly (no message prefix), matching the
-        // on-chain ecdsa_recover-over-digest semantics.
+    /// Sign the §9.2 digest with **every** configured verifier key, returning one
+    /// 65-byte recoverable signature per key (MINT-KEYS-001).
+    ///
+    /// This is the mint-path signer: multiple local signers satisfy an M-of-N
+    /// `MintAuthority` in one transaction. Fails closed when no verifier key is
+    /// configured rather than emitting an unauthenticated mint the module rejects.
+    pub fn sign_mint_attestation_digests(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<Vec<u8>>> {
+        if self.verifier_signing_keys.is_empty() {
+            return Err(ChainOpError::CapabilityUnavailable(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set a secp256k1 verifier key via with_verifier_key())."
+                    .to_string(),
+            ));
+        }
+        Ok(self
+            .verifier_signing_keys
+            .iter()
+            .map(|k| Self::sign_digest_with(k, digest))
+            .collect())
+    }
+
+    /// Produce a single 65-byte recoverable signature (`r || s || v`, raw
+    /// recovery id 0/1) over the 32-byte digest, matching the on-chain
+    /// `secp256k1::ecdsa_recover`-over-digest semantics.
+    fn sign_digest_with(secret_key: &secp256k1::SecretKey, digest: &[u8; 32]) -> Vec<u8> {
+        use secp256k1::{Message, Secp256k1};
         let msg = Message::from_digest(*digest);
         let secp = Secp256k1::new();
         let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
         let (recovery_id, compact) = signature.serialize_compact();
-
         let mut out = Vec::with_capacity(65);
         out.extend_from_slice(&compact);
         // Aptos `secp256k1::ecdsa_recover` expects the raw recovery id (0/1) as `v`.
         out.push(recovery_id.to_i32() as u8);
-        Ok(out)
+        out
     }
 
     /// Submit a verifier-attested §9.2 `csv_seal::mint_sanad` call and wait for its
@@ -691,50 +731,17 @@ impl ChainDeployer for AptosBackend {
 impl ChainProofProvider for AptosBackend {
     async fn build_inclusion_proof(
         &self,
-        commitment: &Hash,
-        block_height: u64,
-        anchor_id: &[u8],
+        _commitment: &Hash,
+        _block_height: u64,
+        _anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
-        // Get block/ledger info
-        let ledger = self
-            .rpc()
-            .get_ledger_info()
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get ledger: {}", e)))?;
-
-        // Build event proof - use a default seal address
-        let seal_address = [0u8; 32];
-        let event_data = self
-            .event_builder
-            .build(*commitment.as_bytes(), seal_address);
-
-        // Convert ledger version to 32-byte hash
-        let mut block_hash_bytes = [0u8; 32];
-        let version_bytes = ledger.ledger_version.to_le_bytes();
-        block_hash_bytes[..8].copy_from_slice(&version_bytes);
-
-        // In a real implementation, we would use the anchor_id (which should be the transaction hash)
-        // to fetch the transaction and construct a proper proof.
-        // The anchor_id is expected to be the 32-byte transaction hash.
-        let _tx_hash = {
-            if anchor_id.len() != 32 {
-                return Err(ChainOpError::InvalidInput(format!(
-                    "Invalid anchor_id length for Aptos: expected 32 bytes, got {}",
-                    anchor_id.len()
-                )));
-            }
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(anchor_id);
-            arr
-        };
-
-        Ok(CoreInclusionProof {
-            proof_bytes: event_data,
-            block_hash: Hash::new(block_hash_bytes),
-            position: block_height,
-            block_number: block_height,
-            ..Default::default()
-        })
+        Err(ChainOpError::CapabilityUnavailable(
+            "Legacy Aptos ChainProofProvider inclusion proofs are disabled: \
+             this path previously fabricated event payloads instead of accumulator \
+             or transaction inclusion evidence. Use the runtime ChainProofPort path \
+             for verifier-attested proof bundles."
+                .to_string(),
+        ))
     }
 
     fn verify_inclusion_proof(
@@ -1602,5 +1609,87 @@ mod tests {
             result.is_err(),
             "empty module address must fail closed, not fall back to a mock seal protocol"
         );
+    }
+
+    fn backend_with_keys(keys: Vec<secp256k1::SecretKey>) -> AptosBackend {
+        let rpc = Box::new(MockAptosRpc::new(1));
+        AptosBackend::new(rpc, AptosNetwork::Devnet)
+            .expect("backend")
+            .with_verifier_keys(keys)
+    }
+
+    #[tokio::test]
+    async fn legacy_chain_proof_provider_inclusion_build_fails_closed() {
+        let backend = backend_with_keys(vec![]);
+        let commitment = Hash::sha256(b"phase-2-aptos-commitment");
+        let anchor_id = Hash::sha256(b"phase-2-aptos-anchor");
+
+        let result = backend
+            .build_inclusion_proof(&commitment, 42, anchor_id.as_bytes())
+            .await;
+
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(ref message)) if message.contains("Legacy Aptos ChainProofProvider inclusion proofs are disabled")),
+            "legacy provider must not fabricate inclusion proofs: {result:?}"
+        );
+    }
+
+    #[test]
+    fn legacy_chain_proof_provider_inclusion_verify_fails_closed() {
+        let backend = backend_with_keys(vec![]);
+        let commitment = Hash::sha256(b"phase-2-aptos-commitment");
+        let forged = CoreInclusionProof {
+            proof_bytes: commitment.as_bytes().to_vec(),
+            block_hash: Hash::sha256(b"phase-2-aptos-block"),
+            position: 42,
+            block_number: 42,
+            ..Default::default()
+        };
+
+        let result = backend.verify_inclusion_proof(&forged, &commitment);
+
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(ref message)) if message.contains("Legacy Aptos ChainProofProvider inclusion verification is disabled")),
+            "legacy provider must not accept self-supplied proof bytes: {result:?}"
+        );
+    }
+
+    #[test]
+    fn multi_signer_produces_one_signature_per_key_each_recovering() {
+        // MINT-KEYS-001: multiple local verifier keys attach one recoverable
+        // signature each, and every signature recovers — over the 32-byte digest
+        // as Aptos's ecdsa_recover does — to its configured public key.
+        use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+        use secp256k1::{Message, Secp256k1};
+
+        let secp = Secp256k1::new();
+        let (s1, pk1) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let (s2, pk2) = secp.generate_keypair(&mut rand::rngs::OsRng);
+        let backend = backend_with_keys(vec![s1, s2]);
+
+        let digest = [0x42u8; 32];
+        let sigs = backend
+            .sign_mint_attestation_digests(&digest)
+            .expect("two signers configured");
+        assert_eq!(sigs.len(), 2, "one signature per configured key");
+
+        let recover = |sig: &[u8]| {
+            let rid = RecoveryId::from_i32(sig[64] as i32).unwrap();
+            let rec = RecoverableSignature::from_compact(&sig[..64], rid).unwrap();
+            secp.recover_ecdsa(&Message::from_digest(digest), &rec)
+                .unwrap()
+        };
+        assert_eq!(recover(&sigs[0]), pk1);
+        assert_eq!(recover(&sigs[1]), pk2);
+    }
+
+    #[test]
+    fn no_verifier_key_fails_closed() {
+        let backend = backend_with_keys(vec![]);
+        assert!(
+            backend.sign_mint_attestation_digests(&[0u8; 32]).is_err(),
+            "absent verifier key must fail closed, not emit an unauthenticated mint"
+        );
+        assert!(backend.sign_mint_attestation_digest(&[0u8; 32]).is_err());
     }
 }

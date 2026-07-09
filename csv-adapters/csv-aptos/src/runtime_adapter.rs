@@ -169,14 +169,14 @@ impl ChainAdapter for AptosRuntimeAdapter {
             // verifier key. Fails closed (no signer -> no signature) rather than
             // emitting an unauthenticated mint the module would reject.
             let digest = attestation.attestation_digest();
-            let signature = self
+            let signatures = self
                 .backend
-                .sign_mint_attestation_digest(&digest)
+                .sign_mint_attestation_digests(&digest)
                 .map_err(|e| {
                     AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
                 })?;
             let mut verifier_signatures = request.verifier_signatures.clone();
-            verifier_signatures.push(signature);
+            verifier_signatures.extend(signatures);
 
             let args = crate::mint::build_aptos_mint_args(
                 &attestation,
@@ -192,6 +192,9 @@ impl ChainAdapter for AptosRuntimeAdapter {
             Ok(MintResult {
                 tx_hash: result.transaction_hash,
                 block_height: result.block_height,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    self.chain_id.clone(),
+                ),
             })
         }
         #[cfg(not(feature = "rpc"))]
@@ -345,6 +348,9 @@ impl ChainAdapter for AptosRuntimeAdapter {
             Ok(MintResult {
                 tx_hash: hex::encode(tx_hash_bytes),
                 block_height: tx.version,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    self.chain_id.clone(),
+                ),
             })
         }
         #[cfg(not(feature = "rpc"))]

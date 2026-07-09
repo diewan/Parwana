@@ -156,7 +156,11 @@ impl WalletOperations for BitcoinWalletOperations {
         }
     }
 
-    async fn sign_transaction(&self, _seed: &[u8], _tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
+    async fn sign_transaction(
+        &self,
+        _seed: &[u8],
+        _tx_data: &[u8],
+    ) -> Result<Vec<u8>, WalletError> {
         // Fail closed. The previous implementation treated `tx_data` as a raw
         // 32-byte digest and produced a bare ECDSA signature over it, with no
         // sighash construction, no input/prevout binding, and no witness

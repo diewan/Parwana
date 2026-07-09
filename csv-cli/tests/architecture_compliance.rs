@@ -216,6 +216,7 @@ fn test_commands_use_csv_sdk_runtime() {
                     | "tests.rs"
                     | "status.rs"
                     | "content.rs"
+                    | "sanad_manifest.rs"
                     | "runtime.rs"
                     | "trust.rs"
                     | "chain.rs"

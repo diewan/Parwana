@@ -171,6 +171,9 @@ impl TestAdapter {
         csv_adapter_core::MintResult {
             tx_hash: hex::encode([0x22u8; 32]),
             block_height: 200,
+            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                "test-chain",
+            ),
         }
     }
 }

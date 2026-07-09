@@ -138,23 +138,57 @@ timelocked by governance). The on-chain verifier identity is the 20-byte address
 
 ## 5. Give the private key to the runtime (config)
 
-The runtime and the `csv` CLI read the signing key from an environment variable
-(a process secret, never a chain-config file, never logged):
+The runtime and the `csv` CLI read the signing key(s) from environment variables
+(a process secret, never a chain-config file, never logged). Since MINT-KEYS-001
+resolution is **destination-chain-scoped** and supports **multiple local signers**:
+
+| Variable | Scope | Notes |
+|----------|-------|-------|
+| `CSV_MINT_VERIFIER_KEY` | legacy/default — every destination chain with no override | testnet / single-destination default |
+| `CSV_MINT_VERIFIER_KEY_APTOS` | Aptos only | overrides the default **for Aptos only** |
+| `CSV_MINT_VERIFIER_KEY_SUI` | Sui only | overrides the default **for Sui only** |
+| `CSV_MINT_VERIFIER_KEY_SOLANA` | Solana only | overrides the default **for Solana only** |
+| `CSV_MINT_VERIFIER_KEY_ETHEREUM` | Ethereum only | overrides the default **for Ethereum only** |
 
 ```bash
+# Legacy/default single key (applies to all destination chains):
 export CSV_MINT_VERIFIER_KEY=$(python3 -c "import json;print(json.load(open('$HOME/.csv/verifier-key-testnet.json'))['private_key_hex'])")
+
+# Chain-scoped keys, and multiple local signers as a comma-separated list
+# (each 32-byte hex, optional 0x). One verifier signature is attached per key,
+# satisfying an M-of-N registry in a single mint:
+export CSV_MINT_VERIFIER_KEY_APTOS="<hex_key_1>,<hex_key_2>"
 ```
 
-The adapter factory ([`load_mint_verifier_key`](../../csv-adapter-factory/src/lib.rs))
-loads it and attaches it to the destination adapter. Unset ⇒ the runtime logs
-`no mint verifier key … will fail closed` and does not sign. The chain addresses
-themselves come from `deployment-manifest.json` (resolved by
+**Precedence & fail-closed rules** (see
+[`csv-adapter-factory::mint_signer`](../../csv-adapter-factory/src/mint_signer.rs),
+resolved by `load_mint_verifier_keys`):
+
+- A non-empty `CSV_MINT_VERIFIER_KEY_<CHAIN>` is **authoritative for that chain**
+  and is **never mixed with** the legacy default — a key configured for one
+  destination is never silently reused for another.
+- If a chain-scoped var is set but every entry is malformed, resolution does
+  **not** fall back to the default (that could be a different verifier set); it
+  fails closed (no signature).
+- Unset / all-empty ⇒ the runtime logs `no mint verifier key … will fail closed`
+  and does not sign. The `csv` CLI preflight (`materialize` / `resume`) refuses
+  **before the source Sanad is locked**, naming the destination-chain variable to
+  set.
+
+The chain addresses themselves come from `deployment-manifest.json` (resolved by
 `get_sui_registry_id` / `get_aptos_module_address` / `get_solana_program_id`) and
 are mirrored into `chains/*.toml` and `~/.csv/config.toml` by the deploy scripts.
 
-For **M-of-N across processes**, each signer runs with its own
-`CSV_MINT_VERIFIER_KEY`; the runtime aggregates the signatures up to `M` (the ABI
-carries a vector of signatures on every chain).
+**M-of-N** is supported two ways: multiple keys in one process (comma-separated
+list above — the adapter signs with all of them), or one key per process across
+independent signers (each with its own env var; the runtime aggregates up to
+`M`). The ABI carries a vector of signatures on every chain.
+
+**KMS/HSM.** Raw env keys are a testnet/dev convenience. The
+[`MintAttestationSigner`](../../csv-adapter-factory/src/mint_signer.rs) trait is
+the production seam: `EnvSecpSigner` is the env-backed provider, and `KmsSigner`
+is a fail-closed scaffold that returns a clear error until an operator wires a
+real KMS/HSM backend. Do not ship raw secrets in env vars in production.
 
 ---
 

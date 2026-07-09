@@ -12,6 +12,9 @@ csv-protocol = { path = "../csv-protocol" }
 thiserror = "1.0"
 hex = "0.4.3"
 serde = { version = "1.0", features = ["derive"] }
+# Used to canonicalize secp256k1 verifier keys for approved-signer binding
+# (VERIFY-SIGNER-BINDING-001).
+secp256k1 = { version = "0.28" }
 
 [dev-dependencies]
 secp256k1 = { version = "0.28", features = ["rand-std"] }

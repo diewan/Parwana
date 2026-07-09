@@ -30,7 +30,9 @@ impl BlsVerifier {
     ) -> Result<(), AnchorError> {
         #[cfg(feature = "bls")]
         {
-            use blst::{BLST_ERROR, min_sig::AggregatePublicKey, min_sig::PublicKey, min_sig::Signature};
+            use blst::{
+                BLST_ERROR, min_sig::AggregatePublicKey, min_sig::PublicKey, min_sig::Signature,
+            };
 
             // Parse the signature (48 bytes for BLS12-381 min_sig).
             if signature.len() != 48 {

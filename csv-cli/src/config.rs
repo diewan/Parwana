@@ -128,6 +128,42 @@ pub struct Config {
     /// Data directory for state persistence
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
+    /// Approved verifier-set for offline proof acceptance (VERIFY-SIGNER-BINDING-001).
+    #[serde(default)]
+    pub verifier: VerifierTrustConfig,
+}
+
+/// Recipient's trusted verifier set for the offline proof-acceptance path.
+///
+/// These are the RFC-0012 §9 verifier public keys the recipient trusts to have
+/// authorized a state transition — the same key set seeded into the destination
+/// registry's verifier set. A proof-bundle signature that does not recover to one
+/// of these keys is rejected. This is deliberately supplied from **trusted local
+/// config**, never from the consignment (which the sender controls).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerifierTrustConfig {
+    /// Approved verifier public keys, hex (compressed secp256k1 recommended;
+    /// `0x`-prefix optional). Empty ⇒ the offline accept path fails closed.
+    #[serde(default)]
+    pub approved_keys: Vec<String>,
+}
+
+impl Config {
+    /// Decode the approved verifier public keys to raw bytes for the verifier's
+    /// signer-binding check. Returns an error if any entry is not valid hex, so a
+    /// misconfigured trust set is surfaced rather than silently shrinking the
+    /// approved set (which could weaken the binding).
+    pub fn approved_verifier_keys(&self) -> anyhow::Result<Vec<Vec<u8>>> {
+        self.verifier
+            .approved_keys
+            .iter()
+            .map(|k| {
+                hex::decode(k.trim().trim_start_matches("0x")).map_err(|e| {
+                    anyhow::anyhow!("Invalid verifier.approved_keys entry (must be hex): {}", e)
+                })
+            })
+            .collect()
+    }
 }
 
 /// Legacy wallet config for TOML parsing (will be migrated to unified WalletAccount)
@@ -270,6 +306,7 @@ impl Default for Config {
             chains,
             wallets,
             data_dir: "~/.csv/data".to_string(),
+            verifier: VerifierTrustConfig::default(),
         }
     }
 }
@@ -770,6 +807,7 @@ finality_depth = 1
             chains: HashMap::new(),
             wallets: HashMap::new(),
             data_dir: "~/.csv/data".to_string(),
+            verifier: VerifierTrustConfig::default(),
         };
         let missing = empty_config.chain(&ChainId::new("bitcoin"));
         assert!(missing.is_err());

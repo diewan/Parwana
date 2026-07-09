@@ -119,16 +119,24 @@ impl AdapterFactory for SuiFactory {
         .map_err(|e| {
             FactoryError::CreationFailed(format!("Failed to create Sui backend: {}", e))
         })?;
-        // Attach the RFC-0012 mint verifier signing key if provided (env). Without
-        // it the backend signs no attestation and mint fails closed by design.
-        if let Some(vk) = super::load_mint_verifier_key() {
-            sui_backend_inner = sui_backend_inner.with_verifier_key(vk);
-            log::info!("Factory: Sui adapter configured with mint verifier key");
-        } else {
+        // Attach the RFC-0012 mint verifier signing key(s) if provided (env).
+        // Resolution is destination-chain-scoped (CSV_MINT_VERIFIER_KEY_SUI
+        // overrides the CSV_MINT_VERIFIER_KEY default for Sui only) and may carry
+        // multiple signers for an M-of-N registry. With none configured the
+        // backend signs no attestation and mint fails closed by design.
+        let verifier_keys = super::load_mint_verifier_keys("sui");
+        if verifier_keys.is_empty() {
             log::debug!(
-                "Factory: no mint verifier key ({}) — Sui mint will fail closed",
+                "Factory: no mint verifier key configured — Sui mint will fail closed \
+                 (set {} or CSV_MINT_VERIFIER_KEY_SUI)",
                 super::MINT_VERIFIER_KEY_ENV
             );
+        } else {
+            log::info!(
+                "Factory: Sui adapter configured with {} mint verifier signer(s)",
+                verifier_keys.len()
+            );
+            sui_backend_inner = sui_backend_inner.with_verifier_keys(verifier_keys);
         }
         let sui_backend = Arc::new(sui_backend_inner);
 

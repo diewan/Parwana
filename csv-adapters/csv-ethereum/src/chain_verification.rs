@@ -20,51 +20,14 @@ impl super::EthereumBackend {
         proof: &InclusionProof,
         commitment: &Hash,
     ) -> ChainOpResult<bool> {
-        #[cfg(feature = "rpc")]
-        {
-            use tokio::runtime::Handle;
-            let handle = Handle::current();
-
-            let block = handle
-                .block_on(self.rpc().get_block_by_number(proof.position))
-                .map_err(|e| ChainOpError::RpcError(format!("Failed to get block: {}", e)))?
-                .ok_or_else(|| {
-                    ChainOpError::ProofVerificationError("Block not found".to_string())
-                })?;
-
-            let state_root_bytes: &[u8] = block.state_root.as_ref();
-            if state_root_bytes != proof.proof_bytes.as_slice() {
-                return Ok(false);
-            }
-
-            let commitment_bytes = commitment.as_bytes();
-            if !proof
-                .proof_bytes
-                .windows(commitment_bytes.len())
-                .any(|window| window == commitment_bytes)
-            {
-                return Err(ChainOpError::ProofVerificationError(
-                    "Commitment not found in proof data".to_string(),
-                ));
-            }
-
-            if proof.block_hash.as_bytes().is_empty()
-                || format!("0x{}", hex::encode(proof.block_hash.as_bytes())).len() < 3
-            {
-                return Err(ChainOpError::ProofVerificationError(
-                    "Invalid transaction hash format".to_string(),
-                ));
-            }
-
-            Ok(true)
-        }
-        #[cfg(not(feature = "rpc"))]
-        {
-            let _ = (proof, commitment);
-            Err(ChainOpError::FeatureNotEnabled(
-                "rpc feature required for proof verification".to_string(),
-            ))
-        }
+        let _ = (proof, commitment);
+        Err(ChainOpError::CapabilityUnavailable(
+            "Legacy Ethereum ChainProofProvider inclusion verification is disabled: \
+             this path did not verify MPT receipt inclusion against independently \
+             fetched chain state. Use the runtime ChainProofPort path for \
+             verifier-attested proof bundles."
+                .to_string(),
+        ))
     }
 
     /// Chain-native finality verification.

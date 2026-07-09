@@ -22,6 +22,6 @@ pub use chain_proof_bundle::{
     inclusion_anchor_ref, verify_chain_proof_bundle,
 };
 pub use verifier::{
-    CanonicalVerifier, CanonicalVerifierImpl, VerificationContext, VerificationError,
-    VerificationResult, verify_proof,
+    CanonicalVerifier, CanonicalVerifierImpl, ExpectedDomain, VerificationContext,
+    VerificationError, VerificationResult, verify_proof, verify_proof_bound,
 };

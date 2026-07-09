@@ -18,6 +18,13 @@ mod aptos;
 mod bitcoin;
 #[cfg(feature = "ethereum")]
 mod ethereum;
+#[cfg(any(
+    feature = "ethereum",
+    feature = "sui",
+    feature = "solana",
+    feature = "aptos"
+))]
+pub mod mint_signer;
 #[cfg(feature = "solana")]
 mod solana;
 #[cfg(feature = "sui")]
@@ -33,63 +40,35 @@ pub use solana::SolanaFactory;
 #[cfg(feature = "sui")]
 pub use sui::SuiFactory;
 
-/// Environment variable holding the RFC-0012 mint verifier's secp256k1 signing
-/// key (32-byte secret, hex, with or without a `0x` prefix).
-///
-/// This is the private half of the verifier keypair whose public key is seeded
-/// into each destination registry's verifier set (`add_verifier` /
-/// `initialize_verifier_registry` / `init_mint_authority`). The runtime signs the
-/// RFC-0012 §9.2 mint-attestation digest with it; the destination contract
-/// verifies the recovered signer against its on-chain set. It is deliberately a
-/// process secret (env), never a chain-config field, and never logged.
+/// Legacy/default env var name holding the RFC-0012 mint verifier's secp256k1
+/// signing key. Re-exported from [`mint_signer`] for backwards compatibility;
+/// see that module for the chain-scoped, multi-signer resolution model
+/// (`CSV_MINT_VERIFIER_KEY_APTOS`, comma-separated lists, provider seam).
 #[cfg(any(
     feature = "ethereum",
     feature = "sui",
     feature = "solana",
     feature = "aptos"
 ))]
-pub const MINT_VERIFIER_KEY_ENV: &str = "CSV_MINT_VERIFIER_KEY";
+pub use mint_signer::MINT_VERIFIER_KEY_ENV;
 
-/// Load the mint verifier signing key from [`MINT_VERIFIER_KEY_ENV`], if set.
+/// Resolve the ordered list of local secp256k1 verifier secrets for a
+/// destination chain tag (`"aptos"`, `"sui"`, `"solana"`, `"ethereum"`).
 ///
-/// Returns `None` when the variable is absent — in that case the destination
-/// adapter is built without a verifier key and mint **fails closed** (the runtime
-/// emits no verifier signature and the contract rejects it). A present-but-invalid
-/// value (bad hex, wrong length, not a valid secp256k1 scalar) also yields `None`
-/// with a warning, preserving fail-closed rather than panicking. The key material
-/// is never included in the log line.
+/// A chain-scoped `CSV_MINT_VERIFIER_KEY_<CHAIN>` overrides the legacy default
+/// for that chain only; each var may hold a comma-separated list so multiple
+/// local signers attach to one destination (M-of-N registries). Returns an empty
+/// vector when nothing is configured — the destination adapter is then built
+/// without a verifier key and mint **fails closed**. Key material is never
+/// logged. See [`mint_signer`].
 #[cfg(any(
     feature = "ethereum",
     feature = "sui",
     feature = "solana",
     feature = "aptos"
 ))]
-pub(crate) fn load_mint_verifier_key() -> Option<secp256k1::SecretKey> {
-    let raw = std::env::var(MINT_VERIFIER_KEY_ENV).ok()?;
-    let trimmed = raw.trim().trim_start_matches("0x");
-    let bytes = match hex::decode(trimmed) {
-        Ok(b) => b,
-        Err(_) => {
-            log::warn!(
-                "{MINT_VERIFIER_KEY_ENV} is set but is not valid hex; \
-                 mint will fail closed (no verifier signature)"
-            );
-            return None;
-        }
-    };
-    match secp256k1::SecretKey::from_slice(&bytes) {
-        Ok(key) => {
-            log::info!("Factory: loaded mint verifier signing key from {MINT_VERIFIER_KEY_ENV}");
-            Some(key)
-        }
-        Err(_) => {
-            log::warn!(
-                "{MINT_VERIFIER_KEY_ENV} is set but is not a valid 32-byte secp256k1 \
-                 secret; mint will fail closed (no verifier signature)"
-            );
-            None
-        }
-    }
+pub(crate) fn load_mint_verifier_keys(chain_tag: &str) -> Vec<secp256k1::SecretKey> {
+    mint_signer::resolve_mint_verifier_keys(chain_tag)
 }
 
 /// Configuration for creating a chain adapter.
@@ -275,46 +254,5 @@ impl FactoryRegistry {
 impl Default for FactoryRegistry {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(all(test, any(feature = "sui", feature = "solana", feature = "aptos")))]
-mod verifier_key_tests {
-    use super::*;
-
-    // All cases live in one test: they mutate a shared process env var, so they
-    // must not run concurrently with each other.
-    #[test]
-    fn load_mint_verifier_key_cases() {
-        let prev = std::env::var(MINT_VERIFIER_KEY_ENV).ok();
-        // SAFETY: single-threaded within this test; restored before returning.
-        unsafe {
-            // Absent -> None (fail-closed).
-            std::env::remove_var(MINT_VERIFIER_KEY_ENV);
-            assert!(load_mint_verifier_key().is_none(), "absent must be None");
-
-            // A valid 32-byte secp256k1 secret loads (bare hex).
-            let valid = "0000000000000000000000000000000000000000000000000000000000000001";
-            std::env::set_var(MINT_VERIFIER_KEY_ENV, valid);
-            assert!(load_mint_verifier_key().is_some(), "valid hex must load");
-
-            // 0x prefix is accepted.
-            std::env::set_var(MINT_VERIFIER_KEY_ENV, format!("0x{valid}"));
-            assert!(load_mint_verifier_key().is_some(), "0x-prefixed must load");
-
-            // Bad hex -> None, not a panic.
-            std::env::set_var(MINT_VERIFIER_KEY_ENV, "nothex");
-            assert!(load_mint_verifier_key().is_none(), "bad hex must be None");
-
-            // Wrong length -> None.
-            std::env::set_var(MINT_VERIFIER_KEY_ENV, "00ff");
-            assert!(load_mint_verifier_key().is_none(), "short key must be None");
-
-            // Restore.
-            match prev {
-                Some(v) => std::env::set_var(MINT_VERIFIER_KEY_ENV, v),
-                None => std::env::remove_var(MINT_VERIFIER_KEY_ENV),
-            }
-        }
     }
 }

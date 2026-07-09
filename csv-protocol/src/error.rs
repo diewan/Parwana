@@ -29,6 +29,10 @@ pub enum ProtocolError {
     #[error("Finality not reached: {0}")]
     FinalityNotReached(String),
 
+    /// Proof is too old (anchor buried deeper than the freshness bound).
+    #[error("Proof expired: {0}")]
+    ProofExpired(String),
+
     /// Inclusion proof failed
     #[error("Inclusion proof failed: {0}")]
     InclusionProofFailed(String),

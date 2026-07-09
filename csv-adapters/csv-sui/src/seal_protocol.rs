@@ -59,6 +59,60 @@ fn format_object_id(object_id: [u8; 32]) -> String {
     format!("0x{}", hex::encode(object_id))
 }
 
+/// Deterministically derive a seal's initial `(sanad_id, state_root, commitment)`
+/// from chain-bound inputs.
+///
+/// The Sui checkpoint API is private in sui-rpc, so the strongest verifiable
+/// chain-state anchor available before a `create_seal` transaction executes is
+/// the set of gas coins it consumes. `gas_ref_digest` commits to each coin's
+/// real `(object_id, version, content-digest)`. Deriving from that (plus the
+/// package, sender, and nonce) is:
+/// - deterministic — identical inputs always yield identical outputs, so
+///   creating a seal twice for the same logical inputs never drifts (there is
+///   no `SystemTime::now()` entropy), and
+/// - chain-bound & reconstructable — a verifier who inspects the transaction
+///   sees exactly which on-chain objects these values commit to.
+///
+/// (`SUI-CREATE-SEAL-STATE-001`).
+fn derive_seal_inputs(
+    package_id_bytes: [u8; 32],
+    sender_bytes: &[u8],
+    nonce: u64,
+    gas_ref_digest: [u8; 32],
+) -> (
+    /* sanad_id */ [u8; 32],
+    /* state_root */ [u8; 32],
+    /* commitment */ [u8; 32],
+) {
+    use blake2::{Blake2b, Digest as Blake2Digest};
+
+    let mut state_root_hasher = Blake2b::new();
+    state_root_hasher.update(b"csv.sui.state-root.v2");
+    state_root_hasher.update(package_id_bytes);
+    state_root_hasher.update(sender_bytes);
+    state_root_hasher.update(nonce.to_le_bytes());
+    state_root_hasher.update(gas_ref_digest);
+    let state_root: [u8; 32] = state_root_hasher.finalize().into();
+
+    let mut sanad_hasher = Blake2b::new();
+    sanad_hasher.update(b"csv.sui.sanad.v2");
+    sanad_hasher.update(package_id_bytes);
+    sanad_hasher.update(sender_bytes);
+    sanad_hasher.update(nonce.to_le_bytes());
+    sanad_hasher.update(gas_ref_digest);
+    let sanad_id: [u8; 32] = sanad_hasher.finalize().into();
+
+    let mut commitment_hasher = Blake2b::new();
+    commitment_hasher.update(b"csv.sui.commitment.v2");
+    commitment_hasher.update(sanad_id);
+    commitment_hasher.update(state_root);
+    commitment_hasher.update(nonce.to_le_bytes());
+    commitment_hasher.update(sender_bytes);
+    let commitment: [u8; 32] = commitment_hasher.finalize().into();
+
+    (sanad_id, state_root, commitment)
+}
+
 /// Parse a Sui object ID string (hex).
 fn parse_object_id(s: &str) -> Result<[u8; 32], String> {
     let hex_str = s.trim_start_matches("0x");
@@ -965,10 +1019,12 @@ impl SealProtocol for SuiSealProtocol {
                 .map_err(|e| format!("Invalid package ID: {}", e))?;
             let module_name = self.config.seal_contract.module_name.clone();
 
-            // Fetch gas objects for the sender address
-            let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
-                .await
-                .map_err(|e| format!("Failed to fetch gas objects: {}", e))?;
+            // Fetch gas objects for the sender address, together with a
+            // commitment to the exact on-chain coins being consumed.
+            let (gas_objects, gas_ref_digest) =
+                crate::gas_utils::fetch_gas_objects_with_digest(&self.node, &sender_address)
+                    .await
+                    .map_err(|e| format!("Failed to fetch gas objects: {}", e))?;
 
             // Build the transaction using sui-transaction-builder
             let mut tx_builder = TransactionBuilder::new();
@@ -988,54 +1044,39 @@ impl SealProtocol for SuiSealProtocol {
             // Generate required parameters from value
             let nonce = value.unwrap_or(0);
 
-            // SECURITY CRITICAL: Derive actual values from chain state instead of using placeholders
+            // Derive the seal's initial sanad_id / commitment / state_root from
+            // real, chain-bound inputs — never from wall-clock time.
             //
-            // Since the checkpoint API is private in sui-rpc, we derive the state_root
-            // from the transaction context itself, which is cryptographically sound.
-            // The state_root will be bound to the actual transaction when executed.
+            // The Sui checkpoint API is private in sui-rpc, so the closest
+            // verifiable chain-state anchor available *before* the transaction
+            // executes is the set of gas coins being consumed. `gas_ref_digest`
+            // commits to each coin's real (object_id, version, content-digest),
+            // so these derivations are:
+            //   * deterministic — the same inputs always produce the same values
+            //     (no `SystemTime::now()` entropy), and
+            //   * chain-bound & reconstructable — a verifier who inspects the
+            //     transaction sees exactly which on-chain objects they commit to,
+            //     and those coins are single-use (spent by this tx).
+            // The v2 domain tags keep these distinct from the prior fabricated
+            // scheme (SUI-CREATE-SEAL-STATE-001).
 
-            // 1. Derive state_root from package_id, sender, and nonce (unique per transaction)
-            let mut state_root_hasher = blake2::Blake2b::new();
-            state_root_hasher.update(b"CSV-SUI-STATE-ROOT-");
-            state_root_hasher.update(package_id_bytes);
-            state_root_hasher.update(sender_address.as_bytes());
-            state_root_hasher.update(&nonce.to_le_bytes());
-            state_root_hasher.update(
-                &std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0)
-                    .to_le_bytes(),
+            let (sanad_id, state_root, commitment) = derive_seal_inputs(
+                package_id_bytes,
+                sender_address.as_bytes(),
+                nonce,
+                gas_ref_digest,
             );
-            let state_root: [u8; 32] = state_root_hasher.finalize().into();
-
-            // 2. Derive sanad_id from package_id and sender address (unique identifier for this seal creation)
-            let mut sanad_hasher = blake2::Blake2b::new();
-            sanad_hasher.update(b"CSV-SUI-SANAD-");
-            sanad_hasher.update(package_id_bytes);
-            sanad_hasher.update(sender_address.as_bytes());
-            sanad_hasher.update(&nonce.to_le_bytes());
-            let sanad_id: [u8; 32] = sanad_hasher.finalize().into();
-
-            // 3. Derive commitment from transaction context (hash of the seal creation parameters)
-            let mut commitment_hasher = blake2::Blake2b::new();
-            commitment_hasher.update(b"CSV-SUI-COMMITMENT-");
-            commitment_hasher.update(&sanad_id);
-            commitment_hasher.update(&state_root);
-            commitment_hasher.update(&nonce.to_le_bytes());
-            commitment_hasher.update(sender_address.as_bytes());
-            let commitment: [u8; 32] = commitment_hasher.finalize().into();
 
             log::info!(
-                "SUI: Derived sanad_id from package and sender: 0x{}",
+                "SUI: Derived sanad_id (chain-bound) 0x{}",
                 hex::encode(sanad_id)
             );
             log::info!(
-                "SUI: Derived commitment from transaction context: 0x{}",
+                "SUI: Derived commitment (chain-bound) 0x{}",
                 hex::encode(commitment)
             );
             log::info!(
-                "SUI: Fetched state_root from latest checkpoint: 0x{}",
+                "SUI: Derived state_root from consumed gas objects: 0x{}",
                 hex::encode(state_root)
             );
 
@@ -1225,12 +1266,9 @@ impl SealProtocol for SuiSealProtocol {
                 (id, 1, String::new())
             };
 
-            let nonce = value.unwrap_or_else(|| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0)
-            });
+            // Deterministic nonce: reuse the value-derived nonce computed above.
+            // Never introduce wall-clock entropy here (SUI-CREATE-SEAL-STATE-001).
+            let nonce = value.unwrap_or(0);
 
             log::info!(
                 "SUI: Created seal object {} with version {} on-chain",
@@ -1457,6 +1495,38 @@ mod tests {
 
     fn test_adapter() -> SuiSealProtocol {
         SuiSealProtocol::with_test().unwrap()
+    }
+
+    /// SUI-CREATE-SEAL-STATE-001: identical logical inputs must produce
+    /// identical seal derivations. The previous implementation folded
+    /// `SystemTime::now()` into the state_root, so two calls drifted; the
+    /// chain-bound derivation is a pure function and must be stable.
+    #[test]
+    fn derive_seal_inputs_is_deterministic() {
+        let package = [7u8; 32];
+        let sender = [9u8; 32];
+        let nonce = 42u64;
+        let gas_ref = [3u8; 32];
+
+        let a = derive_seal_inputs(package, &sender, nonce, gas_ref);
+        let b = derive_seal_inputs(package, &sender, nonce, gas_ref);
+        assert_eq!(a, b, "same inputs must produce the same seal derivation");
+    }
+
+    /// A different consumed chain-state reference must change the derivation,
+    /// so the values are actually bound to real chain state.
+    #[test]
+    fn derive_seal_inputs_binds_gas_reference() {
+        let package = [7u8; 32];
+        let sender = [9u8; 32];
+        let nonce = 42u64;
+
+        let a = derive_seal_inputs(package, &sender, nonce, [1u8; 32]);
+        let b = derive_seal_inputs(package, &sender, nonce, [2u8; 32]);
+        assert_ne!(
+            a, b,
+            "different gas-object references must produce different derivations"
+        );
     }
 
     #[tokio::test]

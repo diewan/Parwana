@@ -491,6 +491,24 @@ impl SanadsManager {
         }
 
         let descriptor = request.build_descriptor()?;
+
+        // Fail closed unless the ownership proof cryptographically verifies:
+        // `proof` must be a valid signature by `public_key` over the canonical
+        // ownership message, and `public_key` must derive to the claimed
+        // `owner` address for this chain (SANAD-OWNERSHIP-PROOF-VERIFY-001).
+        // A published Sanad is authoritative; an absent or forged proof must
+        // never be persisted as Active.
+        owner_proof
+            .verify(
+                &request.chain,
+                &descriptor.compute_hash(),
+                &commitment,
+                salt,
+            )
+            .map_err(|e| {
+                CsvError::InvalidInput(format!("Ownership proof verification failed: {}", e))
+            })?;
+
         let sanad = self.create(
             &descriptor,
             commitment,
@@ -785,6 +803,7 @@ mod create_request_tests {
             owner: vec![9, 9, 9],
             proof: vec![1, 1, 1],
             scheme: None,
+            public_key: vec![],
         };
         let commitment = Hash::sha256(b"commitment");
         let salt = [7u8; 16];
@@ -814,6 +833,7 @@ mod create_request_tests {
             owner: vec![9, 9, 9],
             proof: vec![1, 1, 1],
             scheme: None,
+            public_key: vec![],
         };
 
         let result = manager.create_draft(
@@ -841,6 +861,7 @@ mod create_request_tests {
             owner: vec![9, 9, 9],
             proof: vec![1, 1, 1],
             scheme: None,
+            public_key: vec![],
         };
         let anchor = CommitAnchor {
             anchor_id: vec![1, 2, 3],

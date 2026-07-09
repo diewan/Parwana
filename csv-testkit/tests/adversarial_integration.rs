@@ -32,5 +32,6 @@ fn verification_context_builds_for_test_chains() {
         lock_output_index: ctx.lock_output_index,
         transition_id: ctx.transition_id,
         destination_chain: ctx.destination_chain,
+        authorized_signers: ctx.authorized_signers,
     };
 }

@@ -270,6 +270,9 @@ mod tests {
             Ok(MintResult {
                 tx_hash: "0xmock".to_string(),
                 block_height: 200,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    "mock-chain",
+                ),
             })
         }
 

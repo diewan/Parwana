@@ -53,6 +53,69 @@ impl SanadIdPreimage {
 /// Domain tag for Sanad ID derivation.
 pub const DOMAIN_SANAD_ID_V1: &str = "urn:lnp-bp:csv:csv.sanad.id.v1";
 
+/// Domain tag for owner-bound Sanad ID derivation (v2).
+///
+/// v2 folds a commitment to the owner identity into the preimage so that the
+/// SanadId is cryptographically tied to who owns it — a different owner cannot
+/// be attached to the same descriptor/commitment/salt without changing the
+/// SanadId (see `SANAD-OWNERSHIP-PROOF-VERIFY-001`). The distinct domain tag
+/// keeps v1 and v2 IDs cryptographically separated; it is a deliberate,
+/// versioned change rather than a silent alteration of existing v1 IDs.
+pub const DOMAIN_SANAD_ID_V2: &str = "urn:lnp-bp:csv:csv.sanad.id.v2";
+
+/// Owner-bound preimage for Sanad ID derivation (v2).
+///
+/// Identical to [`SanadIdPreimage`] but additionally binds a 32-byte commitment
+/// to the owner identity (`owner_commitment = sha256(owner_bytes)`), so that the
+/// SanadId is a function of the owner as well as the content/state.
+///
+/// **Layer:** L0
+/// **Serde:** Forbidden - L0 types MUST NOT use serde (enforced by deny.toml)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SanadIdPreimageV2 {
+    /// Descriptor hash (32-byte hash of the SanadPayloadDescriptor)
+    pub descriptor_hash: [u8; 32],
+    /// Commitment hash (32-byte commitment hash)
+    pub commitment: [u8; 32],
+    /// Salt bytes for uniqueness
+    pub salt: Vec<u8>,
+    /// Commitment to the owner identity (`sha256(owner_bytes)`)
+    pub owner_commitment: [u8; 32],
+}
+
+impl SanadIdPreimageV2 {
+    /// Create a new v2 preimage, hashing the raw owner bytes into a fixed-width
+    /// owner commitment.
+    pub fn new(
+        descriptor_hash: [u8; 32],
+        commitment: [u8; 32],
+        salt: Vec<u8>,
+        owner: &[u8],
+    ) -> Self {
+        Self {
+            descriptor_hash,
+            commitment,
+            salt,
+            owner_commitment: *Hash::sha256(owner).as_bytes(),
+        }
+    }
+
+    /// Convert to canonical bytes for hashing.
+    ///
+    /// The canonical format is:
+    /// `descriptor_hash || commitment || owner_commitment || salt`.
+    /// Fixed-width fields precede the variable-length salt so the encoding is
+    /// unambiguous without a length prefix.
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(96 + self.salt.len());
+        bytes.extend_from_slice(&self.descriptor_hash);
+        bytes.extend_from_slice(&self.commitment);
+        bytes.extend_from_slice(&self.owner_commitment);
+        bytes.extend_from_slice(&self.salt);
+        bytes
+    }
+}
+
 /// A unique Sanad identifier.
 ///
 /// Derived via domain-separated tagged hashing:
@@ -158,6 +221,42 @@ impl SanadId {
             commitment.as_bytes(),
             salt,
         )
+    }
+
+    /// Derives an owner-bound SanadId (v2) from a [`SanadIdPreimageV2`].
+    ///
+    /// Uses the v2 domain tag so the resulting ID is cryptographically distinct
+    /// from v1 IDs and is bound to the owner identity.
+    #[inline]
+    pub fn from_domain_canonical_v2(preimage: &SanadIdPreimageV2) -> Self {
+        let bytes = preimage.to_canonical_bytes();
+        let hash_bytes = tagged_hash_str(DOMAIN_SANAD_ID_V2, &bytes);
+        Self(Hash::new(hash_bytes))
+    }
+
+    /// Derives an owner-bound SanadId (v2) from descriptor hash, commitment,
+    /// salt, and the owner identity bytes.
+    ///
+    /// ## Security
+    ///
+    /// The owner is folded into the preimage via `sha256(owner)`, so the
+    /// SanadId changes if the owner changes. This binds a Sanad's identity to
+    /// its owner (`SANAD-OWNERSHIP-PROOF-VERIFY-001`). The `csv.sanad.id.v2`
+    /// domain tag keeps these IDs separated from v1 and from all other protocol
+    /// hashes.
+    pub fn from_descriptor_commitment_owner(
+        descriptor_hash: Hash,
+        commitment: Hash,
+        salt: &[u8],
+        owner: &[u8],
+    ) -> Self {
+        let preimage = SanadIdPreimageV2::new(
+            *descriptor_hash.as_bytes(),
+            *commitment.as_bytes(),
+            salt.to_vec(),
+            owner,
+        );
+        Self::from_domain_canonical_v2(&preimage)
     }
 
     /// Returns the underlying hash bytes.
@@ -395,6 +494,50 @@ mod tests {
         assert_eq!(
             id1, id2,
             "from_descriptor_commitment_salt must use from_domain_canonical"
+        );
+    }
+
+    #[test]
+    fn test_v2_owner_affects_id() {
+        let descriptor_hash = Hash::new([1u8; 32]);
+        let commitment = Hash::new([2u8; 32]);
+        let salt = b"salt";
+
+        let id_a =
+            SanadId::from_descriptor_commitment_owner(descriptor_hash, commitment, salt, b"alice");
+        let id_b =
+            SanadId::from_descriptor_commitment_owner(descriptor_hash, commitment, salt, b"bob");
+
+        assert_ne!(id_a, id_b, "Different owners MUST produce different v2 IDs");
+    }
+
+    #[test]
+    fn test_v2_same_owner_same_id() {
+        let descriptor_hash = Hash::new([3u8; 32]);
+        let commitment = Hash::new([4u8; 32]);
+        let salt = b"salt";
+
+        let id1 =
+            SanadId::from_descriptor_commitment_owner(descriptor_hash, commitment, salt, b"alice");
+        let id2 =
+            SanadId::from_descriptor_commitment_owner(descriptor_hash, commitment, salt, b"alice");
+
+        assert_eq!(id1, id2, "Identical inputs MUST produce identical v2 IDs");
+    }
+
+    #[test]
+    fn test_v2_distinct_from_v1() {
+        let descriptor_hash = Hash::new([5u8; 32]);
+        let commitment = Hash::new([6u8; 32]);
+        let salt = b"salt";
+
+        let v1 = SanadId::from_descriptor_commitment(descriptor_hash, commitment, salt);
+        let v2 =
+            SanadId::from_descriptor_commitment_owner(descriptor_hash, commitment, salt, b"alice");
+
+        assert_ne!(
+            v1, v2,
+            "v2 owner-bound IDs must be domain-separated from v1"
         );
     }
 

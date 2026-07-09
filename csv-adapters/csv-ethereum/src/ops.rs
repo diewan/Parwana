@@ -68,9 +68,11 @@ pub struct EthereumBackend {
     /// secp256k1 verifier key that signs the RFC-0012 §9.2 mint-attestation digest.
     ///
     /// Distinct from the EVM wallet signer that submits and pays for the transaction:
-    /// the contract authenticates mint authority by recovering this verifier from
-    /// the digest signature, independent of `msg.sender`.
-    verifier_signing_key: Option<secp256k1::SecretKey>,
+    /// the contract authenticates mint authority by recovering these verifiers from
+    /// the digest signatures, independent of `msg.sender`. Multiple keys attach one
+    /// verifier signature each, satisfying an M-of-N verifier set in a single mint
+    /// (MINT-KEYS-001).
+    verifier_signing_keys: Vec<secp256k1::SecretKey>,
 }
 
 /// Unsigned deployment transaction for contract deployment
@@ -133,7 +135,7 @@ impl EthereumBackend {
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: Arc::new(seal),
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 
@@ -150,7 +152,7 @@ impl EthereumBackend {
             proof_verifier: EventProofVerifier::new(),
             event_builder: CommitmentEventBuilder::new(),
             seal_protocol: seal,
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 
@@ -164,7 +166,19 @@ impl EthereumBackend {
     /// digest. This key must correspond to the verifier authorized by the deployed
     /// CSVSeal contract; it is not used to pay gas.
     pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
-        self.verifier_signing_key = Some(verifier_signing_key);
+        self.verifier_signing_keys.push(verifier_signing_key);
+        self
+    }
+
+    /// Set the full set of secp256k1 verifier keys that sign the RFC-0012 §9.2
+    /// mint attestation digest (MINT-KEYS-001).
+    ///
+    /// Replaces any previously configured keys. Each key's recovered address must
+    /// be authorized by the deployed CSVSeal contract's verifier set; the adapter
+    /// attaches one signature per key so a single mint can satisfy an M-of-N
+    /// threshold. An empty set leaves the backend fail-closed.
+    pub fn with_verifier_keys(mut self, verifier_signing_keys: Vec<secp256k1::SecretKey>) -> Self {
+        self.verifier_signing_keys = verifier_signing_keys;
         self
     }
 
@@ -483,7 +497,7 @@ impl EthereumBackend {
                         || error_str.contains("underpriced") && retry_count < max_retries - 1
                     {
                         // Bump gas price by 10% and retry
-                        current_max_fee = (current_max_fee as u128).saturating_mul(110) / 100;
+                        current_max_fee = current_max_fee.saturating_mul(110) / 100;
                         continue;
                     } else {
                         return Err(ChainOpError::TransactionError(format!(
@@ -587,28 +601,56 @@ impl EthereumBackend {
     /// no verifier signer is configured rather than emitting an unauthenticated mint.
     #[cfg(feature = "rpc")]
     pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
-        use secp256k1::{Message, Secp256k1};
-
-        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+        // First configured verifier key (fail-closed on none). Retained for
+        // single-signer callers/tests; the mint path uses the plural form below.
+        let secret_key = self.verifier_signing_keys.first().ok_or_else(|| {
             ChainOpError::SigningError(
                 "No verifier signer configured: cannot attest the §9.2 mint digest \
                  (set CSV_MINT_VERIFIER_KEY to the verifier key registered in CSVSeal)"
                     .to_string(),
             )
         })?;
+        Ok(Self::sign_digest_with(secret_key, digest))
+    }
 
+    /// Sign the §9.2 digest with **every** configured verifier key, returning one
+    /// 65-byte EVM-recoverable signature per key (MINT-KEYS-001).
+    ///
+    /// This is the mint-path signer: multiple local signers satisfy an M-of-N
+    /// verifier set in one transaction. Fails closed when no verifier key is
+    /// configured.
+    #[cfg(feature = "rpc")]
+    pub fn sign_mint_attestation_digests(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<Vec<u8>>> {
+        if self.verifier_signing_keys.is_empty() {
+            return Err(ChainOpError::SigningError(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set CSV_MINT_VERIFIER_KEY to the verifier key registered in CSVSeal)"
+                    .to_string(),
+            ));
+        }
+        Ok(self
+            .verifier_signing_keys
+            .iter()
+            .map(|k| Self::sign_digest_with(k, digest))
+            .collect())
+    }
+
+    /// Produce a single 65-byte EVM-recoverable signature (`r || s || v`,
+    /// `v ∈ {27, 28}`) over the 32-byte digest, matching on-chain `ecrecover`.
+    #[cfg(feature = "rpc")]
+    fn sign_digest_with(secret_key: &secp256k1::SecretKey, digest: &[u8; 32]) -> Vec<u8> {
+        use secp256k1::{Message, Secp256k1};
         // Sign the digest bytes directly (no Ethereum message prefix), matching
         // on-chain ecrecover semantics.
         let msg = Message::from_digest(*digest);
         let secp = Secp256k1::new();
-        let signature = secp.sign_ecdsa_recoverable(&msg, &secret_key);
+        let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
         let (recovery_id, compact) = signature.serialize_compact();
-
         let mut out = Vec::with_capacity(65);
         out.extend_from_slice(&compact);
         // EVM `v` = recovery id (0/1) + 27.
         out.push(recovery_id.to_i32() as u8 + 27);
-        Ok(out)
+        out
     }
 
     /// Submit pre-encoded mint calldata to the CSVSeal contract, wait for its
@@ -1133,51 +1175,17 @@ impl ChainDeployer for EthereumBackend {
 impl ChainProofProvider for EthereumBackend {
     async fn build_inclusion_proof(
         &self,
-        commitment: &Hash,
-        block_height: u64,
-        anchor_id: &[u8],
+        _commitment: &Hash,
+        _block_height: u64,
+        _anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
-        // Get the block
-        let block = self
-            .rpc()
-            .get_block_by_number(block_height)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get block: {}", e)))?
-            .ok_or_else(|| ChainOpError::RpcError("Block not found".to_string()))?;
-
-        // Build event proof for the commitment
-        let seal_address = [0u8; 32];
-        let event_data = self
-            .event_builder
-            .build(*commitment.as_bytes(), seal_address);
-
-        // Build MPT proof for the transaction containing the event
-        // This would require finding the transaction that emitted the event
-        let _proof_data = serde_json::to_vec(&block)
-            .map_err(|e| ChainOpError::Unknown(format!("Serialization failed: {}", e)))?;
-
-        // In a real implementation, we would use the anchor_id (which should be the transaction hash)
-        // to fetch the specific transaction and construct a proper inclusion proof.
-        // The anchor_id is expected to be the 32-byte transaction hash.
-        let _tx_hash = {
-            if anchor_id.len() != 32 {
-                return Err(ChainOpError::InvalidInput(format!(
-                    "Invalid anchor_id length for Ethereum: expected 32 bytes, got {}",
-                    anchor_id.len()
-                )));
-            }
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(anchor_id);
-            arr
-        };
-
-        Ok(CoreInclusionProof {
-            proof_bytes: event_data,
-            block_hash: Hash::new(block.state_root),
-            block_number: block_height,
-            position: block_height,
-            ..Default::default()
-        })
+        Err(ChainOpError::CapabilityUnavailable(
+            "Legacy Ethereum ChainProofProvider inclusion proofs are disabled: \
+             this path previously fabricated event payloads instead of MPT receipt \
+             inclusion evidence. Use the runtime ChainProofPort path, which builds \
+             proof bundles from finalized transaction receipts."
+                .to_string(),
+        ))
     }
 
     fn verify_inclusion_proof(
@@ -2312,6 +2320,42 @@ mod tests {
         let (max_fee, priority_fee) = eip1559_fee_caps(2_000_000_000);
         assert_eq!(priority_fee, 1_000_000_000);
         assert_eq!(max_fee, 2_000_000_000);
+    }
+
+    #[tokio::test]
+    async fn legacy_chain_proof_provider_inclusion_build_fails_closed() {
+        let ops = test_ops_with_contract(None);
+        let commitment = Hash::sha256(b"phase-2-ethereum-commitment");
+        let anchor_id = Hash::sha256(b"phase-2-ethereum-anchor");
+
+        let result = ops
+            .build_inclusion_proof(&commitment, 42, anchor_id.as_bytes())
+            .await;
+
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(ref message)) if message.contains("Legacy Ethereum ChainProofProvider inclusion proofs are disabled")),
+            "legacy provider must not fabricate inclusion proofs: {result:?}"
+        );
+    }
+
+    #[test]
+    fn legacy_chain_proof_provider_inclusion_verify_fails_closed() {
+        let ops = test_ops_with_contract(None);
+        let commitment = Hash::sha256(b"phase-2-ethereum-commitment");
+        let forged = CoreInclusionProof {
+            proof_bytes: commitment.as_bytes().to_vec(),
+            block_hash: Hash::sha256(b"phase-2-ethereum-block"),
+            position: 42,
+            block_number: 42,
+            ..Default::default()
+        };
+
+        let result = ops.verify_inclusion_proof(&forged, &commitment);
+
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(ref message)) if message.contains("Legacy Ethereum ChainProofProvider inclusion verification is disabled")),
+            "legacy provider must not accept self-supplied proof bytes: {result:?}"
+        );
     }
 
     #[test]

@@ -199,6 +199,86 @@ fn default_content_hash(domain: &str) -> Hash {
     Hash::sha256(domain.as_bytes())
 }
 
+/// Sign a canonical ownership proof for `chain` using the wallet-derived key.
+///
+/// Returns a fully-formed, self-consistent [`csv_protocol::OwnershipProof`]
+/// (owner address, signature, scheme, and public key) or `None` if the chain is
+/// unsupported for signing or any step fails. The returned proof is verified
+/// locally before being handed back: the signature must validate and the
+/// signing key must derive to `owner`, so the caller can never accidentally
+/// publish a proof that would be rejected by the runtime
+/// (CLI-PUBLISH-MULTICHAIN-001). No raw seed bytes are ever emitted as proof
+/// material.
+#[allow(clippy::too_many_arguments)]
+fn sign_ownership_proof(
+    chain: &Chain,
+    core_chain: &ChainId,
+    seed: &[u8; 64],
+    account: u32,
+    index: u32,
+    descriptor_hash: &Hash,
+    commitment: &Hash,
+    salt: &[u8],
+    owner: &[u8],
+) -> Option<csv_protocol::OwnershipProof> {
+    use csv_protocol::{OwnershipProof, SignatureScheme};
+
+    // Derive the wallet key for this chain (BIP-86 for Bitcoin, BIP-44/SLIP-10
+    // for the rest — handled inside csv-keys).
+    let secret = match csv_keys::bip44::derive_key(seed, core_chain, account, index) {
+        Ok(k) => k,
+        Err(e) => {
+            log::warn!("ownership signing: key derivation failed for {chain}: {e}");
+            return None;
+        }
+    };
+    let key_bytes = secret.as_bytes();
+
+    let message = OwnershipProof::signing_message(descriptor_hash, commitment, salt, owner);
+
+    let (proof, public_key, scheme) = match chain.as_str() {
+        "bitcoin" | "ethereum" => {
+            use secp256k1::{Message, Secp256k1, SecretKey};
+            let sk = SecretKey::from_slice(key_bytes).ok()?;
+            let secp = Secp256k1::new();
+            let msg = Message::from_digest_slice(&message).ok()?;
+            let sig = secp.sign_ecdsa(&msg, &sk).serialize_compact().to_vec();
+            let pubkey = sk.public_key(&secp).serialize().to_vec();
+            (sig, pubkey, SignatureScheme::Secp256k1)
+        }
+        "sui" | "aptos" | "solana" => {
+            use ed25519_dalek::{Signer, SigningKey};
+            let key_array: [u8; 32] = *key_bytes;
+            let signing = SigningKey::from_bytes(&key_array);
+            let sig = signing.sign(&message).to_bytes().to_vec();
+            let pubkey = signing.verifying_key().to_bytes().to_vec();
+            (sig, pubkey, SignatureScheme::Ed25519)
+        }
+        other => {
+            log::warn!("ownership signing: unsupported chain '{other}'");
+            return None;
+        }
+    };
+
+    let proof = OwnershipProof {
+        owner: owner.to_vec(),
+        proof,
+        scheme: Some(scheme),
+        public_key,
+    };
+
+    // Self-check: the freshly built proof must verify (signature valid + key
+    // resolves to `owner`). If it does not, fail closed rather than publish a
+    // proof the runtime will reject — most likely a wallet/address-derivation
+    // mismatch.
+    if let Err(e) = proof.verify(core_chain, descriptor_hash, commitment, salt) {
+        log::warn!("ownership signing: self-verification failed for {chain}: {e}");
+        return None;
+    }
+
+    Some(proof)
+}
+
 async fn cmd_create(
     chain: Chain,
     value: Option<u64>,
@@ -886,10 +966,15 @@ async fn cmd_create(
     // finalize_published() below so the persisted sanad_id matches exactly the
     // id written on-chain during publish.
     let salt: [u8; 16] = rand::random();
-    let sanad_id = csv_hash::sanad::SanadId::from_descriptor_commitment(
+    // v2 owner-bound derivation: the published on-chain sanad_id must match the
+    // local Sanad.id produced by `Sanad::new`, which now folds the owner
+    // identity into the id (SANAD-OWNERSHIP-PROOF-VERIFY-001). Both use the same
+    // owner bytes (`owner_address`) so they stay consistent.
+    let sanad_id = csv_hash::sanad::SanadId::from_descriptor_commitment_owner(
         descriptor.compute_hash(),
         commitment,
         &salt,
+        owner_address.as_bytes(),
     );
     let sanad_id_hash = Hash::new(*sanad_id.as_bytes());
     output::kv_hash("Sanad ID", sanad_id.as_bytes());
@@ -1070,51 +1155,41 @@ async fn cmd_create(
         }
     }
 
-    // Create ownership proof from the owner address
-    // For canonical mode, generate a signature over the commitment hash
-    let proof_bytes = if chain.as_str() == "bitcoin" {
-        // Derive the private key for Bitcoin (BIP-86 Taproot)
-        use secp256k1::{Message, Secp256k1, SecretKey};
+    // Create a real, signed ownership proof for the requested chain.
+    //
+    // The wallet-derived key signs the canonical ownership message
+    // (OwnershipProof::signing_message over descriptor_hash || commitment ||
+    // salt || owner). Bitcoin/Ethereum use secp256k1; Sui/Aptos/Solana use
+    // Ed25519, matching csv-keys::bip44 derivation and each adapter's declared
+    // scheme (CLI-PUBLISH-MULTICHAIN-001). No raw seed bytes are ever used as
+    // proof material, and the helper fails closed (returns None) for any
+    // unsupported chain or signing failure — the guard below then refuses to
+    // finalize an unsigned Sanad.
+    let descriptor_hash = descriptor.compute_hash();
+    let owner_bytes = owner_address.as_bytes().to_vec();
+    let signed_proof = sign_ownership_proof(
+        &chain,
+        &core_chain,
+        &seed_array,
+        account,
+        index,
+        &descriptor_hash,
+        &commitment,
+        &salt,
+        &owner_bytes,
+    );
 
-        // Derive the BIP-86 path for the account/index
-        let path = csv_keys::bip44::DerivationPath::new_bip86(account, index);
-
-        // Derive the private key from the seed using the existing bip44 module
-        let secret_key = csv_keys::bip44::derive_key_from_path(&seed_array, &path, &core_chain)
-            .map_err(|e| anyhow::anyhow!("Failed to derive private key: {}", e))?;
-
-        // Convert to secp256k1 SecretKey
-        let key_bytes = secret_key.as_bytes();
-        let private_key = SecretKey::from_slice(key_bytes)
-            .map_err(|e| anyhow::anyhow!("Failed to create secp256k1 key: {}", e))?;
-
-        // Sign the commitment hash
-        let secp = Secp256k1::new();
-        let message = Message::from_digest_slice(commitment.as_bytes())
-            .map_err(|e| anyhow::anyhow!("Failed to create message: {}", e))?;
-        let signature = secp.sign_ecdsa(&message, &private_key);
-        Some(signature.serialize_compact().to_vec())
-    } else {
-        // Fail closed: only Bitcoin has a real ownership-proof signing path
-        // wired here. Emitting anything else (previously the raw wallet seed,
-        // which leaked key material) would persist a forged proof labeled as a
-        // valid signature. Leave the proof unsigned; the publish path below
-        // refuses to finalize it, while --skip-publish can still build a local
-        // unsigned draft.
-        None
-    };
-
-    let ownership_proof = match &proof_bytes {
-        Some(sig) => csv_protocol::OwnershipProof {
-            owner: owner_address.as_bytes().to_vec(),
-            proof: sig.clone(),
-            scheme: Some(csv_protocol::SignatureScheme::Secp256k1),
-        },
-        None => csv_protocol::OwnershipProof {
-            owner: owner_address.as_bytes().to_vec(),
-            proof: vec![],
-            scheme: None,
-        },
+    let (proof_bytes, ownership_proof) = match signed_proof {
+        Some(proof) => (Some(proof.proof.clone()), proof),
+        None => (
+            None,
+            csv_protocol::OwnershipProof {
+                owner: owner_bytes.clone(),
+                proof: vec![],
+                scheme: None,
+                public_key: vec![],
+            },
+        ),
     };
 
     // `--skip-publish` can, at most, produce a local unsigned/unpublished
@@ -1154,13 +1229,14 @@ async fn cmd_create(
     }
 
     // Fail closed: never persist a published, Active sanad with an unsigned
-    // ownership proof. Only Bitcoin can currently produce a real signature
-    // above; other chains reach here with `proof_bytes == None`.
+    // ownership proof. Bitcoin, Ethereum, Solana, Sui, and Aptos all produce a
+    // real signature above; `proof_bytes == None` means signing was
+    // unsupported or failed (e.g. wallet/address-derivation mismatch), so we
+    // must not finalize.
     if proof_bytes.is_none() {
         return Err(anyhow::anyhow!(
-            "Cannot publish a sanad on chain '{}': ownership-proof signing is \
-             not implemented for this chain. Only 'bitcoin' is supported for \
-             canonical (published) sanad creation at this time. Re-run with \
+            "Cannot publish a sanad on chain '{}': ownership-proof signing \
+             failed or is unsupported for this chain. Re-run with \
              --skip-publish to produce an unsigned local draft instead.",
             chain.as_str()
         ));
@@ -1227,6 +1303,21 @@ async fn cmd_create(
             };
 
             state.storage.sanads.push(tracked);
+
+            // Cache the off-chain manifest for this Sanad (display/verify only).
+            // Best-effort: never fails the create (SANAD-MANIFEST-001).
+            match crate::commands::sanad_manifest::build_manifest(&descriptor, &attachments, None) {
+                Ok(manifest) => crate::commands::sanad_manifest::save(
+                    state,
+                    &sanad_id_hex,
+                    &descriptor,
+                    &manifest,
+                    &salt,
+                    &owner_bytes,
+                    &commitment,
+                ),
+                Err(e) => output::warning(&format!("Could not build Sanad manifest: {e}")),
+            }
 
             // Register the sanad_id -> seal mapping on the Bitcoin adapter for cross-chain lock lookups
             if chain.as_str() == "bitcoin" {
@@ -1331,6 +1422,10 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
         output::warning("Sanad not found in local tracking");
         output::info("This Sanad may exist on-chain but hasn't been tracked locally");
     }
+
+    // Off-chain manifest (display/cache only). Verifies binding to this Sanad
+    // and refuses to present unverified metadata (SANAD-MANIFEST-001).
+    crate::commands::sanad_manifest::show(state, &sanad_id_hash.to_hex(), &sanad_id_hash);
 
     Ok(())
 }
@@ -2107,6 +2202,105 @@ fn build_sdk_config_from_cli_config(
         .insert(chain.as_str().to_string(), sdk_chain_config);
 
     Ok(sdk_config)
+}
+
+#[cfg(test)]
+mod publish_signing_tests {
+    use super::*;
+    use csv_protocol::SignatureScheme;
+
+    fn fixture(chain_name: &str) -> (ChainId, [u8; 64], Hash, Hash, [u8; 16]) {
+        let chain = ChainId::new(chain_name);
+        let seed = [0x42u8; 64];
+        let descriptor_hash = Hash::new([1u8; 32]);
+        let commitment = Hash::new([2u8; 32]);
+        let salt = [3u8; 16];
+        (chain, seed, descriptor_hash, commitment, salt)
+    }
+
+    /// CLI-PUBLISH-MULTICHAIN-001: each supported chain produces a real signed
+    /// ownership proof that verifies through the protocol verification path.
+    #[test]
+    fn signs_and_verifies_for_all_chains() {
+        for chain_name in ["bitcoin", "ethereum", "solana", "sui", "aptos"] {
+            let (chain, seed, dh, commitment, salt) = fixture(chain_name);
+            let owner = csv_keys::bip44::derive_address_from_key(
+                csv_keys::bip44::derive_key(&seed, &chain, 0, 0)
+                    .unwrap()
+                    .as_bytes(),
+                &chain,
+            )
+            .unwrap()
+            .into_bytes();
+
+            let proof =
+                sign_ownership_proof(&chain, &chain, &seed, 0, 0, &dh, &commitment, &salt, &owner)
+                    .unwrap_or_else(|| panic!("signing must succeed for {chain_name}"));
+
+            proof
+                .verify(&chain, &dh, &commitment, &salt)
+                .unwrap_or_else(|e| panic!("proof for {chain_name} must verify: {e}"));
+        }
+    }
+
+    /// Solana must sign with Ed25519, never secp256k1.
+    #[test]
+    fn solana_uses_ed25519() {
+        let (chain, seed, dh, commitment, salt) = fixture("solana");
+        let owner = csv_keys::bip44::derive_address_from_key(
+            csv_keys::bip44::derive_key(&seed, &chain, 0, 0)
+                .unwrap()
+                .as_bytes(),
+            &chain,
+        )
+        .unwrap()
+        .into_bytes();
+        let proof =
+            sign_ownership_proof(&chain, &chain, &seed, 0, 0, &dh, &commitment, &salt, &owner)
+                .unwrap();
+        assert_eq!(proof.scheme, Some(SignatureScheme::Ed25519));
+    }
+
+    /// A proof signed for one chain must not verify against another chain's
+    /// address-derivation rules (wrong scheme / wrong owner binding).
+    #[test]
+    fn cross_chain_proof_rejected() {
+        let (sui, seed, dh, commitment, salt) = fixture("sui");
+        let owner = csv_keys::bip44::derive_address_from_key(
+            csv_keys::bip44::derive_key(&seed, &sui, 0, 0)
+                .unwrap()
+                .as_bytes(),
+            &sui,
+        )
+        .unwrap()
+        .into_bytes();
+        let proof =
+            sign_ownership_proof(&sui, &sui, &seed, 0, 0, &dh, &commitment, &salt, &owner).unwrap();
+        // Verifying the Sui-bound proof as if it were an Aptos sanad must fail:
+        // the owner address does not match Aptos derivation of the same key.
+        let aptos = ChainId::new("aptos");
+        assert!(proof.verify(&aptos, &dh, &commitment, &salt).is_err());
+    }
+
+    /// An unsupported chain fails closed (returns None) rather than emitting a
+    /// bogus proof.
+    #[test]
+    fn unsupported_chain_fails_closed() {
+        let (_c, seed, dh, commitment, salt) = fixture("dogecoin");
+        let chain = ChainId::new("dogecoin");
+        let result = sign_ownership_proof(
+            &chain,
+            &chain,
+            &seed,
+            0,
+            0,
+            &dh,
+            &commitment,
+            &salt,
+            b"addr",
+        );
+        assert!(result.is_none());
+    }
 }
 
 #[cfg(test)]

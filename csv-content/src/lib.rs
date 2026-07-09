@@ -51,6 +51,7 @@ pub mod attachments;
 pub mod claims;
 pub mod content_tree;
 pub mod encryption;
+pub mod manifest;
 pub mod participants;
 pub mod resource_accounting;
 pub mod selective_disclosure;
@@ -68,6 +69,9 @@ pub use claims::{Claim, ClaimPredicate, ContentRights, RightsTransfer};
 
 // Re-exports from attachments
 pub use attachments::{AttachmentBudget, AttachmentRef, MediaType};
+
+// Re-exports from manifest
+pub use manifest::{ManifestError, SANAD_MANIFEST_VERSION, SanadManifest, SanadManifestAttachment};
 
 // Re-exports from participants
 pub use participants::{Participant, ParticipantId, ParticipantRole, ParticipantSet};

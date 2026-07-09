@@ -182,11 +182,11 @@ if [ -z "$SKIP_ALL" ]; then
         echo "Please complete the create step or enter a Sanad ID manually."
         exit 1
     fi
-    prompt_step "Generate Source Proof" "Writes the canonical source proof artifact for the Sanad" "csv proof generate ethereum $SANAD_ID -o proof.cbor"
+    prompt_step "Generate Source Proof" "Writes the canonical source proof artifact for the Sanad" "csv proof generate --chain ethereum $SANAD_ID -o proof.cbor"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Verify Source Proof" "Verifies the canonical source proof artifact locally" "csv proof verify ethereum --proof proof.cbor"
+    prompt_step "Verify Source Proof" "Verifies the canonical source proof artifact locally" "csv proof verify --chain ethereum --proof proof.cbor"
 fi
 
 if [ -z "$SKIP_ALL" ]; then
@@ -289,7 +289,7 @@ if [ -z "$SKIP_ALL" ]; then
     echo "Description: Corrupting proof.cbor and verifying it is a malformed proof attempt that must fail closed"
     echo ""
     echo "Command:"
-    echo "  csv proof verify ethereum --proof proof.cbor"
+    echo "  csv proof verify --chain ethereum --proof proof.cbor"
     echo ""
     read -p "Press Enter to continue (or 's' to skip remaining steps) > " choice
     if [[ "$choice" == "s" || "$choice" == "S" ]]; then
@@ -398,12 +398,12 @@ echo "  Cross-Chain Transfer Demo Complete"
 echo "=============================================="
 echo ""
 echo "Full workflow:"
-echo "  1. csv wallet init test --words 12"
+echo "  1. csv wallet init --network test --words 12"
 echo "  2. csv sanad create --chain ethereum --value 1000000000000000000"
 echo "     → Copy the 'Sanad ID' from the output"
 echo "  3. csv sanad state --chain ethereum <SANAD_ID>"
-echo "  4. csv proof generate ethereum <SANAD_ID> -o proof.cbor"
-echo "  5. csv proof verify ethereum --proof proof.cbor"
+echo "  4. csv proof generate --chain ethereum <SANAD_ID> -o proof.cbor"
+echo "  5. csv proof verify --chain ethereum --proof proof.cbor"
 echo "  6. csv wallet list"
 echo "     → Copy the destination chain address (e.g., Sui address)"
 echo "  7. csv cross-chain materialize --from ethereum --to sui --sanad-id <SANAD_ID> --dest-owner <DEST_OWNER> --proof attestor"

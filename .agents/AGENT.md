@@ -78,6 +78,8 @@ Every verification path MUST:
 * reject malformed proofs,
 * reject empty proof bundles,
 * perform actual cryptographic verification,
+* bind each signature's recovered key to an approved verifier set — never trust a public key carried inside attacker-supplied data as self-authorizing (VERIFY-SIGNER-BINDING-001),
+* enforce finality from an observed chain tip, never from arithmetic on the required depth (RUNTIME-FINALITY-TAUTOLOGY-001),
 * return Err(...) on verification failure.
 
 Verification code may NEVER:

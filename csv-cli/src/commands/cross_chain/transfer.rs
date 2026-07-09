@@ -11,7 +11,7 @@
 //!
 //! The `resume` subcommand advances an already-locked transfer without re-locking.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,9 @@ use csv_runtime::execution_journal::ExecutionJournal;
 use csv_runtime::execution_journal::RocksDbExecutionJournal;
 use csv_runtime::{SendExecutor, SendExecutorError, SendTransfer};
 use csv_sdk::CsvClient;
-use csv_sdk::transfers::{TransferManager, TransferOutcome, TransferReceipt as SdkReceipt};
+use csv_sdk::transfers::{
+    DestinationMaterialization, TransferManager, TransferOutcome, TransferReceipt as SdkReceipt,
+};
 use csv_wire::{
     CONSIGNMENT_VERSION, Consignment as WireConsignment, Invoice, SanadIdWire, SealDefinition,
 };
@@ -184,7 +186,7 @@ struct ResumeContext {
 ///
 /// Shared by both `transfer` (fresh lock) and `resume` (advance existing lock),
 /// so the adapter/wallet wiring can never drift between the two entry points.
-async fn build_client(
+pub(super) async fn build_client(
     from: &Chain,
     to: &Chain,
     finality_depth: Option<u64>,
@@ -875,6 +877,7 @@ pub struct AcceptedConsignment {
 pub fn validate_consignment_bytes(
     bytes: &[u8],
     state: &UnifiedStateManager,
+    authorized_signers: &[Vec<u8>],
 ) -> Result<AcceptedConsignment> {
     let consignment: WireConsignment = csv_codec::from_canonical_cbor(bytes)
         .map_err(|e| anyhow::anyhow!("Invalid canonical consignment CBOR: {}", e))?;
@@ -920,10 +923,37 @@ pub fn validate_consignment_bytes(
                 .iter()
                 .any(|s| s.consumed && s.seal_ref == hex::encode(seal_id))
     };
-    let result = csv_verifier::verify_proof(
+    // VERIFY-SIGNER-BINDING-001: bind the proof-bundle signatures to the
+    // recipient's trusted verifier set (supplied by the caller from local
+    // config). Empty ⇒ verify_proof fails closed; surface an actionable message.
+    if authorized_signers.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No approved verifier keys configured: cannot authenticate the consignment's signer. \
+             Add the destination registry's verifier public key(s) under [verifier] approved_keys \
+             in ~/.csv/config.toml, then retry accept."
+        ));
+    }
+    // VERIFY-DOMAIN-SEPARATION-001: bind the proof bundle to the Sanad this
+    // consignment declares (the bundle's anchor must match), rejecting a bundle
+    // built for a different transfer/domain. `sanad_id` is the normalized 32-byte
+    // hex decoded above; the consignment is already bound to the trusted invoice
+    // seal via `binds_invoice_seal()`.
+    let expected_domain = {
+        let bytes = hex::decode(&sanad_id)
+            .map_err(|e| anyhow::anyhow!("Invalid consignment sanad_id: {}", e))?;
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        csv_verifier::ExpectedDomain {
+            sanad_id: Some(arr),
+            source_chain: None,
+        }
+    };
+    let result = csv_verifier::verify_proof_bound(
         &consignment.proof_bundle,
         seal_registry,
         consignment.proof_bundle.signature_scheme,
+        authorized_signers,
+        &expected_domain,
     );
     if !result.is_valid || !result.errors.is_empty() {
         for error in &result.errors {
@@ -1115,16 +1145,20 @@ impl Drop for AcceptLock {
 /// ownership in the wallet; no chain transaction.
 pub async fn cmd_accept(
     consignment: String,
-    _config: &Config,
+    config: &Config,
     state: &mut UnifiedStateManager,
 ) -> Result<()> {
     output::header("Accept Consignment (accept)");
 
     let _lock = AcceptLock::acquire(state)?;
+    // VERIFY-SIGNER-BINDING-001: the recipient's approved verifier set, from
+    // trusted local config, binds the proof-bundle signatures to an authorized
+    // signer. Empty ⇒ validate_consignment_bytes fails closed.
+    let authorized_signers = config.approved_verifier_keys()?;
     let bytes = std::fs::read(&consignment)
         .map_err(|e| anyhow::anyhow!("Failed to read consignment file: {}", e))?;
     output::progress(1, 5, "Decoding canonical consignment...");
-    let accepted = validate_consignment_bytes(&bytes, state)?;
+    let accepted = validate_consignment_bytes(&bytes, state, &authorized_signers)?;
 
     output::progress(2, 5, "Verifying invoice seal binding...");
     output::kv("Sanad", &accepted.sanad_id);
@@ -1214,31 +1248,83 @@ pub async fn cmd_materialize(
     .await
 }
 
+/// Chain-scoped mint-verifier env var for a destination chain, or `None` for
+/// chains that do not use the verifier-attested mint path. Mirrors
+/// `csv_adapter_factory::mint_signer` so the CLI preflight and the factory agree
+/// on which key(s) authorize a given destination mint (MINT-KEYS-001).
+fn chain_scoped_verifier_env(chain: &str) -> Option<&'static str> {
+    match chain {
+        "aptos" => Some("CSV_MINT_VERIFIER_KEY_APTOS"),
+        "sui" => Some("CSV_MINT_VERIFIER_KEY_SUI"),
+        "solana" => Some("CSV_MINT_VERIFIER_KEY_SOLANA"),
+        "ethereum" => Some("CSV_MINT_VERIFIER_KEY_ETHEREUM"),
+        _ => None,
+    }
+}
+
+/// Resolve the destination-chain verifier secret entries the factory would load,
+/// with the same precedence: a non-empty chain-scoped `CSV_MINT_VERIFIER_KEY_<CHAIN>`
+/// (comma-separated list) is authoritative for that chain and is NOT mixed with
+/// the legacy default; otherwise the legacy `CSV_MINT_VERIFIER_KEY` is used.
+///
+/// Returns the env var name the operator should set (for messaging) and the
+/// trimmed, `0x`-stripped hex entries (never logged).
+fn resolve_destination_verifier_secrets(chain: &str) -> (String, Vec<String>) {
+    let split = |raw: &str| -> Vec<String> {
+        raw.split(',')
+            .map(|e| e.trim().trim_start_matches("0x").to_string())
+            .filter(|e| !e.is_empty())
+            .collect()
+    };
+
+    if let Some(scoped) = chain_scoped_verifier_env(chain)
+        && let Ok(raw) = std::env::var(scoped)
+        && !raw.trim().is_empty()
+    {
+        // Chain-scoped var is authoritative even if malformed: do not fall back to
+        // the default, which could be a different verifier set.
+        return (scoped.to_string(), split(&raw));
+    }
+
+    let default = std::env::var("CSV_MINT_VERIFIER_KEY").unwrap_or_default();
+    let var_name = chain_scoped_verifier_env(chain)
+        .unwrap_or("CSV_MINT_VERIFIER_KEY")
+        .to_string();
+    (var_name, split(&default))
+}
+
 async fn ensure_destination_attestor_ready(to: &Chain, config: &Config) -> Result<()> {
-    let needs_verifier_key = matches!(to.as_str(), "sui" | "aptos" | "solana");
-    let verifier_key = std::env::var("CSV_MINT_VERIFIER_KEY")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    if needs_verifier_key && verifier_key.is_none() {
+    let chain = to.as_str();
+    if !matches!(chain, "sui" | "aptos" | "solana") {
+        return Ok(());
+    }
+
+    let (scoped_var, verifier_secrets) = resolve_destination_verifier_secrets(chain);
+    if verifier_secrets.is_empty() {
         output::error(&format!(
-            "{} materialization requires CSV_MINT_VERIFIER_KEY before the source Sanad is locked",
+            "{} materialization requires a mint verifier key before the source Sanad is locked",
             to
         ));
-        output::info(
-            "Set CSV_MINT_VERIFIER_KEY to the secp256k1 verifier signing key registered in the destination registry, then rerun materialize or resume.",
-        );
+        output::info(&format!(
+            "Set {scoped_var} (or the legacy CSV_MINT_VERIFIER_KEY) to the secp256k1 verifier \
+             signing key(s) registered in the destination registry — comma-separate multiple \
+             keys for an M-of-N registry — then rerun materialize or resume.",
+        ));
         return Err(anyhow::anyhow!(
-            "Destination mint verifier key missing; refusing to proceed without destination mint attestation"
+            "Destination mint verifier key missing for {chain}; refusing to proceed without destination mint attestation"
         ));
     }
-    if to.as_str() == "solana" {
-        ensure_solana_verifier_registered(config, verifier_key.as_deref().unwrap()).await?;
+
+    if chain == "solana" {
+        ensure_solana_verifier_registered(config, &verifier_secrets).await?;
     }
     Ok(())
 }
 
-async fn ensure_solana_verifier_registered(config: &Config, verifier_key_hex: &str) -> Result<()> {
+async fn ensure_solana_verifier_registered(
+    config: &Config,
+    verifier_secrets: &[String],
+) -> Result<()> {
     let chain_config = config.chain(&Chain::new("solana"))?;
     let program_id = chain_config
         .program_id
@@ -1253,17 +1339,31 @@ async fn ensure_solana_verifier_registered(config: &Config, verifier_key_hex: &s
         ));
     }
 
-    let verifier_pubkey = compressed_secp256k1_pubkey(verifier_key_hex)?;
+    // Derive the compressed pubkey of every configured verifier secret so we can
+    // require that at least one is registered on-chain. A malformed secret is a
+    // hard error rather than being silently dropped, so the operator learns the
+    // configured key set is not what the registry will accept.
+    let mut verifier_pubkeys = Vec::with_capacity(verifier_secrets.len());
+    for secret in verifier_secrets {
+        verifier_pubkeys.push(compressed_secp256k1_pubkey(secret)?);
+    }
+
     let registry = solana_verifier_registry_pda(&program_id);
     let registry_account = fetch_solana_account_data(rpc_url, &registry).await?;
     let registered = decode_solana_verifier_registry(&registry_account)?;
-    if !registered.iter().any(|v| v == &verifier_pubkey) {
-        output::error("CSV_MINT_VERIFIER_KEY is not registered in the Solana verifier registry");
+    if !verifier_pubkeys.iter().any(|pk| registered.contains(pk)) {
+        output::error(
+            "None of the configured mint verifier keys are registered in the Solana verifier registry",
+        );
         output::kv("Program ID", &program_id.to_string());
         output::kv("Registry PDA", &registry.to_string());
         output::kv(
-            "Env Verifier Pubkey",
-            &format!("0x{}", hex::encode(verifier_pubkey)),
+            "Configured Verifier Pubkeys",
+            &verifier_pubkeys
+                .iter()
+                .map(|v| format!("0x{}", hex::encode(v)))
+                .collect::<Vec<_>>()
+                .join(", "),
         );
         output::kv(
             "Registered Verifiers",
@@ -1274,7 +1374,7 @@ async fn ensure_solana_verifier_registered(config: &Config, verifier_key_hex: &s
                 .join(", "),
         );
         output::info(
-            "Seed or rotate the Solana verifier registry to include this compressed secp256k1 pubkey, or use the matching registered CSV_MINT_VERIFIER_KEY.",
+            "Seed or rotate the Solana verifier registry to include one of these compressed secp256k1 pubkeys, or configure a registered CSV_MINT_VERIFIER_KEY_SOLANA / CSV_MINT_VERIFIER_KEY.",
         );
         return Err(anyhow::anyhow!(
             "Solana destination verifier key is not registered"
@@ -1369,7 +1469,10 @@ fn decode_solana_verifier_registry(data: &[u8]) -> Result<Vec<[u8; 33]>> {
             "Solana verifier registry account is truncated"
         ));
     }
-    let count = u32::from_le_bytes(data[offset..offset + VEC_LEN].try_into().unwrap()) as usize;
+    let count_bytes: [u8; VEC_LEN] = data[offset..offset + VEC_LEN]
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Solana verifier registry account is corrupted"))?;
+    let count = u32::from_le_bytes(count_bytes) as usize;
     let mut cursor = offset + VEC_LEN;
     let needed = cursor + count * 33;
     if data.len() < needed {
@@ -1636,6 +1739,7 @@ async fn drive(
                     &display_tx_hash(&from, &receipt.lock_tx_hash),
                 );
                 output::kv("Mint Tx Hash", &receipt.mint_tx_hash);
+                output_materialization_metadata(&receipt.materialization);
                 return Ok(());
             }
             TransferOutcome::Pending {
@@ -1824,7 +1928,7 @@ fn record_completed(
         source_fee: None,
         dest_tx_hash: Some(receipt.mint_tx_hash.clone()),
         dest_fee: None,
-        destination_contract: None,
+        destination_contract: receipt.materialization.registry_ref.clone(),
         proof: None,
         status: TransferStatus::Completed,
         created_at: now,
@@ -1841,6 +1945,29 @@ fn record_completed(
             "Failed to mark source Sanad as transferred in local store: {}",
             e
         );
+    }
+}
+
+fn output_materialization_metadata(materialization: &DestinationMaterialization) {
+    if !materialization.has_display_metadata() {
+        output::info("Destination materialization metadata: not reported by adapter");
+        return;
+    }
+    output::header("Destination Materialization");
+    if let Some(object_id) = &materialization.object_id {
+        output::kv("Object ID", object_id);
+    }
+    if let Some(seal_ref) = &materialization.seal_ref {
+        output::kv("Seal Ref", seal_ref);
+    }
+    if let Some(registry_ref) = &materialization.registry_ref {
+        output::kv("Registry Ref", registry_ref);
+    }
+    if let Some(commitment) = materialization.commitment {
+        output::kv("Commitment", &hex::encode(commitment));
+    }
+    if let Some(owner) = &materialization.owner {
+        output::kv("Owner", &hex::encode(owner));
     }
 }
 
@@ -1899,7 +2026,7 @@ fn record_send_completed(
     from: &Chain,
     to: &Chain,
     sanad_id: &SanadId,
-    consignment_path: &PathBuf,
+    consignment_path: &Path,
 ) {
     let now = chrono::Utc::now().timestamp() as u64;
     let sender = state.get_address(from).map(|s| s.to_string());
@@ -1941,6 +2068,68 @@ mod tests {
     use csv_hash::seal::CommitAnchor;
     use csv_protocol::SignatureScheme;
     use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
+
+    // ── Mint verifier key resolution (MINT-KEYS-001) ────────────────────────
+
+    // Serialize the env-mutating tests; they share process-wide env vars.
+    static VERIFIER_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    const VK1: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+    const VK2: &str = "0000000000000000000000000000000000000000000000000000000000000002";
+
+    fn clear_verifier_env() {
+        for v in [
+            "CSV_MINT_VERIFIER_KEY",
+            "CSV_MINT_VERIFIER_KEY_APTOS",
+            "CSV_MINT_VERIFIER_KEY_SUI",
+            "CSV_MINT_VERIFIER_KEY_SOLANA",
+            "CSV_MINT_VERIFIER_KEY_ETHEREUM",
+        ] {
+            // SAFETY: guarded by VERIFIER_ENV_LOCK; single-threaded within the test.
+            unsafe { std::env::remove_var(v) };
+        }
+    }
+
+    #[test]
+    fn verifier_secrets_missing_resolves_empty() {
+        let _g = VERIFIER_ENV_LOCK.lock().unwrap();
+        clear_verifier_env();
+        let (var, keys) = resolve_destination_verifier_secrets("aptos");
+        assert_eq!(var, "CSV_MINT_VERIFIER_KEY_APTOS");
+        assert!(
+            keys.is_empty(),
+            "no config must resolve to no keys (fail closed)"
+        );
+        clear_verifier_env();
+    }
+
+    #[test]
+    fn verifier_secrets_default_applies_when_no_scoped_override() {
+        let _g = VERIFIER_ENV_LOCK.lock().unwrap();
+        clear_verifier_env();
+        unsafe { std::env::set_var("CSV_MINT_VERIFIER_KEY", VK1) };
+        let (_, keys) = resolve_destination_verifier_secrets("sui");
+        assert_eq!(keys, vec![VK1.to_string()]);
+        clear_verifier_env();
+    }
+
+    #[test]
+    fn verifier_secrets_scoped_isolated_to_its_chain() {
+        let _g = VERIFIER_ENV_LOCK.lock().unwrap();
+        clear_verifier_env();
+        unsafe {
+            std::env::set_var("CSV_MINT_VERIFIER_KEY", VK1);
+            std::env::set_var("CSV_MINT_VERIFIER_KEY_SOLANA", format!("{VK1},0x{VK2}"));
+        }
+        // Solana sees its two scoped keys (0x stripped)…
+        let (_, sol) = resolve_destination_verifier_secrets("solana");
+        assert_eq!(sol, vec![VK1.to_string(), VK2.to_string()]);
+        // …while Aptos, with no scoped override, sees only the default. A key
+        // configured for one destination is never reused for another.
+        let (_, apt) = resolve_destination_verifier_secrets("aptos");
+        assert_eq!(apt, vec![VK1.to_string()]);
+        clear_verifier_env();
+    }
 
     // ── Seal-reference parsing ──────────────────────────────────────────────
 
@@ -2170,9 +2359,21 @@ mod tests {
         assert!(ProofMode::from_str("groth16", true).is_err());
     }
 
+    // Deterministic verifier key so tests can build the approved-signer set that
+    // VERIFY-SIGNER-BINDING-001 now requires on the accept path.
+    fn test_signing_key() -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    /// The approved verifier set matching `signed_consignment`'s signer: the raw
+    /// 32-byte ed25519 public key.
+    fn authorized() -> Vec<Vec<u8>> {
+        vec![test_signing_key().verifying_key().to_bytes().to_vec()]
+    }
+
     fn make_ed25519_signature_bytes(message: &[u8]) -> Vec<u8> {
-        use ed25519_dalek::{Signer, SigningKey};
-        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        use ed25519_dalek::Signer;
+        let signing_key = test_signing_key();
         let verifying_key = signing_key.verifying_key();
         let signature = signing_key.sign(message);
         let mut encoded = Vec::with_capacity(4 + 32 + 64);
@@ -2207,7 +2408,11 @@ mod tests {
             ),
             vec![signature],
             seal,
-            CommitAnchor::new(vec![0x99; 32], 100, proof_bytes.clone()).unwrap(),
+            // Anchor id must equal the Sanad id (the real adapter convention:
+            // build_inclusion_proof sets anchor_id = transfer.sanad_id), so the
+            // VERIFY-DOMAIN-SEPARATION-001 binding in the accept path holds. The
+            // consignment's declared Sanad below is [0x55; 32].
+            CommitAnchor::new(vec![0x55u8; 32], 100, proof_bytes.clone()).unwrap(),
             {
                 let mut proof =
                     InclusionProof::new(proof_bytes, Hash::new([2u8; 32]), 100, 0).unwrap();
@@ -2269,7 +2474,7 @@ mod tests {
             .canonical_cbor()
             .unwrap();
 
-        let accepted = validate_consignment_bytes(&bytes, &state).unwrap();
+        let accepted = validate_consignment_bytes(&bytes, &state, &authorized()).unwrap();
         let signal = accepted
             .provenance_strength
             .as_ref()
@@ -2290,7 +2495,7 @@ mod tests {
             .canonical_cbor()
             .unwrap();
 
-        let accepted = validate_consignment_bytes(&bytes, &state).unwrap();
+        let accepted = validate_consignment_bytes(&bytes, &state, &authorized()).unwrap();
         assert!(accepted.provenance_strength.is_none());
     }
 
@@ -2299,8 +2504,12 @@ mod tests {
         let (_dir, state) = temp_state();
         let consignment = signed_consignment_from_source(8, "dogecoin");
 
-        let err = validate_consignment_bytes(&consignment.canonical_cbor().unwrap(), &state)
-            .expect_err("unrecognized source provenance must not suppress warnings");
+        let err = validate_consignment_bytes(
+            &consignment.canonical_cbor().unwrap(),
+            &state,
+            &authorized(),
+        )
+        .expect_err("unrecognized source provenance must not suppress warnings");
         assert!(err.to_string().contains("source-chain provenance"));
     }
 
@@ -2310,7 +2519,7 @@ mod tests {
         let consignment = signed_consignment(1);
         let bytes = consignment.canonical_cbor().unwrap();
 
-        let accepted = validate_consignment_bytes(&bytes, &state).unwrap();
+        let accepted = validate_consignment_bytes(&bytes, &state, &authorized()).unwrap();
 
         assert_eq!(accepted.sanad_id, hex::encode([0x55u8; 32]));
         assert_eq!(accepted.dest_chain.as_str(), "sui");
@@ -2325,7 +2534,7 @@ mod tests {
     fn accept_records_wallet_ownership_after_validation() {
         let (_dir, mut state) = temp_state();
         let bytes = signed_consignment(2).canonical_cbor().unwrap();
-        let accepted = validate_consignment_bytes(&bytes, &state).unwrap();
+        let accepted = validate_consignment_bytes(&bytes, &state, &authorized()).unwrap();
 
         record_accepted_consignment(&accepted, &mut state).unwrap();
 
@@ -2335,7 +2544,7 @@ mod tests {
                 && s.sanad_id.as_deref() == Some(accepted.sanad_id.as_str())
                 && !s.consumed
         }));
-        assert!(validate_consignment_bytes(&bytes, &state).is_err());
+        assert!(validate_consignment_bytes(&bytes, &state, &authorized()).is_err());
     }
 
     #[test]
@@ -2345,8 +2554,12 @@ mod tests {
         let last = consignment.proof_bundle.signatures[0].len() - 1;
         consignment.proof_bundle.signatures[0][last] ^= 0x01;
 
-        let err = validate_consignment_bytes(&consignment.canonical_cbor().unwrap(), &state)
-            .expect_err("tampered signature must fail closed");
+        let err = validate_consignment_bytes(
+            &consignment.canonical_cbor().unwrap(),
+            &state,
+            &authorized(),
+        )
+        .expect_err("tampered signature must fail closed");
         assert!(err.to_string().contains("verification failed"));
     }
 
@@ -2355,7 +2568,7 @@ mod tests {
         let (_dir, mut state) = temp_state();
         let consignment = signed_consignment(4);
         let bytes = consignment.canonical_cbor().unwrap();
-        let accepted = validate_consignment_bytes(&bytes, &state).unwrap();
+        let accepted = validate_consignment_bytes(&bytes, &state, &authorized()).unwrap();
         state.add_seal(SealRecord {
             seal_ref: accepted.seal_ref.clone(),
             chain: accepted.dest_chain.clone(),
@@ -2368,7 +2581,7 @@ mod tests {
             proof_ref: None,
         });
 
-        let err = validate_consignment_bytes(&bytes, &state)
+        let err = validate_consignment_bytes(&bytes, &state, &authorized())
             .expect_err("replayed invoice-bound seal must fail closed");
         assert!(err.to_string().contains("Replay rejected"));
     }
@@ -2379,8 +2592,12 @@ mod tests {
         let mut consignment = signed_consignment(5);
         consignment.proof_bundle.anchor_ref.block_height = 101;
 
-        let err = validate_consignment_bytes(&consignment.canonical_cbor().unwrap(), &state)
-            .expect_err("anchor mismatch must fail closed");
+        let err = validate_consignment_bytes(
+            &consignment.canonical_cbor().unwrap(),
+            &state,
+            &authorized(),
+        )
+        .expect_err("anchor mismatch must fail closed");
         assert!(err.to_string().contains("verification failed"));
     }
 
@@ -2389,7 +2606,7 @@ mod tests {
         let (_dir, state) = temp_state();
         let json = br#"{"version":1,"proof_bundle":{}}"#;
 
-        let err = validate_consignment_bytes(json, &state)
+        let err = validate_consignment_bytes(json, &state, &authorized())
             .expect_err("legacy JSON consignment input must not be accepted");
         assert!(
             err.to_string()

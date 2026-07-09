@@ -530,9 +530,14 @@ def build_context_pack(ticket_path: Path, repo_root: Path, radius_override: Opti
             contract_sections.append("The following contract files are relevant to this ticket. "
                                    "Before implementing any offchain feature, verify the contract supports it.\n\n")
             for cf in contract_files:
-                if cf and (repo_root / cf).exists():
-                    contract_sections.append(f"### `{cf}`\n\n```solidity\n{load_file_limited(repo_root / cf, repo_root)}\n```\n")
-                elif cf:
+                if not cf:
+                    continue
+                cf_path = repo_root / cf
+                if cf_path.is_dir():
+                    contract_sections.append(f"### `{cf}`\n\n[`{cf}` is a directory, not a file — ticket metadata is stale; point `contract_files` at specific source files]\n")
+                elif cf_path.exists():
+                    contract_sections.append(f"### `{cf}`\n\n```{guess_lang(cf)}\n{load_file_limited(cf_path, repo_root)}\n```\n")
+                else:
                     contract_sections.append(f"### `{cf}`\n\n[missing contract file — verify path]\n")
         else:
             contract_sections.append("No contract files specified. If this ticket touches offchain code that "

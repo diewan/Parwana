@@ -25,6 +25,8 @@ use crate::runtime::ChainRuntime;
 
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
+pub use csv_adapter_core::DestinationMaterialization;
+
 #[cfg(feature = "runtime-coordinator")]
 use csv_adapter_core::CrossChainTransfer;
 #[cfg(feature = "runtime-coordinator")]
@@ -197,6 +199,40 @@ impl TransferManager {
             .ok_or_else(|| CsvError::TransferNotFound(transfer_id.to_string()))
     }
 
+    /// Read recorded settlement evidence from the runtime event store.
+    #[cfg(feature = "runtime-coordinator")]
+    pub fn settlement_evidence(
+        &self,
+        sanad_id: &SanadId,
+    ) -> Result<Option<csv_runtime::SettlementEvidence>, CsvError> {
+        let coordinator = self.coordinator.as_ref().ok_or_else(|| {
+            CsvError::CoordinatorNotAvailable(
+                "runtime coordinator is not configured for settlement queries".to_string(),
+            )
+        })?;
+        let runtime_sanad = csv_hash::SanadId::new(*sanad_id.as_bytes());
+        coordinator
+            .settlement_evidence(&runtime_sanad)
+            .map_err(|e| CsvError::RuntimeError(e.to_string()))
+    }
+
+    /// Read terminal settlement status from the runtime event store.
+    #[cfg(feature = "runtime-coordinator")]
+    pub fn settlement_status(
+        &self,
+        sanad_id: &SanadId,
+    ) -> Result<csv_runtime::SettlementStatus, CsvError> {
+        let coordinator = self.coordinator.as_ref().ok_or_else(|| {
+            CsvError::CoordinatorNotAvailable(
+                "runtime coordinator is not configured for settlement queries".to_string(),
+            )
+        })?;
+        let runtime_sanad = csv_hash::SanadId::new(*sanad_id.as_bytes());
+        coordinator
+            .settlement_status(&runtime_sanad)
+            .map_err(|e| CsvError::RuntimeError(e.to_string()))
+    }
+
     /// List transfers matching the given filters.
     pub fn list(&self, filters: TransferFilters) -> Result<Vec<TransferRecord>, CsvError> {
         let transfers = self
@@ -272,6 +308,7 @@ impl TransferManager {
                     destination_chain: to_chain,
                     lock_tx_hash: receipt.lock_tx_hash,
                     mint_tx_hash: receipt.mint_tx_hash,
+                    materialization: receipt.materialization,
                 })
             }
             csv_runtime::TransferOutcome::Pending {
@@ -310,6 +347,8 @@ pub struct TransferReceipt {
     pub lock_tx_hash: String,
     /// Transaction hash of the mint on the destination chain, as reported by the runtime.
     pub mint_tx_hash: String,
+    /// Destination-side materialization metadata observed by the destination adapter.
+    pub materialization: DestinationMaterialization,
 }
 
 impl std::fmt::Display for TransferReceipt {
@@ -560,6 +599,7 @@ impl TransferBuilder {
                                 destination_chain: self.to_chain,
                                 lock_tx_hash: receipt.lock_tx_hash,
                                 mint_tx_hash: receipt.mint_tx_hash,
+                                materialization: receipt.materialization,
                             })
                         }
                         csv_runtime::TransferOutcome::Pending {

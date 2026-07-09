@@ -48,10 +48,11 @@ pub struct SolanaBackend {
     /// Distinct from the Ed25519 wallet that submits the transaction: the
     /// destination program authenticates a mint by recovering M-of-N secp256k1
     /// verifier public keys from signatures over the §9.2 digest
-    /// (`secp256k1_recover`), independent of who pays gas. Absent this key the
+    /// (`secp256k1_recover`), independent of who pays gas. Absent any key the
     /// adapter fails closed rather than emitting an unauthenticated mint the
-    /// program would reject.
-    verifier_signing_key: Option<secp256k1::SecretKey>,
+    /// program would reject. Multiple keys attach one verifier signature each,
+    /// satisfying an M-of-N `VerifierRegistry` in a single mint (MINT-KEYS-001).
+    verifier_signing_keys: Vec<secp256k1::SecretKey>,
 }
 
 impl SolanaBackend {
@@ -81,7 +82,7 @@ impl SolanaBackend {
             network,
             domain_separator,
             seal_protocol: Arc::new(seal),
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         }
     }
 
@@ -98,7 +99,20 @@ impl SolanaBackend {
     /// from the Ed25519 wallet configured on the seal protocol that submits (and
     /// pays for) the transaction.
     pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
-        self.verifier_signing_key = Some(verifier_signing_key);
+        self.verifier_signing_keys.push(verifier_signing_key);
+        self
+    }
+
+    /// Set the full set of secp256k1 verifier keys that sign the RFC-0012 §9.2
+    /// mint attestation digest (MINT-KEYS-001).
+    ///
+    /// Replaces any previously configured keys. Each key's 33-byte compressed
+    /// public key must be registered in the destination program's
+    /// `VerifierRegistry`; the adapter attaches one signature per key so a single
+    /// mint can satisfy an M-of-N threshold. An empty set leaves the backend
+    /// fail-closed.
+    pub fn with_verifier_keys(mut self, verifier_signing_keys: Vec<secp256k1::SecretKey>) -> Self {
+        self.verifier_signing_keys = verifier_signing_keys;
         self
     }
 
@@ -123,28 +137,53 @@ impl SolanaBackend {
     /// both the raw and the EVM (`+27`) form. Fails closed when no verifier key is
     /// configured rather than emitting an unauthenticated mint.
     pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
-        use secp256k1::{Message, Secp256k1};
-
-        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+        // First configured verifier key (fail-closed on none). Retained for
+        // single-signer callers/tests; the mint path uses the plural form below.
+        let secret_key = self.verifier_signing_keys.first().ok_or_else(|| {
             ChainOpError::SigningError(
                 "No verifier signer configured: cannot attest the §9.2 mint digest \
                  (set a secp256k1 verifier key via with_verifier_key())."
                     .to_string(),
             )
         })?;
+        Ok(Self::sign_digest_with(secret_key, digest))
+    }
 
-        // Sign the digest bytes directly (no message prefix), matching the on-chain
-        // secp256k1_recover-over-digest semantics.
+    /// Sign the §9.2 digest with **every** configured verifier key, returning one
+    /// 65-byte recoverable signature per key (MINT-KEYS-001).
+    ///
+    /// This is the mint-path signer: multiple local signers satisfy an M-of-N
+    /// `VerifierRegistry` in one transaction. Fails closed when no verifier key is
+    /// configured.
+    pub fn sign_mint_attestation_digests(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<Vec<u8>>> {
+        if self.verifier_signing_keys.is_empty() {
+            return Err(ChainOpError::SigningError(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set a secp256k1 verifier key via with_verifier_key())."
+                    .to_string(),
+            ));
+        }
+        Ok(self
+            .verifier_signing_keys
+            .iter()
+            .map(|k| Self::sign_digest_with(k, digest))
+            .collect())
+    }
+
+    /// Produce a single 65-byte recoverable signature (`r || s || v`, raw
+    /// recovery id 0/1) over the 32-byte digest, matching the on-chain
+    /// `secp256k1_recover`-over-digest semantics.
+    fn sign_digest_with(secret_key: &secp256k1::SecretKey, digest: &[u8; 32]) -> Vec<u8> {
+        use secp256k1::{Message, Secp256k1};
         let msg = Message::from_digest(*digest);
         let secp = Secp256k1::new();
         let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
         let (recovery_id, compact) = signature.serialize_compact();
-
         let mut out = Vec::with_capacity(65);
         out.extend_from_slice(&compact);
         // Raw recovery id (0/1); the program accepts this and the EVM +27 form.
         out.push(recovery_id.to_i32() as u8);
-        Ok(out)
+        out
     }
 
     /// Create from SolanaSealProtocol
@@ -157,7 +196,7 @@ impl SolanaBackend {
             network: seal.get_network(),
             domain_separator: seal.get_domain(),
             seal_protocol: seal,
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 

@@ -57,6 +57,199 @@ fn parse_digest(s: &str) -> Result<[u8; 32], String> {
     Ok(digest)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SuiSealStateView {
+    sanad_id: Vec<u8>,
+    state: u8,
+    owner: [u8; 32],
+    commitment: Hash,
+    /// Nullifier bytes as stored on-chain (empty when not yet registered).
+    nullifier: Vec<u8>,
+    created_at: u64,
+    locked_at: u64,
+    consumed_at: u64,
+    minted_at: u64,
+    refunded_at: u64,
+}
+
+impl SuiSealStateView {
+    fn from_move_contents(contents: &[u8]) -> Result<Self, String> {
+        let mut cursor = BcsCursor::new(contents);
+
+        cursor.read_array::<32>("id")?;
+        let sanad_id = cursor.read_vec("sanad_id")?.to_vec();
+        let commitment = Hash::new(cursor.read_array::<32>("commitment")?);
+        let state = cursor.read_u8("state")?;
+        let owner = cursor.read_array::<32>("owner")?;
+        cursor.read_vec("source_chain")?;
+        cursor.read_vec("lock_event_id")?;
+        let nullifier = cursor.read_vec("nullifier")?.to_vec();
+        cursor.read_u8("asset_class")?;
+        cursor.read_vec("asset_id")?;
+        cursor.read_vec("metadata_hash")?;
+        cursor.read_u8("proof_system")?;
+        let created_at = cursor.read_u64("created_at")?;
+        let locked_at = cursor.read_u64("locked_at")?;
+        let consumed_at = cursor.read_u64("consumed_at")?;
+        let minted_at = cursor.read_u64("minted_at")?;
+        let refunded_at = cursor.read_u64("refunded_at")?;
+        cursor.finish()?;
+
+        Ok(Self {
+            sanad_id,
+            state,
+            owner,
+            commitment,
+            nullifier,
+            created_at,
+            locked_at,
+            consumed_at,
+            minted_at,
+            refunded_at,
+        })
+    }
+}
+
+/// Map a decoded on-chain `Seal` view into the protocol `CanonicalSanadState`.
+///
+/// Performs strict validation so no placeholder/defaulted values leak: the
+/// nullifier must be absent (empty) or exactly 32 bytes, and every timestamp
+/// must fit in `i64`. Any violation fails closed (`SUI-SANAD-STATE-001`).
+#[cfg(feature = "rpc")]
+fn sanad_state_from_view(view: SuiSealStateView) -> ChainOpResult<CanonicalSanadState> {
+    let nullifier = match view.nullifier.len() {
+        0 => None,
+        32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&view.nullifier);
+            Some(Hash::new(arr))
+        }
+        other => {
+            return Err(ChainOpError::RpcError(format!(
+                "Sui Seal nullifier has unexpected length {} (expected 0 or 32)",
+                other
+            )));
+        }
+    };
+
+    let to_ts = |field: &str, value: u64| -> ChainOpResult<i64> {
+        i64::try_from(value).map_err(|_| {
+            ChainOpError::RpcError(format!("Sui Seal {} overflows i64: {}", field, value))
+        })
+    };
+    let opt_ts = |field: &str, value: u64| -> ChainOpResult<Option<i64>> {
+        if value == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(to_ts(field, value)?))
+        }
+    };
+
+    Ok(CanonicalSanadState {
+        state: view.state,
+        owner: format!("0x{}", hex::encode(view.owner)),
+        commitment: view.commitment,
+        nullifier,
+        created_at: to_ts("created_at", view.created_at)?,
+        locked_at: opt_ts("locked_at", view.locked_at)?,
+        consumed_at: opt_ts("consumed_at", view.consumed_at)?,
+        minted_at: opt_ts("minted_at", view.minted_at)?,
+        refunded_at: opt_ts("refunded_at", view.refunded_at)?,
+    })
+}
+
+struct BcsCursor<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> BcsCursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn read_array<const N: usize>(&mut self, field: &str) -> Result<[u8; N], String> {
+        let end = self
+            .offset
+            .checked_add(N)
+            .ok_or_else(|| format!("{} offset overflow", field))?;
+        let slice = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or_else(|| format!("{} missing {} bytes", field, N))?;
+        self.offset = end;
+        let mut out = [0u8; N];
+        out.copy_from_slice(slice);
+        Ok(out)
+    }
+
+    fn read_u8(&mut self, field: &str) -> Result<u8, String> {
+        let value = *self
+            .bytes
+            .get(self.offset)
+            .ok_or_else(|| format!("{} missing u8", field))?;
+        self.offset += 1;
+        Ok(value)
+    }
+
+    fn read_u64(&mut self, field: &str) -> Result<u64, String> {
+        Ok(u64::from_le_bytes(self.read_array::<8>(field)?))
+    }
+
+    fn read_vec(&mut self, field: &str) -> Result<&'a [u8], String> {
+        let len = self.read_uleb128(field)?;
+        let end = self
+            .offset
+            .checked_add(len)
+            .ok_or_else(|| format!("{} length overflow", field))?;
+        let slice = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or_else(|| format!("{} truncated: expected {} bytes", field, len))?;
+        self.offset = end;
+        Ok(slice)
+    }
+
+    fn read_uleb128(&mut self, field: &str) -> Result<usize, String> {
+        let mut value = 0usize;
+        let mut shift = 0u32;
+
+        loop {
+            let byte = self.read_u8(field)?;
+            let chunk = (byte & 0x7f) as usize;
+            value = value
+                .checked_add(
+                    chunk
+                        .checked_shl(shift)
+                        .ok_or_else(|| format!("{} length shift overflow", field))?,
+                )
+                .ok_or_else(|| format!("{} length overflow", field))?;
+
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+
+            shift = shift
+                .checked_add(7)
+                .ok_or_else(|| format!("{} length shift overflow", field))?;
+            if shift as usize >= usize::BITS as usize {
+                return Err(format!("{} length exceeds usize", field));
+            }
+        }
+    }
+
+    fn finish(self) -> Result<(), String> {
+        if self.offset == self.bytes.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "unexpected trailing bytes in Seal object: {}",
+                self.bytes.len() - self.offset
+            ))
+        }
+    }
+}
+
 /// Sui chain operations implementation
 ///
 /// This struct provides complete implementations of all chain operation traits
@@ -85,9 +278,11 @@ pub struct SuiBackend {
     /// Distinct from `signing_key`: the destination `Registry` authenticates a
     /// mint by recovering M-of-N secp256k1 verifier public keys from signatures
     /// over the §9.2 digest (`ecdsa_k1::secp256k1_ecrecover`), independent of who
-    /// submits the transaction. Absent this key the adapter fails closed rather
-    /// than emitting an unauthenticated mint the `Registry` would reject.
-    verifier_signing_key: Option<secp256k1::SecretKey>,
+    /// submits the transaction. Absent any key the adapter fails closed rather
+    /// than emitting an unauthenticated mint the `Registry` would reject. Multiple
+    /// keys attach one verifier signature each, satisfying an M-of-N verifier set
+    /// in a single mint (see MINT-KEYS-001).
+    verifier_signing_keys: Vec<secp256k1::SecretKey>,
 }
 
 impl SuiBackend {
@@ -128,7 +323,7 @@ impl SuiBackend {
             event_builder,
             seal_protocol: Arc::new(seal),
             signing_key,
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         }
     }
 
@@ -150,7 +345,7 @@ impl SuiBackend {
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
             signing_key: None,
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 
@@ -168,7 +363,7 @@ impl SuiBackend {
             event_builder: CommitmentEventBuilder::new(module_addr, event_type),
             seal_protocol: seal,
             signing_key: Some(signing_key),
-            verifier_signing_key: None,
+            verifier_signing_keys: Vec::new(),
         })
     }
 
@@ -185,7 +380,19 @@ impl SuiBackend {
     /// registered in the destination `Registry`'s verifier set). It is distinct
     /// from the Ed25519 transaction signer configured via [`Self::with_key`].
     pub fn with_verifier_key(mut self, verifier_signing_key: secp256k1::SecretKey) -> Self {
-        self.verifier_signing_key = Some(verifier_signing_key);
+        self.verifier_signing_keys.push(verifier_signing_key);
+        self
+    }
+
+    /// Set the full set of secp256k1 verifier keys that sign the RFC-0012 §9.2
+    /// mint attestation digest (MINT-KEYS-001).
+    ///
+    /// Replaces any previously configured keys. Each key's 33-byte compressed
+    /// public key must be registered in the destination `Registry` verifier set;
+    /// the adapter attaches one signature per key so a single mint can satisfy an
+    /// M-of-N threshold. An empty set leaves the backend fail-closed.
+    pub fn with_verifier_keys(mut self, verifier_signing_keys: Vec<secp256k1::SecretKey>) -> Self {
+        self.verifier_signing_keys = verifier_signing_keys;
         self
     }
 
@@ -223,28 +430,53 @@ impl SuiBackend {
     /// form the Sui native primitive expects (no EVM `+27`). Fails closed when no
     /// verifier key is configured rather than emitting an unauthenticated mint.
     pub fn sign_mint_attestation_digest(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<u8>> {
-        use secp256k1::{Message, Secp256k1};
-
-        let secret_key = self.verifier_signing_key.as_ref().ok_or_else(|| {
+        // First configured verifier key (fail-closed on none). Retained for
+        // single-signer callers/tests; the mint path uses the plural form below.
+        let secret_key = self.verifier_signing_keys.first().ok_or_else(|| {
             ChainOpError::CapabilityUnavailable(
                 "No verifier signer configured: cannot attest the §9.2 mint digest \
                  (set a secp256k1 verifier key via with_verifier_key())."
                     .to_string(),
             )
         })?;
+        Ok(Self::sign_digest_with(secret_key, digest))
+    }
 
-        // Sign the digest bytes directly (no message prefix), matching the
-        // on-chain ecrecover-over-sha256(preimage) semantics.
+    /// Sign the §9.2 digest with **every** configured verifier key, returning one
+    /// 65-byte recoverable signature per key (MINT-KEYS-001).
+    ///
+    /// This is the mint-path signer: multiple local signers satisfy an M-of-N
+    /// `Registry` verifier set in one transaction. Fails closed when no verifier
+    /// key is configured.
+    pub fn sign_mint_attestation_digests(&self, digest: &[u8; 32]) -> ChainOpResult<Vec<Vec<u8>>> {
+        if self.verifier_signing_keys.is_empty() {
+            return Err(ChainOpError::CapabilityUnavailable(
+                "No verifier signer configured: cannot attest the §9.2 mint digest \
+                 (set a secp256k1 verifier key via with_verifier_key())."
+                    .to_string(),
+            ));
+        }
+        Ok(self
+            .verifier_signing_keys
+            .iter()
+            .map(|k| Self::sign_digest_with(k, digest))
+            .collect())
+    }
+
+    /// Produce a single 65-byte recoverable signature (`r || s || v`, raw
+    /// recovery id 0/1) over the 32-byte digest, matching Sui's
+    /// `secp256k1_ecrecover`-over-sha256(preimage) semantics.
+    fn sign_digest_with(secret_key: &secp256k1::SecretKey, digest: &[u8; 32]) -> Vec<u8> {
+        use secp256k1::{Message, Secp256k1};
         let msg = Message::from_digest(*digest);
         let secp = Secp256k1::new();
         let signature = secp.sign_ecdsa_recoverable(&msg, secret_key);
         let (recovery_id, compact) = signature.serialize_compact();
-
         let mut out = Vec::with_capacity(65);
         out.extend_from_slice(&compact);
         // Sui's secp256k1_ecrecover expects the raw recovery id (0/1) as `v`.
         out.push(recovery_id.to_i32() as u8);
-        Ok(out)
+        out
     }
 
     /// Submit a verifier-attested §9.2 mint to the destination `Registry` and
@@ -1594,7 +1826,10 @@ impl SanadStateReader for SuiBackend {
         let client = self.node.client();
         let mut client_guard = client.lock().await;
 
-        let request = sui_rpc::proto::sui::rpc::v2::GetObjectRequest::new(&object_id);
+        let mut request = sui_rpc::proto::sui::rpc::v2::GetObjectRequest::new(&object_id);
+        request.read_mask = Some(prost_types::FieldMask {
+            paths: vec!["contents".to_string()],
+        });
 
         let object_response = (*client_guard)
             .ledger_client()
@@ -1605,15 +1840,28 @@ impl SanadStateReader for SuiBackend {
         let object = object_response.into_inner().object;
 
         match object {
-            Some(_) => {
-                // The Sui RPC/SDK types do not currently expose the sanad state fields
-                // (state, owner, commitment, timestamps) needed to populate CanonicalSanadState.
-                // Returning a capability error instead of placeholder data per security requirements.
-                // TODO: Add Move contract view function to expose sanad state fields via RPC
-                Err(ChainOpError::CapabilityUnavailable(
-                    "Sui object structure does not expose sanad state fields. \
-                     Add a view function to the Move contract to return state, owner, commitment, and timestamps.".to_string(),
-                ))
+            Some(object) => {
+                // Decode the real on-chain Move `Seal` object contents. The
+                // object already carries every field CanonicalSanadState needs
+                // (state, owner, commitment, nullifier, lifecycle timestamps),
+                // so no placeholder/default values are ever substituted; a
+                // missing or malformed object fails closed (SUI-SANAD-STATE-001).
+                let contents = object
+                    .contents
+                    .and_then(|bcs| bcs.value)
+                    .ok_or_else(|| {
+                        ChainOpError::CapabilityUnavailable(
+                            "Sui RPC did not return Seal object contents; cannot derive canonical sanad state"
+                                .to_string(),
+                        )
+                    })?;
+
+                let view =
+                    SuiSealStateView::from_move_contents(contents.as_ref()).map_err(|e| {
+                        ChainOpError::RpcError(format!("Failed to decode Sui Seal object: {}", e))
+                    })?;
+
+                sanad_state_from_view(view)
             }
             None => Err(ChainOpError::RpcError("Sanad object not found".to_string())),
         }
@@ -1628,7 +1876,10 @@ impl SanadStateReader for SuiBackend {
         let mut client_guard = client.lock().await;
 
         // Query the Sui object for this seal
-        let request = sui_rpc::proto::sui::rpc::v2::GetObjectRequest::new(&object_id);
+        let mut request = sui_rpc::proto::sui::rpc::v2::GetObjectRequest::new(&object_id);
+        request.read_mask = Some(prost_types::FieldMask {
+            paths: vec!["contents".to_string()],
+        });
 
         let object_response = (*client_guard)
             .ledger_client()
@@ -1637,16 +1888,45 @@ impl SanadStateReader for SuiBackend {
             .map_err(|e| ChainOpError::RpcError(format!("Failed to get seal object: {}", e)))?;
 
         match object_response.into_inner().object {
-            Some(_object) => {
-                // The Sui RPC/SDK types do not currently expose the seal state fields
-                // needed to populate CanonicalSealState fully.
-                // Return what we can determine from the object's existence.
+            Some(object) => {
+                let contents = object
+                    .contents
+                    .and_then(|bcs| bcs.value)
+                    .ok_or_else(|| {
+                        ChainOpError::CapabilityUnavailable(
+                            "Sui RPC did not return Seal object contents; cannot derive canonical seal state"
+                                .to_string(),
+                        )
+                    })?;
+
+                let seal_state =
+                    SuiSealStateView::from_move_contents(contents.as_ref()).map_err(|e| {
+                        ChainOpError::RpcError(format!("Failed to decode Sui Seal object: {}", e))
+                    })?;
+
+                let created_at = i64::try_from(seal_state.created_at).map_err(|_| {
+                    ChainOpError::RpcError(format!(
+                        "Sui Seal created_at overflows i64: {}",
+                        seal_state.created_at
+                    ))
+                })?;
+                let consumed_at = if seal_state.consumed_at == 0 {
+                    None
+                } else {
+                    Some(i64::try_from(seal_state.consumed_at).map_err(|_| {
+                        ChainOpError::RpcError(format!(
+                            "Sui Seal consumed_at overflows i64: {}",
+                            seal_state.consumed_at
+                        ))
+                    })?)
+                };
+
                 Ok(CanonicalSealState {
-                    state: 0, // Active (seal exists and is not consumed)
-                    owner: format!("0x{}", hex::encode(seal_id.as_bytes())),
-                    commitment: *seal_id,
-                    created_at: 0,
-                    consumed_at: None,
+                    state: seal_state.state,
+                    owner: format!("0x{}", hex::encode(seal_state.owner)),
+                    commitment: seal_state.commitment,
+                    created_at,
+                    consumed_at,
                 })
             }
             None => Err(ChainOpError::RpcError("Seal object not found".to_string())),
@@ -1879,6 +2159,174 @@ impl From<SuiError> for ChainOpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn push_bcs_vec(out: &mut Vec<u8>, bytes: &[u8]) {
+        let mut len = bytes.len();
+        while len >= 0x80 {
+            out.push((len as u8 & 0x7f) | 0x80);
+            len >>= 7;
+        }
+        out.push(len as u8);
+        out.extend_from_slice(bytes);
+    }
+
+    fn seal_contents(
+        state: u8,
+        owner: [u8; 32],
+        commitment: [u8; 32],
+        created_at: u64,
+        consumed_at: u64,
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0xAA; 32]); // UID
+        push_bcs_vec(&mut out, &[0x11; 32]); // sanad_id
+        out.extend_from_slice(&commitment);
+        out.push(state);
+        out.extend_from_slice(&owner);
+        push_bcs_vec(&mut out, &[]); // source_chain
+        push_bcs_vec(&mut out, &[]); // lock_event_id
+        push_bcs_vec(&mut out, &[]); // nullifier
+        out.push(0); // asset_class
+        push_bcs_vec(&mut out, &[]); // asset_id
+        push_bcs_vec(&mut out, &[]); // metadata_hash
+        out.push(0); // proof_system
+        out.extend_from_slice(&created_at.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // locked_at
+        out.extend_from_slice(&consumed_at.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // minted_at
+        out.extend_from_slice(&0u64.to_le_bytes()); // refunded_at
+        out
+    }
+
+    #[test]
+    fn sui_seal_state_decoder_reads_canonical_fields() {
+        let owner = [0x22; 32];
+        let commitment = [0x33; 32];
+        let contents = seal_contents(4, owner, commitment, 12_000, 13_000);
+
+        let view =
+            SuiSealStateView::from_move_contents(&contents).expect("valid Sui Seal BCS decodes");
+
+        assert_eq!(view.state, 4);
+        assert_eq!(view.owner, owner);
+        assert_eq!(view.commitment, Hash::new(commitment));
+        assert_eq!(view.created_at, 12_000);
+        assert_eq!(view.consumed_at, 13_000);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn seal_contents_full(
+        sanad_id: &[u8],
+        commitment: [u8; 32],
+        state: u8,
+        owner: [u8; 32],
+        nullifier: &[u8],
+        created_at: u64,
+        locked_at: u64,
+        consumed_at: u64,
+        minted_at: u64,
+        refunded_at: u64,
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0xAA; 32]); // UID
+        push_bcs_vec(&mut out, sanad_id);
+        out.extend_from_slice(&commitment);
+        out.push(state);
+        out.extend_from_slice(&owner);
+        push_bcs_vec(&mut out, &[]); // source_chain
+        push_bcs_vec(&mut out, &[]); // lock_event_id
+        push_bcs_vec(&mut out, nullifier);
+        out.push(0); // asset_class
+        push_bcs_vec(&mut out, &[]); // asset_id
+        push_bcs_vec(&mut out, &[]); // metadata_hash
+        out.push(0); // proof_system
+        out.extend_from_slice(&created_at.to_le_bytes());
+        out.extend_from_slice(&locked_at.to_le_bytes());
+        out.extend_from_slice(&consumed_at.to_le_bytes());
+        out.extend_from_slice(&minted_at.to_le_bytes());
+        out.extend_from_slice(&refunded_at.to_le_bytes());
+        out
+    }
+
+    /// SUI-SANAD-STATE-001: a fully-populated Seal object decodes into real
+    /// CanonicalSanadState fields (state, owner, commitment, nullifier, and all
+    /// lifecycle timestamps) with no placeholder substitution.
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn sanad_state_from_view_maps_real_fields() {
+        let owner = [0x22; 32];
+        let commitment = [0x33; 32];
+        let nullifier = [0x44; 32];
+        let contents = seal_contents_full(
+            &[0x11; 32],
+            commitment,
+            3,
+            owner,
+            &nullifier,
+            100,
+            200,
+            0,
+            0,
+            0,
+        );
+        let view = SuiSealStateView::from_move_contents(&contents).unwrap();
+        let state = sanad_state_from_view(view).unwrap();
+
+        assert_eq!(state.state, 3);
+        assert_eq!(state.owner, format!("0x{}", hex::encode(owner)));
+        assert_eq!(state.commitment, Hash::new(commitment));
+        assert_eq!(state.nullifier, Some(Hash::new(nullifier)));
+        assert_eq!(state.created_at, 100);
+        assert_eq!(state.locked_at, Some(200));
+        assert_eq!(state.consumed_at, None);
+        assert_eq!(state.minted_at, None);
+        assert_eq!(state.refunded_at, None);
+    }
+
+    /// An absent nullifier (empty on-chain vector) maps to None, not a zero hash.
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn sanad_state_from_view_empty_nullifier_is_none() {
+        let contents =
+            seal_contents_full(&[0x11; 32], [0x33; 32], 1, [0x22; 32], &[], 10, 0, 0, 0, 0);
+        let view = SuiSealStateView::from_move_contents(&contents).unwrap();
+        let state = sanad_state_from_view(view).unwrap();
+        assert_eq!(state.nullifier, None);
+    }
+
+    /// A malformed (wrong-length) nullifier fails closed rather than being
+    /// silently zero-filled or truncated.
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn sanad_state_from_view_rejects_bad_nullifier() {
+        let contents = seal_contents_full(
+            &[0x11; 32],
+            [0x33; 32],
+            1,
+            [0x22; 32],
+            &[0x44; 16], // wrong length
+            10,
+            0,
+            0,
+            0,
+            0,
+        );
+        let view = SuiSealStateView::from_move_contents(&contents).unwrap();
+        assert!(sanad_state_from_view(view).is_err());
+    }
+
+    #[test]
+    fn sui_seal_state_decoder_rejects_truncated_contents() {
+        let contents = seal_contents(1, [0x22; 32], [0x33; 32], 12_000, 0);
+
+        let err = SuiSealStateView::from_move_contents(&contents[..contents.len() - 1])
+            .expect_err("truncated Sui Seal BCS must fail closed");
+
+        assert!(
+            err.contains("refunded_at") || err.contains("trailing") || err.contains("missing"),
+            "unexpected decode error: {err}"
+        );
+    }
 
     #[tokio::test]
     async fn test_address_validation() {

@@ -615,26 +615,66 @@ pub fn parse_signatures_from_bundle(
     Ok(signatures)
 }
 
-/// Verify signatures from a proof bundle using the specified scheme.
+/// Verify signatures from a proof bundle using the specified scheme, bound to an
+/// approved verifier set.
 ///
-/// This is a convenience function that combines parsing and verification
-/// in a single call. It is the canonical implementation used by all adapters.
+/// This mirrors `csv_verifier::verify_bundle_signatures` (VERIFY-SIGNER-BINDING-001):
+/// the public key embedded in each `[pk_len][pk][sig]` blob is chosen by the
+/// sender and proves nothing about authorization on its own. When
+/// `authorized_signers` is non-empty, every embedded key MUST be a member of the
+/// approved verifier set (compared in canonical form) or verification fails
+/// closed. An empty set skips the membership check — callers on an unauthenticated
+/// accept path must pass a non-empty set (and fail closed themselves if they
+/// cannot).
 ///
 /// # Arguments
 /// * `bundle` — The proof bundle containing signatures
 /// * `scheme` — The signature scheme to use for verification
+/// * `authorized_signers` — Approved verifier public keys (raw bytes)
 ///
 /// # Returns
-/// `Ok(())` if all signatures are valid, or an error otherwise.
+/// `Ok(())` if all signatures are valid and authorized, or an error otherwise.
 pub fn verify_bundle_signatures(
     bundle: &crate::proof_taxonomy::ProofBundle,
     scheme: SignatureScheme,
+    authorized_signers: &[Vec<u8>],
 ) -> Result<()> {
     let signatures = parse_signatures_from_bundle(
         &bundle.signatures,
         bundle.transition_dag.root_commitment.as_bytes(),
     )?;
+    if !authorized_signers.is_empty() {
+        let authorized_canonical: Vec<Vec<u8>> = authorized_signers
+            .iter()
+            .map(|k| canonical_public_key(k, scheme))
+            .collect();
+        for (i, sig) in signatures.iter().enumerate() {
+            let candidate = canonical_public_key(&sig.public_key, scheme);
+            if !authorized_canonical.iter().any(|k| k == &candidate) {
+                return Err(ProtocolError::SignatureVerificationFailed(format!(
+                    "Signature {} public key is not in the approved verifier set",
+                    i
+                )));
+            }
+        }
+    }
     verify_signatures(&signatures, scheme)
+}
+
+/// Reduce a public key to a canonical byte form for set-membership comparison.
+///
+/// secp256k1 keys are normalized to their 33-byte compressed serialization (so a
+/// compressed and uncompressed encoding of the same key compare equal); other
+/// schemes and unparseable bytes are returned unchanged for exact comparison.
+fn canonical_public_key(key: &[u8], scheme: SignatureScheme) -> Vec<u8> {
+    #[cfg(feature = "secp256k1")]
+    if matches!(scheme, SignatureScheme::Secp256k1)
+        && let Ok(pk) = secp256k1::PublicKey::from_slice(key)
+    {
+        return pk.serialize().to_vec();
+    }
+    let _ = scheme;
+    key.to_vec()
 }
 
 #[cfg(test)]

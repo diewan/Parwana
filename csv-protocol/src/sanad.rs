@@ -396,18 +396,126 @@ impl CanonicalEncoding for SanadPayloadDescriptor {
     }
 }
 
+/// Domain tag for the canonical message signed by an [`OwnershipProof`].
+///
+/// The owner signs a domain-separated digest over the Sanad's descriptor hash,
+/// commitment, salt, and owner identity, so the ownership signature is bound to
+/// the exact Sanad it claims to own and cannot be replayed onto a different
+/// content/state/owner (`SANAD-OWNERSHIP-PROOF-VERIFY-001`).
+pub const DOMAIN_OWNERSHIP_PROOF_V1: &str = "urn:lnp-bp:csv:csv.sanad.ownership.v1";
+
 /// Ownership proof binding a Sanad to an owner.
+///
+/// The proof carries the signer's `public_key` (needed to verify `proof`) and
+/// the human-readable `owner` address. Verification checks that `proof` is a
+/// valid signature by `public_key` over the canonical ownership message and
+/// that `public_key` actually derives to `owner` for the target chain — so a
+/// proof cannot claim ownership under an address whose key it does not hold.
 ///
 /// **Layer:** L1
 /// **Serde:** FORBIDDEN - uses manual CanonicalEncoding via csv-codec
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnershipProof {
-    /// Proof bytes (chain-specific or generic)
+    /// Proof bytes (a signature by `public_key` over the canonical message)
     pub proof: Vec<u8>,
-    /// Owner identifier (address bytes)
+    /// Owner identifier (chain address bytes)
     pub owner: Vec<u8>,
     /// Optional signature scheme hint
     pub scheme: Option<SignatureScheme>,
+    /// Public key of the signer (the counterpart to `owner`). Required for a
+    /// verifiable proof; empty only for legacy/unsigned drafts that must fail
+    /// closed before being treated as authoritative.
+    pub public_key: Vec<u8>,
+}
+
+impl OwnershipProof {
+    /// Compute the canonical 32-byte message the owner signs / a verifier checks.
+    ///
+    /// `message = tagged_hash(DOMAIN_OWNERSHIP_PROOF_V1,
+    ///                        descriptor_hash || commitment || salt || owner)`.
+    ///
+    /// This is the single source of truth shared by the signer (CLI publish
+    /// path) and the verifier so the two never diverge.
+    pub fn signing_message(
+        descriptor_hash: &Hash,
+        commitment: &Hash,
+        salt: &[u8],
+        owner: &[u8],
+    ) -> [u8; 32] {
+        let mut preimage = Vec::with_capacity(64 + salt.len() + owner.len());
+        preimage.extend_from_slice(descriptor_hash.as_bytes());
+        preimage.extend_from_slice(commitment.as_bytes());
+        preimage.extend_from_slice(salt);
+        preimage.extend_from_slice(owner);
+        csv_hash::tagged_hash_str(DOMAIN_OWNERSHIP_PROOF_V1, &preimage)
+    }
+
+    /// Cryptographically verify this ownership proof against the Sanad it binds.
+    ///
+    /// Fails closed unless **all** of the following hold:
+    /// - a signature scheme is declared,
+    /// - `proof`, `public_key`, and `owner` are all non-empty,
+    /// - `proof` is a valid signature by `public_key` over
+    ///   [`OwnershipProof::signing_message`], and
+    /// - `public_key` derives to the `owner` address for `chain`.
+    ///
+    /// The last check binds the signer's key to the claimed owner, closing the
+    /// self-certifying gap where any valid (key, signature) pair would
+    /// otherwise "prove" ownership of an unrelated address.
+    pub fn verify(
+        &self,
+        chain: &csv_hash::ChainId,
+        descriptor_hash: &Hash,
+        commitment: &Hash,
+        salt: &[u8],
+    ) -> Result<()> {
+        let scheme = self.scheme.ok_or_else(|| {
+            ProtocolError::SignatureVerificationFailed(
+                "Ownership proof has no signature scheme".to_string(),
+            )
+        })?;
+        if self.proof.is_empty() {
+            return Err(ProtocolError::SignatureVerificationFailed(
+                "Ownership proof signature bytes are empty".to_string(),
+            ));
+        }
+        if self.public_key.is_empty() {
+            return Err(ProtocolError::SignatureVerificationFailed(
+                "Ownership proof public key is empty".to_string(),
+            ));
+        }
+        if self.owner.is_empty() {
+            return Err(ProtocolError::SignatureVerificationFailed(
+                "Ownership proof owner is empty".to_string(),
+            ));
+        }
+
+        // 1. Signature validity over the canonical message.
+        let message = Self::signing_message(descriptor_hash, commitment, salt, &self.owner);
+        let signature = crate::signature::Signature::new(
+            self.proof.clone(),
+            self.public_key.clone(),
+            message.to_vec(),
+        );
+        signature.verify(scheme)?;
+
+        // 2. Bind the signing key to the claimed owner address.
+        let derived = csv_keys::bip44::derive_address_from_pubkey(&self.public_key, chain)
+            .map_err(|e| {
+                ProtocolError::SignatureVerificationFailed(format!(
+                    "Failed to derive owner address from public key: {}",
+                    e
+                ))
+            })?;
+        if derived.as_bytes() != self.owner.as_slice() {
+            return Err(ProtocolError::SignatureVerificationFailed(
+                "Ownership proof public key does not correspond to the claimed owner address"
+                    .to_string(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 impl CanonicalEncoding for OwnershipProof {
@@ -433,6 +541,10 @@ impl CanonicalEncoding for OwnershipProof {
                         result.push(0u8);
                     }
                 }
+
+                // public_key: length-prefixed bytes (appended after scheme; a
+                // legacy blob without this trailer decodes to an empty key)
+                result.extend_from_slice(&ManualEncoder::encode_bytes(&self.public_key));
 
                 Ok(result)
             }
@@ -471,15 +583,26 @@ impl CanonicalEncoding for OwnershipProof {
                 ));
             }
             let scheme_bytes = &bytes[pos..pos + 1];
+            pos += 1;
             Some(SignatureScheme::decode_mce(scheme_bytes)?)
         } else {
             None
+        };
+
+        // public_key: length-prefixed bytes. Backward-compatible: a legacy
+        // encoding that predates this field ends here, so an absent trailer
+        // decodes to an empty public key (which fails closed on verify()).
+        let public_key = if pos < bytes.len() {
+            ManualEncoder::decode_bytes(bytes, &mut pos)?
+        } else {
+            Vec::new()
         };
 
         Ok(Self {
             proof,
             owner,
             scheme,
+            public_key,
         })
     }
 }
@@ -529,7 +652,14 @@ impl Sanad {
         salt: &[u8],
     ) -> Self {
         let descriptor_hash = descriptor.compute_hash();
-        let id = SanadId::from_descriptor_commitment(descriptor_hash, commitment, salt);
+        // v2: bind the owner identity into the SanadId so a Sanad's identity is
+        // cryptographically tied to who owns it (SANAD-OWNERSHIP-PROOF-VERIFY-001).
+        let id = SanadId::from_descriptor_commitment_owner(
+            descriptor_hash,
+            commitment,
+            salt,
+            &owner.owner,
+        );
         Self {
             id: id.into(),
             commitment: commitment.into(),
@@ -878,6 +1008,107 @@ mod tests {
     use super::*;
     use csv_hash::Hash;
 
+    /// Build a valid Ed25519 ownership proof for a given chain, binding the
+    /// signer's key to its derived address.
+    fn valid_ed25519_proof(
+        chain: &csv_hash::ChainId,
+        key_byte: u8,
+        descriptor_hash: &Hash,
+        commitment: &Hash,
+        salt: &[u8],
+    ) -> OwnershipProof {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let signing = SigningKey::from_bytes(&[key_byte; 32]);
+        let pubkey = signing.verifying_key().to_bytes().to_vec();
+        let owner = csv_keys::bip44::derive_address_from_pubkey(&pubkey, chain)
+            .unwrap()
+            .into_bytes();
+        let message = OwnershipProof::signing_message(descriptor_hash, commitment, salt, &owner);
+        let sig = signing.sign(&message).to_bytes().to_vec();
+        OwnershipProof {
+            proof: sig,
+            owner,
+            scheme: Some(SignatureScheme::Ed25519),
+            public_key: pubkey,
+        }
+    }
+
+    #[test]
+    fn test_ownership_proof_valid_verifies() {
+        let chain = csv_hash::ChainId::new("sui");
+        let descriptor_hash = Hash::new([9u8; 32]);
+        let commitment = Hash::new([8u8; 32]);
+        let salt = b"salt-xyz";
+        let proof = valid_ed25519_proof(&chain, 7, &descriptor_hash, &commitment, salt);
+        assert!(
+            proof
+                .verify(&chain, &descriptor_hash, &commitment, salt)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_ownership_proof_tampered_owner_rejected() {
+        // Keep a valid signature/key but swap the owner to a different address:
+        // the pubkey no longer derives to `owner`, so verification fails closed.
+        let chain = csv_hash::ChainId::new("solana");
+        let descriptor_hash = Hash::new([1u8; 32]);
+        let commitment = Hash::new([2u8; 32]);
+        let salt = b"salt";
+        let mut proof = valid_ed25519_proof(&chain, 3, &descriptor_hash, &commitment, salt);
+        proof.owner = b"SomeOtherSolanaAddress1111111111111111111111".to_vec();
+        assert!(
+            proof
+                .verify(&chain, &descriptor_hash, &commitment, salt)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_ownership_proof_wrong_message_rejected() {
+        // A signature over a different commitment must not verify.
+        let chain = csv_hash::ChainId::new("aptos");
+        let descriptor_hash = Hash::new([4u8; 32]);
+        let commitment = Hash::new([5u8; 32]);
+        let salt = b"salt";
+        let proof = valid_ed25519_proof(&chain, 6, &descriptor_hash, &commitment, salt);
+        let other_commitment = Hash::new([0x55u8; 32]);
+        assert!(
+            proof
+                .verify(&chain, &descriptor_hash, &other_commitment, salt)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_ownership_proof_missing_pubkey_fails_closed() {
+        let chain = csv_hash::ChainId::new("sui");
+        let descriptor_hash = Hash::new([1u8; 32]);
+        let commitment = Hash::new([2u8; 32]);
+        let salt = b"salt";
+        let mut proof = valid_ed25519_proof(&chain, 2, &descriptor_hash, &commitment, salt);
+        proof.public_key = vec![];
+        assert!(
+            proof
+                .verify(&chain, &descriptor_hash, &commitment, salt)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_ownership_proof_roundtrip_preserves_pubkey() {
+        let chain = csv_hash::ChainId::new("sui");
+        let descriptor_hash = Hash::new([1u8; 32]);
+        let commitment = Hash::new([2u8; 32]);
+        let salt = b"salt";
+        let proof = valid_ed25519_proof(&chain, 2, &descriptor_hash, &commitment, salt);
+        let encoded = proof.encode_mce().unwrap();
+        let decoded = OwnershipProof::decode_mce(&encoded).unwrap();
+        assert_eq!(proof, decoded);
+        assert!(!decoded.public_key.is_empty());
+    }
+
     #[test]
     fn test_descriptor_hash_is_deterministic() {
         let desc = SanadPayloadDescriptor::new(
@@ -962,6 +1193,7 @@ mod tests {
             proof: vec![0u8; 32],
             owner: vec![0u8; 32],
             scheme: None,
+            public_key: vec![],
         };
         let salt = b"test-salt";
 
@@ -985,6 +1217,7 @@ mod tests {
             proof: vec![0u8; 32],
             owner: vec![0u8; 32],
             scheme: None,
+            public_key: vec![],
         };
         let salt = b"test-salt";
 

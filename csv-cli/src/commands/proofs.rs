@@ -318,7 +318,7 @@ async fn cmd_verify(
     chain: Chain,
     proof_file: Option<String>,
     hex_mode: bool,
-    _config: &Config,
+    config: &Config,
     _state: &UnifiedStateManager,
     canonical: bool,
     proof_tree: bool,
@@ -365,8 +365,10 @@ async fn cmd_verify(
     output::progress(2, 4, "Verifying canonical proof bundle...");
 
     let runtime = client.chain_runtime();
+    // VERIFY-SIGNER-BINDING-001: approved verifier set from trusted local config.
+    let authorized_signers = config.approved_verifier_keys()?;
     let valid = runtime
-        .verify_proof_bundle(adapter_chain, &proof_bundle, &sanad_id)
+        .verify_proof_bundle(adapter_chain, &proof_bundle, &sanad_id, &authorized_signers)
         .await
         .map_err(|e| anyhow::anyhow!("Proof verification error: {}", e))?;
 
@@ -403,7 +405,7 @@ async fn cmd_verify_cross_chain(
     proof_file: String,
     hex_mode: bool,
     expected_sanad_id: String,
-    _config: &Config,
+    config: &Config,
     _state: &UnifiedStateManager,
     canonical: bool,
     proof_tree: bool,
@@ -441,9 +443,16 @@ async fn cmd_verify_cross_chain(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to build source CSV client: {}", e))?;
 
+    // VERIFY-SIGNER-BINDING-001: approved verifier set from trusted local config.
+    let authorized_signers = config.approved_verifier_keys()?;
     let source_runtime = source_client.chain_runtime();
     let source_valid = source_runtime
-        .verify_proof_bundle(source_adapter_chain, &proof_bundle, &expected_sanad_id_obj)
+        .verify_proof_bundle(
+            source_adapter_chain,
+            &proof_bundle,
+            &expected_sanad_id_obj,
+            &authorized_signers,
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Source chain proof verification error: {}", e))?;
 
@@ -466,7 +475,12 @@ async fn cmd_verify_cross_chain(
 
     let dest_runtime = dest_client.chain_runtime();
     let dest_valid = dest_runtime
-        .verify_proof_bundle(dest_adapter_chain, &proof_bundle, &expected_sanad_id_obj)
+        .verify_proof_bundle(
+            dest_adapter_chain,
+            &proof_bundle,
+            &expected_sanad_id_obj,
+            &authorized_signers,
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Destination chain proof verification error: {}", e))?;
 

@@ -190,49 +190,6 @@ impl VerificationError {
     }
 }
 
-/// Verify a proof bundle according to the CSV verification pipeline.
-///
-/// This is the **primary entry point for proof verification**. It performs
-/// all cryptographic and structural checks required to validate a proof bundle
-/// before accepting the state transition it authorizes.
-///
-/// # Security Requirements (CRITICAL)
-///
-/// 1. **All signatures must be valid**: Any invalid signature causes rejection
-/// 2. **Seal must be unused**: Replay attacks prevented via `seal_registry` callback
-/// 3. **Proof must be non-empty**: Empty inclusion/finality proofs rejected
-/// 4. **Finality must be reached**: Zero confirmations causes rejection
-///
-/// # Verification Pipeline
-///
-/// 1. **DAG Structure Validation** - Verify transition graph integrity
-/// 2. **Signature Verification** - Cryptographically verify all signatures
-/// 3. **Seal Replay Check** - Ensure seal hasn't been consumed before
-/// 4. **Inclusion Verification** - Verify proof of on-chain inclusion
-/// 5. **Finality Check** - Confirm anchor reached required confirmations
-///
-/// # Arguments
-/// * `bundle` - The proof bundle to verify
-/// * `seal_registry` - Callback to check if seal has been used (returns true if used)
-/// * `signature_scheme` - The signature scheme to use for verification
-///
-/// # Returns
-/// - `Ok(())` - Proof bundle is valid and authorized
-/// - `Err(ProtocolError)` - Specific error indicating which check failed
-///
-/// # Audit Note
-///
-/// Verify that:
-/// 1. No verification step can be bypassed via configuration
-/// 2. The seal_registry callback is actually invoked (not cached/stale)
-/// 3. Signature parsing is robust against malformed input
-/// 4. All error cases are properly handled and logged
-///
-/// Maximum age of a proof bundle in seconds (24 hours).
-/// Reserved for future timestamp-based replay protection.
-#[allow(dead_code)]
-const MAX_PROOF_AGE_SECONDS: u64 = 86400;
-
 /// Maximum proof bundle size in bytes (1MB)
 const MAX_PROOF_BUNDLE_SIZE: usize = 1024 * 1024;
 
@@ -412,6 +369,22 @@ pub struct VerificationContext {
     pub transition_id: Option<Vec<u8>>,
     /// Destination chain identifier for cross-chain binding.
     pub destination_chain: Option<String>,
+    /// Approved verifier public keys (RFC-0012 §9 verifier set) a proof-bundle
+    /// signature MUST recover to (VERIFY-SIGNER-BINDING-001).
+    ///
+    /// Without this binding, `verify_bundle_signatures` would only prove that
+    /// "whoever chose the embedded public key also signed with its private key" —
+    /// a tautology any sender satisfies. When non-empty, every proof-bundle
+    /// signature's public key must be a member of this set or verification fails
+    /// closed. Keys are raw public-key bytes as they appear in the signature
+    /// blob; secp256k1 keys are compared in canonical compressed form.
+    ///
+    /// The **runtime** path may leave this empty because destination
+    /// materialization is separately authorized by the on-chain §9.2
+    /// verifier-attested mint (and `native_proof_validated`). The **offline
+    /// recipient accept** path MUST populate it from trusted local config and
+    /// fails closed if it is empty — that path has no other authorization gate.
+    pub authorized_signers: Vec<Vec<u8>>,
 }
 
 /// Chain-specific verification data.
@@ -443,8 +416,18 @@ pub struct VerifierConfig {
     pub max_proof_bundle_size: usize,
     /// Minimum required confirmations for finality.
     pub min_required_confirmations: u64,
-    /// Maximum proof age in seconds (for timestamp-based replay protection).
-    pub max_proof_age_seconds: u64,
+    /// Maximum age of a proof's anchor, in blocks below the observed source-chain
+    /// tip, before the proof is rejected as stale (VERIFY-PROOF-FRESHNESS-001).
+    ///
+    /// This is a height-based freshness bound rather than a wall-clock one: a
+    /// `ProofBundle` carries no trusted timestamp, but its `anchor_ref.block_height`
+    /// plus the context's observed tip give a real, deterministic age in blocks.
+    /// It is the *upper* bound on the same `tip - anchor_height` quantity that
+    /// finality lower-bounds. `None` disables the check (the default), because a
+    /// meaningful bound is deployment/chain-specific and an always-on default
+    /// would reject the `u64::MAX` "instant-final" confirmation sentinel used by
+    /// chains without a depth model.
+    pub max_anchor_age_blocks: Option<u64>,
 }
 
 impl Default for VerifierConfig {
@@ -452,7 +435,7 @@ impl Default for VerifierConfig {
         Self {
             max_proof_bundle_size: MAX_PROOF_BUNDLE_SIZE,
             min_required_confirmations: MIN_REQUIRED_CONFIRMATIONS,
-            max_proof_age_seconds: MAX_PROOF_AGE_SECONDS,
+            max_anchor_age_blocks: None,
         }
     }
 }
@@ -481,11 +464,27 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         bundle: &ProofBundle,
         context: &VerificationContext,
     ) -> Result<VerificationResult> {
+        // Step 0: Size bound (DoS protection) — reject oversized bundles before
+        // any further work (VERIFY-VALIDATIONS-DISABLED-001).
+        validate_proof_bundle_size(bundle)?;
+
         // Step 1: DAG Structure Validation
         self.validate_dag_structure(bundle)?;
 
-        // Step 2: Signature Verification
-        verify_bundle_signatures(bundle, context.signature_scheme)?;
+        // Step 1.5: Domain / transfer-context binding (VERIFY-DOMAIN-SEPARATION-001).
+        // Bind the bundle to the specific transfer the context authorizes so a
+        // proof built for one chain/Sanad cannot be replayed under a context for
+        // another.
+        validate_context_binding(bundle, context)?;
+
+        // Step 2: Signature Verification (with approved-verifier-set binding when
+        // the context supplies one; the runtime path relies on the on-chain §9.2
+        // gate + native_proof_validated below).
+        verify_bundle_signatures(
+            bundle,
+            context.signature_scheme,
+            &context.authorized_signers,
+        )?;
 
         // Step 3: Seal Replay Check
         self.check_seal_replay(bundle, context)?;
@@ -537,6 +536,22 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
                 return Err(ProtocolError::FinalityNotReached(format!(
                     "{} confirmations, need {}",
                     confirmations, context.required_confirmations
+                )));
+            }
+
+            // VERIFY-PROOF-FRESHNESS-001: reject a proof whose anchor is buried
+            // more than `max_anchor_age_blocks` below the observed tip — a stale
+            // proof being replayed long after its anchor. This is the upper bound
+            // on the same `tip - anchor` quantity finality lower-bounds, using the
+            // real observed height (deterministic, no wall clock). `u64::MAX` is
+            // the "instant-final" sentinel from chains without a depth model and
+            // is exempt (its age is not measured in blocks).
+            if let Some(max_age) = self.config.max_anchor_age_blocks
+                && current_height != u64::MAX
+                && confirmations > max_age
+            {
+                return Err(ProtocolError::ProofExpired(format!(
+                    "anchor is {confirmations} blocks below tip, exceeds max age {max_age}"
                 )));
             }
         }
@@ -737,26 +752,92 @@ pub fn verify_proof(
     bundle: &ProofBundle,
     seal_registry: impl Fn(&[u8]) -> bool,
     signature_scheme: SignatureScheme,
+    authorized_signers: &[Vec<u8>],
 ) -> VerificationResult {
-    // Step 1: Validate proof bundle size (DoS protection)
-    //     if let Err(e) = validate_proof_bundle_size(bundle) {
-    //         return VerificationResult::from_protocol_error(&e);
-    //     }
-    //
-    //     // Step 2: Validate DAG structure
-    //     if let Err(e) = bundle
-    //         .transition_dag
-    //         .validate_structure()
-    //         .map_err(|e| ProtocolError::Generic(format!("Invalid DAG structure: {}", e)))
-    {}
+    // No expected-domain binding for callers that only inspect a proof. The
+    // authoritative offline accept path uses `verify_proof_bound` below.
+    verify_proof_bound(
+        bundle,
+        seal_registry,
+        signature_scheme,
+        authorized_signers,
+        &ExpectedDomain::default(),
+    )
+}
+
+/// Offline proof verification with an explicit expected-domain binding
+/// (VERIFY-DOMAIN-SEPARATION-001).
+///
+/// Identical to [`verify_proof`] but additionally binds the bundle to the caller's
+/// trusted `ExpectedDomain` (Sanad id and/or source chain). The recipient accept
+/// path builds `expected` from the invoice/consignment it trusts and thereby
+/// rejects a bundle that does not match the transfer it intends to accept.
+pub fn verify_proof_bound(
+    bundle: &ProofBundle,
+    seal_registry: impl Fn(&[u8]) -> bool,
+    signature_scheme: SignatureScheme,
+    authorized_signers: &[Vec<u8>],
+    expected: &ExpectedDomain,
+) -> VerificationResult {
+    // Expected-domain binding first: reject a bundle built for a different
+    // Sanad / source chain before any further work.
+    if let Some(expected_sanad) = &expected.sanad_id
+        && bundle.anchor_ref.anchor_id.as_slice() != expected_sanad.as_slice()
+    {
+        return VerificationResult::from_protocol_error(&ProtocolError::Generic(
+            "Domain binding failed: proof anchor does not match the expected Sanad".to_string(),
+        ));
+    }
+    if let Some(expected_source) = &expected.source_chain
+        && !bundle.inclusion_proof.source.is_empty()
+        && &bundle.inclusion_proof.source != expected_source
+    {
+        return VerificationResult::from_protocol_error(&ProtocolError::Generic(format!(
+            "Domain binding failed: proof source chain '{}' does not match expected '{}'",
+            bundle.inclusion_proof.source, expected_source
+        )));
+    }
+
+    // VERIFY-SIGNER-BINDING-001: the offline recipient accept path has no other
+    // authorization gate (no on-chain §9.2 attestation, no adapter
+    // native_proof_validated), so it MUST be given the approved verifier set and
+    // fails closed without it. Otherwise a bundle signed by any attacker-chosen
+    // key would reach `fully_verified()`.
+    if authorized_signers.is_empty() {
+        return VerificationResult::from_protocol_error(
+            &ProtocolError::SignatureVerificationFailed(
+                "No approved verifier keys supplied: refusing to accept a proof bundle whose \
+             signatures cannot be bound to an authorized signer"
+                    .to_string(),
+            ),
+        );
+    }
+    // Step 1: Validate proof bundle size (DoS protection). Re-enabled by
+    // VERIFY-VALIDATIONS-DISABLED-001 — an oversized bundle must be rejected
+    // before any further work.
+    if let Err(e) = validate_proof_bundle_size(bundle) {
+        return VerificationResult::from_protocol_error(&e);
+    }
+
+    // Step 2: Validate DAG structure (well-formed transition graph). Re-enabled
+    // by VERIFY-VALIDATIONS-DISABLED-001.
+    if let Err(e) = bundle
+        .transition_dag
+        .validate_structure()
+        .map_err(|e| ProtocolError::Generic(format!("Invalid DAG structure: {}", e)))
+    {
+        return VerificationResult::from_protocol_error(&e);
+    }
 
     // Step 3: Validate proof timestamp (prevent replay of old proofs)
     if let Err(e) = validate_proof_timestamp(bundle) {
         return VerificationResult::from_protocol_error(&e);
     }
 
-    // Step 4: Validate signatures with cryptographic verification
-    if let Err(e) = verify_bundle_signatures(bundle, signature_scheme) {
+    // Step 4: Validate signatures with cryptographic verification, bound to the
+    // approved verifier set (checked non-empty above — this path fails closed
+    // without it).
+    if let Err(e) = verify_bundle_signatures(bundle, signature_scheme, authorized_signers) {
         return VerificationResult::from_protocol_error(&e);
     }
 
@@ -791,49 +872,52 @@ pub fn verify_proof(
     VerificationResult::fully_verified()
 }
 
-// /// Validate proof bundle size to prevent DoS attacks.
-// ///
-// /// # Security
-// /// - Prevents memory exhaustion from oversized proofs
-// /// - Limits network bandwidth consumption
-// fn validate_proof_bundle_size(bundle: &ProofBundle) -> Result<()> {
-//     // Estimate size by summing all components
-//     let mut total_size: usize = 0;
-//
-//     // DAG segment size
-//     total_size += bundle.transition_dag.root_commitment.as_bytes().len();
-//     for node in &bundle.transition_dag.nodes {
-//         total_size += node.node_id.as_bytes().len();
-//         total_size += node.bytecode.len();
-//         total_size += node.witnesses.len();
-//         for sig in &node.signatures {
-//             total_size += sig.len();
-//         }
-//         for parent in &node.parents {
-//             total_size += parent.as_bytes().len();
-//         }
-//     }
-//
-//     // Signatures size
-//     for sig in &bundle.signatures {
-//         total_size += sig.len();
-//     }
-//
-//     // Seal and anchor references
-//     total_size += bundle.seal_ref.id.len();
-//     total_size += bundle.anchor_ref.anchor_id.len();
-//     total_size += bundle.anchor_ref.metadata.len();
-//
-//     // Proof data
-//     total_size += bundle.inclusion_proof.proof_bytes.len();
-//     total_size += bundle.finality_proof.finality_data.len();
-//
-//     if total_size > MAX_PROOF_BUNDLE_SIZE {
-//         return Err(ProtocolError::Generic(format!(
-//             "Proof bundle too large: {} bytes (max {})",
-//             total_size, MAX_PROOF_BUNDLE_SIZE
-//         )));
-//     }
+/// Validate proof bundle size to prevent DoS attacks (VERIFY-VALIDATIONS-DISABLED-001).
+///
+/// # Security
+/// - Prevents memory exhaustion from oversized proofs
+/// - Limits network bandwidth consumption
+fn validate_proof_bundle_size(bundle: &ProofBundle) -> Result<()> {
+    // Estimate size by summing all components
+    let mut total_size: usize = 0;
+
+    // DAG segment size
+    total_size += bundle.transition_dag.root_commitment.as_bytes().len();
+    for node in &bundle.transition_dag.nodes {
+        total_size += node.node_id.as_bytes().len();
+        total_size += node.bytecode.len();
+        total_size += node.witnesses.len();
+        for sig in &node.signatures {
+            total_size += sig.len();
+        }
+        for parent in &node.parents {
+            total_size += parent.as_bytes().len();
+        }
+    }
+
+    // Signatures size
+    for sig in &bundle.signatures {
+        total_size += sig.len();
+    }
+
+    // Seal and anchor references
+    total_size += bundle.seal_ref.id.len();
+    total_size += bundle.anchor_ref.anchor_id.len();
+    total_size += bundle.anchor_ref.metadata.len();
+
+    // Proof data
+    total_size += bundle.inclusion_proof.proof_bytes.len();
+    total_size += bundle.finality_proof.finality_data.len();
+
+    if total_size > MAX_PROOF_BUNDLE_SIZE {
+        return Err(ProtocolError::Generic(format!(
+            "Proof bundle too large: {} bytes (max {})",
+            total_size, MAX_PROOF_BUNDLE_SIZE
+        )));
+    }
+
+    Ok(())
+}
 
 /// Validate proof timestamp to prevent replay of old proofs.
 ///
@@ -855,6 +939,11 @@ fn validate_proof_timestamp(bundle: &ProofBundle) -> Result<()> {
 /// # Security
 /// - Ensures proof is for the intended domain/chain
 /// - Prevents cross-chain replay attacks
+///
+/// This performs the structural sanity checks (non-empty seal / anchor). The
+/// authoritative chain/transfer binding lives in [`validate_context_binding`],
+/// which compares the bundle against the expected verification context
+/// (VERIFY-DOMAIN-SEPARATION-001).
 fn validate_domain_separation(bundle: &ProofBundle) -> Result<()> {
     // Check that the seal reference has a valid seal ID
     if bundle.seal_ref.id.is_empty() {
@@ -869,6 +958,62 @@ fn validate_domain_separation(bundle: &ProofBundle) -> Result<()> {
         return Err(ProtocolError::Generic(
             "Invalid anchor reference: empty metadata and block height".to_string(),
         ));
+    }
+
+    Ok(())
+}
+
+/// Expected chain/transfer identifiers a proof bundle must be bound to, for the
+/// offline accept path (VERIFY-DOMAIN-SEPARATION-001).
+///
+/// The runtime path uses the full [`VerificationContext`]; offline callers build
+/// this smaller struct from the invoice/consignment they already trust. `None`
+/// fields are not enforced, but the accept path must supply at least the Sanad
+/// binding and fail closed if it cannot.
+#[derive(Debug, Clone, Default)]
+pub struct ExpectedDomain {
+    /// Expected Sanad id (bound to the bundle's `anchor_ref.anchor_id`).
+    pub sanad_id: Option<[u8; 32]>,
+    /// Expected source-chain tag (compared to the bundle's proof `source` when set).
+    pub source_chain: Option<String>,
+}
+
+/// Bind a proof bundle to the transfer/domain it is being verified for
+/// (VERIFY-DOMAIN-SEPARATION-001).
+///
+/// Prevents cross-domain replay: a bundle built for one transfer (Sanad / source
+/// chain) must not verify under a context for another. Uses identifiers the
+/// production adapters bind reliably and unambiguously:
+///
+/// - `anchor_ref.anchor_id == sanad_id` — the primary binding. Both the context
+///   value and the adapter-set `anchor_id` derive from the same `transfer.sanad_id`
+///   (see the Bitcoin adapter's `build_inclusion_proof`), so there is no
+///   encoding/byte-order ambiguity.
+/// - `inclusion_proof.source == chain_id` — defense in depth, enforced only when
+///   the bundle carries a non-empty source tag (not yet mandatory in every adapter
+///   build path, so an empty tag is not treated as a mismatch).
+///
+/// The `seal_ref` lock-outpoint binding is intentionally NOT enforced here: the
+/// lock txid crosses a display/internal byte-order boundary between the transfer
+/// record and the seal reference, so a naive equality check would reject valid
+/// bundles. That binding is a follow-up once the byte order is normalized.
+fn validate_context_binding(bundle: &ProofBundle, context: &VerificationContext) -> Result<()> {
+    if let Some(sanad_id) = &context.sanad_id
+        && bundle.anchor_ref.anchor_id.as_slice() != sanad_id.as_bytes()
+    {
+        return Err(ProtocolError::Generic(
+            "Domain binding failed: proof anchor does not match the expected Sanad".to_string(),
+        ));
+    }
+
+    if !bundle.inclusion_proof.source.is_empty()
+        && !context.chain_id.is_empty()
+        && bundle.inclusion_proof.source != context.chain_id
+    {
+        return Err(ProtocolError::Generic(format!(
+            "Domain binding failed: proof source chain '{}' does not match expected '{}'",
+            bundle.inclusion_proof.source, context.chain_id
+        )));
     }
 
     Ok(())
@@ -1005,7 +1150,11 @@ fn validate_anchor_reference(bundle: &ProofBundle) -> Result<()> {
 /// 2. The message being verified is the correct DAG root commitment
 /// 3. No signature is skipped during verification
 /// 4. The scheme matches the chain's expected signature type
-fn verify_bundle_signatures(bundle: &ProofBundle, scheme: SignatureScheme) -> Result<()> {
+fn verify_bundle_signatures(
+    bundle: &ProofBundle,
+    scheme: SignatureScheme,
+    authorized_signers: &[Vec<u8>],
+) -> Result<()> {
     // Check we have signatures
     if bundle.signatures.is_empty() {
         return Err(ProtocolError::SignatureVerificationFailed(
@@ -1014,12 +1163,20 @@ fn verify_bundle_signatures(bundle: &ProofBundle, scheme: SignatureScheme) -> Re
     }
 
     // For each signature in the bundle, verify it
-    // In a full implementation, each signature would have associated metadata
-    // (public key, signed message) encoded within it
     //
     // The signature format is:
     // [public_key_length (4 bytes LE)] [public_key] [signature_bytes]
-    // The message is the DAG root commitment hash
+    // The message is the DAG root commitment hash.
+    //
+    // VERIFY-SIGNER-BINDING-001: the public key embedded in the blob is chosen by
+    // the sender and proves nothing about authorization on its own. When
+    // `authorized_signers` is non-empty we additionally require every embedded key
+    // to be a member of the approved verifier set (RFC-0012 §9) and fail closed
+    // otherwise, so a bundle signed by an attacker-chosen key cannot verify.
+    let authorized_canonical: Vec<Vec<u8>> = authorized_signers
+        .iter()
+        .map(|k| canonical_public_key(k, scheme))
+        .collect();
 
     let mut signatures = Vec::with_capacity(bundle.signatures.len());
 
@@ -1047,6 +1204,19 @@ fn verify_bundle_signatures(bundle: &ProofBundle, scheme: SignatureScheme) -> Re
         let public_key = sig_bytes[4..4 + pk_len].to_vec();
         let signature = sig_bytes[4 + pk_len..].to_vec();
 
+        // Fail closed if the recovered key is not in the approved verifier set.
+        // Compare in canonical form so compressed/uncompressed secp256k1 encodings
+        // of the same key still match.
+        if !authorized_canonical.is_empty() {
+            let candidate = canonical_public_key(&public_key, scheme);
+            if !authorized_canonical.iter().any(|k| k == &candidate) {
+                return Err(ProtocolError::SignatureVerificationFailed(format!(
+                    "Signature {} public key is not in the approved verifier set",
+                    i
+                )));
+            }
+        }
+
         // The signed message is the DAG root commitment
         let message = bundle.transition_dag.root_commitment.as_bytes().to_vec();
 
@@ -1055,6 +1225,22 @@ fn verify_bundle_signatures(bundle: &ProofBundle, scheme: SignatureScheme) -> Re
 
     // Verify all signatures
     verify_signatures(&signatures, scheme)
+}
+
+/// Reduce a public key to a canonical byte form for set-membership comparison.
+///
+/// secp256k1 keys are normalized to their 33-byte compressed serialization so a
+/// compressed and uncompressed encoding of the same key compare equal; any bytes
+/// that do not parse as a valid key (and all other schemes, e.g. ed25519) are
+/// returned unchanged for an exact byte comparison.
+fn canonical_public_key(key: &[u8], scheme: SignatureScheme) -> Vec<u8> {
+    match scheme {
+        SignatureScheme::Secp256k1 => match secp256k1::PublicKey::from_slice(key) {
+            Ok(pk) => pk.serialize().to_vec(),
+            Err(_) => key.to_vec(),
+        },
+        _ => key.to_vec(),
+    }
 }
 
 #[cfg(test)]
@@ -1066,12 +1252,36 @@ mod tests {
     use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
     use csv_protocol::signature::SignatureScheme;
 
+    // Deterministic key so tests can build the approved-signer set now required
+    // by verify_bundle_signatures (VERIFY-SIGNER-BINDING-001).
+    fn test_signing_key() -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    /// Approved verifier set matching `make_ed25519_signature_bytes`'s signer.
+    fn authorized() -> Vec<Vec<u8>> {
+        vec![test_signing_key().verifying_key().to_bytes().to_vec()]
+    }
+
     fn make_ed25519_signature_bytes(message: &[u8]) -> Vec<u8> {
-        use ed25519_dalek::{Signer, SigningKey};
-        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        use ed25519_dalek::Signer;
+        let signing_key = test_signing_key();
         let verifying_key = signing_key.verifying_key();
         let signature = signing_key.sign(message);
         // Format: [pk_len (4 bytes LE)] [public_key] [signature]
+        let mut encoded = Vec::with_capacity(4 + 32 + 64);
+        encoded.extend_from_slice(&32u32.to_le_bytes());
+        encoded.extend_from_slice(&verifying_key.to_bytes());
+        encoded.extend_from_slice(&signature.to_bytes());
+        encoded
+    }
+
+    /// A signature blob from a fresh, unauthorized key (the exploit shape).
+    fn make_unauthorized_signature_bytes(message: &[u8]) -> Vec<u8> {
+        use ed25519_dalek::{Signer, SigningKey};
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let signature = signing_key.sign(message);
         let mut encoded = Vec::with_capacity(4 + 32 + 64);
         encoded.extend_from_slice(&32u32.to_le_bytes());
         encoded.extend_from_slice(&verifying_key.to_bytes());
@@ -1118,12 +1328,227 @@ mod tests {
     fn test_verify_proof_valid() {
         let bundle = test_bundle_with_signatures().unwrap();
         let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         if !result.is_valid {
             eprintln!("Verification failed. Errors: {:?}", result.errors);
         }
         assert!(result.is_valid);
         assert!(matches!(result.level, VerificationLevel::FullyVerified));
+    }
+
+    #[test]
+    fn verify_proof_rejects_unauthorized_signer() {
+        // VERIFY-SIGNER-BINDING-001 exploit regression: a bundle signed by a
+        // fresh, attacker-chosen keypair over the DAG root must be REJECTED even
+        // though the signature is cryptographically valid for its embedded key,
+        // because that key is not in the approved verifier set.
+        let message = [0u8; 32];
+        let forged = make_unauthorized_signature_bytes(&message);
+        let seal_id = vec![1u8, 2, 3];
+        let bundle = ProofBundle::new(
+            DAGSegment::new(
+                vec![DAGNode::new(
+                    Hash::new([1u8; 32]),
+                    vec![0x01, 0x02],
+                    vec![forged.clone()],
+                    vec![],
+                    vec![],
+                )],
+                Hash::zero(),
+            ),
+            vec![forged],
+            SealPoint::new(seal_id.clone(), Some(42), None)
+                .map_err(|e| ProtocolError::Generic(e.to_string()))
+                .unwrap(),
+            CommitAnchor::new(seal_id, 100, vec![0xCD; 32])
+                .map_err(|e| ProtocolError::Generic(e.to_string()))
+                .unwrap(),
+            InclusionProof::new(vec![0xCD; 32], Hash::new([2u8; 32]), 100, 0)
+                .map_err(|e| ProtocolError::Generic(e.to_string()))
+                .unwrap(),
+            {
+                let mut fp = FinalityProof::new(vec![0xAB; 16], 6, false)
+                    .map_err(|e| ProtocolError::Generic(e.to_string()))
+                    .unwrap();
+                fp.block_hash = Hash::new([3u8; 32]);
+                fp
+            },
+        )
+        .map_err(|e| ProtocolError::Generic(e.to_string()))
+        .unwrap();
+        let seal_registry = |_seal_id: &[u8]| false;
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
+        assert!(
+            !result.is_valid,
+            "a bundle signed by an unauthorized key must not verify"
+        );
+    }
+
+    #[test]
+    fn verify_proof_rejects_oversized_bundle() {
+        // VERIFY-VALIDATIONS-DISABLED-001 regression: the re-enabled size bound
+        // must reject a bundle larger than MAX_PROOF_BUNDLE_SIZE (DoS protection).
+        let mut bundle = test_bundle_with_signatures().unwrap();
+        bundle.signatures.push(vec![0u8; MAX_PROOF_BUNDLE_SIZE + 1]);
+        let seal_registry = |_seal_id: &[u8]| false;
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
+        assert!(
+            !result.is_valid,
+            "an oversized proof bundle must be rejected"
+        );
+    }
+
+    #[test]
+    fn verify_proof_bound_rejects_wrong_expected_sanad() {
+        // VERIFY-DOMAIN-SEPARATION-001: a bundle whose anchor binds Sanad A must
+        // be rejected when the caller expects Sanad B (cross-domain replay).
+        let bundle = test_bundle_with_signatures().unwrap();
+        let seal_registry = |_seal_id: &[u8]| false;
+
+        // The test bundle's anchor_id is the seal_id (vec![1,2,3]); an expected
+        // Sanad that differs must be rejected.
+        let expected = ExpectedDomain {
+            sanad_id: Some([0xABu8; 32]),
+            source_chain: None,
+        };
+        let result = verify_proof_bound(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+            &expected,
+        );
+        assert!(
+            !result.is_valid,
+            "a bundle bound to a different Sanad must not verify"
+        );
+    }
+
+    #[test]
+    fn trait_path_rejects_bundle_bound_to_other_sanad() {
+        // VERIFY-DOMAIN-SEPARATION-001 on the CanonicalVerifierImpl (runtime) path:
+        // a context expecting a different Sanad than the bundle's anchor must fail.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let verifier = CanonicalVerifierImpl::default();
+        let ctx = VerificationContext {
+            chain_id: "bitcoin".to_string(),
+            signature_scheme: SignatureScheme::Ed25519,
+            required_confirmations: 0,
+            current_block_height: Some(200),
+            seal_registry: None,
+            chain_data: None,
+            native_proof_validated: true,
+            // Anchor id in the test bundle is vec![1,2,3]; a 32-byte mismatch here
+            // must be rejected by the context binding step.
+            sanad_id: Some(csv_hash::SanadId(Hash::new([0x11u8; 32]))),
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: Some("sui".to_string()),
+            authorized_signers: Vec::new(),
+        };
+        let result = verifier.verify_proof_bundle(&bundle, &ctx);
+        assert!(
+            result.is_err(),
+            "runtime path must reject a bundle whose anchor does not match the context Sanad"
+        );
+    }
+
+    fn freshness_context(current_height: u64) -> VerificationContext {
+        VerificationContext {
+            chain_id: "bitcoin".to_string(),
+            signature_scheme: SignatureScheme::Ed25519,
+            required_confirmations: 1,
+            current_block_height: Some(current_height),
+            seal_registry: None,
+            chain_data: None,
+            native_proof_validated: true,
+            sanad_id: None,
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
+            authorized_signers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn verify_finality_rejects_stale_anchor_beyond_max_age() {
+        // VERIFY-PROOF-FRESHNESS-001: with a freshness bound configured, an anchor
+        // buried more than max_anchor_age_blocks below the observed tip is stale.
+        let verifier = CanonicalVerifierImpl::new(VerifierConfig {
+            max_anchor_age_blocks: Some(100),
+            ..VerifierConfig::default()
+        });
+        let anchor_height = 1_000u64;
+        // tip is 250 blocks above the anchor -> age 250 > 100 -> expired.
+        let ctx = freshness_context(anchor_height + 250);
+        let result = verifier.verify_finality(anchor_height, &ctx);
+        assert!(
+            matches!(result, Err(ProtocolError::ProofExpired(_))),
+            "a stale anchor must be rejected with ProofExpired, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn verify_finality_accepts_fresh_anchor_within_max_age() {
+        let verifier = CanonicalVerifierImpl::new(VerifierConfig {
+            max_anchor_age_blocks: Some(100),
+            ..VerifierConfig::default()
+        });
+        let anchor_height = 1_000u64;
+        // 50 blocks deep: within both the finality floor (1) and freshness cap (100).
+        let ctx = freshness_context(anchor_height + 50);
+        assert!(verifier.verify_finality(anchor_height, &ctx).is_ok());
+    }
+
+    #[test]
+    fn verify_finality_freshness_exempts_instant_final_sentinel() {
+        // u64::MAX confirmations is the "instant-final" sentinel; its age is not
+        // measured in blocks and must not be rejected as stale.
+        let verifier = CanonicalVerifierImpl::new(VerifierConfig {
+            max_anchor_age_blocks: Some(100),
+            ..VerifierConfig::default()
+        });
+        let ctx = freshness_context(u64::MAX);
+        assert!(verifier.verify_finality(1_000, &ctx).is_ok());
+    }
+
+    #[test]
+    fn verify_finality_freshness_disabled_by_default() {
+        // Default config leaves freshness off, so a very old anchor still passes
+        // finality (preserving existing behavior).
+        let verifier = CanonicalVerifierImpl::default();
+        let ctx = freshness_context(1_000_000);
+        assert!(verifier.verify_finality(1, &ctx).is_ok());
+    }
+
+    #[test]
+    fn verify_proof_fails_closed_without_authorized_set() {
+        // The offline accept path must not reach fully_verified() when no approved
+        // verifier keys are supplied.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let seal_registry = |_seal_id: &[u8]| false;
+        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519, &[]);
+        assert!(
+            !result.is_valid,
+            "empty approved verifier set must fail closed"
+        );
     }
 
     #[test]
@@ -1134,7 +1559,12 @@ mod tests {
             .unwrap();
 
         let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(result.is_valid);
         assert!(matches!(result.level, VerificationLevel::FullyVerified));
     }
@@ -1143,7 +1573,12 @@ mod tests {
     fn test_verify_proof_seal_replay() {
         let bundle = test_bundle_with_signatures().unwrap();
         let seal_registry = |seal_id: &[u8]| seal_id == [1, 2, 3];
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(!result.is_valid);
         assert!(!result.errors.is_empty());
     }
@@ -1153,7 +1588,12 @@ mod tests {
         let mut bundle = test_bundle_with_signatures().unwrap();
         bundle.signatures.clear();
         let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(!result.is_valid);
         assert!(!result.errors.is_empty());
     }
@@ -1163,7 +1603,12 @@ mod tests {
         let mut bundle = test_bundle_with_signatures().unwrap();
         bundle.finality_proof.confirmations = 0;
         let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(!result.is_valid);
         assert!(!result.errors.is_empty());
     }
@@ -1174,7 +1619,12 @@ mod tests {
         // Corrupt signature format
         bundle.signatures[0] = vec![0x00, 0x00]; // Too short
         let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(!result.is_valid);
         assert!(!result.errors.is_empty());
     }
@@ -1189,7 +1639,12 @@ mod tests {
         bundle.signatures = vec![signature];
 
         let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519);
+        let result = verify_proof(
+            &bundle,
+            seal_registry,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(result.is_valid);
         assert!(matches!(result.level, VerificationLevel::FullyVerified));
     }
@@ -1209,7 +1664,12 @@ mod tests {
 
         // First verification should succeed
         let seal_registry1 = |seal_id_check: &[u8]| consumed_seals.contains(seal_id_check);
-        let result1 = verify_proof(&bundle1, seal_registry1, SignatureScheme::Ed25519);
+        let result1 = verify_proof(
+            &bundle1,
+            seal_registry1,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
         assert!(result1.is_valid);
 
         // Mark the seal as consumed
@@ -1220,7 +1680,12 @@ mod tests {
 
         // Second verification should fail due to seal being consumed
         let seal_registry2 = |seal_id_check: &[u8]| consumed_seals.contains(seal_id_check);
-        let result2 = verify_proof(&bundle2, seal_registry2, SignatureScheme::Ed25519);
+        let result2 = verify_proof(
+            &bundle2,
+            seal_registry2,
+            SignatureScheme::Ed25519,
+            &authorized(),
+        );
 
         // Verify that the double-spend attempt is rejected
         assert!(!result2.is_valid, "Double-spend attempt should be rejected");

@@ -8,6 +8,7 @@
 //! **Note:** ZK-proof verification is NOT implemented yet.
 //! This module provides type infrastructure for indexing and querying.
 
+use crate::ProofError;
 use csv_codec::{CanonicalEncoding, EncodingFormat};
 use csv_hash::Hash;
 use std::str::FromStr;
@@ -905,7 +906,7 @@ impl PedersenCommitment {
     }
 }
 
-/// KZG polynomial commitment stub
+/// KZG polynomial commitment metadata.
 ///
 /// KZG commitments are used in PLONK and other SNARK systems.
 /// A commitment to a polynomial f(x) is [f(s)]_1 where s is a secret trapdoor.
@@ -920,7 +921,7 @@ pub struct KZGCommitment {
 }
 
 impl KZGCommitment {
-    /// Create a new KZG commitment (stub - real impl requires elliptic curve crate)
+    /// Create KZG commitment metadata.
     pub fn new(degree: usize, num_points: usize) -> Self {
         Self {
             commitment: Vec::new(),
@@ -931,15 +932,17 @@ impl KZGCommitment {
 
     /// Verify a KZG proof
     ///
-    /// In a real implementation, this would use pairing-based verification:
-    /// e([f(s)]_1, [1]_2) == e([witness]_1, [s - alpha]_2)
-    pub fn verify(&self, _proof: &[u8], _public_inputs: &[u8]) -> bool {
-        // Stub: real implementation requires elliptic curve pairing crate
-        !self.commitment.is_empty()
+    /// KZG verification is not implemented in this metadata crate. Callers must
+    /// use a verifier that performs pairing-based verification for the selected
+    /// curve and trusted setup parameters.
+    pub fn verify(&self, _proof: &[u8], _public_inputs: &[u8]) -> crate::Result<()> {
+        Err(ProofError::NotImplemented(
+            "KZG pairing verification is unavailable in csv-proof".to_string(),
+        ))
     }
 }
 
-/// Bulletproofs inner product argument stub
+/// Bulletproofs inner product argument metadata.
 ///
 /// Bulletproofs provide short range proofs without trusted setup.
 /// The inner product argument proves that <a, b> = p given commitments to a and b.
@@ -956,7 +959,7 @@ pub struct BulletproofCommitment {
 }
 
 impl BulletproofCommitment {
-    /// Create a new Bulletproof commitment (stub)
+    /// Create Bulletproof commitment metadata.
     pub fn new(bits: usize, inner_product: u64) -> Self {
         Self {
             commitment_a: Vec::new(),
@@ -968,10 +971,12 @@ impl BulletproofCommitment {
 
     /// Verify a Bulletproof
     ///
-    /// In a real implementation, this would verify the inner product proof
-    /// using the commitment generators and the proof transcript.
-    pub fn verify(&self, _proof_data: &[u8]) -> bool {
-        // Stub: real implementation requires elliptic curve crate
-        !self.commitment_a.is_empty() && !self.commitment_b.is_empty()
+    /// Bulletproof verification is not implemented in this metadata crate.
+    /// Callers must use a verifier that checks the transcript, generators, and
+    /// inner-product argument for the selected curve.
+    pub fn verify(&self, _proof_data: &[u8]) -> crate::Result<()> {
+        Err(ProofError::NotImplemented(
+            "Bulletproof inner-product verification is unavailable in csv-proof".to_string(),
+        ))
     }
 }

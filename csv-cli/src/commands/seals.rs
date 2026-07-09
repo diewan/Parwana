@@ -121,6 +121,7 @@ async fn cmd_create(
         owner: vec![],
         proof: vec![],
         scheme: None,
+        public_key: vec![],
     };
 
     let salt: [u8; 16] = rand::random();

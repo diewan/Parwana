@@ -70,6 +70,7 @@ pub enum WalletError {
 /// # Example
 ///
 /// ```ignore
+/// use csv_hash::chain_id::ChainId;
 /// use csv_sdk::wallet::Wallet;
 ///
 /// // Generate a new wallet with a random mnemonic
@@ -81,8 +82,8 @@ pub enum WalletError {
 /// let restored = Wallet::from_mnemonic(mnemonic)?;
 ///
 /// // Get address for a specific chain
-/// let btc_address = restored.address("bitcoin");
-/// let eth_address = restored.address("ethereum");
+/// let btc_address = restored.address(ChainId::new("bitcoin"))?;
+/// let eth_address = restored.address(ChainId::new("ethereum"))?;
 /// ```
 #[derive(Clone)]
 pub struct Wallet {
@@ -92,8 +93,7 @@ pub struct Wallet {
     /// Derived seed (64 bytes from BIP-39).
     seed: [u8; 64],
     /// Optional passphrase used with the mnemonic.
-    #[allow(dead_code)]
-    passphrase: String,
+    _passphrase: String,
 }
 
 impl Wallet {
@@ -117,7 +117,7 @@ impl Wallet {
             Self {
                 mnemonic: phrase,
                 seed: seed_bytes,
-                passphrase: String::new(),
+                _passphrase: String::new(),
             }
         }
 
@@ -128,7 +128,7 @@ impl Wallet {
             Self {
                 mnemonic: "[wallet feature required for real wallet generation]".to_string(),
                 seed,
-                passphrase: String::new(),
+                _passphrase: String::new(),
             }
         }
     }
@@ -152,7 +152,7 @@ impl Wallet {
             Ok(Self {
                 mnemonic: mnemonic.to_string(),
                 seed: seed_bytes,
-                passphrase: passphrase.to_string(),
+                _passphrase: passphrase.to_string(),
             })
         }
 
@@ -175,7 +175,7 @@ impl Wallet {
         Self {
             mnemonic: "[restored from seed]".to_string(),
             seed,
-            passphrase: String::new(),
+            _passphrase: String::new(),
         }
     }
 
@@ -199,18 +199,17 @@ impl Wallet {
     ///
     /// # Note
     ///
-    /// Full address derivation requires the chain-specific adapter to be
-    /// enabled. This method returns a basic address derived from the seed
-    /// when the chain feature is not enabled.
-    pub fn address(&self, chain: ChainId) -> String {
+    /// Full address derivation requires wallet support and, for Bitcoin, the
+    /// chain-specific adapter. Missing support or derivation failures return
+    /// an error rather than a placeholder address.
+    pub fn address(&self, chain: ChainId) -> Result<String, WalletError> {
         match chain.as_str() {
             "bitcoin" => self.btc_address(),
             "ethereum" => self.eth_address(),
             "sui" => self.sui_address(),
             "aptos" => self.aptos_address(),
             "solana" => self.sol_address(),
-            // Future chains: derive basic address from seed
-            _ => format!("unknown-chain:{}", hex::encode(&self.seed[..8])),
+            _ => Err(WalletError::UnsupportedChain(chain.as_str().to_string())),
         }
     }
 
@@ -221,14 +220,19 @@ impl Wallet {
     /// * `chain` — Which chain to derive for.
     /// * `account` — BIP-44 account number.
     /// * `index` — Address index within the account.
-    pub fn derive_address(&self, chain: ChainId, account: u32, index: u32) -> String {
+    pub fn derive_address(
+        &self,
+        chain: ChainId,
+        account: u32,
+        index: u32,
+    ) -> Result<String, WalletError> {
         match chain.as_str() {
             "bitcoin" => self.btc_address_with_path(account, index),
             "ethereum" => self.eth_address_with_path(account, index),
             "solana" => self.sol_address_with_path(account, index),
             "sui" => self.sui_address_with_path(account, index),
             "aptos" => self.aptos_address_with_path(account, index),
-            _ => self.address(chain),
+            _ => Err(WalletError::UnsupportedChain(chain.as_str().to_string())),
         }
     }
 
@@ -258,11 +262,11 @@ impl Wallet {
 
     // -- Internal address derivation helpers --
 
-    fn btc_address(&self) -> String {
+    fn btc_address(&self) -> Result<String, WalletError> {
         self.btc_address_with_path(0, 0)
     }
 
-    fn btc_address_with_path(&self, account: u32, index: u32) -> String {
+    fn btc_address_with_path(&self, account: u32, index: u32) -> Result<String, WalletError> {
         // Bitcoin Taproot address derivation
         // Path: m/86'/0'/account'/0/index
         #[cfg(feature = "bitcoin")]
@@ -270,48 +274,31 @@ impl Wallet {
             use csv_bitcoin::wallet::{Bip86Path, SealWallet};
 
             // Create wallet from seed (using signet network for derivation by default)
-            let Ok(wallet) = SealWallet::from_seed(&self.seed, bitcoin::Network::Signet) else {
-                return format!(
-                    "btc:seed-prefix-{}-{}-{}",
-                    hex::encode(&self.seed[..4]),
-                    account,
-                    index
-                );
-            };
+            let wallet = SealWallet::from_seed(&self.seed, bitcoin::Network::Signet)
+                .map_err(|e| WalletError::DerivationFailed(format!("bitcoin: {}", e)))?;
 
             // Derive external address at specified account and index
             let path = Bip86Path::external(account, index);
-            let Ok(key) = wallet.derive_key(&path) else {
-                return format!(
-                    "btc:seed-prefix-{}-{}-{}",
-                    hex::encode(&self.seed[..4]),
-                    account,
-                    index
-                );
-            };
+            let key = wallet
+                .derive_key(&path)
+                .map_err(|e| WalletError::DerivationFailed(format!("bitcoin: {}", e)))?;
 
-            key.address.to_string()
+            Ok(key.address.to_string())
         }
 
         #[cfg(not(feature = "bitcoin"))]
         {
-            // Fallback when bitcoin feature not enabled
-            format!(
-                "btc:seed-prefix-{}-{}-{}",
-                hex::encode(&self.seed[..4]),
-                account,
-                index
-            )
+            let _ = account;
+            let _ = index;
+            Err(WalletError::BitcoinUnavailable)
         }
     }
 
-    fn eth_address(&self) -> String {
+    fn eth_address(&self) -> Result<String, WalletError> {
         self.eth_address_with_path(0, 0)
     }
 
-    #[allow(clippy::unwrap_used)]
-    #[allow(unused_variables)]
-    fn eth_address_with_path(&self, account: u32, index: u32) -> String {
+    fn eth_address_with_path(&self, account: u32, index: u32) -> Result<String, WalletError> {
         // Ethereum address derivation using BIP-44: m/44'/60'/account'/0/index
         #[cfg(feature = "wallet")]
         {
@@ -321,65 +308,56 @@ impl Wallet {
             use std::str::FromStr;
 
             // Derive the BIP-32 path
-            let default_path = DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap();
             let path = DerivationPath::from_str(&format!("m/44'/60'/{}'/0/{}", account, index))
-                .unwrap_or(default_path);
+                .map_err(|e| WalletError::DerivationFailed(format!("ethereum path: {}", e)))?;
 
             // Create extended private key from seed (network-agnostic bip32 crate)
-            let xprv = XPrv::new(self.seed).ok();
+            let xprv = XPrv::new(self.seed).map_err(|e| {
+                WalletError::DerivationFailed(format!("ethereum master key: {}", e))
+            })?;
 
-            if let Some(xprv) = xprv {
-                // Derive child key
-                let mut derived = xprv;
-                let mut success = true;
-                for child in path {
-                    match derived.derive_child(child) {
-                        Ok(d) => derived = d,
-                        Err(_) => {
-                            success = false;
-                            break;
-                        }
-                    }
-                }
-                let derived = if success { Some(derived) } else { None };
-
-                if let Some(derived) = derived {
-                    // Get the private key bytes
-                    let priv_key_bytes = derived.private_key().to_bytes();
-
-                    // Create signing key
-                    if let Ok(signing_key) = SigningKey::from_bytes(&priv_key_bytes) {
-                        // Get public key
-                        let verifying_key = signing_key.verifying_key();
-                        let pub_key_bytes = verifying_key.to_sec1_bytes();
-
-                        // Skip the first byte (0x04 prefix) and hash the rest
-                        let pub_key_no_prefix = &pub_key_bytes[1..];
-                        let hash = Keccak256::digest(pub_key_no_prefix);
-
-                        // Take last 20 bytes
-                        let address_bytes = &hash[hash.len() - 20..];
-                        return format!("0x{}", hex::encode(address_bytes));
-                    }
-                }
+            let mut derived = xprv;
+            for child in path {
+                derived = derived.derive_child(child).map_err(|e| {
+                    WalletError::DerivationFailed(format!("ethereum child key: {}", e))
+                })?;
             }
 
-            // Fallback if derivation fails
-            format!("0x{}", hex::encode(&self.seed[0..20]))
+            // Get the private key bytes
+            let priv_key_bytes = derived.private_key().to_bytes();
+
+            // Create signing key
+            let signing_key = SigningKey::from_bytes(&priv_key_bytes).map_err(|e| {
+                WalletError::DerivationFailed(format!("ethereum signing key: {}", e))
+            })?;
+
+            // Get public key
+            let verifying_key = signing_key.verifying_key();
+            let pub_key = verifying_key.to_encoded_point(false);
+            let pub_key_bytes = pub_key.as_bytes();
+
+            // Skip the first byte (0x04 prefix) and hash the rest
+            let pub_key_no_prefix = &pub_key_bytes[1..];
+            let hash = Keccak256::digest(pub_key_no_prefix);
+
+            // Take last 20 bytes
+            let address_bytes = &hash[hash.len() - 20..];
+            Ok(format!("0x{}", hex::encode(address_bytes)))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            format!("0x{}", hex::encode(&self.seed[0..20]))
+            let _ = account;
+            let _ = index;
+            Err(WalletError::EthereumUnavailable)
         }
     }
 
-    fn sui_address(&self) -> String {
+    fn sui_address(&self) -> Result<String, WalletError> {
         self.sui_address_with_path(0, 0)
     }
 
-    #[allow(unused_variables)]
-    fn sui_address_with_path(&self, account: u32, index: u32) -> String {
+    fn sui_address_with_path(&self, account: u32, index: u32) -> Result<String, WalletError> {
         // Sui address derivation using SLIP-10: m/44'/784'/account'/0/index
         // Address = Blake2b-256(0x00 || public_key)
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
@@ -390,30 +368,25 @@ impl Wallet {
 
             // Use csv-keys bip44 for consistent SLIP-10 derivation
             let chain_id = ChainId::new("sui");
-            let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
-
-            if let Ok(key) = secret_key
-                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-            {
-                return address;
-            }
-
-            // Fallback if derivation fails
-            format!("0x{}", hex::encode(&self.seed[..32]))
+            let key = bip44::derive_key(&self.seed, &chain_id, account, index)
+                .map_err(|e| WalletError::DerivationFailed(format!("sui key: {}", e)))?;
+            bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+                .map_err(|e| WalletError::DerivationFailed(format!("sui address: {}", e)))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            format!("0x{}", hex::encode(&self.seed[..32]))
+            let _ = account;
+            let _ = index;
+            Err(WalletError::SuiUnavailable)
         }
     }
 
-    fn aptos_address(&self) -> String {
+    fn aptos_address(&self) -> Result<String, WalletError> {
         self.aptos_address_with_path(0, 0)
     }
 
-    #[allow(unused_variables)]
-    fn aptos_address_with_path(&self, account: u32, index: u32) -> String {
+    fn aptos_address_with_path(&self, account: u32, index: u32) -> Result<String, WalletError> {
         // Aptos address derivation using SLIP-10: m/44'/637'/account'/0/index
         // Address = SHA3-256(public_key || 0x00)
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
@@ -424,30 +397,25 @@ impl Wallet {
 
             // Use csv-keys bip44 for consistent SLIP-10 derivation
             let chain_id = ChainId::new("aptos");
-            let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
-
-            if let Ok(key) = secret_key
-                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-            {
-                return address;
-            }
-
-            // Fallback if derivation fails
-            format!("0x{}", hex::encode(&self.seed[..32]))
+            let key = bip44::derive_key(&self.seed, &chain_id, account, index)
+                .map_err(|e| WalletError::DerivationFailed(format!("aptos key: {}", e)))?;
+            bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+                .map_err(|e| WalletError::DerivationFailed(format!("aptos address: {}", e)))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            format!("0x{}", hex::encode(&self.seed[..32]))
+            let _ = account;
+            let _ = index;
+            Err(WalletError::AptosUnavailable)
         }
     }
 
-    fn sol_address(&self) -> String {
+    fn sol_address(&self) -> Result<String, WalletError> {
         self.sol_address_with_path(0, 0)
     }
 
-    #[allow(unused_variables)]
-    fn sol_address_with_path(&self, account: u32, index: u32) -> String {
+    fn sol_address_with_path(&self, account: u32, index: u32) -> Result<String, WalletError> {
         // Solana address derivation using SLIP-10: m/44'/501'/account'/0/index
         // Note: SLIP-10 uses different derivation than BIP-32 for Ed25519
         #[cfg(feature = "wallet")]
@@ -457,21 +425,17 @@ impl Wallet {
 
             // Use csv-keys bip44 for consistent SLIP-10 derivation
             let chain_id = ChainId::new("solana");
-            let secret_key = bip44::derive_key(&self.seed, &chain_id, account, index);
-
-            if let Ok(key) = secret_key
-                && let Ok(address) = bip44::derive_address_from_key(key.expose_secret(), &chain_id)
-            {
-                return address;
-            }
-
-            // Fallback if derivation fails
-            format!("sol:{}", hex::encode(&self.seed[..32]))
+            let key = bip44::derive_key(&self.seed, &chain_id, account, index)
+                .map_err(|e| WalletError::DerivationFailed(format!("solana key: {}", e)))?;
+            bip44::derive_address_from_key(key.expose_secret(), &chain_id)
+                .map_err(|e| WalletError::DerivationFailed(format!("solana address: {}", e)))
         }
 
         #[cfg(not(feature = "wallet"))]
         {
-            format!("sol:{}", hex::encode(&self.seed[..32]))
+            let _ = account;
+            let _ = index;
+            Err(WalletError::SolanaUnavailable)
         }
     }
 
@@ -744,7 +708,7 @@ impl WalletManager {
     }
 
     /// Get the address for a specific chain.
-    pub fn address(&self, chain: ChainId) -> String {
+    pub fn address(&self, chain: ChainId) -> Result<String, WalletError> {
         self.wallet.address(chain)
     }
 
@@ -755,7 +719,12 @@ impl WalletManager {
     /// * `chain` — Which chain to derive for.
     /// * `account` — BIP-44 account number.
     /// * `index` — Address index within the account.
-    pub fn derive_address(&self, chain: ChainId, account: u32, index: u32) -> String {
+    pub fn derive_address(
+        &self,
+        chain: ChainId,
+        account: u32,
+        index: u32,
+    ) -> Result<String, WalletError> {
         self.wallet.derive_address(chain, account, index)
     }
 
@@ -853,12 +822,78 @@ impl WalletIdentityResolver {
     /// # Returns
     ///
     /// The derived address as a string (chain-specific format)
-    pub fn derive_address(&self, chain: ChainId, account: u32, index: u32) -> String {
+    pub fn derive_address(
+        &self,
+        chain: ChainId,
+        account: u32,
+        index: u32,
+    ) -> Result<String, WalletError> {
         self.wallet.derive_address(chain, account, index)
     }
 
     /// Get the underlying wallet for advanced operations.
     pub fn wallet(&self) -> &Wallet {
         &self.wallet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_MNEMONIC: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[cfg(feature = "wallet")]
+    #[test]
+    fn ethereum_address_derivation_matches_known_bip44_vector() {
+        let wallet = Wallet::from_mnemonic(TEST_MNEMONIC, "").unwrap();
+
+        let address = wallet.address(ChainId::new("ethereum")).unwrap();
+
+        assert_eq!(address, "0x9858effd232b4033e47d90003d41ec34ecaeda94");
+    }
+
+    #[cfg(feature = "wallet")]
+    #[test]
+    fn invalid_ethereum_derivation_path_returns_error_without_seed_material() {
+        let wallet = Wallet::from_mnemonic(TEST_MNEMONIC, "").unwrap();
+        let seed_prefix = hex::encode(&wallet.seed()[..20]);
+
+        let err = wallet
+            .derive_address(ChainId::new("ethereum"), 0, u32::MAX)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("ethereum"));
+        assert!(!err.contains(&seed_prefix));
+    }
+
+    #[test]
+    fn unsupported_chain_returns_error_without_seed_material() {
+        let wallet = Wallet::from_seed([0xAB; 64]);
+        let seed_prefix = hex::encode(&wallet.seed()[..8]);
+
+        let err = wallet
+            .address(ChainId::new("unknown"))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("unknown"));
+        assert!(!err.contains(&seed_prefix));
+    }
+
+    #[cfg(not(feature = "wallet"))]
+    #[test]
+    fn wallet_feature_disabled_returns_explicit_error_without_seed_material() {
+        let wallet = Wallet::from_seed([0xCD; 64]);
+        let seed_prefix = hex::encode(&wallet.seed()[..20]);
+
+        let err = wallet
+            .address(ChainId::new("ethereum"))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("Ethereum signature capability unavailable"));
+        assert!(!err.contains(&seed_prefix));
     }
 }

@@ -31,6 +31,7 @@ A `ProofBundle` is a self-contained DAG containing:
 3. **Path Verification:** Walk the Merkle path from the commitment to the `state_root` (ETH) or `merkle_root` (BTC) provided in the bundle.
 4. **Header Verification:** Verify the block header matches the user's local "Checkpoint" (Trusted Block Hash).
 5. **Replay Check:** Query the local `ReplayDatabase` with `ReplayId` derived from all transfer inputs. The verifier MUST check this database before accepting any state transition (see PROTOCOL_INVARIANTS.md Invariant 9).
+6. **Signer Binding:** Verify each proof-bundle signature and confirm the recovered public key is a member of the recipient's **approved verifier set** (the RFC-0012 §9 verifier keys). The public key embedded in a signature blob is chosen by the sender and proves nothing on its own — an offline accept that trusts it is forgeable. The approved set is supplied from **trusted local config** (`[verifier] approved_keys` in `~/.csv/config.toml`), never from the consignment. Offline acceptance **fails closed** when no approved keys are configured. (Implemented by `csv_verifier::verify_proof_bound` / `verify_proof`; see VERIFY-SIGNER-BINDING-001.)
 
 ## 5. Security Invariant (Target Model, Stage 3)
 >
@@ -49,5 +50,6 @@ A valid offline verification requires the following components to be present and
 - **`replay_checked`**: Confirmation that `ReplayId` is not in the local replay database
 - **`signature_scheme`**: The proof bundle's declared signature scheme; offline verifiers must compare it with the source chain's expected scheme before signature verification
 - **`ownership_signature`**: Signature proving ownership of the seal, verified using the scheme derived from chain configuration
+- **`approved_signer`**: The recovered signature key MUST be a member of the recipient's approved verifier set (from trusted local config), not merely a well-formed signature over the DAG root. Fails closed when the set is empty (see VERIFY-SIGNER-BINDING-001)
 
-Implementers must ensure all four components are verified before accepting a proof bundle as valid.
+Implementers must ensure all of these components are verified before accepting a proof bundle as valid.

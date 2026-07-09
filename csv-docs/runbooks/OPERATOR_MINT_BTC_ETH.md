@@ -68,11 +68,11 @@ Terminal-off-path: `RolledBack`, `Compromised`.
 
 3. **Confirm settlement evidence was recorded.** On `MintConfirmed`, the runtime
    appends a `Transfer.SettlementRecorded` event to the durable event store for
-   the sanad aggregate. This is the record escrow will later consult
-   (`TransferCoordinator::settlement_evidence`). Check status:
+   the sanad aggregate. This is the record escrow will later consult. Check the
+   runtime event store directly:
 
    ```bash
-   csv cross-chain status <transfer-id>
+   csv cross-chain settlement-status <sanad-id> --from bitcoin --to ethereum
    ```
 
    The settlement evidence carries the settlement key material: `lock_event_id`
@@ -177,9 +177,9 @@ entry is promoted to `Consumed` only after the mint confirms on-chain.
 - **Execution journal**: crash-safe per-phase records (entered/completed/failed)
   used for resume.
 - **Settlement evidence**: read back with
-  `TransferCoordinator::settlement_evidence(sanad_id)` — the input a source
-  release consults. Its absence means no confirmed mint; never release against a
-  missing record.
+  `csv cross-chain settlement-status <sanad-id> --from <source> --to <dest>` —
+  the input a source release consults. Its absence means no confirmed mint;
+  never release against a missing record.
 
 ---
 

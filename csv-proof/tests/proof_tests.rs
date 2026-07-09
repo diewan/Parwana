@@ -3,10 +3,11 @@
 use csv_hash::Hash;
 use csv_proof::{
     CompositeProof, CompositionRule, ExecutionProof, FinalityProof, InclusionProof, OwnershipProof,
-    Proof, ProofCategory, ProofDag, ProofId, ProofNode, ProofPhase, ReplayProof, TransitionProof,
-    ZKProof,
+    Proof, ProofCategory, ProofDag, ProofError, ProofId, ProofNode, ProofPhase, ReplayProof,
+    TransitionProof, ZKProof,
     commitments_ext::{
-        CommitmentScheme, EnhancedCommitment, FinalityProofType, InclusionProofType, ProofMetadata,
+        BulletproofCommitment, CommitmentScheme, EnhancedCommitment, FinalityProofType,
+        InclusionProofType, KZGCommitment, ProofMetadata,
     },
 };
 
@@ -93,6 +94,27 @@ fn test_proof_category_zk() {
         verification_key_hash: test_hash(),
     });
     assert_eq!(proof.category(), ProofCategory::ZK);
+}
+
+#[test]
+fn kzg_verify_rejects_non_empty_garbage() {
+    let mut commitment = KZGCommitment::new(8, 2);
+    commitment.commitment = vec![0xA5, 0x5A, 0x01];
+
+    let result = commitment.verify(b"not a kzg proof", b"not public inputs");
+
+    assert!(matches!(result, Err(ProofError::NotImplemented(_))));
+}
+
+#[test]
+fn bulletproof_verify_rejects_non_empty_garbage() {
+    let mut commitment = BulletproofCommitment::new(64, 42);
+    commitment.commitment_a = vec![0x11, 0x22, 0x33];
+    commitment.commitment_b = vec![0x44, 0x55, 0x66];
+
+    let result = commitment.verify(b"not a bulletproof");
+
+    assert!(matches!(result, Err(ProofError::NotImplemented(_))));
 }
 
 #[test]

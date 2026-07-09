@@ -657,6 +657,7 @@ impl ChainRuntime {
         chain: ChainId,
         proof_bundle: &ProofBundle,
         sanad_id: &SanadId,
+        authorized_signers: &[Vec<u8>],
     ) -> Result<bool, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
         if proof_bundle.seal_ref.id.as_slice() != sanad_id.as_bytes() {
@@ -717,8 +718,15 @@ impl ChainRuntime {
             }
         };
 
-        // Use the core proof verification pipeline for signatures and seal check
-        let result = csv_verifier::verify_proof(proof_bundle, seal_checker, signature_scheme);
+        // Use the core proof verification pipeline for signatures and seal check.
+        // VERIFY-SIGNER-BINDING-001: the caller supplies the approved verifier set
+        // (fails closed if empty) so signatures are bound to an authorized signer.
+        let result = csv_verifier::verify_proof(
+            proof_bundle,
+            seal_checker,
+            signature_scheme,
+            authorized_signers,
+        );
         if result.is_valid {
             log::info!(
                 "Proof bundle verified successfully for sanad {:?} on {:?}",

@@ -541,6 +541,54 @@ module csv_seal::csv_seal {
         seal
     }
 
+    // ==================== Read-only views (SUI-SANAD-STATE-001) ====================
+    //
+    // Off-chain readers can decode a `Seal` object's BCS contents directly, but
+    // these accessors give on-chain callers and typed clients a stable,
+    // schema-independent way to read the canonical sanad state without assuming
+    // the struct's field layout.
+
+    /// Canonical lifecycle fields of a Sanad seal, in the order used by the
+    /// off-chain `CanonicalSanadState`:
+    /// `(state, owner, commitment, nullifier, created_at, locked_at,
+    ///   consumed_at, minted_at, refunded_at)`.
+    /// A zero timestamp means "not set"; an empty nullifier means "not registered".
+    public fun sanad_state(
+        seal: &Seal,
+    ): (u8, address, vector<u8>, vector<u8>, u64, u64, u64, u64, u64) {
+        (
+            seal.state,
+            seal.owner,
+            seal.commitment,
+            seal.nullifier,
+            seal.created_at,
+            seal.locked_at,
+            seal.consumed_at,
+            seal.minted_at,
+            seal.refunded_at,
+        )
+    }
+
+    /// Replay nullifier (empty unless consumed / minted).
+    public fun nullifier(seal: &Seal): vector<u8> {
+        seal.nullifier
+    }
+
+    /// Lock timestamp (0 if never locked).
+    public fun locked_at(seal: &Seal): u64 {
+        seal.locked_at
+    }
+
+    /// Mint timestamp (0 if never minted).
+    public fun minted_at(seal: &Seal): u64 {
+        seal.minted_at
+    }
+
+    /// Refund timestamp (0 if never refunded).
+    public fun refunded_at(seal: &Seal): u64 {
+        seal.refunded_at
+    }
+
     /// Consume a seal, binding its replay nullifier.
     public fun consume_seal(
         seal: &mut Seal,
@@ -718,7 +766,13 @@ module csv_seal::csv_seal {
 
     public fun sanad_id(seal: &Seal): vector<u8> { seal.sanad_id }
 
+    public fun commitment(seal: &Seal): vector<u8> { seal.commitment }
+
     public fun owner(seal: &Seal): address { seal.owner }
+
+    public fun created_at(seal: &Seal): u64 { seal.created_at }
+
+    public fun consumed_at(seal: &Seal): u64 { seal.consumed_at }
 
     public fun id(seal: &Seal): object::ID { object::uid_to_inner(&seal.id) }
 

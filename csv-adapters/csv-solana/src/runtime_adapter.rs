@@ -156,6 +156,9 @@ impl SolanaRuntimeAdapter {
         Ok(Some(MintResult {
             tx_hash: existing_mint_tx_ref(mint_record),
             block_height,
+            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                self.chain_id.clone(),
+            ),
         }))
     }
 }
@@ -264,14 +267,14 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         // key. Fails closed (no signer -> no signature) rather than emitting an
         // unauthenticated mint the program would reject.
         let digest = attestation.attestation_digest();
-        let signature = self
+        let signatures = self
             .backend
-            .sign_mint_attestation_digest(&digest)
+            .sign_mint_attestation_digests(&digest)
             .map_err(|e| {
                 AdapterError::Generic(format!("Failed to sign §9.2 mint attestation: {}", e))
             })?;
         let mut verifier_signatures = request.verifier_signatures.clone();
-        verifier_signatures.push(signature);
+        verifier_signatures.extend(signatures);
 
         let args = crate::mint::build_solana_mint_args(&attestation, &verifier_signatures);
 
@@ -330,6 +333,9 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         Ok(MintResult {
             tx_hash: existing_mint_tx_ref(&mint_record),
             block_height,
+            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                self.chain_id.clone(),
+            ),
         })
     }
 
@@ -501,6 +507,9 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             return Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    self.chain_id.clone(),
+                ),
             });
         }
 
@@ -527,6 +536,9 @@ impl ChainAdapter for SolanaRuntimeAdapter {
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height,
+                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                        self.chain_id.clone(),
+                    ),
                 })
             }
             ConfirmationStatus::Processed => Err(AdapterError::Generic(format!(

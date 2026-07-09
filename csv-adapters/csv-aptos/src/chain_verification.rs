@@ -14,45 +14,14 @@ impl super::AptosBackend {
         proof: &CoreInclusionProof,
         commitment: &Hash,
     ) -> ChainOpResult<bool> {
-        #[cfg(feature = "rpc")]
-        {
-            use tokio::runtime::Handle;
-            let _handle = Handle::current();
-
-            // Aptos uses accumulator-based state proofs
-            // Verify the proof bytes contain valid accumulator data
-            if proof.proof_bytes.len() < 32 {
-                return Ok(false);
-            }
-
-            // Check block hash matches expected format
-            if *proof.block_hash.as_bytes() == [0u8; 32] {
-                return Err(ChainOpError::ProofVerificationError(
-                    "Invalid block hash in inclusion proof".to_string(),
-                ));
-            }
-
-            // Verify commitment is present in proof data
-            let commitment_bytes = commitment.as_bytes();
-            if !proof
-                .proof_bytes
-                .windows(commitment_bytes.len())
-                .any(|window| window == commitment_bytes)
-            {
-                return Err(ChainOpError::ProofVerificationError(
-                    "Commitment not found in proof data".to_string(),
-                ));
-            }
-
-            Ok(true)
-        }
-        #[cfg(not(feature = "rpc"))]
-        {
-            let _ = (proof, commitment);
-            Err(ChainOpError::FeatureNotEnabled(
-                "rpc feature required for proof verification".to_string(),
-            ))
-        }
+        let _ = (proof, commitment);
+        Err(ChainOpError::CapabilityUnavailable(
+            "Legacy Aptos ChainProofProvider inclusion verification is disabled: \
+             this path did not verify accumulator or transaction inclusion against \
+             independently fetched chain state. Use the runtime ChainProofPort path \
+             for verifier-attested proof bundles."
+                .to_string(),
+        ))
     }
 
     /// Chain-native finality verification (HotStuff consensus).

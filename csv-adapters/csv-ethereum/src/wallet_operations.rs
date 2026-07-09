@@ -147,7 +147,11 @@ impl WalletOperations for EthereumWalletOperations {
         }
     }
 
-    async fn sign_transaction(&self, _seed: &[u8], _tx_data: &[u8]) -> Result<Vec<u8>, WalletError> {
+    async fn sign_transaction(
+        &self,
+        _seed: &[u8],
+        _tx_data: &[u8],
+    ) -> Result<Vec<u8>, WalletError> {
         // Fail closed. The previous implementation signed the raw `tx_data`
         // blob directly with a seed-derived key: no EIP-155 chain-id binding,
         // no nonce, no RLP transaction envelope. Such a signature is not a

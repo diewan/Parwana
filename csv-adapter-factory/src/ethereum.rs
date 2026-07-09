@@ -91,17 +91,25 @@ impl AdapterFactory for EthereumFactory {
                     ))
                 },
             )?;
-        // Attach the RFC-0012 mint verifier signing key if provided (env). This is
-        // distinct from the EVM transaction signer configured above: the wallet
-        // pays gas, while this key authorizes the §9.2 attestation digest.
-        if let Some(vk) = super::load_mint_verifier_key() {
-            eth_backend = eth_backend.with_verifier_key(vk);
-            log::info!("Factory: Ethereum adapter configured with mint verifier key");
-        } else {
+        // Attach the RFC-0012 mint verifier signing key(s) if provided (env).
+        // This is distinct from the EVM transaction signer configured above: the
+        // wallet pays gas, while these keys authorize the §9.2 attestation digest.
+        // Resolution is destination-chain-scoped (CSV_MINT_VERIFIER_KEY_ETHEREUM
+        // overrides the CSV_MINT_VERIFIER_KEY default for Ethereum only) and may
+        // carry multiple signers for an M-of-N registry.
+        let verifier_keys = super::load_mint_verifier_keys("ethereum");
+        if verifier_keys.is_empty() {
             log::warn!(
-                "Factory: no mint verifier key ({}) — Ethereum mint will fail closed",
+                "Factory: no mint verifier key configured — Ethereum mint will fail closed \
+                 (set {} or CSV_MINT_VERIFIER_KEY_ETHEREUM)",
                 super::MINT_VERIFIER_KEY_ENV
             );
+        } else {
+            log::info!(
+                "Factory: Ethereum adapter configured with {} mint verifier signer(s)",
+                verifier_keys.len()
+            );
+            eth_backend = eth_backend.with_verifier_keys(verifier_keys);
         }
         let eth_backend = Arc::new(eth_backend);
 

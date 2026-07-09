@@ -484,6 +484,9 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         Ok(MintResult {
             tx_hash: tx_hash.to_string(),
             block_height,
+            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                self.chain_id.clone(),
+            ),
         })
     }
 

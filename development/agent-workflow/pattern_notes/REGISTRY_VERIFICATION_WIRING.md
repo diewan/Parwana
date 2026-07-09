@@ -1,5 +1,19 @@
 # Pattern Note: Registry Verification Wiring
 
+> **Drift warning (verified 2026-07-09).** Two parts of this note no longer match
+> the tree:
+>
+> - The "Fix Placeholder Commitments" example below shows a `ProofLeafV1`
+>   construction in `csv-adapters/csv-ethereum/src/runtime_adapter.rs`.
+>   `ProofLeafV1` no longer appears anywhere in the Ethereum adapter — the
+>   proof-root mint was removed by the thin-registry rewrite (`TRM-ETH-*`). The
+>   *principle* (bind commitments to real on-chain transaction data, never to
+>   `sanad_id`) still holds; the code excerpt is historical.
+> - The "Repository-Wide Application" checklist is still unresolved.
+>   `verify_seal_registry` exists **only** in `csv-ethereum`
+>   (`seal_protocol.rs`, `verifier.rs`). Bitcoin, Solana, Sui, Aptos, and
+>   Celestia have no such function.
+
 ## Context
 
 This pattern note documents the security-critical pattern for wiring on-chain seal registry verification into production paths for chain adapters.
@@ -229,12 +243,15 @@ Ok(VerificationResult {
 
 This pattern should be applied to all chain adapters that have seal registry verification:
 
-- ✅ Ethereum: Completed (A-ETH-REGISTRY-001)
-- ⚠️ Bitcoin: Check for similar patterns in `csv-adapters/csv-bitcoin/src/runtime_adapter.rs`
-- ⚠️ Solana: Reference implementation exists, verify it follows this pattern
-- ⚠️ Sui: Check for similar patterns
-- ⚠️ Aptos: Check for similar patterns
-- ⚠️ Celestia: Check for similar patterns
+Status re-verified 2026-07-09 by grepping for `verify_seal_registry`:
+
+- ✅ Ethereum: Completed (A-ETH-REGISTRY-001) — `seal_protocol.rs`, `verifier.rs`
+- ❌ Bitcoin: not implemented
+- ❌ Solana: not implemented (no reference implementation exists, contrary to the
+  earlier note)
+- ❌ Sui: not implemented
+- ❌ Aptos: not implemented
+- ❌ Celestia: not implemented
 
 ## Verification Commands
 
