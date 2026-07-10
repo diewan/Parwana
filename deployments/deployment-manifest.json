@@ -2,7 +2,7 @@
   "manifest_version": "2.1.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-07-09T23:57:13.290732Z",
+  "updated_at": "2026-07-10T17:17:43.093069Z",
   "mint_model": "thin-registry-verifier-attested (RFC-0012 \u00a79)",
   "deployments": {
     "ethereum": {
@@ -56,8 +56,8 @@
     },
     "aptos": {
       "network": "testnet",
-      "module_address": "0xd2ca32aa271cda19180c2a7739948a9299c4b8e58c475063d6bd9f48fe33c987",
-      "deployment_tx": "0x98faf924c075e2947b65f9802054177a2d65a3ea8f8b99c027923f0d82fc7574",
+      "module_address": "0x845182cdf7c1eddb0426d39cc340bf9523e7f1c7ec7d33f67d9d61c7a40248de",
+      "deployment_tx": "0x8c7c766ba8f7241b117e43921348ba12382a192ed1e134d761367c7dfad65f0e",
       "deployment_type": "account_publish",
       "verified": true,
       "verifier_set": [

@@ -1597,14 +1597,7 @@ async fn cmd_list(
         );
     }
 
-    let headers = vec![
-        "Sanad ID",
-        "Chain",
-        "State",
-        "Transfer ID",
-        "Destination",
-        "Destination Tx",
-    ];
+    let headers = vec!["Sanad ID", "Chain", "State", "Transfer ID", "Destination"];
     let mut rows = Vec::new();
     let mut updates_to_apply: Vec<(String, SanadStatus)> = Vec::new();
 
@@ -1656,19 +1649,10 @@ async fn cmd_list(
             updates_to_apply.push((sanad.id.clone(), new_status));
         }
 
-        let (transfer_id, destination, destination_tx) = latest_transfer
+        let (transfer_id, destination) = latest_transfer
             .as_ref()
-            .map(|transfer| {
-                (
-                    transfer.id.clone(),
-                    transfer_destination_label(transfer),
-                    transfer
-                        .dest_tx_hash
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-            })
-            .unwrap_or_else(|| ("-".to_string(), "-".to_string(), "-".to_string()));
+            .map(|transfer| (transfer.id.clone(), transfer_destination_label(transfer)))
+            .unwrap_or_else(|| ("-".to_string(), "-".to_string()));
 
         rows.push(vec![
             sanad.id.clone(),
@@ -1676,7 +1660,6 @@ async fn cmd_list(
             resolved.label,
             transfer_id,
             destination,
-            destination_tx,
         ]);
     }
 

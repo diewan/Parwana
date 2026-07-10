@@ -1282,61 +1282,21 @@ impl ChainBackend for AptosBackend {
 
 #[async_trait]
 impl SanadStateReader for AptosBackend {
-    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
-        // Query the Aptos resource for this sanad_id
-        // Derive the account address from sanad_id
-        let sanad_bytes = sanad_id.as_bytes();
-        let mut address_bytes = [0u8; 32];
-        if sanad_bytes.len() >= 32 {
-            address_bytes.copy_from_slice(&sanad_bytes[..32]);
-        } else {
-            address_bytes[..sanad_bytes.len()].copy_from_slice(sanad_bytes);
-        }
-
-        // Query the account resources to get the sanad state
-        // Note: Aptos RPC doesn't have get_account_resources, use get_resource for specific types
-        let (module_addr, _event_type) = self.seal_protocol.event_builder_config();
-        let resource_type = format!("0x{}::sanad::Sanad", hex::encode(module_addr));
-
-        match self
-            .rpc()
-            .get_resource(address_bytes, &resource_type, None)
-            .await
-        {
-            Ok(Some(_resource)) => {
-                // Parse the resource data to extract state information
-                // The resource data is BCS-encoded; we need to parse it properly
-                // For now, return an error indicating that resource parsing is not yet implemented
-                // This is fail-closed: we don't fabricate state from commitment alone
-                return Err(ChainOpError::CapabilityUnavailable(
-                    "Sanad resource parsing is not yet implemented for Aptos. \
-                     The resource exists but cannot be parsed into canonical state. \
-                     This requires BCS decoding of the Move resource structure."
-                        .to_string(),
-                ));
-            }
-            Ok(None) => {
-                // Resource doesn't exist - sanad not created
-                Ok(CanonicalSanadState {
-                    state: 0, // Not created
-                    owner: "unknown".to_string(),
-                    commitment: sanad_id.0,
-                    nullifier: None,
-                    created_at: 0,
-                    locked_at: None,
-                    consumed_at: None,
-                    minted_at: None,
-                    refunded_at: None,
-                })
-            }
-            Err(e) => {
-                // Failed to query resources - propagate the error instead of returning fabricated state
-                return Err(ChainOpError::RpcError(format!(
-                    "Failed to query account resources: {}",
-                    e
-                )));
-            }
-        }
+    async fn get_sanad_state(&self, _sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        // CSV's Aptos thin registry stores all Sanad state in the module
+        // account's `CSVSeal::LockRegistry`, keyed by sanad id. A SanadId is a
+        // commitment hash, not an Aptos account address, so querying a fictional
+        // `sanad::Sanad` resource at that hash would falsely report `Uncreated`.
+        //
+        // The current RPC abstraction cannot issue the registry's view function
+        // and decode its SmartTable entry. Fail closed until that read path is
+        // implemented; callers must not treat an absent per-Sanad resource as
+        // canonical on-chain state.
+        Err(ChainOpError::CapabilityUnavailable(
+            "Canonical Aptos Sanad-state lookup requires the CSVSeal::LockRegistry view \
+             function; direct per-Sanad resource lookup is not valid for the thin registry."
+                .to_string(),
+        ))
     }
 
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
@@ -1402,13 +1362,17 @@ impl SanadStateReader for AptosBackend {
 #[async_trait]
 impl ChainReadinessCheck for AptosBackend {
     async fn check_readiness(&self, _account: u32, _index: u32) -> ChainOpResult<ChainReadiness> {
-        // Check if module is configured
-        let contract_configured = !self
-            .seal_protocol
-            .config()
-            .seal_contract
-            .module_address
-            .is_empty();
+        // A configured string is not evidence of a usable deployment. The
+        // thin registry is enabled only after `init_registry` creates this
+        // resource at the module account.
+        let (module_addr, _) = self.seal_protocol.event_builder_config();
+        let registry_type = format!("0x{}::CSVSeal::LockRegistry", hex::encode(module_addr));
+        let contract_configured = matches!(
+            self.rpc()
+                .get_resource(module_addr, &registry_type, None)
+                .await,
+            Ok(Some(_))
+        );
 
         // Check if signer is actually configured by checking the config
         let signer_configured = self.seal_protocol.config().private_key.is_some();

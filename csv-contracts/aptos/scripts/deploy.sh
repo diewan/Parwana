@@ -65,13 +65,8 @@ if [ -n "${CSV_APTOS_ADDRESS:-}" ] && [ -n "${CSV_APTOS_PRIVATE_KEY:-}" ]; then
     APTOS_PROFILE="csv_deploy"
     ACCOUNT="${CSV_APTOS_ADDRESS}"
     
-    # Export config location for all subsequent aptos commands
-    export APTOS_CONFIG_FILE="${PWD}/.aptos/config.yaml"
-    
-    # Debug: show config content
-    echo "  Config file (.aptos/config.yaml):"
-    cat ".aptos/config.yaml" | sed 's/^/    /'
-    
+    # The Aptos CLI resolves the profile from .aptos/config.yaml in the
+    # current directory.  Do not print that file: it contains the private key.
     echo "  Created temporary profile for deployment"
 else
     # Use default profile from aptos CLI config
@@ -89,8 +84,6 @@ else
     APTOS_PROFILE="default"
     ACCOUNT=$("$APTOS" config show-profiles --profile default 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Result']['default']['account'])" 2>/dev/null || echo "")
     
-    # For default profile, don't override config location
-    export APTOS_CONFIG_FILE=""
 fi
 
 echo ""
@@ -156,30 +149,21 @@ EOF
 
 # Publish to testnet with the correct address
 echo "Publishing to ${NETWORK}..."
-if [ -n "${APTOS_CONFIG_FILE:-}" ]; then
-    # Use explicit config file for csv_deploy profile
-    PUBLISH_OUTPUT=$("$APTOS" move publish \
-        --package-dir contracts \
-        --profile "${APTOS_PROFILE}" \
-        --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" \
-        --config-file "${APTOS_CONFIG_FILE}" \
-        --assume-yes 2>&1) || analyze_publish_failure
-else
-    # Use default profile from global config
-    PUBLISH_OUTPUT=$("$APTOS" move publish \
-        --package-dir contracts \
-        --profile "${APTOS_PROFILE}" \
-        --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" \
-        --assume-yes 2>&1) || analyze_publish_failure
-fi
+PUBLISH_OUTPUT=$("$APTOS" move publish \
+    --package-dir contracts \
+    --profile "${APTOS_PROFILE}" \
+    --named-addresses "csv_seal=${ACCOUNT},CSV=${ACCOUNT}" \
+    --assume-yes 2>&1) || analyze_publish_failure
 
 # Restore original Move.toml after successful deployment
 cp "${MOVE_TOML_BACKUP}" "${MOVE_TOML}"
 
 echo "$PUBLISH_OUTPUT" > "scripts/deploy-output-${NETWORK}.txt"
 
-# Extract transaction hash from text output (look for lines containing transaction hash)
-TX_HASH=$(echo "$PUBLISH_OUTPUT" | grep -i "transaction\|hash\|committed" | head -1 | sed 's/.*: *//' | tr -d '"' | tr -d ' ' || echo "")
+# Aptos CLI v9 emits the committed transaction as JSON. Preserve that exact hash
+# in the deployment manifest rather than retaining the previous deployment's
+# transaction reference.
+TX_HASH=$(echo "$PUBLISH_OUTPUT" | sed -nE 's/.*"transaction_hash": *"(0x[0-9a-fA-F]+)".*/\1/p' | head -1)
 
 # Package ID is the account address in Aptos
 PACKAGE_ID="${ACCOUNT}"
@@ -196,8 +180,8 @@ echo "Initializing module (this is what actually enables the module)..."
 echo "  Waiting for publish transaction to be committed..."
 sleep 5
 
-# Verify config file exists
-if [ -n "${APTOS_CONFIG_FILE:-}" ] && [ ! -f ".aptos/config.yaml" ]; then
+# Verify the temporary profile exists.
+if [ "${APTOS_PROFILE}" = "csv_deploy" ] && [ ! -f ".aptos/config.yaml" ]; then
     echo "  ERROR: Config file .aptos/config.yaml not found!"
     echo "  Current directory: ${PWD}"
     ls -la .aptos/ 2>/dev/null || echo "  .aptos directory does not exist"
@@ -206,7 +190,6 @@ fi
 
 # Common profile/config args for `aptos move run`.
 declare -a RUN_ARGS=(--profile "${APTOS_PROFILE}" --assume-yes)
-[ -n "${APTOS_CONFIG_FILE:-}" ] && RUN_ARGS+=(--config-file "${APTOS_CONFIG_FILE}")
 
 # Run an entry function, treating "already initialized" as success so re-running
 # the script (or re-seeding) is idempotent. Extra args (e.g. --args ...) precede.
@@ -293,6 +276,7 @@ try:
         apt['network'] = '$NETWORK'
         # module_address (@csv_seal) is the RFC-0012 §9.2 destinationContract.
         apt['module_address'] = '$PACKAGE_ID'
+        apt['deployment_tx'] = '$TX_HASH' or None
         apt['verified'] = True
         apt['deployment_type'] = 'account_publish'
         # Record the seeded verifier if init_mint_authority ran this deploy;

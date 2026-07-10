@@ -4,21 +4,21 @@ INCLUDING DEPENDENCY AptosFramework
 INCLUDING DEPENDENCY AptosStdlib
 INCLUDING DEPENDENCY MoveStdlib
 BUILDING csv-seal
-package size 17994 bytes
-Transaction submitted: https://explorer.aptoslabs.com/txn/0xce38837894535de73abf9ac8054d12a7c70412fafa34412a1bbfeb218cec3977?network=testnet
+package size 21128 bytes
+Transaction submitted: https://explorer.aptoslabs.com/txn/0x8c7c766ba8f7241b117e43921348ba12382a192ed1e134d761367c7dfad65f0e?network=testnet
 {
   "Result": {
-    "transaction_hash": "0xce38837894535de73abf9ac8054d12a7c70412fafa34412a1bbfeb218cec3977",
-    "gas_used": 86412,
+    "transaction_hash": "0x8c7c766ba8f7241b117e43921348ba12382a192ed1e134d761367c7dfad65f0e",
+    "gas_used": 98997,
     "gas_unit_price": 100,
-    "sender": "810d95132431185b5db7a84cba4d73b5e8135950372bcbcb69e159445ef1fb9c",
+    "sender": "845182cdf7c1eddb0426d39cc340bf9523e7f1c7ec7d33f67d9d61c7a40248de",
     "sequence_number": 0,
     "replay_protector": {
       "SequenceNumber": 0
     },
     "success": true,
-    "timestamp_us": 1782225269416725,
-    "version": 9436219232,
+    "timestamp_us": 1783703850233376,
+    "version": 9818976444,
     "vm_status": "Executed successfully"
   }
 }

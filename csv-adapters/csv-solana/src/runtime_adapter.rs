@@ -316,8 +316,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         // Send the transaction (fails closed if the program rejects an
         // unauthenticated or duplicate mint at simulation/preflight).
-        match self.backend.rpc().send_transaction(&transaction) {
-            Ok(_signature) => {}
+        let signature = match self.backend.rpc().send_transaction(&transaction) {
+            Ok(signature) => signature,
             Err(e) => {
                 if format!("{}", e).contains("already in use")
                     && let Some(result) =
@@ -330,7 +330,23 @@ impl ChainAdapter for SolanaRuntimeAdapter {
                     e
                 )));
             }
-        }
+        };
+
+        // `send_transaction` only reports that the RPC node accepted the
+        // transaction for broadcast.  The runtime persists the mint-record PDA
+        // as the destination reference and immediately asks `confirm_tx` to
+        // read that account.  Do not expose the PDA until the transaction has
+        // actually landed, otherwise a normal RPC propagation delay is reported
+        // as a misleading `AccountNotFound` mint failure.
+        self.backend
+            .rpc()
+            .wait_for_confirmation(&signature)
+            .map_err(|e| {
+                AdapterError::RpcError(format!(
+                    "Failed to confirm Solana mint transaction {}: {}",
+                    signature, e
+                ))
+            })?;
 
         // Get the block height - use slot as proxy since get_block_height not available in SolanaRpc
         let block_height = self
