@@ -71,7 +71,7 @@ impl AdapterFactory for AptosFactory {
                     ))
                 })?
         } else {
-            log::warn!(
+            log::debug!(
                 "Factory: No secret key provided, creating Aptos seal protocol without signing key (read-only mode)"
             );
             AptosSealProtocol::from_config(
@@ -97,7 +97,7 @@ impl AdapterFactory for AptosFactory {
         // backend signs no attestation and mint fails closed by design.
         let verifier_keys = super::load_mint_verifier_keys("aptos");
         if verifier_keys.is_empty() {
-            log::warn!(
+            log::debug!(
                 "Factory: no mint verifier key configured — Aptos mint will fail closed \
                  (set {} or CSV_MINT_VERIFIER_KEY_APTOS)",
                 super::MINT_VERIFIER_KEY_ENV

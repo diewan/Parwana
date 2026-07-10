@@ -51,6 +51,27 @@ fn hash_from_tx_str(tx_hash: &str) -> Result<csv_hash::Hash, TransferCoordinator
     hash_from_tx_bytes(&bytes)
 }
 
+/// Canonical 32-byte digest of a lock transaction reference.
+///
+/// Most chains reference the lock tx by a 32-byte hash, which is used
+/// verbatim. Chains whose native reference is longer (Solana's 64-byte
+/// ed25519 signature) are reduced with a tagged hash so fixed-width
+/// registry/journal fields stay canonical. Chain-facing queries must use the
+/// native bytes (`transfer.lock_tx_hash`), never this digest.
+fn lock_tx_ref_digest(tx_ref: &[u8]) -> Result<csv_hash::Hash, TransferCoordinatorError> {
+    match tx_ref.len() {
+        32 => hash_from_tx_bytes(tx_ref),
+        64 => Ok(csv_hash::Hash::new(csv_hash::csv_tagged_hash(
+            "csv-lock-tx-ref",
+            tx_ref,
+        ))),
+        other => Err(TransferCoordinatorError::InvalidTxHash(format!(
+            "expected a 32-byte tx hash or 64-byte signature, got {}",
+            other
+        ))),
+    }
+}
+
 fn runtime_signature_scheme(
     scheme: csv_protocol::signature::SignatureScheme,
 ) -> Result<csv_protocol::signature::SignatureScheme, TransferCoordinatorError> {
@@ -412,7 +433,7 @@ fn transfer_to_registry_entry(
             nonce: None,
             version: None,
         },
-        lock_tx_hash: hash_from_tx_bytes(&transfer.lock_tx_hash)?,
+        lock_tx_hash: lock_tx_ref_digest(&transfer.lock_tx_hash)?,
         transition_id: transfer.transition_id.clone(),
         mint_tx_hash: csv_hash::Hash::zero(), // Will be updated after mint
         timestamp: std::time::SystemTime::now()
@@ -813,7 +834,9 @@ impl TransferCoordinator {
         transfer: &CrossChainTransfer,
         adapter_registry: &dyn AdapterRegistry,
     ) -> Result<TxFinality, TransferCoordinatorError> {
-        let lock_tx_hex = hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
+        // Chain-facing query: pass the native lock tx reference (may be longer
+        // than 32 bytes, e.g. Solana's 64-byte signature), not its digest.
+        let lock_tx_hex = hex::encode(&transfer.lock_tx_hash);
         adapter_registry
             .tx_finality(&transfer.source_chain, &lock_tx_hex)
             .await
@@ -1501,6 +1524,16 @@ impl TransferCoordinator {
             )));
         }
 
+        // Fail-closed existence check: the adapter errors when the seal/sanad
+        // is unknown on-chain. The returned consumed flag is deliberately NOT
+        // wired into the verifier's seal-replay gate below
+        // (SEAL-REPLAY-RUNTIME-001): after our own lock the source seal is
+        // *necessarily* consumed, and a bare consumed flag cannot distinguish
+        // our lock from a prior hostile spend. The runtime path's double-spend
+        // gates are the replay-DB consume-if-unconsumed CAS and the
+        // destination contract's minted/nullifier tombstones (RFC-0012 §9) —
+        // the same rationale as VERIFY-SIGNER-BINDING-001 for
+        // `authorized_signers`.
         let seal_status = adapter_registry
             .check_seal_registry(&transfer.source_chain, &proof_bundle.seal_ref.id)
             .await
@@ -1510,9 +1543,11 @@ impl TransferCoordinator {
                     e
                 ))
             })?;
-        let seal_is_consumed =
-            matches!(seal_status, csv_adapter_core::SealRegistryStatus::Consumed);
-        let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
+        tracing::debug!(
+            "Source seal registry status for transfer {}: {:?}",
+            transfer.id,
+            seal_status
+        );
 
         let required_confirmations = runtime_ctx
             .policy
@@ -1532,9 +1567,12 @@ impl TransferCoordinator {
             signature_scheme,
             required_confirmations,
             current_block_height: Some(observed_tip),
-            seal_registry: Some(Box::new(move |seal_id: &[u8]| {
-                seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
-            })),
+            // SEAL-REPLAY-RUNTIME-001: the verifier's seal-replay gate carries
+            // the offline-recipient semantic ("was this seal spent before I
+            // accept it?"). Post-lock that question is unanswerable from a
+            // consumed flag — our own lock consumed the seal — so the runtime
+            // path does not supply a registry; see the seal_status check above.
+            seal_registry: None,
             chain_data: None,
             native_proof_validated: true,
             sanad_id: Some(csv_hash::SanadId(transfer.sanad_id)),
@@ -2592,9 +2630,9 @@ impl TransferCoordinator {
                             ));
                         };
 
-                        // Verify the persisted proof and proceed to mint
-                        let lock_tx_hash =
-                            hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes());
+                        // Verify the persisted proof and proceed to mint.
+                        // Chain-facing query: native lock tx reference.
+                        let lock_tx_hash = hex::encode(&transfer.lock_tx_hash);
                         let confirmed_lock = adapter_registry
                             .confirm_tx(&transfer.source_chain, &lock_tx_hash)
                             .await
@@ -3024,6 +3062,9 @@ impl TransferCoordinator {
             )));
         }
 
+        // Fail-closed existence check only; the consumed flag is deliberately
+        // not wired into the verifier's seal-replay gate — see the
+        // fresh-execution construction site (SEAL-REPLAY-RUNTIME-001).
         let seal_status = adapter_registry
             .check_seal_registry(&transfer.source_chain, &proof_bundle.seal_ref.id)
             .await
@@ -3033,9 +3074,11 @@ impl TransferCoordinator {
                     e
                 ))
             })?;
-        let seal_is_consumed =
-            matches!(seal_status, csv_adapter_core::SealRegistryStatus::Consumed);
-        let seal_id_for_registry = proof_bundle.seal_ref.id.clone();
+        tracing::debug!(
+            "Source seal registry status for transfer {} (recovery): {:?}",
+            transfer.id,
+            seal_status
+        );
         let required_confirmations = runtime_ctx
             .policy
             .finality_depth_for_chain(&transfer.source_chain)
@@ -3089,9 +3132,11 @@ impl TransferCoordinator {
             signature_scheme,
             required_confirmations,
             current_block_height: Some(observed_tip),
-            seal_registry: Some(Box::new(move |seal_id: &[u8]| {
-                seal_is_consumed && seal_id == seal_id_for_registry.as_slice()
-            })),
+            // SEAL-REPLAY-RUNTIME-001: no registry on the runtime path — the
+            // seal-replay gate carries the offline-recipient semantic and the
+            // source seal is necessarily consumed by our own lock here. See
+            // the fresh-execution construction site.
+            seal_registry: None,
             chain_data: None,
             native_proof_validated: true,
             sanad_id: Some(csv_hash::SanadId(transfer.sanad_id)),
@@ -3183,16 +3228,12 @@ impl TransferCoordinator {
             arr.copy_from_slice(transfer.sanad_id.as_bytes());
             arr
         };
-        let lock_bytes: [u8; 32] = {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&transfer.lock_tx_hash[..32]);
-            arr
-        };
+        let lock_tx_digest = lock_tx_ref_digest(&transfer.lock_tx_hash)?;
         let transfer_context = crate::execution_journal::TransferContext {
             sanad_id: csv_hash::SanadId(csv_hash::Hash::new(sanad_bytes)).into(),
             source_chain: transfer.source_chain.clone(),
             destination_chain: transfer.destination_chain.clone(),
-            lock_tx_hash: csv_hash::Hash::new(lock_bytes).into(),
+            lock_tx_hash: lock_tx_digest.into(),
             destination_owner: runtime_ctx
                 .destination_owner
                 .as_ref()
@@ -3233,7 +3274,9 @@ impl TransferCoordinator {
         }
 
         let lock_result = csv_adapter_core::LockResult {
-            tx_hash: hex::encode(hash_from_tx_bytes(&transfer.lock_tx_hash)?.as_bytes()),
+            // Native lock tx reference: adapters re-derive their chain-specific
+            // form (e.g. Solana decodes the 128-hex-char 64-byte signature).
+            tx_hash: hex::encode(&transfer.lock_tx_hash),
             block_height: finality.block_height,
         };
         self.execution_journal
@@ -4091,6 +4134,32 @@ mod tests {
             transfer_to_registry_entry(&transfer),
             Err(TransferCoordinatorError::InvalidTxHash(_))
         ));
+    }
+
+    #[test]
+    fn test_registry_entry_digests_64_byte_lock_signature() {
+        // Solana references the lock tx by its 64-byte ed25519 signature; the
+        // fixed-width registry field carries a tagged digest while the native
+        // reference survives in source_seal.id for chain queries and recovery.
+        let native_ref = vec![0xCD; 64];
+        let transfer = CrossChainTransfer {
+            id: "solana-lock".to_string(),
+            source_chain: "solana".to_string(),
+            destination_chain: "ethereum".to_string(),
+            lock_tx_hash: native_ref.clone(),
+            lock_output_index: 0,
+            sanad_id: csv_hash::Hash::new([2u8; 32]),
+            transition_id: vec![3u8; 32],
+        };
+
+        let entry = transfer_to_registry_entry(&transfer).expect("64-byte ref must be accepted");
+        assert_eq!(
+            entry.lock_tx_hash,
+            csv_hash::Hash::new(csv_hash::csv_tagged_hash("csv-lock-tx-ref", &native_ref))
+        );
+
+        let recovered = registry_entry_to_transfer(&entry, transfer.id.clone());
+        assert_eq!(recovered.lock_tx_hash, native_ref);
     }
 
     #[async_trait::async_trait]

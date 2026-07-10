@@ -71,7 +71,7 @@ impl AdapterFactory for SolanaFactory {
         // backend signs no attestation and mint fails closed by design.
         let verifier_keys = super::load_mint_verifier_keys("solana");
         if verifier_keys.is_empty() {
-            log::warn!(
+            log::debug!(
                 "Factory: no mint verifier key configured — Solana mint will fail closed \
                  (set {} or CSV_MINT_VERIFIER_KEY_SOLANA)",
                 super::MINT_VERIFIER_KEY_ENV

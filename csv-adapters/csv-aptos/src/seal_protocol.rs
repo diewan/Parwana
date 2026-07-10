@@ -32,10 +32,12 @@ use crate::checkpoint::CheckpointVerifier;
 use crate::config::{AptosConfig, AptosNetwork};
 use crate::error::{AptosError, AptosResult};
 use crate::proofs::{CommitmentEventBuilder, EventProofVerifier};
-use crate::rpc::AptosRpc;
 #[cfg(not(feature = "rpc"))]
-use crate::rpc::{AptosLedgerInfo, AptosTransaction};
-use crate::rpc::{AptosLedgerReader, AptosTransactionReader, AptosTransactionSubmitter};
+use crate::rpc::AptosLedgerInfo;
+use crate::rpc::AptosRpc;
+use crate::rpc::{
+    AptosLedgerReader, AptosTransaction, AptosTransactionReader, AptosTransactionSubmitter,
+};
 use crate::seal::SealRegistry;
 use crate::types::{AptosCommitAnchor, AptosFinalityProof, AptosInclusionProof, AptosSealPoint};
 
@@ -838,6 +840,65 @@ impl AptosSealProtocol {
         Ok(signed_tx)
     }
 
+    /// Sign, submit, and confirm an entry function. A stale sequence number
+    /// invalidates the signature, so every retry refetches, rebuilds, and
+    /// re-signs the transaction.
+    #[cfg(feature = "rpc")]
+    pub(crate) async fn submit_entry_function_with_retry(
+        &self,
+        payload: crate::entry_function::EntryFunctionPayload,
+    ) -> Result<AptosTransaction, Box<dyn std::error::Error + Send + Sync>> {
+        const MAX_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            let signed = self.sign_entry_function_payload(payload.clone()).await?;
+            match self.rpc.submit_signed_transaction(signed).await {
+                Ok(tx_hash) => {
+                    let transaction =
+                        self.rpc.wait_for_transaction(tx_hash).await.map_err(|e| {
+                            format!(
+                                "Failed to confirm transaction 0x{}: {e}",
+                                hex::encode(tx_hash)
+                            )
+                        })?;
+                    if !transaction.success {
+                        return Err(format!(
+                            "Aptos transaction 0x{} failed: {}",
+                            hex::encode(tx_hash),
+                            transaction.vm_status
+                        )
+                        .into());
+                    }
+                    return Ok(transaction);
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    if attempt < MAX_ATTEMPTS && Self::is_sequence_number_too_old_error(&message) {
+                        log::warn!(
+                            "APTOS: {} rejected with stale sequence number; refetching and retrying ({}/{})",
+                            payload.function_short_name(),
+                            attempt,
+                            MAX_ATTEMPTS
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                        continue;
+                    }
+                    return Err(format!(
+                        "Failed to submit {} transaction: {message}",
+                        payload.function_short_name()
+                    )
+                    .into());
+                }
+            }
+        }
+
+        Err(format!(
+            "Failed to submit {} transaction after {MAX_ATTEMPTS} attempts",
+            payload.function_short_name()
+        )
+        .into())
+    }
+
     /// Verify the event in a published anchor matches the expected commitment.
     ///
     /// Kept as the anchor-event check; publish currently verifies via the runtime path.
@@ -885,7 +946,7 @@ impl SealProtocol for AptosSealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
-        _sanad_id: Hash,
+        sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         log::debug!(
             "Publishing commitment via seal {}",
@@ -899,27 +960,20 @@ impl SealProtocol for AptosSealProtocol {
 
         #[cfg(feature = "rpc")]
         {
-            // For Aptos CSVSealV2, do NOT call consume_seal here.
-            // The deployed contract's lock_sanad function handles commitment publishing
-            // (creates AnchorData, emits SanadConsumed event) when the sanad is locked
-            // for cross-chain transfer. Calling consume_seal here would mark the seal
-            // as consumed before lock_sanad, causing ESealAlreadyConsumed errors.
-            log::debug!(
-                "APTOS: Skipping consume_seal during publish - lock_sanad will handle commitment publishing"
+            let builder = crate::entry_function::EntryFunctionBuilder::new(
+                self.config.seal_contract.module_address.clone(),
             );
+            let payload =
+                builder.publish_sanad(seal.nonce, *sanad_id.as_bytes(), *commitment.as_bytes());
+            let transaction = self
+                .submit_entry_function_with_retry(payload)
+                .await
+                .map_err(|e| ProtocolError::PublishFailed(e.to_string()))?;
 
-            // SECURITY CRITICAL: Fetch actual ledger version from chain instead of using placeholder
-            // The anchor version must reflect the actual blockchain state at the time of commitment
-            let ledger_info = self.rpc.get_ledger_info().await.map_err(|e| {
-                ProtocolError::NetworkError(format!("Failed to fetch ledger info: {}", e))
-            })?;
-            let ledger_version = ledger_info.ledger_version;
-
-            // Return anchor with actual ledger version
             Ok(AptosCommitAnchor::new(
-                ledger_version,
-                seal.account_address,
-                ledger_version,
+                transaction.version,
+                transaction.hash,
+                0,
             ))
         }
 
@@ -1262,52 +1316,6 @@ impl SealProtocol for AptosSealProtocol {
             }
 
             let mut effective_nonce = nonce;
-
-            // With collection-based seals, check if AnchorData exists for the nonce
-            // If AnchorData exists, the seal was already consumed, so increment nonce
-            let anchor_data_collection_type = format!(
-                "0x{}::CSVSeal::AnchorDataCollection",
-                self.config
-                    .seal_contract
-                    .module_address
-                    .strip_prefix("0x")
-                    .unwrap_or(&self.config.seal_contract.module_address)
-            );
-            log::debug!(
-                "APTOS: Checking for anchor collection resource type: {}",
-                anchor_data_collection_type
-            );
-            match self
-                .rpc
-                .get_resource(addr, &anchor_data_collection_type, None)
-                .await
-            {
-                Ok(Some(_collection)) => {
-                    // AnchorDataCollection exists, check if AnchorData for this nonce exists
-                    // Note: We can't directly query SmartTable entries via RPC, so we'll try create_seal
-                    // and handle the EAnchorDataExists error by incrementing nonce
-                    log::debug!(
-                        "APTOS: AnchorDataCollection exists, will attempt to create seal with nonce {}",
-                        effective_nonce
-                    );
-                }
-                Ok(None) => {
-                    // AnchorDataCollection doesn't exist, need to initialize it (REQUIRED)
-                    log::debug!("APTOS: Initializing anchor collection (REQUIRED)");
-                    self.init_anchor_collection(addr).await.map_err(|e| {
-                        AptosError::InitializationFailed {
-                            operation: "init_anchor_collection".to_string(),
-                            reason: e.to_string(),
-                        }
-                    })?;
-                }
-                Err(e) => {
-                    log::warn!(
-                        "APTOS: Failed to check anchor collection: {}, assuming it exists",
-                        e
-                    );
-                }
-            }
 
             log::debug!("APTOS: Deploying seal on-chain via create_seal entry function");
 
@@ -1657,263 +1665,18 @@ impl AptosSealProtocol {
     #[cfg(feature = "rpc")]
     async fn init_seal_collection(
         &self,
-        account_address: [u8; 32],
+        _account_address: [u8; 32],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::{Digest, Sha3_256};
-
-        let signing_key = self
-            .signing_key
-            .as_ref()
-            .ok_or("No signing key configured")?;
-
-        // Derive sender address from signing key
-        let public_key = signing_key.verifying_key().to_bytes();
-        let mut data = public_key.to_vec();
-        data.push(0x00);
-        let hash = Sha3_256::digest(&data);
-        let mut sender = [0u8; 32];
-        sender.copy_from_slice(&hash[..32]);
-
-        // Get account sequence number
-        let sequence_number = self
-            .rpc
-            .get_account_sequence_number(sender)
-            .await
-            .map_err(|e| format!("Failed to get sequence number: {}", e))?;
-
-        // Get ledger info
-        let ledger = self
-            .rpc
-            .get_ledger_info()
-            .await
-            .map_err(|e| format!("Failed to get ledger info: {}", e))?;
-
-        let expiration_secs = (ledger.ledger_timestamp / 1_000_000) + 600;
-        let module_address = &self.config.seal_contract.module_address;
-
-        // Build transaction for init_seal_collection
-        log::debug!("APTOS: Building init_seal_collection transaction");
-        let raw_transaction = self
-            .build_init_seal_collection_transaction(
-                sender,
-                sequence_number,
-                expiration_secs,
-                module_address,
-            )
-            .map_err(|e| format!("Failed to build transaction: {}", e))?;
-
-        // Sign the transaction using the existing helper
-        let (public_key, signature, _signing_message) =
-            Self::sign_raw_transaction(&raw_transaction, signing_key)?;
-
-        // Build the signed transaction JSON
-        let sender_hex = format_address(sender);
-        let signed_tx = serde_json::json!({
-            "sender": sender_hex,
-            "sequence_number": sequence_number.to_string(),
-            "max_gas_amount": self.config.transaction.max_gas.to_string(),
-            "gas_unit_price": "100",
-            "expiration_timestamp_secs": expiration_secs.to_string(),
-            "payload": {
-                "type": "entry_function_payload",
-                "function": format!("{}::CSVSeal::init_seal_collection", module_address),
-                "type_arguments": [],
-                "arguments": []
-            },
-            "signature": {
-                "type": "ed25519_signature",
-                "public_key": format!("0x{}", hex::encode(public_key.to_bytes())),
-                "signature": format!("0x{}", hex::encode(signature.to_bytes()))
-            }
-        });
-
-        // Submit the transaction using the JSON format
-        log::debug!("APTOS: Submitting init_seal_collection transaction");
-        let tx_hash = self
-            .rpc
-            .submit_signed_transaction(signed_tx)
-            .await
-            .map_err(|e| format!("Failed to submit init_seal_collection transaction: {}", e))?;
-
-        log::debug!(
-            "APTOS: init_seal_collection transaction submitted: 0x{}",
-            hex::encode(tx_hash)
-        );
+        let payload = crate::entry_function::EntryFunctionPayload {
+            function: format!(
+                "{}::CSVSeal::init_seal_collection",
+                self.config.seal_contract.module_address
+            ),
+            type_arguments: vec![],
+            arguments: vec![],
+        };
+        self.submit_entry_function_with_retry(payload).await?;
         Ok(())
-    }
-
-    /// Initialize the AnchorDataCollection resource on-chain.
-    #[cfg(feature = "rpc")]
-    async fn init_anchor_collection(
-        &self,
-        account_address: [u8; 32],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sha3::{Digest, Sha3_256};
-
-        let signing_key = self
-            .signing_key
-            .as_ref()
-            .ok_or("No signing key configured")?;
-
-        // Derive sender address from signing key
-        let public_key = signing_key.verifying_key().to_bytes();
-        let mut data = public_key.to_vec();
-        data.push(0x00);
-        let hash = Sha3_256::digest(&data);
-        let mut sender = [0u8; 32];
-        sender.copy_from_slice(&hash[..32]);
-
-        // Get account sequence number
-        let sequence_number = self
-            .rpc
-            .get_account_sequence_number(sender)
-            .await
-            .map_err(|e| format!("Failed to get sequence number: {}", e))?;
-
-        // Get ledger info
-        let ledger = self
-            .rpc
-            .get_ledger_info()
-            .await
-            .map_err(|e| format!("Failed to get ledger info: {}", e))?;
-
-        let expiration_secs = (ledger.ledger_timestamp / 1_000_000) + 600;
-        let module_address = &self.config.seal_contract.module_address;
-
-        // Build transaction for init_anchor_collection
-        log::debug!("APTOS: Building init_anchor_collection transaction");
-        let raw_transaction = self
-            .build_init_anchor_collection_transaction(
-                sender,
-                sequence_number,
-                expiration_secs,
-                module_address,
-            )
-            .map_err(|e| format!("Failed to build transaction: {}", e))?;
-
-        // Sign the transaction using the existing helper
-        let (public_key, signature, _signing_message) =
-            Self::sign_raw_transaction(&raw_transaction, signing_key)?;
-
-        // Build the signed transaction JSON
-        let sender_hex = format_address(sender);
-        let signed_tx = serde_json::json!({
-            "sender": sender_hex,
-            "sequence_number": sequence_number.to_string(),
-            "max_gas_amount": self.config.transaction.max_gas.to_string(),
-            "gas_unit_price": "100",
-            "expiration_timestamp_secs": expiration_secs.to_string(),
-            "payload": {
-                "type": "entry_function_payload",
-                "function": format!("{}::CSVSeal::init_anchor_collection", module_address),
-                "type_arguments": [],
-                "arguments": []
-            },
-            "signature": {
-                "type": "ed25519_signature",
-                "public_key": format!("0x{}", hex::encode(public_key.to_bytes())),
-                "signature": format!("0x{}", hex::encode(signature.to_bytes()))
-            }
-        });
-
-        // Submit the transaction using the JSON format
-        log::debug!("APTOS: Submitting init_anchor_collection transaction");
-        let tx_hash = self
-            .rpc
-            .submit_signed_transaction(signed_tx)
-            .await
-            .map_err(|e| format!("Failed to submit init_anchor_collection transaction: {}", e))?;
-
-        log::debug!(
-            "APTOS: init_anchor_collection transaction submitted: 0x{}",
-            hex::encode(tx_hash)
-        );
-        Ok(())
-    }
-
-    /// Build a raw transaction for the init_seal_collection entry function.
-    #[cfg(feature = "rpc")]
-    fn build_init_seal_collection_transaction(
-        &self,
-        sender: [u8; 32],
-        sequence_number: u64,
-        expiration_secs: u64,
-        module_address: &str,
-    ) -> Result<
-        aptos_sdk::transaction::types::RawTransaction,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        use aptos_sdk::transaction::EntryFunction;
-        use aptos_sdk::transaction::payload::TransactionPayload;
-        use aptos_sdk::transaction::types::RawTransaction;
-        use aptos_sdk::types::{AccountAddress, ChainId, MoveModuleId};
-
-        let module_addr = AccountAddress::from_hex(module_address)
-            .map_err(|e| format!("Invalid module address: {}", e))?;
-
-        let module_name = aptos_sdk::types::Identifier::new("CSVSeal")
-            .map_err(|e| format!("Invalid module name: {}", e))?;
-        let module_id = MoveModuleId::new(module_addr, module_name);
-
-        let entry_function = EntryFunction::new(module_id, "init_seal_collection", vec![], vec![]);
-
-        let sender_addr = AccountAddress::new(sender);
-        let payload = TransactionPayload::EntryFunction(entry_function);
-        let max_gas = self.config.transaction.max_gas;
-        let chain_id = ChainId::new(self.config.network.chain_id());
-
-        Ok(RawTransaction::new(
-            sender_addr,
-            sequence_number,
-            payload,
-            max_gas,
-            100,
-            expiration_secs,
-            chain_id,
-        ))
-    }
-
-    /// Build a raw transaction for the init_anchor_collection entry function.
-    #[cfg(feature = "rpc")]
-    fn build_init_anchor_collection_transaction(
-        &self,
-        sender: [u8; 32],
-        sequence_number: u64,
-        expiration_secs: u64,
-        module_address: &str,
-    ) -> Result<
-        aptos_sdk::transaction::types::RawTransaction,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        use aptos_sdk::transaction::EntryFunction;
-        use aptos_sdk::transaction::payload::TransactionPayload;
-        use aptos_sdk::transaction::types::RawTransaction;
-        use aptos_sdk::types::{AccountAddress, ChainId, MoveModuleId};
-
-        let module_addr = AccountAddress::from_hex(module_address)
-            .map_err(|e| format!("Invalid module address: {}", e))?;
-
-        let module_name = aptos_sdk::types::Identifier::new("CSVSeal")
-            .map_err(|e| format!("Invalid module name: {}", e))?;
-        let module_id = MoveModuleId::new(module_addr, module_name);
-
-        let entry_function =
-            EntryFunction::new(module_id, "init_anchor_collection", vec![], vec![]);
-
-        let sender_addr = AccountAddress::new(sender);
-        let payload = TransactionPayload::EntryFunction(entry_function);
-        let max_gas = self.config.transaction.max_gas;
-        let chain_id = ChainId::new(self.config.network.chain_id());
-
-        Ok(RawTransaction::new(
-            sender_addr,
-            sequence_number,
-            payload,
-            max_gas,
-            100,
-            expiration_secs,
-            chain_id,
-        ))
     }
 
     /// Deploy the seal on-chain by calling the create_seal Move entry function.
@@ -2176,6 +1939,28 @@ mod tests {
         assert!(!AptosSealProtocol::is_sequence_number_too_old_error(
             "Aptos transaction submission failed: vm_error - OUT_OF_GAS"
         ));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rpc")]
+    async fn entry_submission_refetches_and_resigns_after_stale_sequence() {
+        use ed25519_dalek::SigningKey;
+
+        let rpc = crate::rpc::MockAptosRpc::new(5000);
+        rpc.reject_next_submissions_as_stale(1);
+        let adapter = AptosSealProtocol::from_config(AptosConfig::default(), Box::new(rpc))
+            .unwrap()
+            .with_signing_key(SigningKey::from_bytes(&[1u8; 32]));
+        let payload = crate::entry_function::EntryFunctionBuilder::new(
+            adapter.config.seal_contract.module_address.clone(),
+        )
+        .publish_sanad(7, [0x11; 32], [0x22; 32]);
+
+        let transaction = adapter
+            .submit_entry_function_with_retry(payload)
+            .await
+            .unwrap();
+        assert!(transaction.success);
     }
 
     #[test]

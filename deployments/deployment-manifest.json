@@ -2,7 +2,7 @@
   "manifest_version": "2.1.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-07-10T17:17:43.093069Z",
+  "updated_at": "2026-07-10T18:59:39.550515Z",
   "mint_model": "thin-registry-verifier-attested (RFC-0012 \u00a79)",
   "deployments": {
     "ethereum": {
@@ -56,15 +56,15 @@
     },
     "aptos": {
       "network": "testnet",
-      "module_address": "0x845182cdf7c1eddb0426d39cc340bf9523e7f1c7ec7d33f67d9d61c7a40248de",
-      "deployment_tx": "0x8c7c766ba8f7241b117e43921348ba12382a192ed1e134d761367c7dfad65f0e",
+      "module_address": "0x0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f",
+      "deployment_tx": "0xcc184a2febe0e124e7804d29536f9699a0f62acf9385e9cca2e40b407fdad7c5",
       "deployment_type": "account_publish",
       "verified": true,
       "verifier_set": [
         "0x0339e90e058f0a1e6fdc584fcfde25f6a1ec665071f53c5037303ee356a2cbe077"
       ],
       "mint_threshold": 1,
-      "note": "TRM-ROLLOUT-001: RFC-0012 thin-registry csv_seal::CSVSeal deployed to Aptos testnet 2026-07-06 under a fresh account (module_address = @csv_seal = \u00a79.2 destinationContract). Account (not object) deployment is required: init_mint_authority/init_registry assert signer == @csv_seal and store resources there, which an object address cannot sign. Initialized: initialize_module, init_registry (replay tables), init_mint_authority (verifier seeded, threshold 1, tx 0x2e287b0e1e161da79c160dd76606924a34619439b33a5144b821d462f1602814). The earlier object deployment 0x26f43311\u2026 is abandoned (uninitializable). MINT ENABLED once the runtime holds the matching CSV_MINT_VERIFIER_KEY."
+      "note": "TRM-ROLLOUT-001: Canonical source-Sanad registry deployed to Aptos testnet 2026-07-10 under account 0x0d1d46fc\u20269716f. Initialized initialize_module (tx 0x7c2b4c2c\u202658787), init_registry (tx 0x6c6c5a6e\u202643e61), init_sanad_registry (tx 0x3d8d3038\u2026617b1), and init_mint_authority with threshold 1 (tx 0x2d40f752\u2026eb6fe). This deployment adds publish_sanad and canonical get_sanad_info views and replaces the incomplete 0x845182cd\u2026248de deployment. MINT ENABLED when the runtime holds the matching CSV_MINT_VERIFIER_KEY."
     }
   },
   "checksums": {

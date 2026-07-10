@@ -308,6 +308,20 @@ module csv_seal::CSVSeal {
         mint_records: SmartTable<vector<u8>, MintRecord>,
     }
 
+    /// Creation records live in a separate resource so this module can be
+    /// upgraded without changing the deployed `LockRegistry` resource layout.
+    struct SanadRegistry has key {
+        creations: SmartTable<vector<u8>, CreationRecord>,
+        published_seals: SmartTable<vector<u8>, bool>,
+    }
+
+    struct CreationRecord has store, drop {
+        commitment: vector<u8>,
+        owner: address,
+        nonce: u64,
+        created_at: u64,
+    }
+
     // =========================================================================
     // Module / registry / authority initialization
     // =========================================================================
@@ -337,6 +351,18 @@ module csv_seal::CSVSeal {
             nullifiers: smart_table::new(),
             used_lock_events: smart_table::new(),
             mint_records: smart_table::new(),
+        });
+    }
+
+    /// Initialize the canonical source-Sanad registry. This is separate from
+    /// `init_registry` for upgrade compatibility with existing deployments.
+    public entry fun init_sanad_registry(account: &signer) {
+        let addr = signer::address_of(account);
+        assert!(addr == @csv_seal, EUnauthorized);
+        assert!(!exists<SanadRegistry>(addr), EAnchorDataExists);
+        move_to(account, SanadRegistry {
+            creations: smart_table::new(),
+            published_seals: smart_table::new(),
         });
     }
 
@@ -406,6 +432,56 @@ module csv_seal::CSVSeal {
         if (nonce >= collection.next_nonce) {
             collection.next_nonce = nonce + 1;
         };
+    }
+
+    /// Bind a newly-created seal to the protocol's canonical Sanad ID and
+    /// commitment. A successful transaction is the source-chain creation
+    /// anchor returned by the adapter.
+    public entry fun publish_sanad(
+        account: &signer,
+        nonce: u64,
+        sanad_id: vector<u8>,
+        commitment: vector<u8>,
+    ) acquires SealCollection, SanadRegistry {
+        assert!(vector::length(&sanad_id) == 32, EInvalidMetadata);
+        assert!(vector::length(&commitment) == 32, EInvalidMetadata);
+
+        let owner = signer::address_of(account);
+        assert!(exists<SealCollection>(owner), ESealNotFound);
+        let seals = borrow_global<SealCollection>(owner);
+        assert!(smart_table::contains(&seals.seals, nonce), ESealNotFound);
+        let seal = smart_table::borrow(&seals.seals, nonce);
+        assert!(seal.state != SANAD_STATE_CONSUMED, ESealAlreadyConsumed);
+        let asset_class = seal.asset_class;
+        let asset_id = seal.asset_id;
+        let metadata_hash = seal.metadata_hash;
+        let proof_system = seal.proof_system;
+
+        let registry_addr = get_registry_addr();
+        assert!(exists<SanadRegistry>(registry_addr), ESealNotFound);
+        let registry = borrow_global_mut<SanadRegistry>(registry_addr);
+        assert!(!smart_table::contains(&registry.creations, copy sanad_id), EAnchorDataExists);
+        let seal_key = bcs::to_bytes(&owner);
+        vector::append(&mut seal_key, bcs::to_bytes(&nonce));
+        assert!(!smart_table::contains(&registry.published_seals, copy seal_key), ESealAlreadyConsumed);
+
+        let created_at = aptos_framework::timestamp::now_seconds();
+        smart_table::add(&mut registry.published_seals, seal_key, true);
+        smart_table::add(&mut registry.creations, copy sanad_id, CreationRecord {
+            commitment: copy commitment,
+            owner,
+            nonce,
+            created_at,
+        });
+        event::emit(SanadCreated {
+            sanad_id,
+            commitment,
+            owner,
+            asset_class,
+            asset_id,
+            metadata_hash,
+            proof_system,
+        });
     }
 
     public entry fun create_seal_auto(account: &signer) acquires SealCollection {
@@ -577,7 +653,7 @@ module csv_seal::CSVSeal {
         sanad_id: vector<u8>,
         destination_chain: vector<u8>,
         destination_owner: vector<u8>,
-    ) acquires SealCollection, LockRegistry, AnchorDataCollection {
+    ) acquires SealCollection, LockRegistry, AnchorDataCollection, SanadRegistry {
         let owner_addr = signer::address_of(account);
         assert!(exists<SealCollection>(owner_addr), ESealNotFound);
 
@@ -587,9 +663,15 @@ module csv_seal::CSVSeal {
         let seal = smart_table::borrow_mut(&mut collection.seals, nonce);
         assert!(seal.state != SANAD_STATE_CONSUMED, ESealAlreadyConsumed);
 
-        let commitment = get_commitment_bytes(sanad_id, nonce);
-
         let registry_addr = get_registry_addr();
+        assert!(exists<SanadRegistry>(registry_addr), ESealNotFound);
+        let creations = borrow_global<SanadRegistry>(registry_addr);
+        assert!(smart_table::contains(&creations.creations, copy sanad_id), ESealNotFound);
+        let creation = smart_table::borrow(&creations.creations, copy sanad_id);
+        assert!(creation.owner == owner_addr, EUnauthorized);
+        assert!(creation.nonce == nonce, ESealNotFound);
+        let commitment = creation.commitment;
+
         assert!(exists<LockRegistry>(registry_addr), ESealNotFound);
         let registry = borrow_global_mut<LockRegistry>(registry_addr);
         let locked_at = aptos_framework::timestamp::now_seconds();
@@ -930,14 +1012,6 @@ module csv_seal::CSVSeal {
     // Helpers
     // =========================================================================
 
-    /// Helper to generate commitment from sanad_id and nonce using SHA3-256.
-    fun get_commitment_bytes(sanad_id: vector<u8>, nonce: u64): vector<u8> {
-        let data = vector::empty<u8>();
-        vector::append(&mut data, sanad_id);
-        vector::append(&mut data, bcs::to_bytes(&nonce));
-        hash::sha3_256(data)
-    }
-
     // =========================================================================
     // Query Functions (canonical state machine interface)
     // =========================================================================
@@ -1001,20 +1075,52 @@ module csv_seal::CSVSeal {
     #[view]
     public fun version(): u64 { VERSION }
 
+    #[view]
     public fun get_sanad_state(
         registry_addr: address,
         sanad_id: vector<u8>,
-    ): u8 acquires LockRegistry {
-        if (!exists<LockRegistry>(registry_addr)) { return SANAD_STATE_UNCREATED };
-        let registry = borrow_global<LockRegistry>(registry_addr);
-        if (smart_table::contains(&registry.minted_sanads, copy sanad_id)) {
+    ): u8 acquires LockRegistry, SanadRegistry {
+        if (exists<LockRegistry>(registry_addr) && smart_table::contains(&borrow_global<LockRegistry>(registry_addr).minted_sanads, copy sanad_id)) {
             return SANAD_STATE_MINTED
         };
-        if (!smart_table::contains(&registry.locks, copy sanad_id)) {
-            return SANAD_STATE_UNCREATED
+        if (exists<LockRegistry>(registry_addr) && smart_table::contains(&borrow_global<LockRegistry>(registry_addr).locks, copy sanad_id)) {
+            let registry = borrow_global<LockRegistry>(registry_addr);
+            let lock = smart_table::borrow(&registry.locks, copy sanad_id);
+            return if (lock.refunded) { SANAD_STATE_REFUNDED } else { SANAD_STATE_LOCKED }
         };
-        let lock = smart_table::borrow(&registry.locks, sanad_id);
-        if (lock.refunded) { SANAD_STATE_REFUNDED } else { SANAD_STATE_LOCKED }
+        if (exists<SanadRegistry>(registry_addr) && smart_table::contains(&borrow_global<SanadRegistry>(registry_addr).creations, sanad_id)) {
+            return SANAD_STATE_CREATED
+        };
+        SANAD_STATE_UNCREATED
+    }
+
+    // Canonical state plus authenticated creation/lock metadata. The tuple is
+    // deliberately fixed-width for stable REST view decoding.
+    #[view]
+    public fun get_sanad_info(
+        registry_addr: address,
+        sanad_id: vector<u8>,
+    ): (u8, vector<u8>, address, u64) acquires LockRegistry, SanadRegistry {
+        if (exists<LockRegistry>(registry_addr)) {
+            let locks = borrow_global<LockRegistry>(registry_addr);
+            if (smart_table::contains(&locks.mint_records, copy sanad_id)) {
+                let mint = smart_table::borrow(&locks.mint_records, copy sanad_id);
+                return (SANAD_STATE_MINTED, mint.commitment, @0x0, mint.minted_at)
+            };
+            if (smart_table::contains(&locks.locks, copy sanad_id)) {
+                let lock = smart_table::borrow(&locks.locks, copy sanad_id);
+                let state = if (lock.refunded) { SANAD_STATE_REFUNDED } else { SANAD_STATE_LOCKED };
+                return (state, lock.commitment, lock.owner, lock.locked_at)
+            };
+        };
+        if (exists<SanadRegistry>(registry_addr)) {
+            let creations = borrow_global<SanadRegistry>(registry_addr);
+            if (smart_table::contains(&creations.creations, copy sanad_id)) {
+                let creation = smart_table::borrow(&creations.creations, sanad_id);
+                return (SANAD_STATE_CREATED, creation.commitment, creation.owner, creation.created_at)
+            };
+        };
+        (SANAD_STATE_UNCREATED, vector::empty<u8>(), @0x0, 0)
     }
 
     public fun is_sanad_locked(
@@ -1193,6 +1299,7 @@ module csv_seal::CSVSeal {
         timestamp::set_time_has_started_for_testing(framework);
         account::create_account_for_test(signer::address_of(deployer));
         init_registry(deployer);
+        init_sanad_registry(deployer);
         init_mint_authority(deployer, T_VERIFIER);
     }
 
@@ -1204,7 +1311,7 @@ module csv_seal::CSVSeal {
     }
 
     #[test(deployer = @csv_seal, framework = @aptos_framework)]
-    fun test_happy_mint(deployer: &signer, framework: &signer) acquires MintAuthority, LockRegistry {
+    fun test_happy_mint(deployer: &signer, framework: &signer) acquires MintAuthority, LockRegistry, SanadRegistry {
         setup(deployer, framework);
         mint_sanad(
             deployer, T_MAIN_SANAD, T_COMMITMENT, T_SRC_CHAIN, T_OWNER,
@@ -1214,6 +1321,60 @@ module csv_seal::CSVSeal {
         assert!(is_nullifier_registered(@csv_seal, T_MAIN_NULL), 101);
         assert!(is_lock_event_recorded(@csv_seal, T_MAIN_LOCK), 102);
         assert!(get_sanad_state(@csv_seal, T_MAIN_SANAD) == SANAD_STATE_MINTED, 103);
+    }
+
+    #[test(deployer = @csv_seal, framework = @aptos_framework)]
+    fun test_publish_sanad_is_canonically_created(
+        deployer: &signer,
+        framework: &signer,
+    ) acquires LockRegistry, SealCollection, SanadRegistry {
+        setup(deployer, framework);
+        init_seal_collection(deployer);
+        create_seal(deployer, 7);
+        publish_sanad(deployer, 7, T_MAIN_SANAD, T_COMMITMENT);
+
+        let (state, commitment, owner, _) = get_sanad_info(@csv_seal, T_MAIN_SANAD);
+        assert!(state == SANAD_STATE_CREATED, 104);
+        assert!(commitment == T_COMMITMENT, 105);
+        assert!(owner == @csv_seal, 106);
+    }
+
+    #[test(deployer = @csv_seal, framework = @aptos_framework)]
+    #[expected_failure(abort_code = EAnchorDataExists)]
+    fun test_publish_sanad_replay_rejected(
+        deployer: &signer,
+        framework: &signer,
+    ) acquires SealCollection, SanadRegistry {
+        setup(deployer, framework);
+        init_seal_collection(deployer);
+        create_seal(deployer, 7);
+        publish_sanad(deployer, 7, T_MAIN_SANAD, T_COMMITMENT);
+        publish_sanad(deployer, 7, T_MAIN_SANAD, T_COMMITMENT);
+    }
+
+    #[test(deployer = @csv_seal, framework = @aptos_framework)]
+    #[expected_failure(abort_code = ESealAlreadyConsumed)]
+    fun test_one_seal_cannot_publish_two_sanads(
+        deployer: &signer,
+        framework: &signer,
+    ) acquires SealCollection, SanadRegistry {
+        setup(deployer, framework);
+        init_seal_collection(deployer);
+        create_seal(deployer, 7);
+        publish_sanad(deployer, 7, T_MAIN_SANAD, T_COMMITMENT);
+        publish_sanad(deployer, 7, T_FUTURE_SANAD, T_COMMITMENT);
+    }
+
+    #[test(deployer = @csv_seal, framework = @aptos_framework)]
+    #[expected_failure(abort_code = EInvalidMetadata)]
+    fun test_publish_sanad_rejects_malformed_id(
+        deployer: &signer,
+        framework: &signer,
+    ) acquires SealCollection, SanadRegistry {
+        setup(deployer, framework);
+        init_seal_collection(deployer);
+        create_seal(deployer, 7);
+        publish_sanad(deployer, 7, x"01", T_COMMITMENT);
     }
 
     #[test(deployer = @csv_seal, framework = @aptos_framework)]

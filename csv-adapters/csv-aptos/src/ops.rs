@@ -240,46 +240,23 @@ impl AptosBackend {
             args.verifier_signatures.clone(),
         );
 
-        // Sign with the Ed25519 transaction signer (submission authority only — it
-        // confers NO mint authority; that lives in the verifier signatures).
-        let signed_tx = self
+        // The Ed25519 signer is submission authority only; the helper also
+        // rebuilds and re-signs on stale Aptos sequence numbers.
+        let tx = self
             .seal_protocol
-            .sign_entry_function_payload(payload)
+            .submit_entry_function_with_retry(payload)
             .await
             .map_err(|e| {
                 ChainOpError::TransactionError(format!(
-                    "Failed to build and sign mint_sanad transaction: {}",
+                    "Failed to submit mint_sanad transaction: {}",
                     e
                 ))
             })?;
 
-        let tx_hash = self
-            .rpc
-            .submit_signed_transaction(signed_tx)
-            .await
-            .map_err(|e| {
-                ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
-            })?;
-
-        // Wait for confirmation and fail closed on a reverted mint.
-        let tx = self.rpc.wait_for_transaction(tx_hash).await.map_err(|_| {
-            ChainOpError::Timeout(format!(
-                "Timeout waiting for mint confirmation. Transaction hash: {}. Check explorer for status.",
-                hex::encode(tx_hash)
-            ))
-        })?;
-
-        if !tx.success {
-            return Err(ChainOpError::TransactionError(format!(
-                "Mint transaction failed with VM status: {}",
-                tx.vm_status
-            )));
-        }
-
         Ok(SanadOperationResult {
             sanad_id: SanadId(Hash::new(args.sanad_id)),
             operation: SanadOperation::Mint,
-            transaction_hash: hex::encode(tx_hash),
+            transaction_hash: hex::encode(tx.hash),
             block_height: tx.version,
             chain_id: "aptos".to_string(),
             metadata: Vec::new(),
@@ -993,20 +970,11 @@ impl ChainSanadOps for AptosBackend {
             // Get the nonce from the seal
             let nonce = seal.nonce;
 
-            // Convert destination chain to u8
-            let dest_chain_u8 = match destination_chain {
-                "sui" => 1u8,
-                "aptos" => 2u8,
-                "ethereum" => 3u8,
-                "solana" => 4u8,
-                "bitcoin" => 5u8,
-                _ => {
-                    return Err(ChainOpError::InvalidInput(format!(
-                        "Invalid destination chain: {}",
-                        destination_chain
-                    )));
-                }
-            };
+            use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+            let destination_tag = format!("csv.chain.{destination_chain}");
+            let destination_chain_id = *CrossChainHashAlgorithm::Keccak256
+                .hash_bytes(destination_tag.as_bytes())
+                .as_bytes();
 
             // Build the lock_sanad entry function payload
             let entry_function_builder = crate::entry_function::EntryFunctionBuilder::new(
@@ -1016,64 +984,28 @@ impl ChainSanadOps for AptosBackend {
                     .module_address
                     .clone(),
             );
-            let payload =
-                entry_function_builder.lock_sanad(nonce, commitment, dest_chain_u8, _owner_address);
+            let payload = entry_function_builder.lock_sanad(
+                nonce,
+                commitment,
+                destination_chain_id,
+                _owner_address,
+            );
 
-            // Sign the transaction
-            let signed_tx = self
+            let tx = self
                 .seal_protocol
-                .sign_entry_function_payload(payload)
+                .submit_entry_function_with_retry(payload)
                 .await
                 .map_err(|e| {
                     ChainOpError::TransactionError(format!(
-                        "Failed to build and sign lock_sanad transaction: {}",
+                        "Failed to submit lock_sanad transaction: {}",
                         e
                     ))
                 })?;
 
-            log::debug!("APTOS: Built and signed lock_sanad transaction");
-
-            // Submit the signed transaction via RPC
-            log::debug!("APTOS: Submitting lock_sanad transaction");
-            let tx_hash = self
-                .rpc
-                .submit_signed_transaction(signed_tx)
-                .await
-                .map_err(|e| {
-                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
-                })?;
-
-            log::debug!(
-                "APTOS: Transaction submitted with hash: {}",
-                hex::encode(tx_hash)
-            );
-
-            // Wait for transaction confirmation
-            log::debug!("APTOS: Waiting for transaction confirmation");
-            let tx = match self.rpc.wait_for_transaction(tx_hash).await {
-                Ok(tx) => tx,
-                Err(e) => {
-                    log::warn!("APTOS: Timeout waiting for transaction, querying status directly");
-                    return Err(ChainOpError::Timeout(format!(
-                        "Timeout waiting for transaction confirmation. Transaction hash: {}. Check explorer for status.",
-                        hex::encode(tx_hash)
-                    )));
-                }
-            };
-
-            if !tx.success {
-                return Err(ChainOpError::TransactionError(format!(
-                    "Transaction failed with VM status: {}",
-                    tx.vm_status
-                )));
-            }
-
-            log::debug!("APTOS: Transaction confirmed successfully");
-
             Ok(SanadOperationResult {
                 sanad_id: sanad_id.clone(),
                 operation: SanadOperation::Lock,
-                transaction_hash: hex::encode(tx_hash),
+                transaction_hash: hex::encode(tx.hash),
                 block_height: tx.version,
                 chain_id: "aptos".to_string(),
                 metadata: serde_json::to_vec(&serde_json::json!({
@@ -1282,21 +1214,93 @@ impl ChainBackend for AptosBackend {
 
 #[async_trait]
 impl SanadStateReader for AptosBackend {
-    async fn get_sanad_state(&self, _sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
-        // CSV's Aptos thin registry stores all Sanad state in the module
-        // account's `CSVSeal::LockRegistry`, keyed by sanad id. A SanadId is a
-        // commitment hash, not an Aptos account address, so querying a fictional
-        // `sanad::Sanad` resource at that hash would falsely report `Uncreated`.
-        //
-        // The current RPC abstraction cannot issue the registry's view function
-        // and decode its SmartTable entry. Fail closed until that read path is
-        // implemented; callers must not treat an absent per-Sanad resource as
-        // canonical on-chain state.
-        Err(ChainOpError::CapabilityUnavailable(
-            "Canonical Aptos Sanad-state lookup requires the CSVSeal::LockRegistry view \
-             function; direct per-Sanad resource lookup is not valid for the thin registry."
-                .to_string(),
-        ))
+    async fn get_sanad_state(&self, sanad_id: &SanadId) -> ChainOpResult<CanonicalSanadState> {
+        let (module_addr, _) = self.seal_protocol.event_builder_config();
+        let registry_address = format_address(module_addr);
+        let function = format!("{}::CSVSeal::get_sanad_info", registry_address);
+        let response = self
+            .rpc
+            .call_view(
+                &function,
+                vec![
+                    serde_json::Value::String(registry_address),
+                    serde_json::Value::String(format!("0x{}", hex::encode(sanad_id.as_bytes()))),
+                ],
+            )
+            .await
+            .map_err(|e| {
+                ChainOpError::RpcError(format!("Aptos canonical state view failed: {e}"))
+            })?;
+
+        let values = response.as_array().ok_or_else(|| {
+            ChainOpError::RpcError("Aptos get_sanad_info returned a non-array result".to_string())
+        })?;
+        if values.len() != 4 {
+            return Err(ChainOpError::RpcError(format!(
+                "Aptos get_sanad_info returned {} values; expected 4",
+                values.len()
+            )));
+        }
+
+        let parse_number = |value: &serde_json::Value, field: &str| -> ChainOpResult<u64> {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|raw| raw.parse::<u64>().ok()))
+                .ok_or_else(|| {
+                    ChainOpError::RpcError(format!("Aptos get_sanad_info returned invalid {field}"))
+                })
+        };
+        let state = u8::try_from(parse_number(&values[0], "state")?).map_err(|_| {
+            ChainOpError::RpcError("Aptos get_sanad_info state exceeds u8".to_string())
+        })?;
+        if state > 9 {
+            return Err(ChainOpError::RpcError(format!(
+                "Aptos get_sanad_info returned unknown canonical state {state}"
+            )));
+        }
+
+        let commitment = if state == 0 {
+            Hash::new([0u8; 32])
+        } else {
+            let encoded = values[1].as_str().ok_or_else(|| {
+                ChainOpError::RpcError(
+                    "Aptos get_sanad_info returned invalid commitment".to_string(),
+                )
+            })?;
+            let bytes = hex::decode(encoded.trim_start_matches("0x")).map_err(|e| {
+                ChainOpError::RpcError(format!(
+                    "Aptos get_sanad_info returned malformed commitment: {e}"
+                ))
+            })?;
+            let fixed: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| {
+                ChainOpError::RpcError(format!(
+                    "Aptos get_sanad_info commitment must be 32 bytes, got {}",
+                    bytes.len()
+                ))
+            })?;
+            Hash::new(fixed)
+        };
+        let owner = values[2]
+            .as_str()
+            .ok_or_else(|| {
+                ChainOpError::RpcError("Aptos get_sanad_info returned invalid owner".to_string())
+            })?
+            .to_string();
+        let timestamp = i64::try_from(parse_number(&values[3], "timestamp")?).map_err(|_| {
+            ChainOpError::RpcError("Aptos get_sanad_info timestamp exceeds i64".to_string())
+        })?;
+
+        Ok(CanonicalSanadState {
+            state,
+            owner,
+            commitment,
+            nullifier: None,
+            created_at: if state == 1 { timestamp } else { 0 },
+            locked_at: (state == 3).then_some(timestamp),
+            consumed_at: None,
+            minted_at: (state == 5).then_some(timestamp),
+            refunded_at: (state == 7).then_some(timestamp),
+        })
     }
 
     async fn get_seal_state(&self, seal_id: &Hash) -> ChainOpResult<CanonicalSealState> {
@@ -1366,13 +1370,21 @@ impl ChainReadinessCheck for AptosBackend {
         // thin registry is enabled only after `init_registry` creates this
         // resource at the module account.
         let (module_addr, _) = self.seal_protocol.event_builder_config();
-        let registry_type = format!("0x{}::CSVSeal::LockRegistry", hex::encode(module_addr));
-        let contract_configured = matches!(
+        let lock_registry_type = format!("0x{}::CSVSeal::LockRegistry", hex::encode(module_addr));
+        let sanad_registry_type = format!("0x{}::CSVSeal::SanadRegistry", hex::encode(module_addr));
+        let lock_registry_configured = matches!(
             self.rpc()
-                .get_resource(module_addr, &registry_type, None)
+                .get_resource(module_addr, &lock_registry_type, None)
                 .await,
             Ok(Some(_))
         );
+        let sanad_registry_configured = matches!(
+            self.rpc()
+                .get_resource(module_addr, &sanad_registry_type, None)
+                .await,
+            Ok(Some(_))
+        );
+        let contract_configured = lock_registry_configured && sanad_registry_configured;
 
         // Check if signer is actually configured by checking the config
         let signer_configured = self.seal_protocol.config().private_key.is_some();
@@ -1383,8 +1395,10 @@ impl ChainReadinessCheck for AptosBackend {
                 use ed25519_dalek::SigningKey;
                 let key_bytes = secret_key.expose_secret();
                 let signing_key = SigningKey::from_bytes(key_bytes);
-                let public_key = signing_key.verifying_key();
-                let address = public_key.as_bytes().to_vec();
+                let public_key = signing_key.verifying_key().to_bytes();
+                let mut authentication_key = public_key.to_vec();
+                authentication_key.push(0x00);
+                let address = Sha3_256::digest(&authentication_key);
                 Some(format!("0x{}", hex::encode(address)))
             } else {
                 None
@@ -1502,6 +1516,57 @@ mod tests {
             result.is_err(),
             "empty module address must fail closed, not fall back to a mock seal protocol"
         );
+    }
+
+    #[tokio::test]
+    async fn canonical_state_view_decodes_created_sanad() {
+        let config = crate::config::AptosConfig {
+            network: AptosNetwork::Devnet,
+            ..Default::default()
+        };
+        let module =
+            crate::address_utils::parse_aptos_address(&config.seal_contract.module_address)
+                .unwrap();
+        let function = format!("{}::CSVSeal::get_sanad_info", format_address(module));
+        let rpc = MockAptosRpc::new(1);
+        rpc.set_view_result(
+            &function,
+            serde_json::json!([
+                1,
+                format!("0x{}", hex::encode([0x22; 32])),
+                format!("0x{}", hex::encode([0x33; 32])),
+                "1234"
+            ]),
+        );
+        let backend = AptosBackend::new(Box::new(rpc), AptosNetwork::Devnet).unwrap();
+        let state = backend
+            .get_sanad_state(&SanadId(Hash::new([0x11; 32])))
+            .await
+            .unwrap();
+
+        assert_eq!(state.state, 1);
+        assert_eq!(state.commitment, Hash::new([0x22; 32]));
+        assert_eq!(state.created_at, 1234);
+    }
+
+    #[tokio::test]
+    async fn canonical_state_view_rejects_malformed_commitment() {
+        let config = crate::config::AptosConfig {
+            network: AptosNetwork::Devnet,
+            ..Default::default()
+        };
+        let module =
+            crate::address_utils::parse_aptos_address(&config.seal_contract.module_address)
+                .unwrap();
+        let function = format!("{}::CSVSeal::get_sanad_info", format_address(module));
+        let rpc = MockAptosRpc::new(1);
+        rpc.set_view_result(&function, serde_json::json!([1, "0x1234", "0x1", "1234"]));
+        let backend = AptosBackend::new(Box::new(rpc), AptosNetwork::Devnet).unwrap();
+        let result = backend
+            .get_sanad_state(&SanadId(Hash::new([0x11; 32])))
+            .await;
+
+        assert!(matches!(result, Err(ChainOpError::RpcError(_))));
     }
 
     fn backend_with_keys(keys: Vec<secp256k1::SecretKey>) -> AptosBackend {

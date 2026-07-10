@@ -211,47 +211,113 @@ impl ChainAdapter for AptosRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        use crate::types::{AptosCommitAnchor, AptosSealPoint};
+        use crate::types::AptosCommitAnchor;
+        use csv_hash::seal::{CommitAnchor as CoreCommitAnchor, SealPoint as CoreSealPoint};
+        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
         use csv_protocol::seal_protocol::SealProtocol;
 
-        // Delegate to the seal_protocol's build_proof_bundle which constructs
-        // proper proof bundles with real transaction signatures
-        let commitment = transfer.sanad_id;
+        // Lock transaction hash recorded by the lock phase (hex of 32 bytes).
+        let lock_tx_bytes = hex::decode(lock_result.tx_hash.trim_start_matches("0x"))
+            .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
+        let lock_tx_hash: [u8; 32] = lock_tx_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| AdapterError::Generic("Invalid lock tx hash length".to_string()))?;
 
-        // Create an AptosCommitAnchor from the lock result
-        let mut event_handle = [0u8; 32];
-        event_handle.copy_from_slice(transfer.sanad_id.as_bytes());
+        // Anchor at the lock transaction's ledger version.
+        let anchor = AptosCommitAnchor::new(lock_result.block_height, lock_tx_hash, 0);
 
-        let anchor = AptosCommitAnchor {
-            version: lock_result.block_height,
-            event_handle,
-            sequence_number: 0,
-        };
-
-        // Create a seal point from the sanad_id
-        let seal_point = AptosSealPoint {
-            account_address: *transfer.sanad_id.as_bytes(),
-            resource_type: "0x1::csv_seal::Seal".to_string(),
-            nonce: 0,
-        };
-
-        // Create a DAG segment with anchor transition data
-        let dag_segment = csv_protocol::seal_protocol::DagSegment::new(
-            commitment, // anchor_from (source commitment)
-            commitment, // anchor_to (destination commitment, same for now)
-            vec![],     // transition_data (empty for now)
-            vec![],     // proof (empty for now)
-        );
-
-        // Build the proof bundle using the seal protocol
-        let proof_bundle = self
+        let inclusion = self
             .backend
             .seal_protocol
-            .build_proof_bundle(anchor, dag_segment)
+            .verify_inclusion(anchor.clone())
             .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))?;
+            .map_err(|e| {
+                AdapterError::Generic(format!("Inclusion verification failed: {}", e))
+            })?;
+        self.backend
+            .seal_protocol
+            .verify_finality(anchor)
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Finality verification failed: {}", e)))?;
 
-        Ok(proof_bundle)
+        // Confirmations for a BFT-instant chain: how far the ledger has
+        // advanced past the lock version.
+        let latest_version = self.backend.get_latest_block_height().await.map_err(|e| {
+            AdapterError::Generic(format!("Failed to query latest ledger version: {}", e))
+        })?;
+        let confirmations = latest_version.saturating_sub(inclusion.version);
+
+        // Deterministic encoding of the on-chain evidence this proof vouches
+        // for: lock tx hash, ledger version, and the node's transaction/ledger
+        // proofs.
+        let mut proof_bytes = Vec::new();
+        proof_bytes.extend_from_slice(&lock_tx_hash);
+        proof_bytes.extend_from_slice(&inclusion.version.to_le_bytes());
+        proof_bytes.extend_from_slice(&inclusion.transaction_proof);
+        proof_bytes.extend_from_slice(&inclusion.ledger_info);
+
+        let inclusion_proof = InclusionProof::new(
+            proof_bytes.clone(),
+            csv_hash::Hash::new(lock_tx_hash),
+            inclusion.version,
+            0,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
+
+        let finality_proof = FinalityProof::new(
+            inclusion.version.to_le_bytes().to_vec(),
+            confirmations,
+            true, // Aptos finality is deterministic BFT (no probabilistic reorg)
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+
+        // Anchor bound to the Sanad ID being transferred; the verifier's
+        // binding rule requires anchor metadata == inclusion proof bytes.
+        let anchor_ref = CoreCommitAnchor::new(
+            transfer.sanad_id.as_bytes().to_vec(),
+            inclusion.version,
+            proof_bytes,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid anchor reference: {}", e)))?;
+
+        // The seal reference is the sanad id: it keys the @csv_seal module
+        // registry (see check_seal_registry).
+        let seal_ref = CoreSealPoint::new(
+            transfer.sanad_id.as_bytes().to_vec(),
+            Some(inclusion.version),
+            None,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid seal reference: {}", e)))?;
+
+        // Real authorizing signature over the DAG root commitment, by the same
+        // Ed25519 key that signed the lock transaction. Format:
+        // [pk_len: u32 LE][public_key][signature].
+        let root_commitment = *transfer.sanad_id.as_bytes();
+        let encoded_signature = build_aptos_signature(&self.backend, &root_commitment)?;
+
+        // Single-node transition DAG rooted at the Sanad ID, carrying the
+        // inclusion evidence and bound to the lock tx hash.
+        let dag_node = csv_hash::dag::DAGNode::new(
+            csv_hash::Hash::new(root_commitment),
+            inclusion.transaction_proof.clone(),
+            vec![encoded_signature.clone()],
+            vec![lock_tx_hash.to_vec()],
+            vec![],
+        );
+        let transition_dag =
+            csv_hash::dag::DAGSegment::new(vec![dag_node], csv_hash::Hash::new(root_commitment));
+
+        ProofBundle::with_signature_scheme(
+            SignatureScheme::Ed25519,
+            transition_dag,
+            vec![encoded_signature],
+            seal_ref,
+            anchor_ref,
+            inclusion_proof,
+            finality_proof,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))
     }
 
     async fn validate_source_proof(
@@ -268,9 +334,11 @@ impl ChainAdapter for AptosRuntimeAdapter {
         &self,
         seal_id: &[u8],
     ) -> Result<SealRegistryStatus, AdapterError> {
-        use crate::types::AptosSealPoint;
+        use csv_protocol::chain_adapter_traits::SanadStateReader;
 
-        // Aptos uses resource-based seals - delegate to seal_protocol to check availability
+        // The seal_ref for Aptos is the 32-byte sanad id; its canonical state
+        // lives in the @csv_seal module registry, keyed by sanad id — not at an
+        // account address derived from it.
         if seal_id.len() != 32 {
             return Err(AdapterError::Generic(format!(
                 "Invalid seal_id length: expected 32, got {}",
@@ -278,27 +346,34 @@ impl ChainAdapter for AptosRuntimeAdapter {
             )));
         }
 
-        let mut address = [0u8; 32];
-        address.copy_from_slice(seal_id);
+        let mut sanad_bytes = [0u8; 32];
+        sanad_bytes.copy_from_slice(seal_id);
+        let sanad_id = csv_hash::sanad::SanadId(csv_hash::Hash::new(sanad_bytes));
 
-        // Create an AptosSealPoint from the seal_id
-        let seal_point = AptosSealPoint {
-            account_address: address,
-            resource_type: "0x1::csv_seal::Seal".to_string(),
-            nonce: 0,
-        };
-
-        // Delegate to the seal_protocol's verify_seal_available which properly checks
-        // the seal registry and on-chain resource state including the consumed flag
-        self.backend
-            .seal_protocol
-            .verify_seal_available(&seal_point)
+        let state = self
+            .backend
+            .get_sanad_state(&sanad_id)
             .await
             .map_err(|e| {
-                AdapterError::Generic(format!("Failed to verify seal availability: {}", e))
+                AdapterError::Generic(format!("Failed to query canonical sanad state: {}", e))
             })?;
 
-        Ok(SealRegistryStatus::Available)
+        // Move contract canonical states (csv_seal.move SANAD_STATE_*):
+        // 0 uncreated, 1 created, 2 active, 3 locked, 4 consumed, 5 minted,
+        // 6 transferred, 7 refunded, 8 burned, 9 invalid.
+        match state.state {
+            3 | 4 | 5 | 6 | 8 => Ok(SealRegistryStatus::Consumed),
+            1 | 2 | 7 => Ok(SealRegistryStatus::Available),
+            0 => Err(AdapterError::Generic(format!(
+                "Sanad 0x{} does not exist in the on-chain registry",
+                hex::encode(sanad_bytes)
+            ))),
+            other => Err(AdapterError::Generic(format!(
+                "Sanad 0x{} has invalid canonical state {}",
+                hex::encode(sanad_bytes),
+                other
+            ))),
+        }
     }
 
     async fn get_balance(&self, address: &str) -> Result<String, AdapterError> {
@@ -365,6 +440,40 @@ impl ChainAdapter for AptosRuntimeAdapter {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+/// Authorizing proof-bundle signature over `message` (the DAG root
+/// commitment) by the backend's configured Ed25519 lock key, encoded as
+/// `[pk_len: u32 LE][public_key][signature]`. Fails closed without a signer.
+#[cfg(feature = "rpc")]
+fn build_aptos_signature(backend: &AptosBackend, message: &[u8]) -> Result<Vec<u8>, AdapterError> {
+    use ed25519_dalek::Signer;
+
+    let signing_key = backend.seal_protocol.signing_key.as_ref().ok_or_else(|| {
+        AdapterError::Generic(
+            "Cannot build inclusion proof: no Aptos signing key configured to authorize \
+             the proof bundle"
+                .to_string(),
+        )
+    })?;
+    let signature = signing_key.sign(message);
+    let public_key = signing_key.verifying_key().to_bytes();
+    let mut encoded = Vec::with_capacity(4 + public_key.len() + 64);
+    encoded.extend_from_slice(&(public_key.len() as u32).to_le_bytes());
+    encoded.extend_from_slice(&public_key);
+    encoded.extend_from_slice(&signature.to_bytes());
+    Ok(encoded)
+}
+
+#[cfg(not(feature = "rpc"))]
+fn build_aptos_signature(
+    _backend: &AptosBackend,
+    _message: &[u8],
+) -> Result<Vec<u8>, AdapterError> {
+    Err(AdapterError::Generic(
+        "Cannot build inclusion proof: the 'rpc' feature is required to sign the proof bundle"
+            .to_string(),
+    ))
 }
 
 /// Contract-layer Aptos chain identity: `keccak256("csv.chain.aptos")`.

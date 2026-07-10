@@ -12,6 +12,7 @@ pub const CSV_SEAL_MODULE_NAME: &str = "CSVSeal";
 /// EntryFunction function names
 pub mod functions {
     pub const CONSUME_SEAL: &str = "consume_seal";
+    pub const PUBLISH_SANAD: &str = "publish_sanad";
     pub const LOCK_SANAD: &str = "lock_sanad";
     pub const MINT_SANAD: &str = "mint_sanad";
     pub const REFUND_SANAD: &str = "refund_sanad";
@@ -126,18 +127,36 @@ impl EntryFunctionBuilder {
         }
     }
 
+    /// Bind an existing seal to a canonical Sanad ID and commitment.
+    pub fn publish_sanad(
+        &self,
+        nonce: u64,
+        sanad_id: [u8; 32],
+        commitment: [u8; 32],
+    ) -> EntryFunctionPayload {
+        EntryFunctionPayload {
+            function: self.function_name(functions::PUBLISH_SANAD),
+            type_arguments: vec![],
+            arguments: vec![
+                EntryFunctionArgument::U64(nonce),
+                EntryFunctionArgument::Bytes(sanad_id.to_vec()),
+                EntryFunctionArgument::Bytes(commitment.to_vec()),
+            ],
+        }
+    }
+
     /// Build lock_sanad EntryFunction payload
     ///
     /// # Arguments
     /// * `nonce` - The seal nonce (u64)
     /// * `sanad_id` - Unique Sanad identifier (32 bytes)
-    /// * `destination_chain` - Destination chain ID (u8)
+    /// * `destination_chain` - `keccak256("csv.chain.<name>")` (32 bytes)
     /// * `destination_owner` - Destination owner address (32 bytes)
     pub fn lock_sanad(
         &self,
         nonce: u64,
         sanad_id: [u8; 32],
-        destination_chain: u8,
+        destination_chain: [u8; 32],
         destination_owner: [u8; 32],
     ) -> EntryFunctionPayload {
         let function = self.function_name(functions::LOCK_SANAD);
@@ -145,7 +164,7 @@ impl EntryFunctionBuilder {
         let arguments = vec![
             EntryFunctionArgument::U64(nonce),
             EntryFunctionArgument::Bytes(sanad_id.to_vec()),
-            EntryFunctionArgument::U8(destination_chain),
+            EntryFunctionArgument::Bytes(destination_chain.to_vec()),
             EntryFunctionArgument::Bytes(destination_owner.to_vec()),
         ];
 
@@ -310,7 +329,7 @@ mod tests {
         let builder = EntryFunctionBuilder::new("0x1".to_string());
         let nonce = 42u64;
         let sanad_id = [2u8; 32];
-        let destination_chain = 1u8;
+        let destination_chain = [1u8; 32];
         let destination_owner = [3u8; 32];
         let payload = builder.lock_sanad(nonce, sanad_id, destination_chain, destination_owner);
 
@@ -323,12 +342,33 @@ mod tests {
             payload.arguments[1].to_json_value().as_str().unwrap(),
             format!("0x{}", hex::encode(sanad_id))
         );
-        // destination_chain (u8) → JSON number
-        assert_eq!(payload.arguments[2].to_json_value().as_u64().unwrap(), 1);
+        // destination_chain (vector<u8>) → JSON hex string
+        assert_eq!(
+            payload.arguments[2].to_json_value().as_str().unwrap(),
+            format!("0x{}", hex::encode(destination_chain))
+        );
         // destination_owner (vector<u8>) → JSON hex string
         assert_eq!(
             payload.arguments[3].to_json_value().as_str().unwrap(),
             format!("0x{}", hex::encode(destination_owner))
+        );
+    }
+
+    #[test]
+    fn publish_sanad_payload_binds_nonce_id_and_commitment() {
+        let builder = EntryFunctionBuilder::new("0xcafe".to_string());
+        let payload = builder.publish_sanad(9, [0x11; 32], [0x22; 32]);
+
+        assert_eq!(payload.function_short_name(), "publish_sanad");
+        assert_eq!(payload.arguments.len(), 3);
+        assert_eq!(payload.arguments[0].to_json_value(), "9");
+        assert_eq!(
+            payload.arguments[1].to_json_value(),
+            format!("0x{}", hex::encode([0x11; 32]))
+        );
+        assert_eq!(
+            payload.arguments[2].to_json_value(),
+            format!("0x{}", hex::encode([0x22; 32]))
         );
     }
 

@@ -99,7 +99,7 @@ impl AdapterFactory for EthereumFactory {
         // carry multiple signers for an M-of-N registry.
         let verifier_keys = super::load_mint_verifier_keys("ethereum");
         if verifier_keys.is_empty() {
-            log::warn!(
+            log::debug!(
                 "Factory: no mint verifier key configured — Ethereum mint will fail closed \
                  (set {} or CSV_MINT_VERIFIER_KEY_ETHEREUM)",
                 super::MINT_VERIFIER_KEY_ENV

@@ -96,6 +96,27 @@ pub mod real_rpc_impl {
             }
         }
 
+        fn get_transaction_slot(&self, signature: &Signature) -> SolanaResult<Option<u64>> {
+            // `with_history` searches the ledger beyond the recent-status cache,
+            // so a resume long after the lock still resolves the landed slot.
+            let statuses = self
+                .client
+                .get_signature_statuses_with_history(&[*signature])
+                .map_err(|e| {
+                    SolanaError::Rpc(format!("Failed to get signature status: {}", e))
+                })?;
+            let Some(status) = statuses.value.into_iter().next().flatten() else {
+                return Ok(None);
+            };
+            if let Some(err) = status.err {
+                return Err(SolanaError::TransactionFailed(format!(
+                    "Transaction failed: {:?}",
+                    err
+                )));
+            }
+            Ok(Some(status.slot))
+        }
+
         fn send_transaction(&self, transaction: &Transaction) -> SolanaResult<Signature> {
             self.client
                 .send_transaction(transaction)

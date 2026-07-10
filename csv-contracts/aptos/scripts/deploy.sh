@@ -6,11 +6,20 @@
 # Environment variables (optional):
 #   CSV_APTOS_ADDRESS - Account address from unified state
 #   CSV_APTOS_PRIVATE_KEY - Private key from unified state
+#   CSV_APTOS_PROFILE - Aptos CLI profile to load from $HOME/.aptos/config.yaml
 
 set -euo pipefail
 
 NETWORK="${1:-testnet}"
 APTOS="${2:-aptos}"
+
+# Resolve an explicitly requested global Aptos profile before changing into the
+# contract directory. Aptos CLI profiles are workspace-relative, so looking it
+# up after `cd` would incorrectly report that the profile does not exist.
+if [ -n "${CSV_APTOS_PROFILE:-}" ] && [ -z "${CSV_APTOS_ADDRESS:-}" ] && [ -z "${CSV_APTOS_PRIVATE_KEY:-}" ]; then
+    CSV_APTOS_ADDRESS=$(cd "${HOME}" && "$APTOS" config show-profiles --profile "${CSV_APTOS_PROFILE}" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Result']['${CSV_APTOS_PROFILE}']['account'])")
+    CSV_APTOS_PRIVATE_KEY=$(cd "${HOME}" && "$APTOS" config show-private-key --profile "${CSV_APTOS_PROFILE}" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['Result'])")
+fi
 
 echo "=== Aptos ${NETWORK} Deployment ==="
 echo ""
@@ -85,6 +94,13 @@ else
     ACCOUNT=$("$APTOS" config show-profiles --profile default 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Result']['default']['account'])" 2>/dev/null || echo "")
     
 fi
+
+# Persist and pass one canonical address representation everywhere.
+if [ -z "${ACCOUNT:-}" ]; then
+    echo "ERROR: Aptos deployment account is empty"
+    exit 1
+fi
+ACCOUNT="0x${ACCOUNT#0x}"
 
 echo ""
 
@@ -201,7 +217,7 @@ run_init() {
         echo "     ok"
         return 0
     fi
-    if echo "$out" | grep -qiE 'RESOURCE_ALREADY_EXISTS|EAnchorDataExists|already.*exist'; then
+    if echo "$out" | grep -qiE 'RESOURCE_ALREADY_EXISTS|EAnchorDataExists|already.*exist|Move abort.*0x3'; then
         echo "     already initialized (ok)"
         return 0
     fi
@@ -211,8 +227,18 @@ run_init() {
 
 # The mint destination needs: event handle, the LockRegistry (holds the replay
 # tables), and the MintAuthority (verifier set). All assert signer == @csv_seal.
-run_init initialize_module || echo "  WARNING: initialize_module failed (see above)"
-run_init init_registry      || echo "  WARNING: init_registry failed (see above)"
+run_init initialize_module || {
+    echo "  ERROR: initialize_module is required"
+    exit 1
+}
+run_init init_registry || {
+    echo "  ERROR: init_registry is required"
+    exit 1
+}
+run_init init_sanad_registry || {
+    echo "  ERROR: init_sanad_registry is required for canonical Sanad creation"
+    exit 1
+}
 
 # Seed the verifier set if the operator supplied a pubkey; otherwise mint stays
 # fail-closed and the operator seeds it later (see runbook).
@@ -264,7 +290,7 @@ if [ -f "$MANIFEST_PATH" ]; then
         python3 -c "
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     with open('$MANIFEST_PATH', 'r') as f:
@@ -290,7 +316,7 @@ try:
         else:
             apt['verifier_set'] = []
             apt['mint_threshold'] = 0
-        manifest['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        manifest['updated_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     
     with open('$MANIFEST_PATH', 'w') as f:
         json.dump(manifest, f, indent=2)
@@ -308,6 +334,18 @@ except Exception as e:
     fi
 else
     echo "WARNING: Deployment manifest not found at $MANIFEST_PATH"
+fi
+
+# Keep the checked-in chain configuration aligned with the deployed module.
+CHAIN_CONFIG="../../chains/aptos-${NETWORK}.toml"
+if [ -f "$CHAIN_CONFIG" ]; then
+    sed -i \
+        -e "s|^contract_address = \".*\"|contract_address = \"${PACKAGE_ID}\"|" \
+        -e "s|^module_address = \".*\"|module_address = \"${PACKAGE_ID}\"|" \
+        "$CHAIN_CONFIG"
+    echo "Chain config updated: ${CHAIN_CONFIG}"
+else
+    echo "WARNING: Chain config not found at ${CHAIN_CONFIG}"
 fi
 
 # Cleanup temp directory and .aptos

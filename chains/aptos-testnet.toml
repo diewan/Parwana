@@ -4,7 +4,7 @@ default_network = "testnet"
 rpc_endpoints = ["https://fullnode.testnet.aptoslabs.com/v1"]
 block_explorer_urls = ["https://explorer.aptoslabs.com/?network=testnet"]
 start_block = 0
-contract_address = "0xd2ca32aa271cda19180c2a7739948a9299c4b8e58c475063d6bd9f48fe33c987"
+contract_address = "0x0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f"
 
 [finality_guarantee]
 max_reorg_depth = 0
@@ -40,4 +40,4 @@ chain_role = "Settlement"
 # is the RFC-0012 §9.2 `destinationContract` bound into the mint-attestation
 # digest. The canonical value is recorded in
 # deployments/deployment-manifest.json (deployments.aptos.module_address).
-module_address = "0xd2ca32aa271cda19180c2a7739948a9299c4b8e58c475063d6bd9f48fe33c987"
+module_address = "0x0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f"

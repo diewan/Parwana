@@ -17,7 +17,7 @@ use crate::rpc::{
     AptosAccountReader, AptosBlockInfo, AptosCheckpointVerifier, AptosEvent, AptosEventReader,
     AptosLedgerInfo, AptosLedgerReader, AptosModulePublisher, AptosResource, AptosRpc,
     AptosSignerIdentity, AptosTransaction, AptosTransactionReader, AptosTransactionSubmitter,
-    BoxFuture,
+    AptosViewReader, BoxFuture,
 };
 
 #[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
@@ -33,6 +33,22 @@ pub struct AptosNode {
 
 #[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 impl AptosNode {
+    fn canonical_struct_tag(tag: &str) -> String {
+        let Some((address, suffix)) = tag.split_once("::") else {
+            return tag.to_ascii_lowercase();
+        };
+        let trimmed = address
+            .trim_start_matches("0x")
+            .trim_start_matches('0')
+            .to_ascii_lowercase();
+        let canonical_address = if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed
+        };
+        format!("0x{canonical_address}::{suffix}")
+    }
+
     /// Create a new Aptos RPC client
     pub fn new(rpc_url: &str) -> Self {
         Self {
@@ -429,7 +445,10 @@ impl AptosAccountReader for AptosNode {
             // Find the resource matching the requested type
             for resource in resources {
                 let res_type = resource.get("type").and_then(|v| v.as_str());
-                if res_type != Some(&resource_type) {
+                if res_type.is_none_or(|actual| {
+                    Self::canonical_struct_tag(actual)
+                        != Self::canonical_struct_tag(&resource_type)
+                }) {
                     continue;
                 }
 
@@ -452,7 +471,9 @@ impl AptosTransactionReader for AptosNode {
     ) -> BoxFuture<'_, Result<Option<AptosTransaction>, Box<dyn std::error::Error + Send + Sync>>>
     {
         Box::pin(async move {
-            let result = self.get(&format!("/transactions/{}", version)).await?;
+            let result = self
+                .get(&format!("/transactions/by_version/{}", version))
+                .await?;
             if result.get("hash").is_none() {
                 return Ok(None);
             }
@@ -763,6 +784,31 @@ impl AptosTransactionSubmitter for AptosNode {
 }
 
 #[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
+impl AptosViewReader for AptosNode {
+    fn call_view<'a>(
+        &'a self,
+        function: &'a str,
+        arguments: Vec<serde_json::Value>,
+    ) -> BoxFuture<'a, Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async move {
+            let body = serde_json::json!({
+                "function": function,
+                "type_arguments": [],
+                "arguments": arguments,
+            });
+            let result = self.post("/view", &body).await?;
+            if let Some(message) = result.get("message").and_then(|value| value.as_str()) {
+                return Err(format!("Aptos view {function} failed: {message}").into());
+            }
+            if !result.is_array() {
+                return Err(format!("Aptos view {function} returned a non-array response").into());
+            }
+            Ok(result)
+        })
+    }
+}
+
+#[cfg(all(feature = "rpc", not(target_arch = "wasm32")))]
 impl AptosModulePublisher for AptosNode {
     fn publish_module(
         &self,
@@ -862,5 +908,17 @@ mod tests {
 
         let err = AptosNode::parse_transaction(&tx).unwrap_err();
         assert!(err.to_string().contains("hash"));
+    }
+
+    #[test]
+    fn struct_tag_comparison_normalizes_leading_address_zeroes() {
+        assert_eq!(
+            AptosNode::canonical_struct_tag(
+                "0x0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f::CSVSeal::SanadRegistry"
+            ),
+            AptosNode::canonical_struct_tag(
+                "0xd1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f::CSVSeal::SanadRegistry"
+            )
+        );
     }
 }

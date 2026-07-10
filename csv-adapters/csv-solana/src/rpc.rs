@@ -29,6 +29,16 @@ pub trait SolanaRpc: Send + Sync {
     /// Get transaction with status
     fn get_transaction(&self, signature: &Signature) -> SolanaResult<String>;
 
+    /// Get the slot a committed transaction landed in.
+    ///
+    /// Returns the transaction's own slot from its signature status — NOT the
+    /// current tip. Proof building and finality accounting must anchor at the
+    /// slot the lock actually executed in; reporting the latest slot here made
+    /// resumed transfers build proofs against a fabricated lock slot with
+    /// near-zero confirmations. `Ok(None)` means the signature is not (yet)
+    /// known to the cluster; a failed transaction is an error.
+    fn get_transaction_slot(&self, signature: &Signature) -> SolanaResult<Option<u64>>;
+
     /// Send transaction
     fn send_transaction(&self, transaction: &Transaction) -> SolanaResult<Signature>;
 
@@ -117,6 +127,12 @@ impl SolanaRpc for MockSolanaRpc {
         Err(SolanaError::Rpc(
             "Mock RPC: get_transaction not implemented".to_string(),
         ))
+    }
+
+    fn get_transaction_slot(&self, _signature: &Signature) -> SolanaResult<Option<u64>> {
+        // Distinct from get_latest_slot (1000) so tests can tell a landed slot
+        // from a tip observation.
+        Ok(Some(968))
     }
 
     fn send_transaction(&self, _transaction: &Transaction) -> SolanaResult<Signature> {

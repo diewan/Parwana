@@ -516,14 +516,18 @@ impl ChainBroadcaster for SolanaBackend {
             // Use wait_for_confirmation for better status detection
             match self.rpc().wait_for_confirmation(&sig) {
                 Ok(ConfirmationStatus::Finalized) => {
-                    let slot = self.rpc().get_latest_slot().unwrap_or(0);
+                    // Landed slot of the tx, not the tip. Best-effort (0 on
+                    // lookup failure): the tx is already on-chain, so this
+                    // must never fail the confirmation itself — the runtime
+                    // re-derives the authoritative slot via tx_finality.
+                    let slot = self.rpc().get_transaction_slot(&sig).ok().flatten().unwrap_or(0);
                     return Ok(TransactionStatus::Confirmed {
                         block_height: slot,
                         confirmations: 32,
                     });
                 }
                 Ok(ConfirmationStatus::Confirmed) => {
-                    let slot = self.rpc().get_latest_slot().unwrap_or(0);
+                    let slot = self.rpc().get_transaction_slot(&sig).ok().flatten().unwrap_or(0);
                     return Ok(TransactionStatus::Confirmed {
                         block_height: slot,
                         confirmations: 1,

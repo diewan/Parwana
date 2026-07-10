@@ -4,21 +4,21 @@ INCLUDING DEPENDENCY AptosFramework
 INCLUDING DEPENDENCY AptosStdlib
 INCLUDING DEPENDENCY MoveStdlib
 BUILDING csv-seal
-package size 21128 bytes
-Transaction submitted: https://explorer.aptoslabs.com/txn/0x8c7c766ba8f7241b117e43921348ba12382a192ed1e134d761367c7dfad65f0e?network=testnet
+package size 23153 bytes
+Transaction submitted: https://explorer.aptoslabs.com/txn/0xcc184a2febe0e124e7804d29536f9699a0f62acf9385e9cca2e40b407fdad7c5?network=testnet
 {
   "Result": {
-    "transaction_hash": "0x8c7c766ba8f7241b117e43921348ba12382a192ed1e134d761367c7dfad65f0e",
-    "gas_used": 98997,
+    "transaction_hash": "0xcc184a2febe0e124e7804d29536f9699a0f62acf9385e9cca2e40b407fdad7c5",
+    "gas_used": 1254,
     "gas_unit_price": 100,
-    "sender": "845182cdf7c1eddb0426d39cc340bf9523e7f1c7ec7d33f67d9d61c7a40248de",
-    "sequence_number": 0,
+    "sender": "0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f",
+    "sequence_number": 6,
     "replay_protector": {
-      "SequenceNumber": 0
+      "SequenceNumber": 6
     },
     "success": true,
-    "timestamp_us": 1783703850233376,
-    "version": 9818976444,
+    "timestamp_us": 1783709968569974,
+    "version": 9820385718,
     "vm_status": "Executed successfully"
   }
 }

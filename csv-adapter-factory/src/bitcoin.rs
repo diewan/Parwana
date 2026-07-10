@@ -31,7 +31,7 @@ impl AdapterFactory for BitcoinFactory {
         } else if config.secret_key.as_bytes().is_some() {
             config.secret_key.as_bytes().map(hex::encode)
         } else {
-            log::warn!(
+            log::debug!(
                 "Factory: No seed or secret key provided, creating Bitcoin adapter in read-only mode"
             );
             None

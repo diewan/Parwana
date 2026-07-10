@@ -2133,7 +2133,7 @@ async fn query_sanad_on_chain_state(
     let adapter = match runtime.get_adapter(core_chain.clone()).await {
         Ok(adapter) => adapter,
         Err(e) => {
-            log::warn!(
+            log::debug!(
                 "Chain adapter not available for {}: {}. Cannot determine canonical state.",
                 chain,
                 e
@@ -2169,7 +2169,7 @@ async fn query_sanad_on_chain_state(
             })
         }
         Err(e) => {
-            log::warn!(
+            log::debug!(
                 "Failed to query canonical sanad state from chain {}: {}. Cannot return canonical state without on-chain validation.",
                 chain,
                 e

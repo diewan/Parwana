@@ -6,7 +6,7 @@
 
 use csv_adapter_core::{
     AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintAttestationInputs, MintResult,
-    RuntimeMintRequest, SealRegistryStatus,
+    RuntimeMintRequest, SealRegistryStatus, TxFinality,
 };
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::finality::capabilities::{
@@ -372,24 +372,10 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         use crate::types::ConfirmationStatus;
         use csv_hash::seal::{CommitAnchor, SealPoint};
         use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
-        use solana_sdk::signature::Signature;
         use std::str::FromStr;
 
         // Parse the lock signature (hex of the 64-byte signature, or base58).
-        let signature = if lock_result.tx_hash.len() == 128
-            && lock_result.tx_hash.chars().all(|c| c.is_ascii_hexdigit())
-        {
-            let bytes = hex::decode(&lock_result.tx_hash)
-                .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
-            let sig: [u8; 64] = bytes
-                .try_into()
-                .map_err(|_| AdapterError::Generic("Invalid lock signature length".to_string()))?;
-            Signature::from(sig)
-        } else {
-            lock_result.tx_hash.parse::<Signature>().map_err(|e| {
-                AdapterError::Generic(format!("Invalid lock tx signature: {}", e))
-            })?
-        };
+        let signature = parse_tx_signature(&lock_result.tx_hash)?;
 
         // The lock transaction must be confirmed and successful on-chain.
         let status = self
@@ -443,6 +429,25 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             )));
         }
 
+        // Anchor at the slot the lock transaction actually landed in, re-derived
+        // from its signature status. `lock_result.block_height` is not
+        // trustworthy here: on resume it is a finality observation, and the
+        // confirm paths historically reported the current tip — anchoring at
+        // that fabricates the lock slot and zeroes the confirmation depth.
+        let lock_slot = self
+            .backend
+            .rpc()
+            .get_transaction_slot(&signature)
+            .map_err(|e| {
+                AdapterError::Generic(format!("Failed to get lock tx slot: {}", e))
+            })?
+            .ok_or_else(|| {
+                AdapterError::ProofVerificationFailed(format!(
+                    "Lock tx {} has no signature status on-chain",
+                    signature
+                ))
+            })?;
+
         // Real finality evidence: confirmation depth of the lock slot below
         // the current tip.
         let latest_slot = self
@@ -450,7 +455,6 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             .rpc()
             .get_latest_slot()
             .map_err(|e| AdapterError::Generic(format!("Failed to get latest slot: {}", e)))?;
-        let lock_slot = lock_result.block_height;
         let confirmations = latest_slot.saturating_sub(lock_slot);
 
         // Deterministic encoding of the actual on-chain evidence: lock
@@ -615,7 +619,6 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
     async fn confirm_tx(&self, tx_hash: &str) -> Result<MintResult, AdapterError> {
         use crate::types::ConfirmationStatus;
-        use solana_sdk::signature::Signature;
 
         if tx_hash.len() == 64
             && tx_hash.chars().all(|c| c.is_ascii_hexdigit())
@@ -647,9 +650,9 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             });
         }
 
-        let signature = tx_hash.parse::<Signature>().map_err(|e| {
-            AdapterError::Generic(format!("Invalid Solana transaction signature: {}", e))
-        })?;
+        // The runtime records lock tx references as hex of the 64-byte
+        // signature (128 hex chars); accept that alongside base58.
+        let signature = parse_tx_signature(tx_hash)?;
 
         let status = self
             .backend
@@ -664,9 +667,25 @@ impl ChainAdapter for SolanaRuntimeAdapter {
 
         match status {
             ConfirmationStatus::Confirmed | ConfirmationStatus::Finalized => {
-                let block_height = self.backend.rpc().get_latest_slot().map_err(|e| {
-                    AdapterError::RpcError(format!("Failed to get Solana latest slot: {}", e))
-                })?;
+                // Report the slot the transaction landed in, not the current
+                // tip: resume paths reuse this as the lock slot when
+                // rebuilding proofs.
+                let block_height = self
+                    .backend
+                    .rpc()
+                    .get_transaction_slot(&signature)
+                    .map_err(|e| {
+                        AdapterError::RpcError(format!(
+                            "Failed to get slot for Solana transaction {}: {}",
+                            tx_hash, e
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        AdapterError::Generic(format!(
+                            "Solana transaction {} confirmed but has no signature status",
+                            tx_hash
+                        ))
+                    })?;
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height,
@@ -682,8 +701,64 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         }
     }
 
+    async fn tx_finality(&self, tx_hash: &str) -> Result<TxFinality, AdapterError> {
+        // Real confirmation depth for the runtime finality gate. The trait
+        // default delegates to `confirm_tx` and reports `u64::MAX`
+        // confirmations, which made the per-chain finality depth a no-op for
+        // Solana: a lock was treated as final at `Confirmed` commitment.
+        let signature = parse_tx_signature(tx_hash)?;
+
+        let landed_slot = self
+            .backend
+            .rpc()
+            .get_transaction_slot(&signature)
+            .map_err(|e| {
+                AdapterError::RpcError(format!(
+                    "Failed to get slot for Solana transaction {}: {}",
+                    tx_hash, e
+                ))
+            })?;
+        // Not yet visible to the cluster: zero confirmations, let the runtime
+        // gate report Pending rather than erroring right after broadcast.
+        let Some(landed_slot) = landed_slot else {
+            return Ok(TxFinality {
+                block_height: 0,
+                confirmations: 0,
+            });
+        };
+
+        let latest_slot = self.backend.rpc().get_latest_slot().map_err(|e| {
+            AdapterError::RpcError(format!("Failed to get Solana latest slot: {}", e))
+        })?;
+
+        Ok(TxFinality {
+            block_height: landed_slot,
+            confirmations: latest_slot.saturating_sub(landed_slot),
+        })
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Parse a Solana transaction reference: the runtime records tx references as
+/// hex of the 64-byte signature (128 hex chars); base58 is accepted alongside
+/// for direct callers.
+fn parse_tx_signature(tx_hash: &str) -> Result<solana_sdk::signature::Signature, AdapterError> {
+    use solana_sdk::signature::Signature;
+
+    if tx_hash.len() == 128 && tx_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        let bytes = hex::decode(tx_hash)
+            .map_err(|e| AdapterError::Generic(format!("Invalid tx signature hex: {}", e)))?;
+        let sig: [u8; 64] = bytes
+            .try_into()
+            .map_err(|_| AdapterError::Generic("Invalid tx signature length".to_string()))?;
+        Ok(Signature::from(sig))
+    } else {
+        tx_hash.parse::<Signature>().map_err(|e| {
+            AdapterError::Generic(format!("Invalid Solana transaction signature: {}", e))
+        })
     }
 }
 
@@ -821,14 +896,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn confirm_tx_returns_confirmed_slot() {
+    async fn confirm_tx_returns_landed_slot_not_tip() {
         let adapter = SolanaRuntimeAdapter::new(test_backend(None));
         let signature = solana_sdk::signature::Signature::new_unique().to_string();
 
         let result = adapter.confirm_tx(&signature).await.expect("confirm tx");
 
         assert_eq!(result.tx_hash, signature);
-        assert_eq!(result.block_height, 1000);
+        // The mock reports landed slot 968 and tip 1000: the confirmed slot
+        // must be the slot the tx landed in, not the current tip, or resumed
+        // transfers rebuild proofs against a fabricated lock slot.
+        assert_eq!(result.block_height, 968);
+    }
+
+    #[tokio::test]
+    async fn tx_finality_reports_landed_slot_and_real_confirmations() {
+        let adapter = SolanaRuntimeAdapter::new(test_backend(None));
+        let signature = solana_sdk::signature::Signature::new_unique();
+
+        // Both the base58 form and the runtime's 128-hex-char form must resolve.
+        for tx_ref in [
+            signature.to_string(),
+            hex::encode(signature.as_ref() as &[u8]),
+        ] {
+            let finality = adapter.tx_finality(&tx_ref).await.expect("tx finality");
+            assert_eq!(finality.block_height, 968);
+            assert_eq!(finality.confirmations, 1000 - 968);
+        }
     }
 
     #[tokio::test]

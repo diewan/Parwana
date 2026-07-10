@@ -104,6 +104,15 @@ pub trait AptosTransactionSubmitter: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>>;
 }
 
+/// Read-only Move view-function capability.
+pub trait AptosViewReader: Send + Sync + 'static {
+    fn call_view<'a>(
+        &'a self,
+        function: &'a str,
+        arguments: Vec<serde_json::Value>,
+    ) -> BoxFuture<'a, Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>>>;
+}
+
 /// Aptos module publishing capability.
 pub trait AptosModulePublisher: Send + Sync + 'static {
     fn publish_module(
@@ -141,6 +150,7 @@ pub trait AptosRpc:
     + AptosEventReader
     + AptosSignerIdentity
     + AptosTransactionSubmitter
+    + AptosViewReader
     + AptosModulePublisher
     + AptosCheckpointVerifier
     + Send
@@ -286,12 +296,14 @@ pub struct MockAptosRpc {
     pub chain_id: u64,
     pub test_address: [u8; 32],
     pub tx_counter: std::sync::atomic::AtomicU64,
+    pub stale_submissions_remaining: std::sync::atomic::AtomicU64,
     pub resources: std::sync::Mutex<std::collections::HashMap<([u8; 32], String), AptosResource>>,
     pub transactions: std::sync::Mutex<std::collections::HashMap<u64, AptosTransaction>>,
     pub events: std::sync::Mutex<std::collections::HashMap<String, Vec<AptosEvent>>>,
     pub blocks: std::sync::Mutex<std::collections::HashMap<u64, AptosBlockInfo>>,
     pub sent_transactions: std::sync::Mutex<Vec<Vec<u8>>>,
     pub next_tx_events: std::sync::Mutex<Vec<AptosEvent>>,
+    pub view_results: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 impl MockAptosRpc {
@@ -301,13 +313,27 @@ impl MockAptosRpc {
             chain_id: 1,
             test_address: [0x42; 32],
             tx_counter: std::sync::atomic::AtomicU64::new(0),
+            stale_submissions_remaining: std::sync::atomic::AtomicU64::new(0),
             resources: std::sync::Mutex::new(std::collections::HashMap::new()),
             transactions: std::sync::Mutex::new(std::collections::HashMap::new()),
             events: std::sync::Mutex::new(std::collections::HashMap::new()),
             sent_transactions: std::sync::Mutex::new(Vec::new()),
             blocks: std::sync::Mutex::new(std::collections::HashMap::new()),
             next_tx_events: std::sync::Mutex::new(Vec::new()),
+            view_results: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    pub fn set_view_result(&self, function: &str, result: serde_json::Value) {
+        self.view_results
+            .lock()
+            .expect("mutex not poisoned")
+            .insert(function.to_string(), result);
+    }
+
+    pub fn reject_next_submissions_as_stale(&self, count: u64) {
+        self.stale_submissions_remaining
+            .store(count, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn with_chain_id(latest_version: u64, chain_id: u64) -> Self {
@@ -566,6 +592,17 @@ impl AptosTransactionSubmitter for MockAptosRpc {
         signed_tx_json: serde_json::Value,
     ) -> BoxFuture<'_, Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>>> {
         Box::pin(async move {
+            if self
+                .stale_submissions_remaining
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |remaining| remaining.checked_sub(1),
+                )
+                .is_ok()
+            {
+                return Err("Invalid transaction: SEQUENCE_NUMBER_TOO_OLD".into());
+            }
             let tx_bytes = serde_json::to_vec(&signed_tx_json).map_err(|e| {
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -660,6 +697,23 @@ impl AptosModulePublisher for MockAptosRpc {
     }
 }
 
+impl AptosViewReader for MockAptosRpc {
+    fn call_view<'a>(
+        &'a self,
+        function: &'a str,
+        _arguments: Vec<serde_json::Value>,
+    ) -> BoxFuture<'a, Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>>> {
+        Box::pin(async move {
+            self.view_results
+                .lock()
+                .expect("mutex not poisoned")
+                .get(function)
+                .cloned()
+                .ok_or_else(|| format!("No mock Aptos view result for {function}").into())
+        })
+    }
+}
+
 impl AptosCheckpointVerifier for MockAptosRpc {
     fn verify_checkpoint(
         &self,
@@ -677,6 +731,10 @@ impl AptosRpc for MockAptosRpc {
             chain_id: self.chain_id,
             test_address: self.test_address,
             tx_counter: std::sync::atomic::AtomicU64::new(tx_count),
+            stale_submissions_remaining: std::sync::atomic::AtomicU64::new(
+                self.stale_submissions_remaining
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            ),
             resources: std::sync::Mutex::new(
                 self.resources.lock().expect("mutex not poisoned").clone(),
             ),
@@ -696,6 +754,12 @@ impl AptosRpc for MockAptosRpc {
             ),
             next_tx_events: std::sync::Mutex::new(
                 self.next_tx_events
+                    .lock()
+                    .expect("mutex not poisoned")
+                    .clone(),
+            ),
+            view_results: std::sync::Mutex::new(
+                self.view_results
                     .lock()
                     .expect("mutex not poisoned")
                     .clone(),
