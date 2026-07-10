@@ -7,6 +7,44 @@ use csv_verifier::{
     ChainBundleError, ChainBundlePolicy, ChainNativeProofVerifier, verify_chain_proof_bundle,
 };
 
+/// Validate the runtime's on-chain lock-record evidence.
+///
+/// The byte layout is deliberately separate from the older generic slot-proof
+/// layout: `[signature: 64][slot: 8][Anchor discriminator: 8][sanad_id: 32]`.
+fn verify_runtime_lock_proof_layout(
+    proof: &CoreInclusionProof,
+    sanad_id: &Hash,
+) -> ChainOpResult<()> {
+    const LOCK_PROOF_MIN_LEN: usize = 64 + 8 + 8 + 32;
+    if proof.proof_bytes.len() < LOCK_PROOF_MIN_LEN {
+        return Err(ChainOpError::ProofVerificationError(
+            "Lock proof is too short to contain a LockRecord sanad ID".to_string(),
+        ));
+    }
+
+    let proof_sanad_id: [u8; 32] = proof.proof_bytes[80..112]
+        .try_into()
+        .expect("lock proof length was checked above");
+    if proof_sanad_id != *sanad_id.as_bytes() {
+        return Err(ChainOpError::ProofVerificationError(
+            "Sanad ID not found in locked proof record".to_string(),
+        ));
+    }
+
+    let proof_slot = u64::from_le_bytes(
+        proof.proof_bytes[64..72]
+            .try_into()
+            .expect("lock proof length was checked above"),
+    );
+    if proof.position != proof_slot {
+        return Err(ChainOpError::ProofVerificationError(
+            "Position does not match lock slot in proof".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 impl super::SolanaBackend {
     /// Chain-native inclusion verification (slot/transaction proof).
     pub fn verify_inclusion_native(
@@ -32,31 +70,11 @@ impl super::SolanaBackend {
                 ));
             }
 
-            // Proof must be at least 128 bytes (slot + signature + block_hash + confirmations + flags + commitment + data_hash)
-            if proof.proof_bytes.len() < 128 {
-                return Ok(false);
-            }
-
-            // Verify the commitment is embedded in the proof
-            // The commitment is stored at offset 113-145 in the proof bytes
-            if proof.proof_bytes.len() >= 145 {
-                let proof_commitment: [u8; 32] =
-                    proof.proof_bytes[113..145].try_into().unwrap_or([0u8; 32]);
-                if proof_commitment != *commitment.as_bytes() {
-                    return Err(ChainOpError::ProofVerificationError(
-                        "Commitment not found in proof data".to_string(),
-                    ));
-                }
-            }
-
-            // Verify position matches the slot in the proof
-            let proof_slot =
-                u64::from_le_bytes(proof.proof_bytes[..8].try_into().unwrap_or([0u8; 8]));
-            if proof.position != proof_slot {
-                return Err(ChainOpError::ProofVerificationError(
-                    "Position does not match slot in proof".to_string(),
-                ));
-            }
+            // The chain-proof trait calls this argument `commitment`, but the
+            // cross-chain runtime binds it to transfer.sanad_id.  Check the
+            // locked Sanad ID in the on-chain LockRecord at its canonical
+            // offset rather than an obsolete synthetic-proof offset.
+            verify_runtime_lock_proof_layout(proof, commitment)?;
 
             Ok(true)
         }
@@ -139,6 +157,34 @@ impl super::SolanaBackend {
             &ChainBundlePolicy::permissive(),
         )
         .map_err(|e| ChainOpError::ProofVerificationError(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn runtime_lock_proof(sanad_id: Hash, slot: u64) -> CoreInclusionProof {
+        let mut bytes = vec![7u8; 64]; // transaction signature
+        bytes.extend_from_slice(&slot.to_le_bytes());
+        bytes.extend_from_slice(&[9u8; 8]); // Anchor discriminator
+        bytes.extend_from_slice(sanad_id.as_bytes());
+        CoreInclusionProof::new(bytes, Hash::new([1u8; 32]), slot, 0).unwrap()
+    }
+
+    #[test]
+    fn runtime_lock_evidence_binds_sanad_id_and_slot() {
+        let sanad_id = Hash::new([3u8; 32]);
+        let proof = runtime_lock_proof(sanad_id, 475_386_071);
+
+        assert!(verify_runtime_lock_proof_layout(&proof, &sanad_id).is_ok());
+    }
+
+    #[test]
+    fn runtime_lock_evidence_rejects_wrong_sanad_id() {
+        let proof = runtime_lock_proof(Hash::new([3u8; 32]), 475_386_071);
+
+        assert!(verify_runtime_lock_proof_layout(&proof, &Hash::new([4u8; 32])).is_err());
     }
 }
 

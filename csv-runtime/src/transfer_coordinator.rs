@@ -637,29 +637,15 @@ impl TransferCoordinator {
         self.admission_controller.snapshot()
     }
 
-    fn verifier_for_source_chain(
-        policy: &crate::policy::RuntimePolicy,
-        source_chain: &str,
-    ) -> Result<CanonicalVerifierImpl, TransferCoordinatorError> {
-        #[cfg(test)]
-        if source_chain == "test-chain" {
-            return Ok(CanonicalVerifierImpl::new(VerifierConfig {
-                max_anchor_age_blocks: Some(100),
-                ..VerifierConfig::default()
-            }));
-        }
-
-        let max_anchor_age_blocks = policy
-            .max_proof_age_blocks_for_chain(source_chain)
-            .ok_or_else(|| {
-                TransferCoordinatorError::ProofVerificationFailed(format!(
-                    "No max proof age configured for source chain: {source_chain}"
-                ))
-            })?;
-        Ok(CanonicalVerifierImpl::new(VerifierConfig {
-            max_anchor_age_blocks: Some(max_anchor_age_blocks),
-            ..VerifierConfig::default()
-        }))
+    fn runtime_source_verifier() -> CanonicalVerifierImpl {
+        // A runtime rebuilds the proof from current source-chain state and
+        // validates the live lock before this verifier is called.  Its anchor
+        // is necessarily the historical lock slot, so applying the
+        // offline-recipient freshness cap here would permanently strand a
+        // valid lock after that short window.  Freshness remains enforced by
+        // the offline consignment-accept path, where a cached proof is being
+        // accepted without this live source-chain validation.
+        CanonicalVerifierImpl::new(VerifierConfig::default())
     }
 
     /// Snapshot the operator-facing transfer flow metrics.
@@ -1253,19 +1239,21 @@ impl TransferCoordinator {
                     .as_ref()
                     .map(|e| e.to_string())
                     .unwrap_or_else(|| "Unknown error".to_string());
-                let _ = self
-                    .execution_journal
-                    .record(crate::execution_journal::TransferPhaseEntry {
-                        transfer_id: transfer.id.clone(),
-                        replay_id: replay_id_wire.clone(),
-                        proof_hash: [0u8; 32],
-                        proof_payload: None,
-                        phase: crate::recovery::TransferStage::LockConfirmed,
-                        ts: std::time::SystemTime::now(),
-                        outcome: crate::execution_journal::PhaseOutcome::Failed(err_msg.clone()),
-                        attempt: 1,
-                        transfer_context: None,
-                    });
+                let _ =
+                    self.execution_journal
+                        .record(crate::execution_journal::TransferPhaseEntry {
+                            transfer_id: transfer.id.clone(),
+                            replay_id: replay_id_wire.clone(),
+                            proof_hash: [0u8; 32],
+                            proof_payload: None,
+                            phase: crate::recovery::TransferStage::LockConfirmed,
+                            ts: std::time::SystemTime::now(),
+                            outcome: crate::execution_journal::PhaseOutcome::Failed(
+                                err_msg.clone(),
+                            ),
+                            attempt: 1,
+                            transfer_context: None,
+                        });
                 // The lock terminally failed: roll the replay slot back so the
                 // sanad is not permanently blocked from a fresh materialize.
                 // Adapter locks are idempotent / on-chain replay-guarded, so a
@@ -1593,8 +1581,7 @@ impl TransferCoordinator {
             .await
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
 
-        let source_verifier =
-            Self::verifier_for_source_chain(&runtime_ctx.policy, &transfer.source_chain)?;
+        let source_verifier = Self::runtime_source_verifier();
         match source_verifier.verify_proof_bundle(&proof_bundle, &verification_context) {
             Ok(result) => {
                 if !result.is_valid {
@@ -3153,8 +3140,7 @@ impl TransferCoordinator {
             .validate_source_proof(&transfer.source_chain, transfer, proof_bundle)
             .await
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
-        let source_verifier =
-            Self::verifier_for_source_chain(&runtime_ctx.policy, &transfer.source_chain)?;
+        let source_verifier = Self::runtime_source_verifier();
         let result = source_verifier
             .verify_proof_bundle(proof_bundle, &verification_context)
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
@@ -4417,10 +4403,8 @@ mod tests {
     }
 
     #[test]
-    fn source_chain_verifier_rejects_anchor_beyond_configured_max_age() {
-        let mut policy = crate::policy::RuntimePolicy::new();
-        policy.set_max_proof_age_blocks("bitcoin".to_string(), 100);
-        let verifier = TransferCoordinator::verifier_for_source_chain(&policy, "bitcoin").unwrap();
+    fn runtime_source_verifier_accepts_historical_finalized_locks() {
+        let verifier = TransferCoordinator::runtime_source_verifier();
         let ctx = VerificationContext {
             chain_id: "bitcoin".to_string(),
             signature_scheme: csv_protocol::SignatureScheme::Ed25519,
@@ -4437,35 +4421,10 @@ mod tests {
             authorized_signers: Vec::new(),
         };
 
-        let result = verifier.verify_finality(100, &ctx);
         assert!(
-            matches!(result, Err(csv_protocol::ProtocolError::ProofExpired(_))),
-            "source-chain verifier must reject over-age anchors, got {result:?}"
+            verifier.verify_finality(100, &ctx).is_ok(),
+            "runtime verifier must accept a historical lock after native validation"
         );
-    }
-
-    #[test]
-    fn source_chain_verifier_accepts_anchor_exactly_at_configured_max_age() {
-        let mut policy = crate::policy::RuntimePolicy::new();
-        policy.set_max_proof_age_blocks("bitcoin".to_string(), 100);
-        let verifier = TransferCoordinator::verifier_for_source_chain(&policy, "bitcoin").unwrap();
-        let ctx = VerificationContext {
-            chain_id: "bitcoin".to_string(),
-            signature_scheme: csv_protocol::SignatureScheme::Ed25519,
-            required_confirmations: 1,
-            current_block_height: Some(200),
-            seal_registry: None,
-            chain_data: None,
-            native_proof_validated: true,
-            sanad_id: None,
-            lock_tx: None,
-            lock_output_index: None,
-            transition_id: None,
-            destination_chain: None,
-            authorized_signers: Vec::new(),
-        };
-
-        assert!(verifier.verify_finality(100, &ctx).is_ok());
     }
 
     #[tokio::test]

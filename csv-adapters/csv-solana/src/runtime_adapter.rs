@@ -371,29 +371,11 @@ impl ChainAdapter for SolanaRuntimeAdapter {
     ) -> Result<ProofBundle, AdapterError> {
         use crate::types::ConfirmationStatus;
         use csv_hash::seal::{CommitAnchor, SealPoint};
-        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
+        use csv_protocol::proof_taxonomy::InclusionProof;
         use std::str::FromStr;
 
         // Parse the lock signature (hex of the 64-byte signature, or base58).
         let signature = parse_tx_signature(&lock_result.tx_hash)?;
-
-        // The lock transaction must be confirmed and successful on-chain.
-        let status = self
-            .backend
-            .rpc()
-            .wait_for_confirmation(&signature)
-            .map_err(|e| {
-                AdapterError::ProofVerificationFailed(format!(
-                    "Lock tx {} not confirmed: {}",
-                    signature, e
-                ))
-            })?;
-        if matches!(status, ConfirmationStatus::Processed) {
-            return Err(AdapterError::ProofVerificationFailed(format!(
-                "Lock tx {} is processed but not yet confirmed",
-                signature
-            )));
-        }
 
         // Fetch the on-chain LockAccount PDA ["lock", sanad_id]: the canonical
         // lock record this proof vouches for.
@@ -402,10 +384,8 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         )
         .map_err(|_| AdapterError::Generic("Invalid CSV program ID".to_string()))?;
         let sanad_bytes = transfer.sanad_id.as_bytes();
-        let (lock_account, _) = solana_sdk::pubkey::Pubkey::find_program_address(
-            &[b"lock", sanad_bytes],
-            &program_id,
-        );
+        let (lock_account, _) =
+            solana_sdk::pubkey::Pubkey::find_program_address(&[b"lock", sanad_bytes], &program_id);
         let lock_data = self
             .backend
             .rpc()
@@ -429,24 +409,48 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             )));
         }
 
-        // Anchor at the slot the lock transaction actually landed in, re-derived
-        // from its signature status. `lock_result.block_height` is not
-        // trustworthy here: on resume it is a finality observation, and the
-        // confirm paths historically reported the current tip — anchoring at
-        // that fabricates the lock slot and zeroes the confirmation depth.
-        let lock_slot = self
+        // Look up the landed slot with history before using the short-lived
+        // confirmation poll. A resumed transfer commonly falls outside
+        // Solana's recent signature-status cache, while get_transaction_slot
+        // searches history and also rejects failed transactions.
+        let lock_slot = match self
             .backend
             .rpc()
             .get_transaction_slot(&signature)
-            .map_err(|e| {
-                AdapterError::Generic(format!("Failed to get lock tx slot: {}", e))
-            })?
-            .ok_or_else(|| {
-                AdapterError::ProofVerificationFailed(format!(
-                    "Lock tx {} has no signature status on-chain",
-                    signature
-                ))
-            })?;
+            .map_err(|e| AdapterError::Generic(format!("Failed to get lock tx slot: {}", e)))?
+        {
+            Some(slot) => slot,
+            None => {
+                let status = self
+                    .backend
+                    .rpc()
+                    .wait_for_confirmation(&signature)
+                    .map_err(|e| {
+                        AdapterError::ProofVerificationFailed(format!(
+                            "Lock tx {} not confirmed: {}",
+                            signature, e
+                        ))
+                    })?;
+                if matches!(status, ConfirmationStatus::Processed) {
+                    return Err(AdapterError::ProofVerificationFailed(format!(
+                        "Lock tx {} is processed but not yet confirmed",
+                        signature
+                    )));
+                }
+                self.backend
+                    .rpc()
+                    .get_transaction_slot(&signature)
+                    .map_err(|e| {
+                        AdapterError::Generic(format!("Failed to get lock tx slot: {}", e))
+                    })?
+                    .ok_or_else(|| {
+                        AdapterError::ProofVerificationFailed(format!(
+                            "Lock tx {} was confirmed but has no landed slot",
+                            signature
+                        ))
+                    })?
+            }
+        };
 
         // Real finality evidence: confirmation depth of the lock slot below
         // the current tip.
@@ -455,8 +459,6 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             .rpc()
             .get_latest_slot()
             .map_err(|e| AdapterError::Generic(format!("Failed to get latest slot: {}", e)))?;
-        let confirmations = latest_slot.saturating_sub(lock_slot);
-
         // Deterministic encoding of the actual on-chain evidence: lock
         // signature, lock slot, and the raw lock record account data.
         let mut proof_bytes = Vec::new();
@@ -468,16 +470,23 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         let mut block_hash = [0u8; 32];
         block_hash.copy_from_slice(&sig_bytes[..32]);
 
-        let inclusion_proof =
-            InclusionProof::new(proof_bytes.clone(), csv_hash::Hash::new(block_hash), lock_slot, 0)
-                .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
-
-        let finality_proof = FinalityProof::new(
-            lock_slot.to_le_bytes().to_vec(),
-            confirmations,
-            true, // Solana devnet: confirmed commitment is deterministic enough for testnet policy
+        let inclusion_proof = InclusionProof::new(
+            proof_bytes.clone(),
+            csv_hash::Hash::new(block_hash),
+            lock_slot,
+            0,
         )
-        .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+        .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
+
+        // Keep the finality evidence in the same structured format consumed by
+        // the native verifier.  A bare slot was accepted by an earlier builder
+        // but is malformed (the verifier requires slot, tip, confirmation
+        // count, finality flag, and block hash).
+        let finality_proof = crate::proofs::build_finality_proof(
+            lock_slot,
+            csv_hash::Hash::new(block_hash),
+            latest_slot,
+        );
 
         // Anchor bound to the Sanad ID; the verifier's binding rule requires
         // anchor metadata == inclusion proof bytes.
@@ -489,9 +498,11 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
         // The seal reference is the sanad account PDA this lock consumed.
-        let wallet = self.backend.seal_protocol().wallet().ok_or_else(|| {
-            AdapterError::Generic("No Solana wallet configured".to_string())
-        })?;
+        let wallet = self
+            .backend
+            .seal_protocol()
+            .wallet()
+            .ok_or_else(|| AdapterError::Generic("No Solana wallet configured".to_string()))?;
         let owner_pubkey = wallet.pubkey();
         let (sanad_account, _) = solana_sdk::pubkey::Pubkey::find_program_address(
             &[b"sanad", owner_pubkey.as_ref(), sanad_bytes],
@@ -653,6 +664,28 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         // The runtime records lock tx references as hex of the 64-byte
         // signature (128 hex chars); accept that alongside base58.
         let signature = parse_tx_signature(tx_hash)?;
+
+        // Historical status lookup is the durable resume path. It searches
+        // beyond the recent-status cache and checks transaction failure.
+        if let Some(block_height) = self
+            .backend
+            .rpc()
+            .get_transaction_slot(&signature)
+            .map_err(|e| {
+                AdapterError::RpcError(format!(
+                    "Failed to get slot for Solana transaction {}: {}",
+                    tx_hash, e
+                ))
+            })?
+        {
+            return Ok(MintResult {
+                tx_hash: tx_hash.to_string(),
+                block_height,
+                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    self.chain_id.clone(),
+                ),
+            });
+        }
 
         let status = self
             .backend
