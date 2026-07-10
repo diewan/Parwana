@@ -37,6 +37,17 @@ const SOLANA_DOMAIN_SEPARATOR: [u8; 32] = [
 /// (LINT-DEADCODE-HYGIENE-001).
 const INSTRUCTION_PUBLISH_COMMITMENT: u8 = 0x03;
 
+/// Encode the deployed Anchor `create_seal` ABI. Keeping this pure makes the
+/// canonical-ID/commitment distinction directly testable without an RPC.
+fn create_seal_instruction_data(sanad_id: Hash, commitment: Hash) -> Vec<u8> {
+    let mut instruction_data = Vec::with_capacity(8 + 32 + 32 + 32);
+    instruction_data.extend_from_slice(&crate::anchor_client::discriminators::create_seal());
+    instruction_data.extend_from_slice(sanad_id.as_bytes());
+    instruction_data.extend_from_slice(commitment.as_bytes());
+    instruction_data.extend_from_slice(&[0u8; 32]);
+    instruction_data
+}
+
 /// Solana adapter for CSV (Client-Side Validation)
 pub struct SolanaSealProtocol {
     /// Configuration
@@ -210,11 +221,12 @@ impl SealProtocol for SolanaSealProtocol {
 
     /// Create a new seal account (PDA) for a sanad
     ///
-    /// Returns a local placeholder — the real on-chain account is created in publish()
-    /// once we know the commitment hash to use as sanad_id.
+    /// Returns the exact PDA that `publish()` will create on-chain.
     async fn create_seal(
         &self,
         amount: Option<u64>,
+        sanad_id: Hash,
+        _commitment: Hash,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         let wallet = self
             .wallet
@@ -224,38 +236,29 @@ impl SealProtocol for SolanaSealProtocol {
         let owner = wallet.pubkey();
         let lamports = amount.unwrap_or(1_000_000); // Default 0.001 SOL rent exemption
 
-        // Use a deterministic but temporary seed based on owner + lamports + timestamp.
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(b"csv-solana-pending-seal");
-        hasher.update(owner.as_ref());
-        hasher.update(lamports.to_le_bytes());
-        hasher.update(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-                .to_le_bytes(),
-        );
-        let pending_id_bytes: [u8; 32] = hasher.finalize().into();
-        let pending_id = Hash::new(pending_id_bytes);
+        // The transaction is submitted by `publish`, but the account identity is
+        // already fixed by the canonical Sanad ID and wallet owner. Returning a
+        // timestamp-derived placeholder here made the local seal reference differ
+        // from the account actually created on-chain.
+        let account = self.derive_seal_pda(&sanad_id, &owner)?;
 
         Ok(SolanaSealPoint {
-            account: Pubkey::default(), // filled in by publish()
+            account,
             owner,
             lamports,
-            seed: Some(pending_id.as_bytes().to_vec()),
+            seed: Some(sanad_id.as_bytes().to_vec()),
         })
     }
 
     /// Publish a commitment to the seal account
     ///
-    /// For Solana, this performs the real on-chain create_seal transaction using
-    /// the commitment hash as the sanad_id so CLI and on-chain IDs match.
+    /// For Solana, this performs the real on-chain create_seal transaction while
+    /// preserving the distinct canonical Sanad ID and content commitment.
     async fn publish(
         &self,
         commitment: Hash,
         seal_point: Self::SealPoint,
-        _sanad_id: Hash,
+        sanad_id: Hash,
     ) -> Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         let wallet = self
             .wallet
@@ -263,11 +266,9 @@ impl SealProtocol for SolanaSealProtocol {
             .ok_or_else(|| SolanaError::Wallet("No wallet configured".to_string()))?;
         let owner = wallet.pubkey();
 
-        // Use the commitment hash as the sanad_id so CLI and on-chain IDs match.
-        let sanad_id = commitment; // commitment IS the sanad_id from the CLI perspective
         let lamports = seal_point.lamports;
 
-        // Derive the PDA using the commitment-as-sanad_id
+        // Derive the PDA from the canonical Sanad ID and owner.
         let seal_pda = self.derive_seal_pda(&sanad_id, &owner)?;
 
         log::info!(
@@ -285,19 +286,8 @@ impl SealProtocol for SolanaSealProtocol {
             .get_recent_blockhash()
             .map_err(|e| SolanaError::Rpc(format!("Failed to get recent blockhash: {}", e)))?;
 
-        // Build create_seal instruction with commitment as both sanad_id and commitment fields
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(b"global:create_seal");
-        let discriminator_hash = hasher.finalize();
-        let anchor_discriminator: [u8; 8] = discriminator_hash[0..8]
-            .try_into()
-            .expect("slice length matches array size");
-
-        let mut instruction_data = Vec::with_capacity(8 + 32 + 32 + 32);
-        instruction_data.extend_from_slice(&anchor_discriminator);
-        instruction_data.extend_from_slice(sanad_id.as_bytes()); // sanad_id = commitment
-        instruction_data.extend_from_slice(commitment.as_bytes()); // commitment field
-        instruction_data.extend_from_slice(&[0u8; 32]); // state_root
+        // Build create_seal with the distinct canonical ID and commitment.
+        let instruction_data = create_seal_instruction_data(sanad_id, commitment);
 
         let program_id = self.csv_program_id()?;
         let instruction = Instruction {
@@ -696,6 +686,22 @@ impl Default for SolanaSealProtocol {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_seal_abi_keeps_canonical_id_distinct_from_commitment() {
+        let sanad_id = Hash::new([0x11; 32]);
+        let commitment = Hash::new([0x22; 32]);
+        let encoded = create_seal_instruction_data(sanad_id, commitment);
+
+        assert_eq!(
+            &encoded[..8],
+            &crate::anchor_client::discriminators::create_seal()
+        );
+        assert_eq!(&encoded[8..40], sanad_id.as_bytes());
+        assert_eq!(&encoded[40..72], commitment.as_bytes());
+        assert_ne!(&encoded[8..40], &encoded[40..72]);
+        assert_eq!(&encoded[72..104], &[0u8; 32]);
+    }
 
     #[test]
     fn test_derive_seal_pda() {

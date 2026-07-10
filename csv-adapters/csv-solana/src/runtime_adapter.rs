@@ -16,6 +16,7 @@ use csv_protocol::finality::capabilities::{
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signer;
 use std::sync::Arc;
 
 use crate::ops::SolanaBackend;
@@ -193,8 +194,16 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to lock sanad: {}", e)))?;
 
+        // The runtime records lock tx hashes as hex; a base58 Solana signature
+        // would be corrupted by the coordinator's hex round-trip.
+        let tx_hash = result
+            .transaction_hash
+            .parse::<solana_sdk::signature::Signature>()
+            .map(|sig| hex::encode(sig.as_ref() as &[u8]))
+            .unwrap_or(result.transaction_hash);
+
         Ok(LockResult {
-            tx_hash: result.transaction_hash,
+            tx_hash,
             block_height: result.block_height,
         })
     }
@@ -344,55 +353,164 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        use crate::types::{SolanaCommitAnchor, SolanaSealPoint};
-        use csv_protocol::seal_protocol::SealProtocol;
+        use crate::types::ConfirmationStatus;
+        use csv_hash::seal::{CommitAnchor, SealPoint};
+        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
+        use solana_sdk::signature::Signature;
+        use std::str::FromStr;
 
-        // Delegate to the seal_protocol's build_proof_bundle which constructs
-        // proper proof bundles with real transaction signatures
-        let commitment = transfer.sanad_id;
-
-        // Create a SolanaCommitAnchor from the lock result
-        let tx_hash_bytes = hex::decode(&lock_result.tx_hash)
-            .map_err(|e| AdapterError::Generic(format!("Failed to decode tx hash: {}", e)))?;
-        let mut anchor_tx_hash = [0u8; 64];
-        anchor_tx_hash[..tx_hash_bytes.len()].copy_from_slice(&tx_hash_bytes);
-
-        let anchor = SolanaCommitAnchor {
-            signature: solana_sdk::signature::Signature::from(anchor_tx_hash),
-            slot: lock_result.block_height,
-            block_height: lock_result.block_height,
-            account_changes: vec![],
+        // Parse the lock signature (hex of the 64-byte signature, or base58).
+        let signature = if lock_result.tx_hash.len() == 128
+            && lock_result.tx_hash.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            let bytes = hex::decode(&lock_result.tx_hash)
+                .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
+            let sig: [u8; 64] = bytes
+                .try_into()
+                .map_err(|_| AdapterError::Generic("Invalid lock signature length".to_string()))?;
+            Signature::from(sig)
+        } else {
+            lock_result.tx_hash.parse::<Signature>().map_err(|e| {
+                AdapterError::Generic(format!("Invalid lock tx signature: {}", e))
+            })?
         };
 
-        // Get the first active seal from the seal protocol
-        let active_seals = self.backend.seal_protocol().get_active_seals();
-        let _seal_point = active_seals
-            .first()
-            .cloned()
-            .unwrap_or_else(|| SolanaSealPoint {
-                account: solana_sdk::pubkey::Pubkey::default(),
-                owner: solana_sdk::pubkey::Pubkey::default(),
-                lamports: 0,
-                seed: None,
-            });
-
-        // Create a DAG segment with anchor transition data
-        let dag_segment = csv_protocol::seal_protocol::DagSegment::new(
-            commitment, // anchor_from (source commitment)
-            commitment, // anchor_to (destination commitment, same for now)
-            vec![],     // transition_data (empty for now)
-            vec![],     // proof (empty for now)
-        );
-
-        // Build the proof bundle using the seal protocol
-        let proof_bundle = self
+        // The lock transaction must be confirmed and successful on-chain.
+        let status = self
             .backend
-            .seal_protocol()
-            .build_proof_bundle(anchor, dag_segment)
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))?;
+            .rpc()
+            .wait_for_confirmation(&signature)
+            .map_err(|e| {
+                AdapterError::ProofVerificationFailed(format!(
+                    "Lock tx {} not confirmed: {}",
+                    signature, e
+                ))
+            })?;
+        if matches!(status, ConfirmationStatus::Processed) {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "Lock tx {} is processed but not yet confirmed",
+                signature
+            )));
+        }
 
-        Ok(proof_bundle)
+        // Fetch the on-chain LockAccount PDA ["lock", sanad_id]: the canonical
+        // lock record this proof vouches for.
+        let program_id = solana_sdk::pubkey::Pubkey::from_str(
+            &self.backend.seal_protocol().config().csv_program_id,
+        )
+        .map_err(|_| AdapterError::Generic("Invalid CSV program ID".to_string()))?;
+        let sanad_bytes = transfer.sanad_id.as_bytes();
+        let (lock_account, _) = solana_sdk::pubkey::Pubkey::find_program_address(
+            &[b"lock", sanad_bytes],
+            &program_id,
+        );
+        let lock_data = self
+            .backend
+            .rpc()
+            .get_account(&lock_account)
+            .map_err(|e| {
+                AdapterError::ProofVerificationFailed(format!(
+                    "Lock record PDA {} not found on-chain: {}",
+                    lock_account, e
+                ))
+            })?
+            .data;
+
+        // The LockAccount layout is [8-byte discriminator][LockRecord], and
+        // LockRecord starts with the 32-byte sanad_id — verify the record
+        // binds this exact sanad before vouching for it.
+        if lock_data.len() < 40 || &lock_data[8..40] != sanad_bytes {
+            return Err(AdapterError::ProofVerificationFailed(format!(
+                "On-chain lock record {} does not bind sanad 0x{}",
+                lock_account,
+                hex::encode(sanad_bytes)
+            )));
+        }
+
+        // Real finality evidence: confirmation depth of the lock slot below
+        // the current tip.
+        let latest_slot = self
+            .backend
+            .rpc()
+            .get_latest_slot()
+            .map_err(|e| AdapterError::Generic(format!("Failed to get latest slot: {}", e)))?;
+        let lock_slot = lock_result.block_height;
+        let confirmations = latest_slot.saturating_sub(lock_slot);
+
+        // Deterministic encoding of the actual on-chain evidence: lock
+        // signature, lock slot, and the raw lock record account data.
+        let mut proof_bytes = Vec::new();
+        proof_bytes.extend_from_slice(signature.as_ref());
+        proof_bytes.extend_from_slice(&lock_slot.to_le_bytes());
+        proof_bytes.extend_from_slice(&lock_data);
+
+        let sig_bytes: &[u8] = signature.as_ref();
+        let mut block_hash = [0u8; 32];
+        block_hash.copy_from_slice(&sig_bytes[..32]);
+
+        let inclusion_proof =
+            InclusionProof::new(proof_bytes.clone(), csv_hash::Hash::new(block_hash), lock_slot, 0)
+                .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
+
+        let finality_proof = FinalityProof::new(
+            lock_slot.to_le_bytes().to_vec(),
+            confirmations,
+            true, // Solana devnet: confirmed commitment is deterministic enough for testnet policy
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+
+        // Anchor bound to the Sanad ID; the verifier's binding rule requires
+        // anchor metadata == inclusion proof bytes.
+        let commit_anchor = CommitAnchor::new(
+            transfer.sanad_id.as_bytes().to_vec(),
+            lock_slot,
+            proof_bytes,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
+
+        // The seal reference is the sanad account PDA this lock consumed.
+        let wallet = self.backend.seal_protocol().wallet().ok_or_else(|| {
+            AdapterError::Generic("No Solana wallet configured".to_string())
+        })?;
+        let owner_pubkey = wallet.pubkey();
+        let (sanad_account, _) = solana_sdk::pubkey::Pubkey::find_program_address(
+            &[b"sanad", owner_pubkey.as_ref(), sanad_bytes],
+            &program_id,
+        );
+        let seal_point = SealPoint::new(sanad_account.to_bytes().to_vec(), Some(0), None)
+            .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
+
+        // Real authorizing signature over the DAG root commitment by the same
+        // Ed25519 wallet key that signed the lock transaction. Format:
+        // [pk_len: u32 LE][public_key][signature].
+        let root_commitment = *transfer.sanad_id.as_bytes();
+        let auth_sig = wallet.keypair.sign_message(&root_commitment);
+        let pubkey_bytes = owner_pubkey.to_bytes();
+        let mut encoded_signature = Vec::with_capacity(4 + 32 + 64);
+        encoded_signature.extend_from_slice(&(pubkey_bytes.len() as u32).to_le_bytes());
+        encoded_signature.extend_from_slice(&pubkey_bytes);
+        encoded_signature.extend_from_slice(auth_sig.as_ref());
+
+        let dag_node = csv_hash::dag::DAGNode::new(
+            csv_hash::Hash::new(root_commitment),
+            lock_data,
+            vec![encoded_signature.clone()],
+            vec![sig_bytes.to_vec()],
+            vec![],
+        );
+        let transition_dag =
+            csv_hash::dag::DAGSegment::new(vec![dag_node], csv_hash::Hash::new(root_commitment));
+
+        ProofBundle::with_signature_scheme(
+            csv_protocol::signature::SignatureScheme::Ed25519,
+            transition_dag,
+            vec![encoded_signature],
+            seal_point,
+            commit_anchor,
+            inclusion_proof,
+            finality_proof,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))
     }
 
     async fn validate_source_proof(

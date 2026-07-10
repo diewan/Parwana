@@ -108,6 +108,22 @@ impl ReplayDatabase for PostgresReplayDb {
 
         match current {
             Some((state,)) if state == "Consumed" => Ok(()),
+            // RolledBack: previous attempt definitively did not complete —
+            // re-arm the slot so the transfer can be retried.
+            Some((state,)) if state == "RolledBack" => {
+                sqlx::query(
+                    r#"
+                    UPDATE replay_entries
+                    SET state = 'Pending', updated_at = NOW()
+                    WHERE id = $1 AND state = 'RolledBack'
+                    "#,
+                )
+                .bind(&hex_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| ReplayDbError::Storage(e.to_string()))?;
+                Ok(())
+            }
             Some((_,)) => Err(ReplayDbError::AlreadyExists),
             None => self.insert_if_absent(id).await,
         }

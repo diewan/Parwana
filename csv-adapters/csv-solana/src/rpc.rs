@@ -20,6 +20,12 @@ pub trait SolanaRpc: Send + Sync {
     /// Get multiple accounts
     fn get_multiple_accounts(&self, pubkeys: &[Pubkey]) -> SolanaResult<Vec<Option<Account>>>;
 
+    /// Get every account owned by a program.
+    ///
+    /// Callers must still validate account discriminators and canonical fields;
+    /// program ownership alone does not identify an account type.
+    fn get_program_accounts(&self, program_id: &Pubkey) -> SolanaResult<Vec<(Pubkey, Account)>>;
+
     /// Get transaction with status
     fn get_transaction(&self, signature: &Signature) -> SolanaResult<String>;
 
@@ -95,6 +101,15 @@ impl SolanaRpc for MockSolanaRpc {
         Ok(pubkeys
             .iter()
             .map(|pk| self.accounts.get(pk).cloned())
+            .collect())
+    }
+
+    fn get_program_accounts(&self, program_id: &Pubkey) -> SolanaResult<Vec<(Pubkey, Account)>> {
+        Ok(self
+            .accounts
+            .iter()
+            .filter(|(_, account)| account.owner == *program_id)
+            .map(|(pubkey, account)| (*pubkey, account.clone()))
             .collect())
     }
 

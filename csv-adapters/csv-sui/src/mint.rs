@@ -131,27 +131,7 @@ fn parse_object_id(s: &str) -> Result<[u8; 32], String> {
 }
 
 #[cfg(feature = "rpc")]
-fn tx_digest_to_runtime_hex(digest: &str) -> Result<String, String> {
-    let digest = digest.trim();
-    if digest.is_empty() {
-        return Err("empty transaction digest".to_string());
-    }
-    if let Ok(bytes) = hex::decode(digest.trim_start_matches("0x")) {
-        if bytes.len() == 32 {
-            return Ok(hex::encode(bytes));
-        }
-    }
-    let bytes = bs58::decode(digest)
-        .into_vec()
-        .map_err(|e| format!("invalid Sui transaction digest: {}", e))?;
-    if bytes.len() != 32 {
-        return Err(format!(
-            "Sui transaction digest must decode to 32 bytes, got {}",
-            bytes.len()
-        ));
-    }
-    Ok(hex::encode(bytes))
-}
+use crate::rpc_utils::tx_digest_to_runtime_hex;
 
 /// Fetch a shared object's `initial_shared_version`, required to reference it as
 /// an input in a programmable transaction.
@@ -350,6 +330,7 @@ pub async fn submit_mint(
     let mut execute_request = ExecuteTransactionRequest::default();
     execute_request.transaction = Some(sui_transaction);
     execute_request.signatures = vec![user_signature];
+    execute_request.read_mask = Some(crate::rpc_utils::execution_read_mask());
 
     let execution_response = (*client_guard)
         .execution_client()

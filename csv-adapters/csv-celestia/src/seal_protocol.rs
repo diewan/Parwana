@@ -242,6 +242,8 @@ where
     async fn create_seal(
         &self,
         value: Option<u64>,
+        _sanad_id: Hash,
+        _commitment: Hash,
     ) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // Create a new seal at the next available height
         // In production, this would query for the latest height
@@ -597,7 +599,14 @@ mod tests {
     #[tokio::test]
     async fn test_create_seal() {
         let protocol = create_test_protocol().await;
-        let seal = protocol.create_seal(Some(12345)).await.unwrap();
+        let seal = protocol
+            .create_seal(
+                Some(12345),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
 
         assert!(seal.is_valid());
         assert_eq!(seal.height, 12345);
@@ -628,11 +637,25 @@ mod tests {
     #[tokio::test]
     async fn test_enforce_seal() {
         let protocol = create_test_protocol().await;
-        let seal = protocol.create_seal(Some(12345)).await.unwrap();
+        let seal = protocol
+            .create_seal(
+                Some(12345),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert!(protocol.enforce_seal(seal).await.is_ok());
 
         // Consumed seal should fail
-        let mut consumed_seal = protocol.create_seal(Some(12346)).await.unwrap();
+        let mut consumed_seal = protocol
+            .create_seal(
+                Some(12346),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         consumed_seal.consume([0u8; 32]);
         assert!(protocol.enforce_seal(consumed_seal).await.is_err());
     }
@@ -644,7 +667,14 @@ mod tests {
         let contract_id = Hash::new([1u8; 32]);
         let previous_commitment = Hash::new([2u8; 32]);
         let transition_payload_hash = Hash::new([3u8; 32]);
-        let seal = protocol.create_seal(Some(12345)).await.unwrap();
+        let seal = protocol
+            .create_seal(
+                Some(12345),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
 
         let hash = protocol.hash_commitment(
             contract_id,

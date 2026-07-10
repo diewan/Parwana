@@ -382,35 +382,50 @@ impl EthereumBackend {
         Keccak256::digest(input).into()
     }
 
-    /// Check if a sanad is locked on-chain by querying getLockInfo
+    /// Check if a sanad is locked on-chain by querying `get_lock_info`.
+    ///
+    /// Calls the deployed CSVSeal's canonical snake_case view
+    /// `get_lock_info(bytes32)`; the legacy camelCase `getLockInfo` binding
+    /// matches no function on the VERSION 6 contract and always reverts.
     #[cfg(feature = "rpc")]
     pub async fn is_sanad_locked(&self, sanad_id: &[u8]) -> ChainOpResult<bool> {
         let contract_addr = self.contract().map_err(|e| {
             ChainOpError::RpcError(format!("Failed to get contract address: {}", e))
         })?;
 
-        let sanad_id_bytes = alloy_primitives::FixedBytes::<32>::from_slice(sanad_id);
-        let calldata = crate::bindings::csv_lock::CsvLockClient::new(contract_addr.into())
-            .get_lock_info_call(sanad_id_bytes);
-
-        let encoded = hex::encode(calldata.abi_encode());
+        let mut sanad_id_arr = [0u8; 32];
+        if sanad_id.len() != 32 {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Invalid sanad id length: {}",
+                sanad_id.len()
+            )));
+        }
+        sanad_id_arr.copy_from_slice(sanad_id);
+        let calldata = self._encode_view_call("get_lock_info(bytes32)", &sanad_id_arr);
 
         let result = self
             .rpc()
             .eth_call(
                 serde_json::json!({
                     "to": format!("0x{}", hex::encode(contract_addr)),
-                    "data": format!("0x{}", encoded)
+                    "data": format!("0x{}", hex::encode(calldata))
                 }),
                 "latest",
             )
             .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to call getLockInfo: {}", e)))?;
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to call get_lock_info: {}", e)))?;
 
-        // Decode the response: (bytes32 commitment, uint256 timestamp, uint8 destinationChain, bool refunded)
-        // If commitment is all zeros, the sanad is not locked
-        let commitment = &result[..64]; // First 32 bytes of commitment, but we need to check if it's all zeros
-        Ok(!commitment.iter().all(|&b| b == 0))
+        // Return: (bytes32 commitment, uint256 timestamp, bytes32 destinationChain, bool refunded).
+        // Locked iff timestamp != 0 and not refunded.
+        if result.len() < 128 {
+            return Err(ChainOpError::RpcError(format!(
+                "Invalid get_lock_info response length: {}",
+                result.len()
+            )));
+        }
+        let timestamp_nonzero = result[32..64].iter().any(|&b| b != 0);
+        let refunded = result[127] == 1;
+        Ok(timestamp_nonzero && !refunded)
     }
 
     /// Build, sign, and send a transaction to a contract
@@ -525,26 +540,129 @@ impl EthereumBackend {
 
         let max_attempts = 30;
         let poll_interval = Duration::from_secs(2);
+        let mut last_error: Option<String> = None;
 
         for _ in 0..max_attempts {
             match self.rpc().get_transaction_receipt(*tx_hash).await {
-                Ok(Some(receipt)) => return Ok(receipt),
+                Ok(Some(receipt)) => {
+                    // Fail closed on a reverted transaction here, at the submission
+                    // seam, instead of letting callers treat "got a receipt" as
+                    // success and only discovering status=0 during finality checks.
+                    if receipt.status == 0 {
+                        return Err(ChainOpError::TransactionError(format!(
+                            "Transaction 0x{} reverted (status=0) in block {}",
+                            hex::encode(tx_hash),
+                            receipt.block_number
+                        )));
+                    }
+                    return Ok(receipt);
+                }
                 Ok(None) => {
                     // Transaction pending, wait and retry
                     sleep(poll_interval).await;
                 }
                 Err(e) => {
-                    return Err(ChainOpError::RpcError(format!(
-                        "Failed to get receipt: {}",
-                        e
-                    )));
+                    // Transient RPC failures must not abort the wait: the
+                    // transaction is already broadcast, and surfacing an error
+                    // here makes non-idempotent callers (lock/create) re-submit
+                    // a duplicate transaction under a new nonce.
+                    last_error = Some(e.to_string());
+                    sleep(poll_interval).await;
                 }
             }
         }
 
-        Err(ChainOpError::Timeout(
-            "Transaction not confirmed within timeout period".to_string(),
-        ))
+        Err(ChainOpError::Timeout(format!(
+            "Transaction not confirmed within timeout period{}",
+            last_error
+                .map(|e| format!(" (last RPC error: {})", e))
+                .unwrap_or_default()
+        )))
+    }
+
+    /// Read the on-chain `sanadStates[sanadId]` lifecycle byte.
+    #[cfg(feature = "rpc")]
+    async fn read_sanad_state_byte(
+        &self,
+        contract: &[u8; 20],
+        sanad_id: &[u8; 32],
+    ) -> ChainOpResult<u8> {
+        let result = self
+            .rpc()
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(contract)),
+                    "data": format!("0x{}", hex::encode(self._encode_view_call("sanadStates(bytes32)", sanad_id)))
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sanadStates: {}", e)))?;
+        if result.len() >= 32 {
+            Ok(result[31])
+        } else {
+            Err(ChainOpError::RpcError(format!(
+                "Invalid sanadStates response length: {}",
+                result.len()
+            )))
+        }
+    }
+
+    /// Locate the on-chain `SanadLocked` event for `sanad_id` and return its
+    /// `(tx_hash, block_number)`.
+    ///
+    /// Used to make `lock_sanad` idempotent: when the sanad is already Locked
+    /// on-chain (a previous submission succeeded but its outcome was lost to a
+    /// transient RPC failure, and the coordinator retried), the original lock
+    /// transaction is recovered from the topic-indexed event instead of
+    /// re-submitting a duplicate lock that can only revert.
+    #[cfg(feature = "rpc")]
+    async fn find_sanad_locked_event(
+        &self,
+        contract: &[u8; 20],
+        sanad_id: &[u8; 32],
+    ) -> ChainOpResult<Option<([u8; 32], u64)>> {
+        let event_topic = self._keccak256(
+            b"SanadLocked(bytes32,bytes32,address,bytes32,bytes,uint256)".as_slice(),
+        );
+        let filter = serde_json::json!({
+            "address": format!("0x{}", hex::encode(contract)),
+            "fromBlock": "earliest",
+            "toBlock": "latest",
+            "topics": [
+                format!("0x{}", hex::encode(event_topic)),
+                format!("0x{}", hex::encode(sanad_id)),
+            ],
+        });
+        let logs = self
+            .rpc()
+            .eth_get_logs(filter)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query SanadLocked logs: {}", e)))?;
+
+        let Some(log) = logs.last() else {
+            return Ok(None);
+        };
+        let tx_hash_hex = log
+            .get("transactionHash")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ChainOpError::RpcError("SanadLocked log missing transactionHash".to_string())
+            })?;
+        let block_hex = log
+            .get("blockNumber")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ChainOpError::RpcError("SanadLocked log missing blockNumber".to_string())
+            })?;
+        let tx_bytes = hex::decode(tx_hash_hex.trim_start_matches("0x"))
+            .map_err(|e| ChainOpError::RpcError(format!("Invalid log tx hash: {}", e)))?;
+        let tx_hash: [u8; 32] = tx_bytes
+            .try_into()
+            .map_err(|_| ChainOpError::RpcError("Invalid log tx hash length".to_string()))?;
+        let block_number = u64::from_str_radix(block_hex.trim_start_matches("0x"), 16)
+            .map_err(|e| ChainOpError::RpcError(format!("Invalid log block number: {}", e)))?;
+        Ok(Some((tx_hash, block_number)))
     }
 
     /// Recover sender address from transaction signature
@@ -1438,6 +1556,56 @@ impl ChainSanadOps for EthereumBackend {
 
         #[cfg(feature = "rpc")]
         {
+            // Idempotent lock: the transfer coordinator retries lock_sanad on
+            // transient failures, but an EVM lock is not naturally idempotent —
+            // a duplicate submission reverts with SanadAlreadyLocked even though
+            // the first transaction already locked the sanad. Consult canonical
+            // contract state first and recover the original lock outcome when it
+            // already happened, instead of re-submitting.
+            const STATE_LOCKED: u8 = 3;
+            const STATE_CONSUMED: u8 = 4;
+            const STATE_MINTED: u8 = 5;
+            let state = self
+                .read_sanad_state_byte(&contract, sanad_id_bytes)
+                .await?;
+            if state == STATE_LOCKED {
+                if let Some((lock_tx, lock_block)) = self
+                    .find_sanad_locked_event(&contract, sanad_id_bytes)
+                    .await?
+                {
+                    log::info!(
+                        "ETHEREUM: sanad 0x{} already locked on-chain (tx 0x{}); returning existing lock",
+                        hex::encode(sanad_id_bytes),
+                        hex::encode(lock_tx)
+                    );
+                    return Ok(SanadOperationResult {
+                        sanad_id: sanad_id.clone(),
+                        operation: SanadOperation::Lock,
+                        transaction_hash: hex::encode(lock_tx),
+                        block_height: lock_block,
+                        chain_id: self.config.network.chain_id().to_string(),
+                        metadata: serde_json::to_vec(&serde_json::json!({
+                            "operation": "lock",
+                            "destination_chain": destination_chain,
+                            "contract": hex::encode(contract),
+                            "recovered_existing_lock": true,
+                        }))
+                        .unwrap_or_default(),
+                    });
+                }
+                return Err(ChainOpError::TransactionError(format!(
+                    "Sanad 0x{} is Locked on-chain but its SanadLocked event could not be located",
+                    hex::encode(sanad_id_bytes)
+                )));
+            }
+            if state == STATE_CONSUMED || state == STATE_MINTED {
+                return Err(ChainOpError::TransactionError(format!(
+                    "Cannot lock sanad 0x{}: on-chain state is {} (already consumed/minted)",
+                    hex::encode(sanad_id_bytes),
+                    state
+                )));
+            }
+
             // Build the lock transaction using generated Alloy bindings
             use crate::bindings::csv_seal::lock_sanadCall;
             let call = lock_sanadCall {
@@ -1794,10 +1962,15 @@ impl ChainBackend for EthereumBackend {
         true
     }
 
-    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(
+        &self,
+        value: Option<u64>,
+        sanad_id: Hash,
+        commitment: Hash,
+    ) -> ChainOpResult<SealPoint> {
         let ethereum_seal = self
             .seal_protocol
-            .create_seal(value)
+            .create_seal(value, sanad_id, commitment)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 

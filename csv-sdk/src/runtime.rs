@@ -327,6 +327,8 @@ impl ChainRuntime {
     /// # Arguments
     /// * `chain` - The blockchain where the seal will be created
     /// * `value` - Optional value/funding for the seal (chain-specific units like satoshis, wei, etc.)
+    /// * `sanad_id` - Canonical owner-bound Sanad ID to bind into the chain footprint
+    /// * `commitment` - Canonical commitment to bind into the chain footprint
     ///
     /// # Returns
     /// * `Ok(SealPoint)` - The real chain-native seal reference
@@ -334,18 +336,22 @@ impl ChainRuntime {
     ///
     /// # Example
     /// ```rust,ignore
-    /// let seal_ref = runtime.create_seal(ChainId::new("bitcoin"), Some(100_000)).await?;
+    /// let seal_ref = runtime.create_seal(
+    ///     ChainId::new("bitcoin"), Some(100_000), sanad_id, commitment
+    /// ).await?;
     /// // seal_ref.seal_id contains the actual on-chain identifier (e.g., UTXO txid)
     /// ```
     pub async fn create_seal(
         &self,
         chain: ChainId,
         value: Option<u64>,
+        sanad_id: csv_hash::Hash,
+        commitment: csv_hash::Hash,
     ) -> Result<csv_hash::seal::SealPoint, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
 
         // Delegate to the adapter's create_seal method
-        let result = adapter.create_seal(value).await;
+        let result = adapter.create_seal(value, sanad_id, commitment).await;
         result.map_err(|e| CsvError::ProtocolError {
             chain: chain.clone(),
             message: format!("Seal creation failed: {}", e),

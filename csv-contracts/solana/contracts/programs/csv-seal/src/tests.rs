@@ -45,13 +45,7 @@ fn registry(threshold: u8, verifiers: Vec<[u8; 33]>) -> VerifierRegistry {
 
 fn sample_mint_digest() -> [u8; 32] {
     mint_attestation_digest(
-        &[1u8; 32],
-        &[2u8; 32],
-        &[3u8; 32],
-        &[4u8; 32],
-        &[5u8; 32],
-        &[6u8; 32],
-        0,
+        &[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0,
     )
 }
 
@@ -135,31 +129,45 @@ fn mint_digest_is_field_sensitive() {
     // Flipping any single field must change the digest (no field silently dropped).
     assert_ne!(
         base,
-        mint_attestation_digest(&[9u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0)
+        mint_attestation_digest(
+            &[9u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0
+        )
     );
     assert_ne!(
         base,
-        mint_attestation_digest(&[1u8; 32], &[9u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0)
+        mint_attestation_digest(
+            &[1u8; 32], &[9u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0
+        )
     );
     assert_ne!(
         base,
-        mint_attestation_digest(&[1u8; 32], &[2u8; 32], &[9u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0)
+        mint_attestation_digest(
+            &[1u8; 32], &[2u8; 32], &[9u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0
+        )
     );
     assert_ne!(
         base,
-        mint_attestation_digest(&[1u8; 32], &[2u8; 32], &[3u8; 32], &[9u8; 32], &[5u8; 32], &[6u8; 32], 0)
+        mint_attestation_digest(
+            &[1u8; 32], &[2u8; 32], &[3u8; 32], &[9u8; 32], &[5u8; 32], &[6u8; 32], 0
+        )
     );
     assert_ne!(
         base,
-        mint_attestation_digest(&[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[9u8; 32], &[6u8; 32], 0)
+        mint_attestation_digest(
+            &[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[9u8; 32], &[6u8; 32], 0
+        )
     );
     assert_ne!(
         base,
-        mint_attestation_digest(&[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[9u8; 32], 0)
+        mint_attestation_digest(
+            &[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[9u8; 32], 0
+        )
     );
     assert_ne!(
         base,
-        mint_attestation_digest(&[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 1)
+        mint_attestation_digest(
+            &[1u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 1
+        )
     );
 }
 
@@ -269,7 +277,15 @@ fn signature_over_a_different_digest_is_rejected() {
     let digest = sample_mint_digest();
     // Sign a DIFFERENT digest; recovery yields a different key than the signer's, so
     // membership fails — a signature cannot be replayed onto another attestation.
-    let other = mint_attestation_digest(&[99u8; 32], &[2u8; 32], &[3u8; 32], &[4u8; 32], &[5u8; 32], &[6u8; 32], 0);
+    let other = mint_attestation_digest(
+        &[99u8; 32],
+        &[2u8; 32],
+        &[3u8; 32],
+        &[4u8; 32],
+        &[5u8; 32],
+        &[6u8; 32],
+        0,
+    );
     let sigs = vec![sign65(&sk, &other)];
     assert!(require_verifier_threshold(&reg, &digest, &sigs).is_err());
 }

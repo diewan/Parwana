@@ -208,70 +208,212 @@ impl ChainAdapter for SuiRuntimeAdapter {
         transfer: &CrossChainTransfer,
         lock_result: &LockResult,
     ) -> Result<ProofBundle, AdapterError> {
-        // Decode lock tx hash
-        let lock_tx_hash = hex::decode(&lock_result.tx_hash)
+        use csv_hash::seal::{CommitAnchor, SealPoint};
+        use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
+        use sui_rpc::proto::sui::rpc::v2::{GetCheckpointRequest, GetTransactionRequest};
+
+        // Decode the lock tx digest (runtime records it as hex of the 32-byte digest).
+        let lock_tx_bytes = hex::decode(&lock_result.tx_hash)
             .map_err(|e| AdapterError::Generic(format!("Invalid lock tx hash: {}", e)))?;
-        let lock_tx_hash = csv_hash::Hash::try_from(lock_tx_hash.as_slice())
+        let lock_tx_digest: [u8; 32] = lock_tx_bytes
+            .as_slice()
+            .try_into()
             .map_err(|_| AdapterError::Generic("Invalid lock tx hash length".to_string()))?;
+        let digest = sui_sdk_types::Digest::from_bytes(lock_tx_digest)
+            .map_err(|e| AdapterError::Generic(format!("Invalid lock tx digest: {}", e)))?;
 
-        // Build inclusion proof using the backend
-        use csv_protocol::chain_adapter_traits::ChainProofProvider;
+        // Fetch the real lock transaction with its events and effects.
+        let client = self.backend.node().client();
+        let mut client_guard = client.lock().await;
 
-        let inclusion_proof = self
-            .backend
-            .build_inclusion_proof(
-                &transfer.sanad_id,
-                lock_result.block_height,
-                lock_tx_hash.as_bytes(),
-            )
+        let mut request = GetTransactionRequest::new(&digest);
+        request.read_mask = Some(prost_types::FieldMask {
+            paths: vec![
+                "digest".to_string(),
+                "checkpoint".to_string(),
+                "events".to_string(),
+                "effects".to_string(),
+            ],
+        });
+        let tx = (*client_guard)
+            .ledger_client()
+            .get_transaction(request)
             .await
-            .map_err(|e| {
-                AdapterError::Generic(format!("Failed to build inclusion proof: {}", e))
+            .map_err(|e| AdapterError::Generic(format!("Failed to get lock transaction: {}", e)))?
+            .into_inner()
+            .transaction
+            .ok_or_else(|| {
+                AdapterError::ProofVerificationFailed(
+                    "Lock transaction not found on-chain".to_string(),
+                )
             })?;
 
-        // Convert to ProofBundle - need to construct it properly
-        // For now, return a minimal ProofBundle with the inclusion proof
-        use csv_hash::seal::{CommitAnchor, SealPoint};
-        use csv_protocol::proof_taxonomy::FinalityProof;
+        let effects = tx.effects.as_ref().ok_or_else(|| {
+            AdapterError::ProofVerificationFailed(
+                "Lock transaction effects not returned by Sui RPC".to_string(),
+            )
+        })?;
+        crate::rpc_utils::ensure_execution_succeeded(effects)
+            .map_err(AdapterError::ProofVerificationFailed)?;
 
-        let seal_point = SealPoint::new(vec![0u8; 32], Some(0), None)
-            .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
-        // Runtime/domain binding convention: the commit anchor id carries the
-        // Sanad being transferred. The lock transaction hash remains the
-        // inclusion-proof anchor/commitment input below.
+        // Locate the CrossChainLock event this transfer's lock emitted. The
+        // event BCS payload starts with the length-prefixed sanad_id, which
+        // binds the evidence to this exact sanad.
+        let sanad_bytes = transfer.sanad_id.as_bytes();
+        let (event_index, lock_event_bcs) = tx
+            .events
+            .as_ref()
+            .map(|evs| evs.events.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .enumerate()
+            .find_map(|(i, ev)| {
+                let type_matches = ev
+                    .event_type
+                    .as_deref()
+                    .map(|t| t.ends_with("::csv_seal::CrossChainLock"))
+                    .unwrap_or(false);
+                let contents = ev.contents.as_ref().and_then(|b| b.value.as_ref())?;
+                let binds_sanad = contents.len() > 33
+                    && contents[0] == 32
+                    && &contents[1..33] == sanad_bytes;
+                (type_matches && binds_sanad).then(|| (i as u64, contents.to_vec()))
+            })
+            .ok_or_else(|| {
+                AdapterError::ProofVerificationFailed(format!(
+                    "Lock tx 0x{} emitted no CrossChainLock event for sanad 0x{}",
+                    hex::encode(lock_tx_digest),
+                    hex::encode(sanad_bytes)
+                ))
+            })?;
+
+        // The mutated Seal object is the on-chain seal this lock closed over.
+        let seal_object_id = effects
+            .changed_objects
+            .iter()
+            .find(|obj| {
+                obj.object_type
+                    .as_deref()
+                    .map(|t| t.ends_with("::csv_seal::Seal"))
+                    .unwrap_or(false)
+                    && obj.object_id.is_some()
+            })
+            .and_then(|obj| obj.object_id.as_deref())
+            .ok_or_else(|| {
+                AdapterError::ProofVerificationFailed(
+                    "Lock tx effects contain no csv_seal::Seal object".to_string(),
+                )
+            })?;
+        let seal_object_bytes = {
+            let hex_str = seal_object_id.trim_start_matches("0x");
+            let bytes = hex::decode(hex_str)
+                .map_err(|e| AdapterError::Generic(format!("Invalid seal object id: {}", e)))?;
+            if bytes.len() != 32 {
+                return Err(AdapterError::Generic(format!(
+                    "Seal object id must be 32 bytes, got {}",
+                    bytes.len()
+                )));
+            }
+            bytes
+        };
+
+        let tx_checkpoint = tx.checkpoint.ok_or_else(|| {
+            AdapterError::ProofVerificationFailed(
+                "Lock transaction has no checkpoint yet (not finalized)".to_string(),
+            )
+        })?;
+
+        // Real finality evidence: the certified checkpoint containing the tx,
+        // plus the depth of newer checkpoints on top of it.
+        let latest_checkpoint = (*client_guard)
+            .ledger_client()
+            .get_checkpoint(GetCheckpointRequest::default())
+            .await
+            .map_err(|e| AdapterError::Generic(format!("Failed to get latest checkpoint: {}", e)))?
+            .into_inner()
+            .checkpoint
+            .and_then(|c| c.sequence_number)
+            .ok_or_else(|| {
+                AdapterError::Generic("Sui RPC returned no latest checkpoint".to_string())
+            })?;
+        let confirmations = latest_checkpoint.saturating_sub(tx_checkpoint);
+        drop(client_guard);
+
+        // Deterministic encoding of the actual on-chain evidence this proof
+        // vouches for: tx digest, checkpoint, event index, and the raw
+        // CrossChainLock event payload.
+        let mut proof_bytes = Vec::new();
+        proof_bytes.extend_from_slice(&lock_tx_digest);
+        proof_bytes.extend_from_slice(&tx_checkpoint.to_le_bytes());
+        proof_bytes.extend_from_slice(&event_index.to_le_bytes());
+        proof_bytes.extend_from_slice(&lock_event_bcs);
+
+        let inclusion_proof = InclusionProof::new(
+            proof_bytes.clone(),
+            csv_hash::Hash::new(lock_tx_digest),
+            tx_checkpoint,
+            event_index,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid inclusion proof: {}", e)))?;
+
+        let finality_proof = FinalityProof::new(
+            tx_checkpoint.to_le_bytes().to_vec(),
+            confirmations,
+            true, // Sui checkpoints are certified: deterministic finality
+        )
+        .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
+
+        // Anchor bound to the Sanad ID being transferred; the verifier's
+        // binding rule requires anchor metadata == inclusion proof bytes.
         let commit_anchor = CommitAnchor::new(
             transfer.sanad_id.as_bytes().to_vec(),
-            lock_result.block_height,
-            vec![],
+            tx_checkpoint,
+            proof_bytes,
         )
         .map_err(|e| AdapterError::Generic(format!("Failed to create commit anchor: {}", e)))?;
 
-        // Create a canonical ProofLeafV1 for this transfer
-        use csv_protocol::proof_taxonomy::ProofLeafV1;
-        let proof_leaf = ProofLeafV1::new(
-            transfer.source_chain.clone(),
-            transfer.destination_chain.clone(),
-            transfer.sanad_id,
-            lock_tx_hash, // Use the lock transaction hash as commitment
+        let seal_point = SealPoint::new(seal_object_bytes, Some(event_index), None)
+            .map_err(|e| AdapterError::Generic(format!("Failed to create seal point: {}", e)))?;
+
+        // Real authorizing signature over the DAG root commitment, by the same
+        // Ed25519 key that signed the lock transaction. Format:
+        // [pk_len: u32 LE][public_key][signature].
+        let root_commitment = *transfer.sanad_id.as_bytes();
+        let (signature, public_key) =
+            self.backend.sign_ed25519(&root_commitment).ok_or_else(|| {
+                AdapterError::Generic(
+                    "Cannot build inclusion proof: no Sui signing key configured to authorize \
+                     the proof bundle"
+                        .to_string(),
+                )
+            })?;
+        let mut encoded_signature = Vec::with_capacity(4 + 32 + signature.len());
+        encoded_signature.extend_from_slice(&(public_key.len() as u32).to_le_bytes());
+        encoded_signature.extend_from_slice(&public_key);
+        encoded_signature.extend_from_slice(&signature);
+
+        // Single-node transition DAG rooted at the Sanad ID, carrying the lock
+        // event payload and bound to the lock tx digest.
+        let dag_node = csv_hash::dag::DAGNode::new(
+            csv_hash::Hash::new(root_commitment),
+            lock_event_bcs,
+            vec![encoded_signature.clone()],
+            vec![lock_tx_digest.to_vec()],
+            vec![],
         );
-        let leaf_hash = proof_leaf.hash().map_err(|e| {
-            AdapterError::Generic(format!("Failed to compute proof leaf hash: {}", e))
-        })?;
+        let transition_dag =
+            csv_hash::dag::DAGSegment::new(vec![dag_node], csv_hash::Hash::new(root_commitment));
 
-        // Create a minimal DAG with one node using the canonical proof leaf hash
-        let root_commitment = csv_hash::Hash::new([9u8; 32]);
-        let node = csv_hash::dag::DAGNode::new(leaf_hash, vec![], vec![], vec![], vec![]);
-
-        Ok(ProofBundle {
-            version: 1,
-            transition_dag: csv_hash::dag::DAGSegment::new(vec![node], root_commitment),
-            signatures: vec![],
-            signature_scheme: csv_protocol::signature::SignatureScheme::Ed25519,
-            seal_ref: seal_point,
-            anchor_ref: commit_anchor,
-            inclusion_proof: inclusion_proof,
-            finality_proof: FinalityProof::default(),
-        })
+        ProofBundle::with_signature_scheme(
+            csv_protocol::signature::SignatureScheme::Ed25519,
+            transition_dag,
+            vec![encoded_signature],
+            seal_point,
+            commit_anchor,
+            inclusion_proof,
+            finality_proof,
+        )
+        .map_err(|e| AdapterError::Generic(format!("Failed to build proof bundle: {}", e)))
     }
 
     async fn validate_source_proof(
@@ -328,11 +470,23 @@ impl ChainAdapter for SuiRuntimeAdapter {
         use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
         let request = GetObjectRequest::new(&object_id);
 
-        let object_response = (*client_guard)
-            .ledger_client()
-            .get_object(request)
-            .await
-            .map_err(|e| AdapterError::Generic(format!("Failed to query seal object: {}", e)))?;
+        let object_response = match (*client_guard).ledger_client().get_object(request).await {
+            Ok(response) => response,
+            // A missing object is a definite absence, not an RPC failure: the
+            // service reports it as gRPC NotFound rather than `object: None`.
+            Err(status)
+                if status.to_string().contains("not found")
+                    || status.to_string().contains("NotFound") =>
+            {
+                return Ok(SealRegistryStatus::Available);
+            }
+            Err(e) => {
+                return Err(AdapterError::Generic(format!(
+                    "Failed to query seal object: {}",
+                    e
+                )));
+            }
+        };
 
         let object = object_response.into_inner().object;
 

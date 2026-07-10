@@ -55,10 +55,15 @@ impl DerivationPath {
     }
 
     /// Create a BIP-86 derivation path (Bitcoin Taproot).
+    ///
+    /// Coin type is `1'` (testnet/signet), matching the testnet default used
+    /// throughout this crate (see `derive_address_from_pubkey`) and the
+    /// `csv-bitcoin` `SealWallet` path `m/86'/1'/account'/0/index` that funded
+    /// wallet addresses are derived from.
     pub fn new_bip86(account: u32, address_index: u32) -> Self {
         Self {
             purpose: 86 | 0x8000_0000, // BIP-86 hardened
-            coin_type: 0x8000_0000,    // Bitcoin hardened
+            coin_type: 1 | 0x8000_0000, // testnet coin type, hardened
             account: account | 0x8000_0000,
             change: 0,
             address_index,
@@ -190,15 +195,36 @@ fn derive_secp256k1(seed: &[u8; 64], path: &DerivationPath) -> Result<SecretKey,
         .ok()
         .ok_or_else(|| Bip44Error::DerivationFailed("Failed to create master key".to_string()))?;
 
-    // Build BIP-32 derivation path string from components
-    let path_str = format!(
-        "m/{}/{}/{}/{}/{}",
-        path.purpose & 0x7FFF_FFFF,
-        path.coin_type & 0x7FFF_FFFF,
-        path.account & 0x7FFF_FFFF,
-        path.change,
-        path.address_index
-    );
+    // Build BIP-32 derivation path string from components.
+    //
+    // BIP-86 (Bitcoin Taproot) paths use hardened purpose/coin/account per the
+    // spec — this MUST match `csv-bitcoin`'s `SealWallet` (`m/86'/1'/a'/0/i`),
+    // which derives the funded wallet addresses and the taproot spend keys.
+    // Deriving unhardened here produces a different key than the wallet
+    // address, so ownership-proof signing can never bind to the funded owner.
+    //
+    // BIP-44 paths keep the legacy unhardened format: existing funded
+    // Ethereum wallets were generated through this derivation, and changing
+    // it would silently re-point wallets at empty addresses.
+    let path_str = if path.purpose & 0x7FFF_FFFF == 86 {
+        format!(
+            "m/{}'/{}'/{}'/{}/{}",
+            path.purpose & 0x7FFF_FFFF,
+            path.coin_type & 0x7FFF_FFFF,
+            path.account & 0x7FFF_FFFF,
+            path.change,
+            path.address_index
+        )
+    } else {
+        format!(
+            "m/{}/{}/{}/{}/{}",
+            path.purpose & 0x7FFF_FFFF,
+            path.coin_type & 0x7FFF_FFFF,
+            path.account & 0x7FFF_FFFF,
+            path.change,
+            path.address_index
+        )
+    };
 
     let bip32_path = Bip32Path::from_str(&path_str)
         .map_err(|e| Bip44Error::DerivationFailed(format!("Invalid derivation path: {}", e)))?;

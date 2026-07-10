@@ -439,6 +439,8 @@ pub trait SealProtocol {
     async fn create_seal(
         &self,
         value: Option<u64>,
+        sanad_id: Hash,
+        commitment: Hash,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>>;
 
     /// Compute a domain-separated commitment hash from components.

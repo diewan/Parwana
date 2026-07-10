@@ -806,93 +806,15 @@ impl ChainProofProvider for AptosBackend {
 impl ChainSanadOps for AptosBackend {
     async fn create_sanad(
         &self,
-        owner: &str,
-        asset_class: &str,
-        asset_id: &str,
-        metadata: serde_json::Value,
+        _owner: &str,
+        _asset_class: &str,
+        _asset_id: &str,
+        _metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
-        use csv_protocol::chain_adapter_traits::SanadOperation;
-        use sha2::{Digest, Sha256};
-
-        let commitment_bytes: [u8; 32] = {
-            let mut hasher = Sha256::new();
-            hasher.update(b"commitment-");
-            hasher.update(owner.as_bytes());
-            hasher.update(asset_class.as_bytes());
-            hasher.update(asset_id.as_bytes());
-            if let Some(meta_str) = metadata.as_str() {
-                hasher.update(meta_str.as_bytes());
-            }
-            let now_nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            hasher.update(now_nanos.to_le_bytes());
-            hasher.finalize().into()
-        };
-        let commitment = Hash::new(commitment_bytes);
-
-        let seal =
-            self.seal_protocol.create_seal(None).await.map_err(|e| {
-                ChainOpError::TransactionError(format!("Failed to create seal: {}", e))
-            })?;
-
-        log::debug!(
-            "APTOS: Creating sanad with seal at {}",
-            format_address(seal.account_address)
-        );
-
-        #[cfg(feature = "rpc")]
-        {
-            let (_signed_tx, _event_data) = self
-                .seal_protocol
-                .build_and_sign_entry_function(&seal, commitment_bytes)
-                .await
-                .map_err(|e| {
-                    ChainOpError::TransactionError(format!("Failed to build transaction: {}", e))
-                })?;
-
-            log::debug!("APTOS: Built and signed create_sanad transaction");
-
-            let tx_hash = self
-                .rpc
-                .submit_signed_transaction(_signed_tx)
-                .await
-                .map_err(|e| {
-                    ChainOpError::TransactionError(format!("Failed to submit transaction: {}", e))
-                })?;
-
-            log::debug!(
-                "APTOS: Transaction submitted with hash: {}",
-                hex::encode(tx_hash)
-            );
-        }
-
-        #[cfg(not(feature = "rpc"))]
-        {
-            let _ = (&seal, commitment_bytes);
-            return Err(ChainOpError::FeatureNotEnabled(
-                "Sanad creation requires RPC feature for transaction signing. \
-                 Enable with --features rpc"
-                    .to_string(),
-            ));
-        }
-
-        Ok(SanadOperationResult {
-            sanad_id: SanadId(commitment),
-            operation: SanadOperation::Create,
-            transaction_hash: String::new(),
-            block_height: 0,
-            chain_id: "aptos".to_string(),
-            metadata: serde_json::to_vec(&serde_json::json!({
-                "owner": owner,
-                "asset_class": asset_class,
-                "asset_id": asset_id,
-                "seal_address": format_address(seal.account_address),
-                "seal_resource_type": seal.resource_type,
-            }))
-            .unwrap_or_default(),
-        })
+        Err(ChainOpError::CapabilityUnavailable(
+            "Legacy Aptos ChainSanadOps::create_sanad cannot receive the canonical owner-bound Sanad ID and is disabled. Use csv-runtime create_seal + publish_seal."
+                .to_string(),
+        ))
     }
 
     async fn consume_sanad(
@@ -1301,10 +1223,15 @@ impl ChainBackend for AptosBackend {
         true
     }
 
-    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(
+        &self,
+        value: Option<u64>,
+        sanad_id: Hash,
+        commitment: Hash,
+    ) -> ChainOpResult<SealPoint> {
         let aptos_seal = self
             .seal_protocol
-            .create_seal(value)
+            .create_seal(value, sanad_id, commitment)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 

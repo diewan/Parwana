@@ -1,7 +1,7 @@
 # Pattern: deterministic chain-bound state, never wall-clock
 
 **Resolved in:** `SUI-CREATE-SEAL-STATE-001`, `SUI-SANAD-STATE-001`
-**Reference file:** `csv-adapters/csv-sui/src/seal_protocol.rs` (`derive_seal_inputs`), `csv-adapters/csv-sui/src/ops.rs`
+**Reference file:** `csv-adapters/csv-sui/src/seal_protocol.rs` (`canonical_creation_fields`), `csv-adapters/csv-sui/src/ops.rs`
 **Applies to:** every adapter deriving seal state or reading canonical Sanad state
 
 ## What the gap was
@@ -17,16 +17,15 @@ Two distinct fabrications, both in the Sui adapter:
 
 ## Correct implementation shape
 
-**For derivation (creation):**
+**For canonical creation:**
 
-- The derivation must be a **pure function** of chain-bound inputs, so identical
-  logical inputs always yield identical `(sanad_id, state_root, commitment)`.
-- Inputs must be *reconstructable by a verifier who inspects the transaction*.
-  On Sui the strongest pre-execution anchor is the set of gas coins consumed:
-  `gas_ref_digest` commits to each coin's real `(object_id, version, digest)`.
-  Combine that with package id, sender, and a value-derived nonce.
-- The nonce must be derived (e.g. from `value`), never from a clock or RNG.
-- Domain-tag the hash (`b"csv.sui.state-root.v2"`).
+- The SDK derives the canonical owner-bound `sanad_id` and commitment before
+  any chain write. Every adapter receives both through `ChainBackend::create_seal`.
+- The on-chain `SanadCreated` footprint must carry those exact values. An
+  adapter-local wall-clock, RNG, gas-reference, or commitment-as-ID derivation
+  creates a second incompatible identity and is forbidden.
+- Transaction gas objects remain real chain inputs, but they must not replace
+  protocol identity fields.
 
 **For reading (canonical state):**
 
@@ -39,17 +38,12 @@ Two distinct fabrications, both in the Sui adapter:
 
 ```rust
 // csv-adapters/csv-sui/src/seal_protocol.rs
-/// - deterministic — identical inputs always yield identical outputs, so
-///   creating a seal twice for the same logical inputs never drifts (there is
-///   no `SystemTime::now()` entropy), and
-/// - chain-bound & reconstructable — a verifier who inspects the transaction
-///   sees exactly which on-chain objects these values commit to.
-fn derive_seal_inputs(
-    package_id_bytes: [u8; 32],
-    sender_bytes: &[u8],
-    nonce: u64,
-    gas_ref_digest: [u8; 32],
-) -> ([u8; 32], [u8; 32], [u8; 32]) { /* Blake2b, domain-tagged */ }
+fn canonical_creation_fields(
+    sanad_id: Hash,
+    commitment: Hash,
+) -> ([u8; 32], [u8; 32]) {
+    (*sanad_id.as_bytes(), *commitment.as_bytes())
+}
 
 // csv-adapters/csv-sui/src/ops.rs — reading fails closed
 let contents = object.contents.and_then(|bcs| bcs.value).ok_or_else(|| {
@@ -64,7 +58,7 @@ let contents = object.contents.and_then(|bcs| bcs.value).ok_or_else(|| {
 
 | Adapter | Required lookup | Edge cases |
 |---|---|---|
-| csv-sui | Gas coin refs pre-execution; `Seal` Move object contents post-execution | Checkpoint API is private in `sui-rpc`, hence the gas-ref anchor |
+| csv-sui | SDK canonical ID/commitment pre-execution; `Seal` Move object contents post-execution | Read created object id/version/digest from transaction effects |
 | csv-aptos | Ledger version + resource read under `@csv_seal` | Do not use ledger version bytes as a block hash |
 | csv-ethereum | Block hash / receipt root | Do not use `block.timestamp` as entropy |
 | csv-bitcoin | Outpoint `(txid, vout)` is already the natural chain-bound anchor | Display vs internal txid byte order |
@@ -79,23 +73,11 @@ let contents = object.contents.and_then(|bcs| bcs.value).ok_or_else(|| {
   substitution.
 - Negative/adversarial: missing/malformed object contents return
   `CapabilityUnavailable` rather than default state.
-- Regression/constitution: `derive_seal_inputs_is_deterministic` — calling the
-  derivation twice with identical inputs must produce identical output. This is
-  the test that pins the `SystemTime::now()` regression.
+- Regression/constitution: `creation_fields_are_the_sdk_canonical_values` and
+  Solana's `create_seal_abi_keeps_canonical_id_distinct_from_commitment` pin the
+  identity propagation and prevent commitment-as-ID regression.
 
 ## Gotchas
 
-**There is still a fallback worth revisiting.** In `create_seal`, when the
-created-object id cannot be extracted from transaction effects, the code falls
-back to using the transaction digest as the object id
-(`// Fallback: use transaction digest as object ID`). A tx digest is not an
-object id. It is chain-bound and deterministic, so it does not violate this
-pattern's letter, but a later reader may treat it as a real object id. If you
-touch this path, prefer failing closed.
-
-The determinism test is cheap and catches the entire class. When you port this
-pattern to another adapter, write the "same inputs twice, assert equal" test
-first — it fails immediately against any clock or RNG in the derivation.
-
-Domain-tag version bumps (`csv.sui.state-root.v2`) change every derived id. Do
-not bump the tag without treating it as a state-format migration.
+The old tx-digest-as-object-id fallback is removed. Creation now fails if the
+effects omit, ambiguously report, or malform the created Seal object reference.

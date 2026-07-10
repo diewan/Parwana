@@ -68,6 +68,18 @@ pub mod real_rpc_impl {
                 .map_err(|e| SolanaError::Rpc(format!("Failed to get multiple accounts: {}", e)))
         }
 
+        fn get_program_accounts(
+            &self,
+            program_id: &Pubkey,
+        ) -> SolanaResult<Vec<(Pubkey, Account)>> {
+            self.client.get_program_accounts(program_id).map_err(|e| {
+                SolanaError::Rpc(format!(
+                    "Failed to get accounts owned by program {}: {}",
+                    program_id, e
+                ))
+            })
+        }
+
         fn get_transaction(&self, signature: &Signature) -> SolanaResult<String> {
             // Use get_signature_status to check if transaction exists and return status info
             let status = self.client.get_signature_status(signature).map_err(|e| {

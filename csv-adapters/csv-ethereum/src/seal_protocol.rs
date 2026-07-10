@@ -507,6 +507,8 @@ impl SealProtocol for EthereumSealProtocol {
     async fn create_seal(
         &self,
         value: Option<u64>,
+        _sanad_id: Hash,
+        _commitment: Hash,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // Derive a seal from the CSVSeal contract address and a deterministic slot
         // The seal represents a nullifier slot in the contract's usedSeals mapping
@@ -697,14 +699,28 @@ mod tests {
     #[tokio::test]
     async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert_eq!(seal.slot_index, 0);
     }
 
     #[tokio::test]
     async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
 
         let first = adapter.enforce_seal(seal.clone()).await;
         if first.is_err() {
@@ -722,7 +738,14 @@ mod tests {
     #[tokio::test]
     async fn test_hash_commitment() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         let h = adapter.hash_commitment(
             Hash::new([1u8; 32]),
             Hash::new([2u8; 32]),
@@ -764,7 +787,14 @@ mod tests {
         let rpc: Box<dyn crate::rpc::EthereumRpc> = Box::new(mock_rpc);
         let adapter = EthereumSealProtocol::from_config(config, rpc, [0u8; 20]).unwrap();
 
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
 
         // Without RPC feature, this should fail closed
         // With RPC feature and proper mock setup, it should detect consumed seals
@@ -779,7 +809,14 @@ mod tests {
     #[tokio::test]
     async fn test_enforce_seal_fails_closed_without_rpc() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
 
         // Without RPC feature, enforce_seal should fail closed
         let result = adapter.enforce_seal(seal).await;

@@ -57,6 +57,16 @@ module csv_seal::csv_seal {
     /// Chain-ABI identity for Sui (RFC-0012 §6): keccak256("csv.chain.sui").
     const CHAIN_SUI_TAG: vector<u8> = b"csv.chain.sui";
 
+    /// BIP-340-style tag for the lock-event identity, matching the off-chain
+    /// `csv_tagged_hash("csv.mint.lock-event.v1", ..)` (tag prefix `urn:lnp-bp:csv:`).
+    const LOCK_EVENT_TAG: vector<u8> = b"urn:lnp-bp:csv:csv.mint.lock-event.v1";
+
+    /// A Sui lock has no transaction output index: the lock is the whole transaction,
+    /// identified by its digest. The runtime records `lock_output_index = 0` for every
+    /// non-Bitcoin source, and the lock-event preimage is `tx_digest || u32_le(index)`,
+    /// so the on-chain derivation appends four zero bytes.
+    const LOCK_OUTPUT_INDEX_LE: vector<u8> = x"00000000";
+
     // ==================== Errors ====================
 
     const EALREADY_MINTED: u64 = 1;
@@ -512,7 +522,7 @@ module csv_seal::csv_seal {
         owner: address,
         ctx: &mut tx_context::TxContext,
     ): Seal {
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
+        let timestamp_ms = tx_context::epoch_timestamp_ms(ctx);
         let seal = Seal {
             id: object::new(ctx),
             sanad_id,
@@ -596,7 +606,7 @@ module csv_seal::csv_seal {
         ctx: &mut tx_context::TxContext,
     ) {
         assert!(seal.state != SANAD_STATE_CONSUMED, ESEAL_ALREADY_CONSUMED);
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
+        let timestamp_ms = tx_context::epoch_timestamp_ms(ctx);
         seal.state = SANAD_STATE_CONSUMED;
         seal.consumed_at = timestamp_ms;
         seal.nullifier = nullifier;
@@ -610,17 +620,33 @@ module csv_seal::csv_seal {
     }
 
     /// Lock a Sanad for cross-chain transfer, emitting the canonical `CrossChainLock`.
+    ///
+    /// `lock_event_id` is NOT a caller argument: it is the identity of *this* lock
+    /// transaction (`tagged_hash(tx_digest || u32_le(0))`), so no caller could supply it
+    /// before the transaction exists. Deriving it here makes the emitted `CrossChainLock`
+    /// carry exactly the `lockEventId` the destination registry will later record as the
+    /// duplicate-source-lock key.
+    ///
+    /// `locked_at` comes from the shared `Clock`, the same time source as `mint_sanad`,
+    /// because `refund_sanad` gates on it.
     public fun lock_sanad(
         seal: &mut Seal,
         source_chain: vector<u8>,
         destination_chain: vector<u8>,
-        lock_event_id: vector<u8>,
+        clock: &Clock,
         ctx: &mut tx_context::TxContext,
     ) {
         assert!(seal.state != SANAD_STATE_CONSUMED, ESEAL_ALREADY_CONSUMED);
         assert!(seal.state != SANAD_STATE_LOCKED, EALREADY_LOCKED);
 
-        let timestamp_ms = tx_context::epoch(ctx) * 1000;
+        // A `&mut Seal` on an owned object can only be supplied by its owner, so the
+        // sender IS the current owner. Re-anchoring the field here keeps `seal.owner`
+        // (and therefore `refund_sanad`'s authorization check) correct even if the object
+        // reached this holder through a raw `public_transfer` rather than `transfer_sanad`.
+        seal.owner = tx_context::sender(ctx);
+
+        let timestamp_ms = clock::timestamp_ms(clock);
+        let lock_event_id = derive_lock_event_id(ctx);
         seal.state = SANAD_STATE_LOCKED;
         seal.locked_at = timestamp_ms;
         seal.source_chain = source_chain;
@@ -638,9 +664,12 @@ module csv_seal::csv_seal {
     }
 
     /// Refund a locked Sanad after the refund timeout elapses.
-    public fun refund_sanad(seal: &mut Seal, ctx: &mut tx_context::TxContext) {
+    ///
+    /// Both `now` and `seal.locked_at` are `Clock` milliseconds, so the comparison against
+    /// `REFUND_TIMEOUT_MS` measures real elapsed time.
+    public fun refund_sanad(seal: &mut Seal, clock: &Clock, ctx: &mut tx_context::TxContext) {
         assert!(seal.state == SANAD_STATE_LOCKED, ESANAD_NOT_FOUND);
-        let now = tx_context::epoch(ctx) * 1000;
+        let now = clock::timestamp_ms(clock);
         assert!(now >= seal.locked_at + REFUND_TIMEOUT_MS, ETIMEOUT_NOT_EXPIRED);
         assert!(seal.owner == tx_context::sender(ctx), ENOT_AUTHORIZED);
 
@@ -657,14 +686,20 @@ module csv_seal::csv_seal {
     }
 
     /// Transfer Sanad ownership (same chain).
+    ///
+    /// `seal.owner` moves with the object: leaving it behind would make `refund_sanad`
+    /// authorize the previous owner and make `CrossChainLock.owner` name the wrong party.
     public fun transfer_sanad(seal: Seal, to: address, ctx: &mut tx_context::TxContext) {
         assert!(seal.state != SANAD_STATE_CONSUMED, ESEAL_ALREADY_CONSUMED);
         assert!(seal.state != SANAD_STATE_LOCKED, EALREADY_LOCKED);
+        let mut seal = seal;
+        let from = seal.owner;
+        seal.owner = to;
         event::emit(SanadTransferred {
             sanad_id: seal.sanad_id,
-            from: seal.owner,
+            from,
             to,
-            timestamp_ms: tx_context::epoch(ctx) * 1000,
+            timestamp_ms: tx_context::epoch_timestamp_ms(ctx),
         });
         transfer::public_transfer(seal, to);
     }
@@ -679,7 +714,7 @@ module csv_seal::csv_seal {
             commitment,
             seal_id: object::uid_to_inner(&seal.id),
             owner: seal.owner,
-            timestamp_ms: tx_context::epoch(ctx) * 1000,
+            timestamp_ms: tx_context::epoch_timestamp_ms(ctx),
         });
     }
 
@@ -695,6 +730,29 @@ module csv_seal::csv_seal {
         seal.asset_id = asset_id;
         seal.metadata_hash = metadata_hash;
         seal.proof_system = proof_system;
+    }
+
+    // ==================== Lock-event identity ====================
+
+    /// The lock-event identity for an arbitrary source transaction digest.
+    ///
+    /// `tagged_hash(tag, data) = sha256(sha256(tag) || sha256(tag) || data)` over
+    /// `data = tx_digest || u32_le(output_index)`, reproducing the off-chain
+    /// `csv_tagged_hash("csv.mint.lock-event.v1", ..)` byte for byte. Exposed so operators
+    /// and the verifier can recompute the `lockEventId` an emitted `CrossChainLock` carries.
+    public fun lock_event_id_for_digest(tx_digest: vector<u8>): vector<u8> {
+        let tag_hash = std_hash::sha2_256(LOCK_EVENT_TAG);
+        let mut pre = vector::empty<u8>();
+        vector::append(&mut pre, tag_hash);
+        vector::append(&mut pre, tag_hash);
+        vector::append(&mut pre, tx_digest);
+        vector::append(&mut pre, LOCK_OUTPUT_INDEX_LE);
+        std_hash::sha2_256(pre)
+    }
+
+    /// The lock-event identity of the transaction currently executing.
+    fun derive_lock_event_id(ctx: &tx_context::TxContext): vector<u8> {
+        lock_event_id_for_digest(*tx_context::digest(ctx))
     }
 
     // ==================== Internal helpers ====================
@@ -769,6 +827,12 @@ module csv_seal::csv_seal {
     public fun commitment(seal: &Seal): vector<u8> { seal.commitment }
 
     public fun owner(seal: &Seal): address { seal.owner }
+
+    /// The `lockEventId` written by `lock_sanad` (empty until locked).
+    public fun seal_lock_event_id(seal: &Seal): vector<u8> { seal.lock_event_id }
+
+    /// The source chain identity written by `lock_sanad` (empty until locked).
+    public fun seal_source_chain(seal: &Seal): vector<u8> { seal.source_chain }
 
     public fun created_at(seal: &Seal): u64 { seal.created_at }
 

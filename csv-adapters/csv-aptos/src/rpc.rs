@@ -577,7 +577,12 @@ impl AptosTransactionSubmitter for MockAptosRpc {
                 .expect("mutex not poisoned")
                 .push(tx_bytes);
 
-            if let Some(payload) = signed_tx_json.get("payload") {
+            if let Some(payload) = signed_tx_json.get("payload")
+                && payload
+                    .get("function")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|function| function.ends_with("::consume_seal"))
+            {
                 if let Some(args) = payload.get("arguments").and_then(|a| a.as_array()) {
                     if !args.is_empty() {
                         let commit_str = args[0].as_str().ok_or_else(|| {
@@ -605,10 +610,18 @@ impl AptosTransactionSubmitter for MockAptosRpc {
                             })?
                         };
 
+                        if commitment.len() != 32 {
+                            return Err(Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("Commitment must be 32 bytes, got {}", commitment.len()),
+                            ))
+                                as Box<dyn std::error::Error + Send + Sync>);
+                        }
+
                         let mut event_data = vec![0u8; 96];
                         event_data[31] = 0x01;
                         event_data[32..64].copy_from_slice(&self.test_address);
-                        event_data[64..96].copy_from_slice(&commitment[..32.min(commitment.len())]);
+                        event_data[64..96].copy_from_slice(&commitment);
 
                         let mut events = self.next_tx_events.lock().expect("mutex not poisoned");
                         events.push(AptosEvent {

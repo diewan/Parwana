@@ -2820,10 +2820,15 @@ impl ChainBackend for BitcoinBackend {
         true
     }
 
-    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(
+        &self,
+        value: Option<u64>,
+        sanad_id: Hash,
+        commitment: Hash,
+    ) -> ChainOpResult<SealPoint> {
         let bitcoin_seal = self
             .seal_protocol
-            .create_seal(value)
+            .create_seal(value, sanad_id, commitment)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 

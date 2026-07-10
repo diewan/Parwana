@@ -1177,11 +1177,18 @@ impl SealProtocol for AptosSealProtocol {
     async fn create_seal(
         &self,
         value: Option<u64>,
+        _sanad_id: Hash,
+        _commitment: Hash,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // In Aptos, seals are resources owned by the signer's account
         // The seal address should be the signer's address, not a hash-derived address
         #[cfg(feature = "rpc")]
-        let addr = if let Some(ref signing_key) = self.signing_key {
+        let addr = {
+            let signing_key = self.signing_key.as_ref().ok_or_else(|| {
+                Box::new(ProtocolError::PublishFailed(
+                    "Aptos seal creation requires a configured signing key".to_string(),
+                )) as Box<dyn std::error::Error>
+            })?;
             // Derive the signer's address from the signing key
             use sha3::{Digest, Sha3_256};
             let public_key = signing_key.verifying_key().to_bytes();
@@ -1191,34 +1198,12 @@ impl SealProtocol for AptosSealProtocol {
             let mut sender_address = [0u8; 32];
             sender_address.copy_from_slice(&hash[..32]);
             sender_address
-        } else {
-            // Fallback to hash-derived address if no signing key (for testing)
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(b"aptos-seal");
-            if let Some(v) = value {
-                hasher.update(v.to_le_bytes());
-            }
-            let result = hasher.finalize();
-            let mut addr = [0u8; 32];
-            addr.copy_from_slice(&result);
-            addr
         };
 
         #[cfg(not(feature = "rpc"))]
-        let addr = {
-            // Fallback to hash-derived address if no signing key (for testing)
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(b"aptos-seal");
-            if let Some(v) = value {
-                hasher.update(v.to_le_bytes());
-            }
-            let result = hasher.finalize();
-            let mut addr = [0u8; 32];
-            addr.copy_from_slice(&result);
-            addr
-        };
+        let addr: [u8; 32] = return Err(Box::new(ProtocolError::NetworkError(
+            "Aptos seal creation requires the 'rpc' feature".to_string(),
+        )));
 
         // Generate a nonce for Aptos using timestamp (not using value parameter)
         // The value parameter is for Sanad content, not for the nonce
@@ -2151,20 +2136,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_seal() {
+    async fn test_create_seal_without_signer_fails_closed() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let result = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await;
         assert!(
-            seal.nonce > 0,
-            "nonce should be a positive timestamp, got {}",
-            seal.nonce
+            matches!(result, Err(ref error) if error.to_string().contains("requires a configured signing key")),
+            "missing signer must not produce a fabricated Aptos seal: {result:?}"
         );
     }
 
     #[tokio::test]
     async fn test_enforce_seal_replay() {
-        let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let adapter =
+            test_adapter().with_signing_key(ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]));
+        let seal = AptosSealPoint::new([0x44; 32], "CSVSeal::Seal".to_string(), 7);
         adapter.enforce_seal(seal.clone()).await.unwrap();
         assert!(adapter.enforce_seal(seal).await.is_err());
     }

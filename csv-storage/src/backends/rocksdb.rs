@@ -124,6 +124,17 @@ impl ReplayDatabase for RocksDbReplayDb {
     async fn consume_if_unconsumed(&self, id: &[u8]) -> Result<(), ReplayDbError> {
         match self.read_state(id)? {
             Some(ReplayEntryState::Consumed) => Ok(()),
+            // RolledBack means the previous attempt definitively did not
+            // complete (lock/mint failed and was rolled back). Re-arming the
+            // slot lets the transfer be retried; on-chain replay guards and
+            // idempotent adapter locks prevent duplicate effects.
+            Some(ReplayEntryState::RolledBack) => {
+                let val = Self::encode_state(ReplayEntryState::Pending);
+                self.db
+                    .put_cf(self.cf_replay()?, id, val)
+                    .map_err(|e| ReplayDbError::Storage(format!("RocksDB error: {e}")))?;
+                Ok(())
+            }
             Some(_) => Err(ReplayDbError::AlreadyExists),
             None => self.cas_insert(id, ReplayEntryState::Pending),
         }

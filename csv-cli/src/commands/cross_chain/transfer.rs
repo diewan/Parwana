@@ -1426,7 +1426,7 @@ fn resolve_destination_verifier_secrets(chain: &str) -> (String, Vec<String>) {
 
 async fn ensure_destination_attestor_ready(to: &Chain, config: &Config) -> Result<()> {
     let chain = to.as_str();
-    if !matches!(chain, "sui" | "aptos" | "solana") {
+    if !matches!(chain, "sui" | "aptos" | "solana" | "ethereum") {
         return Ok(());
     }
 
@@ -1779,9 +1779,15 @@ pub async fn cmd_resume(
     } else if let Some(ctx) = recover_resume_context_from_journal(&transfer_id, config)? {
         output::info("Transfer not found in local display cache; recovering from runtime journal");
         ctx
+    } else if let Some(ctx) = recover_resume_context_from_replay_db(&transfer_id, config).await? {
+        output::info(
+            "Transfer not found in local display cache or journal context; \
+             recovering from runtime replay registry",
+        );
+        ctx
     } else {
         return Err(anyhow::anyhow!(
-            "Transfer {} not found in local state or runtime journal",
+            "Transfer {} not found in local state, runtime journal, or replay registry",
             transfer_id
         ));
     };
@@ -1947,6 +1953,44 @@ async fn drive(
             }
         }
     }
+}
+
+/// Recover a resume context from the runtime replay registry (transfer
+/// entries keyed by sanad id). This covers transfers whose journal entries
+/// predate transfer-context journaling: the registry entry written after a
+/// successful lock carries the chains and sanad id needed to resume.
+async fn recover_resume_context_from_replay_db(
+    transfer_id: &str,
+    config: &Config,
+) -> Result<Option<ResumeContext>> {
+    let replay_path = runtime_journal_path(config)
+        .parent()
+        .map(|p| p.join("replay"))
+        .ok_or_else(|| anyhow::anyhow!("Cannot derive replay registry path"))?;
+    if !replay_path.exists() {
+        return Ok(None);
+    }
+
+    use csv_runtime::replay_database::ReplayDatabase;
+    let db = csv_runtime::replay_database::RocksDbReplayDb::open(&replay_path.to_string_lossy())
+        .map_err(|e| anyhow::anyhow!("Failed to open replay registry: {}", e))?;
+    let transfers = db
+        .load_all_transfers()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read replay registry: {}", e))?;
+
+    let Some(entry) = transfers.iter().find(|t| t.transfer_id == transfer_id) else {
+        return Ok(None);
+    };
+
+    let from = crate::config::parse_chain(entry.source_chain.as_str())
+        .map_err(|e| anyhow::anyhow!("Invalid source chain in replay registry: {}", e))?;
+    let to = crate::config::parse_chain(entry.destination_chain.as_str())
+        .map_err(|e| anyhow::anyhow!("Invalid destination chain in replay registry: {}", e))?;
+    let sanad_id = SanadId::parse_hex(&hex::encode(entry.sanad_id.as_bytes()))
+        .map_err(|e| anyhow::anyhow!("Invalid Sanad ID in replay registry: {}", e))?;
+
+    Ok(Some(ResumeContext { from, to, sanad_id }))
 }
 
 fn recover_resume_context_from_journal(

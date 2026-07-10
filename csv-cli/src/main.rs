@@ -218,8 +218,27 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = Config::load(cli.config.as_deref())?;
-    let passphrase = UnifiedStateManager::prompt_passphrase()?;
-    let mut state = UnifiedStateManager::load(&passphrase)?;
+    // Commands that do not read wallet/display state must remain non-interactive
+    // and must not rewrite the encrypted state file. This is important for
+    // monitoring/automation and avoids turning a read-only chain query into an
+    // unrelated passphrase/state-write failure.
+    let needs_state = matches!(
+        &cli.command,
+        Commands::Wallet { .. }
+            | Commands::Sanad { .. }
+            | Commands::Proof { .. }
+            | Commands::CrossChain { .. }
+            | Commands::Contract { .. }
+            | Commands::Seal { .. }
+            | Commands::Test { .. }
+            | Commands::Validate { .. }
+    );
+    let mut state = if needs_state {
+        let passphrase = UnifiedStateManager::prompt_passphrase()?;
+        Some(UnifiedStateManager::load(&passphrase)?)
+    } else {
+        None
+    };
 
     // Dispatch commands
     let result = match cli.command {
@@ -227,18 +246,41 @@ async fn main() -> anyhow::Result<()> {
         Commands::ChainManagement { action } => chain_management::ChainCommands::execute(&action)
             .await
             .map_err(|e| anyhow::anyhow!("{:?}", e)),
-        Commands::Wallet { action } => wallet::execute(action, &config, &mut state).await,
+        Commands::Wallet { action } => {
+            wallet::execute(action, &config, required_state_mut(&mut state)?).await
+        }
         Commands::Sanad { action } => {
-            sanads::execute(action, &config, &mut state, cli.canonical).await
+            sanads::execute(
+                action,
+                &config,
+                required_state_mut(&mut state)?,
+                cli.canonical,
+            )
+            .await
         }
         Commands::Proof { action } => {
-            proofs::execute(action, &config, &state, cli.canonical, cli.proof_tree).await
+            proofs::execute(
+                action,
+                &config,
+                required_state(&state)?,
+                cli.canonical,
+                cli.proof_tree,
+            )
+            .await
         }
-        Commands::CrossChain { action } => cross_chain::execute(action, &config, &mut state).await,
-        Commands::Contract { action } => contracts::execute(action, &config, &mut state),
-        Commands::Seal { action } => seals::execute(action, &config, &mut state).await,
-        Commands::Test { action } => tests::execute(action, &config, &state),
-        Commands::Validate { action } => validate::execute(action, &config, &state),
+        Commands::CrossChain { action } => {
+            cross_chain::execute(action, &config, required_state_mut(&mut state)?).await
+        }
+        Commands::Contract { action } => {
+            contracts::execute(action, &config, required_state_mut(&mut state)?)
+        }
+        Commands::Seal { action } => {
+            seals::execute(action, &config, required_state_mut(&mut state)?).await
+        }
+        Commands::Test { action } => tests::execute(action, &config, required_state(&state)?),
+        Commands::Validate { action } => {
+            validate::execute(action, &config, required_state(&state)?)
+        }
         Commands::Inspect { action } => commands::inspect::execute(action),
         Commands::Schema { action } => commands::schema_cmd::execute(action),
         Commands::Content { action } => commands::content::execute(action, &config),
@@ -246,8 +288,23 @@ async fn main() -> anyhow::Result<()> {
         Commands::Trust { action } => commands::trust::execute(action, &config),
     };
 
-    // Save state
-    state.save()?;
+    if let Some(state) = state {
+        state.save()?;
+    }
 
     result
+}
+
+fn required_state(state: &Option<UnifiedStateManager>) -> anyhow::Result<&UnifiedStateManager> {
+    state
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("internal error: command requires CLI state"))
+}
+
+fn required_state_mut(
+    state: &mut Option<UnifiedStateManager>,
+) -> anyhow::Result<&mut UnifiedStateManager> {
+    state
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("internal error: command requires CLI state"))
 }

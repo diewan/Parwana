@@ -8,7 +8,7 @@ crate-type = ["cdylib", "lib"]
 name = "csv_seal"
 
 [features]
-default = ["idl-build"]
+default = []
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
@@ -17,7 +17,9 @@ idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
 anchor-lang = "=1.0.2"
-solana-program = "1.18"
+solana-keccak-hasher = "3.1"
+solana-secp256k1-recover = "3.1"
+solana-sha256-hasher = "3.1"
 
 [dev-dependencies]
 libsecp256k1 = "0.6"

@@ -45,6 +45,19 @@ fn parse_object_id(s: &str) -> Result<[u8; 32], String> {
     Ok(id)
 }
 
+/// Contract-layer chain identity (RFC-0012 §6): `keccak256("csv.chain.<name>")`.
+///
+/// The value the Move `csv_seal` module stores and the §9.2 mint attestation binds. The
+/// runtime derives it the same way; the lock must record the identity, not the CLI's
+/// human-readable chain name.
+fn contract_chain_id(name: &str) -> [u8; 32] {
+    use csv_protocol::cross_chain::CrossChainHashAlgorithm;
+    let tag = format!("csv.chain.{}", name);
+    *CrossChainHashAlgorithm::Keccak256
+        .hash_bytes(tag.as_bytes())
+        .as_bytes()
+}
+
 /// Parse a Sui digest string (hex).
 fn parse_digest(s: &str) -> Result<[u8; 32], String> {
     let hex_str = s.trim_start_matches("0x");
@@ -58,27 +71,37 @@ fn parse_digest(s: &str) -> Result<[u8; 32], String> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SuiSealStateView {
-    sanad_id: Vec<u8>,
-    state: u8,
-    owner: [u8; 32],
-    commitment: Hash,
+pub(crate) struct SuiSealStateView {
+    pub(crate) sanad_id: Vec<u8>,
+    pub(crate) state: u8,
+    pub(crate) owner: [u8; 32],
+    pub(crate) commitment: Hash,
     /// Nullifier bytes as stored on-chain (empty when not yet registered).
-    nullifier: Vec<u8>,
-    created_at: u64,
-    locked_at: u64,
-    consumed_at: u64,
-    minted_at: u64,
-    refunded_at: u64,
+    pub(crate) nullifier: Vec<u8>,
+    pub(crate) created_at: u64,
+    pub(crate) locked_at: u64,
+    pub(crate) consumed_at: u64,
+    pub(crate) minted_at: u64,
+    pub(crate) refunded_at: u64,
 }
 
 impl SuiSealStateView {
-    fn from_move_contents(contents: &[u8]) -> Result<Self, String> {
+    pub(crate) fn from_move_contents(contents: &[u8]) -> Result<Self, String> {
         let mut cursor = BcsCursor::new(contents);
 
         cursor.read_array::<32>("id")?;
         let sanad_id = cursor.read_vec("sanad_id")?.to_vec();
-        let commitment = Hash::new(cursor.read_array::<32>("commitment")?);
+        // `commitment` is a Move `vector<u8>`, so BCS length-prefixes it. Reading it as a
+        // fixed 32-byte array consumes the length byte plus 31 payload bytes and shifts
+        // every field after it.
+        let commitment_bytes = cursor.read_vec("commitment")?;
+        let commitment: [u8; 32] = commitment_bytes.try_into().map_err(|_| {
+            format!(
+                "commitment must be 32 bytes, got {}",
+                commitment_bytes.len()
+            )
+        })?;
+        let commitment = Hash::new(commitment);
         let state = cursor.read_u8("state")?;
         let owner = cursor.read_array::<32>("owner")?;
         cursor.read_vec("source_chain")?;
@@ -332,6 +355,156 @@ impl SuiBackend {
     /// Get the Sui node client (for use by runtime adapter)
     pub fn node(&self) -> &Arc<SuiNode> {
         &self.node
+    }
+
+    /// Sign `message` with the adapter's Ed25519 signing key, returning the
+    /// 64-byte signature and the 32-byte public key. `None` when no signing
+    /// key is configured — callers must fail closed rather than fabricate a
+    /// signature.
+    pub fn sign_ed25519(&self, message: &[u8]) -> Option<(Vec<u8>, [u8; 32])> {
+        use ed25519_dalek::Signer;
+        let key = self.signing_key.as_ref()?;
+        let signature = key.sign(message).to_bytes().to_vec();
+        Some((signature, key.verifying_key().to_bytes()))
+    }
+
+    /// Timeout applied to each Sui gRPC call on a transaction-submitting path.
+    #[cfg(feature = "rpc")]
+    fn rpc_timeout_ms(&self) -> u64 {
+        self.config.transaction.confirmation_timeout_ms
+    }
+
+    /// Resolve the on-chain `Seal` object that carries `sanad_id`.
+    ///
+    /// A Sanad ID is a protocol identifier, not a Sui object ID: the `Seal` object gets a
+    /// fresh UID when it is created, and nothing on chain maps one to the other. The owner
+    /// is the only party who can spend the object, so we enumerate the sender's `Seal`
+    /// objects and match on the decoded `sanad_id` field.
+    ///
+    /// Returns the full owned-object reference — id, version, and content digest — which a
+    /// Move call must pin exactly. Fails closed when no seal matches, and when more than
+    /// one does (two objects claiming one sanad is a state corruption we must not guess at).
+    #[cfg(feature = "rpc")]
+    async fn resolve_seal_object(
+        &self,
+        sanad_id: &SanadId,
+        owner: &sui_sdk_types::Address,
+    ) -> ChainOpResult<sui_transaction_builder::ObjectInput> {
+        use futures::StreamExt;
+        use sui_rpc::proto::sui::rpc::v2::ListOwnedObjectsRequest;
+
+        let package_id_str = self
+            .config
+            .seal_contract
+            .package_id
+            .as_ref()
+            .ok_or_else(|| {
+                ChainOpError::CapabilityUnavailable(
+                    "Package ID not configured. Deploy the CSV contract first.".to_string(),
+                )
+            })?;
+        let seal_type = format!(
+            "{}::{}::Seal",
+            package_id_str, self.config.seal_contract.module_name
+        );
+
+        let mut request = ListOwnedObjectsRequest::default();
+        request.owner = Some(owner.to_string());
+        request.page_size = Some(50);
+        request.object_type = Some(seal_type.clone());
+        request.read_mask = Some(prost_types::FieldMask {
+            paths: vec![
+                "object_id".to_string(),
+                "version".to_string(),
+                "digest".to_string(),
+                "contents".to_string(),
+            ],
+        });
+
+        let client = self.node.client();
+        let client_guard = client.lock().await;
+        let stream = (*client_guard).list_owned_objects(request);
+        let mut stream = std::pin::pin!(stream);
+
+        let mut matches: Vec<sui_transaction_builder::ObjectInput> = Vec::new();
+        let mut scanned = 0usize;
+        let page_timeout = std::time::Duration::from_millis(self.rpc_timeout_ms());
+        loop {
+            let next = tokio::time::timeout(page_timeout, stream.next())
+                .await
+                .map_err(|_| {
+                    ChainOpError::RpcError(format!(
+                        "ListOwnedObjects(Seal) timed out after {}ms (no response from the Sui node)",
+                        self.rpc_timeout_ms()
+                    ))
+                })?;
+
+            let Some(object) = next else { break };
+            let object = object.map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to read Seal object: {}", e))
+            })?;
+            scanned += 1;
+
+            // Silently skipping a seal we could not decode would report "no such sanad" for a
+            // sanad that is actually there.
+            let contents = object
+                .contents
+                .as_ref()
+                .and_then(|bcs| bcs.value.as_ref())
+                .ok_or_else(|| {
+                    ChainOpError::RpcError(
+                        "Sui RPC returned a Seal object without contents; cannot match sanad_id"
+                            .to_string(),
+                    )
+                })?;
+            let view = SuiSealStateView::from_move_contents(contents.as_ref()).map_err(|e| {
+                ChainOpError::RpcError(format!("Failed to decode Sui Seal object: {}", e))
+            })?;
+            if view.sanad_id.as_slice() != sanad_id.as_bytes().as_slice() {
+                continue;
+            }
+
+            let object_id = object.object_id.as_ref().ok_or_else(|| {
+                ChainOpError::RpcError("Seal object has no object_id".to_string())
+            })?;
+            let id_bytes = parse_object_id(object_id)
+                .map_err(|e| ChainOpError::RpcError(format!("Invalid Seal object ID: {}", e)))?;
+            let address = sui_sdk_types::Address::from_bytes(id_bytes).map_err(|e| {
+                ChainOpError::RpcError(format!("Invalid Seal object address: {}", e))
+            })?;
+            let version = object
+                .version
+                .ok_or_else(|| ChainOpError::RpcError("Seal object has no version".to_string()))?;
+            let digest_str = object
+                .digest
+                .as_ref()
+                .ok_or_else(|| ChainOpError::RpcError("Seal object has no digest".to_string()))?;
+            let digest = sui_sdk_types::Digest::from_base58(digest_str).map_err(|e| {
+                ChainOpError::RpcError(format!("Invalid Seal object digest: {}", e))
+            })?;
+
+            matches.push(sui_transaction_builder::ObjectInput::owned(
+                address, version, digest,
+            ));
+        }
+        drop(client_guard);
+
+        match matches.len() {
+            1 => Ok(matches.remove(0)),
+            0 => Err(ChainOpError::InvalidInput(format!(
+                "No {} object holding Sanad 0x{} is owned by {} (scanned {} seals)",
+                seal_type,
+                hex::encode(sanad_id.as_bytes()),
+                owner,
+                scanned
+            ))),
+            n => Err(ChainOpError::RpcError(format!(
+                "{} distinct Seal objects owned by {} claim Sanad 0x{}; refusing to guess",
+                n,
+                owner,
+                hex::encode(sanad_id.as_bytes())
+            ))),
+        }
     }
 
     /// Create from SuiSealProtocol
@@ -1310,120 +1483,25 @@ impl ChainProofProvider for SuiBackend {
 
 #[async_trait]
 impl ChainSanadOps for SuiBackend {
+    /// Creating a source-side Sanad on Sui goes through `SuiSealProtocol::create_seal`,
+    /// which calls `csv_seal::create_seal` and captures the created `Seal` object's
+    /// reference. This trait method has no way to return that reference, and the module it
+    /// used to call (`csv_sanad::create`) does not exist in the deployed package — it built
+    /// a transaction it never submitted and returned a locally hashed digest naming no real
+    /// transaction. Fail closed rather than report a Sanad that was never created.
     async fn create_sanad(
         &self,
-        owner: &str,
-        asset_class: &str,
-        asset_id: &str,
+        _owner: &str,
+        _asset_class: &str,
+        _asset_id: &str,
         _metadata: serde_json::Value,
     ) -> ChainOpResult<SanadOperationResult> {
-        use ed25519_dalek::Signer;
-        use sui_sdk_types::{Address, Identifier};
-        use sui_transaction_builder::TransactionBuilder;
-
-        let signing_key = self.signing_key.as_ref().ok_or_else(|| {
-            ChainOpError::CapabilityUnavailable(
-                "Signing key not set. Use with_signing_key() or with_key() to set a signing key."
-                    .to_string(),
-            )
-        })?;
-
-        // Derive the sender address from the signing key
-        let public_key = signing_key.verifying_key();
-        let pubkey_bytes = public_key.as_bytes();
-
-        // Sui address is derived from public key using Blake2b with 0x00 prefix
-        use blake2::Blake2b;
-        let mut hasher = Blake2b::new();
-        hasher.update([0x00]); // Sui address prefix
-        hasher.update(pubkey_bytes);
-        let hash: [u8; 32] = hasher.finalize().into();
-        let sender_address = Address::from_bytes(&hash)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
-
-        // Get the package ID from config (if available)
-        let package_id_str = self
-            .config
-            .seal_contract
-            .package_id
-            .as_ref()
-            .ok_or_else(|| {
-                ChainOpError::CapabilityUnavailable(
-                    "Package ID not configured. Deploy the CSV contract first.".to_string(),
-                )
-            })?;
-        let package_id_bytes = parse_object_id(package_id_str)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
-        let package_id = Address::from_bytes(&package_id_bytes)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
-
-        // Fetch gas objects for the sender address
-        let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch gas objects: {}", e)))?;
-
-        let client = self.node.client();
-        let _client_guard = client.lock().await;
-
-        // Build the transaction using sui-transaction-builder
-        let mut tx_builder = TransactionBuilder::new();
-        tx_builder.set_sender(sender_address);
-        tx_builder.set_gas_budget(10000000);
-        tx_builder.add_gas_objects(gas_objects);
-
-        // Add the MoveCall to create the sanad
-        let function = sui_transaction_builder::Function::new(
-            package_id,
-            Identifier::new("csv_sanad").unwrap(),
-            Identifier::new("create").unwrap(),
-        );
-        let owner_arg = tx_builder.pure(&owner.to_string());
-        let asset_class_arg = tx_builder.pure(&asset_class.to_string());
-        let asset_id_arg = tx_builder.pure(&asset_id.to_string());
-        tx_builder.move_call(function, vec![owner_arg, asset_class_arg, asset_id_arg]);
-
-        // Build the transaction data
-        let tx_data = tx_builder
-            .try_build()
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to build transaction: {}", e)))?;
-
-        // Use proper Sui signing digest with intent scope
-        let signing_digest = tx_data.signing_digest();
-        let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
-
-        // Serialize transaction to BCS for execution
-        let tx_bytes = bcs::to_bytes(&tx_data).map_err(|e| {
-            ChainOpError::RpcError(format!("Failed to serialize transaction: {}", e))
-        })?;
-
-        // Execute the transaction via sui-rpc
-        let client = self.node.client();
-        let _client_guard = client.lock().await;
-
-        // Use a simplified execution approach since the proto API is complex
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(&tx_bytes);
-        hasher.update(&sig_bytes);
-        let result = hasher.finalize();
-        let mut digest_array = [0u8; 32];
-        digest_array.copy_from_slice(&result[..32]);
-
-        // Extract sanad_id from transaction effects - simplified for now
-        let sanad_id = SanadId::new([0u8; 32]);
-
-        Ok(SanadOperationResult {
-            sanad_id,
-            operation: csv_protocol::chain_adapter_traits::SanadOperation::Create,
-            transaction_hash: hex::encode(digest_array),
-            block_height: 0,
-            chain_id: self.config.chain_id().to_string(),
-            metadata: serde_json::to_vec(&serde_json::json!({
-                "owner": owner,
-                "asset_class": asset_class,
-                "asset_id": asset_id,
-            }))
-            .unwrap_or_default(),
-        })
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sui Sanad creation is not available through ChainSanadOps; use \
+             SuiSealProtocol::create_seal, which submits csv_seal::create_seal and returns \
+             the created Seal object reference"
+                .to_string(),
+        ))
     }
 
     async fn consume_sanad(
@@ -1569,6 +1647,10 @@ impl ChainSanadOps for SuiBackend {
         let sender_address = Address::from_bytes(&hash)
             .map_err(|e| ChainOpError::InvalidInput(format!("Failed to derive address: {}", e)))?;
 
+        // Resolve the real Seal object before anything else: a Sanad ID is not a Sui object
+        // ID, and a Move call must pin the object's exact (id, version, digest).
+        let seal_object = self.resolve_seal_object(sanad_id, &sender_address).await?;
+
         // Fetch gas objects for the sender address
         let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
             .await
@@ -1589,6 +1671,8 @@ impl ChainSanadOps for SuiBackend {
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
         let package_id = Address::from_bytes(&package_id_bytes)
             .map_err(|e| ChainOpError::InvalidInput(format!("Invalid package ID: {}", e)))?;
+        let clock_address = Address::from_bytes(crate::rpc_utils::CLOCK_OBJECT_ID)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Clock object id: {}", e)))?;
 
         let mut tx_builder = TransactionBuilder::new();
         tx_builder.set_sender(sender_address);
@@ -1596,11 +1680,10 @@ impl ChainSanadOps for SuiBackend {
         tx_builder.set_gas_price(self.config.transaction.max_gas_price);
         tx_builder.add_gas_objects(gas_objects);
 
-        let sanad_id_bytes = sanad_id.as_bytes();
-        let sanad_object_id = Address::from_bytes(sanad_id_bytes)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid sanad ID: {}", e)))?;
-
-        // Add MoveCall for lock_sanad function
+        // Argument order MUST match the Move signature:
+        // `lock_sanad(seal, source_chain, destination_chain, clock, ctx)`.
+        // `lock_event_id` is NOT passed: it is the identity of this very transaction, and
+        // the contract derives it on-chain from its own digest.
         let function = sui_transaction_builder::Function::new(
             package_id,
             Identifier::new("csv_seal")
@@ -1608,14 +1691,20 @@ impl ChainSanadOps for SuiBackend {
             Identifier::new("lock_sanad")
                 .map_err(|e| ChainOpError::InvalidInput(format!("Invalid function name: {}", e)))?,
         );
-        let seal_arg = tx_builder.object(sui_transaction_builder::ObjectInput::owned(
-            sanad_object_id,
-            0,
-            sui_sdk_types::Digest::from_bytes(&[0u8; 32]).unwrap(),
+        let seal_arg = tx_builder.object(seal_object);
+        // Contract-layer chain identities (RFC-0012 §6), the same form `mint_sanad` binds
+        // into the §9.2 attestation — not the runtime's human-readable chain names.
+        let source_chain_arg = tx_builder.pure(&contract_chain_id("sui").to_vec());
+        let dest_chain_arg = tx_builder.pure(&contract_chain_id(destination_chain).to_vec());
+        let clock_arg = tx_builder.object(sui_transaction_builder::ObjectInput::shared(
+            clock_address,
+            crate::rpc_utils::CLOCK_INITIAL_SHARED_VERSION,
+            false, // read-only: the lock only reads the timestamp
         ));
-        let dest_chain_bytes = destination_chain.as_bytes().to_vec();
-        let dest_chain_arg = tx_builder.pure(&dest_chain_bytes);
-        tx_builder.move_call(function, vec![seal_arg, dest_chain_arg]);
+        tx_builder.move_call(
+            function,
+            vec![seal_arg, source_chain_arg, dest_chain_arg, clock_arg],
+        );
 
         let tx_data = tx_builder
             .try_build()
@@ -1654,15 +1743,22 @@ impl ChainSanadOps for SuiBackend {
         let mut user_signature = UserSignature::default();
         user_signature.bcs = Some(sig_bcs.into());
 
+        // Without the read mask the service returns only
+        // `effects.status,checkpoint`, leaving `digest` absent.
         let mut execute_request = ExecuteTransactionRequest::default();
         execute_request.transaction = Some(sui_transaction);
         execute_request.signatures = vec![user_signature];
+        execute_request.read_mask = Some(crate::rpc_utils::execution_read_mask());
 
-        let execution_response = (*client_guard)
-            .execution_client()
-            .execute_transaction(execute_request)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to execute transaction: {}", e)))?;
+        let execution_response = crate::rpc_utils::with_rpc_timeout(
+            self.rpc_timeout_ms(),
+            "ExecuteTransaction(lock_sanad)",
+            (*client_guard)
+                .execution_client()
+                .execute_transaction(execute_request),
+        )
+        .await
+        .map_err(ChainOpError::RpcError)?;
 
         let executed_tx = execution_response
             .into_inner()
@@ -1692,28 +1788,30 @@ impl ChainSanadOps for SuiBackend {
             }
         }
 
-        // Extract the transaction digest from the response if available
-        let tx_digest_str = if let Some(digest) = executed_tx.digest {
-            digest
-        } else {
-            use blake2::Blake2b;
-            let mut hasher = Blake2b::new();
-            hasher.update(&tx_bytes);
-            let digest: [u8; 32] = hasher.finalize().into();
-            hex::encode(digest)
-        };
-        let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
-            .map_err(|e| ChainOpError::RpcError(format!("Invalid digest hex: {}", e)))?;
-        let mut digest_array = [0u8; 32];
-        digest_array.copy_from_slice(&digest_bytes[..32]);
+        // The digest identifies the real on-chain transaction; a locally
+        // computed hash would name a transaction that does not exist.
+        let tx_digest_str = executed_tx.digest.ok_or_else(|| {
+            ChainOpError::RpcError(
+                "Sui lock response did not include a transaction digest".to_string(),
+            )
+        })?;
+        let digest_array = crate::rpc_utils::tx_digest_to_bytes(&tx_digest_str)
+            .map_err(|e| ChainOpError::RpcError(format!("Invalid transaction digest: {}", e)))?;
 
         // Extract the checkpoint from the transaction
         let checkpoint = executed_tx.checkpoint.unwrap_or(0);
 
+        // The identity `csv_seal::lock_sanad` derived on-chain from this transaction's own
+        // digest, and the value the runtime will independently derive from `lock_tx_hash`.
+        // Reported so an operator can correlate the emitted `CrossChainLock` with the
+        // `lockEventId` the destination registry records.
+        let lock_event_id = crate::rpc_utils::lock_event_id(&digest_array, 0);
+
         log::info!(
-            "SUI: Transaction executed successfully (digest: 0x{}, checkpoint: {})",
+            "SUI: Transaction executed successfully (digest: 0x{}, checkpoint: {}, lock_event_id: 0x{})",
             hex::encode(digest_array),
-            checkpoint
+            checkpoint,
+            hex::encode(lock_event_id)
         );
 
         Ok(SanadOperationResult {
@@ -1722,7 +1820,10 @@ impl ChainSanadOps for SuiBackend {
             transaction_hash: hex::encode(digest_array),
             block_height: checkpoint,
             chain_id: self.config.chain_id().to_string(),
-            metadata: serde_json::to_vec(&serde_json::json!({})).unwrap_or_default(),
+            metadata: serde_json::to_vec(&serde_json::json!({
+                "lock_event_id": hex::encode(lock_event_id),
+            }))
+            .unwrap_or_default(),
         })
     }
 
@@ -1988,10 +2089,15 @@ impl ChainBackend for SuiBackend {
         true
     }
 
-    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint> {
+    async fn create_seal(
+        &self,
+        value: Option<u64>,
+        sanad_id: Hash,
+        commitment: Hash,
+    ) -> ChainOpResult<SealPoint> {
         let sui_seal = self
             .seal_protocol
-            .create_seal(value)
+            .create_seal(value, sanad_id, commitment)
             .await
             .map_err(|e| ChainOpError::Unknown(format!("Seal creation failed: {}", e)))?;
 
@@ -2168,6 +2274,22 @@ impl From<SuiError> for ChainOpError {
 mod tests {
     use super::*;
 
+    /// The lock records the same contract-layer chain identities `mint_sanad` binds into
+    /// the §9.2 attestation, so the two must agree with the runtime's RFC-0012 §6 vectors.
+    #[test]
+    fn lock_chain_identities_match_rfc0012_vectors() {
+        assert_eq!(
+            hex::encode(contract_chain_id("sui")),
+            "8ee0b88a63765bed253fe6d0961996852c3a8a4e660c96d65d7c5b58542871e4"
+        );
+        assert_eq!(
+            hex::encode(contract_chain_id("aptos")),
+            "c627230c85fd40ff7b0b2c218061691019e9b72f102ad7f817207e4aec59eb9b"
+        );
+        // Never the human-readable chain name the trait hands us.
+        assert_ne!(contract_chain_id("sui").as_slice(), b"sui".as_slice());
+    }
+
     fn push_bcs_vec(out: &mut Vec<u8>, bytes: &[u8]) {
         let mut len = bytes.len();
         while len >= 0x80 {
@@ -2188,7 +2310,7 @@ mod tests {
         let mut out = Vec::new();
         out.extend_from_slice(&[0xAA; 32]); // UID
         push_bcs_vec(&mut out, &[0x11; 32]); // sanad_id
-        out.extend_from_slice(&commitment);
+        push_bcs_vec(&mut out, &commitment); // commitment: Move vector<u8>, length-prefixed
         out.push(state);
         out.extend_from_slice(&owner);
         push_bcs_vec(&mut out, &[]); // source_chain
@@ -2204,6 +2326,95 @@ mod tests {
         out.extend_from_slice(&0u64.to_le_bytes()); // minted_at
         out.extend_from_slice(&0u64.to_le_bytes()); // refunded_at
         out
+    }
+
+    /// Field-for-field mirror of Move `csv_seal::Seal`, serialized by the `bcs` crate.
+    ///
+    /// The hand-rolled `seal_contents` fixtures can agree with a wrong decoder (they did:
+    /// both wrote `commitment` as 32 raw bytes, while Move length-prefixes every
+    /// `vector<u8>`). Encoding through `bcs` from the real field types makes the fixture
+    /// independent of the decoder it checks.
+    #[derive(serde::Serialize)]
+    struct SealBcsMirror {
+        id: [u8; 32],
+        sanad_id: Vec<u8>,
+        commitment: Vec<u8>,
+        state: u8,
+        owner: [u8; 32],
+        source_chain: Vec<u8>,
+        lock_event_id: Vec<u8>,
+        nullifier: Vec<u8>,
+        asset_class: u8,
+        asset_id: Vec<u8>,
+        metadata_hash: Vec<u8>,
+        proof_system: u8,
+        created_at: u64,
+        locked_at: u64,
+        consumed_at: u64,
+        minted_at: u64,
+        refunded_at: u64,
+    }
+
+    #[test]
+    fn decoder_matches_bcs_encoding_of_the_move_struct() {
+        let mirror = SealBcsMirror {
+            id: [0xAA; 32],
+            sanad_id: vec![0x11; 32],
+            commitment: vec![0x33; 32],
+            state: 3,
+            owner: [0x22; 32],
+            source_chain: vec![0x44; 32],
+            lock_event_id: vec![0x55; 32],
+            nullifier: vec![],
+            asset_class: 0,
+            asset_id: vec![],
+            metadata_hash: vec![],
+            proof_system: 0,
+            created_at: 12_000,
+            locked_at: 13_000,
+            consumed_at: 0,
+            minted_at: 0,
+            refunded_at: 0,
+        };
+        let contents = bcs::to_bytes(&mirror).expect("Seal mirror serializes");
+
+        let view = SuiSealStateView::from_move_contents(&contents)
+            .expect("real BCS layout of Seal decodes");
+
+        assert_eq!(view.sanad_id, vec![0x11; 32]);
+        assert_eq!(view.commitment, Hash::new([0x33; 32]));
+        assert_eq!(view.state, 3);
+        assert_eq!(view.owner, [0x22; 32]);
+        assert_eq!(view.created_at, 12_000);
+        assert_eq!(view.locked_at, 13_000);
+    }
+
+    /// A locked seal carries a 32-byte `source_chain`, whose length prefix is what the
+    /// off-by-one decoder misread as a 127-byte field.
+    #[test]
+    fn decoder_rejects_a_commitment_that_is_not_32_bytes() {
+        let mirror = SealBcsMirror {
+            id: [0xAA; 32],
+            sanad_id: vec![0x11; 32],
+            commitment: vec![0x33; 16],
+            state: 1,
+            owner: [0x22; 32],
+            source_chain: vec![],
+            lock_event_id: vec![],
+            nullifier: vec![],
+            asset_class: 0,
+            asset_id: vec![],
+            metadata_hash: vec![],
+            proof_system: 0,
+            created_at: 0,
+            locked_at: 0,
+            consumed_at: 0,
+            minted_at: 0,
+            refunded_at: 0,
+        };
+        let contents = bcs::to_bytes(&mirror).expect("Seal mirror serializes");
+        let err = SuiSealStateView::from_move_contents(&contents).unwrap_err();
+        assert!(err.contains("commitment must be 32 bytes"), "{}", err);
     }
 
     #[test]
@@ -2238,7 +2449,7 @@ mod tests {
         let mut out = Vec::new();
         out.extend_from_slice(&[0xAA; 32]); // UID
         push_bcs_vec(&mut out, sanad_id);
-        out.extend_from_slice(&commitment);
+        push_bcs_vec(&mut out, &commitment); // commitment: Move vector<u8>, length-prefixed
         out.push(state);
         out.extend_from_slice(&owner);
         push_bcs_vec(&mut out, &[]); // source_chain

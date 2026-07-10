@@ -8,6 +8,40 @@
 
 use std::path::Path;
 
+#[test]
+fn stateless_chain_list_does_not_prompt_or_rewrite_wallet_state() {
+    use std::process::{Command, Stdio};
+
+    let home = tempfile::tempdir().expect("temporary HOME");
+    let config = home.path().join("config.toml");
+    std::fs::write(&config, "data_dir = \"~/.csv/data\"\n").expect("write config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_csv"))
+        .args([
+            "--config",
+            config.to_str().expect("utf-8 path"),
+            "chain",
+            "list",
+        ])
+        .env("HOME", home.path())
+        .stdin(Stdio::null())
+        .output()
+        .expect("run csv chain list");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!combined.contains("passphrase"), "{combined}");
+    assert!(!home.path().join(".csv/unified_storage.json").exists());
+}
+
 /// Test that WalletIdentityResolver produces consistent addresses across calls
 #[test]
 fn test_wallet_identity_resolver_consistency() {

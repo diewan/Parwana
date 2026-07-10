@@ -13,19 +13,19 @@ pub enum ChainAction {
     /// Show chain status and configuration
     Status {
         /// Chain name
-        #[arg(value_enum)]
+        #[arg(long, value_enum)]
         chain: Chain,
     },
     /// Show chain RPC endpoint info
     Info {
         /// Chain name
-        #[arg(value_enum)]
+        #[arg(long, value_enum)]
         chain: Chain,
     },
     /// Set chain RPC URL
     SetRpc {
         /// Chain name
-        #[arg(value_enum)]
+        #[arg(long, value_enum)]
         chain: Chain,
         /// New RPC URL
         url: String,
@@ -33,7 +33,7 @@ pub enum ChainAction {
     /// Set chain network (dev/test/main)
     SetNetwork {
         /// Chain name
-        #[arg(value_enum)]
+        #[arg(long, value_enum)]
         chain: Chain,
         /// Network
         #[arg(value_enum)]
@@ -42,7 +42,7 @@ pub enum ChainAction {
     /// Set chain contract address
     SetContract {
         /// Chain name
-        #[arg(value_enum)]
+        #[arg(long, value_enum)]
         chain: Chain,
         /// Contract/package address
         address: String,
@@ -106,13 +106,14 @@ fn cmd_list(config: &Config) -> Result<()> {
             chain_config
                 .contract_address
                 .clone()
+                .or_else(|| chain_config.program_id.clone())
                 .unwrap_or_else(|| "none".to_string()),
         ]);
     }
 
     output::table(&headers, &rows);
     println!();
-    output::info("Use 'csv chain status <chain>' for details");
+    output::info("Use 'csv chain status --chain <chain>' for details");
     Ok(())
 }
 
@@ -132,11 +133,12 @@ async fn cmd_status(chain: &Chain, config: &Config) -> Result<()> {
     );
     output::kv("Finality Depth", &chain_config.finality_depth.to_string());
     output::kv(
-        "Contract",
+        "Contract / Program",
         &chain_config
             .contract_address
             .clone()
-            .unwrap_or_else(|| "Not deployed".to_string()),
+            .or_else(|| chain_config.program_id.clone())
+            .unwrap_or_else(|| "Not applicable".to_string()),
     );
 
     if let Some(fee) = chain_config.default_fee {

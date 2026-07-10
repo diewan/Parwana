@@ -4,7 +4,7 @@ default_network = "testnet"
 rpc_endpoints = ["https://fullnode.testnet.sui.io:443"]
 block_explorer_urls = ["https://suiscan.xyz/testnet"]
 start_block = 0
-contract_address = "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55"
+contract_address = "0x3377372f20b25f8b04f6374eefc25957af76c18fd0af11c89ebf27dc4b429f68"
 
 [finality_guarantee]
 max_reorg_depth = 0
@@ -38,7 +38,7 @@ chain_role = "Settlement"
 #
 # Package ID where the csv_seal module is published (RFC-0012 thin-registry,
 # Sui testnet, deployed 2026-07-05).
-package_id = "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55"
+package_id = "0x3377372f20b25f8b04f6374eefc25957af76c18fd0af11c89ebf27dc4b429f68"
 # Shared `Registry` object id created at publish. This 32-byte object id is the
 # RFC-0012 §9.2 `destinationContract` bound into the mint-attestation digest, and
 # is DISTINCT from package_id. The canonical value is recorded in
@@ -47,4 +47,4 @@ package_id = "0xeca5c0931e91d07d9ac47c7dfd767e43554150cff31de57d3da14f315de2ca55
 # visibility. NOTE: minting stays fail-closed until the AdminCap holder seeds the
 # verifier set (add_verifier + set_threshold) and the runtime holds the matching
 # verifier key.
-registry_id = "0x37f197aa1bf9af0898fd84a064484cbd876cf7d8078c486c7476b52b6521ac95"
+registry_id = "0x3f0ef69c47d2553e7b46fadbffc2ce6afae34a29e70dea6d4d08f94c060aefe5"

@@ -187,6 +187,7 @@ impl PackageDeployer {
         let mut execute_request = ExecuteTransactionRequest::default();
         execute_request.transaction = Some(sui_transaction);
         execute_request.signatures = vec![user_signature];
+        execute_request.read_mask = Some(crate::rpc_utils::execution_read_mask());
 
         // Execute the transaction
         let execution_response = (*client_guard)
@@ -205,10 +206,10 @@ impl PackageDeployer {
         let tx_digest_str = executed_tx.digest.ok_or_else(|| {
             SuiError::ConfigurationError("No transaction digest in response".to_string())
         })?;
-        let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
-            .map_err(|e| SuiError::ConfigurationError(format!("Invalid digest hex: {}", e)))?;
-        let mut digest_array = [0u8; 32];
-        digest_array.copy_from_slice(&digest_bytes[..32]);
+        // Sui reports digests in Base58, not hex.
+        let digest_array = crate::rpc_utils::tx_digest_to_bytes(&tx_digest_str).map_err(|e| {
+            SuiError::ConfigurationError(format!("Invalid transaction digest: {}", e))
+        })?;
 
         // Extract package ID from transaction effects
         // For now, use a deterministic hash as fallback since TransactionEffects structure is complex

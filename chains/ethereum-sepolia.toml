@@ -10,7 +10,11 @@ max_reorg_depth = 12
 is_probabilistic = false
 validator_honesty_threshold = 0.67
 proof_system = { type = "EthereumPos", finality_epochs = 2 }
-max_proof_age_blocks = 100
+# Upper bound on tip - anchor for accepted lock proofs (VERIFY-PROOF-FRESHNESS-001).
+# Aligned with the CSVSeal escrow refund window (24h ≈ 7200 Sepolia blocks): a lock
+# older than the refund timeout is genuinely stale; anything younger must remain
+# resumable (finality wait + operator resume routinely exceeds 100 blocks).
+max_proof_age_blocks = 7200
 min_anchor_sources = 1
 
 [capabilities]
@@ -32,4 +36,4 @@ chain_role = "Settlement"
 
 [custom_settings]
 # Contract address where CSVSeal is deployed
-contract_address = "0x542c4c4ee03ec3fcb21f54613c038fab7e965216"
+contract_address = "0xba3838a7105b0131d418ac344bf999f420b12938"

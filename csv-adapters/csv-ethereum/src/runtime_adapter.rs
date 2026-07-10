@@ -279,7 +279,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         proof_bytes.extend_from_slice(&lock_log.data);
 
         let inclusion_proof = InclusionProof::new(
-            proof_bytes,
+            proof_bytes.clone(),
             csv_hash::Hash::new(receipt.block_hash),
             receipt.block_number,
             lock_log.log_index,
@@ -291,15 +291,15 @@ impl ChainAdapter for EthereumRuntimeAdapter {
                 .map_err(|e| AdapterError::Generic(format!("Invalid finality proof: {}", e)))?;
 
         // The anchor is bound to the Sanad ID being transferred (required by
-        // downstream binding checks), with the lock txid/log index carried as
-        // metadata.
-        let mut anchor_metadata = Vec::with_capacity(32 + 8);
-        anchor_metadata.extend_from_slice(&txid_array);
-        anchor_metadata.extend_from_slice(&lock_log.log_index.to_le_bytes());
+        // downstream binding checks). The verifier's anchor/inclusion binding
+        // rule (`validate_anchor_reference`) requires
+        // `anchor_ref.metadata == inclusion_proof.proof_bytes`, so the anchor
+        // carries the exact inclusion evidence bytes (which already embed the
+        // block hash/number, log index, topics, and data).
         let anchor_ref = CoreCommitAnchor::new(
             transfer.sanad_id.as_bytes().to_vec(),
             receipt.block_number,
-            anchor_metadata,
+            proof_bytes,
         )
         .map_err(|e| AdapterError::Generic(format!("Invalid anchor reference: {}", e)))?;
 

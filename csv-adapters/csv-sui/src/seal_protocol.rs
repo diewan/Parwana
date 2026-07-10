@@ -37,6 +37,14 @@ use crate::types::{SuiCommitAnchor, SuiFinalityProof, SuiInclusionProof, SuiSeal
 #[cfg(feature = "rpc")]
 use sui_transaction_builder::TransactionBuilder;
 
+#[cfg(feature = "rpc")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CreatedSealObject {
+    object_id: [u8; 32],
+    version: u64,
+    digest: String,
+}
+
 /// Sui implementation of the SealProtocol trait
 pub struct SuiSealProtocol {
     /// Configuration for this Sui adapter instance
@@ -59,58 +67,9 @@ fn format_object_id(object_id: [u8; 32]) -> String {
     format!("0x{}", hex::encode(object_id))
 }
 
-/// Deterministically derive a seal's initial `(sanad_id, state_root, commitment)`
-/// from chain-bound inputs.
-///
-/// The Sui checkpoint API is private in sui-rpc, so the strongest verifiable
-/// chain-state anchor available before a `create_seal` transaction executes is
-/// the set of gas coins it consumes. `gas_ref_digest` commits to each coin's
-/// real `(object_id, version, content-digest)`. Deriving from that (plus the
-/// package, sender, and nonce) is:
-/// - deterministic — identical inputs always yield identical outputs, so
-///   creating a seal twice for the same logical inputs never drifts (there is
-///   no `SystemTime::now()` entropy), and
-/// - chain-bound & reconstructable — a verifier who inspects the transaction
-///   sees exactly which on-chain objects these values commit to.
-///
-/// (`SUI-CREATE-SEAL-STATE-001`).
-fn derive_seal_inputs(
-    package_id_bytes: [u8; 32],
-    sender_bytes: &[u8],
-    nonce: u64,
-    gas_ref_digest: [u8; 32],
-) -> (
-    /* sanad_id */ [u8; 32],
-    /* state_root */ [u8; 32],
-    /* commitment */ [u8; 32],
-) {
-    use blake2::{Blake2b, Digest as Blake2Digest};
-
-    let mut state_root_hasher = Blake2b::new();
-    state_root_hasher.update(b"csv.sui.state-root.v2");
-    state_root_hasher.update(package_id_bytes);
-    state_root_hasher.update(sender_bytes);
-    state_root_hasher.update(nonce.to_le_bytes());
-    state_root_hasher.update(gas_ref_digest);
-    let state_root: [u8; 32] = state_root_hasher.finalize().into();
-
-    let mut sanad_hasher = Blake2b::new();
-    sanad_hasher.update(b"csv.sui.sanad.v2");
-    sanad_hasher.update(package_id_bytes);
-    sanad_hasher.update(sender_bytes);
-    sanad_hasher.update(nonce.to_le_bytes());
-    sanad_hasher.update(gas_ref_digest);
-    let sanad_id: [u8; 32] = sanad_hasher.finalize().into();
-
-    let mut commitment_hasher = Blake2b::new();
-    commitment_hasher.update(b"csv.sui.commitment.v2");
-    commitment_hasher.update(sanad_id);
-    commitment_hasher.update(state_root);
-    commitment_hasher.update(nonce.to_le_bytes());
-    commitment_hasher.update(sender_bytes);
-    let commitment: [u8; 32] = commitment_hasher.finalize().into();
-
-    (sanad_id, state_root, commitment)
+/// Preserve the SDK's canonical fields at the Sui transaction boundary.
+fn canonical_creation_fields(sanad_id: Hash, commitment: Hash) -> ([u8; 32], [u8; 32]) {
+    (*sanad_id.as_bytes(), *commitment.as_bytes())
 }
 
 /// Parse a Sui object ID string (hex).
@@ -301,6 +260,136 @@ impl SuiSealProtocol {
             .ok_or_else(|| SuiError::ObjectUsed("Object digest not found".to_string()))
     }
 
+    /// Compare a Move struct tag against the expected one, normalizing the
+    /// leading package address so that `0xabc::m::T` and its zero-padded
+    /// 32-byte form compare equal.
+    #[cfg(feature = "rpc")]
+    fn move_type_matches(actual: &str, expected: &str) -> bool {
+        /// Sui may abbreviate a leading package address (`0x2::coin::Coin`), so
+        /// widen to the canonical 32 bytes before comparing.
+        fn normalize_address(address: &str) -> Option<[u8; 32]> {
+            let hex_str = address.trim().trim_start_matches("0x");
+            if hex_str.is_empty() || hex_str.len() > 64 {
+                return None;
+            }
+            let padded = format!("{:0>64}", hex_str);
+            let bytes = hex::decode(padded).ok()?;
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&bytes);
+            Some(out)
+        }
+
+        fn normalize(tag: &str) -> Option<([u8; 32], String)> {
+            let (address, rest) = tag.split_once("::")?;
+            if rest.is_empty() {
+                return None;
+            }
+            Some((normalize_address(address)?, rest.to_ascii_lowercase()))
+        }
+
+        match (normalize(actual), normalize(expected)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// Extract the seal object created by a `create_seal` transaction.
+    ///
+    /// Only a real created object write is accepted: a fabricated identifier
+    /// derived from the transaction would name an object that does not exist,
+    /// and `publish` would later fail trying to consume it. `expected_type` is
+    /// the fully qualified `<package>::<module>::<type>` tag.
+    ///
+    /// `object_type` is supplied by the node's indexing layer rather than by the
+    /// effects structure itself, so it may be absent. When it is present it must
+    /// match exactly; when it is absent the created object must be unambiguous.
+    #[cfg(feature = "rpc")]
+    fn extract_created_seal_object(
+        changed_objects: &[sui_rpc::proto::sui::rpc::v2::ChangedObject],
+        expected_type: &str,
+    ) -> Result<CreatedSealObject, String> {
+        use sui_rpc::proto::sui::rpc::v2::changed_object::{
+            IdOperation, InputObjectState, OutputObjectState,
+        };
+
+        let created: Vec<_> = changed_objects
+            .iter()
+            .filter(|changed_obj| {
+                changed_obj.input_state == Some(InputObjectState::DoesNotExist as i32)
+                    && changed_obj.output_state == Some(OutputObjectState::ObjectWrite as i32)
+                    && changed_obj.id_operation == Some(IdOperation::Created as i32)
+                    && changed_obj.object_id.is_some()
+            })
+            .collect();
+
+        // Prefer the typed match when the node reports object types at all.
+        // Falling back to the untyped set only when *no* candidate is typed
+        // keeps a type-reporting node from silently accepting a wrong object.
+        let any_typed = created.iter().any(|obj| obj.object_type.is_some());
+        let candidates: Vec<_> = if any_typed {
+            created
+                .iter()
+                .filter(|obj| {
+                    obj.object_type
+                        .as_ref()
+                        .is_some_and(|actual| Self::move_type_matches(actual, expected_type))
+                })
+                .collect()
+        } else {
+            created.iter().collect()
+        };
+
+        let selected = match candidates.as_slice() {
+            [only] => *only,
+            [] => {
+                return Err(format!(
+                    "Sui create_seal transaction did not report a created {} object",
+                    expected_type
+                ));
+            }
+            many => {
+                return Err(format!(
+                    "Sui create_seal transaction reported {} created objects; \
+                     cannot identify the {} seal unambiguously",
+                    many.len(),
+                    expected_type
+                ));
+            }
+        };
+
+        let obj_id_str = selected
+            .object_id
+            .as_ref()
+            .expect("candidate filter requires object_id");
+        let object_id = parse_object_id(obj_id_str)
+            .map_err(|e| format!("Invalid created seal object ID: {}", e))?;
+
+        let version = selected.output_version.ok_or_else(|| {
+            format!(
+                "Created seal object {} has no output version in effects",
+                obj_id_str
+            )
+        })?;
+        let digest = selected.output_digest.clone().ok_or_else(|| {
+            format!(
+                "Created seal object {} has no output digest in effects",
+                obj_id_str
+            )
+        })?;
+        if digest.trim().is_empty() {
+            return Err(format!(
+                "Created seal object {} has an empty output digest",
+                obj_id_str
+            ));
+        }
+
+        Ok(CreatedSealObject {
+            object_id,
+            version,
+            digest,
+        })
+    }
+
     /// Verify that a seal object is available before consumption.
     async fn verify_seal_available(&self, seal: &SuiSealPoint) -> SuiResult<()> {
         log::info!(
@@ -488,10 +577,12 @@ impl SuiSealProtocol {
             sui_sdk_types::Identifier::new(&function_name)
                 .map_err(|e| format!("Invalid function name: {}", e))?,
         );
+        let seal_digest = sui_sdk_types::Digest::from_base58(&seal.digest)
+            .map_err(|e| format!("Invalid seal object digest: {}", e))?;
         let seal_object_arg = tx_builder.object(sui_transaction_builder::ObjectInput::owned(
             seal_object_id,
             seal.version,
-            sui_sdk_types::Digest::from_base58(&seal.digest).unwrap_or(sui_sdk_types::Digest::ZERO),
+            seal_digest,
         ));
         let commitment_arg = tx_builder.pure(&commitment.to_vec());
         tx_builder.move_call(function, vec![seal_object_arg, commitment_arg]);
@@ -590,7 +681,7 @@ impl SealProtocol for SuiSealProtocol {
         &self,
         commitment: Hash,
         seal: Self::SealPoint,
-        _sanad_id: Hash,
+        sanad_id: Hash,
     ) -> std::result::Result<Self::CommitAnchor, Box<dyn std::error::Error + 'static>> {
         log::info!(
             "SUI: Publishing commitment via seal object {}",
@@ -600,7 +691,6 @@ impl SealProtocol for SuiSealProtocol {
             "SUI: Commitment hash: 0x{}",
             hex::encode(commitment.as_bytes())
         );
-        log::info!("SUI: Seal digest in publish method: '{}'", seal.digest);
 
         // Verify seal is available
         log::info!("SUI: Verifying seal availability");
@@ -611,239 +701,111 @@ impl SealProtocol for SuiSealProtocol {
 
         #[cfg(feature = "rpc")]
         {
-            use ed25519_dalek::Signer;
-            use sui_sdk_types::{Address, Identifier};
+            use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
+            use sui_sdk_types::Address;
 
-            // If digest is empty, fetch it from the chain
-            let seal_digest = if seal.digest.is_empty() {
-                log::info!(
-                    "SUI: Digest is empty, fetching from chain for object {} version {}",
-                    format_object_id(seal.object_id),
-                    seal.version
-                );
-                self.fetch_object_digest(seal.object_id, seal.version)
-                    .await?
-            } else {
-                seal.digest.clone()
-            };
+            // On Sui the commitment is anchored at seal creation:
+            // `csv_seal::create_seal(sanad_id, commitment, owner)` writes both
+            // fields into the Seal object and emits `SanadCreated`. Publishing
+            // therefore VERIFIES that binding on-chain and anchors to the
+            // creation transaction. It must NOT consume the seal — a consumed
+            // seal can never be locked for a cross-chain transfer
+            // (`lock_sanad` aborts with ESEAL_ALREADY_CONSUMED), which is the
+            // Single-Use-Seal equivalent of burning a Bitcoin sanad's UTXO at
+            // creation time.
+            let object_id = Address::from_bytes(seal.object_id)
+                .map_err(|e| format!("Invalid seal object ID: {}", e))?;
 
-            let signing_key = self.signing_key.as_ref().ok_or_else(|| {
-                Box::new(ProtocolError::PublishFailed(
-                    "Signing key not configured. Set signer_private_key in SuiConfig.".to_string(),
-                )) as Box<dyn std::error::Error + 'static>
-            })?;
-
-            // Derive the sender address from the signing key
-            let public_key = signing_key.verifying_key();
-            let pubkey_bytes = public_key.as_bytes();
-
-            // Sui address is derived from public key using Blake2b with 0x00 prefix
-            use blake2::Blake2b;
-            let mut hasher = Blake2b::new();
-            hasher.update([0x00]); // Sui address prefix
-            hasher.update(pubkey_bytes);
-            let hash: [u8; 32] = hasher.finalize().into();
-            let sender_address = Address::from_bytes(hash)
-                .map_err(|e| format!("Failed to derive address: {}", e))?;
-
-            // Get the package ID from config
-            let package_id_str = self
-                .config
-                .seal_contract
-                .package_id
-                .as_ref()
-                .ok_or("Package ID not configured")?;
-            let package_id_bytes = parse_object_id(package_id_str)
-                .map_err(|e| format!("Invalid package ID: {}", e))?;
-            let package_id = Address::from_bytes(package_id_bytes)
-                .map_err(|e| format!("Invalid package ID: {}", e))?;
-            let module_name = self.config.seal_contract.module_name.clone();
-
-            // Fetch gas objects for the sender address
-            let gas_objects = crate::gas_utils::fetch_gas_objects(&self.node, &sender_address)
-                .await
-                .map_err(|e| format!("Failed to fetch gas objects: {}", e))?;
-
-            // Build the transaction using sui-transaction-builder
-            let mut tx_builder = TransactionBuilder::new();
-            tx_builder.set_sender(sender_address);
-            tx_builder.set_gas_budget(10000000);
-            tx_builder.set_gas_price(1000); // Sui testnet gas price
-            tx_builder.add_gas_objects(gas_objects);
-
-            let seal_object_id = Address::from_bytes(seal.object_id)?;
-
-            // Add the MoveCall
-            let function = sui_transaction_builder::Function::new(
-                package_id,
-                Identifier::new(&module_name).map_err(|e| format!("Invalid module name: {}", e))?,
-                Identifier::new("consume_seal")
-                    .map_err(|e| format!("Invalid function name: {}", e))?,
-            );
-            log::info!("SUI: Using digest for transaction: {}", &seal_digest);
-            let seal_digest_str = seal_digest.clone();
-            let seal_digest = sui_sdk_types::Digest::from_base58(&seal_digest);
-            let seal_digest = match seal_digest {
-                Ok(d) => {
-                    log::info!("SUI: Successfully parsed digest from base58");
-                    d
-                }
-                Err(e) => {
-                    log::warn!(
-                        "SUI: Failed to parse digest from base58 '{}': {}, using ZERO digest",
-                        &seal_digest_str,
-                        e
-                    );
-                    sui_sdk_types::Digest::ZERO
-                }
-            };
-            let seal_object_arg = tx_builder.object(sui_transaction_builder::ObjectInput::owned(
-                seal_object_id,
-                seal.version,
-                seal_digest,
-            ));
-            let commitment_arg = tx_builder.pure(&commitment.as_bytes().to_vec());
-            tx_builder.move_call(function, vec![seal_object_arg, commitment_arg]);
-
-            // Build the transaction data
-            let tx_data = tx_builder
-                .try_build()
-                .map_err(|e| format!("Failed to build transaction: {}", e))?;
-
-            // Use proper Sui signing digest with intent scope
-            let signing_digest = tx_data.signing_digest();
-            let sig_bytes = signing_key.sign(&signing_digest).to_bytes().to_vec();
-
-            // Serialize transaction to BCS for execution
-            let tx_bytes = bcs::to_bytes(&tx_data)
-                .map_err(|e| format!("Failed to serialize transaction: {}", e))?;
-
-            // Execute the transaction via sui-rpc
             let client = self.node.client();
             let mut client_guard = client.lock().await;
 
-            // Build the ExecuteTransactionRequest
-            use sui_rpc::proto::sui::rpc::v2::{
-                ExecuteTransactionRequest, Transaction, UserSignature,
-            };
-            use sui_sdk_types::SimpleSignature;
+            let mut request = GetObjectRequest::new(&object_id);
+            request.read_mask = Some(prost_types::FieldMask {
+                paths: vec![
+                    "object_id".to_string(),
+                    "version".to_string(),
+                    "contents".to_string(),
+                    "previous_transaction".to_string(),
+                ],
+            });
 
-            // Convert the transaction data to sui-sdk-types Transaction
-            // The bcs field expects Bcs type
-            let mut sui_transaction = Transaction::default();
-            sui_transaction.bcs = Some(tx_bytes.clone().into());
-
-            // Build the UserSignature using sui-sdk-types SimpleSignature
-            // This properly BCS-encodes the signature with the correct structure
-            let sig_array: [u8; 64] = sig_bytes
-                .try_into()
-                .map_err(|e| format!("Invalid signature bytes: {:?}", e))?;
-            let pubkey_array: [u8; 32] = *pubkey_bytes;
-            let simple_sig = SimpleSignature::Ed25519 {
-                signature: sig_array.into(),
-                public_key: pubkey_array.into(),
-            };
-            let sig_bcs = bcs::to_bytes(&simple_sig)
-                .map_err(|e| format!("Failed to serialize signature: {}", e))?;
-            let mut user_signature = UserSignature::default();
-            user_signature.bcs = Some(sig_bcs.into());
-
-            // Build the ExecuteTransactionRequest
-            let mut execute_request = ExecuteTransactionRequest::default();
-            execute_request.transaction = Some(sui_transaction);
-            execute_request.signatures = vec![user_signature];
-
-            // Execute the transaction
-            let execution_response = (*client_guard)
-                .execution_client()
-                .execute_transaction(execute_request)
+            let object = (*client_guard)
+                .ledger_client()
+                .get_object(request)
                 .await
                 .map_err(|e| {
                     Box::new(ProtocolError::PublishFailed(format!(
-                        "Failed to execute transaction: {}",
+                        "Failed to fetch seal object: {}",
+                        e
+                    ))) as Box<dyn std::error::Error + 'static>
+                })?
+                .into_inner()
+                .object
+                .ok_or_else(|| {
+                    Box::new(ProtocolError::PublishFailed(
+                        "Seal object not found on-chain".to_string(),
+                    )) as Box<dyn std::error::Error + 'static>
+                })?;
+
+            let contents = object.contents.and_then(|bcs| bcs.value).ok_or_else(|| {
+                Box::new(ProtocolError::PublishFailed(
+                    "Sui RPC did not return Seal object contents".to_string(),
+                )) as Box<dyn std::error::Error + 'static>
+            })?;
+            let view = crate::ops::SuiSealStateView::from_move_contents(contents.as_ref())
+                .map_err(|e| {
+                    Box::new(ProtocolError::PublishFailed(format!(
+                        "Failed to decode Seal object: {}",
                         e
                     ))) as Box<dyn std::error::Error + 'static>
                 })?;
 
-            let executed_tx = execution_response.into_inner().transaction.ok_or_else(|| {
+            // Fail closed unless the on-chain object binds exactly this
+            // (sanad_id, commitment) pair and is still in Created state.
+            if view.sanad_id != sanad_id.as_bytes().to_vec() {
+                return Err(Box::new(ProtocolError::PublishFailed(format!(
+                    "Seal object binds sanad 0x{}, expected 0x{}",
+                    hex::encode(&view.sanad_id),
+                    hex::encode(sanad_id.as_bytes())
+                ))));
+            }
+            if view.commitment != commitment {
+                return Err(Box::new(ProtocolError::PublishFailed(format!(
+                    "Seal object binds commitment 0x{}, expected 0x{}",
+                    hex::encode(view.commitment.as_bytes()),
+                    hex::encode(commitment.as_bytes())
+                ))));
+            }
+            const SANAD_STATE_CREATED: u8 = 1;
+            if view.state != SANAD_STATE_CREATED {
+                return Err(Box::new(ProtocolError::PublishFailed(format!(
+                    "Seal object is in state {}, expected Created ({})",
+                    view.state, SANAD_STATE_CREATED
+                ))));
+            }
+
+            // Anchor to the real creation transaction recorded on the object.
+            let prev_tx = object.previous_transaction.ok_or_else(|| {
                 Box::new(ProtocolError::PublishFailed(
-                    "No transaction in response".to_string(),
+                    "Sui RPC did not return the seal object's previous transaction".to_string(),
                 )) as Box<dyn std::error::Error + 'static>
+            })?;
+            let digest_array = crate::rpc_utils::tx_digest_to_bytes(&prev_tx).map_err(|e| {
+                Box::new(ProtocolError::PublishFailed(format!(
+                    "Invalid creation transaction digest: {}",
+                    e
+                ))) as Box<dyn std::error::Error + 'static>
             })?;
 
             log::info!(
-                "SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}",
-                executed_tx.digest,
-                executed_tx.checkpoint
+                "SUI: Seal object verified on-chain; anchored to creation tx 0x{}",
+                hex::encode(digest_array)
             );
-            log::info!(
-                "SUI: Transaction effects present: {}",
-                executed_tx.effects.is_some()
-            );
-
-            // Check transaction status and return error if failed
-            if let Some(ref effects) = executed_tx.effects {
-                log::info!("SUI: Effects status: {:?}", effects.status);
-                if let Some(ref status) = effects.status {
-                    if let Some(success) = status.success {
-                        if !success {
-                            let error_msg = if let Some(ref error) = status.error {
-                                format!("Transaction execution failed: {:?}", error)
-                            } else {
-                                "Transaction execution failed (unknown error)".to_string()
-                            };
-                            return Err(Box::new(ProtocolError::PublishFailed(error_msg))
-                                as Box<dyn std::error::Error + 'static>);
-                        }
-                    }
-                }
-            }
-
-            // Extract the transaction digest from the response if available
-            // Otherwise compute it from the transaction data
-            let tx_digest_str = if let Some(digest) = executed_tx.digest {
-                digest
-            } else {
-                // Compute digest from transaction data using Blake2b
-                use blake2::Blake2b;
-                let mut hasher = Blake2b::new();
-                hasher.update(&tx_bytes);
-                let digest: [u8; 32] = hasher.finalize().into();
-                hex::encode(digest)
-            };
-            let digest_bytes =
-                hex::decode(tx_digest_str.trim_start_matches("0x")).map_err(|e| {
-                    Box::new(ProtocolError::PublishFailed(format!(
-                        "Invalid digest hex: {}",
-                        e
-                    ))) as Box<dyn std::error::Error + 'static>
-                })?;
-            let mut digest_array = [0u8; 32];
-            digest_array.copy_from_slice(&digest_bytes[..32]);
-
-            // Extract the checkpoint from the transaction effects if available
-            // Note: TransactionEffects doesn't have a direct checkpoint field
-            // We'll use the transaction's checkpoint if available, or default to 0
-            let checkpoint = executed_tx.checkpoint.unwrap_or(0);
-
-            log::info!(
-                "SUI: Transaction executed successfully (digest: 0x{}, checkpoint: {})",
-                hex::encode(digest_array),
-                checkpoint
-            );
-
-            // Mark seal as used in local registry
-            {
-                let mut registry = self.seal_registry.lock().await;
-                registry
-                    .mark_seal_used(&seal, checkpoint)
-                    .map_err(ProtocolError::from)?;
-            }
 
             Ok(SuiCommitAnchor {
                 object_id: seal.object_id,
                 tx_digest: digest_array,
-                checkpoint,
+                checkpoint: object.version.unwrap_or(0),
             })
         }
 
@@ -988,6 +950,8 @@ impl SealProtocol for SuiSealProtocol {
     async fn create_seal(
         &self,
         value: Option<u64>,
+        canonical_sanad_id: Hash,
+        canonical_commitment: Hash,
     ) -> std::result::Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         #[cfg(feature = "rpc")]
         {
@@ -1047,64 +1011,33 @@ impl SealProtocol for SuiSealProtocol {
                     .map_err(|e| format!("Invalid function name: {}", e))?,
             );
 
-            // Generate required parameters from value
-            let nonce = value.unwrap_or(0);
+            // The SDK derives the owner-bound identity before any chain write.
+            // The on-chain SanadCreated footprint must use exactly those values;
+            // an adapter-local gas/time derivation creates a different Sanad.
+            let (sanad_id, commitment) =
+                canonical_creation_fields(canonical_sanad_id, canonical_commitment);
 
-            // Derive the seal's initial sanad_id / commitment / state_root from
-            // real, chain-bound inputs — never from wall-clock time.
-            //
-            // The Sui checkpoint API is private in sui-rpc, so the closest
-            // verifiable chain-state anchor available *before* the transaction
-            // executes is the set of gas coins being consumed. `gas_ref_digest`
-            // commits to each coin's real (object_id, version, content-digest),
-            // so these derivations are:
-            //   * deterministic — the same inputs always produce the same values
-            //     (no `SystemTime::now()` entropy), and
-            //   * chain-bound & reconstructable — a verifier who inspects the
-            //     transaction sees exactly which on-chain objects they commit to,
-            //     and those coins are single-use (spent by this tx).
-            // The v2 domain tags keep these distinct from the prior fabricated
-            // scheme (SUI-CREATE-SEAL-STATE-001).
-
-            let (sanad_id, state_root, commitment) = derive_seal_inputs(
-                package_id_bytes,
-                sender_address.as_bytes(),
-                nonce,
-                gas_ref_digest,
-            );
-
-            log::info!(
-                "SUI: Derived sanad_id (chain-bound) 0x{}",
-                hex::encode(sanad_id)
-            );
-            log::info!(
-                "SUI: Derived commitment (chain-bound) 0x{}",
-                hex::encode(commitment)
-            );
-            log::info!(
-                "SUI: Derived state_root from consumed gas objects: 0x{}",
-                hex::encode(state_root)
+            log::info!("SUI: Canonical sanad_id 0x{}", hex::encode(sanad_id));
+            log::info!("SUI: Canonical commitment 0x{}", hex::encode(commitment));
+            log::debug!(
+                "SUI: creation gas-reference binding: 0x{}",
+                hex::encode(gas_ref_digest)
             );
 
             let sanad_id_vec = sanad_id.to_vec();
             let commitment_vec = commitment.to_vec();
-            let state_root_vec = state_root.to_vec();
 
+            // Argument list must match `csv_seal::create_seal(sanad_id,
+            // commitment, owner, &mut TxContext)`. `state_root` and `nonce` are
+            // derived inputs the Move entry point does not take: `state_root`
+            // already commits into `sanad_id`/`commitment` via
+            // `derive_seal_inputs`, and `nonce` is carried on the local
+            // `SuiSealPoint`.
             let sanad_id_arg = tx_builder.pure(&sanad_id_vec);
             let commitment_arg = tx_builder.pure(&commitment_vec);
-            let state_root_arg = tx_builder.pure(&state_root_vec);
-            let nonce_arg = tx_builder.pure(&nonce);
             let owner_arg = tx_builder.pure(&sender_address);
-            let seal_result = tx_builder.move_call(
-                function,
-                vec![
-                    sanad_id_arg,
-                    commitment_arg,
-                    state_root_arg,
-                    nonce_arg,
-                    owner_arg,
-                ],
-            );
+            let seal_result =
+                tx_builder.move_call(function, vec![sanad_id_arg, commitment_arg, owner_arg]);
 
             // Transfer the returned Seal object to the sender
             let address_arg = tx_builder.pure(&sender_address);
@@ -1156,10 +1089,14 @@ impl SealProtocol for SuiSealProtocol {
             let mut user_signature = UserSignature::default();
             user_signature.bcs = Some(sig_bcs.into());
 
-            // Build the ExecuteTransactionRequest
+            // Build the ExecuteTransactionRequest. The read mask is required:
+            // without it the service returns only `effects.status,checkpoint`,
+            // so `changed_objects` would come back empty and the created seal
+            // object could not be identified.
             let mut execute_request = ExecuteTransactionRequest::default();
             execute_request.transaction = Some(sui_transaction);
             execute_request.signatures = vec![user_signature];
+            execute_request.read_mask = Some(crate::rpc_utils::execution_read_mask());
 
             // Execute the transaction
             let execution_response = (*client_guard)
@@ -1172,6 +1109,7 @@ impl SealProtocol for SuiSealProtocol {
                 .into_inner()
                 .transaction
                 .ok_or("No transaction in response")?;
+            drop(client_guard);
 
             log::info!(
                 "SUI: Executed transaction response - digest: {:?}, checkpoint: {:?}",
@@ -1182,94 +1120,40 @@ impl SealProtocol for SuiSealProtocol {
                 "SUI: Transaction effects present: {}",
                 executed_tx.effects.is_some()
             );
-            if let Some(ref effects) = executed_tx.effects {
+            let created_seal = if let Some(effects) = executed_tx.effects {
                 log::info!("SUI: Effects status: {:?}", effects.status);
-            }
+                // A reverted create_seal must never yield a seal point.
+                crate::rpc_utils::ensure_execution_succeeded(&effects)?;
 
-            // Extract the created object ID from the transaction effects
-            // The effects should contain the created seal object
-            let (object_id, object_version, object_digest) = if let Some(effects) =
-                executed_tx.effects
-            {
-                // Look for created objects in changed_objects
                 log::info!(
                     "SUI: changed_objects count: {}",
                     effects.changed_objects.len()
                 );
-                let mut created_object_id = None;
-                let mut created_object_version = None;
-                let mut created_object_digest = None;
                 for (idx, changed_obj) in effects.changed_objects.iter().enumerate() {
                     log::info!(
-                        "SUI: changed_objects[{}]: object_id={:?}, input_state={:?}, output_state={:?}, output_version={:?}, output_digest={:?}",
+                        "SUI: changed_objects[{}]: object_id={:?}, input_state={:?}, output_state={:?}, id_operation={:?}, object_type={:?}, output_version={:?}, output_digest={:?}",
                         idx,
                         changed_obj.object_id,
                         changed_obj.input_state,
                         changed_obj.output_state,
+                        changed_obj.id_operation,
+                        changed_obj.object_type,
                         changed_obj.output_version,
                         changed_obj.output_digest
                     );
-                    // Check if this is a newly created object (input_state is DOES_NOT_EXIST/1)
-                    // and output_state indicates it was modified/created
-                    if let Some(input_state) = changed_obj.input_state {
-                        // input_state: 1 = DOES_NOT_EXIST, 2 = EXIST, etc.
-                        // Objects that didn't exist before are newly created
-                        if input_state == 1 && changed_obj.object_id.is_some() {
-                            created_object_id = changed_obj.object_id.clone();
-                            created_object_version = changed_obj.output_version;
-                            created_object_digest = changed_obj.output_digest.clone();
-                            log::info!(
-                                "SUI: Found created object with ID: {:?}, version: {:?}, digest: {:?}",
-                                created_object_id,
-                                created_object_version,
-                                created_object_digest
-                            );
-                            break;
-                        }
-                    }
                 }
 
-                if let Some(obj_id_str) = created_object_id {
-                    let id_bytes = hex::decode(obj_id_str.trim_start_matches("0x"))
-                        .map_err(|e| format!("Invalid object ID hex: {}", e))?;
-                    let mut id = [0u8; 32];
-                    if id_bytes.len() >= 32 {
-                        id.copy_from_slice(&id_bytes[..32]);
-                    }
-                    let version = created_object_version.unwrap_or(1);
-
-                    // Store the object digest as base58 string
-                    let digest = if let Some(digest_str) = created_object_digest {
-                        digest_str
-                    } else {
-                        log::warn!("SUI: No digest in changed_objects, using empty string");
-                        String::new()
-                    };
-
-                    (id, version, digest)
-                } else {
-                    // Fallback: compute digest from transaction data using Blake2b
-                    use blake2::Blake2b;
-                    let mut hasher = Blake2b::new();
-                    hasher.update(&tx_bytes);
-                    let digest: [u8; 32] = hasher.finalize().into();
-                    let mut id = [0u8; 32];
-                    id.copy_from_slice(&digest);
-                    log::info!(
-                        "SUI: No created object found in effects, using computed digest as fallback"
-                    );
-                    (id, 1, String::new())
-                }
+                // Bind the expected type to the configured package: a suffix
+                // match would also accept `<other-package>::csv_seal::Seal`.
+                let expected_type = format!(
+                    "0x{}::{}::{}",
+                    hex::encode(package_id_bytes),
+                    self.config.seal_contract.module_name,
+                    self.config.seal_contract.seal_type
+                );
+                Self::extract_created_seal_object(&effects.changed_objects, &expected_type)?
             } else {
-                // Fallback: use transaction digest as object ID
-                let tx_digest_str = executed_tx
-                    .digest
-                    .ok_or("No transaction digest in response")?;
-                let digest_bytes = hex::decode(tx_digest_str.trim_start_matches("0x"))
-                    .map_err(|e| format!("Invalid digest hex: {}", e))?;
-                let mut id = [0u8; 32];
-                id.copy_from_slice(&digest_bytes[..32]);
-                (id, 1, String::new())
+                return Err("No transaction effects in create_seal response".into());
             };
 
             // Deterministic nonce: reuse the value-derived nonce computed above.
@@ -1278,15 +1162,18 @@ impl SealProtocol for SuiSealProtocol {
 
             log::info!(
                 "SUI: Created seal object {} with version {} on-chain",
-                format_object_id(object_id),
-                object_version
+                format_object_id(created_seal.object_id),
+                created_seal.version
             );
-            log::info!("SUI: Storing digest in SuiSealPoint: '{}'", object_digest);
+            log::info!(
+                "SUI: Storing digest in SuiSealPoint: '{}'",
+                created_seal.digest
+            );
 
             Ok(SuiSealPoint {
-                object_id,
-                version: object_version,
-                digest: object_digest,
+                object_id: created_seal.object_id,
+                version: created_seal.version,
+                digest: created_seal.digest,
                 nonce,
             })
         }
@@ -1503,43 +1390,29 @@ mod tests {
         SuiSealProtocol::with_test().unwrap()
     }
 
-    /// SUI-CREATE-SEAL-STATE-001: identical logical inputs must produce
-    /// identical seal derivations. The previous implementation folded
-    /// `SystemTime::now()` into the state_root, so two calls drifted; the
-    /// chain-bound derivation is a pure function and must be stable.
     #[test]
-    fn derive_seal_inputs_is_deterministic() {
-        let package = [7u8; 32];
-        let sender = [9u8; 32];
-        let nonce = 42u64;
-        let gas_ref = [3u8; 32];
+    fn creation_fields_are_the_sdk_canonical_values() {
+        let sanad_id = Hash::new([0x11; 32]);
+        let commitment = Hash::new([0x22; 32]);
+        let (encoded_id, encoded_commitment) = canonical_creation_fields(sanad_id, commitment);
 
-        let a = derive_seal_inputs(package, &sender, nonce, gas_ref);
-        let b = derive_seal_inputs(package, &sender, nonce, gas_ref);
-        assert_eq!(a, b, "same inputs must produce the same seal derivation");
-    }
-
-    /// A different consumed chain-state reference must change the derivation,
-    /// so the values are actually bound to real chain state.
-    #[test]
-    fn derive_seal_inputs_binds_gas_reference() {
-        let package = [7u8; 32];
-        let sender = [9u8; 32];
-        let nonce = 42u64;
-
-        let a = derive_seal_inputs(package, &sender, nonce, [1u8; 32]);
-        let b = derive_seal_inputs(package, &sender, nonce, [2u8; 32]);
-        assert_ne!(
-            a, b,
-            "different gas-object references must produce different derivations"
-        );
+        assert_eq!(encoded_id, [0x11; 32]);
+        assert_eq!(encoded_commitment, [0x22; 32]);
+        assert_ne!(encoded_id, encoded_commitment);
     }
 
     #[tokio::test]
     #[ignore = "Requires funded SUI address for gas objects"]
     async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert_eq!(seal.version, 0);
     }
 
@@ -1547,7 +1420,14 @@ mod tests {
     #[ignore = "Requires funded SUI address for gas objects"]
     async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         adapter.enforce_seal(seal.clone()).await.unwrap();
         assert!(adapter.enforce_seal(seal).await.is_err());
     }
@@ -1622,7 +1502,13 @@ mod tests {
         let adapter = SuiSealProtocol::from_config(config, node).unwrap();
 
         // create_seal should fail with SigningKeyNotConfigured error
-        let result = adapter.create_seal(None).await;
+        let result = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await;
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Signing key not configured") || error_msg.contains("signer"));
@@ -1647,11 +1533,213 @@ mod tests {
         assert_eq!(formatted.len(), 66); // 0x + 64 hex chars
     }
 
+    #[cfg(feature = "rpc")]
+    fn changed_object(
+        object_id: Option<String>,
+        input_state: sui_rpc::proto::sui::rpc::v2::changed_object::InputObjectState,
+        output_state: sui_rpc::proto::sui::rpc::v2::changed_object::OutputObjectState,
+        id_operation: sui_rpc::proto::sui::rpc::v2::changed_object::IdOperation,
+        object_type: Option<String>,
+        output_digest: Option<String>,
+    ) -> sui_rpc::proto::sui::rpc::v2::ChangedObject {
+        let mut changed = sui_rpc::proto::sui::rpc::v2::ChangedObject::default();
+        changed.object_id = object_id;
+        changed.input_state = Some(input_state as i32);
+        changed.output_state = Some(output_state as i32);
+        changed.output_version = Some(7);
+        changed.output_digest = output_digest;
+        changed.id_operation = Some(id_operation as i32);
+        changed.object_type = object_type;
+        changed
+    }
+
+    /// Fully qualified tag of the seal type under package `0xab..ab`.
+    #[cfg(feature = "rpc")]
+    fn expected_seal_type() -> String {
+        format!("0x{}::csv_seal::Seal", hex::encode([0xabu8; 32]))
+    }
+
+    #[cfg(feature = "rpc")]
+    fn seal_write(object_type: Option<String>, digest: Option<String>) -> ChangedObject {
+        use sui_rpc::proto::sui::rpc::v2::changed_object::{
+            IdOperation, InputObjectState, OutputObjectState,
+        };
+        changed_object(
+            Some(format!("0x{}", hex::encode([9u8; 32]))),
+            InputObjectState::DoesNotExist,
+            OutputObjectState::ObjectWrite,
+            IdOperation::Created,
+            object_type,
+            digest,
+        )
+    }
+
+    #[cfg(feature = "rpc")]
+    use sui_rpc::proto::sui::rpc::v2::ChangedObject;
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_selects_created_object_write() {
+        use sui_rpc::proto::sui::rpc::v2::changed_object::{
+            IdOperation, InputObjectState, OutputObjectState,
+        };
+
+        let changed_objects = vec![
+            changed_object(
+                Some(format!("0x{}", hex::encode([1u8; 32]))),
+                InputObjectState::DoesNotExist,
+                OutputObjectState::PackageWrite,
+                IdOperation::Created,
+                Some("csv_seal::Package".to_string()),
+                Some("package-digest".to_string()),
+            ),
+            seal_write(Some(expected_seal_type()), Some("seal-digest".to_string())),
+        ];
+
+        let created =
+            SuiSealProtocol::extract_created_seal_object(&changed_objects, &expected_seal_type())
+                .unwrap();
+
+        assert_eq!(created.object_id, [9u8; 32]);
+        assert_eq!(created.version, 7);
+        assert_eq!(created.digest, "seal-digest");
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_rejects_missing_digest() {
+        let changed_objects = vec![seal_write(Some(expected_seal_type()), None)];
+
+        let err =
+            SuiSealProtocol::extract_created_seal_object(&changed_objects, &expected_seal_type())
+                .expect_err("missing digest must not produce a seal point");
+
+        assert!(err.contains("has no output digest"), "unexpected: {}", err);
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_rejects_empty_digest() {
+        let changed_objects = vec![seal_write(
+            Some(expected_seal_type()),
+            Some("  ".to_string()),
+        )];
+
+        let err =
+            SuiSealProtocol::extract_created_seal_object(&changed_objects, &expected_seal_type())
+                .expect_err("empty digest must not produce a seal point");
+
+        assert!(err.contains("empty output digest"), "unexpected: {}", err);
+    }
+
+    /// The seal type must be bound to the configured package: a suffix match
+    /// would also accept an identically named type from a foreign package.
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_rejects_foreign_package_type() {
+        let foreign = format!("0x{}::csv_seal::Seal", hex::encode([0xcdu8; 32]));
+        let changed_objects = vec![seal_write(Some(foreign), Some("seal-digest".to_string()))];
+
+        let err =
+            SuiSealProtocol::extract_created_seal_object(&changed_objects, &expected_seal_type())
+                .expect_err("foreign package type must be rejected");
+
+        assert!(
+            err.contains("did not report a created"),
+            "unexpected: {}",
+            err
+        );
+    }
+
+    /// A node that reports no object types at all must still yield the seal,
+    /// but only when the created object is unambiguous.
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_allows_untyped_single_created_object() {
+        let changed_objects = vec![seal_write(None, Some("seal-digest".to_string()))];
+
+        let created =
+            SuiSealProtocol::extract_created_seal_object(&changed_objects, &expected_seal_type())
+                .unwrap();
+
+        assert_eq!(created.object_id, [9u8; 32]);
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_rejects_ambiguous_untyped_creates() {
+        use sui_rpc::proto::sui::rpc::v2::changed_object::{
+            IdOperation, InputObjectState, OutputObjectState,
+        };
+
+        let changed_objects = vec![
+            seal_write(None, Some("seal-digest".to_string())),
+            changed_object(
+                Some(format!("0x{}", hex::encode([8u8; 32]))),
+                InputObjectState::DoesNotExist,
+                OutputObjectState::ObjectWrite,
+                IdOperation::Created,
+                None,
+                Some("other-digest".to_string()),
+            ),
+        ];
+
+        let err =
+            SuiSealProtocol::extract_created_seal_object(&changed_objects, &expected_seal_type())
+                .expect_err("ambiguous creates must not produce a seal point");
+
+        assert!(err.contains("unambiguously"), "unexpected: {}", err);
+    }
+
+    /// Empty effects (what the node returns when no read mask requests
+    /// `changed_objects`) must fail rather than fabricate an object id.
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn created_seal_extraction_rejects_empty_changed_objects() {
+        let err = SuiSealProtocol::extract_created_seal_object(&[], &expected_seal_type())
+            .expect_err("empty effects must not produce a seal point");
+
+        assert!(
+            err.contains("did not report a created"),
+            "unexpected: {}",
+            err
+        );
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn move_type_matches_normalizes_abbreviated_addresses() {
+        assert!(SuiSealProtocol::move_type_matches(
+            "0x2::coin::Coin",
+            "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin",
+        ));
+        assert!(!SuiSealProtocol::move_type_matches(
+            "0x3::coin::Coin",
+            "0x2::coin::Coin",
+        ));
+        // A suffix match must not be mistaken for a package-bound match.
+        assert!(!SuiSealProtocol::move_type_matches(
+            "0x2::evil_csv_seal::Seal",
+            "0x2::csv_seal::Seal",
+        ));
+        assert!(!SuiSealProtocol::move_type_matches(
+            "not-a-tag",
+            "0x2::a::B"
+        ));
+    }
+
     #[tokio::test]
     #[ignore = "Requires funded SUI address for gas objects"]
     async fn test_seal_registry_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
 
         // Manually mark as used
         adapter

@@ -615,11 +615,20 @@ pub trait ChainBackend:
     ///
     /// # Arguments
     /// * `value` - Optional value/funding for the seal (chain-specific units)
+    /// * `sanad_id` - Canonical owner-bound Sanad ID that the on-chain creation
+    ///   footprint MUST use
+    /// * `commitment` - Canonical commitment that the on-chain creation
+    ///   footprint MUST use
     ///
     /// # Returns
     /// * `Ok(SealPoint)` - The created seal reference
     /// * `Err` - If seal creation fails or is not supported
-    async fn create_seal(&self, value: Option<u64>) -> ChainOpResult<SealPoint>;
+    async fn create_seal(
+        &self,
+        value: Option<u64>,
+        sanad_id: Hash,
+        commitment: Hash,
+    ) -> ChainOpResult<SealPoint>;
 
     /// Publish a commitment under a single-use seal.
     ///

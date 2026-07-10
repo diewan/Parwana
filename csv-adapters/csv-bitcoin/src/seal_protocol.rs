@@ -1097,6 +1097,8 @@ impl SealProtocol for BitcoinSealProtocol {
     async fn create_seal(
         &self,
         value: Option<u64>,
+        _sanad_id: Hash,
+        _commitment: Hash,
     ) -> Result<Self::SealPoint, Box<dyn std::error::Error + 'static>> {
         // Try to use an existing UTXO from the wallet if available
         // First try to select UTXOs with sufficient value for transaction fees (minimum 10000 sat)
@@ -1478,14 +1480,28 @@ mod tests {
     #[tokio::test]
     async fn test_create_seal() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert_eq!(seal.nonce, Some(100_000));
     }
 
     #[tokio::test]
     async fn test_enforce_seal_replay() {
         let adapter = test_adapter();
-        let seal = adapter.create_seal(None).await.unwrap();
+        let seal = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         adapter.enforce_seal(seal.clone()).await.unwrap();
         assert!(adapter.enforce_seal(seal).await.is_err());
     }
@@ -1509,8 +1525,22 @@ mod tests {
     #[tokio::test]
     async fn test_hd_wallet_seal_derivation() {
         let adapter = test_adapter();
-        let seal1 = adapter.create_seal(Some(50_000)).await.unwrap();
-        let seal2 = adapter.create_seal(Some(50_000)).await.unwrap();
+        let seal1 = adapter
+            .create_seal(
+                Some(50_000),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
+        let seal2 = adapter
+            .create_seal(
+                Some(50_000),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert_ne!(seal1.txid, seal2.txid);
     }
 
@@ -1519,7 +1549,14 @@ mod tests {
         let wallet = SealWallet::generate_random(bitcoin::Network::Signet);
         let config = BitcoinConfig::default();
         let adapter = BitcoinSealProtocol::with_wallet(config, wallet).unwrap();
-        let seal1 = adapter.create_seal(Some(100_000)).await.unwrap();
+        let seal1 = adapter
+            .create_seal(
+                Some(100_000),
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert_eq!(seal1.nonce, Some(100_000));
     }
 
@@ -1554,9 +1591,23 @@ mod tests {
     #[tokio::test]
     async fn test_derive_seal_deterministic() {
         let adapter = test_adapter();
-        let seal1 = adapter.create_seal(None).await.unwrap();
+        let seal1 = adapter
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         let adapter2 = test_adapter();
-        let seal2 = adapter2.create_seal(None).await.unwrap();
+        let seal2 = adapter2
+            .create_seal(
+                None,
+                csv_hash::Hash::new([0x11; 32]),
+                csv_hash::Hash::new([0x22; 32]),
+            )
+            .await
+            .unwrap();
         assert_ne!(seal1.txid, seal2.txid);
     }
 }

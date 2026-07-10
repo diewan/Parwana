@@ -1223,32 +1223,35 @@ impl TransferCoordinator {
             }
         }
 
-        let mut lock_result = lock_result.ok_or_else(|| {
-            let _ = self
-                .execution_journal
-                .record(crate::execution_journal::TransferPhaseEntry {
-                    transfer_id: transfer.id.clone(),
-                    replay_id: replay_id_wire.clone(),
-                    proof_hash: [0u8; 32],
-                    proof_payload: None,
-                    phase: crate::recovery::TransferStage::LockConfirmed,
-                    ts: std::time::SystemTime::now(),
-                    outcome: crate::execution_journal::PhaseOutcome::Failed(
-                        last_error
-                            .as_ref()
-                            .map(|e| e.to_string())
-                            .unwrap_or_else(|| "Unknown error".to_string()),
-                    ),
-                    attempt: 1,
-                    transfer_context: None,
-                });
-            TransferCoordinatorError::LockFailed(
-                last_error
+        let mut lock_result = match lock_result {
+            Some(result) => result,
+            None => {
+                let err_msg = last_error
                     .as_ref()
                     .map(|e| e.to_string())
-                    .unwrap_or_else(|| "Unknown error".to_string()),
-            )
-        })?;
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                let _ = self
+                    .execution_journal
+                    .record(crate::execution_journal::TransferPhaseEntry {
+                        transfer_id: transfer.id.clone(),
+                        replay_id: replay_id_wire.clone(),
+                        proof_hash: [0u8; 32],
+                        proof_payload: None,
+                        phase: crate::recovery::TransferStage::LockConfirmed,
+                        ts: std::time::SystemTime::now(),
+                        outcome: crate::execution_journal::PhaseOutcome::Failed(err_msg.clone()),
+                        attempt: 1,
+                        transfer_context: None,
+                    });
+                // The lock terminally failed: roll the replay slot back so the
+                // sanad is not permanently blocked from a fresh materialize.
+                // Adapter locks are idempotent / on-chain replay-guarded, so a
+                // retry after an ambiguous broadcast cannot double-lock.
+                let typed_replay_id = replay_id_from_hash(csv_hash::ReplayIdHash(replay_id));
+                let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
+                return Err(TransferCoordinatorError::LockFailed(err_msg));
+            }
+        };
 
         // Record phase entry: Locking (Completed)
         self.execution_journal
@@ -1809,8 +1812,12 @@ impl TransferCoordinator {
                             attempt: 1,
                             transfer_context: None,
                         });
-                let typed_replay_id = replay_id_from_hash(csv_hash::ReplayIdHash(replay_id));
-                let _ = self.replay_db.mark_rolled_back(&typed_replay_id).await;
+                // The source lock has already succeeded.  Do not re-arm this
+                // replay id merely because every destination mint attempt
+                // reverted: an ambiguous destination submission may have been
+                // accepted despite the RPC error.  Leaving it Pending forces
+                // an explicit, evidence-backed recovery path and makes an
+                // ordinary duplicate submission fail closed.
                 return Err(TransferCoordinatorError::MintFailed(error));
             }
         };
@@ -6553,9 +6560,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mint_revert_rolls_back_and_blocks_duplicate() {
-        // When every mint attempt reverts, the transfer fails, the replay entry is
-        // rolled back, and a duplicate submission is refused — never double-minted.
+    async fn mint_revert_blocks_duplicate() {
+        // When every mint attempt reverts after a source lock, the transfer fails
+        // and a duplicate submission is refused — never double-minted.
         let coordinator = TransferCoordinator::new(
             Box::new(csv_storage::InMemoryReplayDb::new()),
             EventBus::new(),
@@ -6591,7 +6598,7 @@ mod tests {
         );
 
         // Duplicate submission after a revert is refused (fail-closed): the
-        // rolled-back replay entry blocks any re-execution, preventing a
+        // The pending replay reservation blocks any re-execution, preventing a
         // double-mint. Recovery from a revert is an operator action, not an
         // automatic re-run (see the operator runbook).
         let dup = coordinator.execute(transfer.clone(), &registry, ctx).await;

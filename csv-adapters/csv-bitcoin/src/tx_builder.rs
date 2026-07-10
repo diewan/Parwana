@@ -744,7 +744,6 @@ mod tests {
         let path2 = Bip86Path::external(0, 1);
 
         // Add a UTXO with a scriptPubKey from a different address
-        let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_byte_array([0xAB; 32]));
         let wrong_key = wallet.derive_key(&path2).unwrap();
         let mut utxo = make_utxo(path.clone(), 1_000_000);
         utxo.script_pubkey = Some(wrong_key.address.script_pubkey()); // Script from wrong path

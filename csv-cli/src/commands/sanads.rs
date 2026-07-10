@@ -1043,6 +1043,72 @@ async fn cmd_create(
     let sanad_id_hash = Hash::new(*sanad_id.as_bytes());
     output::kv_hash("Sanad ID", sanad_id.as_bytes());
 
+    // Sign before any chain write. Draft creation returns immediately below,
+    // so `--skip-publish` can never create/consume a chain-native seal.
+    let descriptor_hash = descriptor.compute_hash();
+    let owner_bytes = owner_address.as_bytes().to_vec();
+    let signed_proof = sign_ownership_proof(
+        &chain,
+        &core_chain,
+        &seed_array,
+        account,
+        index,
+        &descriptor_hash,
+        &commitment,
+        &salt,
+        &owner_bytes,
+    );
+
+    if matches!(
+        create_request.publish_policy,
+        csv_sdk::sanads::PublishPolicy::DraftOnly
+    ) {
+        let ownership_proof = signed_proof.unwrap_or(csv_protocol::OwnershipProof {
+            owner: owner_bytes.clone(),
+            proof: vec![],
+            scheme: None,
+            public_key: vec![],
+        });
+        let draft = client
+            .sanads()
+            .create_draft(&create_request, commitment, ownership_proof, &salt)
+            .map_err(|e| anyhow::anyhow!("Failed to build sanad draft: {}", e))?;
+
+        output::kv("Chain", chain.as_ref());
+        output::kv_hash(
+            "Descriptor Hash",
+            draft.descriptor.compute_hash().as_bytes(),
+        );
+        output::kv_hash("Commitment", draft.commitment.as_bytes());
+        output::kv(
+            "Value",
+            &value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "default".to_string()),
+        );
+        output::kv("Status", "Draft (not published, no seal, no anchor)");
+        println!();
+        output::warning(
+            "This is an unpublished local draft, not a real Sanad. \
+             No seal was created and nothing was anchored on-chain. \
+             Re-run without --skip-publish to create and publish a real Sanad.",
+        );
+        return Ok(());
+    }
+
+    // Fail closed BEFORE any chain write: publishing spends a UTXO / burns gas
+    // and leaves an orphaned on-chain commitment if we abort afterwards
+    // (SANAD-CREATE-001). An unsigned ownership proof can never be finalized,
+    // so reject it here, not after the publish.
+    if signed_proof.is_none() {
+        return Err(anyhow::anyhow!(
+            "Cannot publish a sanad on chain '{}': ownership-proof signing \
+             failed or is unsupported for this chain. Re-run with \
+             --skip-publish to produce an unsigned local draft instead.",
+            chain.as_str()
+        ));
+    }
+
     // For Bitcoin, use existing UTXOs instead of creating new seals
     // We need to track both the seal and the anchor since we publish during UTXO selection
     let (seal, selected_utxo_ref, anchor) = if chain.as_str() == "bitcoin" && !sdk_utxos.is_empty()
@@ -1156,7 +1222,7 @@ async fn cmd_create(
             chain.as_str().to_uppercase()
         );
         let seal = runtime
-            .create_seal(core_chain.clone(), value)
+            .create_seal(core_chain.clone(), value, sanad_id_hash, commitment)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create seal: {}", e))?;
         log::info!(
@@ -1229,82 +1295,13 @@ async fn cmd_create(
     // proof material, and the helper fails closed (returns None) for any
     // unsupported chain or signing failure — the guard below then refuses to
     // finalize an unsigned Sanad.
-    let descriptor_hash = descriptor.compute_hash();
-    let owner_bytes = owner_address.as_bytes().to_vec();
-    let signed_proof = sign_ownership_proof(
-        &chain,
-        &core_chain,
-        &seed_array,
-        account,
-        index,
-        &descriptor_hash,
-        &commitment,
-        &salt,
-        &owner_bytes,
-    );
-
-    let (proof_bytes, ownership_proof) = match signed_proof {
-        Some(proof) => (Some(proof.proof.clone()), proof),
-        None => (
-            None,
-            csv_protocol::OwnershipProof {
-                owner: owner_bytes.clone(),
-                proof: vec![],
-                scheme: None,
-                public_key: vec![],
-            },
-        ),
-    };
-
-    // `--skip-publish` can, at most, produce a local unsigned/unpublished
-    // draft (SanadsManager::create_draft). It must never reach the path that
-    // persists a SanadRecord with SanadStatus::Active or claims a seal/anchor
-    // exists, because no commitment was actually published anywhere
-    // (SANAD-CREATE-001).
-    if matches!(
-        create_request.publish_policy,
-        csv_sdk::sanads::PublishPolicy::DraftOnly
-    ) {
-        let draft = client
-            .sanads()
-            .create_draft(&create_request, commitment, ownership_proof, &salt)
-            .map_err(|e| anyhow::anyhow!("Failed to build sanad draft: {}", e))?;
-
-        let descriptor_hash = draft.descriptor.compute_hash();
-
-        output::kv("Chain", chain.as_ref());
-        output::kv_hash("Descriptor Hash", descriptor_hash.as_bytes());
-        output::kv_hash("Commitment", draft.commitment.as_bytes());
-        output::kv(
-            "Value",
-            &value
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "default".to_string()),
-        );
-        output::kv("Status", "Draft (not published, no seal, no anchor)");
-        println!();
-        output::warning(
-            "This is an unpublished local draft, not a real Sanad. \
-             No seal was created and nothing was anchored on-chain. \
-             Re-run without --skip-publish to create and publish a real Sanad.",
-        );
-
-        return Ok(());
-    }
-
-    // Fail closed: never persist a published, Active sanad with an unsigned
-    // ownership proof. Bitcoin, Ethereum, Solana, Sui, and Aptos all produce a
-    // real signature above; `proof_bytes == None` means signing was
-    // unsupported or failed (e.g. wallet/address-derivation mismatch), so we
-    // must not finalize.
-    if proof_bytes.is_none() {
-        return Err(anyhow::anyhow!(
-            "Cannot publish a sanad on chain '{}': ownership-proof signing \
-             failed or is unsupported for this chain. Re-run with \
-             --skip-publish to produce an unsigned local draft instead.",
-            chain.as_str()
-        ));
-    }
+    // The pre-publish guard above already rejected `None`; a published, Active
+    // sanad is therefore always persisted with a real signed ownership proof.
+    let ownership_proof = signed_proof.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Internal error: unsigned ownership proof reached finalize after publish guard"
+        )
+    })?;
 
     // Create the sanad through the runtime and persist the canonical,
     // published result.
@@ -1424,8 +1421,12 @@ async fn cmd_create(
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "default".to_string()),
             );
-            output::kv("Anchor TX Hash", &hex::encode(&result.anchor.anchor_id));
-            output::kv("Block Height", &result.anchor.block_height.to_string());
+            // `anchor_id` is chain-specific: a transaction id/signature on
+            // Bitcoin/Ethereum/Solana/Sui, but an account/event handle on
+            // Aptos. Label it as the anchor reference rather than promising a
+            // tx hash the chain never produced.
+            output::kv("Anchor Ref", &hex::encode(&result.anchor.anchor_id));
+            output::kv("Anchor Height", &result.anchor.block_height.to_string());
             output::kv("Status", "Created and published via runtime");
 
             // UnifiedStateManager is automatically saved after command execution

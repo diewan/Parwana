@@ -56,6 +56,8 @@ pub mod wallet_operations;
 
 #[cfg(feature = "rpc")]
 pub mod node;
+#[cfg(feature = "rpc")]
+pub(crate) mod rpc_utils;
 
 pub use seal_protocol::SuiSealProtocol;
 

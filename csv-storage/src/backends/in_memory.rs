@@ -64,9 +64,13 @@ impl ReplayDatabase for InMemoryReplayDb {
                 Ok(())
             }
             Some(ReplayEntryState::Consumed) => Ok(()),
-            Some(ReplayEntryState::Pending) | Some(ReplayEntryState::RolledBack) => {
-                Err(ReplayDbError::AlreadyExists)
+            // RolledBack: previous attempt definitively did not complete —
+            // re-arm the slot so the transfer can be retried.
+            Some(ReplayEntryState::RolledBack) => {
+                entries.insert(id.to_vec(), ReplayEntryState::Pending);
+                Ok(())
             }
+            Some(ReplayEntryState::Pending) => Err(ReplayDbError::AlreadyExists),
         }
     }
 

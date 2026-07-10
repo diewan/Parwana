@@ -26,7 +26,7 @@
 //! instruction — their permanent existence is what defeats close+reopen replay.
 
 use anchor_lang::prelude::*;
-use solana_program::secp256k1_recover::secp256k1_recover;
+use solana_secp256k1_recover::secp256k1_recover;
 
 pub mod constants;
 pub mod errors;
@@ -51,7 +51,7 @@ declare_id!("9ekKQYpaLkTrycYmRNRDHohYZwXycHAyfLNirUDRnRVh");
 /// Compute `keccak256("csv.chain.solana")` — the bytes32 `destinationChainId` bound
 /// into the §9.2 mint attestation digest (RFC-0012 §6).
 pub fn solana_chain_id() -> [u8; 32] {
-    solana_program::keccak::hashv(&[CHAIN_NAME_SOLANA]).to_bytes()
+    solana_keccak_hasher::hashv(&[CHAIN_NAME_SOLANA]).to_bytes()
 }
 
 /// Compute the frozen §9.2 mint attestation digest (SHA-256 over the 287-byte preimage).
@@ -84,7 +84,7 @@ pub fn mint_attestation_digest(
     preimage.extend_from_slice(nullifier); // 32
     preimage.extend_from_slice(&attestation_expiry.to_be_bytes()); // 8
 
-    solana_program::hash::hash(&preimage).to_bytes()
+    solana_sha256_hasher::hash(&preimage).to_bytes()
 }
 
 /// Compute the frozen §10 settlement-receipt digest (SHA-256 over the 257-byte preimage).
@@ -115,7 +115,7 @@ pub fn settlement_receipt_digest(
     preimage.extend_from_slice(operator_payout); // 32
     preimage.extend_from_slice(&receipt_expiry.to_be_bytes()); // 8
 
-    solana_program::hash::hash(&preimage).to_bytes()
+    solana_sha256_hasher::hash(&preimage).to_bytes()
 }
 
 /// Whether `s` (big-endian) exceeds n/2 (secp256k1 low-s malleability guard).
@@ -261,7 +261,10 @@ pub mod csv_seal {
         );
 
         let registry = &mut ctx.accounts.registry;
-        require!(registry.verifiers.len() < MAX_VERIFIERS, CsvError::VerifierSetFull);
+        require!(
+            registry.verifiers.len() < MAX_VERIFIERS,
+            CsvError::VerifierSetFull
+        );
         require!(
             !registry.verifiers.iter().any(|v| v == &verifier),
             CsvError::VerifierAlreadyExists
@@ -366,7 +369,10 @@ pub mod csv_seal {
         let consumer = ctx.accounts.consumer.key();
         let now = Clock::get()?.unix_timestamp;
 
-        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
+        require!(
+            sanad.state != SanadState::Consumed as u8,
+            CsvError::AlreadyConsumed
+        );
 
         sanad.state = SanadState::Consumed as u8;
         sanad.consumed_at = now;
@@ -394,8 +400,14 @@ pub mod csv_seal {
         let owner = ctx.accounts.owner.key();
         let now = Clock::get()?.unix_timestamp;
 
-        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
-        require!(sanad.state != SanadState::Locked as u8, CsvError::AlreadyLocked);
+        require!(
+            sanad.state != SanadState::Consumed as u8,
+            CsvError::AlreadyConsumed
+        );
+        require!(
+            sanad.state != SanadState::Locked as u8,
+            CsvError::AlreadyLocked
+        );
 
         lock_account.lock = LockRecord {
             sanad_id: sanad.sanad_id,
@@ -476,11 +488,14 @@ pub mod csv_seal {
 
         // §9.2 expiry bound.
         if attestation_expiry != 0 {
-            require!((now as u64) <= attestation_expiry, CsvError::AttestationExpired);
+            require!(
+                (now as u64) <= attestation_expiry,
+                CsvError::AttestationExpired
+            );
         }
 
         let destination_owner_hash =
-            solana_program::keccak::hashv(&[destination_owner.as_slice()]).to_bytes();
+            solana_keccak_hasher::hashv(&[destination_owner.as_slice()]).to_bytes();
 
         // §9 authentication: verify M-of-N verifier signatures over the frozen §9.2 digest.
         let digest = mint_attestation_digest(
@@ -492,7 +507,11 @@ pub mod csv_seal {
             &nullifier,
             attestation_expiry,
         );
-        require_verifier_threshold(&ctx.accounts.verifier_registry, &digest, &verifier_signatures)?;
+        require_verifier_threshold(
+            &ctx.accounts.verifier_registry,
+            &digest,
+            &verifier_signatures,
+        )?;
 
         // Record the mint and consume the replay keys. `init` on each of these three
         // PDAs is the on-chain uniqueness enforcement (a second mint with any repeated
@@ -529,7 +548,10 @@ pub mod csv_seal {
             nullifier,
             minted_at: now,
         });
-        emit!(NullifierRegistered { nullifier, sanad_id });
+        emit!(NullifierRegistered {
+            nullifier,
+            sanad_id
+        });
 
         Ok(())
     }
@@ -555,10 +577,22 @@ pub mod csv_seal {
         verifier_signatures: Vec<Vec<u8>>,
     ) -> Result<()> {
         require!(sanad_id != [0u8; 32], CsvError::InvalidSettlementRequest);
-        require!(lock_event_id != [0u8; 32], CsvError::InvalidSettlementRequest);
-        require!(destination_chain_id != [0u8; 32], CsvError::InvalidSettlementRequest);
-        require!(destination_mint_tx_ref != [0u8; 32], CsvError::InvalidSettlementRequest);
-        require!(operator_payout != Pubkey::default(), CsvError::InvalidSettlementRequest);
+        require!(
+            lock_event_id != [0u8; 32],
+            CsvError::InvalidSettlementRequest
+        );
+        require!(
+            destination_chain_id != [0u8; 32],
+            CsvError::InvalidSettlementRequest
+        );
+        require!(
+            destination_mint_tx_ref != [0u8; 32],
+            CsvError::InvalidSettlementRequest
+        );
+        require!(
+            operator_payout != Pubkey::default(),
+            CsvError::InvalidSettlementRequest
+        );
 
         let now = Clock::get()?.unix_timestamp;
         if receipt_expiry != 0 {
@@ -579,7 +613,11 @@ pub mod csv_seal {
             &operator_payout.to_bytes(),
             receipt_expiry,
         );
-        require_verifier_threshold(&ctx.accounts.verifier_registry, &digest, &verifier_signatures)?;
+        require_verifier_threshold(
+            &ctx.accounts.verifier_registry,
+            &digest,
+            &verifier_signatures,
+        )?;
 
         // Effects: mark the lock settled (terminal; blocks refund) and record the
         // release. The SettlementRecord `init` is the exactly-one-per-lock_event_id
@@ -662,14 +700,20 @@ pub mod csv_seal {
         metadata_hash: [u8; 32],
         proof_system: u8,
     ) -> Result<()> {
-        require!(asset_class <= ASSET_CLASS_PROOF_SANAD, CsvError::InvalidSanadMetadata);
+        require!(
+            asset_class <= ASSET_CLASS_PROOF_SANAD,
+            CsvError::InvalidSanadMetadata
+        );
         require!(
             asset_class == ASSET_CLASS_UNSPECIFIED || asset_id != [0u8; 32],
             CsvError::InvalidSanadMetadata
         );
 
         let sanad = &mut ctx.accounts.sanad_account;
-        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
+        require!(
+            sanad.state != SanadState::Consumed as u8,
+            CsvError::AlreadyConsumed
+        );
 
         sanad.asset_class = asset_class;
         sanad.asset_id = asset_id;
@@ -693,8 +737,14 @@ pub mod csv_seal {
         let current_owner = ctx.accounts.current_owner.key();
 
         require!(sanad.owner == current_owner, CsvError::NotAuthorized);
-        require!(sanad.state != SanadState::Consumed as u8, CsvError::AlreadyConsumed);
-        require!(sanad.state != SanadState::Locked as u8, CsvError::AlreadyLocked);
+        require!(
+            sanad.state != SanadState::Consumed as u8,
+            CsvError::AlreadyConsumed
+        );
+        require!(
+            sanad.state != SanadState::Locked as u8,
+            CsvError::AlreadyLocked
+        );
 
         sanad.owner = new_owner;
         sanad.state = SanadState::Transferred as u8;
