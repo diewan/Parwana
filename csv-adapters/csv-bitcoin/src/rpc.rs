@@ -71,6 +71,25 @@ pub trait BitcoinRpc: Send + Sync {
         txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Return the height of the block that confirms `txid`, or `None` if the
+    /// transaction is not yet confirmed. `txid` is internal byte order.
+    ///
+    /// The default derives the height from the confirmation count and the current
+    /// tip (`tip - confirmations + 1`). Backends with a direct transaction-status
+    /// endpoint should override this for a race-free single lookup (a block
+    /// arriving between the two RPC calls would otherwise skew the derived height).
+    async fn get_tx_block_height(
+        &self,
+        txid: [u8; 32],
+    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
+        let confirmations = self.get_tx_confirmations(txid).await?;
+        if confirmations == 0 {
+            return Ok(None);
+        }
+        let tip = self.get_block_count().await?;
+        Ok(Some(tip.saturating_sub(confirmations) + 1))
+    }
+
     /// Get UTXOs for a specific address
     /// Returns list of (txid, vout, amount_sat, confirmations)
     async fn get_utxos_for_address(
@@ -154,6 +173,9 @@ pub trait BitcoinRpc: Send + Sync {
 #[cfg(test)]
 pub struct TestBitcoinRpc {
     block_count: u64,
+    /// Confirmation count reported for every txid by `get_tx_confirmations`
+    /// (0 = unconfirmed). Defaults to 0 to preserve existing test behavior.
+    confirmations: u64,
     pub unspent_utxos: HashSet<(Vec<u8>, u32)>,
 }
 
@@ -162,8 +184,15 @@ impl TestBitcoinRpc {
     pub fn new(block_count: u64) -> Self {
         Self {
             block_count,
+            confirmations: 0,
             unspent_utxos: HashSet::new(),
         }
+    }
+
+    /// Report `confirmations` for every txid (drives `get_tx_block_height`).
+    pub fn with_confirmations(mut self, confirmations: u64) -> Self {
+        self.confirmations = confirmations;
+        self
     }
 
     pub fn mark_utxo_unspent(&mut self, txid: Vec<u8>, vout: u32) {
@@ -211,7 +240,7 @@ impl BitcoinRpc for TestBitcoinRpc {
         &self,
         _txid: [u8; 32],
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(0)
+        Ok(self.confirmations)
     }
 
     async fn get_utxos_for_address(
@@ -288,6 +317,7 @@ impl BitcoinRpc for TestBitcoinRpc {
     fn clone_boxed(&self) -> Box<dyn BitcoinRpc + Send + Sync> {
         Box::new(TestBitcoinRpc {
             block_count: self.block_count,
+            confirmations: self.confirmations,
             unspent_utxos: self.unspent_utxos.clone(),
         })
     }

@@ -384,6 +384,27 @@ pub trait ChainDeployer: Send + Sync {
     async fn estimate_deployment_cost(&self, program_bytes: &[u8]) -> ChainOpResult<u64>;
 }
 
+/// Location of a sanad's on-chain anchor: the real anchor/transaction identifier
+/// and the height of the block (or slot) that confirms it.
+///
+/// Returned by [`ChainProofProvider::resolve_sanad_anchor`] so proof generation
+/// can build an inclusion proof against the block that actually contains the
+/// anchor — using the chain-native anchor id — rather than treating the sanad id
+/// as a transaction id and the chain tip as the anchor block (which produces
+/// invalid proofs and merkle-extraction failures).
+#[derive(Debug, Clone)]
+pub struct SanadAnchorLocation {
+    /// Chain-native anchor identifier in the byte order the chain's
+    /// [`ChainProofProvider::build_inclusion_proof`] expects (e.g. a Bitcoin txid
+    /// in internal byte order).
+    pub anchor_id: Vec<u8>,
+    /// Height of the block/slot that confirms the anchor transaction.
+    pub block_height: u64,
+    /// Hex form of `anchor_id` (same byte order) for
+    /// [`ChainProofProvider::build_finality_proof`], which takes a `&str` tx hash.
+    pub tx_hash_hex: String,
+}
+
 /// Trait for building and verifying cryptographic proofs
 ///
 /// All proof operations must use real cryptographic verification.
@@ -410,6 +431,23 @@ pub trait ChainProofProvider: Send + Sync {
         proof: &InclusionProof,
         commitment: &Hash,
     ) -> ChainOpResult<bool>;
+
+    /// Resolve a sanad's on-chain anchor location (real anchor id + confirming
+    /// block height) so proof generation targets the correct block and
+    /// transaction instead of the sanad id and the chain tip.
+    ///
+    /// Returns `Ok(None)` when the adapter cannot resolve the sanad from local
+    /// state (the default). The caller MUST NOT fabricate an anchor in that case;
+    /// it either falls back to a path that itself fails closed, or surfaces an
+    /// error. Adapters that track a `sanad_id -> anchor` mapping (e.g. Bitcoin)
+    /// override this to return the real location, and return `Err` when the sanad
+    /// is known but its anchor is not yet confirmed.
+    async fn resolve_sanad_anchor(
+        &self,
+        _sanad_id: &SanadId,
+    ) -> ChainOpResult<Option<SanadAnchorLocation>> {
+        Ok(None)
+    }
 
     /// Build a finality proof for a transaction or anchor
     ///

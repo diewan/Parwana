@@ -1,5 +1,11 @@
 # CSV Protocol
 
+> [!WARNING]
+> ATTENTION : PROJECT IS IN EXPERIMENTAL MODE
+
+> [!CAUTION]
+> FREQUENT DRAMATIC CHANGES TO THE CODE, ARCHITECTURE AND CONCEPTS ARE NORMAL AT THIS STAGE :bangbang:
+
 ## Constitutional Client-Side Validation Infrastructure
 
 > A multi-chain, client-validated protocol for cryptographic ownership, transfer, provenance, and state evolution using Single-Use Seals, canonical commitments, deterministic replay resistance, and adversarial runtime orchestration.

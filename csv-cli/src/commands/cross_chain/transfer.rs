@@ -419,7 +419,33 @@ pub async fn cmd_send(
     let source_seal = resolve_source_seal(&from, &sanad_hex, state)?;
     let transfer_id = derive_send_transfer_id(&from, &sanad_id, &source_seal, &invoice_id)?;
 
-    let proof_bundle = load_verified_send_proof(&from, &sanad_hex, &destination_seal, state)?;
+    // Build the client first so we can generate the send-transition proof (which
+    // needs the source-chain runtime) if one is not already in the local store.
+    let client = build_client(&from, &destination_chain, None, config, state).await?;
+
+    let mut proof_bundle = load_or_generate_send_transition_proof(
+        &from,
+        &sanad_hex,
+        &sanad_id,
+        &destination_seal,
+        &client,
+        state,
+    )
+    .await?;
+
+    // Stamp source-chain provenance onto the proof leaves. The SDK proof
+    // builders (and the per-chain ops adapters they call) leave
+    // `inclusion_proof.source` / `finality_proof.source` empty; without a
+    // recognizable source-chain marker the recipient's `accept` fails closed
+    // in `consignment_source_chain` ("missing recognized source-chain
+    // provenance"). `from` is the authoritative source chain for this send.
+    if proof_bundle.inclusion_proof.source.is_empty() {
+        proof_bundle.inclusion_proof.source = from.as_str().to_string();
+    }
+    if proof_bundle.finality_proof.source.is_empty() {
+        proof_bundle.finality_proof.source = from.as_str().to_string();
+    }
+
     let executor = CliSendExecutor {
         invoice,
         proof_bundle,
@@ -432,7 +458,6 @@ pub async fn cmd_send(
         destination_seal,
     };
 
-    let client = build_client(&from, &destination_chain, None, config, state).await?;
     let coordinator = client
         .coordinator()
         .ok_or_else(|| anyhow::anyhow!("Runtime coordinator is not available"))?;
@@ -661,6 +686,198 @@ fn load_verified_send_proof(
         ));
     }
     Ok(bundle)
+}
+
+/// Obtain the send-transition [`ProofBundle`] the interactive off-chain `send`
+/// hands to the recipient: reuse a verified one from the local store if present,
+/// otherwise build and sign one here.
+///
+/// The bundle proves the Sanad's source-chain anchor (inclusion + finality,
+/// anchored to the Sanad id) and is *assigned to* the recipient-controlled
+/// destination seal named by the invoice. The transition DAG root is signed with
+/// the sender's source-chain (Sanad-owner) wallet key — the RGB-style `send`
+/// trust model with no attestor (TXMODE decision, MINT-KEYS-independent): the
+/// recipient authenticates that signature against the sender's public key in
+/// their approved verifier set (`[verifier] approved_keys`), delivered
+/// out-of-band. Nothing in the source proof binds `seal_ref`, so re-binding it to
+/// the destination seal leaves source provenance and domain separation
+/// (`anchor_id == sanad_id`) intact (see `csv_verifier::validate_context_binding`).
+async fn load_or_generate_send_transition_proof(
+    from: &Chain,
+    sanad_hex: &str,
+    sanad_id: &SanadId,
+    destination_seal: &SealPoint,
+    client: &CsvClient,
+    state: &mut UnifiedStateManager,
+) -> Result<csv_protocol::proof_taxonomy::ProofBundle> {
+    if let Ok(bundle) = load_verified_send_proof(from, sanad_hex, destination_seal, state) {
+        output::info("Using stored verified send-transition proof for the invoice seal.");
+        return Ok(bundle);
+    }
+
+    output::info(
+        "No stored send-transition proof; building and signing one bound to the invoice seal…",
+    );
+    let core_chain = to_protocol_chain(from.clone());
+
+    // Source-chain anchor evidence for the Sanad (inclusion + finality, anchored
+    // to the Sanad id). Requires source-chain RPC, exactly like `proof generate`.
+    let mut bundle = client
+        .chain_runtime()
+        .generate_proof(core_chain.clone(), sanad_id)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to build source anchor proof for send: {}", e)
+        })?;
+
+    // Re-bind to the recipient-controlled destination seal so the consignment
+    // binds the invoice seal (`Consignment::binds_invoice_seal`). The anchor and
+    // DAG stay rooted at the Sanad, so provenance/domain separation are unchanged.
+    bundle.seal_ref = destination_seal.clone();
+
+    // Structural completeness the recipient's client-side validation requires
+    // (mirrors `load_verified_send_proof`). Fail closed before emitting anything.
+    if bundle.transition_dag.nodes.is_empty()
+        || bundle.inclusion_proof.proof_bytes.is_empty()
+        || bundle.finality_proof.finality_data.is_empty()
+    {
+        return Err(anyhow::anyhow!(
+            "Generated send-transition proof is incomplete (missing DAG/inclusion/finality \
+             evidence); refusing to emit a consignment the recipient would reject"
+        ));
+    }
+
+    // Sign the transition DAG root with the sender's source-chain wallet key.
+    let identity = WalletIdentity::from_state(state)?;
+    let (encoded_signature, scheme) =
+        sign_send_transition(from, &core_chain, identity.seed(), 0, 0, &bundle)?;
+    bundle.signatures = vec![encoded_signature];
+    bundle.signature_scheme = scheme;
+
+    // Persist as a verified send-transition proof so a re-run/resume reuses it.
+    persist_send_transition_proof(state, from, sanad_hex, &bundle)?;
+    state.save()?;
+    output::success("Send-transition proof generated, signed, and recorded.");
+
+    Ok(bundle)
+}
+
+/// Sign the transition DAG root of `bundle` with the sender's wallet key for
+/// `chain` and return the bundle-format signature blob plus its scheme.
+///
+/// The blob layout is `[pk_len (u32 LE)] [public_key] [signature]` and the signed
+/// message is the DAG root commitment — exactly what
+/// `csv_verifier::verify_bundle_signatures` parses and verifies. The freshly
+/// built signature is verified locally before returning, so a key/scheme mismatch
+/// fails closed here rather than producing a consignment the recipient rejects.
+fn sign_send_transition(
+    chain: &Chain,
+    core_chain: &csv_hash::ChainId,
+    seed: &[u8; 64],
+    account: u32,
+    index: u32,
+    bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+) -> Result<(Vec<u8>, csv_protocol::signature::SignatureScheme)> {
+    use csv_protocol::signature::SignatureScheme;
+
+    let message = bundle.transition_dag.root_commitment.as_bytes().to_vec();
+    let secret = csv_keys::bip44::derive_key(seed, core_chain, account, index)
+        .map_err(|e| anyhow::anyhow!("Failed to derive {} signing key: {}", chain, e))?;
+    let key_bytes = secret.as_bytes();
+
+    let (signature, public_key, scheme) = match chain.as_str() {
+        "bitcoin" | "ethereum" => {
+            use secp256k1::{Message, Secp256k1, SecretKey};
+            let sk = SecretKey::from_slice(key_bytes)
+                .map_err(|e| anyhow::anyhow!("Invalid secp256k1 signing key: {}", e))?;
+            let secp = Secp256k1::new();
+            let msg = Message::from_digest_slice(&message)
+                .map_err(|e| anyhow::anyhow!("Invalid signing digest: {}", e))?;
+            let sig = secp.sign_ecdsa(&msg, &sk).serialize_compact().to_vec();
+            let pk = sk.public_key(&secp).serialize().to_vec();
+            // Self-check the signature verifies before we ship it.
+            secp.verify_ecdsa(
+                &msg,
+                &secp256k1::ecdsa::Signature::from_compact(&sig)
+                    .map_err(|e| anyhow::anyhow!("Malformed signature: {}", e))?,
+                &sk.public_key(&secp),
+            )
+            .map_err(|e| anyhow::anyhow!("send-transition signature self-check failed: {}", e))?;
+            (sig, pk, SignatureScheme::Secp256k1)
+        }
+        "sui" | "aptos" | "solana" => {
+            use ed25519_dalek::{Signer, SigningKey, Verifier};
+            let key_array: [u8; 32] = *key_bytes;
+            let signing = SigningKey::from_bytes(&key_array);
+            let sig = signing.sign(&message);
+            signing
+                .verifying_key()
+                .verify(&message, &sig)
+                .map_err(|e| anyhow::anyhow!("send-transition signature self-check failed: {}", e))?;
+            (
+                sig.to_bytes().to_vec(),
+                signing.verifying_key().to_bytes().to_vec(),
+                SignatureScheme::Ed25519,
+            )
+        }
+        other => {
+            return Err(anyhow::anyhow!(
+                "Unsupported send source chain '{}' for transition signing",
+                other
+            ));
+        }
+    };
+
+    // Surface the signer key: the recipient must add this public key to their
+    // `[verifier] approved_keys` (out-of-band) for `accept` to authenticate the
+    // consignment.
+    output::kv(
+        "Send-transition signer pubkey (recipient must approve)",
+        &hex::encode(&public_key),
+    );
+
+    let mut encoded = Vec::with_capacity(4 + public_key.len() + signature.len());
+    encoded.extend_from_slice(&(public_key.len() as u32).to_le_bytes());
+    encoded.extend_from_slice(&public_key);
+    encoded.extend_from_slice(&signature);
+    Ok((encoded, scheme))
+}
+
+/// Record a verified send-transition proof in the local (display/cache) store so
+/// a re-run or resume of the same send reuses it instead of rebuilding.
+fn persist_send_transition_proof(
+    state: &mut UnifiedStateManager,
+    chain: &Chain,
+    sanad_hex: &str,
+    bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+) -> Result<()> {
+    use csv_store::state::ProofRecord;
+    use csv_store::state::domain::ProofStatus;
+
+    let raw = bundle
+        .to_canonical_bytes()
+        .map_err(|e| anyhow::anyhow!("Failed to encode send-transition proof: {}", e))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    state.storage.proofs.push(ProofRecord {
+        chain: csv_hash::ChainId::new(chain.as_str()),
+        sanad_id: sanad_hex.to_string(),
+        proof_type: "send_transition".to_string(),
+        proof_system: None,
+        verified: true,
+        proof_data: Some(base64::engine::general_purpose::STANDARD.encode(&raw)),
+        block_height: Some(bundle.inclusion_proof.block_number),
+        created_at: now,
+        verified_at: Some(now),
+        status: ProofStatus::Verified,
+        seal_ref: Some(hex::encode(&bundle.seal_ref.id)),
+        target_chain: None,
+        verification_tx_hash: None,
+    });
+    Ok(())
 }
 
 fn derive_send_transfer_id(

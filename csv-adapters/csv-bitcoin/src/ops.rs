@@ -13,8 +13,8 @@ use csv_protocol::chain_adapter_traits::{
     BalanceInfo, CanonicalLifecycleEvent, CanonicalSanadState, CanonicalSealState, ChainBackend,
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
-    ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperation,
-    SanadOperationResult, SanadStateReader, TransactionStatus,
+    ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadAnchorLocation,
+    SanadOperation, SanadOperationResult, SanadStateReader, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::signature::SignatureScheme;
@@ -2209,6 +2209,56 @@ impl ChainDeployer for BitcoinBackend {
 
 #[async_trait]
 impl ChainProofProvider for BitcoinBackend {
+    async fn resolve_sanad_anchor(
+        &self,
+        sanad_id: &SanadId,
+    ) -> ChainOpResult<Option<SanadAnchorLocation>> {
+        // The wallet holds the sanad_id -> (anchor_txid, vout) mapping in internal
+        // byte order (see seal_protocol.rs), which is exactly what the inclusion
+        // proof's merkle extraction expects. Look it up rather than treating the
+        // sanad id as a txid.
+        let anchor_txid = {
+            let seals = self.seal_protocol.wallet.get_sanad_seals();
+            match seals.get(sanad_id.as_bytes()) {
+                Some((txid, _vout)) => txid.clone(),
+                // Unknown sanad: let the caller fall through to a path that fails
+                // closed rather than fabricating an anchor here.
+                None => return Ok(None),
+            }
+        };
+        if anchor_txid.len() != 32 {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Stored Bitcoin anchor txid for sanad {} is {} bytes, expected 32",
+                hex::encode(sanad_id.as_bytes()),
+                anchor_txid.len()
+            )));
+        }
+        let mut txid = [0u8; 32];
+        txid.copy_from_slice(&anchor_txid);
+
+        // Locate the block that actually confirms the anchor. Fail closed (Err)
+        // when the sanad is known but not yet confirmed — proof generation must
+        // never build inclusion evidence against the chain tip.
+        let block_height = self
+            .rpc
+            .get_tx_block_height(txid)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to resolve anchor block: {e}")))?
+            .ok_or_else(|| {
+                ChainOpError::ProofVerificationError(format!(
+                    "Bitcoin anchor for sanad {} is not yet confirmed; cannot build an \
+                     inclusion proof",
+                    hex::encode(sanad_id.as_bytes())
+                ))
+            })?;
+
+        Ok(Some(SanadAnchorLocation {
+            anchor_id: anchor_txid.clone(),
+            block_height,
+            tx_hash_hex: hex::encode(&anchor_txid),
+        }))
+    }
+
     async fn build_inclusion_proof(
         &self,
         commitment: &Hash,
@@ -3284,5 +3334,84 @@ mod tests {
         // We verify the protocol has the registry by checking it can be created
         // The actual replay prevention is tested in the create_sanad flow
         assert!(seal_protocol.wallet.utxo_count() == 0);
+    }
+
+    /// Build a `BitcoinBackend` over a `TestBitcoinRpc` for anchor-resolution tests.
+    fn backend_with_rpc(rpc: TestBitcoinRpc) -> BitcoinBackend {
+        let config = BitcoinConfig::default();
+        let wallet = crate::wallet::SealWallet::generate_random(Network::Signet);
+        let seal_protocol = BitcoinSealProtocol::with_wallet(config, wallet)
+            .expect("Failed to create seal protocol")
+            .with_rpc(rpc.clone_boxed());
+        BitcoinBackend::from_seal_protocol(Arc::new(seal_protocol))
+            .expect("Failed to build BitcoinBackend")
+    }
+
+    #[tokio::test]
+    async fn resolve_sanad_anchor_returns_confirming_block_not_tip() {
+        // A confirmed sanad anchor must resolve to the block that *contains* it
+        // (tip - confirmations + 1), using the mapped txid — never the sanad id
+        // or the chain tip. This is the regression the send/generate_proof path hit.
+        let tip = 200u64;
+        let confirmations = 6u64;
+        let backend = backend_with_rpc(TestBitcoinRpc::new(tip).with_confirmations(confirmations));
+
+        let sanad_id = SanadId::new([0xABu8; 32]);
+        let anchor_txid = vec![0x11u8; 32]; // internal byte order, as stored
+        backend.seal_protocol.wallet.register_sanad_seal(
+            *sanad_id.as_bytes(),
+            anchor_txid.clone(),
+            0,
+        );
+
+        let resolved = backend
+            .resolve_sanad_anchor(&sanad_id)
+            .await
+            .expect("resolution should not error")
+            .expect("known, confirmed sanad must resolve to Some");
+
+        assert_eq!(resolved.anchor_id, anchor_txid, "must use the mapped txid");
+        assert_ne!(
+            resolved.anchor_id,
+            sanad_id.as_bytes().to_vec(),
+            "must not use the sanad id as the anchor txid"
+        );
+        assert_eq!(
+            resolved.block_height,
+            tip - confirmations + 1,
+            "must target the confirming block, not the tip"
+        );
+        assert_eq!(resolved.tx_hash_hex, hex::encode(&anchor_txid));
+    }
+
+    #[tokio::test]
+    async fn resolve_sanad_anchor_unknown_sanad_returns_none() {
+        // An unmapped sanad resolves to None so the caller falls through to a
+        // fail-closed path rather than fabricating an anchor.
+        let backend = backend_with_rpc(TestBitcoinRpc::new(200).with_confirmations(6));
+        let unknown = SanadId::new([0x22u8; 32]);
+        let resolved = backend
+            .resolve_sanad_anchor(&unknown)
+            .await
+            .expect("resolution should not error");
+        assert!(resolved.is_none(), "unknown sanad must resolve to None");
+    }
+
+    #[tokio::test]
+    async fn resolve_sanad_anchor_unconfirmed_fails_closed() {
+        // A mapped but unconfirmed anchor must fail closed — proof generation may
+        // never build inclusion evidence against the tip for an unconfirmed tx.
+        let backend = backend_with_rpc(TestBitcoinRpc::new(200).with_confirmations(0));
+        let sanad_id = SanadId::new([0xABu8; 32]);
+        backend
+            .seal_protocol
+            .wallet
+            .register_sanad_seal(*sanad_id.as_bytes(), vec![0x11u8; 32], 0);
+
+        let result = backend.resolve_sanad_anchor(&sanad_id).await;
+        assert!(
+            matches!(result, Err(ChainOpError::ProofVerificationError(ref m)) if m.contains("not yet confirmed")),
+            "unconfirmed anchor must fail closed: {result:?}"
+        );
     }
 }

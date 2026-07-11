@@ -568,39 +568,66 @@ impl ChainRuntime {
         let chain_for_error = chain.clone();
         let adapter = self.get_adapter(chain_for_error.clone()).await?;
 
-        // Query the chain for the inclusion proof at the latest block
-        let block_height =
+        // Resolve the sanad's real on-chain anchor: the transaction that anchors
+        // it and the block that confirms it. Using the sanad id as a txid and the
+        // chain tip as the anchor block yields invalid inclusion proofs — the
+        // sanad id is not a transaction id, and the anchor is not at the tip.
+        //
+        // Adapters that track a sanad_id -> anchor mapping (Bitcoin) return the
+        // real location. Adapters that do not (Ethereum/Aptos/Sui/Solana on this
+        // legacy path) return None; their own `build_inclusion_proof` then fails
+        // closed instead of fabricating a proof — we never invent an anchor here.
+        let anchor =
             adapter
-                .get_latest_block_height()
+                .resolve_sanad_anchor(sanad_id)
                 .await
                 .map_err(|e| CsvError::ProtocolError {
                     chain: chain.clone(),
-                    message: format!("Failed to get latest block height: {}", e),
+                    message: format!("Failed to resolve sanad anchor: {e}"),
                 })?;
+
+        let (block_height, anchor_id_bytes, resolved_tx_hash) = match anchor {
+            Some(loc) => (loc.block_height, loc.anchor_id, Some(loc.tx_hash_hex)),
+            None => {
+                let tip = adapter.get_latest_block_height().await.map_err(|e| {
+                    CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Failed to get latest block height: {}", e),
+                    }
+                })?;
+                (tip, sanad_id.as_bytes().to_vec(), None)
+            }
+        };
 
         // Create commitment from sanad_id (the sanad's hash is the commitment)
         let commitment = csv_hash::Hash::new(*sanad_id.as_bytes());
 
-        // Build inclusion proof from chain state
+        // Build inclusion proof from chain state, against the resolved anchor.
         let inclusion_proof = adapter
-            .build_inclusion_proof(&commitment, block_height, sanad_id.as_bytes())
+            .build_inclusion_proof(&commitment, block_height, &anchor_id_bytes)
             .await
             .map_err(|e| CsvError::ProtocolError {
                 chain: chain.clone(),
                 message: format!("Failed to build inclusion proof: {}", e),
             })?;
 
-        // Get the transaction info to build finality proof
-        // For proof generation, we use the sanad_id as the lookup key
-        let tx_hash_lookup = hex::encode(sanad_id.as_bytes());
-        let tx_hash = adapter
-            .get_transaction(tx_hash_lookup.as_str())
-            .await
-            .map_err(|e| CsvError::ProtocolError {
-                chain: chain.clone(),
-                message: format!("Failed to load proof anchor transaction: {e}"),
-            })?
-            .hash;
+        // Finality proof over the resolved anchor transaction. With a resolved
+        // anchor we use its hash directly; otherwise fall back to the legacy
+        // sanad-id lookup (which itself fails closed on non-resolving adapters).
+        let tx_hash = match resolved_tx_hash {
+            Some(hash) => hash,
+            None => {
+                let tx_hash_lookup = hex::encode(sanad_id.as_bytes());
+                adapter
+                    .get_transaction(tx_hash_lookup.as_str())
+                    .await
+                    .map_err(|e| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!("Failed to load proof anchor transaction: {e}"),
+                    })?
+                    .hash
+            }
+        };
 
         // Build finality proof using the transaction hash
         let finality_proof =

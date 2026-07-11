@@ -236,7 +236,12 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
             .get_block_count()
             .await
             .map_err(|e| AdapterError::Generic(format!("Failed to get block count: {}", e)))?;
-        let required_depth = 6u32; // Bitcoin standard finality depth
+        // Bitcoin standard finality depth. This is the protocol-safe floor the
+        // runtime finality gate is now guaranteed to have already enforced
+        // (RuntimePolicy::set_finality_depth clamps any operator override up to
+        // this floor — BTC-FINALITY-FLOOR-001), so this defense-in-depth re-check
+        // can no longer fire after the gate passed with a sub-floor override.
+        let required_depth = 6u32;
         let confirmations = current_height.saturating_sub(lock_result.block_height);
         if confirmations < required_depth as u64 {
             return Err(AdapterError::ProofVerificationFailed(format!(

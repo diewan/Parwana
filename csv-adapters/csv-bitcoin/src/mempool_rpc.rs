@@ -491,6 +491,25 @@ impl BitcoinRpc for MempoolSignetRpc {
         }
     }
 
+    async fn get_tx_block_height(
+        &self,
+        txid: [u8; 32],
+    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
+        // Direct, race-free lookup: the status endpoint returns the confirming
+        // block height itself, so we do not derive it from confirmations + tip.
+        // Trait contract: txid is internal byte order; reverse to display for REST.
+        let mut display_txid = txid;
+        display_txid.reverse();
+        let txid_hex = hex::encode(display_txid);
+
+        let status = self.get_tx_status(&txid_hex).await?;
+        if status.confirmed {
+            Ok(status.block_height.map(u64::from))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn get_inclusion_proof(
         &self,
         txid: [u8; 32],

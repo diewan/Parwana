@@ -119,9 +119,39 @@ impl RuntimePolicy {
             .or(Some(1))
     }
 
-    /// Set the finality depth for a specific chain
+    /// Set the finality depth for a specific chain.
+    ///
+    /// Finality is never optional (see [`Self::set_mode`]): an operator override
+    /// may only *raise* the required depth, never lower it below the
+    /// protocol-safe floor for the chain. The floor is the csv-protocol default
+    /// depth, which is exactly the confirmation depth each chain adapter's
+    /// inclusion/SPV proof builder itself requires. Clamping here keeps the
+    /// runtime finality gate and the adapter proof builder in agreement, so a
+    /// sub-floor `--finality-depth` can no longer pass the gate and then fail
+    /// closed later at proof-build time (BTC-FINALITY-FLOOR-001).
     pub fn set_finality_depth(&mut self, chain_id: String, depth: u64) {
-        self.finality_depths.insert(chain_id, depth);
+        let floor = Self::finality_depth_floor(&chain_id);
+        let effective = depth.max(floor);
+        if effective != depth {
+            tracing::warn!(
+                "Requested finality depth {} for '{}' is below the protocol-safe floor of {}; \
+                 clamping to {}. Finality-depth overrides may only raise finality, never lower it.",
+                depth,
+                chain_id,
+                floor,
+                effective
+            );
+        }
+        self.finality_depths.insert(chain_id, effective);
+    }
+
+    /// Protocol-safe minimum finality depth for a chain: the csv-protocol
+    /// default, or 1 for chains without a protocol default. This is the floor
+    /// that operator overrides cannot go below.
+    fn finality_depth_floor(chain_id: &str) -> u64 {
+        csv_protocol::finality::capabilities::FinalityDepths::defaults()
+            .for_chain(chain_id)
+            .unwrap_or(1)
     }
 
     /// Get the maximum proof-anchor age in blocks for a chain.
@@ -286,6 +316,31 @@ mod tests {
         let mut policy = RuntimePolicy::new();
         policy.set_finality_depth("bitcoin".to_string(), 12);
         assert_eq!(policy.finality_depth_for_chain("bitcoin"), Some(12));
+    }
+
+    #[test]
+    fn test_finality_depth_override_clamped_to_floor() {
+        // An operator override below the protocol-safe floor must be clamped up,
+        // never applied verbatim — otherwise the runtime finality gate would pass
+        // below what the adapter's inclusion-proof builder requires
+        // (BTC-FINALITY-FLOOR-001).
+        let mut policy = RuntimePolicy::new();
+        policy.set_finality_depth("bitcoin".to_string(), 1);
+        assert_eq!(
+            policy.finality_depth_for_chain("bitcoin"),
+            Some(6),
+            "sub-floor bitcoin depth must clamp to the protocol floor of 6"
+        );
+
+        // At-or-above the floor is preserved exactly.
+        policy.set_finality_depth("bitcoin".to_string(), 6);
+        assert_eq!(policy.finality_depth_for_chain("bitcoin"), Some(6));
+        policy.set_finality_depth("ethereum".to_string(), 2);
+        assert_eq!(
+            policy.finality_depth_for_chain("ethereum"),
+            Some(15),
+            "sub-floor ethereum depth must clamp to the protocol floor of 15"
+        );
     }
 
     #[test]
