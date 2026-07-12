@@ -2,12 +2,13 @@
 name = "csv-wallet"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 description = "CSV Wallet - Unified wallet abstraction with Signer trait"
 
 [dependencies]
-csv-hash = { path = "../csv-hash", features = ["serde"] }
-csv-protocol = { path = "../csv-protocol" }
-csv-keys = { path = "../csv-keys" }
+csv-hash = { version = "0.1.5", path = "../csv-hash", features = ["serde"] }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-keys = { version = "0.1.5", path = "../csv-keys" }
 thiserror = "1"
 anyhow = "1"
 async-trait = "0.1"

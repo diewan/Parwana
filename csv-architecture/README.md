@@ -19,7 +19,9 @@ Per `AGENTS.md` and workspace configuration:
 
 - `csv-core` is retired from the workspace and no production source may import it
 - `csv-cli` must NOT import chain adapters directly (use csv-runtime)
-- `csv-runtime` depends on protocol/orchestration crates only (no chain adapter imports)
+- `csv-runtime` depends on chain-agnostic protocol/interface/verification/storage/orchestration crates only (no concrete chain adapter dependencies)
+- `csv-coordinator` and `csv-adapter-factory` may assemble concrete adapters behind chain feature flags
+- every internal path dependency carries a compatible release version and every workspace crate shares the pinned MSRV
 - `serde_json` is forbidden in canonical hashing paths (use canonical_cbor)
 - `persistent` feature is incompatible with wasm32
 - Finality is NEVER optional (all runtime modes enforce strict finality)

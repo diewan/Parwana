@@ -2,13 +2,14 @@
 name = "csv-examples"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 publish = false
 
 [dependencies]
-csv-sdk = { path = "../csv-sdk", features = ["all-chains", "tokio"] }
-csv-protocol = { path = "../csv-protocol" }
-csv-hash = { path = "../csv-hash" }
-csv-keys = { path = "../csv-keys" }
+csv-sdk = { version = "0.1.5", path = "../csv-sdk", features = ["all-chains", "tokio"] }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-keys = { version = "0.1.5", path = "../csv-keys" }
 hex = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 

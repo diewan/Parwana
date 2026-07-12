@@ -2,16 +2,17 @@
 name = "csv-p2p"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 description = "P2P proof transport layer for CSV protocol using Nostr"
 license = "MIT OR Apache-2.0"
 authors = ["Amin Razavi"]
 
 [dependencies]
-csv-hash = { path = "../csv-hash" }
-csv-codec = { path = "../csv-codec" }
-csv-proof = { path = "../csv-proof" }
-csv-protocol = { path = "../csv-protocol" }
-csv-wire = { path = "../csv-wire" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-wire = { version = "0.1.5", path = "../csv-wire" }
 tokio = { workspace = true, optional = true }
 tokio-stream = "0.1"
 parking_lot = "0.12"

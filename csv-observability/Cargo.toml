@@ -12,10 +12,10 @@ readme = "README.md"
 keywords = ["blockchain", "cryptography", "csv-validation", "cross-chain", "smart-contracts"]
 categories = ["cryptography::cryptocurrencies", "authentication"]
 publish = true
-rust-version = "1.95"
+rust-version.workspace = true
 
 [dependencies]
-csv-protocol = { path = "../csv-protocol" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

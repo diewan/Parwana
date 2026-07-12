@@ -4,7 +4,7 @@
 
 This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 
-- Core protocol logic in `csv-core`
+- Core protocol logic in `csv-protocol`, `csv-algebra`, `csv-hash`, and `csv-proof`
 - Protocol orchestration in `csv-protocol`
 - Chain adapters in `csv-adapters/csv-bitcoin`, `csv-adapters/csv-ethereum`, `csv-adapters/csv-solana`, `csv-adapters/csv-sui`, `csv-adapters/csv-aptos`, `csv-adapters/csv-celestia`
 - Runtime orchestration in `csv-runtime` (TransferCoordinator, execution journal, lease management)
@@ -14,7 +14,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 - MCP server in `csv-mcp-server`
 - Smart contracts in `csv-contracts`
 
-**Note:** `csv-wallet`, `csv-explorer/*`, and `typescript-sdk/` do not exist in the current codebase.
+**Note:** `csv-wallet` is a workspace crate. `csv-explorer/*` and `typescript-sdk/` do not exist in the current codebase.
 
 **Out of scope:** Chain-level consensus, external oracle services, user device security.
 
@@ -40,7 +40,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 
 **Mitigation:**
 
-- RPC quorum client (`csv-core/src/rpc.rs`) requires agreement from multiple providers
+- RPC quorum client (`csv-protocol/src/rpc`) requires agreement from multiple providers
 - Finality depth checks prevent acting on unconfirmed transactions
 - Inclusion proofs are verified against on-chain state roots
 
@@ -53,8 +53,8 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 **Mitigation:**
 
 - All indexer data is verified against on-chain state before use
-- `csv-core/src/finality.rs` tracks finality state independently
-- Reorg detection (`csv-core/src/reorg.rs`) handles chain reorganizations
+- `csv-protocol/src/finality` defines and tracks finality state
+- Reorg detection (`csv-protocol/src/reorg`) handles chain reorganizations
 
 ### 3.3 RPC Equivocation
 
@@ -117,7 +117,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 
 - Tagged hashing with domain separation (`csv_tagged_hash`)
 - Chain-specific hash algorithms (`CrossChainHashAlgorithm`)
-- Replay registry (`csv-core/src/replay_registry.rs`) tracks all processed proofs
+- Replay semantics (`csv-protocol/src/replay/registry.rs`) and the runtime replay database track processed proofs
 - Block height and finality checks in proof verification
 
 ### 4.3 Lease Bypass
@@ -141,7 +141,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 
 **Mitigation:**
 
-- Canonical CBOR serialization (`csv-core/src/canonical.rs`) prevents encoding ambiguity
+- Canonical CBOR serialization (`csv-codec`) prevents encoding ambiguity
 - Tagged hashing ensures proof data cannot be substituted
 - Merkle proofs are verified against on-chain state roots
 - All proof fields are cryptographically bound
@@ -157,7 +157,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 - Signature verification using chain-specific schemes (Secp256k1, Ed25519)
 - `ProofBundle.signature_scheme` is checked against the source chain adapter before verification, preventing Secp256k1 fallback on Ed25519 chains
 - Ownership proofs include the signer's public key
-- `csv-core/src/signature.rs` validates signature scheme matches chain
+- `csv-protocol/src/signature.rs` defines signature schemes and runtime verification binds them to the source chain
 
 ### 4.7 Crash During Mint Completion
 

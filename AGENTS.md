@@ -2,9 +2,9 @@
 
 ## Repo structure
 
-Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is `csv-protocol`.
+Rust monorepo (virtual Cargo workspace, edition 2024, rust-version 1.95). The primary protocol crate is `csv-protocol`.
 
-**Workspace members (24 crates):**
+**Workspace members (32 crates):**
 
 **Phase 1 restructuring crates (new architecture):**
 
@@ -26,7 +26,7 @@ Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is 
 
 **Runtime & orchestration crates:**
 
-- `csv-runtime` — `TransferCoordinator`, lease management, replay DB, circuit breakers, execution journal, health monitoring (depends on csv-protocol, csv-coordinator, csv-admission, csv-observability)
+- `csv-runtime` — `TransferCoordinator`, lease management, replay DB, circuit breakers, execution journal, and health monitoring; it consumes chain-agnostic protocol, verification, storage, wire, and orchestration crates
 - `csv-sdk` — public SDK facade
 - `csv-observability` — metrics, logging, runtime health monitoring
 
@@ -34,6 +34,7 @@ Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is 
 
 - `csv-cli` — CLI binary (runtime monitoring, trust management, content operations, chain/wallet/sanad/proof/cross-chain/seal commands)
 - `csv-keys` — key management
+- `csv-wallet` — wallet derivation and wallet-facing operations
 - `csv-store` — legacy state storage
 
 **Legacy crates (being refactored/deprecated):**
@@ -44,7 +45,9 @@ Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is 
 **Chain adapters** (under `csv-adapters/`, each implements `SealProtocol` + `ChainBackend` traits):
 `csv-adapters/csv-bitcoin`, `csv-adapters/csv-ethereum`, `csv-adapters/csv-solana`, `csv-adapters/csv-sui`, `csv-adapters/csv-aptos`, `csv-adapters/csv-celestia`
 
-**Other crates:** `csv-mcp-server/`, `csv-examples/` (not in workspace)
+**Adapter support crates:** `csv-adapters/csv-adapter-core` (shared adapter traits/types) and `csv-adapter-factory` (feature-gated concrete-adapter assembly).
+
+**Other crates:** `csv-examples/` is a non-publishable workspace member; `csv-mcp-server/` is not in the workspace.
 
 **Smart contracts:** `csv-contracts/ethereum/` (Foundry), `csv-contracts/solana/` (Anchor), `csv-contracts/sui/` (Sui Move), `csv-contracts/aptos/` (Aptos Move).
 
@@ -54,7 +57,7 @@ Rust monorepo (Cargo workspace, edition 2024, rust-version 1.93). Root crate is 
 **CLI Tutorial:** `csv-cli-tutorial.md` — comprehensive CLI command reference with testnet examples.
 **Examples:** `csv-examples/` — organized examples (getting-started/, advanced/, cli-tutorial/).
 
-**Note:** `csv-wallet`, `csv-explorer/*`, and `typescript-sdk/` do not exist in the current codebase. References to them in old documentation should be removed.
+**Note:** `csv-explorer/*` and `typescript-sdk/` do not exist in the current codebase. `csv-wallet/` does exist and is a workspace member.
 
 ## Commands
 
@@ -79,8 +82,12 @@ cargo build --package csv-runtime --no-default-features --target wasm32-unknown-
 cargo install cargo-fuzz
 cd fuzz && cargo fuzz run proof_bundle_decode -- -max_total_time=60
 
-# Golden corpus tests (regenerate fixtures)
-cargo run -p csv-core --bin generate_golden_fixtures
+# Golden corpus and protocol constitution tests
+cargo test -p csv-protocol --test golden_vectors
+cargo test -p csv-protocol --test protocol_constitution
+
+# Release metadata and package-content checks
+scripts/check-release.sh
 
 # Security audit
 cargo install cargo-audit && cargo audit
@@ -99,13 +106,15 @@ cd csv-contracts/aptos/contracts && aptos move compile
 
 - `csv-algebra` MUST NOT depend on `csv-wire` (enforced by deny.toml)
 - `csv-cli` must NOT import chain adapters directly — use `csv-runtime`
-- `csv-runtime` depends only on `csv-protocol`/`csv-coordinator`/`csv-admission`/`csv-observability` — no chain adapter imports
+- `csv-runtime` may depend on chain-agnostic protocol, adapter-interface, verification, storage, wire/codec, coordinator, admission, and observability crates; it must not depend on concrete chain adapters
 - `csv-runtime` uses `csv-coordinator` for per-chain execution cells
 - `csv-runtime` uses `csv-admission` for admission control and pressure boundaries
-- `csv-verifier` depends on `csv-protocol` + `csv-proof` + `csv-hash` (no csv-core dependency)
-- `csv-storage` depends on `csv-protocol` + `csv-hash` (no csv-core dependency)
+- `csv-coordinator` may enable concrete chain adapters behind chain feature flags; adapters must never depend back on coordinator/runtime
+- `csv-sdk` and `csv-adapter-factory` are assembly boundaries and may expose feature-gated concrete adapters, but transfer mutation still delegates to `csv-runtime`
+- `csv-verifier` is chain-agnostic and depends on protocol/proof/hash/codec crates (no csv-core or concrete-adapter dependency)
+- `csv-storage` depends on protocol/hash/proof crates (no csv-core dependency)
 - `serde_json` is forbidden in canonical hashing paths; use `canonical_cbor`
-- `persistent` feature is incompatible with wasm32 (compile_error fires)
+- `persistent` feature is incompatible with wasm32 because it enables the native RocksDB backend
 - `experimental` feature gates: `vm`, `rgb`, `commit_mux`
 - Finality is NEVER optional — all runtime modes enforce strict finality
 - CLI holds NO protocol authority state (leases, transfers) — all delegated to csv-runtime
@@ -272,26 +281,25 @@ See `csv-docs/PROTOCOL_INVARIANTS.md` and `csv-docs/PROTOCOL_CONSTITUTION.md` fo
 
 ```
 csv-sdk (public facade)
-  └── csv-runtime (orchestration + execution journal + health monitoring)
+  ├── csv-runtime (transfer authority + execution journal + health monitoring)
+  └── csv-adapter-factory / feature-gated adapters (assembly only)
+
+csv-runtime
         ├── csv-admission (pressure boundary)
         ├── csv-coordinator (per-chain execution cells)
         ├── csv-observability (metrics, logging, health)
-        └── csv-protocol (protocol types & traits)
-              ├── csv-algebra (typestate algebra)
-              ├── csv-wire (wire encoding & transport)
-              ├── csv-codec (canonical CBOR)
-              ├── csv-hash (hash types)
-              ├── csv-proof (proof types)
-              ├── csv-verifier (canonical verification)
-              ├── csv-content (Merkle trees, selective disclosure)
-              ├── csv-storage (storage backends)
-              └── csv-adapters (chain-specific implementations)
-                    ├── csv-bitcoin
-                    ├── csv-ethereum
-                    ├── csv-solana
-                    ├── csv-sui
-                    ├── csv-aptos
-                    └── csv-celestia
+        ├── csv-protocol / csv-proof / csv-verifier
+        ├── csv-hash / csv-codec / csv-wire
+        ├── csv-storage
+        └── csv-adapter-core (interfaces only)
+
+csv-coordinator / csv-adapter-factory
+  └── feature-gated concrete adapters
+        ├── csv-bitcoin
+        ├── csv-ethereum
+        ├── csv-solana
+        ├── csv-sui
+        └── csv-aptos
 ```
 
 ## Key Architectural Principles

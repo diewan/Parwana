@@ -2,9 +2,10 @@
 name = "csv-content"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 description = "CSV Content - Content tree system with Merkleized structures"
 
 [dependencies]
-csv-hash = { path = "../csv-hash" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"

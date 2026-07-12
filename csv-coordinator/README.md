@@ -35,8 +35,10 @@ Per-chain execution cells with isolated failure domains for CSV Protocol.
 
 ## Dependencies
 
-- `csv-verifier`: Cryptographic anchor verification
-- `csv-protocol`: Finality requirements
+- `csv-protocol`, `csv-verifier`, `csv-hash`: protocol and verification primitives
+- `csv-storage`: storage interfaces with native backends disabled by default
+- `csv-keys`, `csv-wallet`: signing and wallet-facing operations
+- Feature-gated `csv-bitcoin`, `csv-ethereum`, `csv-sui`, `csv-aptos`, and `csv-solana` adapters
 - `thiserror`: Error handling
 - `tokio`: Async runtime
 

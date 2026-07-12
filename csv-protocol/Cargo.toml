@@ -2,13 +2,14 @@
 name = "csv-protocol"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 description = "CSV Protocol - State machines, protocol constants, types, invariants, replay semantics, transition legality, versioning"
 
 [dependencies]
 hex = "0.4"
-csv-hash = { path = "../csv-hash", features = ["serde"] }
-csv-codec = { path = "../csv-codec" }
-csv-keys = { path = "../csv-keys" }
+csv-hash = { version = "0.1.5", path = "../csv-hash", features = ["serde"] }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-keys = { version = "0.1.5", path = "../csv-keys" }
 thiserror = "1"
 anyhow = "1"
 async-trait = "0.1"
@@ -40,8 +41,8 @@ std = []
 experimental = []
 
 [dev-dependencies]
-csv-hash = { path = "../csv-hash", features = ["serde"] }
-csv-codec = { path = "../csv-codec" }
+csv-hash = { version = "0.1.5", path = "../csv-hash", features = ["serde"] }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
 hex = "0.4"
 rand = "0.8"
 pqcrypto-dilithium = "0.5"

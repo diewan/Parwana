@@ -2,13 +2,13 @@
 name = "csv-wire"
 version = "0.1.5"
 edition = "2024"
-rust-version = "1.95"
+rust-version.workspace = true
 
 [dependencies]
-csv-algebra = { path = "../csv-algebra" }
-csv-protocol = { path = "../csv-protocol" }
-csv-hash = { path = "../csv-hash" }
-csv-codec = { path = "../csv-codec" }
+csv-algebra = { version = "0.1.5", path = "../csv-algebra" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"

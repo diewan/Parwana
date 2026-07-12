@@ -12,23 +12,23 @@ readme = "README.md"
 keywords = ["ethereum", "blockchain", "cryptography", "csv-validation", "nullifier"]
 categories = ["cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.95"
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-csv-adapter-core = { path = "../csv-adapter-core" }
-csv-protocol = { path = "../../csv-protocol" }
-csv-hash = { path = "../../csv-hash" }
-csv-verifier = { path = "../../csv-verifier" }
-csv-proof = { path = "../../csv-proof" }
-csv-codec = { path = "../../csv-codec" }
-csv-wire = { path = "../../csv-wire" }
-csv-store = { path = "../../csv-store", optional = true }
-csv-keys = { path = "../../csv-keys" }
-csv-wallet = { path = "../../csv-wallet" }
+csv-adapter-core = { version = "0.1.5", path = "../csv-adapter-core" }
+csv-protocol = { version = "0.1.5", path = "../../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../../csv-hash" }
+csv-verifier = { version = "0.1.5", path = "../../csv-verifier" }
+csv-proof = { version = "0.1.5", path = "../../csv-proof" }
+csv-codec = { version = "0.1.5", path = "../../csv-codec" }
+csv-wire = { version = "0.1.5", path = "../../csv-wire" }
+csv-store = { version = "0.1.5", path = "../../csv-store", optional = true }
+csv-keys = { version = "0.1.5", path = "../../csv-keys" }
+csv-wallet = { version = "0.1.5", path = "../../csv-wallet" }
 async-trait.workspace = true
 rand = "0.8"
 serde = { workspace = true, features = ["derive"] }

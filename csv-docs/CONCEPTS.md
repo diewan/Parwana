@@ -658,16 +658,20 @@ Violations fail the build.
 
 ```
 csv-sdk (public facade)
- └ csv-runtime (orchestration: coordinator, leases, replay DB, journal, health)
+ ├ csv-runtime (transfer authority: coordinator, leases, replay DB, journal)
+ └ csv-adapter-factory / optional adapters (assembly boundary)
+
+csv-runtime
    ├ csv-admission     (backpressure — rejects excess work before state mutation)
    ├ csv-coordinator   (per-chain execution cells — isolated failure domains)
    ├ csv-observability (metrics/logging/health — chain-agnostic)
-   └ csv-protocol      (protocol types & traits — defines *what is correct*)
-       ├ csv-algebra   (no_std typestate machine — never depends on csv-wire)
-       ├ csv-wire      (owns ALL serde / transport encoding)
-       ├ csv-codec     (canonical CBOR)
-       ├ csv-hash / csv-proof / csv-verifier / csv-content / csv-storage
-       └ csv-adapters/* (per-chain: bitcoin, ethereum, solana, sui, aptos, celestia)
+   ├ csv-protocol / csv-proof / csv-verifier
+   ├ csv-hash / csv-codec / csv-wire
+   ├ csv-storage
+   └ csv-adapter-core  (chain-agnostic interfaces)
+
+csv-coordinator / csv-adapter-factory
+ └ feature-gated concrete adapters (bitcoin, ethereum, solana, sui, aptos)
 ```
 
 Non-negotiable rules a newcomer trips over first:
@@ -675,8 +679,10 @@ Non-negotiable rules a newcomer trips over first:
 - **`csv-cli` holds no protocol authority state** and must not import chain
   adapters — everything goes through `csv-runtime`
   ([Invariant](PROTOCOL_INVARIANTS.md): "CLI Holds No Protocol Authority State").
-- **`csv-runtime` must not import chain adapters** — chain work is dispatched
+- **`csv-runtime` must not import concrete chain adapters** — chain work is dispatched
   through the coordinator + adapter registry.
+- **`csv-coordinator` and `csv-adapter-factory` may assemble concrete adapters**
+  behind explicit chain features; adapters never depend back on runtime.
 - **`csv-algebra` must not depend on `csv-wire`** — the typestate stays
   transport-free.
 - **`serde_json` never appears in a hashing path.**

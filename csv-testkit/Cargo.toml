@@ -2,15 +2,16 @@
 name = "csv-testkit"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 description = "CSV Testkit - Testing utilities and shared fixtures"
 
 [dependencies]
-csv-protocol = { path = "../csv-protocol" }
-csv-hash = { path = "../csv-hash" }
-csv-codec = { path = "../csv-codec" }
-csv-proof = { path = "../csv-proof" }
-csv-verifier = { path = "../csv-verifier" }
-csv-adapter-core = { path = "../csv-adapters/csv-adapter-core" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
+csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
+csv-adapter-core = { version = "0.1.5", path = "../csv-adapters/csv-adapter-core" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ed25519-dalek = "2.0"
@@ -20,8 +21,8 @@ rand = "0.8"
 sha2 = "0.10"
 
 [dev-dependencies]
-csv-storage = { path = "../csv-storage", default-features = false }
-csv-runtime = { path = "../csv-runtime" }
+csv-storage = { version = "0.1.5", path = "../csv-storage", default-features = false }
+csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 [[test]]

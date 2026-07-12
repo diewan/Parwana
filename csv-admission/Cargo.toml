@@ -2,10 +2,10 @@
 name = "csv-admission"
 version = "0.1.5"
 edition = "2024"
-rust-version = "1.95"
+rust-version.workspace = true
 
 [dependencies]
-csv-protocol = { path = "../csv-protocol" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
 thiserror = "1.0"
 tracing = "0.1"
 

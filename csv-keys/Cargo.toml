@@ -12,10 +12,10 @@ readme = "README.md"
 keywords = ["keystore", "bip39", "bip44", "crypto", "wallet"]
 categories = ["cryptography", "cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.95"
+rust-version.workspace = true
 
 [dependencies]
-csv-hash = { path = "../csv-hash", features = ["serde"] }
+csv-hash = { version = "0.1.5", path = "../csv-hash", features = ["serde"] }
 
 # BIP-39 mnemonic support
 bip39 = { version = "2.0", features = ["rand", "zeroize"] }

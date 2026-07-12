@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["blockchain", "cryptography", "csv-validation", "cross-chain", "smart-contracts"]
 categories = ["cryptography::cryptocurrencies", "authentication"]
 publish = true
-rust-version = "1.95"
+rust-version.workspace = true
 
 [lib]
 doctest = false
@@ -23,28 +23,28 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Core — always included
-csv-protocol = { path = "../csv-protocol" }
-csv-hash = { path = "../csv-hash" }
-csv-proof = { path = "../csv-proof" }
-csv-verifier = { path = "../csv-verifier" }
-csv-p2p = { path = "../csv-p2p", optional = true }
-csv-adapter-core = { path = "../csv-adapters/csv-adapter-core" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
+csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
+csv-p2p = { version = "0.1.5", path = "../csv-p2p", optional = true }
+csv-adapter-core = { version = "0.1.5", path = "../csv-adapters/csv-adapter-core" }
 
 # Chain adapters — optional, enabled via feature flags
 # csv-bitcoin compiles for all targets
-csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true }
+csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optional = true }
 # csv-ethereum, csv-sui, csv-aptos, csv-solana depend on C libraries (c-kzg, etc.)
 # that don't compile for wasm32 — see target-specific dependencies below
 
 # Persistence
-csv-store = { path = "../csv-store", optional = true }
-csv-storage = { path = "../csv-storage", optional = true }
-csv-runtime = { path = "../csv-runtime" }
-csv-adapter-factory = { path = "../csv-adapter-factory", optional = true }
-csv-codec = { path = "../csv-codec" }
+csv-store = { version = "0.1.5", path = "../csv-store", optional = true }
+csv-storage = { version = "0.1.5", path = "../csv-storage", optional = true }
+csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
+csv-adapter-factory = { version = "0.1.5", path = "../csv-adapter-factory", optional = true }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
 
 # Key management
-csv-keys = { path = "../csv-keys" }
+csv-keys = { version = "0.1.5", path = "../csv-keys" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"], optional = true }
@@ -80,10 +80,10 @@ tiny-hderive = { version = "0.3", optional = true }
 
 # Chain adapters that depend on C libraries (c-kzg, etc.) which don't compile for wasm32
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }
-csv-sui = { path = "../csv-adapters/csv-sui", optional = true }
-csv-aptos = { path = "../csv-adapters/csv-aptos", optional = true }
-csv-solana = { path = "../csv-adapters/csv-solana", optional = true }
+csv-ethereum = { version = "0.1.5", path = "../csv-adapters/csv-ethereum", optional = true }
+csv-sui = { version = "0.1.5", path = "../csv-adapters/csv-sui", optional = true }
+csv-aptos = { version = "0.1.5", path = "../csv-adapters/csv-aptos", optional = true }
+csv-solana = { version = "0.1.5", path = "../csv-adapters/csv-solana", optional = true }
 
 [features]
 default = ["std", "tokio", "native"]
@@ -141,7 +141,7 @@ experimental = []
 [dev-dependencies]
 rand = "0.8"
 tempfile = "3"
-csv-store = { path = "../csv-store" }
+csv-store = { version = "0.1.5", path = "../csv-store" }
 
 [lints]
 workspace = true

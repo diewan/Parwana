@@ -8,7 +8,7 @@ The CSV protocol uses a layered type system to enforce canonical encoding rules 
 
 | Layer | Description | Serde Policy | Encoding | Example Types |
 |-------|-------------|--------------|----------|---------------|
-| **L0** | Hash types, SanadId, SealPoint, CommitAnchor | **MUST NOT use serde** | canonical_cbor only | `Hash`, `ReplayIdHash`, `SealHash`, `SanadIdHash` |
+| **L0** | Hash types, SanadId, SealPoint, CommitAnchor | Serde only for non-critical integration; never as a hash preimage | canonical_cbor only for protocol paths | `Hash`, `ReplayIdHash`, `SealHash`, `SanadIdHash` |
 | **L1** | Proof types, InclusionProof, FinalityProof | **SHOULD NOT use serde** | canonical_cbor only | `ProofBundle`, `InclusionProof`, `FinalityProof` |
 | **L2** | Schema, Content types | MAY use serde | serde or canonical_cbor | `ContentTree`, `Schema`, `AttachmentRef` |
 | **L3** | Storage types (replay, state, lease, genesis) | MAY use serde | serde preferred | `ReplayCheckpoint`, `TransferPhaseEntry` |
@@ -22,7 +22,8 @@ The CSV protocol uses a layered type system to enforce canonical encoding rules 
 
 **Rules:**
 
-- **MUST NOT** use serde derives (enforced by `deny.toml`)
+- **MUST NOT** use serde-derived bytes in protocol-critical hashing paths
+- The optional `csv-hash/serde` feature exists for non-critical persistence and transport integration
 - **MUST** use `to_canonical_bytes()` / `from_canonical_bytes()` for protocol-critical hashing
 - Hash types wrap the core `Hash` type with domain separation
 - Direct serde usage is forbidden to prevent non-canonical encoding in hash computations
@@ -164,7 +165,7 @@ Each crate should have module-level documentation indicating its layer:
 //!
 //! **Layer:** L0 (Hash types)
 //! **Encoding:** MUST use canonical_cbor for protocol-critical paths
-//! **Serde Policy:** MUST NOT use serde derives (enforced by deny.toml)
+//! **Serde Policy:** Never use serde output as protocol hash preimage material
 ```
 
 ### 3. Check Struct-Level Comments
@@ -176,22 +177,16 @@ Critical types should have layer annotations:
 ///
 /// **Layer:** L0
 /// **Encoding:** Use `to_canonical_bytes()` / `from_canonical_bytes()`
-/// **Serde:** Forbidden (enforced by deny.toml)
+/// **Serde:** Non-critical integration only; forbidden as hash preimage material
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ReplayIdHash(pub Hash);
 ```
 
-### 4. Check deny.toml Enforcement
+### 4. Check Architecture-Test Enforcement
 
-The `deny.toml` file contains forbidden edges that enforce layer policies:
-
-```toml
-[forbidden]
-# L0 types must not depend on serde
-edges = [
-    { name = "csv-hash", forbid = ["serde"] },
-]
-```
+The `csv-architecture` tests contain the forbidden edges and source-pattern
+checks that enforce layer policies. `deny.toml` is reserved for cargo-deny
+supply-chain checks.
 
 ## Common Pitfalls and Anti-Patterns
 
@@ -257,7 +252,7 @@ let hash = sha256(&bytes);
    ///
    /// **Layer:** L0
    /// **Encoding:** canonical_cbor
-   /// **Serde:** Forbidden
+   /// **Serde:** Never use serde output as hash preimage material
    ```
 
 3. **Choose the right encoding:**
@@ -266,7 +261,7 @@ let hash = sha256(&bytes);
    - L2+: Use serde if appropriate
 
 4. **Add serde derives only if allowed:**
-   - L0: NEVER
+   - L0: Only for non-critical integration; never in hashing paths
    - L1: Only if required by canonical_cbor
    - L2+: MAY
 
@@ -275,25 +270,17 @@ let hash = sha256(&bytes);
 1. **Identify the current layer** by checking the crate and usage patterns
 2. **Update documentation** with layer classification
 3. **Replace serde usage** with canonical encoding if moving to L0/L1
-4. **Update deny.toml** if adding new forbidden edges
+4. **Update `csv-architecture` tests** if adding new forbidden edges
 5. **Run tests** to ensure encoding compatibility
 
 ## Enforcement Mechanisms
 
-### Compile-Time: deny.toml
+### Dependency supply chain: deny.toml
 
-The `deny.toml` file enforces layer policies at compile time:
-
-```toml
-[forbidden]
-edges = [
-    # L0 types must not depend on serde
-    { name = "csv-hash", forbid = ["serde"] },
-    
-    # L1 types should not use serde_json
-    { name = "csv-proof", forbid = ["serde_json"] },
-]
-```
+`deny.toml` provides cargo-deny's graph selection. Cargo-deny does not model
+arbitrary crate-to-crate forbidden edges; those are enforced by the
+`csv-architecture` tests. Advisory policy remains the separate `cargo audit`
+release/security gate documented in the operational guide.
 
 ### Run-Time: Architecture Tests
 
@@ -305,11 +292,11 @@ The `csv-architecture` crate contains conformance tests that verify:
 
 ### CI/CD: Build Checks
 
-The CI pipeline runs:
+The architecture CI pipeline runs:
 
-- `cargo deny check` - verifies forbidden edges
-- `cargo test --workspace` - verifies encoding tests
 - Architecture compliance tests - verifies layer rules
+- Release metadata tests - verify the MSRV, workspace release version, and versioned internal paths
+- Package-content checks - run `cargo package --list` for every publishable crate
 
 ## Reference Documents
 
@@ -323,7 +310,7 @@ The CI pipeline runs:
 
 | Task | L0 | L1 | L2 | L3 | L4 |
 |------|----|----|----|----|----|
-| Use serde derives | ❌ NEVER | ⚠️ Only for canonical_cbor | ✅ OK | ✅ OK | ✅ OK |
+| Use serde derives | ⚠️ Non-critical integration only | ⚠️ Only for canonical_cbor | ✅ OK | ✅ OK | ✅ OK |
 | Use serde_json | ❌ NEVER | ❌ NEVER | ✅ OK | ✅ OK | ✅ OK |
 | Use canonical_cbor | ✅ REQUIRED | ✅ REQUIRED | ✅ OK | ✅ OK | ✅ OK |
 | Use to_canonical_bytes() | ✅ REQUIRED | ✅ REQUIRED | ✅ OK | ⚠️ Optional | ⚠️ Optional |

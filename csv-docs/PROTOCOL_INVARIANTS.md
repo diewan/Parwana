@@ -396,7 +396,7 @@ Truly trust-minimized verification requires embedded light clients per chain. Th
 | Aptos | BFT certificate validator (known validator set rotation) | Roadmap |
 | Sui | BFT certificate validator (known validator set rotation) | Roadmap |
 
-The `FinalityVerifier` trait in `csv-core` is the abstraction point for swapping in light client implementations as they become available — the coordinator does not need to change.
+The `FinalityVerifier` trait in `csv-protocol/src/finality` is the abstraction point for swapping in light client implementations as they become available — the coordinator does not need to change.
 
 ### Invariant (Target Model, Stage 3)
 

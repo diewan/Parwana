@@ -2,23 +2,24 @@
 name = "csv-runtime"
 version = "0.1.5"
 edition = "2024"
+rust-version.workspace = true
 description = "CSV Protocol runtime orchestration engine"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-csv-adapter-core = { path = "../csv-adapters/csv-adapter-core" }
-csv-protocol = { path = "../csv-protocol" }
-csv-verifier = { path = "../csv-verifier" }
-csv-proof = { path = "../csv-proof" }
-csv-hash = { path = "../csv-hash" }
-csv-wire = { path = "../csv-wire" }
+csv-adapter-core = { version = "0.1.5", path = "../csv-adapters/csv-adapter-core" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-wire = { version = "0.1.5", path = "../csv-wire" }
 # default-features off so RocksDB (native C++, wasm-incompatible) is pulled in ONLY via
 # the `persistent` feature — keeps the `--no-default-features` wasm build clean.
-csv-storage = { path = "../csv-storage", default-features = false }
-csv-codec = { path = "../csv-codec" }
-csv-coordinator = { path = "../csv-coordinator" }
-csv-admission = { path = "../csv-admission" }
-csv-observability = { path = "../csv-observability" }
+csv-storage = { version = "0.1.5", path = "../csv-storage", default-features = false }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-coordinator = { version = "0.1.5", path = "../csv-coordinator" }
+csv-admission = { version = "0.1.5", path = "../csv-admission" }
+csv-observability = { version = "0.1.5", path = "../csv-observability" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
@@ -37,10 +38,10 @@ tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3"
-csv-codec = { path = "../csv-codec" }
-csv-hash = { path = "../csv-hash" }
-csv-proof = { path = "../csv-proof" }
-csv-testkit = { path = "../csv-testkit" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
+csv-testkit = { version = "0.1.5", path = "../csv-testkit" }
 ed25519-dalek = "2"
 
 [features]

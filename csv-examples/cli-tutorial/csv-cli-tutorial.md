@@ -27,7 +27,7 @@ A comprehensive guide to using the CSV Protocol CLI for cross-chain Sanad manage
 
 ### Prerequisites
 
-- Rust 1.93+ installed
+- Rust 1.95+ installed
 - Access to testnet RPC endpoints (configured by default)
 - Basic understanding of blockchain concepts
 

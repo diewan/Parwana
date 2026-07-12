@@ -12,16 +12,16 @@ readme = "README.md"
 keywords = ["sqlite", "persistence", "blockchain", "csv-validation", "storage"]
 categories = ["database", "cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.95"
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-csv-protocol = { path = "../csv-protocol" }
-csv-hash = { path = "../csv-hash" }
-csv-proof = { path = "../csv-proof" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }

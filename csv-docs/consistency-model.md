@@ -6,9 +6,9 @@ Authoritative state and rollback semantics for coordinators and operators.
 
 | Concern | Authority |
 |---------|-----------|
-| Transfer legality | `csv-core` transfer state machine |
-| Proof validity | `csv-core` verifier + chain capabilities |
-| Replay consumption | `csv-core` replay registry (persistent in production) |
+| Transfer legality | `csv-algebra` typestate + `csv-protocol` transfer state |
+| Proof validity | `csv-verifier` + `csv-protocol` chain capabilities |
+| Replay consumption | `csv-protocol` replay semantics + `csv-runtime` replay database |
 | Orchestration order | `csv-runtime` `TransferCoordinator` |
 | Persisted events | `csv-store` / runtime event store (dumb persistence) |
 
@@ -24,12 +24,12 @@ A transfer is **irreversible** only in `Completed`. Until then:
 
 ## Rollback Semantics
 
-On reorg detection (`csv-core/reorg`, `csv-runtime` adversarial path):
+On reorg detection (`csv-protocol/src/reorg`, `csv-runtime` adversarial path):
 
 1. Invalidate inclusion-dependent proofs.
 2. Transition active transfer → `RolledBack`.
 3. Reconcile replay registry (invalidate, do not delete consumed nullifiers).
-4. Emit `RollbackExecuted` event (see `csv-core/src/events.rs`).
+4. Emit `RollbackExecuted` event (see `csv-protocol/src/events.rs`).
 
 **Winner after rollback:** last persisted transition before reorg depth exceeded `max_safe_reorg_depth`.
 

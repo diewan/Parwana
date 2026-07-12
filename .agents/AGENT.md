@@ -205,10 +205,16 @@ Compile-fail tests are preferred over grep checks whenever possible.
 
 # 8. Dependency Boundaries
 
-Applications:
+Applications that execute transfers:
 
 * MUST depend on csv-runtime
-* MUST NOT depend directly on chain adapters
+
+Protocol-authority crates (`csv-cli`, `csv-runtime`, and `csv-protocol`) MUST
+NOT depend directly on concrete chain adapters.
+
+The SDK and adapter factory are assembly boundaries: they may expose optional
+concrete adapters, but they MUST delegate transfer mutation authority to
+`csv-runtime`.
 
 Wallet/UI code may not orchestrate transfers directly.
 
@@ -224,8 +230,8 @@ Transfer orchestration belongs exclusively to:
 * `csv-codec` — canonical CBOR serialization (deterministic encoding)
 * `csv-coordinator` — per-chain execution cells (isolated failure domains)
 * `csv-admission` — admission control (zero chain adapter dependencies)
-* `csv-runtime` — depends only on csv-protocol/csv-coordinator/csv-admission/csv-observability (no csv-core, no direct chain adapter imports)
-* `csv-verifier` — depends on csv-protocol + csv-proof + csv-hash (no csv-core dependency)
+* `csv-runtime` — consumes chain-agnostic protocol, adapter-interface, verification, proof/hash, wire/codec, storage, coordinator, admission, and observability crates (no csv-core or concrete chain adapters)
+* `csv-verifier` — depends on csv-protocol + csv-proof + csv-hash + csv-codec (no csv-core dependency)
 
 **Forbidden dependencies:**
 
@@ -233,6 +239,7 @@ Transfer orchestration belongs exclusively to:
 * `csv-core` MUST NOT depend on any chain adapter
 * `csv-cli` MUST NOT import chain adapters directly
 * `csv-runtime` MUST NOT import chain adapters directly
+* `csv-coordinator` MAY depend on concrete adapters behind chain feature flags
 * `serde_json` is forbidden in canonical hashing paths (use canonical_cbor)
 
 ## Current Codebase Structure
@@ -257,7 +264,7 @@ Transfer orchestration belongs exclusively to:
 
 **Runtime & orchestration crates:**
 
-* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal, health monitoring (depends on csv-protocol, csv-coordinator, csv-admission, csv-observability)
+* `csv-runtime` — TransferCoordinator, lease management, replay DB, circuit breakers, execution journal, health monitoring
 * `csv-sdk` — public SDK facade
 * `csv-observability` — metrics, logging, runtime health monitoring
 
@@ -275,9 +282,11 @@ Transfer orchestration belongs exclusively to:
 **Chain adapters** (under `csv-adapters/`):
 `csv-bitcoin`, `csv-ethereum`, `csv-solana`, `csv-sui`, `csv-aptos`, `csv-celestia`
 
-**Not in workspace:** `csv-mcp-server/`, `csv-examples/`
+**Not in workspace:** `csv-mcp-server/`
 
-**Does not exist:** `csv-wallet/`, `csv-explorer/`, `typescript-sdk/`
+**Non-publishable workspace member:** `csv-examples/`
+
+**Does not exist:** `csv-explorer/`, `typescript-sdk/`
 
 **Documentation:** `csv-docs/` (not `docs/`)
 

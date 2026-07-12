@@ -12,19 +12,19 @@ readme = "README.md"
 keywords = ["celestia", "data-availability", "blockchain", "csv-validation", "stark"]
 categories = ["cryptography::cryptocurrencies"]
 publish = true
-rust-version = "1.95"
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-csv-adapter-core = { path = "../csv-adapter-core" }
-csv-protocol = { path = "../../csv-protocol" }
-csv-hash = { path = "../../csv-hash" }
-csv-codec = { path = "../../csv-codec" }
-csv-proof = { path = "../../csv-proof" }
-csv-wire = { path = "../../csv-wire" }
+csv-adapter-core = { version = "0.1.5", path = "../csv-adapter-core" }
+csv-protocol = { version = "0.1.5", path = "../../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../../csv-hash" }
+csv-codec = { version = "0.1.5", path = "../../csv-codec" }
+csv-proof = { version = "0.1.5", path = "../../csv-proof" }
+csv-wire = { version = "0.1.5", path = "../../csv-wire" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

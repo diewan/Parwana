@@ -3,27 +3,24 @@
 /// This test is the machine-readable architectural contract.
 /// It runs on every CI push. Failure is a build break, not a warning.
 ///
-/// Layer definitions:
-///   L0 (csv-algebra)      — pure types, no_std, no serde, no IO
-///   L1 (csv-wire)         — serde + transport encoding of L0 types
-///   L2 (csv-hash)         — cryptographic primitives over L0 types  
-///   L3 (csv-protocol)     — protocol algebra; imports L0, L2
-///   L4 (csv-verifier)     — verification logic; imports L3
-///   L5 (csv-coordinator)  — orchestration; imports L3, L4, storage traits
-///   L6 (csv-runtime)      — facade only; re-exports L5, adds binary config
-///   L7 (csv-adapters/*)   — chain leaf nodes; imports L3, L4 only
-///   L8 (csv-sdk, csv-cli) — user-facing; imports any layer
+/// Boundary definitions:
+///   csv-algebra           — pure types, no_std, no serde, no IO
+///   csv-wire              — serde + transport boundary
+///   csv-hash/protocol     — cryptographic and protocol primitives
+///   csv-verifier          — chain-agnostic verification
+///   csv-coordinator       — orchestration and feature-gated adapter assembly
+///   csv-runtime           — transfer authority over chain-agnostic interfaces
+///   csv-adapters/*        — concrete chain implementations
+///   csv-sdk/csv-cli       — user-facing facade and application
 ///
-/// FORBIDDEN: any lower-numbered layer importing a higher-numbered layer.
-/// FORBIDDEN: L7 importing L5, L6.
-/// FORBIDDEN: L4 importing L7.
+/// FORBIDDEN: adapters importing coordinator/runtime.
+/// FORBIDDEN: verifier importing concrete adapters.
+/// FORBIDDEN: algebra importing another workspace crate.
+use std::collections::HashMap;
+use std::fs;
 
 #[test]
-fn dependency_dag_has_no_upward_edges() {
-    // Note: This test will initially fail until csv-algebra and csv-coordinator crates exist
-    // and the dependency graph is properly structured. This is intentional - the test
-    // enforces the architectural constitution.
-
+fn forbidden_dependency_edges_are_absent() {
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path("./Cargo.toml")
         .exec()
@@ -60,6 +57,17 @@ fn dependency_dag_has_no_upward_edges() {
             continue;
         }
 
+        if pkg.name == "csv-algebra" && !pkg.dependencies.is_empty() {
+            violations.push(format!(
+                "VIOLATION: csv-algebra has dependencies [{}] — algebra must remain dependency-free",
+                pkg.dependencies
+                    .iter()
+                    .map(|dependency| dependency.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
         for dep in &pkg.dependencies {
             let to_layer = layer(&dep.name);
             if to_layer == 255 {
@@ -79,14 +87,6 @@ fn dependency_dag_has_no_upward_edges() {
                 violations.push(format!(
                     "VIOLATION: {} (L{}) → {} (L{}) — verifier must be chain-agnostic",
                     pkg.name, from_layer, dep.name, to_layer
-                ));
-            }
-
-            // Pure algebra (L0) must not import anything above L0
-            if from_layer == 0 && to_layer > 0 {
-                violations.push(format!(
-                    "VIOLATION: csv-algebra → {} — algebra layer must have zero dependencies",
-                    dep.name
                 ));
             }
         }
@@ -184,5 +184,87 @@ fn intentional_workspace_crates_are_allowlisted() {
         unregistered.is_empty(),
         "new workspace crates require architectural classification: {}",
         unregistered.join(", ")
+    );
+}
+
+#[test]
+fn workspace_release_metadata_is_coherent() {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path("./Cargo.toml")
+        .exec()
+        .expect("cargo metadata must succeed");
+    let workspace_packages: HashMap<_, _> = metadata
+        .workspace_packages()
+        .iter()
+        .map(|package| (package.name.as_str(), *package))
+        .collect();
+    let release_version = &workspace_packages
+        .get("csv-protocol")
+        .expect("csv-protocol must remain a workspace package")
+        .version;
+    let rust_version = workspace_packages
+        .get("csv-protocol")
+        .and_then(|package| package.rust_version.as_ref())
+        .expect("csv-protocol must declare the workspace MSRV");
+    let mut violations = Vec::new();
+
+    for package in metadata.workspace_packages() {
+        if package.version != *release_version {
+            violations.push(format!(
+                "{} has version {}, expected workspace release version {}",
+                package.name, package.version, release_version
+            ));
+        }
+        if package.rust_version.as_ref() != Some(rust_version) {
+            violations.push(format!(
+                "{} has rust-version {:?}, expected {}",
+                package.name, package.rust_version, rust_version
+            ));
+        }
+
+        for dependency in &package.dependencies {
+            let Some(internal_package) = workspace_packages.get(dependency.name.as_str()) else {
+                continue;
+            };
+            if dependency.path.is_none() {
+                violations.push(format!(
+                    "{} -> {} must retain a local path for workspace development",
+                    package.name, dependency.name
+                ));
+            }
+            if dependency.req.to_string() == "*" {
+                violations.push(format!(
+                    "{} -> {} must declare a registry version alongside its local path",
+                    package.name, dependency.name
+                ));
+            }
+            if !dependency.req.matches(&internal_package.version) {
+                violations.push(format!(
+                    "{} -> {} requires {}, which does not include workspace version {}",
+                    package.name, dependency.name, dependency.req, internal_package.version
+                ));
+            }
+        }
+    }
+
+    let toolchain = fs::read_to_string(metadata.workspace_root.join("rust-toolchain.toml"))
+        .expect("workspace rust-toolchain.toml must be readable");
+    let expected_channel = format!(
+        "channel = \"{}.{}\"",
+        rust_version.major, rust_version.minor
+    );
+    if !toolchain
+        .lines()
+        .any(|line| line.trim() == expected_channel)
+    {
+        violations.push(format!(
+            "rust-toolchain.toml must pin the workspace rust-version {rust_version}"
+        ));
+    }
+
+    assert!(
+        violations.is_empty(),
+        "WORKSPACE RELEASE METADATA VIOLATED:\n{}",
+        violations.join("\n")
     );
 }

@@ -2,23 +2,23 @@
 name = "csv-coordinator"
 version = "0.1.5"
 edition = "2024"
-rust-version = "1.95"
+rust-version.workspace = true
 
 [dependencies]
-csv-protocol = { path = "../csv-protocol" }
-csv-verifier = { path = "../csv-verifier" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
 # default-features off so RocksDB (native C++) does not leak into the wasm build of
 # downstream csv-runtime; coordinator does not use the RocksDB backend directly.
-csv-storage = { path = "../csv-storage", default-features = false }
-csv-hash = { path = "../csv-hash" }
-csv-keys = { path = "../csv-keys" }
-csv-wallet = { path = "../csv-wallet" }
+csv-storage = { version = "0.1.5", path = "../csv-storage", default-features = false }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-keys = { version = "0.1.5", path = "../csv-keys" }
+csv-wallet = { version = "0.1.5", path = "../csv-wallet" }
 # Chain adapters (coordinator can depend on these, runtime cannot)
-csv-bitcoin = { path = "../csv-adapters/csv-bitcoin", optional = true }
-csv-ethereum = { path = "../csv-adapters/csv-ethereum", optional = true }
-csv-sui = { path = "../csv-adapters/csv-sui", optional = true }
-csv-aptos = { path = "../csv-adapters/csv-aptos", optional = true }
-csv-solana = { path = "../csv-adapters/csv-solana", optional = true }
+csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optional = true }
+csv-ethereum = { version = "0.1.5", path = "../csv-adapters/csv-ethereum", optional = true }
+csv-sui = { version = "0.1.5", path = "../csv-adapters/csv-sui", optional = true }
+csv-aptos = { version = "0.1.5", path = "../csv-adapters/csv-aptos", optional = true }
+csv-solana = { version = "0.1.5", path = "../csv-adapters/csv-solana", optional = true }
 bitcoin = { version = "0.32", features = ["serde", "rand"], optional = true }
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
 thiserror = "1.0"

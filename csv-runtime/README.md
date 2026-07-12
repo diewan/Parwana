@@ -4,7 +4,7 @@ Runtime orchestration engine for the CSV protocol. Manages transfer coordination
 
 ## Overview
 
-`csv-runtime` provides the high-level orchestration layer for cross-chain transfers, serving as the single source of truth for transfer execution. It depends only on `csv-protocol` and does not import chain adapters directly.
+`csv-runtime` provides the high-level orchestration layer for cross-chain transfers, serving as the single source of truth for transfer execution. It consumes the chain-agnostic protocol, adapter interface, verifier, proof/hash, wire/codec, storage, coordinator, admission, and observability crates. It does not depend on a concrete chain adapter.
 
 ## Features
 
@@ -39,10 +39,13 @@ The runtime does not import chain adapters directly. Chain adapters register the
 
 ## Dependencies
 
-- `csv-protocol`: Protocol types and traits
+- `csv-adapter-core`: Chain-agnostic adapter interfaces
+- `csv-protocol`, `csv-proof`, `csv-verifier`: Protocol and verification types
+- `csv-hash`, `csv-codec`, `csv-wire`: Hashing and encoding boundaries
 - `csv-admission`: Admission control and pressure boundaries
 - `csv-coordinator`: Per-chain execution cells
 - `csv-storage`: Storage backends
+- `csv-observability`: Runtime events and health reporting
 - `tokio`: Async runtime
 
 ## License

@@ -524,7 +524,7 @@ These formal systems encode:
 | `csv-algebra` | Pure ownership algebra |
 | `csv-runtime` | Execution orchestration |
 | `csv-proof` | Proof systems + provenance |
-| `csv-core` | Shared protocol primitives |
+| `csv-hash` / `csv-codec` / `csv-wire` | Hashing, canonical encoding, and transport types |
 
 ---
 

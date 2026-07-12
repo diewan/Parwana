@@ -39,7 +39,7 @@ A source-chain nullifier MUST be registered on the destination chain contract be
 ## Forbidden
 
 - Feature flags that skip replay checks
-- Runtime bypass of `csv-core` replay registry
+- Runtime bypass of `csv-protocol` replay semantics or the runtime replay database
 - Adapter-local replay stores without reconciliation to protocol registry
 
-See `csv-core/src/replay_registry.rs` and `PROTOCOL_INVARIANTS.md` Invariant 9.
+See `csv-protocol/src/replay/registry.rs`, `csv-runtime/src/replay_database.rs`, and `PROTOCOL_INVARIANTS.md` Invariant 9.

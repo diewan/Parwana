@@ -69,6 +69,9 @@ jobs:
       - name: Run CLI architecture compliance tests
         run: CXXFLAGS="-include cstdint" cargo test -p csv-cli --test architecture_compliance
 
+      - name: Check release metadata and package contents
+        run: scripts/check-release.sh
+
   formal-verification:
     name: Formal model check
     runs-on: ubuntu-24.04

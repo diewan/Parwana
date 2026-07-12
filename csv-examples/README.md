@@ -12,7 +12,7 @@ The examples are organized into three categories:
 
 ## Prerequisites
 
-- Rust 1.93+ (for Rust examples)
+- Rust 1.95+ (for Rust examples)
 - Built CSV CLI binary (for CLI tutorial)
 - Access to testnet RPC endpoints (configured by default)
 
