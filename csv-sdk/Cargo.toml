@@ -1,6 +1,6 @@
 [package]
 name = "csv-sdk"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "Unified SDK for CSV (Client-Side Validation) protocol — single entry point for all CSV operations"
 license = "MIT OR Apache-2.0"

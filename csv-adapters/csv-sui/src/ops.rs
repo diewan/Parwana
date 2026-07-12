@@ -18,7 +18,7 @@ use csv_protocol::chain_adapter_traits::{
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
     ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperationResult,
-    SanadStateReader, TransactionInfo, TransactionStatus,
+    SanadStateReader, SealOwnershipTarget, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::seal_protocol::SealProtocol;
@@ -1357,50 +1357,31 @@ impl ChainProofProvider for SuiBackend {
         &self,
         _commitment: &Hash,
         _block_height: u64,
-        anchor_id: &[u8],
+        _anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
-        use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
-
-        let tx_digest = sui_sdk_types::Digest::from_bytes(anchor_id)
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid transaction hash: {}", e)))?;
-
-        let client = self.node.client();
-        let mut client_guard = client.lock().await;
-
-        let request = GetTransactionRequest::new(&tx_digest);
-
-        let tx_response = (*client_guard)
-            .ledger_client()
-            .get_transaction(request)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get transaction: {}", e)))?;
-
-        let tx = tx_response.into_inner().transaction.ok_or_else(|| {
-            ChainOpError::InvalidInput("Transaction not found in response".to_string())
-        })?;
-
-        // Build inclusion proof
-        let block_hash = if let Some(digest) = tx.digest {
-            let hex_str = digest.trim_start_matches("0x");
-            let decoded = hex::decode(hex_str).unwrap_or_default();
-            let mut hash_bytes = [0u8; 32];
-            if decoded.len() >= 32 {
-                hash_bytes.copy_from_slice(&decoded[..32]);
-            }
-            Hash::new(hash_bytes)
-        } else {
-            Hash::zero()
-        };
-
-        CoreInclusionProof::new(
-            vec![], // Sui doesn't use Merkle proofs for transaction inclusion
-            block_hash,
-            tx.checkpoint.unwrap_or(0),
-            0,
-        )
-        .map_err(|e| {
-            ChainOpError::ProofVerificationError(format!("Failed to create inclusion proof: {}", e))
-        })
+        // PROOFGEN-MULTICHAIN-001: disabled and fail-closed.
+        //
+        // The previous implementation returned an inclusion proof with EMPTY
+        // proof bytes and NO binding between the fetched transaction and the
+        // sanad being proven, so it could not carry real, sanad-bound inclusion
+        // evidence — a recipient's client-side validation has nothing to check.
+        // It is now reachable by the create/publish-anchor proof path, so it must
+        // not produce a proof.
+        //
+        // Open question (per-chain anchor semantics): a real Sui builder must
+        // mirror the Ethereum `SanadCreated` pattern — fetch the create/publish
+        // transaction with its events/effects, locate the event whose BCS payload
+        // binds this sanad (as the runtime lock-path builder does for
+        // `CrossChainLock`), and encode only that real evidence. Until that lands,
+        // create-anchor proof generation and off-chain `send` from a Sui source
+        // fail closed here.
+        Err(ChainOpError::CapabilityUnavailable(
+            "Sui create-anchor inclusion proofs are not implemented: the legacy path \
+             produced empty, unbound evidence and has been disabled. Implement a real, \
+             sanad-bound builder in the Sui adapter (mirroring the Ethereum SanadCreated \
+             pattern) before generating proofs or sending off-chain from a Sui source."
+                .to_string(),
+        ))
     }
 
     fn verify_inclusion_proof(
@@ -2142,6 +2123,133 @@ impl ChainBackend for SuiBackend {
             metadata: sui_anchor.object_id.to_vec(),
         })
     }
+
+    /// Confirm `claimed_owner` address-owns the recipient-nominated Sui object at
+    /// the pinned version.
+    ///
+    /// Fetches the object and confirms it (a) exists at exactly the pinned
+    /// `version` (a version bump means the object has since been mutated/consumed,
+    /// so a stale pin is not a live single-use seal), (b) is address-owned (not
+    /// shared, immutable, or object-owned — none of which is a wallet-controlled
+    /// single-use seal), and (c) its owner address is `claimed_owner`. Fails closed
+    /// on a missing object, missing owner, wrong owner kind, version mismatch, or
+    /// address mismatch.
+    async fn verify_seal_ownership(
+        &self,
+        target: &SealOwnershipTarget,
+        claimed_owner: &str,
+    ) -> ChainOpResult<()> {
+        use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, owner::OwnerKind};
+
+        let (object_id, version) = match target {
+            SealOwnershipTarget::SuiObject { object_id, version } => (object_id, *version),
+            other => {
+                return Err(ChainOpError::InvalidInput(format!(
+                    "Sui backend cannot verify a {} ownership target",
+                    other.chain()
+                )));
+            }
+        };
+
+        let claimed = parse_sui_address(claimed_owner)?;
+        let object_id_addr = sui_sdk_types::Address::from_bytes(object_id).map_err(|e| {
+            ChainOpError::InvalidInput(format!("Invalid Sui object id: {}", e))
+        })?;
+
+        let client = self.node.client();
+        let mut client_guard = client.lock().await;
+
+        let mut request = GetObjectRequest::new(&object_id_addr);
+        request.read_mask = Some(prost_types::FieldMask {
+            paths: vec!["owner".to_string(), "version".to_string()],
+        });
+
+        let response = (*client_guard)
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to fetch Sui object: {}", e)))?;
+
+        let object = response.into_inner().object.ok_or_else(|| {
+            ChainOpError::InvalidInput(format!(
+                "Sui object 0x{} not found: it does not exist, so ownership cannot be confirmed",
+                hex::encode(object_id)
+            ))
+        })?;
+
+        // The pinned version must match the object's current version exactly; a
+        // higher on-chain version means the nominated seal has already moved on.
+        match object.version {
+            Some(v) if v == version => {}
+            Some(v) => {
+                return Err(ChainOpError::InvalidInput(format!(
+                    "Sui object 0x{} is at version {} on-chain, not the pinned version {}",
+                    hex::encode(object_id),
+                    v,
+                    version
+                )));
+            }
+            None => {
+                return Err(ChainOpError::RpcError(format!(
+                    "Sui RPC did not return a version for object 0x{}",
+                    hex::encode(object_id)
+                )));
+            }
+        }
+
+        let owner = object.owner.ok_or_else(|| {
+            ChainOpError::RpcError(format!(
+                "Sui RPC did not return an owner for object 0x{}",
+                hex::encode(object_id)
+            ))
+        })?;
+
+        if owner.kind != Some(OwnerKind::Address as i32) {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Sui object 0x{} is not address-owned (owner kind {:?}); a shared, immutable, \
+                 or object-owned object is not a wallet-controlled single-use seal",
+                hex::encode(object_id),
+                owner.kind
+            )));
+        }
+
+        let owner_addr_str = owner.address.ok_or_else(|| {
+            ChainOpError::RpcError(format!(
+                "Sui RPC returned an address-owned object 0x{} without an owner address",
+                hex::encode(object_id)
+            ))
+        })?;
+        let on_chain_owner = parse_sui_address(&owner_addr_str)?;
+
+        if on_chain_owner != claimed {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Sui object 0x{} is owned by 0x{} on-chain, not the wallet address 0x{}",
+                hex::encode(object_id),
+                hex::encode(on_chain_owner),
+                hex::encode(claimed)
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+/// Parse an optionally `0x`-prefixed Sui address (up to 32 bytes, left zero-padded)
+/// into its canonical 32-byte form.
+fn parse_sui_address(address: &str) -> ChainOpResult<[u8; 32]> {
+    let hexpart = address.trim().trim_start_matches("0x");
+    if hexpart.is_empty() || hexpart.len() > 64 {
+        return Err(ChainOpError::InvalidInput(format!(
+            "Invalid Sui address '{}': expected up to 32 hex-encoded bytes",
+            address
+        )));
+    }
+    let padded = format!("{:0>64}", hexpart);
+    let bytes = hex::decode(&padded)
+        .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui address hex: {}", e)))?;
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(out)
 }
 
 #[async_trait]
@@ -2273,6 +2381,32 @@ impl From<SuiError> for ChainOpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // PROOFGEN-MULTICHAIN-001: the create-anchor inclusion builder must fail
+    // closed rather than return empty, unbound evidence. A real, sanad-bound Sui
+    // builder is an open per-chain question (see the method). The disabled builder
+    // returns before touching the node, so no network access is required here.
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_no_unbound_evidence() {
+        let config = SuiConfig {
+            seal_contract: crate::SealContractConfig {
+                package_id: Some(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
+        let ops = SuiBackend::new(config, node);
+        let commitment = Hash::new([0x02u8; 32]);
+        let result = ops.build_inclusion_proof(&commitment, 1, &[0x07u8; 32]).await;
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(_))),
+            "Sui must fail closed (no empty/unbound inclusion evidence): {result:?}"
+        );
+    }
 
     /// The lock records the same contract-layer chain identities `mint_sanad` binds into
     /// the §9.2 attestation, so the two must agree with the runtime's RFC-0012 §6 vectors.
@@ -2670,5 +2804,24 @@ mod tests {
                 other
             ),
         }
+    }
+
+    #[test]
+    fn parse_sui_address_normalizes_and_rejects_bad_input() {
+        // Full 32-byte address round-trips.
+        let full = format!("0x{}", hex::encode([0xABu8; 32]));
+        assert_eq!(parse_sui_address(&full).unwrap(), [0xABu8; 32]);
+
+        // A short address is left-zero-padded to the canonical 32 bytes, so `0x2`
+        // and its padded form compare equal.
+        let mut expected = [0u8; 32];
+        expected[31] = 0x02;
+        assert_eq!(parse_sui_address("0x2").unwrap(), expected);
+        assert_eq!(parse_sui_address("2").unwrap(), expected); // no 0x prefix
+
+        // Over-long and non-hex inputs are rejected.
+        assert!(parse_sui_address(&hex::encode([0u8; 33])).is_err());
+        assert!(parse_sui_address("0xZZ").is_err());
+        assert!(parse_sui_address("0x").is_err());
     }
 }

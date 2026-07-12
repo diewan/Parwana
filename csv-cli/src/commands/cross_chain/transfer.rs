@@ -390,9 +390,16 @@ pub async fn cmd_send(
     let sanad_record = state
         .get_sanad(&sanad_hex)
         .ok_or_else(|| anyhow::anyhow!("Sanad {} not found in local state", sanad_hex))?;
-    if sanad_record.status != SanadStatus::Active {
+    // A sanad is sendable if it is locally owned and unspent: freshly created and
+    // Active, or held off-chain via a client-side-validated `accept`
+    // (`OwnedOffChain`) and being forwarded onward (CLI-STATE-002). Consumed /
+    // Transferred sanads are not sendable.
+    if !matches!(
+        sanad_record.status,
+        SanadStatus::Active | SanadStatus::OwnedOffChain
+    ) {
         return Err(anyhow::anyhow!(
-            "Sanad {} is not active (status: {})",
+            "Sanad {} is not sendable (status: {})",
             sanad_hex,
             sanad_record.status
         ));
@@ -720,11 +727,28 @@ async fn load_or_generate_send_transition_proof(
     );
     let core_chain = to_protocol_chain(from.clone());
 
+    // Resolve the sanad's create/publish anchor transaction from locally tracked
+    // state as a hint for non-Bitcoin sources (whose adapter holds no in-adapter
+    // sanad->anchor mapping). It is a lookup key only: the runtime re-verifies the
+    // named transaction is confirmed and the adapter re-fetches and sanad-binds
+    // the inclusion evidence, so a missing/stale record fails closed.
+    let wanted_id = hex::encode(sanad_id.as_bytes());
+    let anchor_hint = state
+        .storage
+        .sanads
+        .iter()
+        .find(|s| s.id.trim_start_matches("0x").eq_ignore_ascii_case(&wanted_id))
+        .and_then(|s| s.anchor_tx_hash.clone())
+        .filter(|h| !h.trim().is_empty())
+        .map(|anchor_tx_hex| csv_protocol::chain_adapter_traits::SanadAnchorHint {
+            anchor_tx_hex,
+        });
+
     // Source-chain anchor evidence for the Sanad (inclusion + finality, anchored
     // to the Sanad id). Requires source-chain RPC, exactly like `proof generate`.
     let mut bundle = client
         .chain_runtime()
-        .generate_proof(core_chain.clone(), sanad_id)
+        .generate_proof(core_chain.clone(), sanad_id, anchor_hint)
         .await
         .map_err(|e| {
             anyhow::anyhow!("Failed to build source anchor proof for send: {}", e)
@@ -928,14 +952,17 @@ fn write_consignment_once(path: &PathBuf, bytes: &[u8]) -> Result<()> {
 /// the recipient owns.
 ///
 /// The `--seal` reference is chain-tagged (`<chain>:<field>:<field>`) so it is
-/// self-describing without a separate `--chain` flag, and it is verified against
-/// wallet-held key material **offline** — no destination transaction, gas, or
-/// RPC. If the wallet cannot prove control of the seal, the command fails closed
-/// rather than issuing an invoice for a seal the recipient does not own.
+/// self-describing without a separate `--chain` flag. Seal control is verified
+/// before any invoice is issued: Bitcoin and Aptos are checked **offline** against
+/// wallet-held material (no destination transaction, gas, or RPC), while Sui,
+/// Ethereum, and Solana require a read-only on-chain ownership query dispatched
+/// through the SDK runtime (no destination transaction or gas). If control cannot
+/// be positively confirmed, the command fails closed rather than issuing an
+/// invoice for a seal the recipient does not own.
 pub async fn cmd_invoice(
     schema: String,
     seal: String,
-    _config: &Config,
+    config: &Config,
     state: &UnifiedStateManager,
 ) -> Result<()> {
     output::header("Issue Transfer Invoice (invoice)");
@@ -944,12 +971,13 @@ pub async fn cmd_invoice(
     let seal_def = parse_seal_ref(&seal)?;
     output::kv("Destination chain", seal_def.chain());
 
-    // 2. Prove — offline, against wallet-held material — that the recipient
-    //    controls this seal. Fail closed otherwise: issuing an invoice for a
-    //    seal we do not own would let a sender assign the sanad somewhere the
-    //    recipient cannot later spend it.
-    verify_seal_controlled(&seal_def, state)?;
-    output::success("Seal ownership verified against wallet-held material");
+    // 2. Prove that the recipient controls this seal. Bitcoin/Aptos are verified
+    //    offline against wallet-held material; Sui/Ethereum/Solana are confirmed
+    //    on-chain through the SDK runtime. Fail closed otherwise: issuing an
+    //    invoice for a seal we do not own would let a sender assign the sanad
+    //    somewhere the recipient cannot later spend it.
+    verify_seal_controlled(&seal_def, config, state).await?;
+    output::success("Seal ownership verified");
 
     // 3. Encode the accepted schema/type (opaque to the wire layer).
     let schema_id = encode_schema_id(&schema)?;
@@ -997,15 +1025,17 @@ fn decode_hex_field(what: &str, value: &str) -> Result<Vec<u8>> {
 ///     definition pins).
 ///   * `sui:<object_id_hex>:<version>`         — owned object.
 ///   * `aptos:<resource_address_hex>:<key_hex>` — Move resource.
-///   * `ethereum:<contract_hex>:<slot_hex>`    — contract storage slot.
+///   * `ethereum:<contract_hex>:<slot_hex>`    — CSVSeal registry seal.
+///   * `solana:<account_hex>:<_>`              — csv-seal `SanadAccount` PDA (the
+///     third field is reserved and ignored; supply `0` to keep the shape uniform).
 fn parse_seal_ref(seal_ref: &str) -> Result<SealDefinition> {
     let fields: Vec<&str> = seal_ref.splitn(3, ':').collect();
     if fields.len() != 3 || fields.iter().any(|f| f.is_empty()) {
         return Err(anyhow::anyhow!(
             "Invalid --seal reference '{}'. Expected `<chain>:<field>:<field>`, e.g. \
              `bitcoin:<txid_hex>:<vout>`, `sui:<object_id_hex>:<version>`, \
-             `aptos:<resource_address_hex>:<key_hex>`, or \
-             `ethereum:<contract_hex>:<slot_hex>`.",
+             `aptos:<resource_address_hex>:<key_hex>`, `ethereum:<contract_hex>:<slot_hex>`, \
+             or `solana:<account_hex>:0`.",
             seal_ref
         ));
     }
@@ -1039,9 +1069,16 @@ fn parse_seal_ref(seal_ref: &str) -> Result<SealDefinition> {
             let slot = decode_hex_field("ethereum slot", b)?;
             SealDefinition::ethereum(contract, slot).map_err(|e| anyhow::anyhow!(e))?
         }
+        "solana" => {
+            // The account address is the seal identity; the third field is reserved
+            // (there is no per-account version/key to pin) and intentionally ignored.
+            let account = decode_hex_field("solana account", a)?;
+            SealDefinition::solana(account).map_err(|e| anyhow::anyhow!(e))?
+        }
         other => {
             return Err(anyhow::anyhow!(
-                "Unsupported seal chain '{}'. Expected one of: bitcoin, sui, aptos, ethereum.",
+                "Unsupported seal chain '{}'. Expected one of: bitcoin, sui, aptos, ethereum, \
+                 solana.",
                 other
             ));
         }
@@ -1071,18 +1108,25 @@ fn encode_schema_id(schema: &str) -> Result<Vec<u8>> {
     }
 }
 
-/// Verify — offline, against wallet-held key material — that the recipient
-/// controls `seal`. Fail closed if control cannot be established.
+/// Verify that the recipient controls `seal`, failing closed if control cannot be
+/// positively established.
 ///
-/// Only the chains whose control is derivable without a network round-trip are
-/// verifiable here:
-///   * **Bitcoin** — the nominated OutPoint must be in the wallet's UTXO set.
-///   * **Aptos** — the resource address must be the wallet's own account.
-///
-/// Sui object ownership and Ethereum storage-slot control cannot be derived from
-/// wallet key material offline (they need an on-chain query), so they fail closed
-/// pending a follow-up adapter-backed ownership check.
-fn verify_seal_controlled(seal: &SealDefinition, state: &UnifiedStateManager) -> Result<()> {
+/// Two classes of chain, split by whether control is derivable offline:
+///   * **Bitcoin** — the nominated OutPoint must be in the wallet's UTXO set
+///     (offline; wallet-held state).
+///   * **Aptos** — the resource address must be the wallet's own account
+///     (offline; wallet-derived address).
+///   * **Sui / Ethereum / Solana** — control of an object / registry seal /
+///     account cannot be derived from wallet key material and requires a live
+///     chain query, dispatched through the SDK runtime (never a direct adapter
+///     call). The wallet derives its own address for the chain and the adapter
+///     confirms that address owns the seal on-chain. Any RPC error, not-found,
+///     wrong-owner, or wrong-version result fails closed and no invoice is issued.
+async fn verify_seal_controlled(
+    seal: &SealDefinition,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<()> {
     match seal {
         SealDefinition::Bitcoin { txid, vout } => {
             // `txid` is internal byte order; the wallet stores display order.
@@ -1123,14 +1167,90 @@ fn verify_seal_controlled(seal: &SealDefinition, state: &UnifiedStateManager) ->
             }
             Ok(())
         }
-        SealDefinition::Sui { .. } | SealDefinition::Ethereum { .. } => Err(anyhow::anyhow!(
-            "Offline ownership verification is not available for {} seals: control of an \
-             object/storage slot cannot be derived from wallet key material without an \
-             on-chain query. This fail-closed path will be lifted by a follow-up adding an \
-             adapter-backed ownership check; use a Bitcoin or Aptos destination seal for now.",
+        SealDefinition::Sui { .. }
+        | SealDefinition::Ethereum { .. }
+        | SealDefinition::Solana { .. } => {
+            verify_seal_controlled_online(seal, config, state).await
+        }
+    }
+}
+
+/// Build the protocol-level ownership target for a chain whose control is only
+/// confirmable via a live chain query.
+fn seal_ownership_target(seal: &SealDefinition) -> Result<csv_sdk::SealOwnershipTarget> {
+    fn to_array<const N: usize>(what: &str, bytes: &[u8]) -> Result<[u8; N]> {
+        bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("{} must be {} bytes, got {}", what, N, bytes.len()))
+    }
+
+    match seal {
+        SealDefinition::Sui { object_id, version } => Ok(csv_sdk::SealOwnershipTarget::SuiObject {
+            object_id: to_array("Sui object id", object_id)?,
+            version: *version,
+        }),
+        SealDefinition::Ethereum { contract, slot } => {
+            Ok(csv_sdk::SealOwnershipTarget::EthereumSeal {
+                registry: to_array("Ethereum contract", contract)?,
+                seal_id: to_array("Ethereum seal id", slot)?,
+            })
+        }
+        SealDefinition::Solana { account } => Ok(csv_sdk::SealOwnershipTarget::SolanaAccount {
+            account: to_array("Solana account", account)?,
+        }),
+        SealDefinition::Bitcoin { .. } | SealDefinition::Aptos { .. } => Err(anyhow::anyhow!(
+            "{} seals are verified offline and have no adapter-backed ownership target",
             seal.chain()
         )),
     }
+}
+
+/// Adapter-backed ownership check for Sui / Ethereum / Solana destination seals.
+///
+/// Derives the wallet's own address on the destination chain, then asks the SDK
+/// runtime (which dispatches through the coordinator + adapter registry — the CLI
+/// never touches an adapter) to confirm that address owns the seal on-chain. Fails
+/// closed on a missing RPC config, a derivation failure, or any non-positive
+/// ownership result.
+async fn verify_seal_controlled_online(
+    seal: &SealDefinition,
+    config: &Config,
+    state: &UnifiedStateManager,
+) -> Result<()> {
+    let dest = Chain::new(seal.chain());
+
+    // The destination-chain ownership query needs RPC; surface a clear error if
+    // the chain is not configured rather than failing deep inside the adapter.
+    config.chain(&dest).map_err(|_| {
+        anyhow::anyhow!(
+            "Destination chain '{}' has no configured RPC. Add it to your chains config to \
+             issue an invoice for a {} seal (its ownership must be confirmed on-chain).",
+            dest.as_str(),
+            dest.as_str()
+        )
+    })?;
+
+    // The wallet proves it can derive this address; the adapter then confirms the
+    // address owns the seal on-chain.
+    let identity = WalletIdentity::from_state(state)?;
+    let claimed_owner = identity.address(&dest, 0, 0)?;
+
+    let target = seal_ownership_target(seal)?;
+
+    let client = build_client(&dest, &dest, None, config, state).await?;
+    client
+        .chain_runtime()
+        .verify_seal_ownership(csv_hash::ChainId::new(dest.as_str()), &target, &claimed_owner)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Refusing to issue an invoice for a {} seal the wallet does not \
+                 control (address {}): {}",
+                dest.as_str(),
+                claimed_owner,
+                e
+            )
+        })
 }
 
 /// Verified, replay-free consignment metadata ready to persist as local ownership.
@@ -1359,7 +1479,11 @@ fn record_accepted_consignment(
         value: 0,
         commitment: accepted.commitment.clone(),
         nullifier: None,
-        status: SanadStatus::Active,
+        // Client-side-validated off-chain ownership: authority lives on the
+        // source chain + this consignment; nothing was minted on the
+        // destination chain. Record it as such so `sanad list` reports an honest
+        // off-chain-owned state instead of `Active`/`Uncreated` (CLI-STATE-002).
+        status: SanadStatus::OwnedOffChain,
         created_at,
         anchor_tx_hash: Some(hex::encode(
             &accepted.consignment.proof_bundle.anchor_ref.anchor_id,
@@ -1396,11 +1520,20 @@ fn normalize_sanad_id(value: &str) -> Result<String> {
     Ok(hex::encode(bytes))
 }
 
+/// Encode a destination [`SealPoint`] to the single canonical on-disk encoding
+/// for `SanadRecord.seal_ref` / `SealRecord.seal_ref`: base64 of the seal's
+/// canonical bytes.
+///
+/// Base64 is the documented encoding for the field and what `sanad create`
+/// already writes, so `accept` must agree with it (CLI-STATE-002). A divergent
+/// encoding here previously made accepted off-chain Sanads fail the `sanad list`
+/// validity check and show as `Invalid`, and let a create'd (base64) seal slip
+/// past the accept replay check that compares stored `seal_ref` strings.
 fn encode_seal_ref(seal: &SealPoint) -> Result<String> {
     let bytes = seal
         .to_canonical_bytes()
         .map_err(|e| anyhow::anyhow!("Failed to encode destination seal: {}", e))?;
-    Ok(hex::encode(bytes))
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn owner_from_invoice(invoice: &Invoice) -> Result<String> {
@@ -2565,6 +2698,59 @@ mod tests {
             .unwrap(),
             SealDefinition::Ethereum { .. }
         ));
+        // Solana pins the account address; the third field is reserved/ignored.
+        assert!(matches!(
+            parse_seal_ref(&format!("solana:{}:0", hex::encode([0x44u8; 32]))).unwrap(),
+            SealDefinition::Solana { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_seal_ref_rejects_malformed_solana_account() {
+        // A 31-byte account must be rejected by the definition constructor.
+        assert!(parse_seal_ref(&format!("solana:{}:0", hex::encode([0u8; 31]))).is_err());
+        // A non-hex account is rejected at decode.
+        assert!(parse_seal_ref("solana:nothex:0").is_err());
+    }
+
+    #[test]
+    fn seal_ownership_target_maps_each_online_chain() {
+        use csv_sdk::SealOwnershipTarget;
+
+        let sui = parse_seal_ref(&format!("sui:{}:9", hex::encode([0x01u8; 32]))).unwrap();
+        assert_eq!(
+            seal_ownership_target(&sui).unwrap(),
+            SealOwnershipTarget::SuiObject {
+                object_id: [0x01u8; 32],
+                version: 9
+            }
+        );
+
+        let eth = parse_seal_ref(&format!(
+            "ethereum:{}:{}",
+            hex::encode([0x11u8; 20]),
+            hex::encode([0x22u8; 32])
+        ))
+        .unwrap();
+        assert_eq!(
+            seal_ownership_target(&eth).unwrap(),
+            SealOwnershipTarget::EthereumSeal {
+                registry: [0x11u8; 20],
+                seal_id: [0x22u8; 32]
+            }
+        );
+
+        let sol = parse_seal_ref(&format!("solana:{}:0", hex::encode([0x33u8; 32]))).unwrap();
+        assert_eq!(
+            seal_ownership_target(&sol).unwrap(),
+            SealOwnershipTarget::SolanaAccount {
+                account: [0x33u8; 32]
+            }
+        );
+
+        // Offline chains have no adapter-backed ownership target.
+        let btc = parse_seal_ref(&format!("bitcoin:{}:0", "aa".repeat(32))).unwrap();
+        assert!(seal_ownership_target(&btc).is_err());
     }
 
     #[test]
@@ -2613,27 +2799,29 @@ mod tests {
         });
     }
 
-    #[test]
-    fn bitcoin_seal_is_controlled_only_when_utxo_is_held() {
+    #[tokio::test]
+    async fn bitcoin_seal_is_controlled_only_when_utxo_is_held() {
+        let config = Config::default();
         let txid_display = "aa".repeat(32);
         let def = parse_seal_ref(&format!("bitcoin:{txid_display}:3")).unwrap();
 
         // No matching UTXO → fail closed.
         let mut state = wallet_state();
-        assert!(verify_seal_controlled(&def, &state).is_err());
+        assert!(verify_seal_controlled(&def, &config, &state).await.is_err());
 
         // Wrong vout → still fail closed.
         add_utxo(&mut state, &txid_display, 9);
-        assert!(verify_seal_controlled(&def, &state).is_err());
+        assert!(verify_seal_controlled(&def, &config, &state).await.is_err());
 
         // Exact OutPoint held → controlled.
         add_utxo(&mut state, &txid_display, 3);
-        assert!(verify_seal_controlled(&def, &state).is_ok());
+        assert!(verify_seal_controlled(&def, &config, &state).await.is_ok());
     }
 
-    #[test]
-    fn aptos_seal_is_controlled_only_for_the_wallets_own_account() {
+    #[tokio::test]
+    async fn aptos_seal_is_controlled_only_for_the_wallets_own_account() {
         const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let config = Config::default();
         let mut state = wallet_state();
         state.storage.wallet.mnemonic = Some(PHRASE.to_string());
 
@@ -2644,7 +2832,7 @@ mod tests {
 
         let owned =
             parse_seal_ref(&format!("aptos:{addr_hex}:{}", hex::encode(b"balance"))).unwrap();
-        assert!(verify_seal_controlled(&owned, &state).is_ok());
+        assert!(verify_seal_controlled(&owned, &config, &state).await.is_ok());
 
         // A resource under a different account is not controlled.
         let foreign = parse_seal_ref(&format!(
@@ -2653,12 +2841,28 @@ mod tests {
             hex::encode(b"balance")
         ))
         .unwrap();
-        assert!(verify_seal_controlled(&foreign, &state).is_err());
+        assert!(
+            verify_seal_controlled(&foreign, &config, &state)
+                .await
+                .is_err()
+        );
     }
 
-    #[test]
-    fn sui_and_ethereum_ownership_fails_closed_offline() {
-        let state = wallet_state();
+    #[tokio::test]
+    async fn online_seals_fail_closed_without_destination_rpc_config() {
+        // With no configured RPC for the destination chain, the adapter-backed
+        // ownership check cannot run, so Sui/Ethereum/Solana MUST fail closed
+        // (never "assume owned") — no invoice is issued. Clear the default public
+        // RPC endpoints so this stays hermetic (no network round-trip).
+        let mut config = Config::default();
+        config.chains.clear();
+        let mut state = wallet_state();
+        state.storage.wallet.mnemonic = Some(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon about"
+                .to_string(),
+        );
+
         let sui = parse_seal_ref(&format!("sui:{}:1", hex::encode([0u8; 32]))).unwrap();
         let eth = parse_seal_ref(&format!(
             "ethereum:{}:{}",
@@ -2666,8 +2870,18 @@ mod tests {
             hex::encode([0u8; 32])
         ))
         .unwrap();
-        assert!(verify_seal_controlled(&sui, &state).is_err());
-        assert!(verify_seal_controlled(&eth, &state).is_err());
+        let sol = parse_seal_ref(&format!("solana:{}:0", hex::encode([0u8; 32]))).unwrap();
+
+        for def in [sui, eth, sol] {
+            let err = verify_seal_controlled(&def, &config, &state)
+                .await
+                .expect_err("online seal must fail closed without RPC config");
+            assert!(
+                err.to_string().contains("no configured RPC"),
+                "unexpected error for {}: {err}",
+                def.chain()
+            );
+        }
     }
 
     // ── Full invoice issuance (happy path) ──────────────────────────────────

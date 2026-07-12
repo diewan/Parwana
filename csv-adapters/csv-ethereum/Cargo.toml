@@ -1,6 +1,6 @@
 [package]
 name = "csv-ethereum"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "Ethereum adapter for CSV (Client-Side Validation) with storage slot seals and light-client proofs"
 license = "MIT OR Apache-2.0"

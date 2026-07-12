@@ -78,11 +78,13 @@ impl UnifiedStateManager {
             UnifiedStorage::new().with_defaults()
         };
 
-        Ok(Self {
+        let mut manager = Self {
             storage,
             file_path: path,
             passphrase: passphrase.to_string(),
-        })
+        };
+        manager.migrate_legacy_seal_refs();
+        Ok(manager)
     }
 
     /// Load from a specific path with passphrase.
@@ -105,11 +107,69 @@ impl UnifiedStateManager {
             UnifiedStorage::new().with_defaults()
         };
 
-        Ok(Self {
+        let mut manager = Self {
             storage,
             file_path: path.to_string(),
             passphrase: passphrase.to_string(),
-        })
+        };
+        manager.migrate_legacy_seal_refs();
+        Ok(manager)
+    }
+
+    /// One-time, idempotent migration of `seal_ref` records to the single
+    /// canonical on-disk encoding: base64 (CLI-STATE-002).
+    ///
+    /// An older `accept` path wrote `seal_ref` as **hex** of the seal's canonical
+    /// bytes, diverging from `sanad create` (which writes base64) and from the
+    /// current unified writers. A hex record fails the tightened base64-only
+    /// display check and would otherwise be mislabeled `Invalid`. Because `accept`
+    /// is the *only* writer that ever produced hex — and it only ever produces
+    /// off-chain-owned Sanads — a legacy-hex `SanadRecord` is unambiguously an
+    /// off-chain accept: this migration re-encodes its `seal_ref` to base64 and,
+    /// if it is still tagged `Active`, promotes it to `OwnedOffChain` so it reads
+    /// honestly. `SealRecord`s are re-encoded too (no status to promote).
+    ///
+    /// Detection is conservative: a value is treated as legacy hex only when it is
+    /// lowercase-hex of even length (as `hex::encode` emits) whose bytes parse as a
+    /// canonical `SealPoint`. base64 produced by `create`/`accept` uses mixed case
+    /// and `+`/`/`/`=`, so it is never misclassified. Changes persist on the next
+    /// `save`; a read-only command is displayed correctly from the in-memory
+    /// normalization without forcing a write.
+    fn migrate_legacy_seal_refs(&mut self) {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        // Decode `value` iff it is legacy lowercase-hex of canonical seal bytes.
+        fn legacy_hex_seal_bytes(value: &str) -> Option<Vec<u8>> {
+            if value.is_empty() || value.len() % 2 != 0 {
+                return None;
+            }
+            if !value
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            {
+                return None;
+            }
+            let bytes = hex::decode(value).ok()?;
+            // Confirm it is really a seal (what `accept` hex-encoded), not a
+            // coincidental all-hex base64 string.
+            csv_hash::seal::SealPoint::from_canonical_bytes(&bytes).ok()?;
+            Some(bytes)
+        }
+
+        for sanad in &mut self.storage.sanads {
+            if let Some(bytes) = legacy_hex_seal_bytes(&sanad.seal_ref) {
+                sanad.seal_ref = b64.encode(&bytes);
+                if sanad.status == SanadStatus::Active {
+                    sanad.status = SanadStatus::OwnedOffChain;
+                }
+            }
+        }
+        for seal in &mut self.storage.seals {
+            if let Some(bytes) = legacy_hex_seal_bytes(&seal.seal_ref) {
+                seal.seal_ref = b64.encode(&bytes);
+            }
+        }
     }
 
     /// Create new with defaults (requires passphrase for encryption).
@@ -454,4 +514,113 @@ impl UnifiedStateManager {
     // Note: Lease management is handled exclusively by csv-runtime.
     // The CLI delegates lease acquisition and management to the runtime
     // and only stores display records for user reference.
+}
+
+#[cfg(test)]
+mod seal_ref_migration_tests {
+    use super::*;
+    use base64::Engine as _;
+    use csv_hash::seal::SealPoint;
+
+    fn canonical_seal_bytes() -> Vec<u8> {
+        SealPoint {
+            id: vec![0x22u8; 33],
+            nonce: Some(9),
+            version: None,
+        }
+        .to_canonical_bytes()
+        .unwrap()
+    }
+
+    /// CLI-STATE-002: a legacy hex-encoded `seal_ref` written by an older `accept`
+    /// is re-encoded to base64 on load, and — because only the off-chain `accept`
+    /// path ever wrote hex — a still-`Active` record is promoted to
+    /// `OwnedOffChain`. A base64 record written by `sanad create` is left intact.
+    #[test]
+    fn legacy_hex_records_migrate_to_base64_and_off_chain() {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let bytes = canonical_seal_bytes();
+        let hex_seal = hex::encode(&bytes);
+        let already_b64 = b64.encode(&bytes);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let path_str = path.to_str().unwrap();
+
+        {
+            let mut state = UnifiedStateManager::load_from(path_str, "pw").unwrap();
+            // Legacy off-chain accept record: hex seal_ref, tagged Active.
+            state.storage.sanads.push(SanadRecord {
+                id: "aa".repeat(32),
+                chain: Chain::new("aptos"),
+                seal_ref: hex_seal.clone(),
+                owner: String::new(),
+                value: 0,
+                commitment: String::new(),
+                nullifier: None,
+                status: SanadStatus::Active,
+                created_at: 0,
+                anchor_tx_hash: None,
+                nonce: None,
+                provenance_strength: None,
+            });
+            // A base64 record (as `sanad create` writes) must be left untouched.
+            state.storage.sanads.push(SanadRecord {
+                id: "bb".repeat(32),
+                chain: Chain::new("aptos"),
+                seal_ref: already_b64.clone(),
+                owner: String::new(),
+                value: 0,
+                commitment: String::new(),
+                nullifier: None,
+                status: SanadStatus::Active,
+                created_at: 0,
+                anchor_tx_hash: None,
+                nonce: None,
+                provenance_strength: None,
+            });
+            state.storage.seals.push(SealRecord {
+                seal_ref: hex_seal.clone(),
+                chain: Chain::new("aptos"),
+                value: 0,
+                consumed: false,
+                status: SealStatus::Active,
+                created_at: 0,
+                sanad_id: None,
+                content: None,
+                proof_ref: None,
+            });
+            state.save().unwrap();
+        }
+
+        // Reload — the migration runs on load.
+        let state = UnifiedStateManager::load_from(path_str, "pw").unwrap();
+
+        let migrated = state.get_sanad(&"aa".repeat(32)).unwrap();
+        assert_eq!(
+            migrated.seal_ref, already_b64,
+            "legacy hex seal_ref must be re-encoded to the canonical base64"
+        );
+        assert_eq!(
+            migrated.status,
+            SanadStatus::OwnedOffChain,
+            "a legacy hex (off-chain accept) record must be promoted to OwnedOffChain"
+        );
+
+        let untouched = state.get_sanad(&"bb".repeat(32)).unwrap();
+        assert_eq!(
+            untouched.seal_ref, already_b64,
+            "an existing base64 seal_ref must be left unchanged"
+        );
+        assert_eq!(
+            untouched.status,
+            SanadStatus::Active,
+            "a base64 (on-chain create) record must NOT be promoted to off-chain"
+        );
+
+        assert_eq!(
+            state.storage.seals[0].seal_ref, already_b64,
+            "legacy hex SealRecord.seal_ref must be re-encoded to base64"
+        );
+    }
 }

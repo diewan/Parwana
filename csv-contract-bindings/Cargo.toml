@@ -1,6 +1,6 @@
 [package]
 name = "csv-contract-bindings"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "CSV Contract Bindings - Type-safe smart contract ABI bindings for all supported chains"
 

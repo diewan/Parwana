@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Status of a Sanad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum SanadStatus {
     /// Sanad is active and can be used.
     Active,
@@ -16,6 +16,13 @@ pub enum SanadStatus {
     Transferred,
     /// Sanad has been consumed (seal used).
     Consumed,
+    /// Sanad is held off-chain via client-side validation (RGB-style): the
+    /// recipient owns it, its authority lives on the **source** chain plus the
+    /// accepted consignment, and — by the design of the off-chain transfer mode —
+    /// nothing was ever settled on the **destination** chain. This is a
+    /// first-class ownership state, distinct from both `Active` (an on-chain
+    /// settled Sanad) and any failure/absence (CLI-STATE-002).
+    OwnedOffChain,
 }
 
 impl std::fmt::Display for SanadStatus {
@@ -24,7 +31,36 @@ impl std::fmt::Display for SanadStatus {
             SanadStatus::Active => write!(f, "active"),
             SanadStatus::Transferred => write!(f, "transferred"),
             SanadStatus::Consumed => write!(f, "consumed"),
+            SanadStatus::OwnedOffChain => write!(f, "owned_off_chain"),
         }
+    }
+}
+
+impl SanadStatus {
+    /// Human-readable display label for the CLI.
+    ///
+    /// `OwnedOffChain` is deliberately distinct from every on-chain
+    /// [`SanadLifecycleState`] label: it names client-side-validated ownership
+    /// that was never settled on the destination chain, so it must not be shown
+    /// as `Active` (which would masquerade as an on-chain-settled Sanad) nor as
+    /// `Invalid` (CLI-STATE-002).
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            SanadStatus::Active => "Active",
+            SanadStatus::Transferred => "Transferred",
+            SanadStatus::Consumed => "Consumed",
+            SanadStatus::OwnedOffChain => "Owned (off-chain, client-side-validated)",
+        }
+    }
+
+    /// Whether this Sanad is held off-chain (its authority lives on the source
+    /// chain + consignment, never on the destination chain it is tagged with).
+    ///
+    /// A destination-chain canonical query is a category error for such a Sanad:
+    /// it was never minted there, so the query would truthfully return
+    /// `Uncreated` for authority that does not live on that chain (CLI-STATE-002).
+    pub fn is_off_chain(&self) -> bool {
+        matches!(self, SanadStatus::OwnedOffChain)
     }
 }
 
@@ -537,11 +573,18 @@ impl SanadLifecycleState {
     }
 
     /// Convert from the local SanadStatus (used by cmd_show fallback).
+    ///
+    /// `OwnedOffChain` has no on-chain lifecycle equivalent — it means the Sanad
+    /// was never settled on this (destination) chain — so it maps to `Unknown`
+    /// here. Callers that display off-chain-owned Sanads must use
+    /// [`SanadStatus::display_label`] instead of routing through this enum, so the
+    /// honest off-chain label is shown rather than `Unknown` (CLI-STATE-002).
     pub fn from_local_status(status: SanadStatus) -> Self {
         match status {
             SanadStatus::Active => SanadLifecycleState::Active,
             SanadStatus::Transferred => SanadLifecycleState::Transferred,
             SanadStatus::Consumed => SanadLifecycleState::Consumed,
+            SanadStatus::OwnedOffChain => SanadLifecycleState::Unknown,
         }
     }
 }

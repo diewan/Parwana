@@ -51,8 +51,8 @@ use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
 use csv_protocol::chain_adapter_traits::{
-    BalanceInfo, ChainBackend, ChainReadiness, DeploymentStatus, SanadOperationResult,
-    TransactionInfo, TransactionStatus,
+    BalanceInfo, ChainBackend, ChainReadiness, DeploymentStatus, SanadAnchorHint,
+    SanadOperationResult, SealOwnershipTarget, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::ProofBundle;
 
@@ -379,6 +379,31 @@ impl ChainRuntime {
         })
     }
 
+    /// Confirm — via a live chain query — that `claimed_owner` controls the
+    /// recipient-nominated single-use seal `target` on `chain`.
+    ///
+    /// Delegates to `ChainBackend::verify_seal_ownership`. Fails closed: returns
+    /// `Ok(())` only on a positive, chain-confirmed ownership match; any RPC
+    /// error, not-found, wrong-owner, or unimplemented adapter path returns `Err`.
+    /// This backs the interactive-transfer `invoice` ownership check for chains
+    /// whose control cannot be derived offline (Sui, Ethereum, Solana).
+    pub async fn verify_seal_ownership(
+        &self,
+        chain: ChainId,
+        target: &SealOwnershipTarget,
+        claimed_owner: &str,
+    ) -> Result<(), CsvError> {
+        let adapter = self.get_adapter(chain.clone()).await?;
+
+        adapter
+            .verify_seal_ownership(target, claimed_owner)
+            .await
+            .map_err(|e| CsvError::ProtocolError {
+                chain: chain.clone(),
+                message: format!("Seal ownership verification failed: {}", e),
+            })
+    }
+
     /// Confirm a transaction and check its finality status.
     ///
     /// Delegates to ChainBroadcaster::confirm_transaction.
@@ -555,6 +580,25 @@ impl ChainRuntime {
     /// This implementation queries the chain for inclusion proof data and constructs
     /// a complete ProofBundle for cross-chain transfers.
     ///
+    /// # Anchor resolution (uniform across chains)
+    ///
+    /// The sanad's on-chain anchor (its create/publish transaction and the block
+    /// that confirms it) is resolved through one uniform seam, so shared code
+    /// stays chain-agnostic and a new chain only implements its adapter methods:
+    ///
+    /// 1. The adapter's [`resolve_sanad_anchor`] is asked first. Adapters that
+    ///    persist a local `sanad_id -> anchor` mapping (Bitcoin) return the real
+    ///    location here.
+    /// 2. Otherwise, if the caller supplies an [`SanadAnchorHint`] (chains whose
+    ///    adapter holds no such mapping — Ethereum/Aptos/Sui/Solana), the anchor
+    ///    transaction it names is **re-verified against live chain state** (must
+    ///    exist and be confirmed) before use. The hint is a lookup key, never
+    ///    authority; the adapter's `build_inclusion_proof` independently re-fetches
+    ///    the receipt/accumulator evidence and binds it to the sanad.
+    /// 3. Otherwise the chain tip is used as a last resort, which the adapter's own
+    ///    `build_inclusion_proof` then rejects (fails closed) rather than
+    ///    fabricating a tip-anchored proof.
+    ///
     /// # Security
     /// - Fetches real inclusion proof from chain state
     /// - Includes finality proof with confirmation count
@@ -564,6 +608,7 @@ impl ChainRuntime {
         &self,
         chain: ChainId,
         sanad_id: &SanadId,
+        anchor_hint: Option<SanadAnchorHint>,
     ) -> Result<ProofBundle, CsvError> {
         let chain_for_error = chain.clone();
         let adapter = self.get_adapter(chain_for_error.clone()).await?;
@@ -572,11 +617,6 @@ impl ChainRuntime {
         // it and the block that confirms it. Using the sanad id as a txid and the
         // chain tip as the anchor block yields invalid inclusion proofs — the
         // sanad id is not a transaction id, and the anchor is not at the tip.
-        //
-        // Adapters that track a sanad_id -> anchor mapping (Bitcoin) return the
-        // real location. Adapters that do not (Ethereum/Aptos/Sui/Solana on this
-        // legacy path) return None; their own `build_inclusion_proof` then fails
-        // closed instead of fabricating a proof — we never invent an anchor here.
         let anchor =
             adapter
                 .resolve_sanad_anchor(sanad_id)
@@ -587,16 +627,53 @@ impl ChainRuntime {
                 })?;
 
         let (block_height, anchor_id_bytes, resolved_tx_hash) = match anchor {
+            // Adapter resolved the anchor from its own local state (Bitcoin).
             Some(loc) => (loc.block_height, loc.anchor_id, Some(loc.tx_hash_hex)),
-            None => {
-                let tip = adapter.get_latest_block_height().await.map_err(|e| {
-                    CsvError::ProtocolError {
-                        chain: chain.clone(),
-                        message: format!("Failed to get latest block height: {}", e),
-                    }
-                })?;
-                (tip, sanad_id.as_bytes().to_vec(), None)
-            }
+            // Caller-supplied anchor for chains with no in-adapter mapping. We do
+            // NOT trust the hint: re-verify it against live chain state here, and
+            // the adapter's `build_inclusion_proof` re-fetches and sanad-binds the
+            // evidence below. A hint naming an unknown or unconfirmed transaction
+            // fails closed rather than yielding a tip-anchored (invalid) proof.
+            None => match anchor_hint {
+                Some(hint) => {
+                    let tx = adapter.get_transaction(&hint.anchor_tx_hex).await.map_err(|e| {
+                        CsvError::ProtocolError {
+                            chain: chain.clone(),
+                            message: format!(
+                                "Failed to resolve supplied anchor transaction {}: {e}",
+                                hint.anchor_tx_hex
+                            ),
+                        }
+                    })?;
+                    let block_height =
+                        tx.block_height.ok_or_else(|| CsvError::ProtocolError {
+                            chain: chain.clone(),
+                            message: format!(
+                                "Supplied anchor transaction {} is not yet confirmed; cannot \
+                                 build an inclusion proof against an unconfirmed anchor",
+                                hint.anchor_tx_hex
+                            ),
+                        })?;
+                    let anchor_bytes = hex::decode(hint.anchor_tx_hex.trim_start_matches("0x"))
+                        .map_err(|e| CsvError::ProtocolError {
+                            chain: chain.clone(),
+                            message: format!(
+                                "Invalid anchor transaction hex {}: {e}",
+                                hint.anchor_tx_hex
+                            ),
+                        })?;
+                    (block_height, anchor_bytes, Some(hint.anchor_tx_hex))
+                }
+                None => {
+                    let tip = adapter.get_latest_block_height().await.map_err(|e| {
+                        CsvError::ProtocolError {
+                            chain: chain.clone(),
+                            message: format!("Failed to get latest block height: {}", e),
+                        }
+                    })?;
+                    (tip, sanad_id.as_bytes().to_vec(), None)
+                }
+            },
         };
 
         // Create commitment from sanad_id (the sanad's hash is the commitment)

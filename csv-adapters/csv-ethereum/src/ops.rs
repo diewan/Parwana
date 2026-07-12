@@ -15,7 +15,7 @@ use csv_protocol::chain_adapter_traits::{
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
     ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperationResult,
-    SanadStateReader, TransactionInfo, TransactionStatus,
+    SanadStateReader, SealOwnershipTarget, TransactionInfo, TransactionStatus,
 };
 
 use csv_hash::Hash;
@@ -1294,17 +1294,130 @@ impl ChainDeployer for EthereumBackend {
 impl ChainProofProvider for EthereumBackend {
     async fn build_inclusion_proof(
         &self,
-        _commitment: &Hash,
-        _block_height: u64,
-        _anchor_id: &[u8],
+        commitment: &Hash,
+        block_height: u64,
+        anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
-        Err(ChainOpError::CapabilityUnavailable(
-            "Legacy Ethereum ChainProofProvider inclusion proofs are disabled: \
-             this path previously fabricated event payloads instead of MPT receipt \
-             inclusion evidence. Use the runtime ChainProofPort path, which builds \
-             proof bundles from finalized transaction receipts."
-                .to_string(),
-        ))
+        // `anchor_id` is the 32-byte create/publish transaction hash (internal
+        // byte order), resolved by the runtime from the caller-supplied anchor
+        // hint and re-verified as confirmed before we are called. We do NOT trust
+        // that: we independently re-fetch the real receipt and bind it to the
+        // sanad via the on-chain `SanadCreated` event. This is the receipt-backed
+        // successor to the removed fabricated-event-payload path — no synthetic
+        // block hashes, no invented event data.
+        if anchor_id.len() != 32 {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Ethereum anchor id must be a 32-byte transaction hash, got {} bytes",
+                anchor_id.len()
+            )));
+        }
+        let mut txid = [0u8; 32];
+        txid.copy_from_slice(anchor_id);
+
+        // Real inclusion evidence: the confirmed receipt for the anchor tx. Fail
+        // closed when no receipt exists rather than shipping a fabricated proof.
+        let receipt = self
+            .rpc()
+            .get_transaction_receipt(txid)
+            .await
+            .map_err(|e| {
+                ChainOpError::RpcError(format!(
+                    "Failed to fetch receipt for anchor tx 0x{}: {e}",
+                    hex::encode(txid)
+                ))
+            })?
+            .ok_or_else(|| {
+                ChainOpError::ProofVerificationError(format!(
+                    "No receipt found for anchor tx 0x{}; cannot build an inclusion proof \
+                     against an unconfirmed or unknown anchor",
+                    hex::encode(txid)
+                ))
+            })?;
+
+        if receipt.status != 1 {
+            return Err(ChainOpError::ProofVerificationError(format!(
+                "Anchor tx 0x{} reverted (status={}); refusing to vouch for a failed transaction",
+                hex::encode(txid),
+                receipt.status
+            )));
+        }
+        if receipt.block_number != block_height {
+            return Err(ChainOpError::ProofVerificationError(format!(
+                "Anchor tx 0x{} receipt block {} does not match the resolved confirming height {}",
+                hex::encode(txid),
+                receipt.block_number,
+                block_height
+            )));
+        }
+
+        // Bind the evidence to this sanad via the indexed `sanadId` topic of the
+        // `SanadCreated(sanadId, commitment, owner, ts)` event emitted by
+        // `create_seal`. `generate_proof` domain-separates the anchor against the
+        // sanad id, which it passes here in `commitment`; matching topics[1]
+        // guarantees this receipt actually anchors THIS sanad. When a contract
+        // address is configured, require the log to originate from it so an
+        // unrelated contract cannot spoof the event.
+        let sanad_id_topic = *commitment.as_bytes();
+        let created_sig = CsvSealAbi::sanad_created_event_signature();
+        let log = receipt
+            .logs
+            .iter()
+            .find(|log| {
+                self.contract_address
+                    .map(|addr| log.address == addr)
+                    .unwrap_or(true)
+                    && log.topics.len() >= 2
+                    && log.topics[0] == created_sig
+                    && log.topics[1] == sanad_id_topic
+            })
+            .ok_or_else(|| {
+                ChainOpError::ProofVerificationError(format!(
+                    "Anchor tx 0x{} emitted no SanadCreated event for sanad 0x{}; refusing to \
+                     build an inclusion proof not bound to this sanad",
+                    hex::encode(txid),
+                    hex::encode(sanad_id_topic)
+                ))
+            })?;
+
+        // Real finality evidence: confirmation depth measured against the
+        // observed chain tip, enforced against the configured finality depth.
+        // Finality is never optional (RUNTIME-FINALITY-TAUTOLOGY-001): the tip is
+        // observed, not derived from the required depth.
+        let tip = self
+            .rpc()
+            .block_number()
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to get latest block number: {e}")))?;
+        let confirmations = tip.saturating_sub(receipt.block_number);
+        if confirmations < self.config.finality_depth {
+            return Err(ChainOpError::ProofVerificationError(format!(
+                "Anchor tx 0x{} has only {} confirmations; needs {} for finality",
+                hex::encode(txid),
+                confirmations,
+                self.config.finality_depth
+            )));
+        }
+
+        // Deterministic encoding of the real receipt evidence this proof vouches
+        // for: block hash/number, the matched log's index, its topics, and its
+        // data. Mirrors the runtime lock-path encoding so both proof builders
+        // agree on the wire shape.
+        let mut proof_bytes = Vec::new();
+        proof_bytes.extend_from_slice(&receipt.block_hash);
+        proof_bytes.extend_from_slice(&receipt.block_number.to_le_bytes());
+        proof_bytes.extend_from_slice(&log.log_index.to_le_bytes());
+        for topic in &log.topics {
+            proof_bytes.extend_from_slice(topic);
+        }
+        proof_bytes.extend_from_slice(&log.data);
+
+        CoreInclusionProof::new(
+            proof_bytes,
+            Hash::new(receipt.block_hash),
+            receipt.block_number,
+            log.log_index,
+        )
+        .map_err(|e| ChainOpError::InvalidInput(format!("Invalid inclusion proof: {e}")))
     }
 
     fn verify_inclusion_proof(
@@ -2027,6 +2140,109 @@ impl ChainBackend for EthereumBackend {
             metadata: ethereum_anchor.log_index.to_le_bytes().to_vec(),
         })
     }
+
+    /// Confirm `claimed_owner` controls the recipient-nominated CSVSeal registry
+    /// seal via `sealOwners[sealId]`.
+    ///
+    /// The CSVSeal registry sets `sealOwners[sealId] = msg.sender` in `create_seal`
+    /// and only the seal owner can consume it, so a `sealOwners` entry that resolves
+    /// to the claimant is a positive, on-chain proof of control. Fails closed on an
+    /// unexpected registry, a zero/absent owner (seal never created), a short RPC
+    /// response, or an owner that does not match.
+    async fn verify_seal_ownership(
+        &self,
+        target: &SealOwnershipTarget,
+        claimed_owner: &str,
+    ) -> ChainOpResult<()> {
+        let (registry, seal_id) = match target {
+            SealOwnershipTarget::EthereumSeal { registry, seal_id } => (registry, seal_id),
+            other => {
+                return Err(ChainOpError::InvalidInput(format!(
+                    "Ethereum backend cannot verify a {} ownership target",
+                    other.chain()
+                )));
+            }
+        };
+
+        // Only the configured CSVSeal registry can be trusted to answer
+        // `sealOwners`; querying an arbitrary attacker-named contract would let a
+        // recipient forge a positive result. Fail closed on any mismatch.
+        let configured = self.contract_address.ok_or_else(|| {
+            ChainOpError::CapabilityUnavailable(
+                "Contract address not configured. Set contract_address in EthereumConfig."
+                    .to_string(),
+            )
+        })?;
+        if &configured != registry {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Seal registry 0x{} does not match the configured CSVSeal registry 0x{}",
+                hex::encode(registry),
+                hex::encode(configured)
+            )));
+        }
+
+        // Parse the claimed owner into a 20-byte address before any RPC round-trip.
+        let claimed = parse_eth_address(claimed_owner)?;
+
+        // sealOwners(bytes32) -> address (right-aligned in a 32-byte word).
+        let owner_result = self
+            .rpc
+            .eth_call(
+                serde_json::json!({
+                    "to": format!("0x{}", hex::encode(configured)),
+                    "data": format!("0x{}", hex::encode(self._encode_view_call("sealOwners(bytes32)", seal_id)))
+                }),
+                "latest",
+            )
+            .await
+            .map_err(|e| ChainOpError::RpcError(format!("Failed to query sealOwners: {}", e)))?;
+
+        if owner_result.len() < 32 {
+            return Err(ChainOpError::RpcError(format!(
+                "Invalid sealOwners response length: {} (expected >= 32)",
+                owner_result.len()
+            )));
+        }
+        // The address occupies the low 20 bytes of the trailing 32-byte word.
+        let word = &owner_result[owner_result.len() - 32..];
+        let mut on_chain_owner = [0u8; 20];
+        on_chain_owner.copy_from_slice(&word[12..32]);
+
+        if on_chain_owner == [0u8; 20] {
+            return Err(ChainOpError::InvalidInput(format!(
+                "CSVSeal registry has no owner for seal 0x{}: the seal has not been created \
+                 on-chain, so ownership cannot be confirmed",
+                hex::encode(seal_id)
+            )));
+        }
+
+        if on_chain_owner != claimed {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Seal 0x{} is owned by 0x{} on-chain, not the wallet address 0x{}",
+                hex::encode(seal_id),
+                hex::encode(on_chain_owner),
+                hex::encode(claimed)
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+/// Parse an optionally `0x`-prefixed 20-byte Ethereum address string.
+fn parse_eth_address(address: &str) -> ChainOpResult<[u8; 20]> {
+    let hexpart = address.trim().trim_start_matches("0x");
+    let bytes = hex::decode(hexpart)
+        .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Ethereum address hex: {}", e)))?;
+    if bytes.len() != 20 {
+        return Err(ChainOpError::InvalidInput(format!(
+            "Ethereum address must be 20 bytes, got {}",
+            bytes.len()
+        )));
+    }
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&bytes);
+    Ok(out)
 }
 
 #[async_trait]
@@ -2413,7 +2629,185 @@ impl ChainReadinessCheck for EthereumBackend {
 mod tests {
     use super::*;
     use crate::config::Network;
-    use crate::rpc::MockEthereumRpc;
+    use crate::rpc::{LogEntry, MockEthereumRpc, TransactionReceipt};
+
+    /// Build an Ethereum backend over a pre-configured mock RPC.
+    fn backend_with_rpc(rpc: MockEthereumRpc, contract: Option<[u8; 20]>) -> EthereumBackend {
+        let config = EthereumConfig {
+            network: Network::Sepolia,
+            finality_depth: 15,
+            use_checkpoint_finality: true,
+            rpc_url: "http://127.0.0.1:8545".to_string(),
+            private_key: None,
+            contract_address: contract,
+        };
+        EthereumBackend::new(Box::new(rpc), config)
+            .expect("EthereumBackend::new should succeed with a mock RPC and valid config")
+    }
+
+    /// A `SanadCreated(sanadId, commitment, owner, ts)` log for `sanad_id`.
+    fn sanad_created_log(addr: [u8; 20], sanad_id: [u8; 32], log_index: u64) -> LogEntry {
+        LogEntry {
+            address: addr,
+            topics: vec![
+                CsvSealAbi::sanad_created_event_signature(),
+                sanad_id,
+                [0x33u8; 32], // commitment (indexed, not matched by the builder)
+            ],
+            data: vec![0xABu8; 32],
+            log_index,
+        }
+    }
+
+    fn receipt_with_logs(
+        txid: [u8; 32],
+        block_number: u64,
+        status: u64,
+        logs: Vec<LogEntry>,
+    ) -> TransactionReceipt {
+        TransactionReceipt {
+            tx_hash: txid,
+            block_number,
+            block_hash: [0x11u8; 32],
+            contract_address: None,
+            logs,
+            status,
+            gas_used: 21000,
+            success: status == 1,
+        }
+    }
+
+    // PROOFGEN-MULTICHAIN-001: the create-anchor inclusion builder must produce a
+    // real, sanad-bound, receipt-backed proof for a confirmed sanad and fail
+    // closed (never fabricate) otherwise.
+
+    #[tokio::test]
+    async fn build_inclusion_proof_binds_confirmed_sanad_created_receipt() {
+        let contract = [0x11u8; 20];
+        let sanad_id = [0x02u8; 32];
+        let txid = [0xAAu8; 32];
+        let rpc = MockEthereumRpc::new(1000); // tip 1000
+        rpc.add_receipt(
+            txid,
+            receipt_with_logs(txid, 100, 1, vec![sanad_created_log(contract, sanad_id, 7)]),
+        );
+        let backend = backend_with_rpc(rpc, Some(contract));
+
+        let commitment = Hash::new(sanad_id);
+        let proof = backend
+            .build_inclusion_proof(&commitment, 100, &txid)
+            .await
+            .expect("confirmed, sanad-bound create anchor must yield a real inclusion proof");
+
+        assert_eq!(proof.block_number, 100);
+        assert!(
+            !proof.proof_bytes.is_empty(),
+            "inclusion evidence must not be empty"
+        );
+        // Evidence embeds the real block hash + the matched SanadCreated topic.
+        assert!(
+            proof
+                .proof_bytes
+                .windows(32)
+                .any(|w| w == sanad_id),
+            "encoded evidence must carry the sanad-bound event topic"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_without_receipt() {
+        let rpc = MockEthereumRpc::new(1000);
+        let backend = backend_with_rpc(rpc, Some([0x11u8; 20]));
+        let commitment = Hash::new([0x02u8; 32]);
+        let result = backend
+            .build_inclusion_proof(&commitment, 100, &[0xAAu8; 32])
+            .await;
+        assert!(
+            matches!(result, Err(ChainOpError::ProofVerificationError(_))),
+            "must fail closed when the anchor tx has no receipt: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_on_reverted_anchor() {
+        let contract = [0x11u8; 20];
+        let sanad_id = [0x02u8; 32];
+        let txid = [0xAAu8; 32];
+        let rpc = MockEthereumRpc::new(1000);
+        rpc.add_receipt(
+            txid,
+            receipt_with_logs(txid, 100, 0, vec![sanad_created_log(contract, sanad_id, 0)]),
+        );
+        let backend = backend_with_rpc(rpc, Some(contract));
+        let result = backend
+            .build_inclusion_proof(&Hash::new(sanad_id), 100, &txid)
+            .await;
+        assert!(
+            matches!(result, Err(ChainOpError::ProofVerificationError(_))),
+            "must fail closed on a reverted anchor tx: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_without_sanad_created_event() {
+        let contract = [0x11u8; 20];
+        let sanad_id = [0x02u8; 32];
+        let txid = [0xAAu8; 32];
+        let rpc = MockEthereumRpc::new(1000);
+        // Receipt exists but carries no SanadCreated log for this sanad.
+        rpc.add_receipt(txid, receipt_with_logs(txid, 100, 1, vec![]));
+        let backend = backend_with_rpc(rpc, Some(contract));
+        let result = backend
+            .build_inclusion_proof(&Hash::new(sanad_id), 100, &txid)
+            .await;
+        assert!(
+            matches!(result, Err(ChainOpError::ProofVerificationError(_))),
+            "must fail closed when no SanadCreated event binds the receipt to this sanad: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_for_different_sanad() {
+        let contract = [0x11u8; 20];
+        let created_for = [0x02u8; 32];
+        let asked_for = [0x09u8; 32];
+        let txid = [0xAAu8; 32];
+        let rpc = MockEthereumRpc::new(1000);
+        rpc.add_receipt(
+            txid,
+            receipt_with_logs(txid, 100, 1, vec![sanad_created_log(contract, created_for, 0)]),
+        );
+        let backend = backend_with_rpc(rpc, Some(contract));
+        // The receipt anchors `created_for`, but we ask for `asked_for`.
+        let result = backend
+            .build_inclusion_proof(&Hash::new(asked_for), 100, &txid)
+            .await;
+        assert!(
+            matches!(result, Err(ChainOpError::ProofVerificationError(_))),
+            "must not vouch for a sanad the receipt does not bind: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_below_finality_depth() {
+        let contract = [0x11u8; 20];
+        let sanad_id = [0x02u8; 32];
+        let txid = [0xAAu8; 32];
+        let rpc = MockEthereumRpc::new(1000); // tip 1000
+        // Anchor at block 990 → only 10 confirmations, below the depth of 15.
+        rpc.add_receipt(
+            txid,
+            receipt_with_logs(txid, 990, 1, vec![sanad_created_log(contract, sanad_id, 0)]),
+        );
+        let backend = backend_with_rpc(rpc, Some(contract));
+        let result = backend
+            .build_inclusion_proof(&Hash::new(sanad_id), 990, &txid)
+            .await;
+        assert!(
+            matches!(result, Err(ChainOpError::ProofVerificationError(_))),
+            "must fail closed below the configured finality depth: {result:?}"
+        );
+    }
 
     #[test]
     fn test_ethereum_chain_operations_creation() {
@@ -2494,22 +2888,6 @@ mod tests {
         let (max_fee, priority_fee) = eip1559_fee_caps(2_000_000_000);
         assert_eq!(priority_fee, 1_000_000_000);
         assert_eq!(max_fee, 2_000_000_000);
-    }
-
-    #[tokio::test]
-    async fn legacy_chain_proof_provider_inclusion_build_fails_closed() {
-        let ops = test_ops_with_contract(None);
-        let commitment = Hash::sha256(b"phase-2-ethereum-commitment");
-        let anchor_id = Hash::sha256(b"phase-2-ethereum-anchor");
-
-        let result = ops
-            .build_inclusion_proof(&commitment, 42, anchor_id.as_bytes())
-            .await;
-
-        assert!(
-            matches!(result, Err(ChainOpError::CapabilityUnavailable(ref message)) if message.contains("Legacy Ethereum ChainProofProvider inclusion proofs are disabled")),
-            "legacy provider must not fabricate inclusion proofs: {result:?}"
-        );
     }
 
     #[test]
@@ -2689,5 +3067,117 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
+    }
+
+    // ── Seal-ownership verification (invoice grief-proofing) ────────────────
+
+    /// Encode a `sealOwners(bytes32) -> address` return value: the address is
+    /// right-aligned in a 32-byte word.
+    fn owner_word(addr: [u8; 20]) -> Vec<u8> {
+        let mut word = vec![0u8; 32];
+        word[12..32].copy_from_slice(&addr);
+        word
+    }
+
+    const OWN_REGISTRY: [u8; 20] = [0xCCu8; 20];
+    const OWN_OWNER: [u8; 20] = [0xAB; 20];
+    const OWN_SEAL_ID: [u8; 32] = [0x22u8; 32];
+
+    #[tokio::test]
+    async fn ownership_ok_when_registry_owner_matches_wallet() {
+        let rpc = MockEthereumRpc::new(100);
+        rpc.set_call_result(owner_word(OWN_OWNER));
+        let backend = backend_with_rpc(rpc, Some(OWN_REGISTRY));
+
+        let target = SealOwnershipTarget::EthereumSeal {
+            registry: OWN_REGISTRY,
+            seal_id: OWN_SEAL_ID,
+        };
+        let claimed = format!("0x{}", hex::encode(OWN_OWNER));
+        backend
+            .verify_seal_ownership(&target, &claimed)
+            .await
+            .expect("matching on-chain owner must confirm control");
+    }
+
+    #[tokio::test]
+    async fn ownership_fails_on_wrong_owner() {
+        let rpc = MockEthereumRpc::new(100);
+        rpc.set_call_result(owner_word([0x01u8; 20])); // some other owner
+        let backend = backend_with_rpc(rpc, Some(OWN_REGISTRY));
+
+        let target = SealOwnershipTarget::EthereumSeal {
+            registry: OWN_REGISTRY,
+            seal_id: OWN_SEAL_ID,
+        };
+        let claimed = format!("0x{}", hex::encode(OWN_OWNER));
+        assert!(
+            backend
+                .verify_seal_ownership(&target, &claimed)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn ownership_fails_on_zero_owner_uncreated_seal() {
+        // Default mock returns a zero word — the seal was never created on-chain.
+        let backend = backend_with_rpc(MockEthereumRpc::new(100), Some(OWN_REGISTRY));
+        let target = SealOwnershipTarget::EthereumSeal {
+            registry: OWN_REGISTRY,
+            seal_id: OWN_SEAL_ID,
+        };
+        let claimed = format!("0x{}", hex::encode(OWN_OWNER));
+        let err = backend
+            .verify_seal_ownership(&target, &claimed)
+            .await
+            .expect_err("a zero/absent owner must never be treated as owned");
+        assert!(err.to_string().contains("has not been created"));
+    }
+
+    #[tokio::test]
+    async fn ownership_fails_on_registry_mismatch() {
+        // The recipient names a registry other than the configured CSVSeal one:
+        // fail closed before any RPC round-trip.
+        let rpc = MockEthereumRpc::new(100);
+        rpc.set_call_result(owner_word(OWN_OWNER));
+        let backend = backend_with_rpc(rpc, Some(OWN_REGISTRY));
+        let target = SealOwnershipTarget::EthereumSeal {
+            registry: [0xEEu8; 20], // != OWN_REGISTRY
+            seal_id: OWN_SEAL_ID,
+        };
+        let claimed = format!("0x{}", hex::encode(OWN_OWNER));
+        assert!(
+            backend
+                .verify_seal_ownership(&target, &claimed)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn ownership_fails_on_wrong_target_chain() {
+        let backend = backend_with_rpc(MockEthereumRpc::new(100), Some(OWN_REGISTRY));
+        let target = SealOwnershipTarget::SolanaAccount {
+            account: [0x01u8; 32],
+        };
+        assert!(
+            backend
+                .verify_seal_ownership(&target, "0x00")
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn parse_eth_address_roundtrips_and_rejects_bad_input() {
+        assert_eq!(
+            parse_eth_address(&format!("0x{}", hex::encode(OWN_OWNER))).unwrap(),
+            OWN_OWNER
+        );
+        assert_eq!(parse_eth_address(&hex::encode(OWN_OWNER)).unwrap(), OWN_OWNER); // no 0x
+        assert!(parse_eth_address("0x1234").is_err()); // too short
+        assert!(parse_eth_address(&hex::encode([0u8; 21])).is_err()); // too long
+        assert!(parse_eth_address("0xnothexnothexnothexnothexnothexnothexnope").is_err());
     }
 }

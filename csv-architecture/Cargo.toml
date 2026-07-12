@@ -1,6 +1,6 @@
 [package]
 name = "csv-architecture"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "Architecture guardrails for the CSV Protocol workspace"
 license = "MIT OR Apache-2.0"

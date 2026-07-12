@@ -15,7 +15,7 @@ use csv_protocol::chain_adapter_traits::{
     ChainBroadcaster, ChainCapability, ChainDeployer, ChainOpError, ChainOpResult,
     ChainProofProvider, ChainQuery, ChainReadiness, ChainReadinessCheck, ChainSanadOps,
     ChainSigner, ContractStatus, DeploymentStatus, FinalityStatus, SanadOperationResult,
-    SanadStateReader, TransactionInfo, TransactionStatus,
+    SanadStateReader, SealOwnershipTarget, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof as CoreInclusionProof};
 use csv_protocol::sanad::SanadId;
@@ -643,58 +643,33 @@ impl ChainDeployer for SolanaBackend {
 impl ChainProofProvider for SolanaBackend {
     async fn build_inclusion_proof(
         &self,
-        commitment: &Hash,
-        block_height: u64,
-        anchor_id: &[u8],
+        _commitment: &Hash,
+        _block_height: u64,
+        _anchor_id: &[u8],
     ) -> ChainOpResult<CoreInclusionProof> {
-        use sha3::{Digest, Keccak256};
-
-        if anchor_id.len() != 64 {
-            return Err(ChainOpError::InvalidInput(format!(
-                "Invalid anchor_id length for Solana: expected 64-byte transaction signature, got {}",
-                anchor_id.len()
-            )));
-        }
-
-        let program_id = self
-            .seal_protocol
-            .config
-            .csv_program_id
-            .parse::<solana_sdk::pubkey::Pubkey>()
-            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Solana program ID: {}", e)))?;
-
-        let latest_slot = self
-            .rpc()
-            .get_latest_slot()
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get latest slot: {}", e)))?;
-
-        if latest_slot < block_height {
-            return Err(ChainOpError::ProofVerificationError(format!(
-                "Cannot build inclusion proof for future slot {} (latest {})",
-                block_height, latest_slot
-            )));
-        }
-
-        let mut block_hasher = Keccak256::new();
-        block_hasher.update(block_height.to_le_bytes());
-        block_hasher.update(program_id.as_ref());
-        block_hasher.update(anchor_id);
-        block_hasher.update(commitment.as_bytes());
-        let block_hash = Hash::new(block_hasher.finalize().into());
-
-        let mut proof_bytes = Vec::with_capacity(22 + 8 + 32 + 64 + 32 + 8 + 32);
-        proof_bytes.extend_from_slice(b"CSV-SOLANA-SLOT-PROOF");
-        proof_bytes.extend_from_slice(&block_height.to_le_bytes());
-        proof_bytes.extend_from_slice(program_id.as_ref());
-        proof_bytes.extend_from_slice(anchor_id);
-        proof_bytes.extend_from_slice(commitment.as_bytes());
-        proof_bytes.extend_from_slice(&latest_slot.to_le_bytes());
-        proof_bytes.extend_from_slice(block_hash.as_bytes());
-
-        Ok(
-            CoreInclusionProof::new(proof_bytes, block_hash, block_height, block_height)
-                .map_err(|e| ChainOpError::ProofVerificationError(e.to_string()))?,
-        )
+        // PROOFGEN-MULTICHAIN-001: disabled and fail-closed.
+        //
+        // The previous implementation FABRICATED a synthetic block hash
+        // (keccak256 over slot/program/anchor/commitment) and a
+        // "CSV-SOLANA-SLOT-PROOF" byte blob rather than deriving inclusion
+        // evidence from real, sanad-bound on-chain state. That is exactly the
+        // fabricated-blockchain-state the protocol forbids, and it is now
+        // reachable by the create/publish-anchor proof path, so it must not
+        // produce a proof.
+        //
+        // Open question (per-chain anchor semantics): a real Solana builder must
+        // mirror the Ethereum `SanadCreated` pattern — resolve the create/publish
+        // transaction's landed slot, read the on-chain seal/sanad account it
+        // wrote (binding the sanad), and encode only that real evidence (no
+        // synthesized hashes). Until that lands, create-anchor proof generation
+        // and off-chain `send` from a Solana source fail closed here.
+        Err(ChainOpError::CapabilityUnavailable(
+            "Solana create-anchor inclusion proofs are not implemented: the legacy path \
+             fabricated a synthetic slot proof and has been disabled. Implement a real, \
+             sanad-bound builder in the Solana adapter (mirroring the Ethereum SanadCreated \
+             receipt pattern) before generating proofs or sending off-chain from a Solana source."
+                .to_string(),
+        ))
     }
 
     fn verify_inclusion_proof(
@@ -1159,6 +1134,66 @@ impl ChainBackend for SolanaBackend {
             metadata: solana_anchor.slot.to_le_bytes().to_vec(),
         })
     }
+
+    /// Confirm `claimed_owner` controls the recipient-nominated csv-seal
+    /// `SanadAccount`.
+    ///
+    /// Fetches the account at the nominated address and confirms it (a) is owned by
+    /// the configured csv-seal program, (b) carries the Anchor `SanadAccount`
+    /// discriminator and canonical layout, and (c) records `claimed_owner` in its
+    /// `owner` field. Fails closed if the account does not exist, is owned by
+    /// another program, is not a `SanadAccount`, or the stored owner does not match
+    /// — a wrong-program or wrong-layout account could otherwise present forged
+    /// owner bytes.
+    async fn verify_seal_ownership(
+        &self,
+        target: &SealOwnershipTarget,
+        claimed_owner: &str,
+    ) -> ChainOpResult<()> {
+        let account_bytes = match target {
+            SealOwnershipTarget::SolanaAccount { account } => account,
+            other => {
+                return Err(ChainOpError::InvalidInput(format!(
+                    "Solana backend cannot verify a {} ownership target",
+                    other.chain()
+                )));
+            }
+        };
+
+        let program_id = Pubkey::from_str(&self.seal_protocol.config.csv_program_id)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid program ID: {}", e)))?;
+        let claimed = self.parse_address(claimed_owner)?;
+        let account_pubkey = Pubkey::new_from_array(*account_bytes);
+
+        let account = self.rpc().get_account(&account_pubkey).map_err(|e| {
+            ChainOpError::RpcError(format!(
+                "Failed to fetch Solana account {}: {}",
+                account_pubkey, e
+            ))
+        })?;
+
+        // The account must be owned by the configured csv-seal program; otherwise
+        // its data layout is untrusted and its `owner` bytes could be forged.
+        if account.owner != program_id {
+            return Err(ChainOpError::InvalidInput(format!(
+                "Account {} is owned by program {}, not the configured csv-seal program {}",
+                account_pubkey, account.owner, program_id
+            )));
+        }
+
+        // Validates the Anchor discriminator and canonical layout before reading
+        // the `owner` field.
+        let decoded = decode_sanad_account(&account.data)?;
+
+        if decoded.owner != claimed {
+            return Err(ChainOpError::InvalidInput(format!(
+                "SanadAccount {} is owned by {} on-chain, not the wallet address {}",
+                account_pubkey, decoded.owner, claimed
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1507,6 +1542,24 @@ mod tests {
         // This is a basic test - real tests would use MockSolanaRpc
     }
 
+    // PROOFGEN-MULTICHAIN-001: the create-anchor inclusion builder must fail
+    // closed rather than fabricate a synthetic slot proof. Real, sanad-bound
+    // Solana inclusion evidence is an open per-chain question (see the method).
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_no_fabrication() {
+        let backend =
+            SolanaBackend::new(Box::new(crate::rpc::MockSolanaRpc::new()), Network::Devnet);
+        let commitment = Hash::new([0x02u8; 32]);
+        let anchor_id = [0x07u8; 64];
+        let result = backend
+            .build_inclusion_proof(&commitment, 1, &anchor_id)
+            .await;
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(_))),
+            "Solana must fail closed (no fabricated slot proof): {result:?}"
+        );
+    }
+
     #[test]
     fn keypair_from_hex_key_id_accepts_32_byte_secret() {
         use solana_sdk::signature::Signer;
@@ -1551,5 +1604,97 @@ mod tests {
             decode_sanad_account(&data),
             Err(ChainOpError::ProofVerificationError(_))
         ));
+    }
+
+    // ── Seal-ownership verification (invoice grief-proofing) ────────────────
+
+    /// Build canonical `SanadAccount` data whose stored `owner` field is `owner`.
+    fn sanad_account_data(owner: &Pubkey) -> Vec<u8> {
+        let mut data = vec![0u8; 8 + 268];
+        data[..8].copy_from_slice(&anchor_account_discriminator("SanadAccount"));
+        data[8..40].copy_from_slice(owner.as_ref());
+        data
+    }
+
+    #[tokio::test]
+    async fn solana_ownership_confirms_owner_and_fails_closed() {
+        use solana_sdk::account::Account;
+
+        // The default backend's configured csv-seal program id.
+        let program_id = Pubkey::new_from_array(
+            SolanaBackend::new(Box::new(crate::rpc::MockSolanaRpc::new()), Network::Devnet)
+                .program_id()
+                .expect("default program id"),
+        );
+
+        let owner = Pubkey::new_unique();
+        let account_pubkey = Pubkey::new_unique();
+        // An account owned by another program but carrying valid-looking SanadAccount
+        // data — must NOT be trusted.
+        let spoof_pubkey = Pubkey::new_unique();
+
+        let mut mock = crate::rpc::MockSolanaRpc::new();
+        mock.add_account(
+            account_pubkey,
+            Account {
+                lamports: 1,
+                data: sanad_account_data(&owner),
+                owner: program_id,
+                executable: false,
+                rent_epoch: 0,
+            },
+        );
+        mock.add_account(
+            spoof_pubkey,
+            Account {
+                lamports: 1,
+                data: sanad_account_data(&owner),
+                owner: Pubkey::new_unique(), // NOT the csv-seal program
+                executable: false,
+                rent_epoch: 0,
+            },
+        );
+        let backend = SolanaBackend::new(Box::new(mock), Network::Devnet);
+
+        let target = SealOwnershipTarget::SolanaAccount {
+            account: account_pubkey.to_bytes(),
+        };
+
+        // Positive: program-owned SanadAccount whose owner field matches the wallet.
+        backend
+            .verify_seal_ownership(&target, &owner.to_string())
+            .await
+            .expect("matching on-chain owner must confirm control");
+
+        // Negative: a different claimed owner is rejected.
+        assert!(
+            backend
+                .verify_seal_ownership(&target, &Pubkey::new_unique().to_string())
+                .await
+                .is_err()
+        );
+
+        // Adversarial: an account NOT owned by the csv-seal program is rejected even
+        // though its data bytes name the claimant as owner.
+        let spoof = SealOwnershipTarget::SolanaAccount {
+            account: spoof_pubkey.to_bytes(),
+        };
+        assert!(
+            backend
+                .verify_seal_ownership(&spoof, &owner.to_string())
+                .await
+                .is_err()
+        );
+
+        // Negative: a nonexistent account fails closed.
+        let missing = SealOwnershipTarget::SolanaAccount {
+            account: Pubkey::new_unique().to_bytes(),
+        };
+        assert!(
+            backend
+                .verify_seal_ownership(&missing, &owner.to_string())
+                .await
+                .is_err()
+        );
     }
 }

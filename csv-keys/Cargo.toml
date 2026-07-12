@@ -1,6 +1,6 @@
 [package]
 name = "csv-keys"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "Secure key storage for CSV Adapter with BIP-39/BIP-44 support"
 license = "MIT OR Apache-2.0"

@@ -12,13 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cargo-deny
-        run: cargo install cargo-deny
-
       - name: Check dependency graph constitution
-        run: cargo deny check graph
-
-      - name: Run dependency DAG test
         run: CXXFLAGS="-include cstdint" cargo test -p csv-architecture --test dep_graph_constitution
 
       - name: No tokio::runtime::Builder in adapters

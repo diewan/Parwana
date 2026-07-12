@@ -1,6 +1,6 @@
 [package]
 name = "csv-solana"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "Solana adapter for CSV (Client-Side Validation) with account seals and program-based commitments"
 license = "MIT OR Apache-2.0"

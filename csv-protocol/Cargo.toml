@@ -1,6 +1,6 @@
 [package]
 name = "csv-protocol"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "CSV Protocol - State machines, protocol constants, types, invariants, replay semantics, transition legality, versioning"
 

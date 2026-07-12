@@ -1,6 +1,6 @@
 [package]
 name = "csv-p2p"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "P2P proof transport layer for CSV protocol using Nostr"
 license = "MIT OR Apache-2.0"

@@ -1457,14 +1457,7 @@ fn cmd_show(sanad_id: String, state: &UnifiedStateManager) -> Result<()> {
     if let Some(tracked) = state.get_sanad(&sanad_id_hash.to_hex()) {
         output::kv("Chain", tracked.chain.as_ref());
         output::kv("Commitment", &tracked.commitment);
-        output::kv(
-            "Local Status",
-            match tracked.status {
-                SanadStatus::Consumed => "Consumed",
-                SanadStatus::Transferred => "Transferred",
-                SanadStatus::Active => "Active",
-            },
-        );
+        output::kv("Local Status", tracked.status.display_label());
         if let Some(nullifier) = &tracked.nullifier {
             output::kv_hash("Nullifier", nullifier.as_bytes());
         }
@@ -1537,6 +1530,25 @@ struct ResolvedSanadRow {
     status_update: Option<SanadStatus>,
 }
 
+/// Whether a Sanad's `seal_ref` is well-formed enough to display as a real seal.
+///
+/// Bitcoin sanads carry no encoded seal_ref (the outpoint is the seal), so they
+/// are always displayable. For every other chain the seal_ref is a base64 blob:
+/// that is the single canonical on-disk encoding every writer now agrees on —
+/// `sanad create`, `accept`, and the transfer paths (CLI-STATE-002). Legacy
+/// records written as hex by an older `accept` are re-encoded to base64 by the
+/// one-time load migration (`UnifiedStateManager::migrate_legacy_seal_refs`), so
+/// this check validates base64 only, with no dual hex/base64 tolerance.
+fn seal_ref_is_displayable(chain: &str, seal_ref: &str) -> bool {
+    if chain == "bitcoin" {
+        return true;
+    }
+    !seal_ref.is_empty()
+        && base64::engine::general_purpose::STANDARD
+            .decode(seal_ref)
+            .is_ok()
+}
+
 /// Pure decision logic for a single Sanad row in `csv sanad list`.
 ///
 /// This is the load-bearing rule for CLI-STATE-001: a local cache must never be
@@ -1550,11 +1562,24 @@ fn resolve_sanad_row_status(
     local_status: SanadStatus,
     on_chain_state: Option<SanadLifecycleState>,
 ) -> ResolvedSanadRow {
+    // Off-chain-owned Sanads (CLI-STATE-002): authority lives on the source chain
+    // + consignment, never on the destination chain this record is tagged with.
+    // A destination-chain query is a category error, so `cmd_list` never issues
+    // one for these; even if a caller passed a canonical result, we must not
+    // present it or overwrite the local off-chain status with it. Report the
+    // honest off-chain-owned label and produce no status update.
+    if local_status.is_off_chain() {
+        return ResolvedSanadRow {
+            label: local_status.display_label().to_string(),
+            status_update: None,
+        };
+    }
+
     let local_label = || {
         if !has_valid_seal {
-            SanadLifecycleState::Invalid.label()
+            SanadLifecycleState::Invalid.label().to_string()
         } else {
-            SanadLifecycleState::from_local_status(local_status).label()
+            local_status.display_label().to_string()
         }
     };
 
@@ -1576,7 +1601,7 @@ fn resolve_sanad_row_status(
             status_update: None,
         },
         None => ResolvedSanadRow {
-            label: local_label().to_string(),
+            label: local_label(),
             status_update: None,
         },
     }
@@ -1611,17 +1636,15 @@ async fn cmd_list(
         let latest_transfer =
             latest_transfer_for_sanad(&state.storage.transfers, &sanad.id).cloned();
 
-        // Check if sanad has a valid seal_ref (required for non-Bitcoin chains)
-        let has_valid_seal = if sanad.chain.as_str() != "bitcoin" {
-            base64::engine::general_purpose::STANDARD
-                .decode(&sanad.seal_ref)
-                .is_ok()
-        } else {
-            true
-        };
+        // Check if sanad has a valid seal_ref (required for non-Bitcoin chains).
+        let has_valid_seal = seal_ref_is_displayable(sanad.chain.as_str(), &sanad.seal_ref);
 
-        // Only query on-chain state when --update flag is set
-        let on_chain_state = if update {
+        // Only query on-chain state when --update flag is set — and never for an
+        // off-chain-owned Sanad: its authority is on the source chain +
+        // consignment, so querying the destination chain (`sanad.chain`) it was
+        // tagged with is a category error that would truthfully return
+        // `Uncreated` and wrongly relabel/overwrite the record (CLI-STATE-002).
+        let on_chain_state = if update && !sanad.status.is_off_chain() {
             query_sanad_on_chain_state(&sanad.chain, &sanad.id, Some(sanad), config, state).await
         } else {
             None
@@ -1890,6 +1913,30 @@ async fn cmd_state(
 
     output::header(&format!("Sanad State: {}", sanad_id_hex));
     output::kv("Chain", chain.as_ref());
+
+    // Off-chain-owned Sanads carry no canonical state on the destination chain:
+    // they were never settled there. Querying it would fail closed with a
+    // misleading "cannot determine canonical state" error (a category error), so
+    // report the honest off-chain-owned state instead and stop — keeping
+    // `sanad state` consistent with `sanad list` (CLI-STATE-002). Authority for
+    // such a Sanad lives on the source chain + the accepted consignment.
+    if let Some(local) = state.get_sanad(&sanad_id_hex)
+        && local.status.is_off_chain()
+    {
+        output::kv("State", local.status.display_label());
+        output::info(
+            "Held off-chain via client-side validation; never settled on the destination chain. \
+             Its authority is the source-chain anchor plus the accepted consignment, not this \
+             chain's on-chain state.",
+        );
+        if let Some(anchor) = &local.anchor_tx_hash {
+            output::kv("Source Anchor", anchor);
+        }
+        if !local.owner.is_empty() {
+            output::kv("Local Owner", &local.owner);
+        }
+        return Ok(());
+    }
 
     // Use runtime-backed canonical state query (CLI-STATE-001)
     let core_chain = csv_hash::ChainId::new(chain.as_str());
@@ -2399,6 +2446,92 @@ mod state_tests {
         let resolved = resolve_sanad_row_status(false, true, SanadStatus::Active, None);
         assert_eq!(resolved.label, "Active");
         assert_eq!(resolved.status_update, None);
+    }
+
+    /// CLI-STATE-002: hex is no longer a valid on-disk `seal_ref` encoding. A raw
+    /// hex seal_ref (what an older `accept` wrote) must NOT pass the tightened
+    /// base64-only display check — the load migration re-encodes such records to
+    /// base64 before they are ever displayed — while the base64 form of the same
+    /// seal is displayable.
+    #[test]
+    fn only_base64_seal_ref_is_displayable() {
+        // Odd canonical byte length ⇒ hex string length ≡ 2 (mod 4), so the hex
+        // form is not even accidentally decodable as base64.
+        let seal = csv_hash::seal::SealPoint {
+            id: vec![0x11u8; 33],
+            nonce: Some(7),
+            version: None,
+        };
+        let bytes = seal.to_canonical_bytes().unwrap();
+        assert_eq!(bytes.len() % 2, 1, "test relies on an odd-length seal");
+        let hex_seal = hex::encode(&bytes);
+        let b64_seal = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        assert!(
+            !seal_ref_is_displayable("aptos", &hex_seal),
+            "raw hex seal_ref must not pass the base64-only display check"
+        );
+        assert!(
+            seal_ref_is_displayable("aptos", &b64_seal),
+            "the canonical base64 seal_ref must be displayable"
+        );
+    }
+
+    /// The base64 encoding written by `sanad create` must remain valid.
+    #[test]
+    fn base64_encoded_create_seal_is_displayable() {
+        let b64_seal = base64::engine::general_purpose::STANDARD.encode([1u8; 33]);
+        assert!(seal_ref_is_displayable("aptos", &b64_seal));
+    }
+
+    /// CLI-STATE-002 (root cause B): an off-chain-owned Sanad is labeled honestly
+    /// as off-chain — never `Invalid`, never a plain on-chain `Active` — and
+    /// without `--update` produces no status update.
+    #[test]
+    fn off_chain_owned_is_labeled_off_chain_not_invalid() {
+        let resolved =
+            resolve_sanad_row_status(false, true, SanadStatus::OwnedOffChain, None);
+        assert_eq!(
+            resolved.label,
+            SanadStatus::OwnedOffChain.display_label(),
+            "off-chain-owned Sanad must show its distinct off-chain label"
+        );
+        assert_ne!(resolved.label, "Invalid");
+        assert_ne!(resolved.label, "Active");
+        assert_eq!(resolved.status_update, None);
+    }
+
+    /// CLI-STATE-002 (root cause B): even if a destination-chain query somehow
+    /// returned `Uncreated`/`Invalid`, it must NOT relabel or overwrite an
+    /// off-chain-owned record — the destination chain is irrelevant to its
+    /// authority. (`cmd_list` additionally skips the query entirely for these.)
+    #[test]
+    fn destination_uncreated_does_not_overwrite_off_chain_owned() {
+        for canonical in [SanadLifecycleState::Uncreated, SanadLifecycleState::Invalid] {
+            let resolved =
+                resolve_sanad_row_status(true, true, SanadStatus::OwnedOffChain, Some(canonical));
+            assert_eq!(
+                resolved.label,
+                SanadStatus::OwnedOffChain.display_label(),
+                "a destination-chain {canonical:?} must not relabel an off-chain-owned Sanad"
+            );
+            assert_eq!(
+                resolved.status_update, None,
+                "a destination-chain query must never overwrite an off-chain-owned status"
+            );
+        }
+    }
+
+    /// An empty seal_ref on a non-Bitcoin chain is not displayable.
+    #[test]
+    fn empty_seal_is_not_displayable_off_bitcoin() {
+        assert!(!seal_ref_is_displayable("aptos", ""));
+    }
+
+    /// Bitcoin sanads carry no encoded seal_ref and are always displayable.
+    #[test]
+    fn bitcoin_seal_is_always_displayable() {
+        assert!(seal_ref_is_displayable("bitcoin", ""));
     }
 
     /// An invalid seal reference must be treated as Invalid for local display,

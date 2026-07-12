@@ -230,6 +230,9 @@ pub struct MockEthereumRpc {
     pub blocks: Mutex<HashMap<u64, RpcBlock>>,
     pub transactions: Mutex<HashMap<[u8; 32], RpcTransaction>>,
     pub gas_price: u64,
+    /// Optional canned `eth_call` return value. When set, `eth_call` returns it
+    /// verbatim; when `None`, the default zero response is returned.
+    pub call_result: Mutex<Option<Vec<u8>>>,
 }
 
 impl MockEthereumRpc {
@@ -254,7 +257,16 @@ impl MockEthereumRpc {
             blocks: Mutex::new(blocks),
             transactions: Mutex::new(HashMap::new()),
             gas_price: 20_000_000_000, // 20 Gwei default
+            call_result: Mutex::new(None),
         }
+    }
+
+    /// Set the canned response returned by `eth_call`.
+    pub fn set_call_result(&self, result: Vec<u8>) {
+        *self
+            .call_result
+            .lock()
+            .expect("call_result mutex poisoned") = Some(result);
     }
 
     pub fn add_block(&self, block: RpcBlock) {
@@ -437,7 +449,16 @@ impl EthereumRpc for MockEthereumRpc {
         _call: serde_json::Value,
         _block: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        // Return empty response (sanad not locked) for mock
+        // Return the canned response when configured; otherwise the default empty
+        // (sanad not locked) response.
+        if let Some(result) = self
+            .call_result
+            .lock()
+            .expect("call_result mutex poisoned")
+            .clone()
+        {
+            return Ok(result);
+        }
         Ok(vec![0u8; 64])
     }
 
@@ -481,6 +502,12 @@ impl EthereumRpc for MockEthereumRpc {
                     .clone(),
             ),
             gas_price: self.gas_price,
+            call_result: Mutex::new(
+                self.call_result
+                    .lock()
+                    .expect("call_result mutex poisoned")
+                    .clone(),
+            ),
         })
     }
 

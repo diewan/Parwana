@@ -1,6 +1,6 @@
 [package]
 name = "csv-celestia"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 description = "Celestia adapter for CSV (Client-Side Validation) - Data Availability layer for Sanad proofs"
 license = "MIT OR Apache-2.0"

@@ -50,6 +50,9 @@ pub const SEAL_APTOS_KEY_MAX_LEN: usize = 512;
 /// - **Sui** — `id = object_id(32)`, `version = Some(object_version)`. Owned object.
 /// - **Aptos** — `id = resource_address(32) || key`, `version = None`. Move resource.
 /// - **Ethereum** — `id = contract(20) || slot(32)`, `version = None`. Contract slot.
+/// - **Solana** — `id = account(32)`, `version = None`. csv-seal `SanadAccount` the
+///   recipient controls; the 32 bytes are the account's on-chain address (the PDA
+///   whose `owner` field is the recipient's wallet pubkey).
 ///
 /// The anti-replay nonce is supplied by the invoice, not the definition, and is
 /// folded into the resulting `SealPoint.nonce` by [`SealDefinition::to_seal_point`].
@@ -89,6 +92,12 @@ pub enum SealDefinition {
         /// 32-byte storage slot.
         #[serde(with = "crate::hexbytes")]
         slot: Vec<u8>,
+    },
+    /// Solana csv-seal `SanadAccount` (`account`).
+    Solana {
+        /// 32-byte account address (the recipient-controlled `SanadAccount` PDA).
+        #[serde(with = "crate::hexbytes")]
+        account: Vec<u8>,
     },
 }
 
@@ -154,6 +163,17 @@ impl SealDefinition {
         Ok(Self::Ethereum { contract, slot })
     }
 
+    /// Construct a Solana csv-seal `SanadAccount` seal, validating the address length.
+    ///
+    /// # Errors
+    /// Returns an error if `account` is not exactly 32 bytes.
+    pub fn solana(account: Vec<u8>) -> Result<Self, String> {
+        if account.len() != SEAL_ID32_LEN {
+            return Err(format!("solana account must be {SEAL_ID32_LEN} bytes"));
+        }
+        Ok(Self::Solana { account })
+    }
+
     /// Canonical chain identifier for this seal definition.
     pub fn chain(&self) -> &'static str {
         match self {
@@ -161,6 +181,7 @@ impl SealDefinition {
             Self::Sui { .. } => "sui",
             Self::Aptos { .. } => "aptos",
             Self::Ethereum { .. } => "ethereum",
+            Self::Solana { .. } => "solana",
         }
     }
 
@@ -196,6 +217,7 @@ impl SealDefinition {
                 id.extend_from_slice(slot);
                 (id, None)
             }
+            Self::Solana { account } => (account.clone(), None),
         };
         SealPoint::new(id, nonce, version).map_err(|e| e.to_string())
     }
@@ -211,6 +233,7 @@ mod tests {
             SealDefinition::sui(vec![0xCD; 32], 7).unwrap(),
             SealDefinition::aptos(vec![0xEF; 32], vec![1, 2, 3, 4]).unwrap(),
             SealDefinition::ethereum(vec![0x11; 20], vec![0x22; 32]).unwrap(),
+            SealDefinition::solana(vec![0x33; 32]).unwrap(),
         ]
     }
 
@@ -222,6 +245,8 @@ mod tests {
         assert!(SealDefinition::aptos(vec![0; 32], vec![]).is_err());
         assert!(SealDefinition::ethereum(vec![0; 19], vec![0; 32]).is_err());
         assert!(SealDefinition::ethereum(vec![0; 20], vec![0; 31]).is_err());
+        assert!(SealDefinition::solana(vec![0; 31]).is_err());
+        assert!(SealDefinition::solana(vec![0; 33]).is_err());
     }
 
     #[test]
@@ -269,8 +294,17 @@ mod tests {
     }
 
     #[test]
+    fn solana_seal_point_pins_account_layout() {
+        let def = SealDefinition::solana(vec![0x33; 32]).unwrap();
+        let sp = def.to_seal_point(Some(5)).unwrap();
+        assert_eq!(sp.id, vec![0x33; 32]);
+        assert_eq!(sp.version, None);
+        assert_eq!(sp.nonce, Some(5));
+    }
+
+    #[test]
     fn distinct_chains_produce_distinct_chain_tags() {
         let tags: Vec<&str> = all_definitions().iter().map(|d| d.chain()).collect();
-        assert_eq!(tags, vec!["bitcoin", "sui", "aptos", "ethereum"]);
+        assert_eq!(tags, vec!["bitcoin", "sui", "aptos", "ethereum", "solana"]);
     }
 }

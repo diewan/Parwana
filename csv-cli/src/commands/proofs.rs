@@ -22,7 +22,31 @@ use crate::config::{Chain, Config};
 use crate::output;
 use crate::state::UnifiedStateManager;
 use csv_hash::sanad::SanadId;
+use csv_protocol::chain_adapter_traits::SanadAnchorHint;
 use csv_protocol::proof_taxonomy::ProofBundle;
+
+/// Resolve the locally-tracked create/publish anchor transaction for `sanad_id`
+/// into a [`SanadAnchorHint`] for runtime proof generation.
+///
+/// Returns `None` when no local record has an anchor tx hash (e.g. Bitcoin, which
+/// resolves the anchor in-adapter, or a sanad this node never created). The hint
+/// is never trusted as authority: the runtime re-verifies it against live chain
+/// state and the adapter re-fetches and sanad-binds the inclusion evidence, so a
+/// missing hint fails closed downstream rather than producing an invalid proof.
+fn resolve_anchor_hint(
+    state: &UnifiedStateManager,
+    sanad_id: &SanadId,
+) -> Option<SanadAnchorHint> {
+    let wanted = hex::encode(sanad_id.as_bytes());
+    let record = state.storage.sanads.iter().find(|s| {
+        s.id.trim_start_matches("0x").eq_ignore_ascii_case(&wanted)
+    })?;
+    let anchor_tx_hex = record.anchor_tx_hash.clone()?;
+    if anchor_tx_hex.trim().is_empty() {
+        return None;
+    }
+    Some(SanadAnchorHint { anchor_tx_hex })
+}
 
 /// Display-only summary of a canonical `ProofBundle`.
 ///
@@ -221,7 +245,7 @@ async fn cmd_generate(
     json_summary: bool,
     hex_mode: bool,
     config: &Config,
-    _state: &UnifiedStateManager,
+    state: &UnifiedStateManager,
     proof_tree: bool,
 ) -> Result<()> {
     use csv_sdk::prelude::CsvClient;
@@ -251,12 +275,21 @@ async fn cmd_generate(
 
     output::progress(2, 4, "Querying chain state for inclusion proof...");
 
+    // Resolve the sanad's create/publish anchor transaction from locally tracked
+    // state and hand it to the runtime as a hint. Chains whose adapter has no
+    // in-adapter sanad->anchor mapping (Ethereum/Aptos/Sui/Solana) need this to
+    // target the real anchor block; Bitcoin resolves it in-adapter and ignores
+    // the hint. The hint is a lookup key only — the runtime re-verifies the named
+    // transaction is confirmed and the adapter re-fetches and sanad-binds the
+    // inclusion evidence, so a stale/absent record simply fails closed.
+    let anchor_hint = resolve_anchor_hint(state, &sanad_id_obj);
+
     // Use the runtime to generate the canonical proof bundle. This is the
     // exact ProofBundle type that csv-verifier consumes - no lossy summary
     // is derived from it here.
     let runtime = client.chain_runtime();
     let proof_bundle = runtime
-        .generate_proof(adapter_chain, &sanad_id_obj)
+        .generate_proof(adapter_chain, &sanad_id_obj, anchor_hint)
         .await
         .map_err(|e| anyhow::anyhow!("Proof generation failed: {}", e))?;
 

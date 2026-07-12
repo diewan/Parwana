@@ -405,6 +405,25 @@ pub struct SanadAnchorLocation {
     pub tx_hash_hex: String,
 }
 
+/// Caller-supplied hint identifying a sanad's on-chain anchor (create/publish)
+/// transaction, for chains whose adapter holds no local `sanad_id -> anchor`
+/// mapping (every chain except Bitcoin today, whose wallet persists the mapping).
+///
+/// This is a lookup key, **never** authority. Proof generation RE-VERIFIES it
+/// against live chain state before trusting it: the runtime confirms the named
+/// transaction exists and is confirmed, and the adapter's
+/// [`ChainProofProvider::build_inclusion_proof`] independently fetches the real
+/// receipt/accumulator evidence and binds it to the sanad via the on-chain
+/// create/publish event. A wrong, stale, or forged hint therefore fails closed
+/// (no matching confirmed anchor / no sanad-bound event) rather than producing a
+/// usable proof — it can only ever point at real evidence, not manufacture it.
+#[derive(Debug, Clone)]
+pub struct SanadAnchorHint {
+    /// Hex of the anchor transaction hash/signature/digest, in the chain-native
+    /// byte order the adapter's proof builder and `get_transaction` expect.
+    pub anchor_tx_hex: String,
+}
+
 /// Trait for building and verifying cryptographic proofs
 ///
 /// All proof operations must use real cryptographic verification.
@@ -621,6 +640,53 @@ pub struct CanonicalSealState {
     pub consumed_at: Option<i64>,
 }
 
+/// A recipient-nominated single-use seal whose on-chain ownership must be
+/// confirmed (via a live chain query) before an invoice is issued for it.
+///
+/// This mirrors the pinned per-chain `SealDefinition` encodings that `csv-wire`
+/// owns, expressed at the protocol layer so the ownership query can be dispatched
+/// through the runtime/SDK without an application ever importing a chain adapter.
+/// Only the chains whose control cannot be derived offline from wallet key
+/// material appear here — Bitcoin (UTXO set) and Aptos (account address) are
+/// verified offline by the caller and never reach this query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SealOwnershipTarget {
+    /// Sui owned object: confirm the object `object_id` exists at `version` and is
+    /// address-owned by the claimant.
+    SuiObject {
+        /// 32-byte Sui object id.
+        object_id: [u8; 32],
+        /// Object version the invoice pins (must match the object's current version).
+        version: u64,
+    },
+    /// Ethereum CSVSeal registry seal: confirm `sealOwners[seal_id]` on the
+    /// `registry` contract resolves to the claimant (a zero/absent owner is not
+    /// owned).
+    EthereumSeal {
+        /// 20-byte CSVSeal registry contract address.
+        registry: [u8; 20],
+        /// 32-byte seal id (the registry's `sealOwners` mapping key).
+        seal_id: [u8; 32],
+    },
+    /// Solana csv-seal `SanadAccount` PDA: confirm the account exists, is owned by
+    /// the csv-seal program, and its `owner` field is the claimant's wallet pubkey.
+    SolanaAccount {
+        /// 32-byte account address of the `SanadAccount`.
+        account: [u8; 32],
+    },
+}
+
+impl SealOwnershipTarget {
+    /// Canonical chain identifier this ownership target must be queried on.
+    pub fn chain(&self) -> &'static str {
+        match self {
+            Self::SuiObject { .. } => "sui",
+            Self::EthereumSeal { .. } => "ethereum",
+            Self::SolanaAccount { .. } => "solana",
+        }
+    }
+}
+
 /// Combined trait for full chain backend capabilities
 ///
 /// Implementors must provide real implementations for all operations.
@@ -688,6 +754,43 @@ pub trait ChainBackend:
         commitment: Hash,
         sanad_id: Hash,
     ) -> ChainOpResult<CommitAnchor>;
+
+    /// Confirm — via a live chain query — that `claimed_owner` controls the
+    /// recipient-nominated single-use seal `target` on this chain.
+    ///
+    /// This backs the interactive-transfer `invoice` grief-proofing check for the
+    /// chains whose control cannot be derived offline (Sui object ownership,
+    /// Ethereum registry seal ownership, Solana account ownership). It MUST fail
+    /// **closed**: return `Ok(())` only on a positive, chain-confirmed ownership
+    /// match, and `Err` on any RPC error, not-found, wrong-owner, wrong-version,
+    /// or ambiguous result. Never infer ownership from missing data.
+    ///
+    /// `claimed_owner` is the wallet-derived address string for this chain (the
+    /// caller has already proven it can derive it from wallet key material); the
+    /// adapter only performs the on-chain lookup and comparison, so it needs no
+    /// key material.
+    ///
+    /// The default implementation fails closed for chains that do not implement an
+    /// adapter-backed ownership check.
+    ///
+    /// # Arguments
+    /// * `target` - The chain-specific seal identity to check ownership of.
+    /// * `claimed_owner` - The wallet-derived owner address to require on-chain.
+    ///
+    /// # Returns
+    /// * `Ok(())` - The chain confirms `claimed_owner` controls the seal.
+    /// * `Err` - Ownership could not be positively confirmed (fail closed).
+    async fn verify_seal_ownership(
+        &self,
+        target: &SealOwnershipTarget,
+        claimed_owner: &str,
+    ) -> ChainOpResult<()> {
+        let _ = claimed_owner;
+        Err(ChainOpError::CapabilityUnavailable(format!(
+            "adapter-backed seal-ownership verification is not implemented for {} seals",
+            target.chain()
+        )))
+    }
 }
 
 /// Chain capabilities that may not be available on all chains

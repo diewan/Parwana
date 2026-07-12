@@ -1479,6 +1479,22 @@ mod tests {
         assert_eq!(ops.network, AptosNetwork::Devnet);
     }
 
+    // PROOFGEN-MULTICHAIN-001: the create-anchor inclusion builder must fail
+    // closed rather than fabricate accumulator/event evidence. Real, sanad-bound
+    // Aptos inclusion evidence is an open per-chain question — Aptos's anchor is
+    // an account/event handle, not a transaction hash — so it stays disabled.
+    #[tokio::test]
+    async fn build_inclusion_proof_fails_closed_no_fabrication() {
+        let ops = AptosBackend::new(Box::new(MockAptosRpc::new(1000)), AptosNetwork::Devnet)
+            .expect("AptosBackend::new should succeed with a mock RPC and valid config");
+        let commitment = Hash::new([0x02u8; 32]);
+        let result = ops.build_inclusion_proof(&commitment, 1, &[0x07u8; 32]).await;
+        assert!(
+            matches!(result, Err(ChainOpError::CapabilityUnavailable(_))),
+            "Aptos must fail closed (no fabricated inclusion evidence): {result:?}"
+        );
+    }
+
     #[test]
     fn test_address_validation() {
         let rpc = Box::new(MockAptosRpc::new(1));
