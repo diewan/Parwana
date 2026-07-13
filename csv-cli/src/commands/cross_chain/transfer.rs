@@ -30,14 +30,15 @@ use csv_runtime::execution_journal::ExecutionJournal;
 use csv_runtime::execution_journal::RocksDbExecutionJournal;
 use csv_runtime::{SendExecutor, SendExecutorError, SendTransfer};
 use csv_sdk::CsvClient;
-use csv_sdk::transfers::{
-    DestinationMaterialization, TransferManager, TransferOutcome, TransferReceipt as SdkReceipt,
-};
+use csv_sdk::contract;
+use csv_sdk::contract::{IntentOperation, IntentValue, SigningIntent};
+use csv_sdk::transfers::{TransferManager, TransferOutcome, TransferReceipt as SdkReceipt};
 use csv_wire::{
     CONSIGNMENT_VERSION, Consignment as WireConsignment, Invoice, SanadIdWire, SealDefinition,
 };
 
 use crate::config::{Chain, Config};
+use crate::contract_view;
 use crate::output;
 use crate::state::{
     ProvenanceStrengthSignal, SanadRecord, SanadStatus, SealRecord, SealStatus, TransferRecord,
@@ -430,8 +431,17 @@ pub async fn cmd_send(
     // needs the source-chain runtime) if one is not already in the local store.
     let client = build_client(&from, &destination_chain, None, config, state).await?;
 
+    // The network the signature will be valid on. Bound into the signing intent so
+    // a testnet confirmation can never authorize a mainnet act.
+    let network = config
+        .chains
+        .get(&from)
+        .map(|c| format!("{:?}", c.network).to_lowercase())
+        .unwrap_or_else(|| format!("{:?}", config.network()).to_lowercase());
+
     let mut proof_bundle = load_or_generate_send_transition_proof(
         &from,
+        &network,
         &sanad_hex,
         &sanad_id,
         &destination_seal,
@@ -492,10 +502,19 @@ pub async fn cmd_send(
     );
     state.save()?;
 
-    output::success("Interactive off-chain send completed");
-    output::kv("Transfer ID", &receipt.transfer_id);
-    output::kv("Source Chain", from.as_str());
-    output::kv("Invoice ID", &hex::encode(invoice_id));
+    // The same receipt the wallet renders. `send` has no destination phase, so the
+    // contract permits no resume/retry here — the CLI cannot offer one even by
+    // accident, because the contract would reject the receipt.
+    let artifact = contract::send_receipt(
+        &receipt.transfer_id,
+        &sanad_id,
+        &to_protocol_chain(from.clone()),
+        &transfer.source_seal,
+        &transfer.destination_seal,
+        &invoice_id,
+        &receipt.consignment.0,
+    )?;
+    contract_view::transfer_receipt(&artifact);
     output::kv("Consignment", &path.display().to_string());
     output::info("No destination-chain submitter, fee spend, or attestor was used.");
     Ok(())
@@ -711,6 +730,7 @@ fn load_verified_send_proof(
 /// (`anchor_id == sanad_id`) intact (see `csv_verifier::validate_context_binding`).
 async fn load_or_generate_send_transition_proof(
     from: &Chain,
+    network: &str,
     sanad_hex: &str,
     sanad_id: &SanadId,
     destination_seal: &SealPoint,
@@ -737,12 +757,13 @@ async fn load_or_generate_send_transition_proof(
         .storage
         .sanads
         .iter()
-        .find(|s| s.id.trim_start_matches("0x").eq_ignore_ascii_case(&wanted_id))
+        .find(|s| {
+            s.id.trim_start_matches("0x")
+                .eq_ignore_ascii_case(&wanted_id)
+        })
         .and_then(|s| s.anchor_tx_hash.clone())
         .filter(|h| !h.trim().is_empty())
-        .map(|anchor_tx_hex| csv_protocol::chain_adapter_traits::SanadAnchorHint {
-            anchor_tx_hex,
-        });
+        .map(|anchor_tx_hex| csv_protocol::chain_adapter_traits::SanadAnchorHint { anchor_tx_hex });
 
     // Source-chain anchor evidence for the Sanad (inclusion + finality, anchored
     // to the Sanad id). Requires source-chain RPC, exactly like `proof generate`.
@@ -750,9 +771,7 @@ async fn load_or_generate_send_transition_proof(
         .chain_runtime()
         .generate_proof(core_chain.clone(), sanad_id, anchor_hint)
         .await
-        .map_err(|e| {
-            anyhow::anyhow!("Failed to build source anchor proof for send: {}", e)
-        })?;
+        .map_err(|e| anyhow::anyhow!("Failed to build source anchor proof for send: {}", e))?;
 
     // Re-bind to the recipient-controlled destination seal so the consignment
     // binds the invoice seal (`Consignment::binds_invoice_seal`). The anchor and
@@ -771,10 +790,16 @@ async fn load_or_generate_send_transition_proof(
         ));
     }
 
-    // Sign the transition DAG root with the sender's source-chain wallet key.
+    // Sign the transition DAG root with the sender's source-chain wallet key —
+    // but only behind a typed, expiring intent. The signature below authorizes the
+    // sanad leaving the sender's control; signing it as bare bytes would mean the
+    // user was never told, in the signature's own terms, what they were agreeing to.
+    let intent = build_send_transition_intent(from, network, sanad_id, destination_seal, &bundle)?;
+    contract_view::signing_intent(&intent);
+
     let identity = WalletIdentity::from_state(state)?;
     let (encoded_signature, scheme) =
-        sign_send_transition(from, &core_chain, identity.seed(), 0, 0, &bundle)?;
+        sign_send_transition(from, &core_chain, identity.seed(), 0, 0, &bundle, &intent)?;
     bundle.signatures = vec![encoded_signature];
     bundle.signature_scheme = scheme;
 
@@ -786,6 +811,71 @@ async fn load_or_generate_send_transition_proof(
     Ok(bundle)
 }
 
+/// How long a send-transition signing intent stays valid.
+///
+/// Short on purpose: the intent is the user's answer to a question they were just
+/// shown, not a standing authorization. Bounded by `MAX_INTENT_TTL_SECS`.
+const SEND_INTENT_TTL_SECS: u64 = 120;
+
+/// Build the signing intent for the send transition the CLI is about to sign.
+///
+/// `payload_digest` is the DAG root commitment — the exact bytes
+/// [`sign_send_transition`] will sign — so the intent's user-visible description
+/// and the signed payload cannot come apart.
+fn build_send_transition_intent(
+    chain: &Chain,
+    network: &str,
+    sanad_id: &SanadId,
+    destination_seal: &SealPoint,
+    bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+) -> Result<SigningIntent> {
+    let sanad_hex = hex::encode(sanad_id.as_bytes());
+    let seal_hex = hex::encode(&destination_seal.id);
+
+    let intent = SigningIntent::new(
+        chain.as_str().to_string(),
+        network.to_string(),
+        IntentOperation::SendTransition,
+        csv_wire::SanadIdWire {
+            bytes: sanad_hex.clone(),
+        },
+        csv_wire::SealPointWire::from(destination_seal.clone()),
+        // The beneficiary of a send is the recipient-controlled seal the invoice
+        // nominated — that seal *is* the recipient's claim on the sanad.
+        format!("seal:{seal_hex}"),
+        IntentValue {
+            amount: "1".to_string(),
+            unit: "sanad".to_string(),
+        },
+        destination_seal.nonce.unwrap_or_default(),
+        None,
+        format!(
+            "Send sanad {sanad_hex} from {} ({network}): assign it to the recipient's seal \
+             {seal_hex} and close your single-use source seal. This is irreversible — after \
+             signing, the sanad is no longer yours to spend.",
+            chain.as_str()
+        ),
+        bundle.transition_dag.root_commitment.as_bytes().to_vec(),
+        now_secs(),
+        SEND_INTENT_TTL_SECS,
+    );
+
+    // Fail closed here rather than at the signing site: an intent that cannot be
+    // stated completely is not one a user could have understood.
+    intent
+        .validate_at(now_secs())
+        .map_err(|e| anyhow::anyhow!("refusing to sign: {}", e))?;
+    Ok(intent)
+}
+
+/// Unix seconds.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
+}
+
 /// Sign the transition DAG root of `bundle` with the sender's wallet key for
 /// `chain` and return the bundle-format signature blob plus its scheme.
 ///
@@ -794,6 +884,12 @@ async fn load_or_generate_send_transition_proof(
 /// `csv_verifier::verify_bundle_signatures` parses and verifies. The freshly
 /// built signature is verified locally before returning, so a key/scheme mismatch
 /// fails closed here rather than producing a consignment the recipient rejects.
+///
+/// Nothing is signed until `intent` both validates at the current time and its
+/// payload digest equals the transition root being signed. The proof-bundle wire
+/// format currently carries a signature over that root only; its typed-intent
+/// binding digest is not serialized there, so this is a local fail-closed UI
+/// guard rather than a portable attestation of every displayed intent field.
 fn sign_send_transition(
     chain: &Chain,
     core_chain: &csv_hash::ChainId,
@@ -801,10 +897,25 @@ fn sign_send_transition(
     account: u32,
     index: u32,
     bundle: &csv_protocol::proof_taxonomy::ProofBundle,
+    intent: &SigningIntent,
 ) -> Result<(Vec<u8>, csv_protocol::signature::SignatureScheme)> {
     use csv_protocol::signature::SignatureScheme;
 
     let message = bundle.transition_dag.root_commitment.as_bytes().to_vec();
+
+    // The intent gate. Re-checked at the signing site (not merely where the intent
+    // was built) so a stale or swapped intent cannot slip through in between.
+    intent
+        .validate_at(now_secs())
+        .map_err(|e| anyhow::anyhow!("refusing to sign: {}", e))?;
+    if intent.payload_digest != message {
+        return Err(anyhow::anyhow!(
+            "refusing to sign: the signing intent is bound to digest {} but the payload to be \
+             signed is {} — the description shown and the bytes signed do not match",
+            hex::encode(&intent.payload_digest),
+            hex::encode(&message)
+        ));
+    }
     let secret = csv_keys::bip44::derive_key(seed, core_chain, account, index)
         .map_err(|e| anyhow::anyhow!("Failed to derive {} signing key: {}", chain, e))?;
     let key_bytes = secret.as_bytes();
@@ -837,7 +948,9 @@ fn sign_send_transition(
             signing
                 .verifying_key()
                 .verify(&message, &sig)
-                .map_err(|e| anyhow::anyhow!("send-transition signature self-check failed: {}", e))?;
+                .map_err(|e| {
+                    anyhow::anyhow!("send-transition signature self-check failed: {}", e)
+                })?;
             (
                 sig.to_bytes().to_vec(),
                 signing.verifying_key().to_bytes().to_vec(),
@@ -1169,9 +1282,7 @@ async fn verify_seal_controlled(
         }
         SealDefinition::Sui { .. }
         | SealDefinition::Ethereum { .. }
-        | SealDefinition::Solana { .. } => {
-            verify_seal_controlled_online(seal, config, state).await
-        }
+        | SealDefinition::Solana { .. } => verify_seal_controlled_online(seal, config, state).await,
     }
 }
 
@@ -1240,7 +1351,11 @@ async fn verify_seal_controlled_online(
     let client = build_client(&dest, &dest, None, config, state).await?;
     client
         .chain_runtime()
-        .verify_seal_ownership(csv_hash::ChainId::new(dest.as_str()), &target, &claimed_owner)
+        .verify_seal_ownership(
+            csv_hash::ChainId::new(dest.as_str()),
+            &target,
+            &claimed_owner,
+        )
         .await
         .map_err(|e| {
             anyhow::anyhow!(
@@ -2208,33 +2323,45 @@ async fn drive(
     let mut outcome = first;
     let mut transfer_id_announced = false;
 
+    let from_chain_id = to_protocol_chain(from.clone());
+    let to_chain_id = to_protocol_chain(to.clone());
+
     loop {
         match outcome {
             TransferOutcome::Completed(receipt) => {
+                // The receipt the wallet would render, built from the runtime's own
+                // artifact. If the runtime ever handed back a completion the contract
+                // will not receipt — a mint at structural-only assurance, say — this
+                // errors instead of printing a success.
+                let artifact = contract::materialize_receipt(
+                    &csv_runtime::TransferReceipt {
+                        transfer_id: receipt.transfer_id.clone(),
+                        replay_id: receipt.replay_id,
+                        lock_tx_hash: display_tx_hash(&from, &receipt.lock_tx_hash),
+                        mint_tx_hash: receipt.mint_tx_hash.clone(),
+                        materialization: receipt.materialization.clone(),
+                        finality: receipt.finality.clone(),
+                        assurance: receipt.assurance,
+                    },
+                    &sanad_id,
+                    &from_chain_id,
+                    &to_chain_id,
+                )?;
+
                 record_completed(state, &receipt, &from, &to, &sanad_id, dest_owner.clone());
                 state.save()?;
-                output::success(&format!(
-                    "Transfer {} completed. Sanad locked on source chain and minted on destination chain.",
-                    receipt.transfer_id
-                ));
-                output::kv("Transfer ID", &receipt.transfer_id);
-                output::kv("Replay ID", &receipt.replay_id.to_string());
-                output::kv("Source Chain", receipt.source_chain.as_ref());
-                output::kv("Destination Chain", receipt.destination_chain.as_ref());
-                output::kv(
-                    "Lock Tx Hash",
-                    &display_tx_hash(&from, &receipt.lock_tx_hash),
-                );
-                output::kv("Mint Tx Hash", &receipt.mint_tx_hash);
-                output_materialization_metadata(&receipt.materialization);
+
+                contract_view::transfer_receipt(&artifact);
                 return Ok(());
             }
             TransferOutcome::Pending {
                 transfer_id,
                 lock_tx_hash,
-                confirmations,
-                required,
+                finality,
             } => {
+                let confirmations = finality.confirmations;
+                let required = finality.required_confirmations;
+
                 record_pending(
                     state,
                     &transfer_id,
@@ -2252,16 +2379,22 @@ async fn drive(
                 }
 
                 if !opts.wait {
-                    output::info(&format!(
-                        "Transfer {} locked — awaiting finality ({}/{} confirmations).",
-                        transfer_id, confirmations, required
-                    ));
-                    output::kv("Transfer ID", &transfer_id);
-                    output::kv("Lock Tx Hash", &display_tx_hash(&from, &lock_tx_hash));
-                    output::info(&format!(
-                        "Run `csv cross-chain resume {}` (optionally with --wait) once the lock confirms.",
-                        transfer_id
-                    ));
+                    // The awaiting-finality event carries the observed tip the depth
+                    // was measured against, not just `N/M`.
+                    let event = contract::materialize_event(
+                        &TransferOutcome::Pending {
+                            transfer_id: transfer_id.clone(),
+                            lock_tx_hash: display_tx_hash(&from, &lock_tx_hash),
+                            finality: finality.clone(),
+                        },
+                        &sanad_id,
+                        &from_chain_id,
+                    )?;
+                    contract_view::transfer_event(&event);
+                    contract_view::recovery_plan(&contract::awaiting_finality_plan(
+                        &transfer_id,
+                        &finality,
+                    )?);
                     return Ok(());
                 }
 
@@ -2470,29 +2603,6 @@ fn record_completed(
             "Failed to mark source Sanad as transferred in local store: {}",
             e
         );
-    }
-}
-
-fn output_materialization_metadata(materialization: &DestinationMaterialization) {
-    if !materialization.has_display_metadata() {
-        output::info("Destination materialization metadata: not reported by adapter");
-        return;
-    }
-    output::header("Destination Materialization");
-    if let Some(object_id) = &materialization.object_id {
-        output::kv("Object ID", object_id);
-    }
-    if let Some(seal_ref) = &materialization.seal_ref {
-        output::kv("Seal Ref", seal_ref);
-    }
-    if let Some(registry_ref) = &materialization.registry_ref {
-        output::kv("Registry Ref", registry_ref);
-    }
-    if let Some(commitment) = materialization.commitment {
-        output::kv("Commitment", &hex::encode(commitment));
-    }
-    if let Some(owner) = &materialization.owner {
-        output::kv("Owner", &hex::encode(owner));
     }
 }
 
@@ -2832,7 +2942,11 @@ mod tests {
 
         let owned =
             parse_seal_ref(&format!("aptos:{addr_hex}:{}", hex::encode(b"balance"))).unwrap();
-        assert!(verify_seal_controlled(&owned, &config, &state).await.is_ok());
+        assert!(
+            verify_seal_controlled(&owned, &config, &state)
+                .await
+                .is_ok()
+        );
 
         // A resource under a different account is not controlled.
         let foreign = parse_seal_ref(&format!(
@@ -3232,6 +3346,166 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("Invalid canonical consignment CBOR")
+        );
+    }
+}
+
+// ── Signing-intent gate (APPS-CONTRACT-004) ─────────────────────────────────
+//
+// The reference application never signs bytes whose meaning it has not stated.
+// These tests pin the gate itself: what the intent binds, and what it refuses.
+#[cfg(test)]
+mod signing_intent_gate_tests {
+    use super::*;
+    use csv_hash::dag::{DAGNode, DAGSegment};
+    use csv_hash::seal::CommitAnchor;
+    use csv_protocol::SignatureScheme;
+    use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof, ProofBundle};
+    use csv_sdk::contract::MAX_INTENT_TTL_SECS;
+
+    const DAG_ROOT: [u8; 32] = [0x7Au8; 32];
+
+    /// A bundle whose DAG root is the digest the send transition would sign.
+    fn bundle_with_root(root: [u8; 32]) -> ProofBundle {
+        let proof_bytes = vec![0x44; 32];
+        ProofBundle::with_signature_scheme(
+            SignatureScheme::Ed25519,
+            DAGSegment::new(
+                vec![DAGNode::new(
+                    Hash::new([1u8; 32]),
+                    vec![0x01, 0x02],
+                    vec![],
+                    vec![],
+                    vec![],
+                )],
+                Hash::new(root),
+            ),
+            vec![],
+            SealPoint::new(vec![0xCD; 32], Some(7), None).unwrap(),
+            CommitAnchor::new(vec![0x55u8; 32], 100, proof_bytes.clone()).unwrap(),
+            InclusionProof::new(proof_bytes, Hash::new([2u8; 32]), 100, 0).unwrap(),
+            FinalityProof::new(vec![0xAB; 16], 6, false).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn destination_seal() -> SealPoint {
+        SealPoint::new(vec![0xCD; 32], Some(7), None).unwrap()
+    }
+
+    fn sanad() -> SanadId {
+        SanadId::new([0x55u8; 32])
+    }
+
+    fn intent_for(root: [u8; 32]) -> SigningIntent {
+        build_send_transition_intent(
+            &Chain::new("bitcoin"),
+            "test",
+            &sanad(),
+            &destination_seal(),
+            &bundle_with_root(root),
+        )
+        .expect("a complete send intent is buildable")
+    }
+
+    #[test]
+    fn intent_binds_the_exact_digest_that_will_be_signed() {
+        let intent = intent_for(DAG_ROOT);
+
+        // The digest in the intent is the DAG root commitment — the very bytes
+        // `sign_send_transition` signs. If these ever diverge, the user is shown one
+        // thing and signs another.
+        assert_eq!(intent.payload_digest, DAG_ROOT.to_vec());
+        assert_eq!(intent.operation, IntentOperation::SendTransition);
+        assert_eq!(intent.chain, "bitcoin");
+        assert_eq!(intent.network, "test");
+    }
+
+    #[test]
+    fn intent_states_the_meaning_and_expires() {
+        let intent = intent_for(DAG_ROOT);
+
+        assert!(
+            intent.summary.contains("no longer yours to spend"),
+            "the intent must state the irreversible consequence: {}",
+            intent.summary
+        );
+        let ttl = intent.expires_at - intent.created_at;
+        assert_eq!(ttl, SEND_INTENT_TTL_SECS);
+        assert!(
+            ttl <= MAX_INTENT_TTL_SECS,
+            "a send intent must stay inside the contract's maximum window"
+        );
+    }
+
+    #[test]
+    fn signing_is_refused_when_the_intent_does_not_bind_the_payload() {
+        // The classic swap: a benign-looking description paired with different bytes.
+        // The gate compares them and refuses before any key is touched.
+        let intent = intent_for([0x11u8; 32]);
+        let bundle = bundle_with_root(DAG_ROOT);
+
+        let err = sign_send_transition(
+            &Chain::new("bitcoin"),
+            &csv_hash::ChainId::new("bitcoin"),
+            &[0u8; 64],
+            0,
+            0,
+            &bundle,
+            &intent,
+        )
+        .expect_err("a mismatched intent must not produce a signature");
+
+        let msg = err.to_string();
+        assert!(msg.contains("refusing to sign"), "unexpected error: {msg}");
+        assert!(
+            msg.contains("do not match"),
+            "the refusal must name the mismatch: {msg}"
+        );
+    }
+
+    #[test]
+    fn signing_is_refused_once_the_intent_has_expired() {
+        let mut intent = intent_for(DAG_ROOT);
+        // Back-date the window so it closed before now.
+        intent.created_at = 1_000;
+        intent.expires_at = 1_000 + SEND_INTENT_TTL_SECS;
+
+        let err = sign_send_transition(
+            &Chain::new("bitcoin"),
+            &csv_hash::ChainId::new("bitcoin"),
+            &[0u8; 64],
+            0,
+            0,
+            &bundle_with_root(DAG_ROOT),
+            &intent,
+        )
+        .expect_err("an expired intent must not produce a signature");
+
+        assert!(
+            err.to_string().contains("refusing to sign"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn signing_is_refused_when_the_intent_is_incomplete() {
+        // An intent whose meaning was never stated cannot be one a user understood.
+        let mut intent = intent_for(DAG_ROOT);
+        intent.summary.clear();
+
+        assert!(
+            sign_send_transition(
+                &Chain::new("bitcoin"),
+                &csv_hash::ChainId::new("bitcoin"),
+                &[0u8; 64],
+                0,
+                0,
+                &bundle_with_root(DAG_ROOT),
+                &intent,
+            )
+            .is_err(),
+            "an intent with no user-visible meaning must not produce a signature"
         );
     }
 }

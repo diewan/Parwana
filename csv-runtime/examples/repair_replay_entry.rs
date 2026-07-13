@@ -26,13 +26,16 @@ fn main() {
         .get_cf(cf, &sanad_bytes)
         .expect("read")
         .expect("no transfer entry for this sanad id");
-    let mut entry = csv_protocol::cross_chain::HashEntry::from_canonical_bytes(&val)
-        .expect("decode entry");
+    let mut entry =
+        csv_protocol::cross_chain::HashEntry::from_canonical_bytes(&val).expect("decode entry");
 
     println!("transfer_id:  {}", entry.transfer_id);
     println!("source:       {}", entry.source_chain);
     println!("destination:  {}", entry.destination_chain);
-    println!("lock_tx_hash: {}", hex::encode(entry.lock_tx_hash.as_bytes()));
+    println!(
+        "lock_tx_hash: {}",
+        hex::encode(entry.lock_tx_hash.as_bytes())
+    );
     println!("source_seal:  {}", hex::encode(&entry.source_seal.id));
 
     let Some(new_lock_hex) = new_lock_hex else {

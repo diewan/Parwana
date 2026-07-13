@@ -9,6 +9,9 @@ description = "CSV Wallet - Unified wallet abstraction with Signer trait"
 csv-hash = { version = "0.1.5", path = "../csv-hash", features = ["serde"] }
 csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
 csv-keys = { version = "0.1.5", path = "../csv-keys" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
+aes-gcm = { version = "0.10", features = ["std"] }
+argon2 = { version = "0.5", features = ["std"] }
 thiserror = "1"
 anyhow = "1"
 async-trait = "0.1"
@@ -25,6 +28,7 @@ reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
+ciborium = "0.2"
 
 [features]
 default = []

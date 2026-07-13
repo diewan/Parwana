@@ -33,14 +33,13 @@ use csv_protocol::proof_taxonomy::ProofBundle;
 /// is never trusted as authority: the runtime re-verifies it against live chain
 /// state and the adapter re-fetches and sanad-binds the inclusion evidence, so a
 /// missing hint fails closed downstream rather than producing an invalid proof.
-fn resolve_anchor_hint(
-    state: &UnifiedStateManager,
-    sanad_id: &SanadId,
-) -> Option<SanadAnchorHint> {
+fn resolve_anchor_hint(state: &UnifiedStateManager, sanad_id: &SanadId) -> Option<SanadAnchorHint> {
     let wanted = hex::encode(sanad_id.as_bytes());
-    let record = state.storage.sanads.iter().find(|s| {
-        s.id.trim_start_matches("0x").eq_ignore_ascii_case(&wanted)
-    })?;
+    let record = state
+        .storage
+        .sanads
+        .iter()
+        .find(|s| s.id.trim_start_matches("0x").eq_ignore_ascii_case(&wanted))?;
     let anchor_tx_hex = record.anchor_tx_hash.clone()?;
     if anchor_tx_hex.trim().is_empty() {
         return None;

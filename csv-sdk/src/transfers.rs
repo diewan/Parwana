@@ -310,17 +310,17 @@ impl TransferManager {
                     lock_tx_hash: receipt.lock_tx_hash,
                     mint_tx_hash: receipt.mint_tx_hash,
                     materialization: receipt.materialization,
+                    finality: receipt.finality,
+                    assurance: receipt.assurance,
                 }))
             }
             csv_runtime::TransferOutcome::Pending {
                 lock_tx_hash,
-                confirmations,
-                required,
+                finality,
             } => TransferOutcome::Pending {
                 transfer_id: transfer_id.to_string(),
                 lock_tx_hash,
-                confirmations,
-                required,
+                finality,
             },
         })
     }
@@ -350,6 +350,13 @@ pub struct TransferReceipt {
     pub mint_tx_hash: String,
     /// Destination-side materialization metadata observed by the destination adapter.
     pub materialization: DestinationMaterialization,
+    /// The finality observation the runtime made on the source lock, including the
+    /// chain tip it was measured against. `None` when the receipt was reconstructed
+    /// from the runtime journal without a fresh chain read.
+    pub finality: Option<csv_runtime::FinalityObservation>,
+    /// What the canonical verifier established about the source proof. `None` on the
+    /// journal-reconstructed path, where no verification ran.
+    pub assurance: Option<csv_protocol::verification_levels::VerificationLevel>,
 }
 
 impl std::fmt::Display for TransferReceipt {
@@ -378,10 +385,9 @@ pub enum TransferOutcome {
         transfer_id: String,
         /// Lock transaction hash in the runtime's chain-native byte encoding.
         lock_tx_hash: String,
-        /// Confirmations observed on the source-chain lock.
-        confirmations: u64,
-        /// Confirmation depth required by the source chain.
-        required: u64,
+        /// What the runtime observed on the source chain, including the tip the
+        /// depth was measured against. A bare confirmation count is not evidence.
+        finality: csv_runtime::FinalityObservation,
     },
 }
 
@@ -514,13 +520,9 @@ impl TransferBuilder {
     pub async fn execute(self) -> Result<TransferReceipt, CsvError> {
         match self.execute_outcome().await? {
             TransferOutcome::Completed(receipt) => Ok(*receipt),
-            TransferOutcome::Pending {
-                confirmations,
-                required,
-                ..
-            } => Err(CsvError::RuntimeError(format!(
+            TransferOutcome::Pending { finality, .. } => Err(CsvError::RuntimeError(format!(
                 "transfer awaiting finality: {}/{} confirmations",
-                confirmations, required
+                finality.confirmations, finality.required_confirmations
             ))),
         }
     }
@@ -604,24 +606,24 @@ impl TransferBuilder {
                                 lock_tx_hash: receipt.lock_tx_hash,
                                 mint_tx_hash: receipt.mint_tx_hash,
                                 materialization: receipt.materialization,
+                                finality: receipt.finality,
+                                assurance: receipt.assurance,
                             }))
                         }
                         csv_runtime::TransferOutcome::Pending {
                             lock_tx_hash,
-                            confirmations,
-                            required,
+                            finality,
                         } => {
                             log::info!(
                                 "TransferBuilder: Transfer {} locked, awaiting finality {}/{}",
                                 transfer_id,
-                                confirmations,
-                                required
+                                finality.confirmations,
+                                finality.required_confirmations
                             );
                             TransferOutcome::Pending {
                                 transfer_id,
                                 lock_tx_hash,
-                                confirmations,
-                                required,
+                                finality,
                             }
                         }
                     });

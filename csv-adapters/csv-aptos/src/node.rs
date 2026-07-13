@@ -446,8 +446,7 @@ impl AptosAccountReader for AptosNode {
             for resource in resources {
                 let res_type = resource.get("type").and_then(|v| v.as_str());
                 if res_type.is_none_or(|actual| {
-                    Self::canonical_struct_tag(actual)
-                        != Self::canonical_struct_tag(&resource_type)
+                    Self::canonical_struct_tag(actual) != Self::canonical_struct_tag(&resource_type)
                 }) {
                     continue;
                 }

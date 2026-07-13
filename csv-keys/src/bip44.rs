@@ -62,7 +62,7 @@ impl DerivationPath {
     /// wallet addresses are derived from.
     pub fn new_bip86(account: u32, address_index: u32) -> Self {
         Self {
-            purpose: 86 | 0x8000_0000, // BIP-86 hardened
+            purpose: 86 | 0x8000_0000,  // BIP-86 hardened
             coin_type: 1 | 0x8000_0000, // testnet coin type, hardened
             account: account | 0x8000_0000,
             change: 0,

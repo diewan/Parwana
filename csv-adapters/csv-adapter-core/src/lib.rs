@@ -765,6 +765,16 @@ pub struct TxFinality {
     /// Number of confirmations, measured with the same `tip - block_height`
     /// convention used by the proof builders. `0` when unconfirmed.
     pub confirmations: u64,
+    /// The chain tip height the adapter actually read when it measured
+    /// `confirmations` (RUNTIME-FINALITY-TAUTOLOGY-001).
+    ///
+    /// `None` means no tip was read — either the transaction is unconfirmed, or the
+    /// chain reports finality deterministically rather than as depth below a tip.
+    /// It never means "tip unknown, assume final": a consumer that needs an observed
+    /// tip must treat `None` as the absence of one, and callers must never
+    /// reconstruct it as `block_height + confirmations`, which is the arithmetic
+    /// that made the finality gate pass by construction.
+    pub observed_tip_height: Option<u64>,
 }
 
 /// Status of a seal in the registry.
@@ -1023,6 +1033,10 @@ pub trait ChainAdapter: Send + Sync {
         Ok(TxFinality {
             block_height: confirmed.block_height,
             confirmations: u64::MAX,
+            // No tip was read on this path — the chain's own confirmation is the
+            // finality signal. Reported as absent rather than reconstructed, so a
+            // consumer cannot mistake it for a depth measured against a real tip.
+            observed_tip_height: None,
         })
     }
 

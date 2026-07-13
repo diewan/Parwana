@@ -522,6 +522,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
             return Ok(TxFinality {
                 block_height: 0,
                 confirmations: 0,
+                observed_tip_height: None,
             });
         }
 
@@ -543,6 +544,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         Ok(TxFinality {
             block_height,
             confirmations,
+            observed_tip_height: Some(tip),
         })
     }
 

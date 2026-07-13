@@ -30,7 +30,8 @@ fn rpc_call(method: &str, params: serde_json::Value) -> serde_json::Value {
 
 fn main() {
     let home = std::env::var("HOME").expect("HOME");
-    let key_json = std::fs::read_to_string(format!("{home}/.config/solana/id.json")).expect("id.json");
+    let key_json =
+        std::fs::read_to_string(format!("{home}/.config/solana/id.json")).expect("id.json");
     let key_bytes: Vec<u8> = serde_json::from_str(&key_json).expect("keypair json");
     let payer = Keypair::try_from(key_bytes.as_slice()).expect("keypair");
     let program_id = Pubkey::from_str(PROGRAM_ID).unwrap();

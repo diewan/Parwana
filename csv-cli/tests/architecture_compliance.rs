@@ -186,8 +186,13 @@ fn test_commands_use_csv_sdk_runtime() {
             // - inspect.rs: Protocol inspection utilities
             // - schema_cmd.rs: Schema validation (no chain operations)
             // - mod.rs: Module declarations
-            // - wallet/import.rs: Import from csv-wallet (legacy)
-            // - wallet/export.rs: Export to csv-wallet (legacy)
+            // - wallet/import.rs: Portable wallet-file import (local state only)
+            // - wallet/export.rs: Portable wallet-file export (local state only)
+            // - wallet/portable.rs: Encode/decode of the common wallet envelope
+            //   via csv-wallet. Holds no protocol authority, executes no
+            //   transfers, and touches no chain adapter — so it has no runtime
+            //   call to make. Transfer-executing commands are still required to
+            //   go through csv-sdk.
             // - wallet/types.rs: Type definitions
             // - wallet/private_key.rs: Key derivation (no chain operations)
             // - wallet/generate.rs: Key generation (no chain operations)
@@ -208,6 +213,7 @@ fn test_commands_use_csv_sdk_runtime() {
                     | "mod.rs"
                     | "import.rs"
                     | "export.rs"
+                    | "portable.rs"
                     | "types.rs"
                     | "private_key.rs"
                     | "generate.rs"

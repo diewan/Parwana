@@ -147,8 +147,9 @@ csv chain set-network --chain ethereum --network main # Change network
 
 ```bash
 csv wallet init --network test --words 12   # Initialize wallet
-csv wallet import "<mnemonic>"              # Import existing wallet
-csv wallet export                           # Export mnemonic (with warnings)
+csv wallet export --out wallet.csvw         # Export the common encrypted wallet file
+csv wallet import wallet.csvw --mode replace  # Import a wallet file (replace | profile)
+csv wallet import-mnemonic                  # Import a mnemonic at a hidden prompt
 csv wallet generate --chain bitcoin         # Generate for specific chain
 csv wallet balance --chain ethereum         # Check balance
 csv wallet list                             # List all addresses

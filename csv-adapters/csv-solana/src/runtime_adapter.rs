@@ -757,6 +757,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             return Ok(TxFinality {
                 block_height: 0,
                 confirmations: 0,
+                observed_tip_height: None,
             });
         };
 
@@ -767,6 +768,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         Ok(TxFinality {
             block_height: landed_slot,
             confirmations: latest_slot.saturating_sub(landed_slot),
+            observed_tip_height: Some(latest_slot),
         })
     }
 

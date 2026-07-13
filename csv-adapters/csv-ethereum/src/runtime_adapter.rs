@@ -507,6 +507,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
                 return Ok(TxFinality {
                     block_height: 0,
                     confirmations: 0,
+                    observed_tip_height: None,
                 });
             }
             Err(e) => {
@@ -536,6 +537,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         Ok(TxFinality {
             block_height: receipt.block_number,
             confirmations,
+            observed_tip_height: Some(tip),
         })
     }
 

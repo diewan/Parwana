@@ -45,8 +45,9 @@ csv-cli (stateless)
 ### Wallet Operations
 
 - `csv wallet init --network test --words 12` — Initialize wallet (generates mnemonic, derives keys)
-- `csv wallet import "<mnemonic>"` — Import existing wallet
-- `csv wallet export` — Export mnemonic (with security warnings)
+- `csv wallet export --out <file>` — Export the wallet as a portable encrypted wallet file
+- `csv wallet import <file> --mode <replace|profile>` — Import a portable wallet file
+- `csv wallet import-mnemonic` — Import a mnemonic typed at a hidden prompt
 - `csv wallet generate --chain <chain>` — Generate wallet for specific chain
 - `csv wallet balance --chain <chain>` — Check balance
 - `csv wallet list` — List all wallet addresses

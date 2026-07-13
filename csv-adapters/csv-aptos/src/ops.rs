@@ -1488,7 +1488,9 @@ mod tests {
         let ops = AptosBackend::new(Box::new(MockAptosRpc::new(1000)), AptosNetwork::Devnet)
             .expect("AptosBackend::new should succeed with a mock RPC and valid config");
         let commitment = Hash::new([0x02u8; 32]);
-        let result = ops.build_inclusion_proof(&commitment, 1, &[0x07u8; 32]).await;
+        let result = ops
+            .build_inclusion_proof(&commitment, 1, &[0x07u8; 32])
+            .await;
         assert!(
             matches!(result, Err(ChainOpError::CapabilityUnavailable(_))),
             "Aptos must fail closed (no fabricated inclusion evidence): {result:?}"

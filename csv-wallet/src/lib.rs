@@ -22,6 +22,7 @@
 #![allow(unused_imports)]
 
 pub mod error;
+pub mod format;
 pub mod keystore;
 pub mod seal_custody;
 pub mod signer;
@@ -30,6 +31,10 @@ pub mod wallet_traits;
 
 // Re-export commonly used types
 pub use error::{Result, WalletError};
+pub use format::{
+    DerivationProfile, FormatError, KdfId, KdfParams, KeySource, KeySourceKind, KnownAccount,
+    WalletPayload,
+};
 pub use keystore::{KeyPurpose, KeyStore};
 pub use seal_custody::{SealCustody, SealCustodyRecord};
 pub use signer::{Signature, Signer, SignerRef};

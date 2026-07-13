@@ -102,9 +102,7 @@ pub mod real_rpc_impl {
             let statuses = self
                 .client
                 .get_signature_statuses_with_history(&[*signature])
-                .map_err(|e| {
-                    SolanaError::Rpc(format!("Failed to get signature status: {}", e))
-                })?;
+                .map_err(|e| SolanaError::Rpc(format!("Failed to get signature status: {}", e)))?;
             let Some(status) = statuses.value.into_iter().next().flatten() else {
                 return Ok(None);
             };

@@ -622,9 +622,8 @@ impl EthereumBackend {
         contract: &[u8; 20],
         sanad_id: &[u8; 32],
     ) -> ChainOpResult<Option<([u8; 32], u64)>> {
-        let event_topic = self._keccak256(
-            b"SanadLocked(bytes32,bytes32,address,bytes32,bytes,uint256)".as_slice(),
-        );
+        let event_topic = self
+            ._keccak256(b"SanadLocked(bytes32,bytes32,address,bytes32,bytes,uint256)".as_slice());
         let filter = serde_json::json!({
             "address": format!("0x{}", hex::encode(contract)),
             "fromBlock": "earliest",
@@ -634,11 +633,9 @@ impl EthereumBackend {
                 format!("0x{}", hex::encode(sanad_id)),
             ],
         });
-        let logs = self
-            .rpc()
-            .eth_get_logs(filter)
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to query SanadLocked logs: {}", e)))?;
+        let logs = self.rpc().eth_get_logs(filter).await.map_err(|e| {
+            ChainOpError::RpcError(format!("Failed to query SanadLocked logs: {}", e))
+        })?;
 
         let Some(log) = logs.last() else {
             return Ok(None);
@@ -1383,11 +1380,9 @@ impl ChainProofProvider for EthereumBackend {
         // observed chain tip, enforced against the configured finality depth.
         // Finality is never optional (RUNTIME-FINALITY-TAUTOLOGY-001): the tip is
         // observed, not derived from the required depth.
-        let tip = self
-            .rpc()
-            .block_number()
-            .await
-            .map_err(|e| ChainOpError::RpcError(format!("Failed to get latest block number: {e}")))?;
+        let tip = self.rpc().block_number().await.map_err(|e| {
+            ChainOpError::RpcError(format!("Failed to get latest block number: {e}"))
+        })?;
         let confirmations = tip.saturating_sub(receipt.block_number);
         if confirmations < self.config.finality_depth {
             return Err(ChainOpError::ProofVerificationError(format!(
@@ -2706,10 +2701,7 @@ mod tests {
         );
         // Evidence embeds the real block hash + the matched SanadCreated topic.
         assert!(
-            proof
-                .proof_bytes
-                .windows(32)
-                .any(|w| w == sanad_id),
+            proof.proof_bytes.windows(32).any(|w| w == sanad_id),
             "encoded evidence must carry the sanad-bound event topic"
         );
     }
@@ -2775,7 +2767,12 @@ mod tests {
         let rpc = MockEthereumRpc::new(1000);
         rpc.add_receipt(
             txid,
-            receipt_with_logs(txid, 100, 1, vec![sanad_created_log(contract, created_for, 0)]),
+            receipt_with_logs(
+                txid,
+                100,
+                1,
+                vec![sanad_created_log(contract, created_for, 0)],
+            ),
         );
         let backend = backend_with_rpc(rpc, Some(contract));
         // The receipt anchors `created_for`, but we ask for `asked_for`.
@@ -3175,7 +3172,10 @@ mod tests {
             parse_eth_address(&format!("0x{}", hex::encode(OWN_OWNER))).unwrap(),
             OWN_OWNER
         );
-        assert_eq!(parse_eth_address(&hex::encode(OWN_OWNER)).unwrap(), OWN_OWNER); // no 0x
+        assert_eq!(
+            parse_eth_address(&hex::encode(OWN_OWNER)).unwrap(),
+            OWN_OWNER
+        ); // no 0x
         assert!(parse_eth_address("0x1234").is_err()); // too short
         assert!(parse_eth_address(&hex::encode([0u8; 21])).is_err()); // too long
         assert!(parse_eth_address("0xnothexnothexnothexnothexnothexnothexnope").is_err());

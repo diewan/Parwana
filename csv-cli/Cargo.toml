@@ -71,6 +71,11 @@ aead = "0.5"
 argon2 = { version = "0.5", features = ["std"] }
 base64 = "0.21"
 
+# Secret handling: hidden terminal prompts (no echo, no shell history) and
+# zeroize-on-drop buffers for mnemonics and wallet-file passphrases.
+rpassword = "7"
+zeroize = "1"
+
 # HTTP client for RPC calls
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 thiserror = "1.0"

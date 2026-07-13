@@ -219,47 +219,6 @@ impl SuiSealProtocol {
         self.config.signer_address.clone()
     }
 
-    /// Fetch the object digest from the chain for a given object ID and version.
-    #[cfg(feature = "rpc")]
-    async fn fetch_object_digest(&self, object_id: [u8; 32], version: u64) -> SuiResult<String> {
-        use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
-        use sui_sdk_types::Address;
-
-        let object_id_addr = Address::from_bytes(object_id)
-            .map_err(|e| SuiError::ObjectUsed(format!("Invalid object ID: {}", e)))?;
-
-        let client = self.node.client();
-        let mut client_guard = client.lock().await;
-
-        let request = GetObjectRequest::new(&object_id_addr);
-
-        let object_response = (*client_guard)
-            .ledger_client()
-            .get_object(request)
-            .await
-            .map_err(|e| SuiError::ObjectUsed(format!("Failed to get object: {}", e)))?;
-
-        let object = object_response
-            .into_inner()
-            .object
-            .ok_or_else(|| SuiError::ObjectUsed("Object not found".to_string()))?;
-
-        // Verify object version matches
-        if let Some(obj_version) = object.version {
-            if obj_version != version {
-                return Err(SuiError::ObjectUsed(format!(
-                    "Object version mismatch: expected {}, got {}",
-                    version, obj_version
-                )));
-            }
-        }
-
-        // Return the digest if available
-        object
-            .digest
-            .ok_or_else(|| SuiError::ObjectUsed("Object digest not found".to_string()))
-    }
-
     /// Compare a Move struct tag against the expected one, normalizing the
     /// leading package address so that `0xabc::m::T` and its zero-padded
     /// 32-byte form compare equal.

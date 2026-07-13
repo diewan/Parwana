@@ -1,7 +1,23 @@
 //! Wallet command types — encrypted mnemonic management only.
 
 use crate::config::{Chain, Network};
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
+use std::path::PathBuf;
+
+/// How an imported wallet file is applied to local state.
+///
+/// The two behaviors have opposite consequences, so the operator names one
+/// explicitly; the CLI never guesses, and never merges secrets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ImportMode {
+    /// Install the file's key source as the sole signing authority, destroying
+    /// any mnemonic already stored and re-deriving all accounts from it.
+    Replace,
+    /// Import only the file's known accounts and labels as a watch profile. The
+    /// stored mnemonic is never read or replaced, and a key source in the file
+    /// is not installed.
+    Profile,
+}
 
 /// Wallet management actions (encrypted mnemonics only).
 #[derive(Subcommand)]
@@ -18,19 +34,41 @@ pub enum WalletAction {
         #[arg(long, default_value = "0")]
         account: u32,
     },
-    /// Import wallet from mnemonic phrase (from csv-wallet or other source)
+    /// Import a portable wallet file (the common encrypted format)
     Import {
-        /// Mnemonic phrase (12 or 24 words)
-        phrase: String,
-        /// Network (dev/test/main)
-        #[arg(value_enum, default_value = "dev")]
-        network: Network,
+        /// Path to the portable wallet file
+        file: PathBuf,
+        /// How to apply the file: replace the signing authority, or import
+        /// accounts and labels as a watch profile
+        #[arg(long, value_enum)]
+        mode: ImportMode,
+        /// Bitcoin account index used when re-deriving accounts (replace mode)
+        #[arg(long, default_value = "0")]
+        account: u32,
+        /// Confirm the destructive edge of the chosen mode without prompting:
+        /// overwriting an existing wallet secret (replace) or an existing
+        /// account address (profile)
+        #[arg(long)]
+        force: bool,
+    },
+    /// Import a BIP-39 mnemonic typed at a hidden prompt (never an argument)
+    ImportMnemonic {
         /// Bitcoin account index
         #[arg(long, default_value = "0")]
         account: u32,
+        /// Overwrite an existing wallet secret without prompting
+        #[arg(long)]
+        force: bool,
     },
-    /// Export mnemonic phrase for backup or migration
-    Export,
+    /// Export the wallet as a portable encrypted wallet file (common format)
+    Export {
+        /// Destination path for the encrypted wallet file
+        #[arg(short, long)]
+        out: PathBuf,
+        /// Overwrite the destination if it already exists
+        #[arg(long)]
+        force: bool,
+    },
     /// Generate wallet for specific chain
     Generate {
         /// Chain name

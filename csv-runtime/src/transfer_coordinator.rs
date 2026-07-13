@@ -498,11 +498,59 @@ pub enum TransferOutcome {
     Pending {
         /// Lock transaction hash in the runtime's chain-native byte encoding.
         lock_tx_hash: String,
-        /// Confirmations observed on the source-chain lock transaction.
-        confirmations: u64,
-        /// Confirmation depth required by the source chain's finality policy.
-        required: u64,
+        /// What the runtime actually observed on the source chain, including the
+        /// tip the depth was measured against.
+        finality: FinalityObservation,
     },
+}
+
+/// What the runtime observed when it measured the source lock's finality.
+///
+/// Carries the observed chain tip alongside the depth, because a bare
+/// `confirmations >= required` pair is not evidence: it can be satisfied by
+/// arithmetic on the required depth rather than by looking at the chain
+/// (RUNTIME-FINALITY-TAUTOLOGY-001). Consumers that need to *show* why a transfer
+/// is final render this; they do not recompute it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinalityObservation {
+    /// Height of the block that includes the lock transaction.
+    pub confirming_block_height: u64,
+    /// Confirmations observed on the lock transaction.
+    pub confirmations: u64,
+    /// Depth the source chain's finality policy requires.
+    pub required_confirmations: u64,
+    /// The chain tip the adapter read when it measured `confirmations`.
+    ///
+    /// `None` when no tip was read — the chain reported finality deterministically.
+    /// Never a reconstruction of `confirming_block_height + confirmations`.
+    pub observed_tip_height: Option<u64>,
+}
+
+impl FinalityObservation {
+    /// Build an observation from an adapter's finality read and the policy depth.
+    pub fn new(finality: &csv_adapter_core::TxFinality, required_confirmations: u64) -> Self {
+        Self {
+            confirming_block_height: finality.block_height,
+            confirmations: finality.confirmations,
+            required_confirmations,
+            observed_tip_height: finality.observed_tip_height,
+        }
+    }
+
+    /// Whether the observed depth meets the required depth.
+    pub fn is_final(&self) -> bool {
+        self.confirmations >= self.required_confirmations
+    }
+
+    /// The observed source-chain tip suitable for verifier freshness checks.
+    ///
+    /// An absent tip remains absent. Reconstructing it from block height plus a
+    /// confirmation count would manufacture the very observation the finality
+    /// gate is meant to require. Deterministic-finality adapters rely on their
+    /// native proof validation instead and do not receive a synthetic height.
+    pub fn verification_height(&self) -> Option<u64> {
+        self.observed_tip_height
+    }
 }
 
 /// Receipt returned after a successful transfer
@@ -518,6 +566,16 @@ pub struct TransferReceipt {
     pub mint_tx_hash: String,
     /// Destination-side materialization metadata observed by the destination adapter.
     pub materialization: csv_adapter_core::DestinationMaterialization,
+    /// The finality observation that authorized this transfer's proof build.
+    ///
+    /// `None` only when the receipt was reconstructed from the journal for an
+    /// already-completed transfer, where no fresh chain read was made. A consumer
+    /// must render that as "not re-observed", never as "final".
+    pub finality: Option<FinalityObservation>,
+    /// What the canonical verifier established about the source proof.
+    ///
+    /// `None` on the journal-reconstructed path, for the same reason as `finality`.
+    pub assurance: Option<csv_protocol::verification_levels::VerificationLevel>,
 }
 
 /// The single source of truth for cross-chain transfer execution.
@@ -800,14 +858,12 @@ impl TransferCoordinator {
             .await?
         {
             TransferOutcome::Completed(receipt) => Ok(*receipt),
-            TransferOutcome::Pending {
-                confirmations,
-                required,
-                ..
-            } => Err(TransferCoordinatorError::FinalityFailed(format!(
-                "lock has {} confirmations, {} required",
-                confirmations, required
-            ))),
+            TransferOutcome::Pending { finality, .. } => {
+                Err(TransferCoordinatorError::FinalityFailed(format!(
+                    "lock has {} confirmations, {} required",
+                    finality.confirmations, finality.required_confirmations
+                )))
+            }
         }
     }
 
@@ -870,6 +926,11 @@ impl TransferCoordinator {
                     materialization: csv_adapter_core::DestinationMaterialization::unavailable(
                         transfer.destination_chain.clone(),
                     ),
+                    // Reconstructed from the journal for a transfer that already
+                    // completed. No chain read and no verification happened on this
+                    // path, so neither is claimed — see `TransferReceipt::finality`.
+                    finality: None,
+                    assurance: None,
                 }));
             }
         }
@@ -1412,8 +1473,7 @@ impl TransferCoordinator {
             );
             return Ok(TransferOutcome::Pending {
                 lock_tx_hash: hex::encode(&transfer.lock_tx_hash),
-                confirmations: finality.confirmations,
-                required: required_finality,
+                finality: FinalityObservation::new(&finality, required_finality),
             });
         }
 
@@ -1545,16 +1605,17 @@ impl TransferCoordinator {
         // observation of the source-chain tip, not `lock_height +
         // required_confirmations` (which made verify_finality pass by
         // construction). Reuse the real finality observation taken by the gate
-        // above (`finality`), where the tip = confirming height + confirmations.
-        // The gate already returned Pending if confirmations were insufficient,
-        // so here verify_finality re-checks against the same observed tip rather
-        // than a synthesized one.
-        let observed_tip = finality.block_height.saturating_add(finality.confirmations);
+        // above (`finality`), whose adapter reports the tip it read. The gate
+        // already returned Pending if confirmations were insufficient, so here
+        // verify_finality re-checks against that same observed tip rather than a
+        // synthesized one.
+        let finality_observation = FinalityObservation::new(&finality, required_confirmations);
+        let observed_tip = finality_observation.verification_height();
         let verification_context = VerificationContext {
             chain_id: transfer.source_chain.clone(),
             signature_scheme,
             required_confirmations,
-            current_block_height: Some(observed_tip),
+            current_block_height: observed_tip,
             // SEAL-REPLAY-RUNTIME-001: the verifier's seal-replay gate carries
             // the offline-recipient semantic ("was this seal spent before I
             // accept it?"). Post-lock that question is unanswerable from a
@@ -1582,9 +1643,104 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
 
         let source_verifier = Self::runtime_source_verifier();
-        match source_verifier.verify_proof_bundle(&proof_bundle, &verification_context) {
-            Ok(result) => {
-                if !result.is_valid {
+        // The assurance the canonical verifier actually reached. Carried onto the
+        // receipt so an application can show what was verified instead of inferring
+        // it from the existence of a mint transaction.
+        let source_assurance =
+            match source_verifier.verify_proof_bundle(&proof_bundle, &verification_context) {
+                Ok(result) => {
+                    if !result.is_valid {
+                        self.with_metrics(|metrics| metrics.record_authorization_rejected());
+                        let _ = self.execution_journal.record(
+                            crate::execution_journal::TransferPhaseEntry {
+                                transfer_id: transfer.id.clone(),
+                                replay_id: replay_id_wire.clone(),
+                                proof_hash: [0u8; 32],
+                                proof_payload: None,
+                                phase: crate::recovery::TransferStage::ProofBuilding,
+                                ts: std::time::SystemTime::now(),
+                                outcome: crate::execution_journal::PhaseOutcome::Failed(
+                                    result
+                                        .errors
+                                        .iter()
+                                        .map(|e| e.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join("; "),
+                                ),
+                                attempt: 1,
+                                transfer_context: None,
+                            },
+                        );
+                        return Err(TransferCoordinatorError::ProofVerificationFailed(
+                            result
+                                .errors
+                                .iter()
+                                .map(|e| e.to_string())
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        ));
+                    }
+                    // Proof verified successfully
+                    // Append ProofVerified event to EventStore (durable write FIRST)
+                    if let Err(e) = self.event_store.append(
+                        &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
+                            csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
+                                *transfer.sanad_id.as_bytes(),
+                            )),
+                            crate::event_envelope::EventType::from_static(
+                                crate::event_envelope::EventType::TRANSFER_PROOF_VERIFIED,
+                            ),
+                            EVENT_VERSION_PROOF_VERIFIED,
+                            serde_json::json!({
+                                "transfer_id": transfer.id,
+                            })
+                            .to_string(),
+                            None,
+                            runtime_ctx.runtime_instance,
+                            std::time::SystemTime::now(),
+                        ),
+                    ) {
+                        tracing::warn!("Failed to append ProofVerified event to EventStore: {}", e);
+                    }
+
+                    self.event_bus.emit(TransferEvent::ProofVerified(
+                        crate::event_bus::TransferContext {
+                            transfer_id: transfer.id.clone(),
+                            replay_id: Some(replay_id),
+                            proof_hash: None,
+                            coordinator_id: self
+                                .runtime_id
+                                .0
+                                .parse()
+                                .unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                            lease_id: None,
+                            source_chain: transfer.source_chain.clone(),
+                            dest_chain: transfer.destination_chain.clone(),
+                            finality_state: crate::event_bus::FinalityState::NotChecked,
+                            recovery_attempt: 0,
+                        },
+                    ));
+
+                    // Record phase entry: BuildingProof (Completed)
+                    self.execution_journal
+                        .record(crate::execution_journal::TransferPhaseEntry {
+                            transfer_id: transfer.id.clone(),
+                            replay_id: replay_id_wire.clone(),
+                            proof_hash: [0u8; 32],
+                            proof_payload: None,
+                            phase: crate::recovery::TransferStage::ProofBuilding,
+                            ts: std::time::SystemTime::now(),
+                            outcome: crate::execution_journal::PhaseOutcome::Completed,
+                            attempt: 1,
+                            transfer_context: None,
+                        })
+                        .map_err(|e| {
+                            TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e))
+                        })?;
+
+                    result.level
+                }
+                Err(e) => {
                     self.with_metrics(|metrics| metrics.record_authorization_rejected());
                     let _ = self.execution_journal.record(
                         crate::execution_journal::TransferPhaseEntry {
@@ -1594,105 +1750,16 @@ impl TransferCoordinator {
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::ProofBuilding,
                             ts: std::time::SystemTime::now(),
-                            outcome: crate::execution_journal::PhaseOutcome::Failed(
-                                result
-                                    .errors
-                                    .iter()
-                                    .map(|e| e.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join("; "),
-                            ),
+                            outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
                             attempt: 1,
                             transfer_context: None,
                         },
                     );
                     return Err(TransferCoordinatorError::ProofVerificationFailed(
-                        result
-                            .errors
-                            .iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join("; "),
+                        e.to_string(),
                     ));
                 }
-                // Proof verified successfully
-                // Append ProofVerified event to EventStore (durable write FIRST)
-                if let Err(e) = self.event_store.append(
-                    &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
-                        csv_wire::SanadIdWire::from(csv_protocol::sanad::SanadId::new(
-                            *transfer.sanad_id.as_bytes(),
-                        )),
-                        crate::event_envelope::EventType::from_static(
-                            crate::event_envelope::EventType::TRANSFER_PROOF_VERIFIED,
-                        ),
-                        EVENT_VERSION_PROOF_VERIFIED,
-                        serde_json::json!({
-                            "transfer_id": transfer.id,
-                        })
-                        .to_string(),
-                        None,
-                        runtime_ctx.runtime_instance,
-                        std::time::SystemTime::now(),
-                    ),
-                ) {
-                    tracing::warn!("Failed to append ProofVerified event to EventStore: {}", e);
-                }
-
-                self.event_bus.emit(TransferEvent::ProofVerified(
-                    crate::event_bus::TransferContext {
-                        transfer_id: transfer.id.clone(),
-                        replay_id: Some(replay_id),
-                        proof_hash: None,
-                        coordinator_id: self
-                            .runtime_id
-                            .0
-                            .parse()
-                            .unwrap_or_else(|_| uuid::Uuid::new_v4()),
-                        lease_id: None,
-                        source_chain: transfer.source_chain.clone(),
-                        dest_chain: transfer.destination_chain.clone(),
-                        finality_state: crate::event_bus::FinalityState::NotChecked,
-                        recovery_attempt: 0,
-                    },
-                ));
-
-                // Record phase entry: BuildingProof (Completed)
-                self.execution_journal
-                    .record(crate::execution_journal::TransferPhaseEntry {
-                        transfer_id: transfer.id.clone(),
-                        replay_id: replay_id_wire.clone(),
-                        proof_hash: [0u8; 32],
-                        proof_payload: None,
-                        phase: crate::recovery::TransferStage::ProofBuilding,
-                        ts: std::time::SystemTime::now(),
-                        outcome: crate::execution_journal::PhaseOutcome::Completed,
-                        attempt: 1,
-                        transfer_context: None,
-                    })
-                    .map_err(|e| {
-                        TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e))
-                    })?;
-            }
-            Err(e) => {
-                self.with_metrics(|metrics| metrics.record_authorization_rejected());
-                let _ =
-                    self.execution_journal
-                        .record(crate::execution_journal::TransferPhaseEntry {
-                            transfer_id: transfer.id.clone(),
-                            replay_id: replay_id_wire.clone(),
-                            proof_hash: [0u8; 32],
-                            proof_payload: None,
-                            phase: crate::recovery::TransferStage::ProofBuilding,
-                            ts: std::time::SystemTime::now(),
-                            outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
-                            attempt: 1,
-                            transfer_context: None,
-                        });
-                return Err(TransferCoordinatorError::ProofVerificationFailed(
-                    e.to_string(),
-                ));
-            }
-        }
+            };
 
         // Serialize proof bundle for minting using canonical CBOR
         let proof_bundle_bytes = proof_bundle.to_canonical_bytes().map_err(|e| {
@@ -1998,6 +2065,8 @@ impl TransferCoordinator {
             lock_tx_hash: lock_result.tx_hash,
             mint_tx_hash: mint_result.tx_hash,
             materialization: mint_result.materialization,
+            finality: Some(finality_observation),
+            assurance: Some(source_assurance),
         })))
     }
 
@@ -3112,13 +3181,14 @@ impl TransferCoordinator {
                 finality.confirmations, required_confirmations
             )));
         }
-        let observed_tip = finality.block_height.saturating_add(finality.confirmations);
+        let finality_observation = FinalityObservation::new(&finality, required_confirmations);
+        let observed_tip = finality_observation.verification_height();
 
         let verification_context = VerificationContext {
             chain_id: transfer.source_chain.clone(),
             signature_scheme,
             required_confirmations,
-            current_block_height: Some(observed_tip),
+            current_block_height: observed_tip,
             // SEAL-REPLAY-RUNTIME-001: no registry on the runtime path — the
             // seal-replay gate carries the offline-recipient semantic and the
             // source seal is necessarily consumed by our own lock here. See
@@ -3169,14 +3239,12 @@ impl TransferCoordinator {
             .await?
         {
             TransferOutcome::Completed(receipt) => Ok(*receipt),
-            TransferOutcome::Pending {
-                confirmations,
-                required,
-                ..
-            } => Err(TransferCoordinatorError::FinalityFailed(format!(
-                "lock has {} confirmations, {} required",
-                confirmations, required
-            ))),
+            TransferOutcome::Pending { finality, .. } => {
+                Err(TransferCoordinatorError::FinalityFailed(format!(
+                    "lock has {} confirmations, {} required",
+                    finality.confirmations, finality.required_confirmations
+                )))
+            }
         }
     }
 
@@ -3254,8 +3322,7 @@ impl TransferCoordinator {
             );
             return Ok(TransferOutcome::Pending {
                 lock_tx_hash: hex::encode(&transfer.lock_tx_hash),
-                confirmations: finality.confirmations,
-                required: required_finality,
+                finality: FinalityObservation::new(&finality, required_finality),
             });
         }
 
@@ -3580,6 +3647,12 @@ impl TransferCoordinator {
             lock_tx_hash: hex::encode(transfer.lock_tx_hash),
             mint_tx_hash: mint_result.tx_hash,
             materialization: mint_result.materialization,
+            // This path confirms a mint the runtime had already submitted, which it
+            // only does after the canonical verifier accepted the source proof. It
+            // re-reads neither the source tip nor the proof, so it claims neither —
+            // the journal is the authority for that earlier verification.
+            finality: None,
+            assurance: None,
         })
     }
 
@@ -4024,6 +4097,18 @@ mod tests {
     use csv_storage::ReplayDatabase;
     use std::sync::Arc;
 
+    #[test]
+    fn missing_observed_tip_is_not_reconstructed_for_verification() {
+        let observation = FinalityObservation {
+            confirming_block_height: 100,
+            confirmations: 6,
+            required_confirmations: 6,
+            observed_tip_height: None,
+        };
+
+        assert_eq!(observation.verification_height(), None);
+    }
+
     // Local test adapter to avoid orphan rule
     struct LocalTestAdapter {
         caps: ChainCapabilities,
@@ -4227,6 +4312,8 @@ mod tests {
                 Some(confirmations) => Ok(csv_adapter_core::TxFinality {
                     block_height: 100,
                     confirmations,
+                    // Model a depth-based chain: the tip is what the adapter read.
+                    observed_tip_height: Some(100 + confirmations),
                 }),
                 // Default: delegate to confirm_tx and treat as final (u64::MAX),
                 // matching the trait default.
@@ -4235,6 +4322,7 @@ mod tests {
                     Ok(csv_adapter_core::TxFinality {
                         block_height: confirmed.block_height,
                         confirmations: u64::MAX,
+                        observed_tip_height: None,
                     })
                 }
             }

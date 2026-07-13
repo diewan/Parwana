@@ -3,6 +3,7 @@
 //! This crate owns ALL serde, ALL transport encoding, and ALL RPC wire format conversions.
 //! It depends on csv-algebra. The inverse is forbidden by deny.toml.
 
+pub mod app;
 pub mod canonical;
 pub mod consignment;
 pub mod hexbytes;
@@ -14,6 +15,11 @@ pub mod seal;
 pub mod transfer;
 pub mod transfer_state;
 
+pub use app::{
+    APP_CONTRACT_SCHEMA_VERSION, ArtifactKind, ContractArtifact, ContractError, ContractHeader,
+    FinalityEvidence, NextAction, RecoveryPlan, RecoveryReason, RuntimeHealthReport, SigningIntent,
+    TransferEvent, TransferMode, TransferPhase, TransferReceipt, VerificationAssuranceWire,
+};
 pub use canonical::CanonicalProofWire;
 pub use consignment::{CONSIGNMENT_VERSION, Consignment};
 pub use invoice::{INVOICE_VERSION, Invoice};

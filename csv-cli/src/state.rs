@@ -141,7 +141,7 @@ impl UnifiedStateManager {
 
         // Decode `value` iff it is legacy lowercase-hex of canonical seal bytes.
         fn legacy_hex_seal_bytes(value: &str) -> Option<Vec<u8>> {
-            if value.is_empty() || value.len() % 2 != 0 {
+            if value.is_empty() || !value.len().is_multiple_of(2) {
                 return None;
             }
             if !value
@@ -422,20 +422,13 @@ impl UnifiedStateManager {
         self.storage.set_account(account);
     }
 
-    /// Export for wallet import
-    /// State import/export surface for backup tooling; no command wired yet.
-    #[allow(dead_code)]
-    pub fn export_json(&self) -> anyhow::Result<String> {
-        Ok(serde_json::to_string_pretty(&self.storage)?)
-    }
-
-    /// Import from wallet export
-    /// State import/export surface for backup tooling; no command wired yet.
-    #[allow(dead_code)]
-    pub fn import_json(&mut self, json: &str) -> anyhow::Result<()> {
-        self.storage = serde_json::from_str(json)?;
-        Ok(())
-    }
+    // Wallet interchange is the portable encrypted envelope owned by
+    // `csv_wallet::format` (see `commands::wallet::portable`). The plaintext
+    // `export_json` / `import_json` pair that used to live here was removed with
+    // WALLETFMT-CLI-003: it serialized the whole storage — mnemonic included —
+    // as unencrypted JSON and re-imported arbitrary JSON as wallet state, which
+    // is a second, unauthenticated wallet format and a plaintext import path.
+    // Do not reintroduce it.
 
     // --- Transaction Recording ---
 

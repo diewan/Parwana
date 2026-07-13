@@ -263,10 +263,7 @@ impl MockEthereumRpc {
 
     /// Set the canned response returned by `eth_call`.
     pub fn set_call_result(&self, result: Vec<u8>) {
-        *self
-            .call_result
-            .lock()
-            .expect("call_result mutex poisoned") = Some(result);
+        *self.call_result.lock().expect("call_result mutex poisoned") = Some(result);
     }
 
     pub fn add_block(&self, block: RpcBlock) {

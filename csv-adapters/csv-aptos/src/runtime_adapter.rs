@@ -232,9 +232,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
             .seal_protocol
             .verify_inclusion(anchor.clone())
             .await
-            .map_err(|e| {
-                AdapterError::Generic(format!("Inclusion verification failed: {}", e))
-            })?;
+            .map_err(|e| AdapterError::Generic(format!("Inclusion verification failed: {}", e)))?;
         self.backend
             .seal_protocol
             .verify_finality(anchor)
@@ -350,13 +348,9 @@ impl ChainAdapter for AptosRuntimeAdapter {
         sanad_bytes.copy_from_slice(seal_id);
         let sanad_id = csv_hash::sanad::SanadId(csv_hash::Hash::new(sanad_bytes));
 
-        let state = self
-            .backend
-            .get_sanad_state(&sanad_id)
-            .await
-            .map_err(|e| {
-                AdapterError::Generic(format!("Failed to query canonical sanad state: {}", e))
-            })?;
+        let state = self.backend.get_sanad_state(&sanad_id).await.map_err(|e| {
+            AdapterError::Generic(format!("Failed to query canonical sanad state: {}", e))
+        })?;
 
         // Move contract canonical states (csv_seal.move SANAD_STATE_*):
         // 0 uncreated, 1 created, 2 active, 3 locked, 4 consumed, 5 minted,

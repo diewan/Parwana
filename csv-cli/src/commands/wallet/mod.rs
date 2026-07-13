@@ -4,6 +4,7 @@ pub mod balance;
 pub mod export;
 pub mod generate;
 pub mod import;
+pub mod portable;
 pub mod private_key;
 pub mod types;
 
@@ -28,11 +29,15 @@ pub async fn execute(
             account,
         } => generate::cmd_init(network, words, account, config, state),
         WalletAction::Import {
-            phrase,
-            network,
+            file,
+            mode,
             account,
-        } => import::cmd_import(&phrase, network, account, config, state),
-        WalletAction::Export => export::cmd_export(config, state),
+            force,
+        } => import::cmd_import(&file, mode, account, force, config, state),
+        WalletAction::ImportMnemonic { account, force } => {
+            import::cmd_import_mnemonic(account, force, config, state)
+        }
+        WalletAction::Export { out, force } => export::cmd_export(&out, force, config, state),
         WalletAction::Generate { chain, network } => {
             generate::cmd_generate(chain, network, config, state)
         }

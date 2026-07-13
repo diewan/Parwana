@@ -50,6 +50,7 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 mod config;
+mod contract_view;
 mod output;
 mod state;
 mod wallet_identity;

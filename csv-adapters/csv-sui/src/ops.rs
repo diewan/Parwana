@@ -2152,9 +2152,8 @@ impl ChainBackend for SuiBackend {
         };
 
         let claimed = parse_sui_address(claimed_owner)?;
-        let object_id_addr = sui_sdk_types::Address::from_bytes(object_id).map_err(|e| {
-            ChainOpError::InvalidInput(format!("Invalid Sui object id: {}", e))
-        })?;
+        let object_id_addr = sui_sdk_types::Address::from_bytes(object_id)
+            .map_err(|e| ChainOpError::InvalidInput(format!("Invalid Sui object id: {}", e)))?;
 
         let client = self.node.client();
         let mut client_guard = client.lock().await;
@@ -2401,7 +2400,9 @@ mod tests {
         let node = Arc::new(SuiNode::new("https://fullnode.testnet.sui.io:443").unwrap());
         let ops = SuiBackend::new(config, node);
         let commitment = Hash::new([0x02u8; 32]);
-        let result = ops.build_inclusion_proof(&commitment, 1, &[0x07u8; 32]).await;
+        let result = ops
+            .build_inclusion_proof(&commitment, 1, &[0x07u8; 32])
+            .await;
         assert!(
             matches!(result, Err(ChainOpError::CapabilityUnavailable(_))),
             "Sui must fail closed (no empty/unbound inclusion evidence): {result:?}"

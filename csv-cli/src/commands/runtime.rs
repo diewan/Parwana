@@ -6,8 +6,10 @@ use colored::Colorize;
 use csv_admission::AdmissionController;
 use csv_observability::runtime_health::{DegradedReason, RuntimeHealth};
 use csv_runtime::{CircuitBreakerState, HealthMonitor, RuntimeMode};
+use csv_sdk::contract;
 
 use crate::config::Config;
+use crate::contract_view;
 use crate::output;
 
 #[derive(Subcommand)]
@@ -89,30 +91,11 @@ fn cmd_health() -> Result<()> {
         return Ok(());
     }
 
-    let headers = vec!["Component", "Status", "Error"];
-    let mut rows = Vec::new();
-
-    for check in checks {
-        let status = if check.healthy {
-            "Healthy".to_string()
-        } else {
-            format!("Unhealthy: {}", check.error.as_deref().unwrap_or("unknown"))
-        };
-        rows.push(vec![
-            check.component.clone(),
-            status,
-            check.error.clone().unwrap_or_default(),
-        ]);
-    }
-
-    output::table(&headers, &rows);
-
-    let unhealthy_count = checks.iter().filter(|c| !c.healthy).count();
-    if unhealthy_count > 0 {
-        output::warning(&format!("{} component(s) unhealthy", unhealthy_count));
-    } else {
-        output::success("All components healthy");
-    }
+    // Render the same health artifact the wallet renders. Building it through the
+    // contract is what stops the CLI from quietly reporting an overall-healthy
+    // runtime while a component is failing — the contract rejects that report.
+    let report = contract::health_report(&monitor.health(), checks)?;
+    contract_view::health_report(&report);
 
     Ok(())
 }

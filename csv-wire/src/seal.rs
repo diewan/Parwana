@@ -2,7 +2,7 @@ use csv_hash::seal::SealPoint;
 use serde::{Deserialize, Serialize};
 
 /// Wire format for seal point.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealPointWire {
     pub id: String,
     pub nonce: Option<u64>,

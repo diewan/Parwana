@@ -42,6 +42,8 @@ csv-storage = { version = "0.1.5", path = "../csv-storage", optional = true }
 csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
 csv-adapter-factory = { version = "0.1.5", path = "../csv-adapter-factory", optional = true }
 csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-wire = { version = "0.1.5", path = "../csv-wire" }
+csv-observability = { version = "0.1.5", path = "../csv-observability" }
 
 # Key management
 csv-keys = { version = "0.1.5", path = "../csv-keys" }

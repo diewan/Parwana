@@ -636,24 +636,24 @@ impl ChainRuntime {
             // fails closed rather than yielding a tip-anchored (invalid) proof.
             None => match anchor_hint {
                 Some(hint) => {
-                    let tx = adapter.get_transaction(&hint.anchor_tx_hex).await.map_err(|e| {
-                        CsvError::ProtocolError {
+                    let tx = adapter
+                        .get_transaction(&hint.anchor_tx_hex)
+                        .await
+                        .map_err(|e| CsvError::ProtocolError {
                             chain: chain.clone(),
                             message: format!(
                                 "Failed to resolve supplied anchor transaction {}: {e}",
                                 hint.anchor_tx_hex
                             ),
-                        }
-                    })?;
-                    let block_height =
-                        tx.block_height.ok_or_else(|| CsvError::ProtocolError {
-                            chain: chain.clone(),
-                            message: format!(
-                                "Supplied anchor transaction {} is not yet confirmed; cannot \
-                                 build an inclusion proof against an unconfirmed anchor",
-                                hint.anchor_tx_hex
-                            ),
                         })?;
+                    let block_height = tx.block_height.ok_or_else(|| CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: format!(
+                            "Supplied anchor transaction {} is not yet confirmed; cannot \
+                                 build an inclusion proof against an unconfirmed anchor",
+                            hint.anchor_tx_hex
+                        ),
+                    })?;
                     let anchor_bytes = hex::decode(hint.anchor_tx_hex.trim_start_matches("0x"))
                         .map_err(|e| CsvError::ProtocolError {
                             chain: chain.clone(),

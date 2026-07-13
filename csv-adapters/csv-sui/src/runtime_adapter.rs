@@ -274,9 +274,8 @@ impl ChainAdapter for SuiRuntimeAdapter {
                     .map(|t| t.ends_with("::csv_seal::CrossChainLock"))
                     .unwrap_or(false);
                 let contents = ev.contents.as_ref().and_then(|b| b.value.as_ref())?;
-                let binds_sanad = contents.len() > 33
-                    && contents[0] == 32
-                    && &contents[1..33] == sanad_bytes;
+                let binds_sanad =
+                    contents.len() > 33 && contents[0] == 32 && &contents[1..33] == sanad_bytes;
                 (type_matches && binds_sanad).then(|| (i as u64, contents.to_vec()))
             })
             .ok_or_else(|| {

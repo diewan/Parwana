@@ -2489,8 +2489,7 @@ mod state_tests {
     /// without `--update` produces no status update.
     #[test]
     fn off_chain_owned_is_labeled_off_chain_not_invalid() {
-        let resolved =
-            resolve_sanad_row_status(false, true, SanadStatus::OwnedOffChain, None);
+        let resolved = resolve_sanad_row_status(false, true, SanadStatus::OwnedOffChain, None);
         assert_eq!(
             resolved.label,
             SanadStatus::OwnedOffChain.display_label(),

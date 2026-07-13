@@ -201,16 +201,14 @@ Wallet Initialization
   ✓ Config saved to ~/.csv/config.toml
 ```
 
-### Import Existing Wallet
+### Export Wallet (Portable Encrypted File)
+
+Export produces the common encrypted wallet envelope — the one format every CSV
+application imports. The file is encrypted with a passphrase of its own, typed at
+a hidden prompt, and written with owner-only permissions.
 
 ```bash
-csv wallet import "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" test
-```
-
-### Export Wallet (View Mnemonic)
-
-```bash
-csv wallet export
+csv wallet export --out my-wallet.csvw
 ```
 
 Output:
@@ -219,8 +217,29 @@ Output:
 ═══════════════════════════════════════════════════════════════
 Wallet Export
 ═══════════════════════════════════════════════════════════════
-  SECRET  abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about
-  WARNING Store this securely and never share it!
+  ✓ Wallet exported to my-wallet.csvw
+  Format                    common encrypted wallet envelope v1
+  Accounts                  5
+  ⚠ This file carries your key material.
+```
+
+### Import Existing Wallet
+
+Importing a wallet file states explicitly what it does to your local wallet.
+`--mode replace` installs the file's key source as the signing authority,
+destroying any mnemonic already stored; `--mode profile` imports only known
+accounts and labels as a watch profile and never touches your secret.
+
+```bash
+csv wallet import my-wallet.csvw --mode replace
+```
+
+To import a BIP-39 phrase you hold on paper, use the dedicated command. The
+phrase is typed at a hidden prompt — never pass it as an argument, where it would
+land in your shell history and the process list.
+
+```bash
+csv wallet import-mnemonic
 ```
 
 ### Generate Wallet for Specific Chain

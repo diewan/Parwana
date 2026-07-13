@@ -520,14 +520,24 @@ impl ChainBroadcaster for SolanaBackend {
                     // lookup failure): the tx is already on-chain, so this
                     // must never fail the confirmation itself — the runtime
                     // re-derives the authoritative slot via tx_finality.
-                    let slot = self.rpc().get_transaction_slot(&sig).ok().flatten().unwrap_or(0);
+                    let slot = self
+                        .rpc()
+                        .get_transaction_slot(&sig)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0);
                     return Ok(TransactionStatus::Confirmed {
                         block_height: slot,
                         confirmations: 32,
                     });
                 }
                 Ok(ConfirmationStatus::Confirmed) => {
-                    let slot = self.rpc().get_transaction_slot(&sig).ok().flatten().unwrap_or(0);
+                    let slot = self
+                        .rpc()
+                        .get_transaction_slot(&sig)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0);
                     return Ok(TransactionStatus::Confirmed {
                         block_height: slot,
                         confirmations: 1,
@@ -896,12 +906,11 @@ impl ChainSanadOps for SolanaBackend {
         // Accounts per the program's `LockSanad` context: sanad PDA, the
         // ["lock_registry"] PDA, the per-sanad ["lock", sanad_id] record PDA
         // (init), the owner (payer/signer), and the system program.
-        let (lock_registry, _) =
-            Pubkey::find_program_address(&[b"lock_registry"], &program_id);
+        let (lock_registry, _) = Pubkey::find_program_address(&[b"lock_registry"], &program_id);
         let (lock_account, _) =
             Pubkey::find_program_address(&[b"lock", sanad_id.as_bytes()], &program_id);
-        let system_program = Pubkey::from_str("11111111111111111111111111111111")
-            .expect("system program id");
+        let system_program =
+            Pubkey::from_str("11111111111111111111111111111111").expect("system program id");
 
         let instruction = Instruction {
             program_id,
