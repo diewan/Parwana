@@ -49,7 +49,10 @@ use crate::wallet::WalletManager;
 // Import adapter registry for cross-chain transfers
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
-#[cfg(feature = "runtime-coordinator")]
+// The adapter factory is a native-only, target-scoped dependency: on wasm32 the
+// runtime-coordinator feature builds the coordinator against an empty adapter
+// registry (fail closed; chain dispatch requires a native host — WASM-REMOTE-001).
+#[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
 use csv_adapter_factory::{
     AdapterConfig, AdapterFactory, AdapterResult as FactoryAdapterResult, AptosFactory,
     BitcoinFactory, EthereumFactory, NetworkType as FactoryNetworkType, RpcEndpoint, RpcProtocol,
@@ -60,12 +63,12 @@ use csv_keys::memory::SecretKey;
 #[cfg(feature = "runtime-coordinator")]
 use csv_protocol::secret::SharedSecretHandle;
 
-#[cfg(feature = "runtime-coordinator")]
+#[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
 // Type alias for factory result
 /// Result type returned by the adapter factory
 pub type AdapterResult = FactoryAdapterResult;
 
-#[cfg(not(feature = "runtime-coordinator"))]
+#[cfg(not(all(feature = "runtime-coordinator", not(target_arch = "wasm32"))))]
 // Type alias for legacy result (no factory support)
 pub type AdapterResult = std::sync::Arc<dyn csv_protocol::chain_adapter_traits::ChainBackend>;
 

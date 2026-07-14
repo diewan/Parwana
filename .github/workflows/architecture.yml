@@ -81,6 +81,7 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo build -p csv-runtime --target wasm32-unknown-unknown
           cargo build -p csv-sdk --no-default-features --features std,wasm,wallet --target wasm32-unknown-unknown
+          cargo build -p csv-sdk --no-default-features --features std,wasm,wallet,runtime-coordinator --target wasm32-unknown-unknown
 
   formal-verification:
     name: Formal model check

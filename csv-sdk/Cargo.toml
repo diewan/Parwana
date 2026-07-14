@@ -40,7 +40,6 @@ csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optiona
 csv-store = { version = "0.1.5", path = "../csv-store", optional = true }
 csv-storage = { version = "0.1.5", path = "../csv-storage", optional = true }
 csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
-csv-adapter-factory = { version = "0.1.5", path = "../csv-adapter-factory", optional = true }
 csv-codec = { version = "0.1.5", path = "../csv-codec" }
 csv-wire = { version = "0.1.5", path = "../csv-wire" }
 csv-observability = { version = "0.1.5", path = "../csv-observability" }
@@ -86,6 +85,17 @@ csv-ethereum = { version = "0.1.5", path = "../csv-adapters/csv-ethereum", optio
 csv-sui = { version = "0.1.5", path = "../csv-adapters/csv-sui", optional = true }
 csv-aptos = { version = "0.1.5", path = "../csv-adapters/csv-aptos", optional = true }
 csv-solana = { version = "0.1.5", path = "../csv-adapters/csv-solana", optional = true }
+# The adapter factory bundles all concrete chain adapters, so it is native-only.
+# On wasm32 the runtime-coordinator feature still builds the TransferCoordinator,
+# but the adapter registry stays empty (fail closed) until remote dispatch to a
+# native host is wired in (WASM-REMOTE-001).
+csv-adapter-factory = { version = "0.1.5", path = "../csv-adapter-factory", optional = true, features = [
+    "bitcoin",
+    "ethereum",
+    "sui",
+    "aptos",
+    "solana",
+] }
 
 [features]
 default = ["std", "tokio", "native"]
@@ -121,7 +131,12 @@ in-memory = []
 cross-chain-persist = ["dep:csv-storage", "dep:sqlx", "dep:chrono"]
 
 # Runtime coordinator integration (full TransferCoordinator support)
-runtime-coordinator = ["dep:csv-storage", "csv-storage/redb", "csv-runtime/persistent", "tokio", "dep:csv-adapter-factory", "csv-adapter-factory/bitcoin", "csv-adapter-factory/ethereum", "csv-adapter-factory/sui", "csv-adapter-factory/aptos", "csv-adapter-factory/solana"]
+# Portable coordinator core (stores, journal, TransferCoordinator). The concrete
+# chain adapters ride along automatically on native targets only: the factory is
+# a target-scoped dependency (see below), so `dep:csv-adapter-factory` is a
+# no-op on wasm32 and the coordinator runs against an empty, fail-closed
+# adapter registry there.
+runtime-coordinator = ["dep:csv-storage", "csv-storage/redb", "csv-runtime/persistent", "tokio", "dep:csv-adapter-factory"]
 
 # Wallet / crypto
 wallet = ["dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]

@@ -309,7 +309,7 @@ impl ClientBuilder {
             crate::client::NetworkType::Mainnet
         };
 
-        #[cfg(feature = "runtime-coordinator")]
+        #[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
         for chain in &self.state.enabled_chains {
             if let Some(result) = crate::client::CsvClient::build_adapter_for_chain(
                 chain.clone(),
@@ -341,7 +341,11 @@ impl ClientBuilder {
             }
         }
 
-        #[cfg(not(feature = "runtime-coordinator"))]
+        // On wasm32 this legacy arm also serves runtime-coordinator builds: chain
+        // backends register for read paths, but the coordinator's adapter registry
+        // stays empty, so transfer dispatch fails closed until remote dispatch to a
+        // native host lands (WASM-REMOTE-001).
+        #[cfg(not(all(feature = "runtime-coordinator", not(target_arch = "wasm32"))))]
         for chain in &self.state.enabled_chains {
             if let Some(result) = crate::client::CsvClient::build_adapter_for_chain(
                 chain.clone(),

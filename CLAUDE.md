@@ -22,6 +22,7 @@ cargo clippy --workspace --all-features -- -D warnings
 # chain adapters are target-gated out on wasm32 and served by in-memory stores)
 cargo build -p csv-runtime --target wasm32-unknown-unknown
 cargo build -p csv-sdk --no-default-features --features std,wasm,wallet --target wasm32-unknown-unknown
+cargo build -p csv-sdk --no-default-features --features std,wasm,wallet,runtime-coordinator --target wasm32-unknown-unknown
 ```
 
 The workspace is pure Rust (persistence is `redb`; RocksDB and its C++ toolchain requirement are gone — no `CXXFLAGS` needed).
