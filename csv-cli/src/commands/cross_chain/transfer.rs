@@ -27,7 +27,7 @@ use csv_hash::sanad::SanadId;
 use csv_hash::seal::SealPoint;
 use csv_protocol::verification_levels::VerificationLevel;
 use csv_runtime::execution_journal::ExecutionJournal;
-use csv_runtime::execution_journal::RocksDbExecutionJournal;
+use csv_runtime::execution_journal::RedbExecutionJournal;
 use csv_runtime::{SendExecutor, SendExecutorError, SendTransfer};
 use csv_sdk::CsvClient;
 use csv_sdk::contract;
@@ -2448,14 +2448,14 @@ async fn recover_resume_context_from_replay_db(
 ) -> Result<Option<ResumeContext>> {
     let replay_path = runtime_journal_path(config)
         .parent()
-        .map(|p| p.join("replay"))
+        .map(|p| p.join("replay.redb"))
         .ok_or_else(|| anyhow::anyhow!("Cannot derive replay registry path"))?;
     if !replay_path.exists() {
         return Ok(None);
     }
 
     use csv_runtime::replay_database::ReplayDatabase;
-    let db = csv_runtime::replay_database::RocksDbReplayDb::open(&replay_path.to_string_lossy())
+    let db = csv_runtime::replay_database::RedbReplayDb::open(&replay_path.to_string_lossy())
         .map_err(|e| anyhow::anyhow!("Failed to open replay registry: {}", e))?;
     let transfers = db
         .load_all_transfers()
@@ -2485,7 +2485,7 @@ fn recover_resume_context_from_journal(
         return Ok(None);
     }
 
-    let journal = RocksDbExecutionJournal::open(&journal_path.to_string_lossy())
+    let journal = RedbExecutionJournal::open(&journal_path.to_string_lossy())
         .map_err(|e| anyhow::anyhow!("Failed to open runtime journal: {}", e))?;
     let entry = match journal
         .latest_entry(transfer_id)
@@ -2518,7 +2518,7 @@ fn runtime_journal_path(config: &Config) -> PathBuf {
         PathBuf::from(&config.data_dir)
     };
 
-    data_dir.join("runtime").join("journal")
+    data_dir.join("runtime").join("journal.redb")
 }
 
 /// Minimal chain config used only for capability probing (no wallet material).

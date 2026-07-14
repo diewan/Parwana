@@ -13,11 +13,10 @@ csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
 csv-proof = { version = "0.1.5", path = "../csv-proof" }
 csv-hash = { version = "0.1.5", path = "../csv-hash" }
 csv-wire = { version = "0.1.5", path = "../csv-wire" }
-# default-features off so RocksDB (native C++, wasm-incompatible) is pulled in ONLY via
+# default-features off so redb (filesystem-backed, wasm-incompatible) is pulled in ONLY via
 # the `persistent` feature — keeps the `--no-default-features` wasm build clean.
 csv-storage = { version = "0.1.5", path = "../csv-storage", default-features = false }
 csv-codec = { version = "0.1.5", path = "../csv-codec" }
-csv-coordinator = { version = "0.1.5", path = "../csv-coordinator" }
 csv-admission = { version = "0.1.5", path = "../csv-admission" }
 csv-observability = { version = "0.1.5", path = "../csv-observability" }
 serde = { version = "1", features = ["derive"] }
@@ -31,10 +30,18 @@ hex = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 toml = "0.8"
 
-# csv-runtime is native-only (depends on tokio net, etc.)
-# wasm32 is not supported - see compile_error! in lib.rs
+# Native builds keep the full tokio feature set and the coordinator's default
+# chain adapters. wasm32 builds trim tokio to its supported feature subset
+# (sync,macros,io-util,rt,time) and drop the adapters — chain-specific work is
+# unavailable in-browser and must be dispatched to a native host.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["full"] }
+csv-coordinator = { version = "0.1.5", path = "../csv-coordinator" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["sync", "macros", "rt", "time"] }
+csv-coordinator = { version = "0.1.5", path = "../csv-coordinator", default-features = false }
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -46,12 +53,12 @@ ed25519-dalek = "2"
 
 [features]
 default = ["persistent"]
-persistent = ["csv-storage/rocksdb", "dep:rocksdb"]
+persistent = ["csv-storage/redb", "dep:redb"]
 postgres = ["csv-storage/postgres"]
 serde = []
 
-[dependencies.rocksdb]
-version = "0.22"
+[dependencies.redb]
+version = "4.1"
 optional = true
 
 [lints]

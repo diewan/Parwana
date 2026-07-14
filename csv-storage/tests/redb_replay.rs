@@ -1,11 +1,12 @@
-//! RocksDB replay backend integration test.
+//! redb replay backend integration test.
 
-use csv_storage::{ReplayDatabase, RocksDbReplayDb};
+use csv_storage::{RedbReplayDb, ReplayDatabase};
 
 #[tokio::test]
-async fn rocksdb_replay_cas() {
+async fn redb_replay_cas() {
     let dir = tempfile::tempdir().unwrap();
-    let db = RocksDbReplayDb::open(dir.path().to_str().unwrap()).unwrap();
+    let path = dir.path().join("replay.redb");
+    let db = RedbReplayDb::open(path.to_str().unwrap()).unwrap();
     let id = b"01234567890123456789012345678901";
     assert!(!db.contains(id).await.unwrap());
     db.insert_if_absent(id).await.unwrap();

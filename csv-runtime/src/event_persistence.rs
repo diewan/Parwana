@@ -398,88 +398,144 @@ impl EventStore for InMemoryEventStore {
     }
 }
 
-/// RocksDB-backed event store for durability when `persistent` feature is enabled.
+/// Events keyed by (aggregate id bytes, version) so per-aggregate range scans
+/// come back in version order.
 #[cfg(feature = "persistent")]
-pub struct RocksDbEventStore {
-    db: rocksdb::DB,
+const EVENTS_TABLE: redb::TableDefinition<'static, (&'static [u8], u64), &'static [u8]> =
+    redb::TableDefinition::new("events");
+
+/// Latest snapshot per aggregate id.
+#[cfg(feature = "persistent")]
+const SNAPSHOTS_TABLE: redb::TableDefinition<'static, &'static [u8], &'static [u8]> =
+    redb::TableDefinition::new("snapshots");
+
+/// Stream position per aggregate id.
+#[cfg(feature = "persistent")]
+const POSITIONS_TABLE: redb::TableDefinition<'static, &'static [u8], &'static [u8]> =
+    redb::TableDefinition::new("positions");
+
+/// redb-backed event store for durability when `persistent` feature is enabled.
+#[cfg(feature = "persistent")]
+pub struct RedbEventStore {
+    db: redb::Database,
 }
 
 #[cfg(feature = "persistent")]
-impl RocksDbEventStore {
-    /// Open a RocksDB-backed event store at the given filesystem path.
+impl RedbEventStore {
+    /// Open a redb-backed event store at the given file path.
     pub fn open(path: &str) -> Result<Self, String> {
-        let mut opts = rocksdb::Options::default();
-        opts.create_if_missing(true);
-        match rocksdb::DB::open(&opts, path) {
-            Ok(db) => Ok(Self { db }),
-            Err(e) => Err(e.to_string()),
+        let db = redb::Database::create(path).map_err(|e| e.to_string())?;
+        // Create all tables up front so read transactions never observe a
+        // missing table.
+        let txn = db.begin_write().map_err(|e| e.to_string())?;
+        txn.open_table(EVENTS_TABLE)
+            .and_then(|_| txn.open_table(SNAPSHOTS_TABLE))
+            .and_then(|_| txn.open_table(POSITIONS_TABLE))
+            .map_err(|e| e.to_string())?;
+        txn.commit().map_err(|e| e.to_string())?;
+        Ok(Self { db })
+    }
+
+    fn aggregate_bytes(aggregate_id: &csv_protocol::sanad::SanadId) -> Vec<u8> {
+        let wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
+        wire.bytes.as_bytes().to_vec()
+    }
+
+    fn put(
+        &self,
+        table: redb::TableDefinition<'static, &'static [u8], &'static [u8]>,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<(), EventStoreError> {
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        {
+            let mut t = txn
+                .open_table(table)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            t.insert(key, value)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
         }
+        txn.commit().map_err(|e| EventStoreError::Io(e.to_string()))
     }
 
-    /// Key prefix for events.
-    const EVENTS_PREFIX: &'static str = "evt:";
-
-    /// Key prefix for snapshots.
-    const SNAPSHOTS_PREFIX: &'static str = "snap:";
-
-    /// Key prefix for positions.
-    const POSITIONS_PREFIX: &'static str = "pos:";
-
-    /// Build a key for storing an event.
-    /// Uses raw bytes for aggregate ID to avoid serde_json dependency.
-    fn event_key(aggregate_id: &SanadIdWire, version: u64) -> String {
-        format!(
-            "{}{}:{:x}",
-            Self::EVENTS_PREFIX,
-            hex::encode(aggregate_id.bytes.as_bytes()),
-            version
-        )
+    fn get(
+        &self,
+        table: redb::TableDefinition<'static, &'static [u8], &'static [u8]>,
+        key: &[u8],
+    ) -> Result<Option<Vec<u8>>, EventStoreError> {
+        use redb::ReadableDatabase;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let t = txn
+            .open_table(table)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        Ok(t.get(key)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?
+            .map(|v| v.value().to_vec()))
     }
 
-    /// Build a key for storing a snapshot.
-    fn snapshot_key(aggregate_id: &SanadIdWire) -> String {
-        format!(
-            "{}{}",
-            Self::SNAPSHOTS_PREFIX,
-            hex::encode(aggregate_id.bytes.as_bytes())
-        )
-    }
-
-    /// Build a key for storing a position.
-    fn position_key(aggregate_id: &SanadIdWire) -> String {
-        format!(
-            "{}{}",
-            Self::POSITIONS_PREFIX,
-            hex::encode(aggregate_id.bytes.as_bytes())
-        )
+    /// Scan one aggregate's events in version order, applying `visit` until it
+    /// returns `false`.
+    fn scan_aggregate_events(
+        &self,
+        aggregate: &[u8],
+        mut visit: impl FnMut(u64, &[u8]) -> Result<bool, EventStoreError>,
+    ) -> Result<(), EventStoreError> {
+        use redb::ReadableDatabase;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let t = txn
+            .open_table(EVENTS_TABLE)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        for item in redb::ReadableTable::range(&t, (aggregate, 0u64)..=(aggregate, u64::MAX))
+            .map_err(|e| EventStoreError::Io(e.to_string()))?
+        {
+            let (key, value) = item.map_err(|e| EventStoreError::Io(e.to_string()))?;
+            let (_, version) = key.value();
+            if !visit(version, value.value())? {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 
 #[cfg(feature = "persistent")]
-impl EventStore for RocksDbEventStore {
+impl EventStore for RedbEventStore {
     fn append(&self, event: &RuntimeEventEnvelope) -> Result<(), EventStoreError> {
-        let key = Self::event_key(&event.aggregate_id, event.version);
-        let value =
-            to_canonical_cbor(event).map_err(|e| EventStoreError::Serialization(e.to_string()))?;
-        self.db
-            .put(key, value)
-            .map_err(|e| EventStoreError::Io(e.to_string()))
+        self.append_batch(std::slice::from_ref(event))
     }
 
     fn append_batch(&self, events: &[RuntimeEventEnvelope]) -> Result<(), EventStoreError> {
         if events.is_empty() {
             return Ok(());
         }
-        let mut batch = rocksdb::WriteBatch::default();
-        for event in events {
-            let key = Self::event_key(&event.aggregate_id, event.version);
-            let value = to_canonical_cbor(event)
-                .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
-            batch.put(key, value);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        {
+            let mut t = txn
+                .open_table(EVENTS_TABLE)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            for event in events {
+                let value = to_canonical_cbor(event)
+                    .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
+                t.insert(
+                    (event.aggregate_id.bytes.as_bytes(), event.version),
+                    value.as_slice(),
+                )
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            }
         }
-        self.db
-            .write(batch)
-            .map_err(|e| EventStoreError::Io(e.to_string()))
+        txn.commit().map_err(|e| EventStoreError::Io(e.to_string()))
     }
 
     fn get_events(
@@ -487,39 +543,39 @@ impl EventStore for RocksDbEventStore {
         aggregate_id: &csv_protocol::sanad::SanadId,
         filter: Option<&EventFilter>,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError> {
-        let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, aggregate_id);
+        let aggregate = Self::aggregate_bytes(aggregate_id);
         let mut result = Vec::new();
 
-        for entry in self.db.prefix_iterator(prefix.as_bytes()) {
-            let (_, value) = entry.map_err(|e| EventStoreError::Io(e.to_string()))?;
-            let event: RuntimeEventEnvelope = from_canonical_cbor(&value)
+        self.scan_aggregate_events(&aggregate, |_, value| {
+            let event: RuntimeEventEnvelope = from_canonical_cbor(value)
                 .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
 
             if let Some(f) = filter {
                 if let Some(ref event_type) = f.event_type
                     && &event.event_type != event_type
                 {
-                    continue;
+                    return Ok(true);
                 }
                 if let Some(min_ver) = f.min_version
                     && event.version < min_ver
                 {
-                    continue;
+                    return Ok(true);
                 }
                 if let Some(max_ver) = f.max_version
                     && event.version > max_ver
                 {
-                    continue;
+                    return Ok(true);
                 }
                 if let Some(limit) = f.limit
                     && result.len() >= limit
                 {
-                    break;
+                    return Ok(false);
                 }
             }
 
             result.push(event);
-        }
+            Ok(true)
+        })?;
 
         Ok(result)
     }
@@ -528,48 +584,48 @@ impl EventStore for RocksDbEventStore {
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<u64, EventStoreError> {
-        // Iterate all events for this aggregate and find the max version
-        let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, aggregate_id);
-        let mut max_version = 0u64;
-
-        for result in self.db.prefix_iterator(prefix.as_bytes()) {
-            let (key, _) = result.map_err(|e| EventStoreError::Io(e.to_string()))?;
-            let key_str =
-                String::from_utf8(key.to_vec()).map_err(|e| EventStoreError::Io(e.to_string()))?;
-            if let Some(ver_str) = key_str.split(':').next_back()
-                && let Ok(ver) = ver_str.parse::<u64>()
-                && ver > max_version
-            {
-                max_version = ver;
-            }
-        }
-
-        Ok(max_version)
+        use redb::ReadableDatabase;
+        let aggregate = Self::aggregate_bytes(aggregate_id);
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let t = txn
+            .open_table(EVENTS_TABLE)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let last = redb::ReadableTable::range(
+            &t,
+            (aggregate.as_slice(), 0u64)..=(aggregate.as_slice(), u64::MAX),
+        )
+        .map_err(|e| EventStoreError::Io(e.to_string()))?
+        .next_back()
+        .transpose()
+        .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        Ok(last.map(|(key, _)| key.value().1).unwrap_or(0))
     }
 
     fn save_snapshot(&self, snapshot: &AggregateSnapshot) -> Result<(), EventStoreError> {
-        let key = Self::snapshot_key(&snapshot.aggregate_id);
         let value = to_canonical_cbor(snapshot)
             .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
-        self.db
-            .put(key, value)
-            .map_err(|e| EventStoreError::Io(e.to_string()))
+        self.put(
+            SNAPSHOTS_TABLE,
+            snapshot.aggregate_id.bytes.as_bytes(),
+            &value,
+        )
     }
 
     fn load_snapshot(
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<AggregateSnapshot>, EventStoreError> {
-        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
-        let key = Self::snapshot_key(&aggregate_id_wire);
-        match self.db.get(key) {
-            Ok(Some(value)) => {
+        let key = Self::aggregate_bytes(aggregate_id);
+        match self.get(SNAPSHOTS_TABLE, &key)? {
+            Some(value) => {
                 let snapshot: AggregateSnapshot = from_canonical_cbor(&value)
                     .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
                 Ok(Some(snapshot))
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(EventStoreError::Io(e.to_string())),
+            None => Ok(None),
         }
     }
 
@@ -578,24 +634,38 @@ impl EventStore for RocksDbEventStore {
         aggregate_id: &csv_protocol::sanad::SanadId,
         keep_after_version: u64,
     ) -> Result<usize, EventStoreError> {
-        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
-        let key = Self::snapshot_key(&aggregate_id_wire);
-        match self.db.get(&key) {
-            Ok(Some(value)) => {
-                let snapshot: AggregateSnapshot = from_canonical_cbor(&value)
-                    .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
-                if snapshot.version < keep_after_version {
-                    self.db
-                        .delete(&key)
-                        .map_err(|e| EventStoreError::Io(e.to_string()))?;
-                    Ok(1)
-                } else {
-                    Ok(0)
+        use redb::ReadableTable;
+        let key = Self::aggregate_bytes(aggregate_id);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let pruned = {
+            let mut t = txn
+                .open_table(SNAPSHOTS_TABLE)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            let stale = match t
+                .get(key.as_slice())
+                .map_err(|e| EventStoreError::Io(e.to_string()))?
+            {
+                Some(value) => {
+                    let snapshot: AggregateSnapshot = from_canonical_cbor(value.value())
+                        .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
+                    snapshot.version < keep_after_version
                 }
+                None => false,
+            };
+            if stale {
+                t.remove(key.as_slice())
+                    .map_err(|e| EventStoreError::Io(e.to_string()))?;
+                1
+            } else {
+                0
             }
-            Ok(None) => Ok(0),
-            Err(e) => Err(EventStoreError::Io(e.to_string())),
-        }
+        };
+        txn.commit()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        Ok(pruned)
     }
 
     fn get_after_position(
@@ -603,110 +673,129 @@ impl EventStore for RocksDbEventStore {
         position: &StreamPosition,
         limit: usize,
     ) -> Result<Vec<RuntimeEventEnvelope>, EventStoreError> {
-        let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, position.aggregate_id);
+        let aggregate = position.aggregate_id.bytes.as_bytes().to_vec();
         let mut result = Vec::new();
 
-        for item in self.db.prefix_iterator(prefix.as_bytes()) {
-            let (_, value) = item.map_err(|e| EventStoreError::Io(e.to_string()))?;
-            let event: RuntimeEventEnvelope = from_canonical_cbor(&value)
-                .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
-
-            if event.version > position.last_version {
-                result.push(event);
-                if result.len() >= limit {
-                    break;
-                }
+        self.scan_aggregate_events(&aggregate, |version, value| {
+            if version <= position.last_version {
+                return Ok(true);
             }
-        }
+            let event: RuntimeEventEnvelope = from_canonical_cbor(value)
+                .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
+            result.push(event);
+            Ok(result.len() < limit)
+        })?;
 
         Ok(result)
     }
 
     fn update_position(&self, position: &StreamPosition) -> Result<(), EventStoreError> {
-        let key = Self::position_key(&position.aggregate_id);
         let value = to_canonical_cbor(position)
             .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
-        self.db
-            .put(key, value)
-            .map_err(|e| EventStoreError::Io(e.to_string()))
+        self.put(
+            POSITIONS_TABLE,
+            position.aggregate_id.bytes.as_bytes(),
+            &value,
+        )
     }
 
     fn get_position(
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<Option<StreamPosition>, EventStoreError> {
-        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
-        let key = Self::position_key(&aggregate_id_wire);
-        match self.db.get(key) {
-            Ok(Some(value)) => {
+        let key = Self::aggregate_bytes(aggregate_id);
+        match self.get(POSITIONS_TABLE, &key)? {
+            Some(value) => {
                 let position: StreamPosition = from_canonical_cbor(&value)
                     .map_err(|e| EventStoreError::Serialization(e.to_string()))?;
                 Ok(Some(position))
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(EventStoreError::Io(e.to_string())),
+            None => Ok(None),
         }
     }
 
     fn list_aggregates(&self) -> Result<Vec<csv_protocol::sanad::SanadId>, EventStoreError> {
+        use redb::ReadableDatabase;
         let mut aggregates = std::collections::HashSet::new();
-        let prefix = Self::EVENTS_PREFIX;
-
-        for item in self.db.prefix_iterator(prefix.as_bytes()) {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let t = txn
+            .open_table(EVENTS_TABLE)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        for item in redb::ReadableTable::range::<(&[u8], u64)>(&t, ..)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?
+        {
             let (key, _) = item.map_err(|e| EventStoreError::Io(e.to_string()))?;
-            let key_str =
-                String::from_utf8(key.to_vec()).map_err(|e| EventStoreError::Io(e.to_string()))?;
-            // Extract aggregate ID from key format "evt:{hex_aggregate_id}:version"
-            if let Some(rest) = key_str.strip_prefix(prefix)
-                && let Some(colon_pos) = rest.find(':')
-            {
-                let hex_id = &rest[..colon_pos];
-                if let Ok(bytes) = hex::decode(hex_id)
-                    && bytes.len() == 32
-                {
-                    let mut array = [0u8; 32];
-                    array.copy_from_slice(&bytes);
-                    aggregates.insert(csv_protocol::sanad::SanadId::new(array));
-                }
+            let (aggregate, _) = key.value();
+            if aggregate.len() == 32 {
+                let mut array = [0u8; 32];
+                array.copy_from_slice(aggregate);
+                aggregates.insert(csv_protocol::sanad::SanadId::new(array));
             }
         }
-
         Ok(aggregates.into_iter().collect())
     }
 
     fn event_count(&self) -> Result<usize, EventStoreError> {
-        // Count all events by iterating the prefix
-        let mut count = 0;
-        for _ in self.db.prefix_iterator(Self::EVENTS_PREFIX.as_bytes()) {
-            count += 1;
-        }
-        Ok(count)
+        use redb::ReadableDatabase;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let t = txn
+            .open_table(EVENTS_TABLE)
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        let count =
+            redb::ReadableTableMetadata::len(&t).map_err(|e| EventStoreError::Io(e.to_string()))?;
+        Ok(count as usize)
     }
 
     fn clear_aggregate(
         &self,
         aggregate_id: &csv_protocol::sanad::SanadId,
     ) -> Result<(), EventStoreError> {
-        // Delete all events for this aggregate
-        let prefix = format!("{}{:?}:", Self::EVENTS_PREFIX, aggregate_id);
-        for item in self.db.prefix_iterator(prefix.as_bytes()) {
-            let (key, _) = item.map_err(|e| EventStoreError::Io(e.to_string()))?;
-            self.db
-                .delete(key)
+        let aggregate = Self::aggregate_bytes(aggregate_id);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| EventStoreError::Io(e.to_string()))?;
+        {
+            let mut events = txn
+                .open_table(EVENTS_TABLE)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            let versions: Vec<u64> = redb::ReadableTable::range(
+                &events,
+                (aggregate.as_slice(), 0u64)..=(aggregate.as_slice(), u64::MAX),
+            )
+            .map_err(|e| EventStoreError::Io(e.to_string()))?
+            .map(|item| {
+                item.map(|(key, _)| key.value().1)
+                    .map_err(|e| EventStoreError::Io(e.to_string()))
+            })
+            .collect::<Result<_, _>>()?;
+            for version in versions {
+                events
+                    .remove((aggregate.as_slice(), version))
+                    .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            }
+
+            let mut snapshots = txn
+                .open_table(SNAPSHOTS_TABLE)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            snapshots
+                .remove(aggregate.as_slice())
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+
+            let mut positions = txn
+                .open_table(POSITIONS_TABLE)
+                .map_err(|e| EventStoreError::Io(e.to_string()))?;
+            positions
+                .remove(aggregate.as_slice())
                 .map_err(|e| EventStoreError::Io(e.to_string()))?;
         }
-
-        // Delete snapshot
-        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
-        let snap_key = Self::snapshot_key(&aggregate_id_wire);
-        let _ = self.db.delete(snap_key);
-
-        // Delete position
-        let aggregate_id_wire: csv_wire::SanadIdWire = aggregate_id.clone().into();
-        let pos_key = Self::position_key(&aggregate_id_wire);
-        let _ = self.db.delete(pos_key);
-
-        Ok(())
+        txn.commit().map_err(|e| EventStoreError::Io(e.to_string()))
     }
 }
 

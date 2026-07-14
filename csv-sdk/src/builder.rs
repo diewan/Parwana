@@ -37,13 +37,11 @@ use csv_runtime::event_bus::EventBus;
 #[cfg(all(feature = "runtime-coordinator", target_arch = "wasm32"))]
 use csv_runtime::{event_persistence::InMemoryEventStore, execution_journal::InMemoryJournal};
 #[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
-use csv_runtime::{
-    event_persistence::RocksDbEventStore, execution_journal::RocksDbExecutionJournal,
-};
+use csv_runtime::{event_persistence::RedbEventStore, execution_journal::RedbExecutionJournal};
 #[cfg(all(feature = "runtime-coordinator", target_arch = "wasm32"))]
 use csv_storage::InMemoryReplayDb;
 #[cfg(all(feature = "runtime-coordinator", not(target_arch = "wasm32")))]
-use csv_storage::RocksDbReplayDb;
+use csv_storage::RedbReplayDb;
 #[cfg(feature = "runtime-coordinator")]
 use csv_verifier::{CanonicalVerifierImpl, VerifierConfig};
 
@@ -389,15 +387,17 @@ impl ClientBuilder {
                 ))
             })?;
 
-            let replay_path = runtime_dir.join("replay");
-            let events_path = runtime_dir.join("events");
-            let journal_path = runtime_dir.join("journal");
+            // redb databases are single files (the old RocksDB backends were
+            // directories named replay/events/journal).
+            let replay_path = runtime_dir.join("replay.redb");
+            let events_path = runtime_dir.join("events.redb");
+            let journal_path = runtime_dir.join("journal.redb");
 
-            let replay_db = RocksDbReplayDb::open(&replay_path.to_string_lossy())
+            let replay_db = RedbReplayDb::open(&replay_path.to_string_lossy())
                 .map_err(|e| CsvError::StoreError(format!("failed to open replay DB: {e}")))?;
-            let event_store = RocksDbEventStore::open(&events_path.to_string_lossy())
+            let event_store = RedbEventStore::open(&events_path.to_string_lossy())
                 .map_err(|e| CsvError::StoreError(format!("failed to open event store: {e}")))?;
-            let execution_journal = RocksDbExecutionJournal::open(&journal_path.to_string_lossy())
+            let execution_journal = RedbExecutionJournal::open(&journal_path.to_string_lossy())
                 .map_err(|e| {
                     CsvError::StoreError(format!("failed to open execution journal: {e}"))
                 })?;

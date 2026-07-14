@@ -8,6 +8,11 @@
 //!
 //! Without <correct_lock_tx_hex> the entry is printed and left untouched.
 
+use redb::{ReadableDatabase, TableDefinition};
+
+// Must match csv-storage's redb replay backend table name.
+const TRANSFERS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("transfer_entries");
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let path = args.next().expect("replay db path");
@@ -16,18 +21,17 @@ fn main() {
 
     let sanad_bytes = hex::decode(&sanad_hex).expect("sanad hex");
 
-    let mut options = rocksdb::Options::default();
-    options.create_if_missing(false);
-    let cfs = ["replay_entries", "replay_conflicts", "transfer_entries"];
-    let db = rocksdb::DB::open_cf(&options, &path, cfs).expect("open replay db");
-    let cf = db.cf_handle("transfer_entries").expect("cf");
-
-    let val = db
-        .get_cf(cf, &sanad_bytes)
-        .expect("read")
-        .expect("no transfer entry for this sanad id");
-    let mut entry =
-        csv_protocol::cross_chain::HashEntry::from_canonical_bytes(&val).expect("decode entry");
+    let db = redb::Database::open(&path).expect("open replay db");
+    let mut entry = {
+        let read = db.begin_read().expect("read txn");
+        let table = read.open_table(TRANSFERS_TABLE).expect("transfers table");
+        let val = table
+            .get(sanad_bytes.as_slice())
+            .expect("read")
+            .expect("no transfer entry for this sanad id");
+        csv_protocol::cross_chain::HashEntry::from_canonical_bytes(val.value())
+            .expect("decode entry")
+    };
 
     println!("transfer_id:  {}", entry.transfer_id);
     println!("source:       {}", entry.source_chain);
@@ -55,6 +59,13 @@ fn main() {
     }
 
     let bytes = entry.to_canonical_bytes().expect("encode");
-    db.put_cf(cf, &sanad_bytes, bytes).expect("write");
+    let write = db.begin_write().expect("write txn");
+    {
+        let mut table = write.open_table(TRANSFERS_TABLE).expect("transfers table");
+        table
+            .insert(sanad_bytes.as_slice(), bytes.as_slice())
+            .expect("write");
+    }
+    write.commit().expect("commit");
     println!("updated lock_tx_hash -> {}", new_lock_hex);
 }

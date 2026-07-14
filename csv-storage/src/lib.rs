@@ -7,7 +7,7 @@
 //! - Generic key-value storage backends
 //!
 //! Backends:
-//! - RocksDB (single-node, CAS semantics)
+//! - redb (single-node, CAS semantics, pure Rust)
 //! - PostgreSQL (distributed, advisory locks)
 //! - InMemory (testing)
 
@@ -22,7 +22,7 @@ pub mod traits;
 pub use backends::in_memory::InMemoryReplayDb;
 #[cfg(feature = "postgres")]
 pub use backends::postgres::PostgresReplayDb;
-#[cfg(feature = "rocksdb")]
-pub use backends::rocksdb::RocksDbReplayDb;
+#[cfg(feature = "redb")]
+pub use backends::redb::RedbReplayDb;
 pub use errors::{ReplayDbError, StorageError};
 pub use traits::{ReplayDatabase, ReplayEntryState, StorageBackend, TransferStore};

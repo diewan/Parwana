@@ -35,7 +35,7 @@ A comprehensive guide to using the CSV Protocol CLI for cross-chain Sanad manage
 
 ```bash
 # Build the CLI
-CXXFLAGS="-include cstdint" cargo build -p csv-cli --release
+cargo build -p csv-cli --release
 
 # The binary will be at target/release/csv
 cp target/release/csv ~/.local/bin/csv

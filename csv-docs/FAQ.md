@@ -113,7 +113,7 @@ We share ancestors with RGB, but CSV Protocol is designed for Multi-Chain Native
 Build the CLI with:
 
 ```bash
-CXXFLAGS="-include cstdint" cargo build -p csv-cli --release
+cargo build -p csv-cli --release
 ```
 
 Then run the quick start:

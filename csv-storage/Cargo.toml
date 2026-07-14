@@ -15,7 +15,7 @@ serde_json = "1.0"
 thiserror = "1.0"
 hex = "0.4.3"
 tokio = { version = "1", features = ["rt", "macros", "sync"] }
-rocksdb = { version = "0.22", optional = true }
+redb = { version = "4.1", optional = true }
 sqlx = { version = "0.8", optional = true, features = ["postgres", "_rt-tokio", "tls-rustls", "chrono"] }
 
 [dev-dependencies]
@@ -23,13 +23,13 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
 
 [[test]]
-name = "rocksdb_replay"
-path = "tests/rocksdb_replay.rs"
-required-features = ["rocksdb"]
+name = "redb_replay"
+path = "tests/redb_replay.rs"
+required-features = ["redb"]
 
 [features]
-default = ["rocksdb"]
-rocksdb = ["dep:rocksdb"]
+default = ["redb"]
+redb = ["dep:redb"]
 postgres = ["dep:sqlx"]
 [lints]
 workspace = true

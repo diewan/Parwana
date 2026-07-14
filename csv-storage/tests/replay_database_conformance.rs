@@ -114,21 +114,21 @@ async fn test_in_memory_replay_database_conformance() {
     test_replay_database_conformance(&db).await;
 }
 
-#[cfg(feature = "rocksdb")]
+#[cfg(feature = "redb")]
 #[tokio::test]
-async fn test_rocksdb_replay_database_conformance() {
-    use csv_storage::backends::rocksdb::RocksDbReplayDb;
+async fn test_redb_replay_database_conformance() {
+    use csv_storage::backends::redb::RedbReplayDb;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let db_path = temp_dir.path().join("test_replay_db");
+    let db_path = temp_dir.path().join("test_replay.redb");
 
-    let db = RocksDbReplayDb::open(
+    let db = RedbReplayDb::open(
         db_path
             .to_str()
-            .expect("temporary RocksDB path should be valid UTF-8"),
+            .expect("temporary redb path should be valid UTF-8"),
     )
-    .expect("Failed to open RocksDB");
+    .expect("Failed to open redb");
     test_replay_database_conformance(&db).await;
 }
 

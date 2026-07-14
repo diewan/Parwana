@@ -32,4 +32,4 @@ Set `VERIFIER_ADDRESS` when updating CSVSeal constructor args.
 - [ ] `bytecode_hash` populated from `deployments/artifacts/*.bin`
 - [ ] `verified: true` after Etherscan / block explorer confirmation
 - [ ] `chains/ethereum.toml` `contract_address` matches manifest
-- [ ] `CXXFLAGS="-include cstdint" cargo test --workspace --all-features` passes
+- [ ] `cargo test --workspace --all-features` passes

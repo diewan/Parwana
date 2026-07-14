@@ -8,11 +8,9 @@ CSV Protocol — a multi-chain, client-side-validated cryptographic state protoc
 
 ## Build & test
 
-**Gotcha:** C++ deps (RocksDB) fail to compile without `CXXFLAGS="-include cstdint"`. Prefix build/test commands with it:
-
 ```bash
-CXXFLAGS="-include cstdint" cargo build --workspace --all-features
-CXXFLAGS="-include cstdint" cargo test  --workspace --all-features
+cargo build --workspace --all-features
+cargo test  --workspace --all-features
 cargo test --workspace --doc                    # doc tests
 cargo test -p <crate> <test_name>               # single test / single crate
 cargo build -p csv-cli --release                # the `csv` CLI binary
@@ -20,9 +18,13 @@ cargo build -p csv-cli --release                # the `csv` CLI binary
 cargo fmt --all -- --check
 cargo clippy --workspace --all-features -- -D warnings
 
-# WASM check (runtime must stay wasm-compatible; `persistent` feature is wasm-incompatible by design)
-cargo build -p csv-runtime --no-default-features --target wasm32-unknown-unknown
+# WASM gates (the whole SDK path must stay wasm-compilable; persistence and
+# chain adapters are target-gated out on wasm32 and served by in-memory stores)
+cargo build -p csv-runtime --target wasm32-unknown-unknown
+cargo build -p csv-sdk --no-default-features --features std,wasm,wallet --target wasm32-unknown-unknown
 ```
+
+The workspace is pure Rust (persistence is `redb`; RocksDB and its C++ toolchain requirement are gone — no `CXXFLAGS` needed).
 
 - Integration tests are `#[ignore]`d and need live RPC secrets (signet, sepolia, sui testnet).
 - nextest config in `.config/nextest.toml` (30s slow-timeout for crypto tests).

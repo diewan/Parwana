@@ -17,7 +17,7 @@ Rust monorepo (virtual Cargo workspace, edition 2024, rust-version 1.95). The pr
 - `csv-verifier` — canonical proof verification
 - `csv-schema` — schema definitions
 - `csv-content` — content types (Merkle trees, selective disclosure, encryption)
-- `csv-storage` — storage traits and backends (RocksDB, PostgreSQL, in-memory)
+- `csv-storage` — storage traits and backends (redb, PostgreSQL, in-memory)
 - `csv-testkit` — test fixtures and adversarial testing
 - `csv-contract-bindings` — smart contract bindings
 - `csv-coordinator` — per-chain execution cells with isolated failure domains
@@ -63,10 +63,10 @@ Rust monorepo (virtual Cargo workspace, edition 2024, rust-version 1.95). The pr
 
 ```bash
 # Build everything
-CXXFLAGS="-include cstdint" cargo build --workspace --all-features
+cargo build --workspace --all-features
 
 # Run all tests
-CXXFLAGS="-include cstdint" cargo test --workspace --all-features
+cargo test --workspace --all-features
 
 # Run doc tests
 cargo test --workspace --doc
@@ -114,7 +114,7 @@ cd csv-contracts/aptos/contracts && aptos move compile
 - `csv-verifier` is chain-agnostic and depends on protocol/proof/hash/codec crates (no csv-core or concrete-adapter dependency)
 - `csv-storage` depends on protocol/hash/proof crates (no csv-core dependency)
 - `serde_json` is forbidden in canonical hashing paths; use `canonical_cbor`
-- `persistent` feature is incompatible with wasm32 because it enables the native RocksDB backend
+- `persistent` (redb) compiles on wasm32 but is non-functional there (no real filesystem); wasm builds use the in-memory stores, and chain adapters + full tokio are target-gated to native
 - `experimental` feature gates: `vm`, `rgb`, `commit_mux`
 - Finality is NEVER optional — all runtime modes enforce strict finality
 - CLI holds NO protocol authority state (leases, transfers) — all delegated to csv-runtime

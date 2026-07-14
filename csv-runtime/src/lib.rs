@@ -65,7 +65,7 @@ pub use error::{RuntimeError, TransferCoordinatorError};
 pub use event_bus::{EventBus, TransferEvent};
 pub use event_persistence::{EventStore, EventStoreError, InMemoryEventStore};
 #[cfg(feature = "persistent")]
-pub use execution_journal::RocksDbExecutionJournal;
+pub use execution_journal::RedbExecutionJournal;
 pub use execution_journal::{
     ExecutionJournal, InMemoryJournal, JournalError, PhaseOutcome, TransferPhaseEntry,
 };

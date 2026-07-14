@@ -180,7 +180,7 @@ impl Default for InMemoryJournal {
 
 /// Execution journal trait.
 ///
-/// Implementations may use RocksDB, PostgreSQL, or any other persistent store.
+/// Implementations may use redb, PostgreSQL, or any other persistent store.
 pub trait ExecutionJournal: Send + Sync {
     /// Record a phase entry in the journal.
     fn record(&self, entry: TransferPhaseEntry) -> Result<(), JournalError>;
@@ -215,44 +215,69 @@ impl ExecutionJournal for InMemoryJournal {
     }
 }
 
-/// RocksDB-backed append-only execution journal for production recovery.
+/// Key space for the durable journal: monotonically increasing sequence
+/// numbers so iteration order is insertion order.
 #[cfg(feature = "persistent")]
-pub struct RocksDbExecutionJournal {
-    db: rocksdb::DB,
+const JOURNAL_TABLE: redb::TableDefinition<'static, u64, &'static [u8]> =
+    redb::TableDefinition::new("transfer_phases");
+
+/// redb-backed append-only execution journal for production recovery.
+#[cfg(feature = "persistent")]
+pub struct RedbExecutionJournal {
+    db: redb::Database,
     next_sequence: std::sync::Mutex<u64>,
 }
 
 #[cfg(feature = "persistent")]
-impl RocksDbExecutionJournal {
-    const ENTRY_PREFIX: &'static [u8] = b"phase/";
-
-    /// Open or create a durable execution journal at `path`.
+impl RedbExecutionJournal {
+    /// Open or create a durable execution journal at `path` (a file, not a
+    /// directory).
     pub fn open(path: &str) -> Result<Self, JournalError> {
-        let mut options = rocksdb::Options::default();
-        options.create_if_missing(true);
-        let db = rocksdb::DB::open(&options, path).map_err(|e| JournalError::Io(e.to_string()))?;
-        let next_sequence =
-            db.prefix_iterator(Self::ENTRY_PREFIX)
-                .try_fold(0_u64, |count, item| {
-                    item.map(|_| count + 1)
-                        .map_err(|e| JournalError::Io(e.to_string()))
-                })?;
+        use redb::ReadableDatabase;
+
+        let db = redb::Database::create(path).map_err(|e| JournalError::Io(e.to_string()))?;
+        // Create the table so later read transactions never observe a missing
+        // table, and seed the sequence counter from the highest existing key.
+        let txn = db
+            .begin_write()
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        txn.open_table(JOURNAL_TABLE)
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        txn.commit().map_err(|e| JournalError::Io(e.to_string()))?;
+
+        let read = db
+            .begin_read()
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        let table = read
+            .open_table(JOURNAL_TABLE)
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        let next_sequence = redb::ReadableTable::last(&table)
+            .map_err(|e| JournalError::Io(e.to_string()))?
+            .map(|(key, _)| key.value() + 1)
+            .unwrap_or(0);
         Ok(Self {
             db,
             next_sequence: std::sync::Mutex::new(next_sequence),
         })
     }
 
-    fn entry_key(sequence: u64) -> Vec<u8> {
-        format!("phase/{sequence:020}").into_bytes()
-    }
+    /// Read every journal entry in insertion order (diagnostics / recovery
+    /// tooling).
+    pub fn entries(&self) -> Result<Vec<TransferPhaseEntry>, JournalError> {
+        use redb::ReadableDatabase;
 
-    fn entries(&self) -> Result<Vec<TransferPhaseEntry>, JournalError> {
-        self.db
-            .prefix_iterator(Self::ENTRY_PREFIX)
+        let read = self
+            .db
+            .begin_read()
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        let table = read
+            .open_table(JOURNAL_TABLE)
+            .map_err(|e| JournalError::Io(e.to_string()))?;
+        redb::ReadableTable::range::<u64>(&table, ..)
+            .map_err(|e| JournalError::Io(e.to_string()))?
             .map(|item| {
                 let (_, bytes) = item.map_err(|e| JournalError::Io(e.to_string()))?;
-                csv_codec::from_canonical_cbor(bytes.as_ref())
+                csv_codec::from_canonical_cbor(bytes.value())
                     .map_err(|e| JournalError::Serialization(e.to_string()))
             })
             .collect()
@@ -271,7 +296,7 @@ impl RocksDbExecutionJournal {
 }
 
 #[cfg(feature = "persistent")]
-impl ExecutionJournal for RocksDbExecutionJournal {
+impl ExecutionJournal for RedbExecutionJournal {
     fn record(&self, entry: TransferPhaseEntry) -> Result<(), JournalError> {
         let bytes = csv_codec::to_canonical_cbor(&entry)
             .map_err(|e| JournalError::Serialization(e.to_string()))?;
@@ -279,17 +304,24 @@ impl ExecutionJournal for RocksDbExecutionJournal {
             .next_sequence
             .lock()
             .map_err(|e| JournalError::Io(e.to_string()))?;
-        let key = Self::entry_key(*sequence);
         // Durability is the whole point of this journal: the phase MUST be on
         // stable storage before the corresponding chain action runs, otherwise
         // a crash between the (async) write and the action loses the entry and
-        // defeats crash-safe resume. A plain `put` only reaches the OS page
-        // cache, so force an fsync of the WAL on every record.
-        let mut write_opts = rocksdb::WriteOptions::default();
-        write_opts.set_sync(true);
-        self.db
-            .put_opt(key, bytes, &write_opts)
+        // defeats crash-safe resume. redb commits are Durability::Immediate by
+        // default — commit() returns only after the data is fsynced.
+        let txn = self
+            .db
+            .begin_write()
             .map_err(|e| JournalError::Io(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(JOURNAL_TABLE)
+                .map_err(|e| JournalError::Io(e.to_string()))?;
+            table
+                .insert(*sequence, bytes.as_slice())
+                .map_err(|e| JournalError::Io(e.to_string()))?;
+        }
+        txn.commit().map_err(|e| JournalError::Io(e.to_string()))?;
         *sequence += 1;
         Ok(())
     }
@@ -441,10 +473,11 @@ mod tests {
     #[test]
     fn durable_journal_recovers_proof_payload_after_reopen() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().to_str().unwrap();
+        let file = dir.path().join("journal.redb");
+        let path = file.to_str().unwrap();
         let replay_id = csv_hash::ReplayIdHash(csv_hash::Hash::new([4u8; 32]));
         {
-            let journal = RocksDbExecutionJournal::open(path).unwrap();
+            let journal = RedbExecutionJournal::open(path).unwrap();
             journal
                 .record(TransferPhaseEntry {
                     transfer_id: "recover-me".to_string(),
@@ -460,7 +493,7 @@ mod tests {
                 .unwrap();
         }
 
-        let reopened = RocksDbExecutionJournal::open(path).unwrap();
+        let reopened = RedbExecutionJournal::open(path).unwrap();
         let entry = reopened.latest_entry("recover-me").unwrap().unwrap();
         assert_eq!(entry.phase, TransferStage::ProofValidated);
         assert_eq!(entry.proof_payload, Some(vec![1, 2, 3]));

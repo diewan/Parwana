@@ -726,9 +726,8 @@ own verb. Full command reference is in [AGENTS.md](../AGENTS.md).
 ### Build & test **[impl]**
 
 ```bash
-# C++ deps (RocksDB) need this flag or the build fails:
-CXXFLAGS="-include cstdint" cargo build --workspace --all-features
-CXXFLAGS="-include cstdint" cargo test  --workspace --all-features
+cargo build --workspace --all-features
+cargo test  --workspace --all-features
 
 cargo build -p csv-cli --release                 # the `csv` binary
 cargo fmt --all -- --check
