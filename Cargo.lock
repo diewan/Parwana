@@ -2835,6 +2835,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv-accountability"
+version = "0.1.5"
+
+[[package]]
 name = "csv-adapter-core"
 version = "0.1.5"
 dependencies = [

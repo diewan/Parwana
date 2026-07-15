@@ -13,7 +13,8 @@
  *   - Proof bundle bytes are never constructed in this layer.
  *
  * Usage:
- *   csv-mcp                    # Start MCP server (stdio transport)
+ *   csv-mcp                    # Read-only protocol inspector (stdio)
+ *   csv-mcp --legacy-mutations # Explicit legacy compatibility surface
  *   csv-mcp --sse --port 3000  # SSE transport on port 3000
  */
 
@@ -45,12 +46,18 @@ import { writeTempJson, deleteTempFile } from './execution/temp_files.js';
 
 async function startServer(
   transport: 'stdio' | 'sse' = 'stdio',
-  port = 3000
+  port = 3000,
+  legacyMutations = false
 ): Promise<void> {
   const server = new McpServer({
-    name: 'csv-protocol',
+    name: legacyMutations ? 'csv-protocol-legacy-mutations' : 'csv-protocol-inspector',
     version: '1.0.0',
   });
+
+  // Default discovery is namespaced and read-only. The old unprefixed names
+  // exist only in the explicitly selected legacy compatibility mode.
+  const exposedName = (name: string): string =>
+    legacyMutations ? name : `csv_protocol_${name}`;
 
   // Derive a session ID at startup; all audit entries for this process share it
   const SESSION_ID = crypto.randomUUID();
@@ -130,7 +137,7 @@ async function startServer(
 
   // ── Tool: create_seal ────────────────────────────────────────────────────
 
-  server.tool(
+  if (legacyMutations) server.tool(
     'create_seal',
     'Create a new single-use cryptographic seal on a specified blockchain. Returns seal_id and transaction details.',
     { chain: z.string(), value: z.number(), memo: z.string().optional() },
@@ -152,7 +159,7 @@ async function startServer(
 
   // ── Tool: transfer_sanad ─────────────────────────────────────────────────
 
-  server.tool(
+  if (legacyMutations) server.tool(
     'transfer_sanad',
     'Execute a cross-chain transfer of a sanad. Uses TransferCoordinator; never calls adapters directly. On failure, returns structured error — caller must not auto-retry.',
     {
@@ -186,7 +193,7 @@ async function startServer(
   // ── Tool: verify_proof ───────────────────────────────────────────────────
 
   server.tool(
-    'verify_proof',
+    exposedName('verify_proof'),
     'Verify a proof bundle. Returns verification_level — callers must not rely solely on is_valid for minting decisions.',
     {
       bundle_json: z.string(),
@@ -220,7 +227,7 @@ async function startServer(
   // ── Tool: get_sanads ─────────────────────────────────────────────────────
 
   server.tool(
-    'get_sanads',
+    exposedName('get_sanads'),
     'List sanads for an address. Returns opaque value fields — use classify_sanad for semantic enrichment.',
     {
       address: z.string(),
@@ -235,7 +242,7 @@ async function startServer(
         '--address', input.address,
         '--limit', String(input.limit),
         '--offset', String(input.offset),
-        '--status', input.status,
+        '--status', input.status ?? 'all',
         ...(input.chain ? ['--chain', input.chain] : []),
         '--output', 'json',
       ];
@@ -254,7 +261,7 @@ async function startServer(
   // ── Tool: monitor_transfer ───────────────────────────────────────────────
 
   server.tool(
-    'monitor_transfer',
+    exposedName('monitor_transfer'),
     'Poll the status of a cross-chain transfer. "compromised" and "rolled_back" states require human review.',
     { transfer_id: z.string() },
     wrapTool('monitor_transfer', MonitorTransferInput, async (input, agentId) => {
@@ -278,7 +285,7 @@ async function startServer(
   // ── Tool: export_proof_bundle ────────────────────────────────────────────
 
   server.tool(
-    'export_proof_bundle',
+    exposedName('export_proof_bundle'),
     'Export a complete proof bundle for offline verification or agent-to-agent handoff.',
     {
       transfer_id: z.string(),
@@ -289,7 +296,7 @@ async function startServer(
       const args = [
         'proofs', 'export',
         '--transfer-id', input.transfer_id,
-        '--format', input.format,
+        '--format', input.format ?? 'json',
         ...(input.include_provenance ? ['--include-provenance'] : []),
         '--output', 'json',
       ];
@@ -307,7 +314,7 @@ async function startServer(
 
   // ── Tool: accept_consignment ─────────────────────────────────────────────
 
-  server.tool(
+  if (legacyMutations) server.tool(
     'accept_consignment',
     'Accept and validate an incoming state transition consignment from a counterparty.',
     {
@@ -340,13 +347,13 @@ async function startServer(
   // ── Tool: get_protocol_info ──────────────────────────────────────────────
 
   server.tool(
-    'get_protocol_info',
+    exposedName('get_protocol_info'),
     'Return current protocol version and chain adapter status. Use before transfers to verify compatibility.',
     { chain: z.string().optional() },
     wrapTool('get_protocol_info', GetProtocolInfoInput, async (input, agentId) => {
       const args = [
         'chain', 'info',
-        ...(input.chain !== 'all' ? ['--chain', input.chain] : []),
+        ...(input.chain && input.chain !== 'all' ? ['--chain', input.chain] : []),
         '--output', 'json',
       ];
       const result = await executeCsvCommand(args, {
@@ -364,7 +371,7 @@ async function startServer(
   // ── Tool: health_check ───────────────────────────────────────────────────
 
   server.tool(
-    'health_check',
+    exposedName('health_check'),
     'Verify that the MCP server and CSV CLI are operational.',
     {},
     async () => {
@@ -432,8 +439,9 @@ const args = process.argv.slice(2);
 const useSSE = args.includes('--sse');
 const portArg = args.find(a => a.startsWith('--port='));
 const port = portArg ? parseInt(portArg.split('=')[1], 10) : 3000;
+const legacyMutations = args.includes('--legacy-mutations');
 
-startServer(useSSE ? 'sse' : 'stdio', port).catch((err) => {
+startServer(useSSE ? 'sse' : 'stdio', port, legacyMutations).catch((err) => {
   process.stderr.write(`Fatal: ${err.message}\n`);
   process.exit(1);
 });

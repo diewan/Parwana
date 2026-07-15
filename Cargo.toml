@@ -5,6 +5,7 @@ exclude = ["csv-core"]
 members = [
     # Core crates (Phase 1 restructuring)
     "csv-algebra",
+    "csv-accountability",
     "csv-wire",
     "csv-protocol",
     "csv-codec",

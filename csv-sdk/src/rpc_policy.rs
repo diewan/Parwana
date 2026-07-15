@@ -49,21 +49,16 @@ pub enum RpcEndpointSource {
 }
 
 /// Which source groups may be selected and in what order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RpcSelectionMode {
     /// Use only reviewed endpoints shipped with the application.
+    #[default]
     BuiltInOnly,
     /// Use only endpoints explicitly supplied by the user/operator.
     UserOnly,
     /// Prefer user endpoints and then use built-ins. This must be explicit.
     UserThenBuiltIn,
-}
-
-impl Default for RpcSelectionMode {
-    fn default() -> Self {
-        Self::BuiltInOnly
-    }
 }
 
 /// Trust requirement for a class of RPC operation.

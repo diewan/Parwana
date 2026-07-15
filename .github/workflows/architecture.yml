@@ -81,6 +81,9 @@ jobs:
       - name: Check release metadata and package contents
         run: scripts/check-release.sh
 
+      - name: Verify published contract manifest and conformance digest
+        run: python3 scripts/check-contract-manifest.py
+
       # The SDK path (runtime, coordinator, storage) must stay wasm-compilable:
       # persistence and chain adapters are target-gated to native, wasm builds
       # run on in-memory stores. These gates keep native-only deps from leaking

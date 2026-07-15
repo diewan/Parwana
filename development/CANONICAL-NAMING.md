@@ -436,3 +436,102 @@ No production contract may use a function name outside the canonical list above.
 No production contract may emit an event name outside the canonical event list above.
 No chain may use a different state enum value for the same lifecycle state.
 ```
+
+---
+
+## Accountability vocabulary and compatibility policy
+
+**Status:** Normative for the Accountability Profile
+
+**Governing plan:** DieWan Accountability Platform Master Plan Revision 0.3
+
+**Adopted:** 2026-07-16 under ticket A-03
+
+The existing `csv-*` crate names remain unchanged throughout the first
+vertical slice. The prefix is an implementation-history detail and does not
+authorize a cosmetic workspace rename while canonical objects, vectors, and
+consumer contracts are still experimental. User-facing products use the
+language defined by the DieWan design system; crate names do not leak into
+Piteka operator copy.
+
+### Canonical terms
+
+| Term | Canonical meaning | Must not mean |
+|---|---|---|
+| **Mandate** | A signed, pre-action protocol artifact binding an exact canonical intent, issuer, permitted subject/executor, validity interval, constraints, and evidence requirements. | OAuth scope, IAM capability, a chat instruction, historical approval evidence, a reservation token, or current operational state. |
+| **Receipt** | A signed protocol artifact binding a mandate, intent, execution attempt, consumption record, source-attributed evidence references, and an explicit reported outcome including `Unknown`. | Proof that every included assertion is true, proof of legal authorization, or a mutable application status row. |
+| **Observation** | A source-attributed record of what a collector obtained from an external or internal source, retaining provenance, authentication result, collection time, and normalization version. | A verifier conclusion, organizational authorization, an unqualified fact, or an automatically trusted provider payload. |
+| **Claim** | An assertion made by an identified producer about a subject or event, encoded distinctly from an observation and from a verifier conclusion. | A fact established merely by inclusion, signature, anchoring, repetition, or absence of counterevidence. |
+| **Verification** | Deterministic evaluation of disclosed evidence under an explicit, hash-bound `VerificationContext`, producing structured findings and reason codes. | Network retrieval, evidence collection, product approval, a context-free boolean, or an assertion that all claims are true. |
+| **Assurance** | A dimensioned `AssuranceProfile` describing what verification satisfied, did not satisfy, could not determine, or found not applicable, with evidence references and limitations. | A scalar trust score, permission to execute, legal judgment, reputation, or a synonym for cryptographic validity. |
+
+Qualifying nouns remain mandatory when ambiguity is possible. Use “mandate
+projection” for a Piteka database view, “target observation” for a provider
+record, “verification output” for verifier results, and “authority assurance
+dimension” for the relevant profile component. Do not shorten these to
+“mandate,” “fact,” “valid,” or “assurance” when the shortened form changes the
+authority or evidence class.
+
+### Related terms
+
+- `ActionIntent` is the exact proposed operation before approval; it is not a
+  mandate and cannot authorize dispatch.
+- `ExecutionAttempt` is the operational record for one reserved dispatch; it
+  is not a receipt.
+- `EvidenceGap` reports unavailable or undisclosed required evidence; it never
+  proves non-occurrence.
+- `AuthorityReconstruction` evaluates historical compatibility only and never
+  becomes a mandate or returns “Authorized.”
+- `VerificationContext` is an input to verification, not optional metadata.
+- Tuppira may store a named observation of a verification output only when the
+  verifier identity, version, bundle digest, and context digest remain bound.
+
+### Compatibility rules
+
+1. Canonical bytes, object identifiers, domain tags, profile identifiers,
+   reason codes, and state reachability are protocol compatibility surfaces.
+2. Rust type/module moves are source compatibility changes even when bytes do
+   not change; release notes must distinguish source, wire, semantic, and data
+   migration impact.
+3. Existing Sanad, proof, transfer, wallet, and chain-contract bytes remain
+   unchanged unless a separately governed defect requires a version bump.
+4. Accountability objects remain `0.x` experimental until frozen golden and
+   adversarial vectors, offline verification, consumer pinning, and audit pass.
+5. Consumers pin an exact compatible contract version. `latest`, floating Git
+   branches, and unrecorded path dependencies are prohibited in CI releases.
+6. Unknown major versions fail explicitly. Unknown fields follow the policy of
+   their registered envelope version and never silently alter signed meaning.
+7. JSON Schema and UI projections are interoperability surfaces, not canonical
+   cryptographic encodings.
+8. A vocabulary clarification that changes object meaning is a semantic
+   compatibility change and requires an ADR, even if no Rust signature changes.
+
+### Future crate-rename process
+
+A rename away from `csv-*` is deferred until after the first audited vertical
+slice. A rename proposal must:
+
+1. state the product/maintenance benefit and reject purely cosmetic churn;
+2. inventory package names, import paths, published crates, feature names,
+   documentation links, CI, fixtures, SBOMs, lockfiles, and downstream pins;
+3. prove whether canonical bytes and domain tags remain unchanged;
+4. define a deprecation window and compatibility/re-export strategy;
+5. update consumers in release order—Parwana contract first, then Piteka,
+   Tuppira, and Hemion pins;
+6. run the full conformance corpus before and after the rename;
+7. receive an ADR and owner approval before implementation.
+
+Crate renaming must never rename registered wire/profile/domain identifiers by
+implication. Those changes require their own explicit versioning decision.
+
+### Accountability vocabulary check
+
+Run from the Parwana repository root:
+
+```bash
+python3 scripts/check-accountability-vocabulary.py
+```
+
+The check ensures the required definitions and compatibility clauses remain
+present. It complements semantic review; it cannot prove that every future
+sentence uses the terms correctly.

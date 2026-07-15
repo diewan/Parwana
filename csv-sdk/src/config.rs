@@ -568,22 +568,21 @@ impl Config {
     ) -> Option<RpcConfig> {
         let mut rpc = reviewed_chain_config(chain, network).rpc;
         let policy = rpc.policy.as_mut()?;
-        if let Some(url) = request_url_override.map(str::trim).filter(|u| !u.is_empty()) {
-            if let Some(endpoint) = policy.endpoints.iter_mut().find(|endpoint| {
+        if let Some(url) = request_url_override.map(str::trim).filter(|u| !u.is_empty())
+            && let Some(endpoint) = policy.endpoints.iter_mut().find(|endpoint| {
                 endpoint.capabilities.contains(&RpcCapability::Read)
                     && endpoint.transport != RpcTransport::WebSocket
-            }) {
-                endpoint.url = url.to_string();
-            }
+            })
+        {
+            endpoint.url = url.to_string();
         }
-        if let Some(url) = indexer_url_override.map(str::trim).filter(|u| !u.is_empty()) {
-            if let Some(endpoint) = policy
+        if let Some(url) = indexer_url_override.map(str::trim).filter(|u| !u.is_empty())
+            && let Some(endpoint) = policy
                 .endpoints
                 .iter_mut()
                 .find(|endpoint| endpoint.capabilities.contains(&RpcCapability::AddressIndex))
-            {
-                endpoint.url = url.to_string();
-            }
+        {
+            endpoint.url = url.to_string();
         }
         Some(rpc)
     }

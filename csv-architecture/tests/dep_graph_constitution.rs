@@ -5,6 +5,7 @@
 ///
 /// Boundary definitions:
 ///   csv-algebra           — pure types, no_std, no serde, no IO
+///   csv-accountability    — pure accountability semantics, no IO/application stack
 ///   csv-wire              — serde + transport boundary
 ///   csv-hash/protocol     — cryptographic and protocol primitives
 ///   csv-verifier          — chain-agnostic verification
@@ -19,6 +20,34 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+const ACCOUNTABILITY_FORBIDDEN_DEPENDENCIES: &[&str] = &[
+    "async-trait",
+    "axum",
+    "dioxus",
+    "dioxus-web",
+    "reqwest",
+    "sqlx",
+    "tokio",
+    "csv-adapter-factory",
+    "csv-admission",
+    "csv-cli",
+    "csv-coordinator",
+    "csv-runtime",
+    "csv-sdk",
+    "csv-storage",
+    "csv-store",
+    "csv-wallet",
+];
+
+fn impure_accountability_dependencies<'a>(
+    dependencies: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'a str> {
+    dependencies
+        .into_iter()
+        .filter(|name| ACCOUNTABILITY_FORBIDDEN_DEPENDENCIES.contains(name))
+        .collect()
+}
 
 #[test]
 fn protected_core_api_snapshots_are_checked_in() {
@@ -121,6 +150,56 @@ fn forbidden_dependency_edges_are_absent() {
 }
 
 #[test]
+fn accountability_crate_has_no_impure_dependencies() {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path("./Cargo.toml")
+        .exec()
+        .expect("cargo metadata must succeed");
+    let package = metadata
+        .workspace_packages()
+        .into_iter()
+        .find(|package| package.name == "csv-accountability")
+        .expect("csv-accountability must remain a workspace package");
+    let violations = impure_accountability_dependencies(
+        package
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.name.as_str()),
+    );
+    assert!(
+        violations.is_empty(),
+        "csv-accountability must remain pure; forbidden dependencies: {}",
+        violations.join(", ")
+    );
+}
+
+#[test]
+fn accountability_purity_policy_rejects_each_impure_layer() {
+    let candidates = [
+        "csv-hash",
+        "tokio",
+        "reqwest",
+        "sqlx",
+        "csv-runtime",
+        "csv-storage",
+        "csv-adapter-factory",
+        "dioxus",
+    ];
+    assert_eq!(
+        impure_accountability_dependencies(candidates),
+        vec![
+            "tokio",
+            "reqwest",
+            "sqlx",
+            "csv-runtime",
+            "csv-storage",
+            "csv-adapter-factory",
+            "dioxus",
+        ]
+    );
+}
+
+#[test]
 fn every_chain_adapter_uses_the_wire_boundary() {
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path("./Cargo.toml")
@@ -168,6 +247,7 @@ fn intentional_workspace_crates_are_allowlisted() {
         "csv-chain-ports",
         "csv-adapter-factory",
         "csv-admission",
+        "csv-accountability",
         "csv-algebra",
         "csv-aptos",
         "csv-architecture",

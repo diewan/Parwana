@@ -165,7 +165,10 @@ where
     let (winning_value, agreeing_providers) = tally
         .into_iter()
         .max_by_key(|(_, providers)| providers.len())
-        .expect("reliable is non-empty");
+        .ok_or(QuorumError::InsufficientProviders {
+            required: params.min_providers,
+            available: 0,
+        })?;
 
     if agreeing_providers.len() < usize::from(params.min_agreement) {
         return Err(QuorumError::NoAgreement {
@@ -306,11 +309,6 @@ mod tests {
     #[test]
     fn submitter_as_sole_confirmer_is_rejected() {
         // Only the submitter "alpha" confirms mint; others observe not-yet.
-        let observations = vec![
-            obs("alpha", "a1", "minted"),
-            obs("beta", "b1", "pending"),
-            obs("gamma", "c1", "pending"),
-        ];
         let params = QuorumParams {
             min_providers: 3,
             min_agreement: 1,

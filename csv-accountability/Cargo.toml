@@ -1,0 +1,15 @@
+[package]
+name = "csv-accountability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Pure accountability protocol semantics for Parwana"
+
+[features]
+default = []
+
+[dependencies]
+
+[lints]
+workspace = true

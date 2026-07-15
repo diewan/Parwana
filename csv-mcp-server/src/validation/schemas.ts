@@ -41,7 +41,7 @@ export const GetSanadsInput = z.object({
   address: z.string().min(20).max(128),
   chain: ChainEnum.optional(),
   limit: z.number().int().positive().max(100).default(20),
-  offset: z.number().int().nonneg().default(0),
+  offset: z.number().int().nonnegative().default(0),
   status: z.enum(['active', 'consumed', 'locked', 'all']).default('all'),
 });
 
@@ -58,7 +58,10 @@ export const ExportProofBundleInput = z.object({
 export const AcceptConsignmentInput = z.object({
   consignment_json: z.string().min(1).refine(
     (s) => {
-      try { const p = JSON.parse(s); return typeof p === 'object' && p !== null; }
+      try {
+        const parsed: unknown = JSON.parse(s);
+        return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+      }
       catch { return false; }
     },
     { message: 'consignment_json must be a JSON object' }

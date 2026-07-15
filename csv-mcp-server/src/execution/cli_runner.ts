@@ -5,7 +5,7 @@
  * environment isolation, timeout handling, and output capture.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -37,7 +37,7 @@ export async function executeCsvCommand(
   const start = Date.now();
 
   return new Promise((resolve, reject) => {
-    const child: ChildProcess = spawn(CSV_BIN, args, {
+    const child = spawn(CSV_BIN, args, {
       env: {
         ...process.env,
         RUST_LOG: 'info',
@@ -50,6 +50,10 @@ export async function executeCsvCommand(
     let stdout = '';
     let stderr = '';
 
+    if (!child.stdout || !child.stderr) {
+      reject(new Error('CSV CLI process was started without captured output pipes'));
+      return;
+    }
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
 
