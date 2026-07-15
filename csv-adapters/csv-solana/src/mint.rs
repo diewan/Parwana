@@ -19,7 +19,7 @@
 //! finished [`SolanaMintArgs`] here before submitting the transaction.
 
 use crate::anchor_client::{discriminators, pdas};
-use csv_adapter_core::MintAttestationInputs;
+use csv_chain_ports::MintAttestationInputs;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,

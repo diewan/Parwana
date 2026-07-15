@@ -1,10 +1,10 @@
 //! Runtime adapter wrapper for Sui chain adapter
 //!
-//! This module implements the ChainAdapter trait from csv-adapter-core,
+//! This module implements the ChainAdapter trait from csv-chain-ports,
 //! bridging the Sui-specific implementation with the generic
 //! runtime orchestration layer.
 
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterError, ChainAdapter, CrossChainTransfer, DestinationMaterialization, LockResult,
     MintResult, RuntimeMintRequest, SealRegistryStatus,
 };
@@ -644,7 +644,7 @@ mod tests {
     use crate::config::{SealContractConfig, SuiConfig, SuiNetwork};
     use crate::node::SuiNode;
     use crate::ops::SuiBackend;
-    use csv_adapter_core::MintAttestationInputs;
+    use csv_chain_ports::MintAttestationInputs;
     use csv_hash::Hash;
 
     const REGISTRY_ID: &str = "0x00000000000000000000000000000000000000000000000000000000000000aa";

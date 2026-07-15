@@ -24,6 +24,12 @@ pub struct Deployments {
 #[derive(Debug, Deserialize)]
 pub struct EthereumDeployment {
     pub network: String,
+    /// EVM numeric chain id (e.g. 11155111 for Sepolia). This is the expected
+    /// network identity an endpoint must report before it may serve requests
+    /// (RFC-0013 / RPC-003). Optional + `serde(default)` so manifests predating
+    /// the field still parse.
+    #[serde(default)]
+    pub chain_id: Option<u64>,
     pub contracts: Vec<EthereumContract>,
 }
 
@@ -111,6 +117,26 @@ pub fn get_ethereum_contract_address() -> Result<String, Box<dyn std::error::Err
             Box::<dyn std::error::Error>::from("CSVSeal contract not found in Ethereum deployment")
         })?;
     Ok(contract.address.clone())
+}
+
+/// Extract the Ethereum numeric chain id from an already-loaded manifest.
+///
+/// Returns `None` when the ethereum deployment or its `chain_id` field is
+/// absent. Split from [`get_ethereum_chain_id`] so the mapping is testable
+/// against a synthetic manifest independent of the committed deployment state.
+pub fn ethereum_chain_id_from(manifest: &DeploymentManifest) -> Option<u64> {
+    manifest
+        .deployments
+        .ethereum
+        .as_ref()
+        .and_then(|ethereum| ethereum.chain_id)
+}
+
+/// Get the Ethereum numeric chain id from the deployment manifest.
+pub fn get_ethereum_chain_id() -> Result<u64, Box<dyn std::error::Error>> {
+    ethereum_chain_id_from(&load_deployment_manifest()?).ok_or_else(|| {
+        Box::<dyn std::error::Error>::from("Ethereum chain_id not found in deployment manifest")
+    })
 }
 
 /// Get the Solana program ID from the deployment manifest

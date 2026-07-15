@@ -1,10 +1,10 @@
 //! Runtime adapter wrapper for Ethereum chain adapter
 //!
-//! This module implements the ChainAdapter trait from csv-adapter-core,
+//! This module implements the ChainAdapter trait from csv-chain-ports,
 //! bridging the Ethereum-specific implementation with the generic
 //! runtime orchestration layer.
 
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
     SealRegistryStatus, TxFinality,
 };
@@ -157,7 +157,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
             Ok(MintResult {
                 tx_hash,
                 block_height,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     self.chain_id.clone(),
                 ),
             })
@@ -481,7 +481,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
         Ok(MintResult {
             tx_hash: tx_hash.to_string(),
             block_height: receipt.block_number,
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                 self.chain_id.clone(),
             ),
         })
@@ -592,7 +592,7 @@ impl ChainAdapter for EthereumRuntimeAdapter {
 /// signature-bearing shape are unit-testable without a live signer/RPC.
 #[cfg(feature = "rpc")]
 fn build_mint_call(
-    attestation: &csv_adapter_core::MintAttestationInputs,
+    attestation: &csv_chain_ports::MintAttestationInputs,
     verifier_signatures: &[Vec<u8>],
 ) -> crate::bindings::csv_seal::mint_sanadCall {
     use alloy_primitives::{Bytes, FixedBytes};
@@ -1079,8 +1079,8 @@ mod tests {
 
     // ---- §9.2 attestation mint (TRM-ETH-ADPT-001) ----
 
-    fn mint_attestation(sanad_id: Hash) -> csv_adapter_core::MintAttestationInputs {
-        csv_adapter_core::MintAttestationInputs {
+    fn mint_attestation(sanad_id: Hash) -> csv_chain_ports::MintAttestationInputs {
+        csv_chain_ports::MintAttestationInputs {
             destination_chain_id: [7u8; 32],
             destination_contract: [0u8; 32],
             sanad_id: *sanad_id.as_bytes(),
@@ -1094,7 +1094,7 @@ mod tests {
     }
 
     fn runtime_mint_request_cbor(sanad_id: Hash) -> Vec<u8> {
-        let request = csv_adapter_core::RuntimeMintRequest {
+        let request = csv_chain_ports::RuntimeMintRequest {
             attestation: mint_attestation(sanad_id),
             verifier_signatures: vec![],
             proof_bundle: vec![],

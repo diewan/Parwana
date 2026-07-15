@@ -1,12 +1,12 @@
 //! Runtime adapter wrapper for Bitcoin chain adapter
 //!
-//! This module implements the ChainAdapter trait from csv-adapter-core,
+//! This module implements the ChainAdapter trait from csv-chain-ports,
 //! bridging the Bitcoin-specific implementation with the generic
 //! runtime orchestration layer.
 
 use bitcoin::Network;
 use bitcoin_hashes::Hash as BitcoinHash;
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, SealRegistryStatus,
     TxFinality,
 };
@@ -491,7 +491,7 @@ impl ChainAdapter for BitcoinRuntimeAdapter {
         Ok(MintResult {
             tx_hash: tx_hash.to_string(),
             block_height,
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                 self.chain_id.clone(),
             ),
         })
@@ -647,7 +647,7 @@ impl BitcoinRuntimeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_adapter_core::CrossChainTransfer;
+    use csv_chain_ports::CrossChainTransfer;
     use csv_hash::Hash;
     use csv_protocol::proof_taxonomy::ProofBundle;
 

@@ -48,9 +48,6 @@ pub mod transfer_coordinator;
 pub mod user_runtime_lease;
 pub mod verification_quorum;
 
-// Wallet operations (facade over chain adapters)
-pub mod wallet;
-
 // Legacy re-exports (orchestration only)
 pub use adapter_registry::AdapterRegistryImpl;
 pub use chain_discovery::{ChainConfig, ChainDiscovery};
@@ -58,7 +55,7 @@ pub use config::{
     CircuitBreakerConfig, ConfigValidationError, LeaseConfig, OperationalConfig, RetryConfig,
     RpcConfig, TimeoutConfig,
 };
-pub use csv_adapter_core::{
+pub use csv_chain_ports::{
     ChainAdapter, ChainCapabilityPort, ChainLockPort, ChainMintPort, ChainProofPort, ChainReadPort,
     ChainSealRegistryPort,
 };

@@ -6,9 +6,10 @@ rust-version.workspace = true
 
 [dependencies]
 csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
-csv-adapter-core = { version = "0.1.5", path = "../csv-adapters/csv-adapter-core" }
+csv-chain-ports = { version = "0.1.5", path = "../csv-chain-ports" }
 csv-hash = { version = "0.1.5", path = "../csv-hash" }
 csv-keys = { version = "0.1.5", path = "../csv-keys" }
+csv-wallet = { version = "0.1.5", path = "../csv-wallet" }
 csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optional = true, features = ["signet-rest"] }
 csv-ethereum = { version = "0.1.5", path = "../csv-adapters/csv-ethereum", optional = true }
 csv-sui = { version = "0.1.5", path = "../csv-adapters/csv-sui", optional = true, features = ["rpc"] }

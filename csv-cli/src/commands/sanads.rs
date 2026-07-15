@@ -681,13 +681,18 @@ async fn cmd_create(
             let indexer_kind = chain_cfg.indexer_backend.clone();
 
             // Initialize wallet factory before UTXO scan
-            let _factory = csv_coordinator::init_wallet_factory();
+            let _factory = csv_adapter_factory::init_wallet_factory();
 
-            // Scan for UTXOs using wallet operations from csv-coordinator
+            // Scan for UTXOs through the application composition factory.
             output::info("Scanning for UTXOs...");
-            let wallet_ops = csv_coordinator::get_wallet_operations(&chain_id);
-            let scanned_utxos = if let Some(ops) = wallet_ops {
-                ops.scan_utxos(
+            let wallet_ops = csv_adapter_factory::get_wallet_operations(&chain_id).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Bitcoin wallet operations are unavailable in this build; enable the bitcoin \
+                     composition feature before creating a Bitcoin sanad"
+                )
+            })?;
+            let scanned_utxos = wallet_ops
+                .scan_utxos(
                     &seed_array,
                     account,
                     index,
@@ -695,11 +700,7 @@ async fn cmd_create(
                     indexer_kind.as_deref(),
                 )
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?
-            } else {
-                output::warning("Wallet operations not available, skipping UTXO scan");
-                Vec::new()
-            };
+                .map_err(|e| anyhow::anyhow!("Failed to scan UTXOs: {}", e))?;
 
             if scanned_utxos.is_empty() {
                 output::warning(

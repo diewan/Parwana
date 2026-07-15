@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 const AUTHORITY_CRATE_MANIFESTS: &[&str] = &[
     "csv-runtime/Cargo.toml",
+    "csv-coordinator/Cargo.toml",
     "csv-cli/Cargo.toml",
     "csv-protocol/Cargo.toml",
 ];
@@ -80,12 +81,12 @@ fn authority_crates_do_not_depend_on_chain_adapters() {
         let content = fs::read_to_string(root.join(manifest)).unwrap();
         let active_content = strip_toml_comments(&content);
         for marker in ADAPTER_DEP_MARKERS {
-            // Allow csv-adapter-core as it's a shared library, not a chain-specific adapter
+            // Allow csv-chain-ports as it's a shared library, not a chain-specific adapter
             if (*marker == "../csv-adapters/" || *marker == "csv-adapters/")
-                && active_content.contains("csv-adapter-core")
+                && active_content.contains("csv-chain-ports")
             {
-                // Check if it's specifically csv-adapter-core (allowed) or other adapters (not allowed)
-                if active_content.contains("csv-adapter-core")
+                // Check if it's specifically csv-chain-ports (allowed) or other adapters (not allowed)
+                if active_content.contains("csv-chain-ports")
                     && !active_content.contains("csv-bitcoin")
                     && !active_content.contains("csv-ethereum")
                     && !active_content.contains("csv-solana")
@@ -93,7 +94,7 @@ fn authority_crates_do_not_depend_on_chain_adapters() {
                     && !active_content.contains("csv-aptos")
                     && !active_content.contains("csv-celestia")
                 {
-                    continue; // csv-adapter-core is allowed
+                    continue; // csv-chain-ports is allowed
                 }
             }
             assert!(

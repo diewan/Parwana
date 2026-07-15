@@ -23,7 +23,7 @@ pub use crate::sanads::{SanadFilters, SanadsManager};
 pub use crate::transfers::{TransferBuilder, TransferManager};
 pub use crate::wallet::Wallet;
 
-// Re-exports from csv-adapter-core
+// Re-exports from csv-chain-ports
 pub use csv_hash::Hash;
 pub use csv_hash::chain_id::ChainId;
 pub use csv_hash::commitment::Commitment;

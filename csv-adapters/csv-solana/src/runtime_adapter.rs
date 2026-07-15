@@ -1,10 +1,10 @@
 //! Runtime adapter wrapper for Solana chain adapter
 //!
-//! This module implements the ChainAdapter trait from csv-adapter-core,
+//! This module implements the ChainAdapter trait from csv-chain-ports,
 //! bridging the Solana-specific implementation with the generic
 //! runtime orchestration layer.
 
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintAttestationInputs, MintResult,
     RuntimeMintRequest, SealRegistryStatus, TxFinality,
 };
@@ -157,7 +157,7 @@ impl SolanaRuntimeAdapter {
         Ok(Some(MintResult {
             tx_hash: existing_mint_tx_ref(mint_record),
             block_height,
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                 self.chain_id.clone(),
             ),
         }))
@@ -358,7 +358,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
         Ok(MintResult {
             tx_hash: existing_mint_tx_ref(&mint_record),
             block_height,
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                 self.chain_id.clone(),
             ),
         })
@@ -655,7 +655,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             return Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     self.chain_id.clone(),
                 ),
             });
@@ -681,7 +681,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
             return Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     self.chain_id.clone(),
                 ),
             });
@@ -722,7 +722,7 @@ impl ChainAdapter for SolanaRuntimeAdapter {
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height,
-                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                         self.chain_id.clone(),
                     ),
                 })
@@ -817,7 +817,7 @@ mod tests {
     use crate::ops::SolanaBackend;
     use crate::rpc::MockSolanaRpc;
     use crate::seal_protocol::SolanaSealProtocol;
-    use csv_adapter_core::MintAttestationInputs;
+    use csv_chain_ports::MintAttestationInputs;
     use csv_hash::Hash;
     use std::str::FromStr;
 

@@ -1,6 +1,6 @@
 //! Chain Operation Traits Implementation for Aptos
 //!
-//! This module implements all chain operation traits from csv-adapter-core:
+//! This module implements all chain operation traits from csv-chain-ports:
 //! - ChainQuery: Querying chain state via REST API
 //! - ChainSigner: Ed25519 signing operations
 //! - ChainBroadcaster: Transaction broadcasting

@@ -1,0 +1,52 @@
+# Immutable corpus manifest. Changing a vector creates corpus/v2; v1 is never
+# rewritten after a release tag is cut.
+corpus_version = 1
+owner = "TBD"
+
+[[case]]
+id = "canonical-cbor-simple-struct"
+kind = "canonical_cbor"
+source = "csv-protocol/tests/golden_vectors.rs::golden_simple_struct"
+expected = "a26161182a61626568656c6c6f"
+
+[[case]]
+id = "canonical-cbor-map-order"
+kind = "canonical_cbor"
+source = "csv-protocol/tests/golden_vectors.rs::golden_map_key_ordering"
+expected = "a3616102616d03617a01"
+
+[[case]]
+id = "typed-hash-and-replay"
+kind = "typed_hash_replay"
+source = "csv-runtime/tests/protocol_constitution/replay_protection.rs"
+expected = "deterministic and domain separated"
+
+[[case]]
+id = "proof-bundle-malformed"
+kind = "proof_bundle_negative"
+source = "csv-testkit/tests/adversarial_integration.rs"
+expected = "reject"
+
+[[case]]
+id = "forged-mint-authorization"
+kind = "authorization_negative"
+source = "csv-runtime/src/transfer_coordinator.rs::forged_mint_authorization_payload_is_rejected"
+expected = "reject before mint"
+
+[[case]]
+id = "replay-double-use"
+kind = "replay_negative"
+source = "csv-runtime/src/transfer_coordinator.rs::duplicate_nullifier_fails_closed"
+expected = "reject"
+
+[[case]]
+id = "insufficient-finality"
+kind = "finality_negative"
+source = "csv-runtime/src/transfer_coordinator.rs::recovery_fails_closed_when_lock_below_required_confirmations"
+expected = "reject"
+
+[[case]]
+id = "crash-resume"
+kind = "crash_resume"
+source = "csv-runtime/tests/execution_journal_crash_recovery.rs"
+expected = "resume without duplicate mutation"

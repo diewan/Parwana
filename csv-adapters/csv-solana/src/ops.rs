@@ -1,6 +1,6 @@
 //! Chain Operation Traits Implementation for Solana
 //!
-//! This module implements all chain operation traits from csv-adapter-core:
+//! This module implements all chain operation traits from csv-chain-ports:
 //! - ChainQuery: Querying chain state via RPC
 //! - ChainSigner: Ed25519 signing operations
 //! - ChainBroadcaster: Transaction broadcasting

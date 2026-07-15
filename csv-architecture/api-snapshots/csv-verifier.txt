@@ -1,0 +1,1816 @@
+pub mod csv_verifier
+pub mod csv_verifier::anchors
+pub enum csv_verifier::anchors::AnchorError
+pub csv_verifier::anchors::AnchorError::HashMismatch
+pub csv_verifier::anchors::AnchorError::HashMismatch::actual: alloc::string::String
+pub csv_verifier::anchors::AnchorError::HashMismatch::expected: alloc::string::String
+pub csv_verifier::anchors::AnchorError::InvalidInclusionProof(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::InvalidProofStructure(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::InvalidSignature(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::MissingQuorumCert
+pub csv_verifier::anchors::AnchorError::ProofTooOld(u64, u64)
+pub csv_verifier::anchors::AnchorError::ReorgDepthExceeded(u64, u64)
+pub csv_verifier::anchors::AnchorError::UnsupportedChain(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::UnsupportedZkSealProofSystem(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::ValidatorSetMismatch
+pub csv_verifier::anchors::AnchorError::ZkSealMalformed(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::ZkSealPairingCheckFailed(alloc::string::String)
+pub csv_verifier::anchors::AnchorError::ZkSealUnavailable(alloc::string::String)
+impl core::convert::From<csv_proof::zk_proof::ZkError> for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::from(csv_proof::zk_proof::ZkError) -> Self
+impl core::error::Error for csv_verifier::anchors::AnchorError
+impl core::fmt::Debug for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::AnchorError
+impl core::marker::Send for csv_verifier::anchors::AnchorError
+impl core::marker::Sync for csv_verifier::anchors::AnchorError
+impl core::marker::Unpin for csv_verifier::anchors::AnchorError
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::AnchorError
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::AnchorError
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::AnchorError
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::AnchorError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::AnchorError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::AnchorError where U: core::convert::From<T>
+pub fn csv_verifier::anchors::AnchorError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::AnchorError where U: core::convert::Into<T>
+pub type csv_verifier::anchors::AnchorError::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::AnchorError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::AnchorError where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::AnchorError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::AnchorError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for csv_verifier::anchors::AnchorError where T: core::fmt::Display + ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for csv_verifier::anchors::AnchorError where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::AnchorError where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::AnchorError where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::AnchorError
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::AnchorError
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::AnchorError
+pub type csv_verifier::anchors::AnchorError::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::AnchorError where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::AnchorError where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::AnchorError::vzip(self) -> V
+pub enum csv_verifier::anchors::ProofSystem
+pub csv_verifier::anchors::ProofSystem::BftQc
+pub csv_verifier::anchors::ProofSystem::BftQc::quorum_fraction: f32
+pub csv_verifier::anchors::ProofSystem::BitcoinSpv
+pub csv_verifier::anchors::ProofSystem::BitcoinSpv::confirmations: u64
+pub csv_verifier::anchors::ProofSystem::EthereumPos
+pub csv_verifier::anchors::ProofSystem::EthereumPos::finality_epochs: u8
+pub csv_verifier::anchors::ProofSystem::ZkHeader
+pub csv_verifier::anchors::ProofSystem::ZkHeader::circuit_id: [u8; 32]
+impl core::clone::Clone for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::clone(&self) -> csv_verifier::anchors::ProofSystem
+impl core::cmp::PartialEq for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::eq(&self, &csv_verifier::anchors::ProofSystem) -> bool
+impl core::fmt::Debug for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_verifier::anchors::ProofSystem
+impl core::marker::Freeze for csv_verifier::anchors::ProofSystem
+impl core::marker::Send for csv_verifier::anchors::ProofSystem
+impl core::marker::Sync for csv_verifier::anchors::ProofSystem
+impl core::marker::Unpin for csv_verifier::anchors::ProofSystem
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ProofSystem
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ProofSystem
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ProofSystem
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ProofSystem where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ProofSystem where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ProofSystem where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ProofSystem::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ProofSystem where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ProofSystem::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ProofSystem::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ProofSystem where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ProofSystem::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ProofSystem::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ProofSystem where T: core::clone::Clone
+pub type csv_verifier::anchors::ProofSystem::Owned = T
+pub fn csv_verifier::anchors::ProofSystem::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ProofSystem::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ProofSystem where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ProofSystem::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ProofSystem where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ProofSystem::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ProofSystem where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ProofSystem::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ProofSystem where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ProofSystem::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ProofSystem
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ProofSystem
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ProofSystem
+pub type csv_verifier::anchors::ProofSystem::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ProofSystem where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ProofSystem where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ProofSystem::vzip(self) -> V
+pub struct csv_verifier::anchors::CanonicalBlockHeader
+pub csv_verifier::anchors::CanonicalBlockHeader::hash: [u8; 32]
+pub csv_verifier::anchors::CanonicalBlockHeader::height: u64
+pub csv_verifier::anchors::CanonicalBlockHeader::parent_hash: [u8; 32]
+pub csv_verifier::anchors::CanonicalBlockHeader::quorum_cert: core::option::Option<csv_verifier::anchors::QuorumCertificate>
+pub csv_verifier::anchors::CanonicalBlockHeader::timestamp: u64
+impl core::clone::Clone for csv_verifier::anchors::CanonicalBlockHeader
+pub fn csv_verifier::anchors::CanonicalBlockHeader::clone(&self) -> csv_verifier::anchors::CanonicalBlockHeader
+impl core::fmt::Debug for csv_verifier::anchors::CanonicalBlockHeader
+pub fn csv_verifier::anchors::CanonicalBlockHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::Send for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::Sync for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::Unpin for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::CanonicalBlockHeader
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::CanonicalBlockHeader
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::CanonicalBlockHeader
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::CanonicalBlockHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::CanonicalBlockHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::CanonicalBlockHeader where U: core::convert::From<T>
+pub fn csv_verifier::anchors::CanonicalBlockHeader::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::CanonicalBlockHeader where U: core::convert::Into<T>
+pub type csv_verifier::anchors::CanonicalBlockHeader::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::CanonicalBlockHeader::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::CanonicalBlockHeader where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::CanonicalBlockHeader::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::CanonicalBlockHeader::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::CanonicalBlockHeader where T: core::clone::Clone
+pub type csv_verifier::anchors::CanonicalBlockHeader::Owned = T
+pub fn csv_verifier::anchors::CanonicalBlockHeader::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::CanonicalBlockHeader::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::CanonicalBlockHeader where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalBlockHeader::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::CanonicalBlockHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalBlockHeader::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::CanonicalBlockHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalBlockHeader::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::CanonicalBlockHeader where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::CanonicalBlockHeader::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::CanonicalBlockHeader
+pub fn csv_verifier::anchors::CanonicalBlockHeader::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::CanonicalBlockHeader
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::CanonicalBlockHeader
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::CanonicalBlockHeader
+pub type csv_verifier::anchors::CanonicalBlockHeader::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::CanonicalBlockHeader where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::CanonicalBlockHeader where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::CanonicalBlockHeader::vzip(self) -> V
+pub struct csv_verifier::anchors::CanonicalInclusionProof
+pub csv_verifier::anchors::CanonicalInclusionProof::key: alloc::vec::Vec<u8>
+pub csv_verifier::anchors::CanonicalInclusionProof::proof: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub csv_verifier::anchors::CanonicalInclusionProof::root_hash: [u8; 32]
+pub csv_verifier::anchors::CanonicalInclusionProof::value: alloc::vec::Vec<u8>
+impl core::clone::Clone for csv_verifier::anchors::CanonicalInclusionProof
+pub fn csv_verifier::anchors::CanonicalInclusionProof::clone(&self) -> csv_verifier::anchors::CanonicalInclusionProof
+impl core::fmt::Debug for csv_verifier::anchors::CanonicalInclusionProof
+pub fn csv_verifier::anchors::CanonicalInclusionProof::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::Send for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::Sync for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::Unpin for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::CanonicalInclusionProof
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::CanonicalInclusionProof
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::CanonicalInclusionProof
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::CanonicalInclusionProof where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::CanonicalInclusionProof where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::CanonicalInclusionProof where U: core::convert::From<T>
+pub fn csv_verifier::anchors::CanonicalInclusionProof::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::CanonicalInclusionProof where U: core::convert::Into<T>
+pub type csv_verifier::anchors::CanonicalInclusionProof::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::CanonicalInclusionProof::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::CanonicalInclusionProof where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::CanonicalInclusionProof::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::CanonicalInclusionProof::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::CanonicalInclusionProof where T: core::clone::Clone
+pub type csv_verifier::anchors::CanonicalInclusionProof::Owned = T
+pub fn csv_verifier::anchors::CanonicalInclusionProof::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::CanonicalInclusionProof::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::CanonicalInclusionProof where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalInclusionProof::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::CanonicalInclusionProof where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalInclusionProof::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::CanonicalInclusionProof where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalInclusionProof::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::CanonicalInclusionProof where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::CanonicalInclusionProof::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::CanonicalInclusionProof
+pub fn csv_verifier::anchors::CanonicalInclusionProof::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::CanonicalInclusionProof
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::CanonicalInclusionProof
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::CanonicalInclusionProof
+pub type csv_verifier::anchors::CanonicalInclusionProof::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::CanonicalInclusionProof where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::CanonicalInclusionProof where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::CanonicalInclusionProof::vzip(self) -> V
+pub struct csv_verifier::anchors::EthereumAnchor
+pub csv_verifier::anchors::EthereumAnchor::sync_committee_period: u64
+impl csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::new(u64) -> Self
+impl core::clone::Clone for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::clone(&self) -> csv_verifier::anchors::EthereumAnchor
+impl core::fmt::Debug for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl csv_verifier::anchors::CryptographicAnchor for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::verify_header(&self, &csv_verifier::anchors::CanonicalBlockHeader, &csv_verifier::anchors::ValidatorSet, &csv_verifier::anchors::FinalityGuarantee) -> core::result::Result<csv_verifier::anchors::VerifiedHeader, csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::EthereumAnchor::verify_inclusion(&self, &csv_verifier::anchors::CanonicalInclusionProof, &csv_verifier::anchors::VerifiedHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl core::marker::Freeze for csv_verifier::anchors::EthereumAnchor
+impl core::marker::Send for csv_verifier::anchors::EthereumAnchor
+impl core::marker::Sync for csv_verifier::anchors::EthereumAnchor
+impl core::marker::Unpin for csv_verifier::anchors::EthereumAnchor
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::EthereumAnchor
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::EthereumAnchor
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::EthereumAnchor
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::EthereumAnchor where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::EthereumAnchor where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::EthereumAnchor where U: core::convert::From<T>
+pub fn csv_verifier::anchors::EthereumAnchor::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::EthereumAnchor where U: core::convert::Into<T>
+pub type csv_verifier::anchors::EthereumAnchor::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::EthereumAnchor::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::EthereumAnchor where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::EthereumAnchor::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::EthereumAnchor::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::EthereumAnchor where T: core::clone::Clone
+pub type csv_verifier::anchors::EthereumAnchor::Owned = T
+pub fn csv_verifier::anchors::EthereumAnchor::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::EthereumAnchor::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::EthereumAnchor where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::EthereumAnchor::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::EthereumAnchor where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::EthereumAnchor::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::EthereumAnchor where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::EthereumAnchor::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::EthereumAnchor where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::EthereumAnchor::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::EthereumAnchor
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::EthereumAnchor
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::EthereumAnchor
+pub type csv_verifier::anchors::EthereumAnchor::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::EthereumAnchor where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::EthereumAnchor where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::EthereumAnchor::vzip(self) -> V
+pub struct csv_verifier::anchors::FinalityGuarantee
+pub csv_verifier::anchors::FinalityGuarantee::is_probabilistic: bool
+pub csv_verifier::anchors::FinalityGuarantee::max_proof_age_blocks: u64
+pub csv_verifier::anchors::FinalityGuarantee::max_reorg_depth: u64
+pub csv_verifier::anchors::FinalityGuarantee::min_anchor_sources: u8
+pub csv_verifier::anchors::FinalityGuarantee::proof_system: csv_verifier::anchors::ProofSystem
+pub csv_verifier::anchors::FinalityGuarantee::validator_honesty_threshold: f32
+impl core::clone::Clone for csv_verifier::anchors::FinalityGuarantee
+pub fn csv_verifier::anchors::FinalityGuarantee::clone(&self) -> csv_verifier::anchors::FinalityGuarantee
+impl core::fmt::Debug for csv_verifier::anchors::FinalityGuarantee
+pub fn csv_verifier::anchors::FinalityGuarantee::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::Send for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::Sync for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::Unpin for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::FinalityGuarantee
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::FinalityGuarantee
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::FinalityGuarantee
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::FinalityGuarantee where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::FinalityGuarantee where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::FinalityGuarantee where U: core::convert::From<T>
+pub fn csv_verifier::anchors::FinalityGuarantee::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::FinalityGuarantee where U: core::convert::Into<T>
+pub type csv_verifier::anchors::FinalityGuarantee::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::FinalityGuarantee::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::FinalityGuarantee where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::FinalityGuarantee::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::FinalityGuarantee::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::FinalityGuarantee where T: core::clone::Clone
+pub type csv_verifier::anchors::FinalityGuarantee::Owned = T
+pub fn csv_verifier::anchors::FinalityGuarantee::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::FinalityGuarantee::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::FinalityGuarantee where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::FinalityGuarantee::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::FinalityGuarantee where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::FinalityGuarantee::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::FinalityGuarantee where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::FinalityGuarantee::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::FinalityGuarantee where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::FinalityGuarantee::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::FinalityGuarantee
+pub fn csv_verifier::anchors::FinalityGuarantee::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::FinalityGuarantee
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::FinalityGuarantee
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::FinalityGuarantee
+pub type csv_verifier::anchors::FinalityGuarantee::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::FinalityGuarantee where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::FinalityGuarantee where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::FinalityGuarantee::vzip(self) -> V
+pub struct csv_verifier::anchors::QuorumCertificate
+pub csv_verifier::anchors::QuorumCertificate::signature: alloc::vec::Vec<u8>
+pub csv_verifier::anchors::QuorumCertificate::signers: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub csv_verifier::anchors::QuorumCertificate::view: u64
+impl core::clone::Clone for csv_verifier::anchors::QuorumCertificate
+pub fn csv_verifier::anchors::QuorumCertificate::clone(&self) -> csv_verifier::anchors::QuorumCertificate
+impl core::fmt::Debug for csv_verifier::anchors::QuorumCertificate
+pub fn csv_verifier::anchors::QuorumCertificate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::QuorumCertificate
+impl core::marker::Send for csv_verifier::anchors::QuorumCertificate
+impl core::marker::Sync for csv_verifier::anchors::QuorumCertificate
+impl core::marker::Unpin for csv_verifier::anchors::QuorumCertificate
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::QuorumCertificate
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::QuorumCertificate
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::QuorumCertificate
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::QuorumCertificate where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::QuorumCertificate where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::QuorumCertificate where U: core::convert::From<T>
+pub fn csv_verifier::anchors::QuorumCertificate::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::QuorumCertificate where U: core::convert::Into<T>
+pub type csv_verifier::anchors::QuorumCertificate::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::QuorumCertificate::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::QuorumCertificate where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::QuorumCertificate::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::QuorumCertificate::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::QuorumCertificate where T: core::clone::Clone
+pub type csv_verifier::anchors::QuorumCertificate::Owned = T
+pub fn csv_verifier::anchors::QuorumCertificate::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::QuorumCertificate::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::QuorumCertificate where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::QuorumCertificate::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::QuorumCertificate where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::QuorumCertificate::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::QuorumCertificate where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::QuorumCertificate::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::QuorumCertificate where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::QuorumCertificate::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::QuorumCertificate
+pub fn csv_verifier::anchors::QuorumCertificate::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::QuorumCertificate
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::QuorumCertificate
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::QuorumCertificate
+pub type csv_verifier::anchors::QuorumCertificate::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::QuorumCertificate where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::QuorumCertificate where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::QuorumCertificate::vzip(self) -> V
+pub struct csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::clone::Clone for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::clone(&self) -> csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::default::Default for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::default() -> csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::fmt::Debug for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for csv_verifier::anchors::UnavailableGroth16Verifier
+impl csv_verifier::anchors::Groth16PairingVerifier for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::verify_groth16_zk_seal(&self, &csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl core::marker::Freeze for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::Send for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::Sync for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::Unpin for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::UnavailableGroth16Verifier
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::UnavailableGroth16Verifier where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::UnavailableGroth16Verifier where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::UnavailableGroth16Verifier where U: core::convert::From<T>
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::UnavailableGroth16Verifier where U: core::convert::Into<T>
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::UnavailableGroth16Verifier where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::UnavailableGroth16Verifier where T: core::clone::Clone
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Owned = T
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::UnavailableGroth16Verifier where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::UnavailableGroth16Verifier where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::UnavailableGroth16Verifier where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::UnavailableGroth16Verifier where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::UnavailableGroth16Verifier::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::UnavailableGroth16Verifier
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::UnavailableGroth16Verifier
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::UnavailableGroth16Verifier
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::UnavailableGroth16Verifier where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::UnavailableGroth16Verifier where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::vzip(self) -> V
+pub struct csv_verifier::anchors::ValidatorInfo
+pub csv_verifier::anchors::ValidatorInfo::public_key: alloc::vec::Vec<u8>
+pub csv_verifier::anchors::ValidatorInfo::voting_power: u64
+impl core::clone::Clone for csv_verifier::anchors::ValidatorInfo
+pub fn csv_verifier::anchors::ValidatorInfo::clone(&self) -> csv_verifier::anchors::ValidatorInfo
+impl core::fmt::Debug for csv_verifier::anchors::ValidatorInfo
+pub fn csv_verifier::anchors::ValidatorInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::ValidatorInfo
+impl core::marker::Send for csv_verifier::anchors::ValidatorInfo
+impl core::marker::Sync for csv_verifier::anchors::ValidatorInfo
+impl core::marker::Unpin for csv_verifier::anchors::ValidatorInfo
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ValidatorInfo
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ValidatorInfo
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ValidatorInfo
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ValidatorInfo where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ValidatorInfo where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ValidatorInfo where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ValidatorInfo::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ValidatorInfo where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ValidatorInfo::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ValidatorInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ValidatorInfo where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ValidatorInfo::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ValidatorInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ValidatorInfo where T: core::clone::Clone
+pub type csv_verifier::anchors::ValidatorInfo::Owned = T
+pub fn csv_verifier::anchors::ValidatorInfo::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ValidatorInfo::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ValidatorInfo where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorInfo::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ValidatorInfo where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorInfo::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ValidatorInfo where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorInfo::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ValidatorInfo where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ValidatorInfo::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ValidatorInfo
+pub fn csv_verifier::anchors::ValidatorInfo::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ValidatorInfo
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ValidatorInfo
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ValidatorInfo
+pub type csv_verifier::anchors::ValidatorInfo::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ValidatorInfo where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ValidatorInfo where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ValidatorInfo::vzip(self) -> V
+pub struct csv_verifier::anchors::ValidatorSet
+pub csv_verifier::anchors::ValidatorSet::epoch: u64
+pub csv_verifier::anchors::ValidatorSet::validators: alloc::vec::Vec<csv_verifier::anchors::ValidatorInfo>
+impl core::clone::Clone for csv_verifier::anchors::ValidatorSet
+pub fn csv_verifier::anchors::ValidatorSet::clone(&self) -> csv_verifier::anchors::ValidatorSet
+impl core::fmt::Debug for csv_verifier::anchors::ValidatorSet
+pub fn csv_verifier::anchors::ValidatorSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::ValidatorSet
+impl core::marker::Send for csv_verifier::anchors::ValidatorSet
+impl core::marker::Sync for csv_verifier::anchors::ValidatorSet
+impl core::marker::Unpin for csv_verifier::anchors::ValidatorSet
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ValidatorSet
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ValidatorSet
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ValidatorSet
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ValidatorSet where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ValidatorSet where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ValidatorSet where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ValidatorSet::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ValidatorSet where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ValidatorSet::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ValidatorSet::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ValidatorSet where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ValidatorSet::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ValidatorSet::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ValidatorSet where T: core::clone::Clone
+pub type csv_verifier::anchors::ValidatorSet::Owned = T
+pub fn csv_verifier::anchors::ValidatorSet::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ValidatorSet::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ValidatorSet where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorSet::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ValidatorSet where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorSet::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ValidatorSet where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorSet::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ValidatorSet where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ValidatorSet::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ValidatorSet
+pub fn csv_verifier::anchors::ValidatorSet::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ValidatorSet
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ValidatorSet
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ValidatorSet
+pub type csv_verifier::anchors::ValidatorSet::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ValidatorSet where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ValidatorSet where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ValidatorSet::vzip(self) -> V
+pub struct csv_verifier::anchors::VerifiedHeader
+pub csv_verifier::anchors::VerifiedHeader::hash: [u8; 32]
+pub csv_verifier::anchors::VerifiedHeader::height: u64
+impl core::clone::Clone for csv_verifier::anchors::VerifiedHeader
+pub fn csv_verifier::anchors::VerifiedHeader::clone(&self) -> csv_verifier::anchors::VerifiedHeader
+impl core::fmt::Debug for csv_verifier::anchors::VerifiedHeader
+pub fn csv_verifier::anchors::VerifiedHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::VerifiedHeader
+impl core::marker::Send for csv_verifier::anchors::VerifiedHeader
+impl core::marker::Sync for csv_verifier::anchors::VerifiedHeader
+impl core::marker::Unpin for csv_verifier::anchors::VerifiedHeader
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::VerifiedHeader
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::VerifiedHeader
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::VerifiedHeader
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::VerifiedHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::VerifiedHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::VerifiedHeader where U: core::convert::From<T>
+pub fn csv_verifier::anchors::VerifiedHeader::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::VerifiedHeader where U: core::convert::Into<T>
+pub type csv_verifier::anchors::VerifiedHeader::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::VerifiedHeader::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::VerifiedHeader where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::VerifiedHeader::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::VerifiedHeader::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::VerifiedHeader where T: core::clone::Clone
+pub type csv_verifier::anchors::VerifiedHeader::Owned = T
+pub fn csv_verifier::anchors::VerifiedHeader::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::VerifiedHeader::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::VerifiedHeader where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::VerifiedHeader::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::VerifiedHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::VerifiedHeader::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::VerifiedHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::VerifiedHeader::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::VerifiedHeader where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::VerifiedHeader::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::VerifiedHeader
+pub fn csv_verifier::anchors::VerifiedHeader::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::VerifiedHeader
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::VerifiedHeader
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::VerifiedHeader
+pub type csv_verifier::anchors::VerifiedHeader::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::VerifiedHeader where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::VerifiedHeader where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::VerifiedHeader::vzip(self) -> V
+pub struct csv_verifier::anchors::ZkHeader
+pub csv_verifier::anchors::ZkHeader::circuit_id: [u8; 32]
+impl csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::new([u8; 32]) -> core::result::Result<Self, csv_verifier::anchors::AnchorError>
+impl core::clone::Clone for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::clone(&self) -> csv_verifier::anchors::ZkHeader
+impl core::cmp::Eq for csv_verifier::anchors::ZkHeader
+impl core::cmp::PartialEq for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::eq(&self, &csv_verifier::anchors::ZkHeader) -> bool
+impl core::fmt::Debug for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_verifier::anchors::ZkHeader
+impl core::marker::Freeze for csv_verifier::anchors::ZkHeader
+impl core::marker::Send for csv_verifier::anchors::ZkHeader
+impl core::marker::Sync for csv_verifier::anchors::ZkHeader
+impl core::marker::Unpin for csv_verifier::anchors::ZkHeader
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ZkHeader
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ZkHeader
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ZkHeader
+impl<Q, K> equivalent::Equivalent<K> for csv_verifier::anchors::ZkHeader where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::equivalent(&self, &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for csv_verifier::anchors::ZkHeader where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::equivalent(&self, &K) -> bool
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ZkHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ZkHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ZkHeader where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ZkHeader::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ZkHeader where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ZkHeader::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ZkHeader::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ZkHeader where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ZkHeader::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ZkHeader::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ZkHeader where T: core::clone::Clone
+pub type csv_verifier::anchors::ZkHeader::Owned = T
+pub fn csv_verifier::anchors::ZkHeader::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ZkHeader::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ZkHeader where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ZkHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ZkHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ZkHeader where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ZkHeader::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ZkHeader
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ZkHeader
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ZkHeader
+pub type csv_verifier::anchors::ZkHeader::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ZkHeader where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ZkHeader where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ZkHeader::vzip(self) -> V
+pub trait csv_verifier::anchors::CryptographicAnchor: core::marker::Send + core::marker::Sync
+pub fn csv_verifier::anchors::CryptographicAnchor::verify_header(&self, &csv_verifier::anchors::CanonicalBlockHeader, &csv_verifier::anchors::ValidatorSet, &csv_verifier::anchors::FinalityGuarantee) -> core::result::Result<csv_verifier::anchors::VerifiedHeader, csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::CryptographicAnchor::verify_inclusion(&self, &csv_verifier::anchors::CanonicalInclusionProof, &csv_verifier::anchors::VerifiedHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl csv_verifier::anchors::CryptographicAnchor for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::verify_header(&self, &csv_verifier::anchors::CanonicalBlockHeader, &csv_verifier::anchors::ValidatorSet, &csv_verifier::anchors::FinalityGuarantee) -> core::result::Result<csv_verifier::anchors::VerifiedHeader, csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::EthereumAnchor::verify_inclusion(&self, &csv_verifier::anchors::CanonicalInclusionProof, &csv_verifier::anchors::VerifiedHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub trait csv_verifier::anchors::Groth16PairingVerifier
+pub fn csv_verifier::anchors::Groth16PairingVerifier::verify_groth16_zk_seal(&self, &csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl csv_verifier::anchors::Groth16PairingVerifier for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::verify_groth16_zk_seal(&self, &csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::verify_zk_seal_unavailable(&csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::verify_zk_seal_with_pairing<V: csv_verifier::anchors::Groth16PairingVerifier + ?core::marker::Sized>(&csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader, &V) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub mod csv_verifier::chain_proof_bundle
+pub enum csv_verifier::chain_proof_bundle::ChainBundleError
+pub csv_verifier::chain_proof_bundle::ChainBundleError::Finality(alloc::string::String)
+pub csv_verifier::chain_proof_bundle::ChainBundleError::Inclusion(alloc::string::String)
+pub csv_verifier::chain_proof_bundle::ChainBundleError::Policy(alloc::string::String)
+impl core::cmp::Eq for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::cmp::PartialEq for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::eq(&self, &csv_verifier::chain_proof_bundle::ChainBundleError) -> bool
+impl core::convert::From<csv_protocol::chain_adapter_traits::ChainOpError> for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::from(csv_protocol::chain_adapter_traits::ChainOpError) -> Self
+impl core::error::Error for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::fmt::Debug for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Freeze for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Send for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Sync for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Unpin for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::UnsafeUnpin for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::chain_proof_bundle::ChainBundleError
+impl<Q, K> equivalent::Equivalent<K> for csv_verifier::chain_proof_bundle::ChainBundleError where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::equivalent(&self, &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for csv_verifier::chain_proof_bundle::ChainBundleError where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::equivalent(&self, &K) -> bool
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::chain_proof_bundle::ChainBundleError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::chain_proof_bundle::ChainBundleError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::chain_proof_bundle::ChainBundleError where U: core::convert::From<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::chain_proof_bundle::ChainBundleError where U: core::convert::Into<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundleError::Error = core::convert::Infallible
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::chain_proof_bundle::ChainBundleError where U: core::convert::TryFrom<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundleError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for csv_verifier::chain_proof_bundle::ChainBundleError where T: core::fmt::Display + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for csv_verifier::chain_proof_bundle::ChainBundleError where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::chain_proof_bundle::ChainBundleError where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::chain_proof_bundle::ChainBundleError where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::chain_proof_bundle::ChainBundleError
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::chain_proof_bundle::ChainBundleError
+impl<T> typenum::type_operators::Same for csv_verifier::chain_proof_bundle::ChainBundleError
+pub type csv_verifier::chain_proof_bundle::ChainBundleError::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::chain_proof_bundle::ChainBundleError where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::chain_proof_bundle::ChainBundleError where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::vzip(self) -> V
+pub struct csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub csv_verifier::chain_proof_bundle::ChainBundlePolicy::max_confirmations: core::option::Option<u64>
+pub csv_verifier::chain_proof_bundle::ChainBundlePolicy::min_confirmations: core::option::Option<u64>
+impl csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::bitcoin() -> Self
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::permissive() -> Self
+impl core::clone::Clone for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::clone(&self) -> csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::default::Default for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::default() -> csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::fmt::Debug for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Freeze for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Send for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Sync for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Unpin for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::UnsafeUnpin for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where U: core::convert::From<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where U: core::convert::Into<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Error = core::convert::Infallible
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where U: core::convert::TryFrom<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: core::clone::Clone
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Owned = T
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::clone_into(&self, &mut T)
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: core::clone::Clone
+pub unsafe fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl<T> typenum::type_operators::Same for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::vzip(self) -> V
+pub struct csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>(pub &'a dyn csv_protocol::chain_adapter_traits::ChainProofProvider)
+impl csv_verifier::chain_proof_bundle::ChainNativeProofVerifier for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_finality_proof(&self, &csv_protocol::proof_taxonomy::FinalityProof, &str) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_inclusion_proof(&self, &csv_protocol::proof_taxonomy::InclusionProof, &csv_hash::hash_registry::Hash) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+impl<'a> core::marker::Freeze for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::Send for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::Sync for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::Unpin for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::UnsafeUnpin for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where U: core::convert::From<T>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where U: core::convert::Into<T>
+pub type csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::Error = core::convert::Infallible
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where U: core::convert::TryFrom<T>
+pub type csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<T> typenum::type_operators::Same for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+pub type csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::vzip(self) -> V
+pub trait csv_verifier::chain_proof_bundle::ChainNativeProofVerifier
+pub fn csv_verifier::chain_proof_bundle::ChainNativeProofVerifier::verify_finality_proof(&self, &csv_protocol::proof_taxonomy::FinalityProof, &str) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::chain_proof_bundle::ChainNativeProofVerifier::verify_inclusion_proof(&self, &csv_protocol::proof_taxonomy::InclusionProof, &csv_hash::hash_registry::Hash) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+impl csv_verifier::chain_proof_bundle::ChainNativeProofVerifier for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_finality_proof(&self, &csv_protocol::proof_taxonomy::FinalityProof, &str) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_inclusion_proof(&self, &csv_protocol::proof_taxonomy::InclusionProof, &csv_hash::hash_registry::Hash) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::chain_proof_bundle::inclusion_anchor_ref(&csv_protocol::proof_taxonomy::InclusionProof) -> alloc::string::String
+pub fn csv_verifier::chain_proof_bundle::verify_chain_proof_bundle<V: csv_verifier::chain_proof_bundle::ChainNativeProofVerifier + ?core::marker::Sized>(&V, &csv_protocol::proof_taxonomy::InclusionProof, &csv_protocol::proof_taxonomy::FinalityProof, &csv_hash::hash_registry::Hash, &csv_verifier::chain_proof_bundle::ChainBundlePolicy) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub enum csv_verifier::AnchorError
+pub csv_verifier::AnchorError::HashMismatch
+pub csv_verifier::AnchorError::HashMismatch::actual: alloc::string::String
+pub csv_verifier::AnchorError::HashMismatch::expected: alloc::string::String
+pub csv_verifier::AnchorError::InvalidInclusionProof(alloc::string::String)
+pub csv_verifier::AnchorError::InvalidProofStructure(alloc::string::String)
+pub csv_verifier::AnchorError::InvalidSignature(alloc::string::String)
+pub csv_verifier::AnchorError::MissingQuorumCert
+pub csv_verifier::AnchorError::ProofTooOld(u64, u64)
+pub csv_verifier::AnchorError::ReorgDepthExceeded(u64, u64)
+pub csv_verifier::AnchorError::UnsupportedChain(alloc::string::String)
+pub csv_verifier::AnchorError::UnsupportedZkSealProofSystem(alloc::string::String)
+pub csv_verifier::AnchorError::ValidatorSetMismatch
+pub csv_verifier::AnchorError::ZkSealMalformed(alloc::string::String)
+pub csv_verifier::AnchorError::ZkSealPairingCheckFailed(alloc::string::String)
+pub csv_verifier::AnchorError::ZkSealUnavailable(alloc::string::String)
+impl core::convert::From<csv_proof::zk_proof::ZkError> for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::from(csv_proof::zk_proof::ZkError) -> Self
+impl core::error::Error for csv_verifier::anchors::AnchorError
+impl core::fmt::Debug for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::AnchorError
+impl core::marker::Send for csv_verifier::anchors::AnchorError
+impl core::marker::Sync for csv_verifier::anchors::AnchorError
+impl core::marker::Unpin for csv_verifier::anchors::AnchorError
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::AnchorError
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::AnchorError
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::AnchorError
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::AnchorError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::AnchorError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::AnchorError where U: core::convert::From<T>
+pub fn csv_verifier::anchors::AnchorError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::AnchorError where U: core::convert::Into<T>
+pub type csv_verifier::anchors::AnchorError::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::AnchorError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::AnchorError where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::AnchorError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::AnchorError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for csv_verifier::anchors::AnchorError where T: core::fmt::Display + ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for csv_verifier::anchors::AnchorError where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::AnchorError where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::AnchorError where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::AnchorError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::anchors::AnchorError
+pub fn csv_verifier::anchors::AnchorError::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::AnchorError
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::AnchorError
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::AnchorError
+pub type csv_verifier::anchors::AnchorError::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::AnchorError where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::AnchorError where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::AnchorError::vzip(self) -> V
+pub enum csv_verifier::ChainBundleError
+pub csv_verifier::ChainBundleError::Finality(alloc::string::String)
+pub csv_verifier::ChainBundleError::Inclusion(alloc::string::String)
+pub csv_verifier::ChainBundleError::Policy(alloc::string::String)
+impl core::cmp::Eq for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::cmp::PartialEq for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::eq(&self, &csv_verifier::chain_proof_bundle::ChainBundleError) -> bool
+impl core::convert::From<csv_protocol::chain_adapter_traits::ChainOpError> for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::from(csv_protocol::chain_adapter_traits::ChainOpError) -> Self
+impl core::error::Error for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::fmt::Debug for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Freeze for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Send for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Sync for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::Unpin for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::marker::UnsafeUnpin for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::chain_proof_bundle::ChainBundleError
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::chain_proof_bundle::ChainBundleError
+impl<Q, K> equivalent::Equivalent<K> for csv_verifier::chain_proof_bundle::ChainBundleError where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::equivalent(&self, &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for csv_verifier::chain_proof_bundle::ChainBundleError where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::equivalent(&self, &K) -> bool
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::chain_proof_bundle::ChainBundleError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::chain_proof_bundle::ChainBundleError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::chain_proof_bundle::ChainBundleError where U: core::convert::From<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::chain_proof_bundle::ChainBundleError where U: core::convert::Into<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundleError::Error = core::convert::Infallible
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::chain_proof_bundle::ChainBundleError where U: core::convert::TryFrom<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundleError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for csv_verifier::chain_proof_bundle::ChainBundleError where T: core::fmt::Display + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for csv_verifier::chain_proof_bundle::ChainBundleError where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::chain_proof_bundle::ChainBundleError where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::chain_proof_bundle::ChainBundleError where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::chain_proof_bundle::ChainBundleError
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::chain_proof_bundle::ChainBundleError
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::chain_proof_bundle::ChainBundleError
+impl<T> typenum::type_operators::Same for csv_verifier::chain_proof_bundle::ChainBundleError
+pub type csv_verifier::chain_proof_bundle::ChainBundleError::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::chain_proof_bundle::ChainBundleError where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::chain_proof_bundle::ChainBundleError where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundleError::vzip(self) -> V
+pub enum csv_verifier::ProofSystem
+pub csv_verifier::ProofSystem::BftQc
+pub csv_verifier::ProofSystem::BftQc::quorum_fraction: f32
+pub csv_verifier::ProofSystem::BitcoinSpv
+pub csv_verifier::ProofSystem::BitcoinSpv::confirmations: u64
+pub csv_verifier::ProofSystem::EthereumPos
+pub csv_verifier::ProofSystem::EthereumPos::finality_epochs: u8
+pub csv_verifier::ProofSystem::ZkHeader
+pub csv_verifier::ProofSystem::ZkHeader::circuit_id: [u8; 32]
+impl core::clone::Clone for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::clone(&self) -> csv_verifier::anchors::ProofSystem
+impl core::cmp::PartialEq for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::eq(&self, &csv_verifier::anchors::ProofSystem) -> bool
+impl core::fmt::Debug for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_verifier::anchors::ProofSystem
+impl core::marker::Freeze for csv_verifier::anchors::ProofSystem
+impl core::marker::Send for csv_verifier::anchors::ProofSystem
+impl core::marker::Sync for csv_verifier::anchors::ProofSystem
+impl core::marker::Unpin for csv_verifier::anchors::ProofSystem
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ProofSystem
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ProofSystem
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ProofSystem
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ProofSystem where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ProofSystem where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ProofSystem where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ProofSystem::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ProofSystem where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ProofSystem::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ProofSystem::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ProofSystem where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ProofSystem::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ProofSystem::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ProofSystem where T: core::clone::Clone
+pub type csv_verifier::anchors::ProofSystem::Owned = T
+pub fn csv_verifier::anchors::ProofSystem::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ProofSystem::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ProofSystem where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ProofSystem::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ProofSystem where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ProofSystem::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ProofSystem where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ProofSystem::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ProofSystem where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ProofSystem::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ProofSystem
+pub fn csv_verifier::anchors::ProofSystem::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ProofSystem
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ProofSystem
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ProofSystem
+pub type csv_verifier::anchors::ProofSystem::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ProofSystem where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ProofSystem where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ProofSystem::vzip(self) -> V
+pub struct csv_verifier::CanonicalBlockHeader
+pub csv_verifier::CanonicalBlockHeader::hash: [u8; 32]
+pub csv_verifier::CanonicalBlockHeader::height: u64
+pub csv_verifier::CanonicalBlockHeader::parent_hash: [u8; 32]
+pub csv_verifier::CanonicalBlockHeader::quorum_cert: core::option::Option<csv_verifier::anchors::QuorumCertificate>
+pub csv_verifier::CanonicalBlockHeader::timestamp: u64
+impl core::clone::Clone for csv_verifier::anchors::CanonicalBlockHeader
+pub fn csv_verifier::anchors::CanonicalBlockHeader::clone(&self) -> csv_verifier::anchors::CanonicalBlockHeader
+impl core::fmt::Debug for csv_verifier::anchors::CanonicalBlockHeader
+pub fn csv_verifier::anchors::CanonicalBlockHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::Send for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::Sync for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::Unpin for csv_verifier::anchors::CanonicalBlockHeader
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::CanonicalBlockHeader
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::CanonicalBlockHeader
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::CanonicalBlockHeader
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::CanonicalBlockHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::CanonicalBlockHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::CanonicalBlockHeader where U: core::convert::From<T>
+pub fn csv_verifier::anchors::CanonicalBlockHeader::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::CanonicalBlockHeader where U: core::convert::Into<T>
+pub type csv_verifier::anchors::CanonicalBlockHeader::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::CanonicalBlockHeader::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::CanonicalBlockHeader where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::CanonicalBlockHeader::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::CanonicalBlockHeader::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::CanonicalBlockHeader where T: core::clone::Clone
+pub type csv_verifier::anchors::CanonicalBlockHeader::Owned = T
+pub fn csv_verifier::anchors::CanonicalBlockHeader::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::CanonicalBlockHeader::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::CanonicalBlockHeader where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalBlockHeader::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::CanonicalBlockHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalBlockHeader::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::CanonicalBlockHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalBlockHeader::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::CanonicalBlockHeader where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::CanonicalBlockHeader::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::CanonicalBlockHeader
+pub fn csv_verifier::anchors::CanonicalBlockHeader::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::CanonicalBlockHeader
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::CanonicalBlockHeader
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::CanonicalBlockHeader
+pub type csv_verifier::anchors::CanonicalBlockHeader::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::CanonicalBlockHeader where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::CanonicalBlockHeader where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::CanonicalBlockHeader::vzip(self) -> V
+pub struct csv_verifier::CanonicalInclusionProof
+pub csv_verifier::CanonicalInclusionProof::key: alloc::vec::Vec<u8>
+pub csv_verifier::CanonicalInclusionProof::proof: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub csv_verifier::CanonicalInclusionProof::root_hash: [u8; 32]
+pub csv_verifier::CanonicalInclusionProof::value: alloc::vec::Vec<u8>
+impl core::clone::Clone for csv_verifier::anchors::CanonicalInclusionProof
+pub fn csv_verifier::anchors::CanonicalInclusionProof::clone(&self) -> csv_verifier::anchors::CanonicalInclusionProof
+impl core::fmt::Debug for csv_verifier::anchors::CanonicalInclusionProof
+pub fn csv_verifier::anchors::CanonicalInclusionProof::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::Send for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::Sync for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::Unpin for csv_verifier::anchors::CanonicalInclusionProof
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::CanonicalInclusionProof
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::CanonicalInclusionProof
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::CanonicalInclusionProof
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::CanonicalInclusionProof where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::CanonicalInclusionProof where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::CanonicalInclusionProof where U: core::convert::From<T>
+pub fn csv_verifier::anchors::CanonicalInclusionProof::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::CanonicalInclusionProof where U: core::convert::Into<T>
+pub type csv_verifier::anchors::CanonicalInclusionProof::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::CanonicalInclusionProof::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::CanonicalInclusionProof where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::CanonicalInclusionProof::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::CanonicalInclusionProof::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::CanonicalInclusionProof where T: core::clone::Clone
+pub type csv_verifier::anchors::CanonicalInclusionProof::Owned = T
+pub fn csv_verifier::anchors::CanonicalInclusionProof::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::CanonicalInclusionProof::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::CanonicalInclusionProof where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalInclusionProof::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::CanonicalInclusionProof where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalInclusionProof::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::CanonicalInclusionProof where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::CanonicalInclusionProof::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::CanonicalInclusionProof where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::CanonicalInclusionProof::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::CanonicalInclusionProof
+pub fn csv_verifier::anchors::CanonicalInclusionProof::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::CanonicalInclusionProof
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::CanonicalInclusionProof
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::CanonicalInclusionProof
+pub type csv_verifier::anchors::CanonicalInclusionProof::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::CanonicalInclusionProof where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::CanonicalInclusionProof where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::CanonicalInclusionProof::vzip(self) -> V
+pub struct csv_verifier::CanonicalVerifierImpl
+impl csv_verifier::CanonicalVerifierImpl
+pub fn csv_verifier::CanonicalVerifierImpl::config(&self) -> &csv_verifier::VerifierConfig
+pub fn csv_verifier::CanonicalVerifierImpl::new(csv_verifier::VerifierConfig) -> Self
+impl core::default::Default for csv_verifier::CanonicalVerifierImpl
+pub fn csv_verifier::CanonicalVerifierImpl::default() -> Self
+impl csv_verifier::CanonicalVerifier for csv_verifier::CanonicalVerifierImpl
+pub fn csv_verifier::CanonicalVerifierImpl::verify_finality(&self, u64, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_inclusion_proof(&self, &csv_hash::seal::CommitAnchor, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_proof_bundle(&self, &csv_protocol::proof_taxonomy::ProofBundle, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_proof_leaf(&self, &csv_protocol::proof_taxonomy::ProofLeafV1, &csv_hash::hash_registry::Hash) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_seal_registry(&self, &[u8], &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::verifier::SealRegistryStatus, csv_protocol::error::ProtocolError>
+impl core::marker::Freeze for csv_verifier::CanonicalVerifierImpl
+impl core::marker::Send for csv_verifier::CanonicalVerifierImpl
+impl core::marker::Sync for csv_verifier::CanonicalVerifierImpl
+impl core::marker::Unpin for csv_verifier::CanonicalVerifierImpl
+impl core::marker::UnsafeUnpin for csv_verifier::CanonicalVerifierImpl
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::CanonicalVerifierImpl
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::CanonicalVerifierImpl
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::CanonicalVerifierImpl where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::CanonicalVerifierImpl where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::CanonicalVerifierImpl where U: core::convert::From<T>
+pub fn csv_verifier::CanonicalVerifierImpl::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::CanonicalVerifierImpl where U: core::convert::Into<T>
+pub type csv_verifier::CanonicalVerifierImpl::Error = core::convert::Infallible
+pub fn csv_verifier::CanonicalVerifierImpl::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::CanonicalVerifierImpl where U: core::convert::TryFrom<T>
+pub type csv_verifier::CanonicalVerifierImpl::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::CanonicalVerifierImpl::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for csv_verifier::CanonicalVerifierImpl where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::CanonicalVerifierImpl::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::CanonicalVerifierImpl where T: ?core::marker::Sized
+pub fn csv_verifier::CanonicalVerifierImpl::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::CanonicalVerifierImpl where T: ?core::marker::Sized
+pub fn csv_verifier::CanonicalVerifierImpl::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::CanonicalVerifierImpl
+pub fn csv_verifier::CanonicalVerifierImpl::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::CanonicalVerifierImpl
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::CanonicalVerifierImpl
+impl<T> typenum::type_operators::Same for csv_verifier::CanonicalVerifierImpl
+pub type csv_verifier::CanonicalVerifierImpl::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::CanonicalVerifierImpl where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::CanonicalVerifierImpl where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::CanonicalVerifierImpl::vzip(self) -> V
+pub struct csv_verifier::ChainBundlePolicy
+pub csv_verifier::ChainBundlePolicy::max_confirmations: core::option::Option<u64>
+pub csv_verifier::ChainBundlePolicy::min_confirmations: core::option::Option<u64>
+impl csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::bitcoin() -> Self
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::permissive() -> Self
+impl core::clone::Clone for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::clone(&self) -> csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::default::Default for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::default() -> csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::fmt::Debug for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Freeze for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Send for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Sync for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::Unpin for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::marker::UnsafeUnpin for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where U: core::convert::From<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where U: core::convert::Into<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Error = core::convert::Infallible
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where U: core::convert::TryFrom<T>
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: core::clone::Clone
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Owned = T
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::clone_into(&self, &mut T)
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: core::clone::Clone
+pub unsafe fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+impl<T> typenum::type_operators::Same for csv_verifier::chain_proof_bundle::ChainBundlePolicy
+pub type csv_verifier::chain_proof_bundle::ChainBundlePolicy::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::chain_proof_bundle::ChainBundlePolicy where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::chain_proof_bundle::ChainBundlePolicy::vzip(self) -> V
+pub struct csv_verifier::DynChainProofVerifier<'a>(pub &'a dyn csv_protocol::chain_adapter_traits::ChainProofProvider)
+impl csv_verifier::chain_proof_bundle::ChainNativeProofVerifier for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_finality_proof(&self, &csv_protocol::proof_taxonomy::FinalityProof, &str) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_inclusion_proof(&self, &csv_protocol::proof_taxonomy::InclusionProof, &csv_hash::hash_registry::Hash) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+impl<'a> core::marker::Freeze for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::Send for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::Sync for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::Unpin for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> core::marker::UnsafeUnpin for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where U: core::convert::From<T>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where U: core::convert::Into<T>
+pub type csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::Error = core::convert::Infallible
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where U: core::convert::TryFrom<T>
+pub type csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: ?core::marker::Sized
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+impl<T> typenum::type_operators::Same for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>
+pub type csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a> where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'a>::vzip(self) -> V
+pub struct csv_verifier::EthereumAnchor
+pub csv_verifier::EthereumAnchor::sync_committee_period: u64
+impl csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::new(u64) -> Self
+impl core::clone::Clone for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::clone(&self) -> csv_verifier::anchors::EthereumAnchor
+impl core::fmt::Debug for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl csv_verifier::anchors::CryptographicAnchor for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::verify_header(&self, &csv_verifier::anchors::CanonicalBlockHeader, &csv_verifier::anchors::ValidatorSet, &csv_verifier::anchors::FinalityGuarantee) -> core::result::Result<csv_verifier::anchors::VerifiedHeader, csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::EthereumAnchor::verify_inclusion(&self, &csv_verifier::anchors::CanonicalInclusionProof, &csv_verifier::anchors::VerifiedHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl core::marker::Freeze for csv_verifier::anchors::EthereumAnchor
+impl core::marker::Send for csv_verifier::anchors::EthereumAnchor
+impl core::marker::Sync for csv_verifier::anchors::EthereumAnchor
+impl core::marker::Unpin for csv_verifier::anchors::EthereumAnchor
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::EthereumAnchor
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::EthereumAnchor
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::EthereumAnchor
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::EthereumAnchor where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::EthereumAnchor where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::EthereumAnchor where U: core::convert::From<T>
+pub fn csv_verifier::anchors::EthereumAnchor::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::EthereumAnchor where U: core::convert::Into<T>
+pub type csv_verifier::anchors::EthereumAnchor::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::EthereumAnchor::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::EthereumAnchor where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::EthereumAnchor::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::EthereumAnchor::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::EthereumAnchor where T: core::clone::Clone
+pub type csv_verifier::anchors::EthereumAnchor::Owned = T
+pub fn csv_verifier::anchors::EthereumAnchor::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::EthereumAnchor::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::EthereumAnchor where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::EthereumAnchor::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::EthereumAnchor where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::EthereumAnchor::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::EthereumAnchor where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::EthereumAnchor::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::EthereumAnchor where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::EthereumAnchor::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::EthereumAnchor
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::EthereumAnchor
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::EthereumAnchor
+pub type csv_verifier::anchors::EthereumAnchor::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::EthereumAnchor where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::EthereumAnchor where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::EthereumAnchor::vzip(self) -> V
+pub struct csv_verifier::ExpectedDomain
+pub csv_verifier::ExpectedDomain::max_anchor_age_blocks: core::option::Option<u64>
+pub csv_verifier::ExpectedDomain::observed_source_tip: core::option::Option<u64>
+pub csv_verifier::ExpectedDomain::sanad_id: core::option::Option<[u8; 32]>
+pub csv_verifier::ExpectedDomain::source_chain: core::option::Option<alloc::string::String>
+impl core::clone::Clone for csv_verifier::ExpectedDomain
+pub fn csv_verifier::ExpectedDomain::clone(&self) -> csv_verifier::ExpectedDomain
+impl core::default::Default for csv_verifier::ExpectedDomain
+pub fn csv_verifier::ExpectedDomain::default() -> csv_verifier::ExpectedDomain
+impl core::fmt::Debug for csv_verifier::ExpectedDomain
+pub fn csv_verifier::ExpectedDomain::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::ExpectedDomain
+impl core::marker::Send for csv_verifier::ExpectedDomain
+impl core::marker::Sync for csv_verifier::ExpectedDomain
+impl core::marker::Unpin for csv_verifier::ExpectedDomain
+impl core::marker::UnsafeUnpin for csv_verifier::ExpectedDomain
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::ExpectedDomain
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::ExpectedDomain
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::ExpectedDomain where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::ExpectedDomain where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::ExpectedDomain where U: core::convert::From<T>
+pub fn csv_verifier::ExpectedDomain::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::ExpectedDomain where U: core::convert::Into<T>
+pub type csv_verifier::ExpectedDomain::Error = core::convert::Infallible
+pub fn csv_verifier::ExpectedDomain::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::ExpectedDomain where U: core::convert::TryFrom<T>
+pub type csv_verifier::ExpectedDomain::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::ExpectedDomain::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::ExpectedDomain where T: core::clone::Clone
+pub type csv_verifier::ExpectedDomain::Owned = T
+pub fn csv_verifier::ExpectedDomain::clone_into(&self, &mut T)
+pub fn csv_verifier::ExpectedDomain::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::ExpectedDomain where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::ExpectedDomain::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::ExpectedDomain where T: ?core::marker::Sized
+pub fn csv_verifier::ExpectedDomain::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::ExpectedDomain where T: ?core::marker::Sized
+pub fn csv_verifier::ExpectedDomain::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::ExpectedDomain where T: core::clone::Clone
+pub unsafe fn csv_verifier::ExpectedDomain::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::ExpectedDomain
+pub fn csv_verifier::ExpectedDomain::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::ExpectedDomain
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::ExpectedDomain
+impl<T> typenum::type_operators::Same for csv_verifier::ExpectedDomain
+pub type csv_verifier::ExpectedDomain::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::ExpectedDomain where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::ExpectedDomain where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::ExpectedDomain::vzip(self) -> V
+pub struct csv_verifier::FinalityGuarantee
+pub csv_verifier::FinalityGuarantee::is_probabilistic: bool
+pub csv_verifier::FinalityGuarantee::max_proof_age_blocks: u64
+pub csv_verifier::FinalityGuarantee::max_reorg_depth: u64
+pub csv_verifier::FinalityGuarantee::min_anchor_sources: u8
+pub csv_verifier::FinalityGuarantee::proof_system: csv_verifier::anchors::ProofSystem
+pub csv_verifier::FinalityGuarantee::validator_honesty_threshold: f32
+impl core::clone::Clone for csv_verifier::anchors::FinalityGuarantee
+pub fn csv_verifier::anchors::FinalityGuarantee::clone(&self) -> csv_verifier::anchors::FinalityGuarantee
+impl core::fmt::Debug for csv_verifier::anchors::FinalityGuarantee
+pub fn csv_verifier::anchors::FinalityGuarantee::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::Send for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::Sync for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::Unpin for csv_verifier::anchors::FinalityGuarantee
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::FinalityGuarantee
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::FinalityGuarantee
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::FinalityGuarantee
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::FinalityGuarantee where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::FinalityGuarantee where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::FinalityGuarantee where U: core::convert::From<T>
+pub fn csv_verifier::anchors::FinalityGuarantee::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::FinalityGuarantee where U: core::convert::Into<T>
+pub type csv_verifier::anchors::FinalityGuarantee::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::FinalityGuarantee::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::FinalityGuarantee where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::FinalityGuarantee::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::FinalityGuarantee::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::FinalityGuarantee where T: core::clone::Clone
+pub type csv_verifier::anchors::FinalityGuarantee::Owned = T
+pub fn csv_verifier::anchors::FinalityGuarantee::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::FinalityGuarantee::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::FinalityGuarantee where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::FinalityGuarantee::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::FinalityGuarantee where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::FinalityGuarantee::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::FinalityGuarantee where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::FinalityGuarantee::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::FinalityGuarantee where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::FinalityGuarantee::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::FinalityGuarantee
+pub fn csv_verifier::anchors::FinalityGuarantee::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::FinalityGuarantee
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::FinalityGuarantee
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::FinalityGuarantee
+pub type csv_verifier::anchors::FinalityGuarantee::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::FinalityGuarantee where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::FinalityGuarantee where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::FinalityGuarantee::vzip(self) -> V
+pub struct csv_verifier::QuorumCertificate
+pub csv_verifier::QuorumCertificate::signature: alloc::vec::Vec<u8>
+pub csv_verifier::QuorumCertificate::signers: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub csv_verifier::QuorumCertificate::view: u64
+impl core::clone::Clone for csv_verifier::anchors::QuorumCertificate
+pub fn csv_verifier::anchors::QuorumCertificate::clone(&self) -> csv_verifier::anchors::QuorumCertificate
+impl core::fmt::Debug for csv_verifier::anchors::QuorumCertificate
+pub fn csv_verifier::anchors::QuorumCertificate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::QuorumCertificate
+impl core::marker::Send for csv_verifier::anchors::QuorumCertificate
+impl core::marker::Sync for csv_verifier::anchors::QuorumCertificate
+impl core::marker::Unpin for csv_verifier::anchors::QuorumCertificate
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::QuorumCertificate
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::QuorumCertificate
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::QuorumCertificate
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::QuorumCertificate where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::QuorumCertificate where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::QuorumCertificate where U: core::convert::From<T>
+pub fn csv_verifier::anchors::QuorumCertificate::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::QuorumCertificate where U: core::convert::Into<T>
+pub type csv_verifier::anchors::QuorumCertificate::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::QuorumCertificate::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::QuorumCertificate where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::QuorumCertificate::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::QuorumCertificate::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::QuorumCertificate where T: core::clone::Clone
+pub type csv_verifier::anchors::QuorumCertificate::Owned = T
+pub fn csv_verifier::anchors::QuorumCertificate::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::QuorumCertificate::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::QuorumCertificate where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::QuorumCertificate::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::QuorumCertificate where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::QuorumCertificate::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::QuorumCertificate where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::QuorumCertificate::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::QuorumCertificate where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::QuorumCertificate::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::QuorumCertificate
+pub fn csv_verifier::anchors::QuorumCertificate::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::QuorumCertificate
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::QuorumCertificate
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::QuorumCertificate
+pub type csv_verifier::anchors::QuorumCertificate::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::QuorumCertificate where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::QuorumCertificate where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::QuorumCertificate::vzip(self) -> V
+pub struct csv_verifier::UnavailableGroth16Verifier
+impl core::clone::Clone for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::clone(&self) -> csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::default::Default for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::default() -> csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::fmt::Debug for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for csv_verifier::anchors::UnavailableGroth16Verifier
+impl csv_verifier::anchors::Groth16PairingVerifier for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::verify_groth16_zk_seal(&self, &csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl core::marker::Freeze for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::Send for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::Sync for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::Unpin for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::UnavailableGroth16Verifier
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::UnavailableGroth16Verifier
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::UnavailableGroth16Verifier where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::UnavailableGroth16Verifier where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::UnavailableGroth16Verifier where U: core::convert::From<T>
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::UnavailableGroth16Verifier where U: core::convert::Into<T>
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::UnavailableGroth16Verifier where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::UnavailableGroth16Verifier where T: core::clone::Clone
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Owned = T
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::UnavailableGroth16Verifier where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::UnavailableGroth16Verifier where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::UnavailableGroth16Verifier where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::UnavailableGroth16Verifier where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::UnavailableGroth16Verifier::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::UnavailableGroth16Verifier
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::UnavailableGroth16Verifier
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::UnavailableGroth16Verifier
+pub type csv_verifier::anchors::UnavailableGroth16Verifier::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::UnavailableGroth16Verifier where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::UnavailableGroth16Verifier where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::vzip(self) -> V
+pub struct csv_verifier::ValidatorInfo
+pub csv_verifier::ValidatorInfo::public_key: alloc::vec::Vec<u8>
+pub csv_verifier::ValidatorInfo::voting_power: u64
+impl core::clone::Clone for csv_verifier::anchors::ValidatorInfo
+pub fn csv_verifier::anchors::ValidatorInfo::clone(&self) -> csv_verifier::anchors::ValidatorInfo
+impl core::fmt::Debug for csv_verifier::anchors::ValidatorInfo
+pub fn csv_verifier::anchors::ValidatorInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::ValidatorInfo
+impl core::marker::Send for csv_verifier::anchors::ValidatorInfo
+impl core::marker::Sync for csv_verifier::anchors::ValidatorInfo
+impl core::marker::Unpin for csv_verifier::anchors::ValidatorInfo
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ValidatorInfo
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ValidatorInfo
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ValidatorInfo
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ValidatorInfo where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ValidatorInfo where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ValidatorInfo where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ValidatorInfo::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ValidatorInfo where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ValidatorInfo::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ValidatorInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ValidatorInfo where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ValidatorInfo::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ValidatorInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ValidatorInfo where T: core::clone::Clone
+pub type csv_verifier::anchors::ValidatorInfo::Owned = T
+pub fn csv_verifier::anchors::ValidatorInfo::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ValidatorInfo::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ValidatorInfo where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorInfo::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ValidatorInfo where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorInfo::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ValidatorInfo where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorInfo::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ValidatorInfo where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ValidatorInfo::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ValidatorInfo
+pub fn csv_verifier::anchors::ValidatorInfo::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ValidatorInfo
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ValidatorInfo
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ValidatorInfo
+pub type csv_verifier::anchors::ValidatorInfo::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ValidatorInfo where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ValidatorInfo where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ValidatorInfo::vzip(self) -> V
+pub struct csv_verifier::ValidatorSet
+pub csv_verifier::ValidatorSet::epoch: u64
+pub csv_verifier::ValidatorSet::validators: alloc::vec::Vec<csv_verifier::anchors::ValidatorInfo>
+impl core::clone::Clone for csv_verifier::anchors::ValidatorSet
+pub fn csv_verifier::anchors::ValidatorSet::clone(&self) -> csv_verifier::anchors::ValidatorSet
+impl core::fmt::Debug for csv_verifier::anchors::ValidatorSet
+pub fn csv_verifier::anchors::ValidatorSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::ValidatorSet
+impl core::marker::Send for csv_verifier::anchors::ValidatorSet
+impl core::marker::Sync for csv_verifier::anchors::ValidatorSet
+impl core::marker::Unpin for csv_verifier::anchors::ValidatorSet
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ValidatorSet
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ValidatorSet
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ValidatorSet
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ValidatorSet where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ValidatorSet where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ValidatorSet where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ValidatorSet::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ValidatorSet where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ValidatorSet::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ValidatorSet::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ValidatorSet where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ValidatorSet::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ValidatorSet::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ValidatorSet where T: core::clone::Clone
+pub type csv_verifier::anchors::ValidatorSet::Owned = T
+pub fn csv_verifier::anchors::ValidatorSet::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ValidatorSet::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ValidatorSet where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorSet::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ValidatorSet where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorSet::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ValidatorSet where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ValidatorSet::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ValidatorSet where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ValidatorSet::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ValidatorSet
+pub fn csv_verifier::anchors::ValidatorSet::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ValidatorSet
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ValidatorSet
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ValidatorSet
+pub type csv_verifier::anchors::ValidatorSet::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ValidatorSet where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ValidatorSet where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ValidatorSet::vzip(self) -> V
+pub struct csv_verifier::VerificationContext
+pub csv_verifier::VerificationContext::authorized_signers: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub csv_verifier::VerificationContext::chain_data: core::option::Option<csv_verifier::verifier::ChainVerificationData>
+pub csv_verifier::VerificationContext::chain_id: alloc::string::String
+pub csv_verifier::VerificationContext::current_block_height: core::option::Option<u64>
+pub csv_verifier::VerificationContext::destination_chain: core::option::Option<alloc::string::String>
+pub csv_verifier::VerificationContext::lock_output_index: core::option::Option<u32>
+pub csv_verifier::VerificationContext::lock_tx: core::option::Option<alloc::vec::Vec<u8>>
+pub csv_verifier::VerificationContext::native_proof_validated: bool
+pub csv_verifier::VerificationContext::required_confirmations: u64
+pub csv_verifier::VerificationContext::sanad_id: core::option::Option<csv_hash::sanad::SanadId>
+pub csv_verifier::VerificationContext::seal_registry: core::option::Option<alloc::boxed::Box<(dyn core::ops::function::Fn(&[u8]) -> bool + core::marker::Send + core::marker::Sync)>>
+pub csv_verifier::VerificationContext::signature_scheme: csv_protocol::signature::SignatureScheme
+pub csv_verifier::VerificationContext::transition_id: core::option::Option<alloc::vec::Vec<u8>>
+impl core::marker::Freeze for csv_verifier::VerificationContext
+impl core::marker::Send for csv_verifier::VerificationContext
+impl core::marker::Sync for csv_verifier::VerificationContext
+impl core::marker::Unpin for csv_verifier::VerificationContext
+impl core::marker::UnsafeUnpin for csv_verifier::VerificationContext
+impl !core::panic::unwind_safe::RefUnwindSafe for csv_verifier::VerificationContext
+impl !core::panic::unwind_safe::UnwindSafe for csv_verifier::VerificationContext
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::VerificationContext where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::VerificationContext where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::VerificationContext where U: core::convert::From<T>
+pub fn csv_verifier::VerificationContext::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::VerificationContext where U: core::convert::Into<T>
+pub type csv_verifier::VerificationContext::Error = core::convert::Infallible
+pub fn csv_verifier::VerificationContext::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::VerificationContext where U: core::convert::TryFrom<T>
+pub type csv_verifier::VerificationContext::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::VerificationContext::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for csv_verifier::VerificationContext where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::VerificationContext::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::VerificationContext where T: ?core::marker::Sized
+pub fn csv_verifier::VerificationContext::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::VerificationContext where T: ?core::marker::Sized
+pub fn csv_verifier::VerificationContext::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for csv_verifier::VerificationContext
+pub fn csv_verifier::VerificationContext::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::VerificationContext
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::VerificationContext
+impl<T> typenum::type_operators::Same for csv_verifier::VerificationContext
+pub type csv_verifier::VerificationContext::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::VerificationContext where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::VerificationContext where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::VerificationContext::vzip(self) -> V
+pub struct csv_verifier::VerificationError
+pub csv_verifier::VerificationError::code: csv_verifier::verifier::VerificationErrorCode
+pub csv_verifier::VerificationError::message: alloc::string::String
+pub csv_verifier::VerificationError::retryable: bool
+impl csv_verifier::VerificationError
+pub fn csv_verifier::VerificationError::anchor_invalid(&str) -> Self
+pub fn csv_verifier::VerificationError::domain_mismatch(&str, &str) -> Self
+pub fn csv_verifier::VerificationError::finality_not_reached(u64, u64) -> Self
+pub fn csv_verifier::VerificationError::inclusion_proof_invalid(&str) -> Self
+pub fn csv_verifier::VerificationError::internal(&str) -> Self
+pub fn csv_verifier::VerificationError::malformed_proof(&str) -> Self
+pub fn csv_verifier::VerificationError::proof_too_large(usize, usize) -> Self
+pub fn csv_verifier::VerificationError::seal_replay(&[u8]) -> Self
+pub fn csv_verifier::VerificationError::signature_invalid() -> Self
+impl core::clone::Clone for csv_verifier::VerificationError
+pub fn csv_verifier::VerificationError::clone(&self) -> csv_verifier::VerificationError
+impl core::fmt::Debug for csv_verifier::VerificationError
+pub fn csv_verifier::VerificationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for csv_verifier::VerificationError
+pub fn csv_verifier::VerificationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for csv_verifier::VerificationError
+pub fn csv_verifier::VerificationError::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl core::marker::Freeze for csv_verifier::VerificationError
+impl core::marker::Send for csv_verifier::VerificationError
+impl core::marker::Sync for csv_verifier::VerificationError
+impl core::marker::Unpin for csv_verifier::VerificationError
+impl core::marker::UnsafeUnpin for csv_verifier::VerificationError
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::VerificationError
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::VerificationError
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::VerificationError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::VerificationError where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::VerificationError where U: core::convert::From<T>
+pub fn csv_verifier::VerificationError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::VerificationError where U: core::convert::Into<T>
+pub type csv_verifier::VerificationError::Error = core::convert::Infallible
+pub fn csv_verifier::VerificationError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::VerificationError where U: core::convert::TryFrom<T>
+pub type csv_verifier::VerificationError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::VerificationError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::VerificationError where T: core::clone::Clone
+pub type csv_verifier::VerificationError::Owned = T
+pub fn csv_verifier::VerificationError::clone_into(&self, &mut T)
+pub fn csv_verifier::VerificationError::to_owned(&self) -> T
+impl<T> alloc::string::ToString for csv_verifier::VerificationError where T: core::fmt::Display + ?core::marker::Sized
+pub fn csv_verifier::VerificationError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for csv_verifier::VerificationError where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::VerificationError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::VerificationError where T: ?core::marker::Sized
+pub fn csv_verifier::VerificationError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::VerificationError where T: ?core::marker::Sized
+pub fn csv_verifier::VerificationError::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::VerificationError where T: core::clone::Clone
+pub unsafe fn csv_verifier::VerificationError::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::VerificationError
+pub fn csv_verifier::VerificationError::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::VerificationError
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::VerificationError
+impl<T> typenum::type_operators::Same for csv_verifier::VerificationError
+pub type csv_verifier::VerificationError::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::VerificationError where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::VerificationError where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::VerificationError::vzip(self) -> V
+pub struct csv_verifier::VerificationResult
+pub csv_verifier::VerificationResult::errors: alloc::vec::Vec<csv_verifier::VerificationError>
+pub csv_verifier::VerificationResult::is_valid: bool
+pub csv_verifier::VerificationResult::level: csv_protocol::verification_levels::VerificationLevel
+pub csv_verifier::VerificationResult::warnings: alloc::vec::Vec<alloc::string::String>
+impl csv_verifier::VerificationResult
+pub fn csv_verifier::VerificationResult::failed(alloc::vec::Vec<csv_verifier::VerificationError>) -> Self
+pub fn csv_verifier::VerificationResult::from_protocol_error(&csv_protocol::error::ProtocolError) -> Self
+pub fn csv_verifier::VerificationResult::from_verification_error(csv_verifier::VerificationError) -> Self
+pub fn csv_verifier::VerificationResult::fully_verified() -> Self
+pub fn csv_verifier::VerificationResult::merkle_verified() -> Self
+pub fn csv_verifier::VerificationResult::structural() -> Self
+impl core::clone::Clone for csv_verifier::VerificationResult
+pub fn csv_verifier::VerificationResult::clone(&self) -> csv_verifier::VerificationResult
+impl core::fmt::Debug for csv_verifier::VerificationResult
+pub fn csv_verifier::VerificationResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for csv_verifier::VerificationResult
+pub fn csv_verifier::VerificationResult::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
+impl core::marker::Freeze for csv_verifier::VerificationResult
+impl core::marker::Send for csv_verifier::VerificationResult
+impl core::marker::Sync for csv_verifier::VerificationResult
+impl core::marker::Unpin for csv_verifier::VerificationResult
+impl core::marker::UnsafeUnpin for csv_verifier::VerificationResult
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::VerificationResult
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::VerificationResult
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::VerificationResult where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::VerificationResult where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::VerificationResult where U: core::convert::From<T>
+pub fn csv_verifier::VerificationResult::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::VerificationResult where U: core::convert::Into<T>
+pub type csv_verifier::VerificationResult::Error = core::convert::Infallible
+pub fn csv_verifier::VerificationResult::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::VerificationResult where U: core::convert::TryFrom<T>
+pub type csv_verifier::VerificationResult::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::VerificationResult::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::VerificationResult where T: core::clone::Clone
+pub type csv_verifier::VerificationResult::Owned = T
+pub fn csv_verifier::VerificationResult::clone_into(&self, &mut T)
+pub fn csv_verifier::VerificationResult::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::VerificationResult where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::VerificationResult::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::VerificationResult where T: ?core::marker::Sized
+pub fn csv_verifier::VerificationResult::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::VerificationResult where T: ?core::marker::Sized
+pub fn csv_verifier::VerificationResult::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::VerificationResult where T: core::clone::Clone
+pub unsafe fn csv_verifier::VerificationResult::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::VerificationResult
+pub fn csv_verifier::VerificationResult::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::VerificationResult
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::VerificationResult
+impl<T> typenum::type_operators::Same for csv_verifier::VerificationResult
+pub type csv_verifier::VerificationResult::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::VerificationResult where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::VerificationResult where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::VerificationResult::vzip(self) -> V
+pub struct csv_verifier::VerifiedHeader
+pub csv_verifier::VerifiedHeader::hash: [u8; 32]
+pub csv_verifier::VerifiedHeader::height: u64
+impl core::clone::Clone for csv_verifier::anchors::VerifiedHeader
+pub fn csv_verifier::anchors::VerifiedHeader::clone(&self) -> csv_verifier::anchors::VerifiedHeader
+impl core::fmt::Debug for csv_verifier::anchors::VerifiedHeader
+pub fn csv_verifier::anchors::VerifiedHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::anchors::VerifiedHeader
+impl core::marker::Send for csv_verifier::anchors::VerifiedHeader
+impl core::marker::Sync for csv_verifier::anchors::VerifiedHeader
+impl core::marker::Unpin for csv_verifier::anchors::VerifiedHeader
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::VerifiedHeader
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::VerifiedHeader
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::VerifiedHeader
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::VerifiedHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::VerifiedHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::VerifiedHeader where U: core::convert::From<T>
+pub fn csv_verifier::anchors::VerifiedHeader::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::VerifiedHeader where U: core::convert::Into<T>
+pub type csv_verifier::anchors::VerifiedHeader::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::VerifiedHeader::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::VerifiedHeader where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::VerifiedHeader::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::VerifiedHeader::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::VerifiedHeader where T: core::clone::Clone
+pub type csv_verifier::anchors::VerifiedHeader::Owned = T
+pub fn csv_verifier::anchors::VerifiedHeader::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::VerifiedHeader::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::VerifiedHeader where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::VerifiedHeader::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::VerifiedHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::VerifiedHeader::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::VerifiedHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::VerifiedHeader::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::VerifiedHeader where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::VerifiedHeader::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::VerifiedHeader
+pub fn csv_verifier::anchors::VerifiedHeader::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::VerifiedHeader
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::VerifiedHeader
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::VerifiedHeader
+pub type csv_verifier::anchors::VerifiedHeader::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::VerifiedHeader where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::VerifiedHeader where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::VerifiedHeader::vzip(self) -> V
+pub struct csv_verifier::VerifierConfig
+pub csv_verifier::VerifierConfig::max_anchor_age_blocks: core::option::Option<u64>
+pub csv_verifier::VerifierConfig::max_proof_bundle_size: usize
+pub csv_verifier::VerifierConfig::min_required_confirmations: u64
+impl core::clone::Clone for csv_verifier::VerifierConfig
+pub fn csv_verifier::VerifierConfig::clone(&self) -> csv_verifier::VerifierConfig
+impl core::default::Default for csv_verifier::VerifierConfig
+pub fn csv_verifier::VerifierConfig::default() -> Self
+impl core::fmt::Debug for csv_verifier::VerifierConfig
+pub fn csv_verifier::VerifierConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for csv_verifier::VerifierConfig
+impl core::marker::Send for csv_verifier::VerifierConfig
+impl core::marker::Sync for csv_verifier::VerifierConfig
+impl core::marker::Unpin for csv_verifier::VerifierConfig
+impl core::marker::UnsafeUnpin for csv_verifier::VerifierConfig
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::VerifierConfig
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::VerifierConfig
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::VerifierConfig where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::VerifierConfig where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::VerifierConfig where U: core::convert::From<T>
+pub fn csv_verifier::VerifierConfig::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::VerifierConfig where U: core::convert::Into<T>
+pub type csv_verifier::VerifierConfig::Error = core::convert::Infallible
+pub fn csv_verifier::VerifierConfig::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::VerifierConfig where U: core::convert::TryFrom<T>
+pub type csv_verifier::VerifierConfig::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::VerifierConfig::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::VerifierConfig where T: core::clone::Clone
+pub type csv_verifier::VerifierConfig::Owned = T
+pub fn csv_verifier::VerifierConfig::clone_into(&self, &mut T)
+pub fn csv_verifier::VerifierConfig::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::VerifierConfig where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::VerifierConfig::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::VerifierConfig where T: ?core::marker::Sized
+pub fn csv_verifier::VerifierConfig::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::VerifierConfig where T: ?core::marker::Sized
+pub fn csv_verifier::VerifierConfig::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::VerifierConfig where T: core::clone::Clone
+pub unsafe fn csv_verifier::VerifierConfig::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::VerifierConfig
+pub fn csv_verifier::VerifierConfig::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::VerifierConfig
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::VerifierConfig
+impl<T> typenum::type_operators::Same for csv_verifier::VerifierConfig
+pub type csv_verifier::VerifierConfig::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::VerifierConfig where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::VerifierConfig where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::VerifierConfig::vzip(self) -> V
+pub struct csv_verifier::ZkHeader
+pub csv_verifier::ZkHeader::circuit_id: [u8; 32]
+impl csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::new([u8; 32]) -> core::result::Result<Self, csv_verifier::anchors::AnchorError>
+impl core::clone::Clone for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::clone(&self) -> csv_verifier::anchors::ZkHeader
+impl core::cmp::Eq for csv_verifier::anchors::ZkHeader
+impl core::cmp::PartialEq for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::eq(&self, &csv_verifier::anchors::ZkHeader) -> bool
+impl core::fmt::Debug for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_verifier::anchors::ZkHeader
+impl core::marker::Freeze for csv_verifier::anchors::ZkHeader
+impl core::marker::Send for csv_verifier::anchors::ZkHeader
+impl core::marker::Sync for csv_verifier::anchors::ZkHeader
+impl core::marker::Unpin for csv_verifier::anchors::ZkHeader
+impl core::marker::UnsafeUnpin for csv_verifier::anchors::ZkHeader
+impl core::panic::unwind_safe::RefUnwindSafe for csv_verifier::anchors::ZkHeader
+impl core::panic::unwind_safe::UnwindSafe for csv_verifier::anchors::ZkHeader
+impl<Q, K> equivalent::Equivalent<K> for csv_verifier::anchors::ZkHeader where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::equivalent(&self, &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for csv_verifier::anchors::ZkHeader where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::equivalent(&self, &K) -> bool
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Initialized, zerocopy::pointer::invariant::Initialized> for csv_verifier::anchors::ZkHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<ST, DT> zerocopy::pointer::invariant::CastableFrom<ST, zerocopy::pointer::invariant::Uninit, zerocopy::pointer::invariant::Uninit> for csv_verifier::anchors::ZkHeader where ST: ?core::marker::Sized, DT: ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for csv_verifier::anchors::ZkHeader where U: core::convert::From<T>
+pub fn csv_verifier::anchors::ZkHeader::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_verifier::anchors::ZkHeader where U: core::convert::Into<T>
+pub type csv_verifier::anchors::ZkHeader::Error = core::convert::Infallible
+pub fn csv_verifier::anchors::ZkHeader::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_verifier::anchors::ZkHeader where U: core::convert::TryFrom<T>
+pub type csv_verifier::anchors::ZkHeader::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_verifier::anchors::ZkHeader::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_verifier::anchors::ZkHeader where T: core::clone::Clone
+pub type csv_verifier::anchors::ZkHeader::Owned = T
+pub fn csv_verifier::anchors::ZkHeader::clone_into(&self, &mut T)
+pub fn csv_verifier::anchors::ZkHeader::to_owned(&self) -> T
+impl<T> core::any::Any for csv_verifier::anchors::ZkHeader where T: 'static + ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_verifier::anchors::ZkHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_verifier::anchors::ZkHeader where T: ?core::marker::Sized
+pub fn csv_verifier::anchors::ZkHeader::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_verifier::anchors::ZkHeader where T: core::clone::Clone
+pub unsafe fn csv_verifier::anchors::ZkHeader::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_verifier::anchors::ZkHeader
+pub fn csv_verifier::anchors::ZkHeader::from(T) -> T
+impl<T> tracing::instrument::Instrument for csv_verifier::anchors::ZkHeader
+impl<T> tracing::instrument::WithSubscriber for csv_verifier::anchors::ZkHeader
+impl<T> typenum::type_operators::Same for csv_verifier::anchors::ZkHeader
+pub type csv_verifier::anchors::ZkHeader::Output = T
+impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusive, zerocopy::pointer::invariant::BecauseExclusive> for csv_verifier::anchors::ZkHeader where T: ?core::marker::Sized
+impl<V, T> ppv_lite86::types::VZip<V> for csv_verifier::anchors::ZkHeader where V: ppv_lite86::types::MultiLane<T>
+pub fn csv_verifier::anchors::ZkHeader::vzip(self) -> V
+pub trait csv_verifier::CanonicalVerifier: core::marker::Send + core::marker::Sync
+pub fn csv_verifier::CanonicalVerifier::verify_finality(&self, u64, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifier::verify_inclusion_proof(&self, &csv_hash::seal::CommitAnchor, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifier::verify_proof_bundle(&self, &csv_protocol::proof_taxonomy::ProofBundle, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifier::verify_proof_leaf(&self, &csv_protocol::proof_taxonomy::ProofLeafV1, &csv_hash::hash_registry::Hash) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifier::verify_seal_registry(&self, &[u8], &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::verifier::SealRegistryStatus, csv_protocol::error::ProtocolError>
+impl csv_verifier::CanonicalVerifier for csv_verifier::CanonicalVerifierImpl
+pub fn csv_verifier::CanonicalVerifierImpl::verify_finality(&self, u64, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_inclusion_proof(&self, &csv_hash::seal::CommitAnchor, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_proof_bundle(&self, &csv_protocol::proof_taxonomy::ProofBundle, &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_proof_leaf(&self, &csv_protocol::proof_taxonomy::ProofLeafV1, &csv_hash::hash_registry::Hash) -> core::result::Result<csv_verifier::VerificationResult, csv_protocol::error::ProtocolError>
+pub fn csv_verifier::CanonicalVerifierImpl::verify_seal_registry(&self, &[u8], &csv_verifier::VerificationContext) -> core::result::Result<csv_verifier::verifier::SealRegistryStatus, csv_protocol::error::ProtocolError>
+pub trait csv_verifier::ChainNativeProofVerifier
+pub fn csv_verifier::ChainNativeProofVerifier::verify_finality_proof(&self, &csv_protocol::proof_taxonomy::FinalityProof, &str) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::ChainNativeProofVerifier::verify_inclusion_proof(&self, &csv_protocol::proof_taxonomy::InclusionProof, &csv_hash::hash_registry::Hash) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+impl csv_verifier::chain_proof_bundle::ChainNativeProofVerifier for csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_finality_proof(&self, &csv_protocol::proof_taxonomy::FinalityProof, &str) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::chain_proof_bundle::DynChainProofVerifier<'_>::verify_inclusion_proof(&self, &csv_protocol::proof_taxonomy::InclusionProof, &csv_hash::hash_registry::Hash) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub trait csv_verifier::CryptographicAnchor: core::marker::Send + core::marker::Sync
+pub fn csv_verifier::CryptographicAnchor::verify_header(&self, &csv_verifier::anchors::CanonicalBlockHeader, &csv_verifier::anchors::ValidatorSet, &csv_verifier::anchors::FinalityGuarantee) -> core::result::Result<csv_verifier::anchors::VerifiedHeader, csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::CryptographicAnchor::verify_inclusion(&self, &csv_verifier::anchors::CanonicalInclusionProof, &csv_verifier::anchors::VerifiedHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl csv_verifier::anchors::CryptographicAnchor for csv_verifier::anchors::EthereumAnchor
+pub fn csv_verifier::anchors::EthereumAnchor::verify_header(&self, &csv_verifier::anchors::CanonicalBlockHeader, &csv_verifier::anchors::ValidatorSet, &csv_verifier::anchors::FinalityGuarantee) -> core::result::Result<csv_verifier::anchors::VerifiedHeader, csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::anchors::EthereumAnchor::verify_inclusion(&self, &csv_verifier::anchors::CanonicalInclusionProof, &csv_verifier::anchors::VerifiedHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub trait csv_verifier::Groth16PairingVerifier
+pub fn csv_verifier::Groth16PairingVerifier::verify_groth16_zk_seal(&self, &csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+impl csv_verifier::anchors::Groth16PairingVerifier for csv_verifier::anchors::UnavailableGroth16Verifier
+pub fn csv_verifier::anchors::UnavailableGroth16Verifier::verify_groth16_zk_seal(&self, &csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::inclusion_anchor_ref(&csv_protocol::proof_taxonomy::InclusionProof) -> alloc::string::String
+pub fn csv_verifier::verify_chain_proof_bundle<V: csv_verifier::chain_proof_bundle::ChainNativeProofVerifier + ?core::marker::Sized>(&V, &csv_protocol::proof_taxonomy::InclusionProof, &csv_protocol::proof_taxonomy::FinalityProof, &csv_hash::hash_registry::Hash, &csv_verifier::chain_proof_bundle::ChainBundlePolicy) -> core::result::Result<bool, csv_verifier::chain_proof_bundle::ChainBundleError>
+pub fn csv_verifier::verify_proof(&csv_protocol::proof_taxonomy::ProofBundle, impl core::ops::function::Fn(&[u8]) -> bool, csv_protocol::signature::SignatureScheme, &[alloc::vec::Vec<u8>]) -> csv_verifier::VerificationResult
+pub fn csv_verifier::verify_proof_bound(&csv_protocol::proof_taxonomy::ProofBundle, impl core::ops::function::Fn(&[u8]) -> bool, csv_protocol::signature::SignatureScheme, &[alloc::vec::Vec<u8>], &csv_verifier::ExpectedDomain) -> csv_verifier::VerificationResult
+pub fn csv_verifier::verify_zk_seal_unavailable(&csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader) -> core::result::Result<(), csv_verifier::anchors::AnchorError>
+pub fn csv_verifier::verify_zk_seal_with_pairing<V: csv_verifier::anchors::Groth16PairingVerifier + ?core::marker::Sized>(&csv_proof::zk_proof::ZkSealProof, &csv_verifier::anchors::ZkHeader, &V) -> core::result::Result<(), csv_verifier::anchors::AnchorError>

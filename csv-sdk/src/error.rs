@@ -383,7 +383,7 @@ impl HasErrorSuggestion for CsvError {
     }
 }
 
-// Conversion from csv-adapter-core errors
+// Conversion from csv-chain-ports errors
 impl From<csv_protocol::error::ProtocolError> for CsvError {
     fn from(err: csv_protocol::error::ProtocolError) -> Self {
         CsvError::Generic(err.to_string())

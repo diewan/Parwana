@@ -7,7 +7,7 @@ description = "CSV Protocol runtime orchestration engine"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-csv-adapter-core = { version = "0.1.5", path = "../csv-adapters/csv-adapter-core" }
+csv-chain-ports = { version = "0.1.5", path = "../csv-chain-ports" }
 csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
 csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
 csv-proof = { version = "0.1.5", path = "../csv-proof" }

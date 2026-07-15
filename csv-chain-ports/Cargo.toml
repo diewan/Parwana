@@ -1,0 +1,18 @@
+[package]
+name = "csv-chain-ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Chain-neutral runtime adapter ports for CSV Protocol"
+license.workspace = true
+
+[dependencies]
+csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-proof = { version = "0.1.5", path = "../csv-proof" }
+serde.workspace = true
+async-trait.workspace = true
+thiserror = "2.0"
+
+[lints]
+workspace = true

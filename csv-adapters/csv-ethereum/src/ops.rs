@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 //! Chain Operation Traits Implementation for Ethereum
 //!
-//! This module implements all chain operation traits from csv-adapter-core:
+//! This module implements all chain operation traits from csv-chain-ports:
 //! - ChainQuery: Querying chain state via RPC
 //! - ChainSigner: ECDSA signing operations
 //! - ChainBroadcaster: Transaction broadcasting

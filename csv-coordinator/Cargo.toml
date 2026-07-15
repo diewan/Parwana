@@ -11,15 +11,6 @@ csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
 # build of downstream csv-runtime; coordinator does not use the redb backend directly.
 csv-storage = { version = "0.1.5", path = "../csv-storage", default-features = false }
 csv-hash = { version = "0.1.5", path = "../csv-hash" }
-csv-keys = { version = "0.1.5", path = "../csv-keys" }
-csv-wallet = { version = "0.1.5", path = "../csv-wallet" }
-# Chain adapters (coordinator can depend on these, runtime cannot)
-csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optional = true }
-csv-ethereum = { version = "0.1.5", path = "../csv-adapters/csv-ethereum", optional = true }
-csv-sui = { version = "0.1.5", path = "../csv-adapters/csv-sui", optional = true }
-csv-aptos = { version = "0.1.5", path = "../csv-adapters/csv-aptos", optional = true }
-csv-solana = { version = "0.1.5", path = "../csv-adapters/csv-solana", optional = true }
-bitcoin = { version = "0.32", features = ["serde", "rand"], optional = true }
 thiserror = "1.0"
 anyhow = "1"
 tracing = "0.1"
@@ -36,11 +27,3 @@ tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", default-features = false, features = ["sync", "macros", "rt", "time"] }
-
-[features]
-default = ["bitcoin"]
-bitcoin = ["dep:csv-bitcoin", "csv-bitcoin/signet-rest", "dep:bitcoin"]
-ethereum = ["dep:csv-ethereum"]
-sui = ["dep:csv-sui"]
-aptos = ["dep:csv-aptos"]
-solana = ["dep:csv-solana"]

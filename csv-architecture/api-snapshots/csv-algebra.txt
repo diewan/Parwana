@@ -1,0 +1,862 @@
+pub mod csv_algebra
+pub mod csv_algebra::error
+pub enum csv_algebra::error::AlgebraError
+pub csv_algebra::error::AlgebraError::InvalidFinality
+pub csv_algebra::error::AlgebraError::InvalidFinality::reason: alloc::string::String
+pub csv_algebra::error::AlgebraError::InvalidProof
+pub csv_algebra::error::AlgebraError::InvalidProof::reason: alloc::string::String
+pub csv_algebra::error::AlgebraError::InvalidReplayId
+pub csv_algebra::error::AlgebraError::InvalidReplayId::reason: alloc::string::String
+pub csv_algebra::error::AlgebraError::InvalidTransferId
+pub csv_algebra::error::AlgebraError::InvalidTransferId::reason: alloc::string::String
+pub csv_algebra::error::AlgebraError::InvalidTransition
+pub csv_algebra::error::AlgebraError::InvalidTransition::from: alloc::string::String
+pub csv_algebra::error::AlgebraError::InvalidTransition::reason: alloc::string::String
+pub csv_algebra::error::AlgebraError::InvalidTransition::to: alloc::string::String
+impl csv_algebra::error::AlgebraError
+pub fn csv_algebra::error::AlgebraError::invalid_finality(&str) -> Self
+pub fn csv_algebra::error::AlgebraError::invalid_proof(&str) -> Self
+pub fn csv_algebra::error::AlgebraError::invalid_replay_id(&str) -> Self
+pub fn csv_algebra::error::AlgebraError::invalid_transfer_id(&str) -> Self
+pub fn csv_algebra::error::AlgebraError::invalid_transition(&str, &str, &str) -> Self
+impl core::clone::Clone for csv_algebra::error::AlgebraError
+pub fn csv_algebra::error::AlgebraError::clone(&self) -> csv_algebra::error::AlgebraError
+impl core::cmp::Eq for csv_algebra::error::AlgebraError
+impl core::cmp::PartialEq for csv_algebra::error::AlgebraError
+pub fn csv_algebra::error::AlgebraError::eq(&self, &csv_algebra::error::AlgebraError) -> bool
+impl core::fmt::Debug for csv_algebra::error::AlgebraError
+pub fn csv_algebra::error::AlgebraError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::error::AlgebraError
+impl core::marker::Freeze for csv_algebra::error::AlgebraError
+impl core::marker::Send for csv_algebra::error::AlgebraError
+impl core::marker::Sync for csv_algebra::error::AlgebraError
+impl core::marker::Unpin for csv_algebra::error::AlgebraError
+impl core::marker::UnsafeUnpin for csv_algebra::error::AlgebraError
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::error::AlgebraError
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::error::AlgebraError
+impl<T, U> core::convert::Into<U> for csv_algebra::error::AlgebraError where U: core::convert::From<T>
+pub fn csv_algebra::error::AlgebraError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::error::AlgebraError where U: core::convert::Into<T>
+pub type csv_algebra::error::AlgebraError::Error = core::convert::Infallible
+pub fn csv_algebra::error::AlgebraError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::error::AlgebraError where U: core::convert::TryFrom<T>
+pub type csv_algebra::error::AlgebraError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::error::AlgebraError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::error::AlgebraError where T: core::clone::Clone
+pub type csv_algebra::error::AlgebraError::Owned = T
+pub fn csv_algebra::error::AlgebraError::clone_into(&self, &mut T)
+pub fn csv_algebra::error::AlgebraError::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::error::AlgebraError where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::error::AlgebraError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::error::AlgebraError where T: ?core::marker::Sized
+pub fn csv_algebra::error::AlgebraError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::error::AlgebraError where T: ?core::marker::Sized
+pub fn csv_algebra::error::AlgebraError::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::error::AlgebraError where T: core::clone::Clone
+pub unsafe fn csv_algebra::error::AlgebraError::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::error::AlgebraError
+pub fn csv_algebra::error::AlgebraError::from(T) -> T
+pub mod csv_algebra::finality
+pub struct csv_algebra::finality::FinalityEvidence
+pub csv_algebra::finality::FinalityEvidence::block_hash: [u8; 32]
+pub csv_algebra::finality::FinalityEvidence::block_height: u64
+pub csv_algebra::finality::FinalityEvidence::proof_data: alloc::vec::Vec<u8>
+pub csv_algebra::finality::FinalityEvidence::timestamp: u64
+impl csv_algebra::finality::FinalityEvidence
+pub fn csv_algebra::finality::FinalityEvidence::block_hash(&self) -> &[u8; 32]
+pub fn csv_algebra::finality::FinalityEvidence::block_height(&self) -> u64
+pub fn csv_algebra::finality::FinalityEvidence::new([u8; 32], u64, alloc::vec::Vec<u8>, u64) -> Self
+pub fn csv_algebra::finality::FinalityEvidence::proof_data(&self) -> &[u8]
+impl core::clone::Clone for csv_algebra::finality::FinalityEvidence
+pub fn csv_algebra::finality::FinalityEvidence::clone(&self) -> csv_algebra::finality::FinalityEvidence
+impl core::cmp::Eq for csv_algebra::finality::FinalityEvidence
+impl core::cmp::PartialEq for csv_algebra::finality::FinalityEvidence
+pub fn csv_algebra::finality::FinalityEvidence::eq(&self, &csv_algebra::finality::FinalityEvidence) -> bool
+impl core::fmt::Debug for csv_algebra::finality::FinalityEvidence
+pub fn csv_algebra::finality::FinalityEvidence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::finality::FinalityEvidence
+impl core::marker::Freeze for csv_algebra::finality::FinalityEvidence
+impl core::marker::Send for csv_algebra::finality::FinalityEvidence
+impl core::marker::Sync for csv_algebra::finality::FinalityEvidence
+impl core::marker::Unpin for csv_algebra::finality::FinalityEvidence
+impl core::marker::UnsafeUnpin for csv_algebra::finality::FinalityEvidence
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::finality::FinalityEvidence
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::finality::FinalityEvidence
+impl<T, U> core::convert::Into<U> for csv_algebra::finality::FinalityEvidence where U: core::convert::From<T>
+pub fn csv_algebra::finality::FinalityEvidence::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::finality::FinalityEvidence where U: core::convert::Into<T>
+pub type csv_algebra::finality::FinalityEvidence::Error = core::convert::Infallible
+pub fn csv_algebra::finality::FinalityEvidence::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::finality::FinalityEvidence where U: core::convert::TryFrom<T>
+pub type csv_algebra::finality::FinalityEvidence::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::finality::FinalityEvidence::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::finality::FinalityEvidence where T: core::clone::Clone
+pub type csv_algebra::finality::FinalityEvidence::Owned = T
+pub fn csv_algebra::finality::FinalityEvidence::clone_into(&self, &mut T)
+pub fn csv_algebra::finality::FinalityEvidence::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::finality::FinalityEvidence where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::finality::FinalityEvidence::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::finality::FinalityEvidence where T: ?core::marker::Sized
+pub fn csv_algebra::finality::FinalityEvidence::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::finality::FinalityEvidence where T: ?core::marker::Sized
+pub fn csv_algebra::finality::FinalityEvidence::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::finality::FinalityEvidence where T: core::clone::Clone
+pub unsafe fn csv_algebra::finality::FinalityEvidence::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::finality::FinalityEvidence
+pub fn csv_algebra::finality::FinalityEvidence::from(T) -> T
+pub mod csv_algebra::proof
+pub struct csv_algebra::proof::CanonicalProof
+pub csv_algebra::proof::CanonicalProof::block_hash: [u8; 32]
+pub csv_algebra::proof::CanonicalProof::block_height: u64
+pub csv_algebra::proof::CanonicalProof::metadata: csv_algebra::proof::Metadata
+pub csv_algebra::proof::CanonicalProof::proof_nodes: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub csv_algebra::proof::CanonicalProof::state_root: [u8; 32]
+impl csv_algebra::proof::CanonicalProof
+pub fn csv_algebra::proof::CanonicalProof::block_hash(&self) -> &[u8; 32]
+pub fn csv_algebra::proof::CanonicalProof::chain_id(&self) -> u32
+pub fn csv_algebra::proof::CanonicalProof::new(u64, [u8; 32], [u8; 32], alloc::vec::Vec<alloc::vec::Vec<u8>>, u32) -> Self
+pub fn csv_algebra::proof::CanonicalProof::state_root(&self) -> &[u8; 32]
+pub fn csv_algebra::proof::CanonicalProof::with_metadata(self, alloc::string::String, alloc::vec::Vec<u8>) -> Self
+impl core::clone::Clone for csv_algebra::proof::CanonicalProof
+pub fn csv_algebra::proof::CanonicalProof::clone(&self) -> csv_algebra::proof::CanonicalProof
+impl core::cmp::Eq for csv_algebra::proof::CanonicalProof
+impl core::cmp::PartialEq for csv_algebra::proof::CanonicalProof
+pub fn csv_algebra::proof::CanonicalProof::eq(&self, &csv_algebra::proof::CanonicalProof) -> bool
+impl core::fmt::Debug for csv_algebra::proof::CanonicalProof
+pub fn csv_algebra::proof::CanonicalProof::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::proof::CanonicalProof
+impl core::marker::Freeze for csv_algebra::proof::CanonicalProof
+impl core::marker::Send for csv_algebra::proof::CanonicalProof
+impl core::marker::Sync for csv_algebra::proof::CanonicalProof
+impl core::marker::Unpin for csv_algebra::proof::CanonicalProof
+impl core::marker::UnsafeUnpin for csv_algebra::proof::CanonicalProof
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::proof::CanonicalProof
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::proof::CanonicalProof
+impl<T, U> core::convert::Into<U> for csv_algebra::proof::CanonicalProof where U: core::convert::From<T>
+pub fn csv_algebra::proof::CanonicalProof::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::proof::CanonicalProof where U: core::convert::Into<T>
+pub type csv_algebra::proof::CanonicalProof::Error = core::convert::Infallible
+pub fn csv_algebra::proof::CanonicalProof::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::proof::CanonicalProof where U: core::convert::TryFrom<T>
+pub type csv_algebra::proof::CanonicalProof::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::proof::CanonicalProof::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::proof::CanonicalProof where T: core::clone::Clone
+pub type csv_algebra::proof::CanonicalProof::Owned = T
+pub fn csv_algebra::proof::CanonicalProof::clone_into(&self, &mut T)
+pub fn csv_algebra::proof::CanonicalProof::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::proof::CanonicalProof where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::proof::CanonicalProof::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::proof::CanonicalProof where T: ?core::marker::Sized
+pub fn csv_algebra::proof::CanonicalProof::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::proof::CanonicalProof where T: ?core::marker::Sized
+pub fn csv_algebra::proof::CanonicalProof::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::proof::CanonicalProof where T: core::clone::Clone
+pub unsafe fn csv_algebra::proof::CanonicalProof::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::proof::CanonicalProof
+pub fn csv_algebra::proof::CanonicalProof::from(T) -> T
+pub struct csv_algebra::proof::Metadata
+pub csv_algebra::proof::Metadata::chain_id: u32
+pub csv_algebra::proof::Metadata::fields: alloc::vec::Vec<(alloc::string::String, alloc::vec::Vec<u8>)>
+impl core::clone::Clone for csv_algebra::proof::Metadata
+pub fn csv_algebra::proof::Metadata::clone(&self) -> csv_algebra::proof::Metadata
+impl core::cmp::Eq for csv_algebra::proof::Metadata
+impl core::cmp::PartialEq for csv_algebra::proof::Metadata
+pub fn csv_algebra::proof::Metadata::eq(&self, &csv_algebra::proof::Metadata) -> bool
+impl core::fmt::Debug for csv_algebra::proof::Metadata
+pub fn csv_algebra::proof::Metadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::proof::Metadata
+impl core::marker::Freeze for csv_algebra::proof::Metadata
+impl core::marker::Send for csv_algebra::proof::Metadata
+impl core::marker::Sync for csv_algebra::proof::Metadata
+impl core::marker::Unpin for csv_algebra::proof::Metadata
+impl core::marker::UnsafeUnpin for csv_algebra::proof::Metadata
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::proof::Metadata
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::proof::Metadata
+impl<T, U> core::convert::Into<U> for csv_algebra::proof::Metadata where U: core::convert::From<T>
+pub fn csv_algebra::proof::Metadata::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::proof::Metadata where U: core::convert::Into<T>
+pub type csv_algebra::proof::Metadata::Error = core::convert::Infallible
+pub fn csv_algebra::proof::Metadata::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::proof::Metadata where U: core::convert::TryFrom<T>
+pub type csv_algebra::proof::Metadata::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::proof::Metadata::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::proof::Metadata where T: core::clone::Clone
+pub type csv_algebra::proof::Metadata::Owned = T
+pub fn csv_algebra::proof::Metadata::clone_into(&self, &mut T)
+pub fn csv_algebra::proof::Metadata::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::proof::Metadata where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::proof::Metadata::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::proof::Metadata where T: ?core::marker::Sized
+pub fn csv_algebra::proof::Metadata::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::proof::Metadata where T: ?core::marker::Sized
+pub fn csv_algebra::proof::Metadata::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::proof::Metadata where T: core::clone::Clone
+pub unsafe fn csv_algebra::proof::Metadata::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::proof::Metadata
+pub fn csv_algebra::proof::Metadata::from(T) -> T
+pub struct csv_algebra::proof::ProofAncestry
+pub csv_algebra::proof::ProofAncestry::parent_hash: [u8; 32]
+pub csv_algebra::proof::ProofAncestry::sequence: u64
+impl csv_algebra::proof::ProofAncestry
+pub fn csv_algebra::proof::ProofAncestry::new([u8; 32], u64) -> Self
+impl core::clone::Clone for csv_algebra::proof::ProofAncestry
+pub fn csv_algebra::proof::ProofAncestry::clone(&self) -> csv_algebra::proof::ProofAncestry
+impl core::cmp::Eq for csv_algebra::proof::ProofAncestry
+impl core::cmp::PartialEq for csv_algebra::proof::ProofAncestry
+pub fn csv_algebra::proof::ProofAncestry::eq(&self, &csv_algebra::proof::ProofAncestry) -> bool
+impl core::fmt::Debug for csv_algebra::proof::ProofAncestry
+pub fn csv_algebra::proof::ProofAncestry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::proof::ProofAncestry
+impl core::marker::Freeze for csv_algebra::proof::ProofAncestry
+impl core::marker::Send for csv_algebra::proof::ProofAncestry
+impl core::marker::Sync for csv_algebra::proof::ProofAncestry
+impl core::marker::Unpin for csv_algebra::proof::ProofAncestry
+impl core::marker::UnsafeUnpin for csv_algebra::proof::ProofAncestry
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::proof::ProofAncestry
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::proof::ProofAncestry
+impl<T, U> core::convert::Into<U> for csv_algebra::proof::ProofAncestry where U: core::convert::From<T>
+pub fn csv_algebra::proof::ProofAncestry::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::proof::ProofAncestry where U: core::convert::Into<T>
+pub type csv_algebra::proof::ProofAncestry::Error = core::convert::Infallible
+pub fn csv_algebra::proof::ProofAncestry::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::proof::ProofAncestry where U: core::convert::TryFrom<T>
+pub type csv_algebra::proof::ProofAncestry::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::proof::ProofAncestry::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::proof::ProofAncestry where T: core::clone::Clone
+pub type csv_algebra::proof::ProofAncestry::Owned = T
+pub fn csv_algebra::proof::ProofAncestry::clone_into(&self, &mut T)
+pub fn csv_algebra::proof::ProofAncestry::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::proof::ProofAncestry where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::proof::ProofAncestry::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::proof::ProofAncestry where T: ?core::marker::Sized
+pub fn csv_algebra::proof::ProofAncestry::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::proof::ProofAncestry where T: ?core::marker::Sized
+pub fn csv_algebra::proof::ProofAncestry::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::proof::ProofAncestry where T: core::clone::Clone
+pub unsafe fn csv_algebra::proof::ProofAncestry::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::proof::ProofAncestry
+pub fn csv_algebra::proof::ProofAncestry::from(T) -> T
+pub mod csv_algebra::replay
+pub struct csv_algebra::replay::ReplayId(pub [u8; 32])
+impl csv_algebra::replay::ReplayId
+pub fn csv_algebra::replay::ReplayId::as_bytes(&self) -> &[u8; 32]
+pub fn csv_algebra::replay::ReplayId::is_zero(&self) -> bool
+pub fn csv_algebra::replay::ReplayId::new([u8; 32]) -> Self
+impl core::clone::Clone for csv_algebra::replay::ReplayId
+pub fn csv_algebra::replay::ReplayId::clone(&self) -> csv_algebra::replay::ReplayId
+impl core::cmp::Eq for csv_algebra::replay::ReplayId
+impl core::cmp::PartialEq for csv_algebra::replay::ReplayId
+pub fn csv_algebra::replay::ReplayId::eq(&self, &csv_algebra::replay::ReplayId) -> bool
+impl core::fmt::Debug for csv_algebra::replay::ReplayId
+pub fn csv_algebra::replay::ReplayId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for csv_algebra::replay::ReplayId
+pub fn csv_algebra::replay::ReplayId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for csv_algebra::replay::ReplayId
+impl core::marker::StructuralPartialEq for csv_algebra::replay::ReplayId
+impl core::marker::Freeze for csv_algebra::replay::ReplayId
+impl core::marker::Send for csv_algebra::replay::ReplayId
+impl core::marker::Sync for csv_algebra::replay::ReplayId
+impl core::marker::Unpin for csv_algebra::replay::ReplayId
+impl core::marker::UnsafeUnpin for csv_algebra::replay::ReplayId
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::replay::ReplayId
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::replay::ReplayId
+impl<T, U> core::convert::Into<U> for csv_algebra::replay::ReplayId where U: core::convert::From<T>
+pub fn csv_algebra::replay::ReplayId::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::replay::ReplayId where U: core::convert::Into<T>
+pub type csv_algebra::replay::ReplayId::Error = core::convert::Infallible
+pub fn csv_algebra::replay::ReplayId::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::replay::ReplayId where U: core::convert::TryFrom<T>
+pub type csv_algebra::replay::ReplayId::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::replay::ReplayId::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::replay::ReplayId where T: core::clone::Clone
+pub type csv_algebra::replay::ReplayId::Owned = T
+pub fn csv_algebra::replay::ReplayId::clone_into(&self, &mut T)
+pub fn csv_algebra::replay::ReplayId::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::replay::ReplayId where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::replay::ReplayId::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::replay::ReplayId where T: ?core::marker::Sized
+pub fn csv_algebra::replay::ReplayId::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::replay::ReplayId where T: ?core::marker::Sized
+pub fn csv_algebra::replay::ReplayId::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::replay::ReplayId where T: core::clone::Clone
+pub unsafe fn csv_algebra::replay::ReplayId::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::replay::ReplayId
+pub fn csv_algebra::replay::ReplayId::from(T) -> T
+pub struct csv_algebra::replay::ReplayNonce(pub u64)
+impl csv_algebra::replay::ReplayNonce
+pub fn csv_algebra::replay::ReplayNonce::as_u64(&self) -> u64
+pub fn csv_algebra::replay::ReplayNonce::increment(&self) -> Self
+pub fn csv_algebra::replay::ReplayNonce::new(u64) -> Self
+impl core::clone::Clone for csv_algebra::replay::ReplayNonce
+pub fn csv_algebra::replay::ReplayNonce::clone(&self) -> csv_algebra::replay::ReplayNonce
+impl core::cmp::Eq for csv_algebra::replay::ReplayNonce
+impl core::cmp::PartialEq for csv_algebra::replay::ReplayNonce
+pub fn csv_algebra::replay::ReplayNonce::eq(&self, &csv_algebra::replay::ReplayNonce) -> bool
+impl core::fmt::Debug for csv_algebra::replay::ReplayNonce
+pub fn csv_algebra::replay::ReplayNonce::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for csv_algebra::replay::ReplayNonce
+pub fn csv_algebra::replay::ReplayNonce::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for csv_algebra::replay::ReplayNonce
+impl core::marker::StructuralPartialEq for csv_algebra::replay::ReplayNonce
+impl core::marker::Freeze for csv_algebra::replay::ReplayNonce
+impl core::marker::Send for csv_algebra::replay::ReplayNonce
+impl core::marker::Sync for csv_algebra::replay::ReplayNonce
+impl core::marker::Unpin for csv_algebra::replay::ReplayNonce
+impl core::marker::UnsafeUnpin for csv_algebra::replay::ReplayNonce
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::replay::ReplayNonce
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::replay::ReplayNonce
+impl<T, U> core::convert::Into<U> for csv_algebra::replay::ReplayNonce where U: core::convert::From<T>
+pub fn csv_algebra::replay::ReplayNonce::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::replay::ReplayNonce where U: core::convert::Into<T>
+pub type csv_algebra::replay::ReplayNonce::Error = core::convert::Infallible
+pub fn csv_algebra::replay::ReplayNonce::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::replay::ReplayNonce where U: core::convert::TryFrom<T>
+pub type csv_algebra::replay::ReplayNonce::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::replay::ReplayNonce::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::replay::ReplayNonce where T: core::clone::Clone
+pub type csv_algebra::replay::ReplayNonce::Owned = T
+pub fn csv_algebra::replay::ReplayNonce::clone_into(&self, &mut T)
+pub fn csv_algebra::replay::ReplayNonce::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::replay::ReplayNonce where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::replay::ReplayNonce::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::replay::ReplayNonce where T: ?core::marker::Sized
+pub fn csv_algebra::replay::ReplayNonce::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::replay::ReplayNonce where T: ?core::marker::Sized
+pub fn csv_algebra::replay::ReplayNonce::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::replay::ReplayNonce where T: core::clone::Clone
+pub unsafe fn csv_algebra::replay::ReplayNonce::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::replay::ReplayNonce
+pub fn csv_algebra::replay::ReplayNonce::from(T) -> T
+pub mod csv_algebra::state
+pub enum csv_algebra::state::RollbackReason
+pub csv_algebra::state::RollbackReason::FinalityTimeout
+pub csv_algebra::state::RollbackReason::MintFailed
+pub csv_algebra::state::RollbackReason::ProofInvalid
+pub csv_algebra::state::RollbackReason::Reorg
+impl core::clone::Clone for csv_algebra::state::RollbackReason
+pub fn csv_algebra::state::RollbackReason::clone(&self) -> csv_algebra::state::RollbackReason
+impl core::cmp::Eq for csv_algebra::state::RollbackReason
+impl core::cmp::PartialEq for csv_algebra::state::RollbackReason
+pub fn csv_algebra::state::RollbackReason::eq(&self, &csv_algebra::state::RollbackReason) -> bool
+impl core::fmt::Debug for csv_algebra::state::RollbackReason
+pub fn csv_algebra::state::RollbackReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for csv_algebra::state::RollbackReason
+impl core::marker::StructuralPartialEq for csv_algebra::state::RollbackReason
+impl core::marker::Freeze for csv_algebra::state::RollbackReason
+impl core::marker::Send for csv_algebra::state::RollbackReason
+impl core::marker::Sync for csv_algebra::state::RollbackReason
+impl core::marker::Unpin for csv_algebra::state::RollbackReason
+impl core::marker::UnsafeUnpin for csv_algebra::state::RollbackReason
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::RollbackReason
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::RollbackReason
+impl<T, U> core::convert::Into<U> for csv_algebra::state::RollbackReason where U: core::convert::From<T>
+pub fn csv_algebra::state::RollbackReason::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::RollbackReason where U: core::convert::Into<T>
+pub type csv_algebra::state::RollbackReason::Error = core::convert::Infallible
+pub fn csv_algebra::state::RollbackReason::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::RollbackReason where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::RollbackReason::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::RollbackReason::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::RollbackReason where T: core::clone::Clone
+pub type csv_algebra::state::RollbackReason::Owned = T
+pub fn csv_algebra::state::RollbackReason::clone_into(&self, &mut T)
+pub fn csv_algebra::state::RollbackReason::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::RollbackReason where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::RollbackReason::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::RollbackReason where T: ?core::marker::Sized
+pub fn csv_algebra::state::RollbackReason::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::RollbackReason where T: ?core::marker::Sized
+pub fn csv_algebra::state::RollbackReason::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::RollbackReason where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::RollbackReason::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::RollbackReason
+pub fn csv_algebra::state::RollbackReason::from(T) -> T
+pub struct csv_algebra::state::AwaitingFinality
+pub csv_algebra::state::AwaitingFinality::proof: csv_algebra::proof::CanonicalProof
+pub csv_algebra::state::AwaitingFinality::required_confirmations: u64
+impl csv_algebra::state::AwaitingFinality
+pub fn csv_algebra::state::AwaitingFinality::accept(self, csv_algebra::finality::FinalityEvidence) -> csv_algebra::state::ProofValidated
+pub fn csv_algebra::state::AwaitingFinality::timeout(self) -> csv_algebra::state::RolledBack
+impl core::clone::Clone for csv_algebra::state::AwaitingFinality
+pub fn csv_algebra::state::AwaitingFinality::clone(&self) -> csv_algebra::state::AwaitingFinality
+impl core::cmp::Eq for csv_algebra::state::AwaitingFinality
+impl core::cmp::PartialEq for csv_algebra::state::AwaitingFinality
+pub fn csv_algebra::state::AwaitingFinality::eq(&self, &csv_algebra::state::AwaitingFinality) -> bool
+impl core::fmt::Debug for csv_algebra::state::AwaitingFinality
+pub fn csv_algebra::state::AwaitingFinality::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::AwaitingFinality
+impl csv_algebra::state::TransferState for csv_algebra::state::AwaitingFinality
+impl core::marker::Freeze for csv_algebra::state::AwaitingFinality
+impl core::marker::Send for csv_algebra::state::AwaitingFinality
+impl core::marker::Sync for csv_algebra::state::AwaitingFinality
+impl core::marker::Unpin for csv_algebra::state::AwaitingFinality
+impl core::marker::UnsafeUnpin for csv_algebra::state::AwaitingFinality
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::AwaitingFinality
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::AwaitingFinality
+impl<T, U> core::convert::Into<U> for csv_algebra::state::AwaitingFinality where U: core::convert::From<T>
+pub fn csv_algebra::state::AwaitingFinality::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::AwaitingFinality where U: core::convert::Into<T>
+pub type csv_algebra::state::AwaitingFinality::Error = core::convert::Infallible
+pub fn csv_algebra::state::AwaitingFinality::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::AwaitingFinality where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::AwaitingFinality::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::AwaitingFinality::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::AwaitingFinality where T: core::clone::Clone
+pub type csv_algebra::state::AwaitingFinality::Owned = T
+pub fn csv_algebra::state::AwaitingFinality::clone_into(&self, &mut T)
+pub fn csv_algebra::state::AwaitingFinality::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::AwaitingFinality where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::AwaitingFinality::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::AwaitingFinality where T: ?core::marker::Sized
+pub fn csv_algebra::state::AwaitingFinality::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::AwaitingFinality where T: ?core::marker::Sized
+pub fn csv_algebra::state::AwaitingFinality::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::AwaitingFinality where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::AwaitingFinality::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::AwaitingFinality
+pub fn csv_algebra::state::AwaitingFinality::from(T) -> T
+pub struct csv_algebra::state::Completed
+pub csv_algebra::state::Completed::mint_tx: [u8; 32]
+pub csv_algebra::state::Completed::seal_id: csv_algebra::transfer::SealId
+impl core::clone::Clone for csv_algebra::state::Completed
+pub fn csv_algebra::state::Completed::clone(&self) -> csv_algebra::state::Completed
+impl core::cmp::Eq for csv_algebra::state::Completed
+impl core::cmp::PartialEq for csv_algebra::state::Completed
+pub fn csv_algebra::state::Completed::eq(&self, &csv_algebra::state::Completed) -> bool
+impl core::fmt::Debug for csv_algebra::state::Completed
+pub fn csv_algebra::state::Completed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::Completed
+impl csv_algebra::state::TransferState for csv_algebra::state::Completed
+impl core::marker::Freeze for csv_algebra::state::Completed
+impl core::marker::Send for csv_algebra::state::Completed
+impl core::marker::Sync for csv_algebra::state::Completed
+impl core::marker::Unpin for csv_algebra::state::Completed
+impl core::marker::UnsafeUnpin for csv_algebra::state::Completed
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::Completed
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::Completed
+impl<T, U> core::convert::Into<U> for csv_algebra::state::Completed where U: core::convert::From<T>
+pub fn csv_algebra::state::Completed::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::Completed where U: core::convert::Into<T>
+pub type csv_algebra::state::Completed::Error = core::convert::Infallible
+pub fn csv_algebra::state::Completed::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::Completed where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::Completed::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::Completed::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::Completed where T: core::clone::Clone
+pub type csv_algebra::state::Completed::Owned = T
+pub fn csv_algebra::state::Completed::clone_into(&self, &mut T)
+pub fn csv_algebra::state::Completed::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::Completed where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::Completed::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::Completed where T: ?core::marker::Sized
+pub fn csv_algebra::state::Completed::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::Completed where T: ?core::marker::Sized
+pub fn csv_algebra::state::Completed::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::Completed where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::Completed::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::Completed
+pub fn csv_algebra::state::Completed::from(T) -> T
+pub struct csv_algebra::state::Locked
+pub csv_algebra::state::Locked::dest_chain: u32
+pub csv_algebra::state::Locked::seal_id: csv_algebra::transfer::SealId
+pub csv_algebra::state::Locked::source_chain: u32
+impl csv_algebra::state::Locked
+pub fn csv_algebra::state::Locked::begin_proof(self) -> csv_algebra::state::ProofBuilding
+pub fn csv_algebra::state::Locked::reorg(self) -> csv_algebra::state::RolledBack
+impl core::clone::Clone for csv_algebra::state::Locked
+pub fn csv_algebra::state::Locked::clone(&self) -> csv_algebra::state::Locked
+impl core::cmp::Eq for csv_algebra::state::Locked
+impl core::cmp::PartialEq for csv_algebra::state::Locked
+pub fn csv_algebra::state::Locked::eq(&self, &csv_algebra::state::Locked) -> bool
+impl core::fmt::Debug for csv_algebra::state::Locked
+pub fn csv_algebra::state::Locked::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::Locked
+impl csv_algebra::state::TransferState for csv_algebra::state::Locked
+impl core::marker::Freeze for csv_algebra::state::Locked
+impl core::marker::Send for csv_algebra::state::Locked
+impl core::marker::Sync for csv_algebra::state::Locked
+impl core::marker::Unpin for csv_algebra::state::Locked
+impl core::marker::UnsafeUnpin for csv_algebra::state::Locked
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::Locked
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::Locked
+impl<T, U> core::convert::Into<U> for csv_algebra::state::Locked where U: core::convert::From<T>
+pub fn csv_algebra::state::Locked::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::Locked where U: core::convert::Into<T>
+pub type csv_algebra::state::Locked::Error = core::convert::Infallible
+pub fn csv_algebra::state::Locked::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::Locked where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::Locked::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::Locked::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::Locked where T: core::clone::Clone
+pub type csv_algebra::state::Locked::Owned = T
+pub fn csv_algebra::state::Locked::clone_into(&self, &mut T)
+pub fn csv_algebra::state::Locked::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::Locked where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::Locked::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::Locked where T: ?core::marker::Sized
+pub fn csv_algebra::state::Locked::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::Locked where T: ?core::marker::Sized
+pub fn csv_algebra::state::Locked::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::Locked where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::Locked::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::Locked
+pub fn csv_algebra::state::Locked::from(T) -> T
+pub struct csv_algebra::state::Minting
+pub csv_algebra::state::Minting::mint_tx: [u8; 32]
+pub csv_algebra::state::Minting::validated: csv_algebra::state::ProofValidated
+impl csv_algebra::state::Minting
+pub fn csv_algebra::state::Minting::confirm(self) -> csv_algebra::state::Completed
+pub fn csv_algebra::state::Minting::fail(self) -> csv_algebra::state::RolledBack
+impl core::clone::Clone for csv_algebra::state::Minting
+pub fn csv_algebra::state::Minting::clone(&self) -> csv_algebra::state::Minting
+impl core::cmp::Eq for csv_algebra::state::Minting
+impl core::cmp::PartialEq for csv_algebra::state::Minting
+pub fn csv_algebra::state::Minting::eq(&self, &csv_algebra::state::Minting) -> bool
+impl core::fmt::Debug for csv_algebra::state::Minting
+pub fn csv_algebra::state::Minting::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::Minting
+impl csv_algebra::state::TransferState for csv_algebra::state::Minting
+impl core::marker::Freeze for csv_algebra::state::Minting
+impl core::marker::Send for csv_algebra::state::Minting
+impl core::marker::Sync for csv_algebra::state::Minting
+impl core::marker::Unpin for csv_algebra::state::Minting
+impl core::marker::UnsafeUnpin for csv_algebra::state::Minting
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::Minting
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::Minting
+impl<T, U> core::convert::Into<U> for csv_algebra::state::Minting where U: core::convert::From<T>
+pub fn csv_algebra::state::Minting::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::Minting where U: core::convert::Into<T>
+pub type csv_algebra::state::Minting::Error = core::convert::Infallible
+pub fn csv_algebra::state::Minting::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::Minting where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::Minting::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::Minting::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::Minting where T: core::clone::Clone
+pub type csv_algebra::state::Minting::Owned = T
+pub fn csv_algebra::state::Minting::clone_into(&self, &mut T)
+pub fn csv_algebra::state::Minting::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::Minting where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::Minting::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::Minting where T: ?core::marker::Sized
+pub fn csv_algebra::state::Minting::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::Minting where T: ?core::marker::Sized
+pub fn csv_algebra::state::Minting::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::Minting where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::Minting::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::Minting
+pub fn csv_algebra::state::Minting::from(T) -> T
+pub struct csv_algebra::state::ProofBuilding
+pub csv_algebra::state::ProofBuilding::attempt: u8
+pub csv_algebra::state::ProofBuilding::locked: csv_algebra::state::Locked
+impl csv_algebra::state::ProofBuilding
+pub fn csv_algebra::state::ProofBuilding::fail(self) -> csv_algebra::state::RolledBack
+pub fn csv_algebra::state::ProofBuilding::submit_proof(self, csv_algebra::proof::CanonicalProof, u64) -> csv_algebra::state::AwaitingFinality
+impl core::clone::Clone for csv_algebra::state::ProofBuilding
+pub fn csv_algebra::state::ProofBuilding::clone(&self) -> csv_algebra::state::ProofBuilding
+impl core::cmp::Eq for csv_algebra::state::ProofBuilding
+impl core::cmp::PartialEq for csv_algebra::state::ProofBuilding
+pub fn csv_algebra::state::ProofBuilding::eq(&self, &csv_algebra::state::ProofBuilding) -> bool
+impl core::fmt::Debug for csv_algebra::state::ProofBuilding
+pub fn csv_algebra::state::ProofBuilding::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::ProofBuilding
+impl csv_algebra::state::TransferState for csv_algebra::state::ProofBuilding
+impl core::marker::Freeze for csv_algebra::state::ProofBuilding
+impl core::marker::Send for csv_algebra::state::ProofBuilding
+impl core::marker::Sync for csv_algebra::state::ProofBuilding
+impl core::marker::Unpin for csv_algebra::state::ProofBuilding
+impl core::marker::UnsafeUnpin for csv_algebra::state::ProofBuilding
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::ProofBuilding
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::ProofBuilding
+impl<T, U> core::convert::Into<U> for csv_algebra::state::ProofBuilding where U: core::convert::From<T>
+pub fn csv_algebra::state::ProofBuilding::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::ProofBuilding where U: core::convert::Into<T>
+pub type csv_algebra::state::ProofBuilding::Error = core::convert::Infallible
+pub fn csv_algebra::state::ProofBuilding::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::ProofBuilding where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::ProofBuilding::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::ProofBuilding::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::ProofBuilding where T: core::clone::Clone
+pub type csv_algebra::state::ProofBuilding::Owned = T
+pub fn csv_algebra::state::ProofBuilding::clone_into(&self, &mut T)
+pub fn csv_algebra::state::ProofBuilding::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::ProofBuilding where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::ProofBuilding::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::ProofBuilding where T: ?core::marker::Sized
+pub fn csv_algebra::state::ProofBuilding::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::ProofBuilding where T: ?core::marker::Sized
+pub fn csv_algebra::state::ProofBuilding::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::ProofBuilding where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::ProofBuilding::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::ProofBuilding
+pub fn csv_algebra::state::ProofBuilding::from(T) -> T
+pub struct csv_algebra::state::ProofValidated
+pub csv_algebra::state::ProofValidated::evidence: csv_algebra::finality::FinalityEvidence
+pub csv_algebra::state::ProofValidated::proof: csv_algebra::proof::CanonicalProof
+impl csv_algebra::state::ProofValidated
+pub fn csv_algebra::state::ProofValidated::mint(self, [u8; 32]) -> csv_algebra::state::Minting
+impl core::clone::Clone for csv_algebra::state::ProofValidated
+pub fn csv_algebra::state::ProofValidated::clone(&self) -> csv_algebra::state::ProofValidated
+impl core::cmp::Eq for csv_algebra::state::ProofValidated
+impl core::cmp::PartialEq for csv_algebra::state::ProofValidated
+pub fn csv_algebra::state::ProofValidated::eq(&self, &csv_algebra::state::ProofValidated) -> bool
+impl core::fmt::Debug for csv_algebra::state::ProofValidated
+pub fn csv_algebra::state::ProofValidated::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::ProofValidated
+impl csv_algebra::state::TransferState for csv_algebra::state::ProofValidated
+impl core::marker::Freeze for csv_algebra::state::ProofValidated
+impl core::marker::Send for csv_algebra::state::ProofValidated
+impl core::marker::Sync for csv_algebra::state::ProofValidated
+impl core::marker::Unpin for csv_algebra::state::ProofValidated
+impl core::marker::UnsafeUnpin for csv_algebra::state::ProofValidated
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::ProofValidated
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::ProofValidated
+impl<T, U> core::convert::Into<U> for csv_algebra::state::ProofValidated where U: core::convert::From<T>
+pub fn csv_algebra::state::ProofValidated::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::ProofValidated where U: core::convert::Into<T>
+pub type csv_algebra::state::ProofValidated::Error = core::convert::Infallible
+pub fn csv_algebra::state::ProofValidated::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::ProofValidated where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::ProofValidated::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::ProofValidated::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::ProofValidated where T: core::clone::Clone
+pub type csv_algebra::state::ProofValidated::Owned = T
+pub fn csv_algebra::state::ProofValidated::clone_into(&self, &mut T)
+pub fn csv_algebra::state::ProofValidated::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::ProofValidated where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::ProofValidated::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::ProofValidated where T: ?core::marker::Sized
+pub fn csv_algebra::state::ProofValidated::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::ProofValidated where T: ?core::marker::Sized
+pub fn csv_algebra::state::ProofValidated::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::ProofValidated where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::ProofValidated::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::ProofValidated
+pub fn csv_algebra::state::ProofValidated::from(T) -> T
+pub struct csv_algebra::state::RolledBack
+pub csv_algebra::state::RolledBack::reason: csv_algebra::state::RollbackReason
+pub csv_algebra::state::RolledBack::seal_id: csv_algebra::transfer::SealId
+impl core::clone::Clone for csv_algebra::state::RolledBack
+pub fn csv_algebra::state::RolledBack::clone(&self) -> csv_algebra::state::RolledBack
+impl core::cmp::Eq for csv_algebra::state::RolledBack
+impl core::cmp::PartialEq for csv_algebra::state::RolledBack
+pub fn csv_algebra::state::RolledBack::eq(&self, &csv_algebra::state::RolledBack) -> bool
+impl core::fmt::Debug for csv_algebra::state::RolledBack
+pub fn csv_algebra::state::RolledBack::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for csv_algebra::state::RolledBack
+impl csv_algebra::state::TransferState for csv_algebra::state::RolledBack
+impl core::marker::Freeze for csv_algebra::state::RolledBack
+impl core::marker::Send for csv_algebra::state::RolledBack
+impl core::marker::Sync for csv_algebra::state::RolledBack
+impl core::marker::Unpin for csv_algebra::state::RolledBack
+impl core::marker::UnsafeUnpin for csv_algebra::state::RolledBack
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::state::RolledBack
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::state::RolledBack
+impl<T, U> core::convert::Into<U> for csv_algebra::state::RolledBack where U: core::convert::From<T>
+pub fn csv_algebra::state::RolledBack::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::state::RolledBack where U: core::convert::Into<T>
+pub type csv_algebra::state::RolledBack::Error = core::convert::Infallible
+pub fn csv_algebra::state::RolledBack::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::state::RolledBack where U: core::convert::TryFrom<T>
+pub type csv_algebra::state::RolledBack::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::state::RolledBack::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::state::RolledBack where T: core::clone::Clone
+pub type csv_algebra::state::RolledBack::Owned = T
+pub fn csv_algebra::state::RolledBack::clone_into(&self, &mut T)
+pub fn csv_algebra::state::RolledBack::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::state::RolledBack where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::state::RolledBack::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::state::RolledBack where T: ?core::marker::Sized
+pub fn csv_algebra::state::RolledBack::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::state::RolledBack where T: ?core::marker::Sized
+pub fn csv_algebra::state::RolledBack::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::state::RolledBack where T: core::clone::Clone
+pub unsafe fn csv_algebra::state::RolledBack::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::state::RolledBack
+pub fn csv_algebra::state::RolledBack::from(T) -> T
+pub trait csv_algebra::state::TransferState: csv_algebra::state::sealed::Sealed
+impl csv_algebra::state::TransferState for csv_algebra::state::AwaitingFinality
+impl csv_algebra::state::TransferState for csv_algebra::state::Completed
+impl csv_algebra::state::TransferState for csv_algebra::state::Locked
+impl csv_algebra::state::TransferState for csv_algebra::state::Minting
+impl csv_algebra::state::TransferState for csv_algebra::state::ProofBuilding
+impl csv_algebra::state::TransferState for csv_algebra::state::ProofValidated
+impl csv_algebra::state::TransferState for csv_algebra::state::RolledBack
+pub mod csv_algebra::transfer
+pub struct csv_algebra::transfer::ChainId(pub u32)
+impl csv_algebra::transfer::ChainId
+pub fn csv_algebra::transfer::ChainId::as_u32(&self) -> u32
+pub fn csv_algebra::transfer::ChainId::new(u32) -> Self
+impl core::clone::Clone for csv_algebra::transfer::ChainId
+pub fn csv_algebra::transfer::ChainId::clone(&self) -> csv_algebra::transfer::ChainId
+impl core::cmp::Eq for csv_algebra::transfer::ChainId
+impl core::cmp::PartialEq for csv_algebra::transfer::ChainId
+pub fn csv_algebra::transfer::ChainId::eq(&self, &csv_algebra::transfer::ChainId) -> bool
+impl core::fmt::Debug for csv_algebra::transfer::ChainId
+pub fn csv_algebra::transfer::ChainId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for csv_algebra::transfer::ChainId
+pub fn csv_algebra::transfer::ChainId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for csv_algebra::transfer::ChainId
+impl core::marker::StructuralPartialEq for csv_algebra::transfer::ChainId
+impl core::marker::Freeze for csv_algebra::transfer::ChainId
+impl core::marker::Send for csv_algebra::transfer::ChainId
+impl core::marker::Sync for csv_algebra::transfer::ChainId
+impl core::marker::Unpin for csv_algebra::transfer::ChainId
+impl core::marker::UnsafeUnpin for csv_algebra::transfer::ChainId
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::transfer::ChainId
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::transfer::ChainId
+impl<T, U> core::convert::Into<U> for csv_algebra::transfer::ChainId where U: core::convert::From<T>
+pub fn csv_algebra::transfer::ChainId::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::transfer::ChainId where U: core::convert::Into<T>
+pub type csv_algebra::transfer::ChainId::Error = core::convert::Infallible
+pub fn csv_algebra::transfer::ChainId::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::transfer::ChainId where U: core::convert::TryFrom<T>
+pub type csv_algebra::transfer::ChainId::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::transfer::ChainId::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::transfer::ChainId where T: core::clone::Clone
+pub type csv_algebra::transfer::ChainId::Owned = T
+pub fn csv_algebra::transfer::ChainId::clone_into(&self, &mut T)
+pub fn csv_algebra::transfer::ChainId::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::transfer::ChainId where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::transfer::ChainId::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::transfer::ChainId where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::ChainId::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::transfer::ChainId where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::ChainId::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::transfer::ChainId where T: core::clone::Clone
+pub unsafe fn csv_algebra::transfer::ChainId::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::transfer::ChainId
+pub fn csv_algebra::transfer::ChainId::from(T) -> T
+pub struct csv_algebra::transfer::SealId(pub [u8; 32])
+impl csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::as_bytes(&self) -> &[u8; 32]
+pub fn csv_algebra::transfer::SealId::new([u8; 32]) -> Self
+impl core::clone::Clone for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::clone(&self) -> csv_algebra::transfer::SealId
+impl core::cmp::Eq for csv_algebra::transfer::SealId
+impl core::cmp::PartialEq for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::eq(&self, &csv_algebra::transfer::SealId) -> bool
+impl core::convert::From<&[u8; 32]> for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::from(&[u8; 32]) -> Self
+impl core::convert::From<[u8; 32]> for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::from([u8; 32]) -> Self
+impl core::fmt::Debug for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for csv_algebra::transfer::SealId
+impl core::marker::StructuralPartialEq for csv_algebra::transfer::SealId
+impl core::marker::Freeze for csv_algebra::transfer::SealId
+impl core::marker::Send for csv_algebra::transfer::SealId
+impl core::marker::Sync for csv_algebra::transfer::SealId
+impl core::marker::Unpin for csv_algebra::transfer::SealId
+impl core::marker::UnsafeUnpin for csv_algebra::transfer::SealId
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::transfer::SealId
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::transfer::SealId
+impl<T, U> core::convert::Into<U> for csv_algebra::transfer::SealId where U: core::convert::From<T>
+pub fn csv_algebra::transfer::SealId::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::transfer::SealId where U: core::convert::Into<T>
+pub type csv_algebra::transfer::SealId::Error = core::convert::Infallible
+pub fn csv_algebra::transfer::SealId::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::transfer::SealId where U: core::convert::TryFrom<T>
+pub type csv_algebra::transfer::SealId::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::transfer::SealId::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::transfer::SealId where T: core::clone::Clone
+pub type csv_algebra::transfer::SealId::Owned = T
+pub fn csv_algebra::transfer::SealId::clone_into(&self, &mut T)
+pub fn csv_algebra::transfer::SealId::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::transfer::SealId where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::transfer::SealId::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::transfer::SealId where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::SealId::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::transfer::SealId where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::SealId::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::transfer::SealId where T: core::clone::Clone
+pub unsafe fn csv_algebra::transfer::SealId::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::transfer::SealId
+pub fn csv_algebra::transfer::SealId::from(T) -> T
+pub struct csv_algebra::transfer::SealPoint
+pub csv_algebra::transfer::SealPoint::block_hash: [u8; 32]
+pub csv_algebra::transfer::SealPoint::block_height: u64
+pub csv_algebra::transfer::SealPoint::seal_id: csv_algebra::transfer::SealId
+impl core::clone::Clone for csv_algebra::transfer::SealPoint
+pub fn csv_algebra::transfer::SealPoint::clone(&self) -> csv_algebra::transfer::SealPoint
+impl core::cmp::Eq for csv_algebra::transfer::SealPoint
+impl core::cmp::PartialEq for csv_algebra::transfer::SealPoint
+pub fn csv_algebra::transfer::SealPoint::eq(&self, &csv_algebra::transfer::SealPoint) -> bool
+impl core::fmt::Debug for csv_algebra::transfer::SealPoint
+pub fn csv_algebra::transfer::SealPoint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for csv_algebra::transfer::SealPoint
+impl core::marker::StructuralPartialEq for csv_algebra::transfer::SealPoint
+impl core::marker::Freeze for csv_algebra::transfer::SealPoint
+impl core::marker::Send for csv_algebra::transfer::SealPoint
+impl core::marker::Sync for csv_algebra::transfer::SealPoint
+impl core::marker::Unpin for csv_algebra::transfer::SealPoint
+impl core::marker::UnsafeUnpin for csv_algebra::transfer::SealPoint
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::transfer::SealPoint
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::transfer::SealPoint
+impl<T, U> core::convert::Into<U> for csv_algebra::transfer::SealPoint where U: core::convert::From<T>
+pub fn csv_algebra::transfer::SealPoint::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::transfer::SealPoint where U: core::convert::Into<T>
+pub type csv_algebra::transfer::SealPoint::Error = core::convert::Infallible
+pub fn csv_algebra::transfer::SealPoint::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::transfer::SealPoint where U: core::convert::TryFrom<T>
+pub type csv_algebra::transfer::SealPoint::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::transfer::SealPoint::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::transfer::SealPoint where T: core::clone::Clone
+pub type csv_algebra::transfer::SealPoint::Owned = T
+pub fn csv_algebra::transfer::SealPoint::clone_into(&self, &mut T)
+pub fn csv_algebra::transfer::SealPoint::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::transfer::SealPoint where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::transfer::SealPoint::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::transfer::SealPoint where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::SealPoint::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::transfer::SealPoint where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::SealPoint::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::transfer::SealPoint where T: core::clone::Clone
+pub unsafe fn csv_algebra::transfer::SealPoint::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::transfer::SealPoint
+pub fn csv_algebra::transfer::SealPoint::from(T) -> T
+pub struct csv_algebra::transfer::TransferId(pub [u8; 32])
+impl csv_algebra::transfer::TransferId
+pub fn csv_algebra::transfer::TransferId::as_bytes(&self) -> &[u8; 32]
+pub fn csv_algebra::transfer::TransferId::new([u8; 32]) -> Self
+impl core::clone::Clone for csv_algebra::transfer::TransferId
+pub fn csv_algebra::transfer::TransferId::clone(&self) -> csv_algebra::transfer::TransferId
+impl core::cmp::Eq for csv_algebra::transfer::TransferId
+impl core::cmp::PartialEq for csv_algebra::transfer::TransferId
+pub fn csv_algebra::transfer::TransferId::eq(&self, &csv_algebra::transfer::TransferId) -> bool
+impl core::fmt::Debug for csv_algebra::transfer::TransferId
+pub fn csv_algebra::transfer::TransferId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for csv_algebra::transfer::TransferId
+pub fn csv_algebra::transfer::TransferId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for csv_algebra::transfer::TransferId
+impl core::marker::StructuralPartialEq for csv_algebra::transfer::TransferId
+impl core::marker::Freeze for csv_algebra::transfer::TransferId
+impl core::marker::Send for csv_algebra::transfer::TransferId
+impl core::marker::Sync for csv_algebra::transfer::TransferId
+impl core::marker::Unpin for csv_algebra::transfer::TransferId
+impl core::marker::UnsafeUnpin for csv_algebra::transfer::TransferId
+impl core::panic::unwind_safe::RefUnwindSafe for csv_algebra::transfer::TransferId
+impl core::panic::unwind_safe::UnwindSafe for csv_algebra::transfer::TransferId
+impl<T, U> core::convert::Into<U> for csv_algebra::transfer::TransferId where U: core::convert::From<T>
+pub fn csv_algebra::transfer::TransferId::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for csv_algebra::transfer::TransferId where U: core::convert::Into<T>
+pub type csv_algebra::transfer::TransferId::Error = core::convert::Infallible
+pub fn csv_algebra::transfer::TransferId::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for csv_algebra::transfer::TransferId where U: core::convert::TryFrom<T>
+pub type csv_algebra::transfer::TransferId::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn csv_algebra::transfer::TransferId::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for csv_algebra::transfer::TransferId where T: core::clone::Clone
+pub type csv_algebra::transfer::TransferId::Owned = T
+pub fn csv_algebra::transfer::TransferId::clone_into(&self, &mut T)
+pub fn csv_algebra::transfer::TransferId::to_owned(&self) -> T
+impl<T> core::any::Any for csv_algebra::transfer::TransferId where T: 'static + ?core::marker::Sized
+pub fn csv_algebra::transfer::TransferId::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for csv_algebra::transfer::TransferId where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::TransferId::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for csv_algebra::transfer::TransferId where T: ?core::marker::Sized
+pub fn csv_algebra::transfer::TransferId::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for csv_algebra::transfer::TransferId where T: core::clone::Clone
+pub unsafe fn csv_algebra::transfer::TransferId::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for csv_algebra::transfer::TransferId
+pub fn csv_algebra::transfer::TransferId::from(T) -> T

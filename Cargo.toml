@@ -16,6 +16,7 @@ members = [
     "csv-storage",
     "csv-testkit",
     "csv-contract-bindings",
+    "csv-chain-ports",
     # Coordinator crate
     "csv-coordinator",
     # Admission crate

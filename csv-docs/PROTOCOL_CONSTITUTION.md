@@ -302,6 +302,10 @@ The nullifier is published on the destination chain and checked before any mint 
 
 ## 7. Versioning and Upgrades
 
+Cross-crate, wire, proof, schema, contract, and deployment compatibility is
+normatively governed by the [CSV Compatibility Policy](COMPATIBILITY_POLICY.md).
+Rust SemVer alone never authorizes a consensus-visible format change.
+
 ### 7.1 Protocol Version
 
 The protocol uses semantic versioning with a `ProtocolVersion` struct:

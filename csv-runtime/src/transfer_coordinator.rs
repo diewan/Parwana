@@ -19,8 +19,8 @@ use crate::execution_journal::ExecutionJournal;
 #[cfg(test)]
 use crate::execution_journal::InMemoryJournal;
 use crate::recovery::{CheckpointManager, TransferStage};
-use csv_adapter_core::{AdapterRegistry, CrossChainTransfer, TxFinality};
 use csv_admission::{AdmissionController, AdmissionLimits, AdmissionSnapshot};
+use csv_chain_ports::{AdapterRegistry, CrossChainTransfer, TxFinality};
 use csv_hash::chain_id::ChainId;
 use csv_hash::seal::SealPoint;
 use csv_observability::metrics::{MetricsCollector, RuntimeFlowSnapshot};
@@ -106,12 +106,12 @@ fn proof_payload_hash(payload: &[u8]) -> [u8; 32] {
 
 /// 23-byte domain tag for the RFC-0012 §9.2 mint attestation digest.
 ///
-/// Single source of truth lives in `csv_adapter_core` so the runtime (which
+/// Single source of truth lives in `csv_chain_ports` so the runtime (which
 /// binds the attestation) and the destination adapter (which binds
 /// `destination_contract` and signs the digest) can never drift. The `const`
 /// assertion below fails the build if the tag ever drifts from the frozen
 /// 23-byte length.
-use csv_adapter_core::MINT_ATTESTATION_DOMAIN;
+use csv_chain_ports::MINT_ATTESTATION_DOMAIN;
 const _: () = assert!(MINT_ATTESTATION_DOMAIN.len() == 23);
 
 /// Contract-layer chain identity (RFC-0012 §6): `keccak256("csv.chain.<name>")`.
@@ -165,11 +165,11 @@ fn mint_nullifier(proof_bundle: &csv_protocol::proof_taxonomy::ProofBundle) -> [
 
 // The RFC-0012 §9.2 attestation-digest inputs (`MintAttestationInputs`) and the
 // `RuntimeMintRequest` handed to the destination adapter live in
-// `csv_adapter_core` — the single crate depended on by both the runtime (which
+// `csv_chain_ports` — the single crate depended on by both the runtime (which
 // binds the attestation) and every chain adapter (which binds
 // `destination_contract` and signs the digest). Keeping one definition prevents
 // the silent ABI/serde drift a mirrored struct would invite.
-pub use csv_adapter_core::{MintAttestationInputs, RuntimeMintRequest};
+pub use csv_chain_ports::{MintAttestationInputs, RuntimeMintRequest};
 
 /// Build the runtime mint request from a verified proof bundle.
 ///
@@ -278,10 +278,10 @@ fn encode_mint_request(request: &RuntimeMintRequest) -> Result<Vec<u8>, Transfer
 
 // The RFC-0012 §10 settlement-receipt inputs (`SettlementReceiptInputs`) and the
 // `RuntimeSettlementRequest` handed to the source adapter live in
-// `csv_adapter_core`, next to the §9.2 mint types — one definition shared by the
+// `csv_chain_ports`, next to the §9.2 mint types — one definition shared by the
 // runtime (which binds every field except `source_escrow_contract`) and the
 // source adapter (which binds `source_escrow_contract` and signs).
-pub use csv_adapter_core::{RuntimeSettlementRequest, SettlementReceiptInputs};
+pub use csv_chain_ports::{RuntimeSettlementRequest, SettlementReceiptInputs};
 
 /// Canonical fixed-width reference to a confirmed destination mint, derived from
 /// the mint transaction hash recorded in [`SettlementEvidence`].
@@ -528,7 +528,7 @@ pub struct FinalityObservation {
 
 impl FinalityObservation {
     /// Build an observation from an adapter's finality read and the policy depth.
-    pub fn new(finality: &csv_adapter_core::TxFinality, required_confirmations: u64) -> Self {
+    pub fn new(finality: &csv_chain_ports::TxFinality, required_confirmations: u64) -> Self {
         Self {
             confirming_block_height: finality.block_height,
             confirmations: finality.confirmations,
@@ -565,7 +565,7 @@ pub struct TransferReceipt {
     /// Transaction hash of the mint on destination chain
     pub mint_tx_hash: String,
     /// Destination-side materialization metadata observed by the destination adapter.
-    pub materialization: csv_adapter_core::DestinationMaterialization,
+    pub materialization: csv_chain_ports::DestinationMaterialization,
     /// The finality observation that authorized this transfer's proof build.
     ///
     /// `None` only when the receipt was reconstructed from the journal for an
@@ -923,7 +923,7 @@ impl TransferCoordinator {
                     replay_id,
                     lock_tx_hash: hex::encode(entry.lock_tx_hash.as_bytes()),
                     mint_tx_hash: hex::encode(entry.mint_tx_hash.as_bytes()),
-                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                         transfer.destination_chain.clone(),
                     ),
                     // Reconstructed from the journal for a transfer that already
@@ -1557,7 +1557,7 @@ impl TransferCoordinator {
         let proof_bundle = adapter_registry
             .build_inclusion_proof(&transfer.source_chain, &transfer, &lock_result)
             .await
-            .map_err(|e: csv_adapter_core::AdapterError| {
+            .map_err(|e: csv_chain_ports::AdapterError| {
                 TransferCoordinatorError::ProofBuildFailed(e.to_string())
             })?;
 
@@ -1889,7 +1889,7 @@ impl TransferCoordinator {
             None => {
                 let error = last_error
                     .as_ref()
-                    .map(|e: &csv_adapter_core::AdapterError| e.to_string())
+                    .map(|e: &csv_chain_ports::AdapterError| e.to_string())
                     .unwrap_or_else(|| "Unknown error".to_string());
                 let _ =
                     self.execution_journal
@@ -2477,7 +2477,7 @@ impl TransferCoordinator {
     fn record_resumed_settlement_evidence(
         &self,
         transfer: &CrossChainTransfer,
-        mint_result: &csv_adapter_core::MintResult,
+        mint_result: &csv_chain_ports::MintResult,
         runtime_ctx: &crate::user_runtime_lease::RuntimeExecutionContext,
     ) {
         let payload = match self.execution_journal.latest_entry(&transfer.id) {
@@ -3326,7 +3326,7 @@ impl TransferCoordinator {
             });
         }
 
-        let lock_result = csv_adapter_core::LockResult {
+        let lock_result = csv_chain_ports::LockResult {
             // Native lock tx reference: adapters re-derive their chain-specific
             // form (e.g. Solana decodes the 128-hex-char 64-byte signature).
             tx_hash: hex::encode(&transfer.lock_tx_hash),
@@ -4088,7 +4088,7 @@ pub trait RecoveryContextProvider: Send + Sync {
 mod tests {
     use super::*;
     use crate::adapter_registry::AdapterRegistryImpl;
-    use csv_adapter_core::{
+    use csv_chain_ports::{
         ChainAdapter, CrossChainTransfer as RuntimeCrossChainTransfer, LockResult, MintResult,
         SealRegistryStatus,
     };
@@ -4147,7 +4147,7 @@ mod tests {
             MintResult {
                 tx_hash: hex::encode([0u8; 32]),
                 block_height: 100,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             }
@@ -4250,7 +4250,7 @@ mod tests {
         async fn lock_sanad(
             &self,
             _transfer: &CrossChainTransfer,
-        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+        ) -> Result<LockResult, csv_chain_ports::AdapterError> {
             Ok(LocalTestAdapter::build_fake_lock_result())
         }
 
@@ -4258,7 +4258,7 @@ mod tests {
             &self,
             _transfer: &CrossChainTransfer,
             _proof_bundle: &[u8],
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             Ok(LocalTestAdapter::build_fake_mint_result())
         }
 
@@ -4266,18 +4266,18 @@ mod tests {
             &self,
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
-        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+        ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
             LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
-                .map_err(|e| csv_adapter_core::AdapterError::Generic(e))
+                .map_err(|e| csv_chain_ports::AdapterError::Generic(e))
         }
 
         async fn validate_source_proof(
             &self,
             transfer: &CrossChainTransfer,
             proof_bundle: &ProofBundle,
-        ) -> Result<(), csv_adapter_core::AdapterError> {
+        ) -> Result<(), csv_chain_ports::AdapterError> {
             if proof_bundle.seal_ref.id != transfer.sanad_id.as_bytes() {
-                return Err(csv_adapter_core::AdapterError::Generic(
+                return Err(csv_chain_ports::AdapterError::Generic(
                     "proof is not bound to the requested sanad".to_string(),
                 ));
             }
@@ -4287,18 +4287,18 @@ mod tests {
         async fn check_seal_registry(
             &self,
             _seal_id: &[u8],
-        ) -> Result<csv_adapter_core::SealRegistryStatus, csv_adapter_core::AdapterError> {
-            Ok(csv_adapter_core::SealRegistryStatus::Available)
+        ) -> Result<csv_chain_ports::SealRegistryStatus, csv_chain_ports::AdapterError> {
+            Ok(csv_chain_ports::SealRegistryStatus::Available)
         }
 
         async fn confirm_tx(
             &self,
             tx_hash: &str,
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             })
@@ -4307,9 +4307,9 @@ mod tests {
         async fn tx_finality(
             &self,
             tx_hash: &str,
-        ) -> Result<csv_adapter_core::TxFinality, csv_adapter_core::AdapterError> {
+        ) -> Result<csv_chain_ports::TxFinality, csv_chain_ports::AdapterError> {
             match self.finality_confirmations {
-                Some(confirmations) => Ok(csv_adapter_core::TxFinality {
+                Some(confirmations) => Ok(csv_chain_ports::TxFinality {
                     block_height: 100,
                     confirmations,
                     // Model a depth-based chain: the tip is what the adapter read.
@@ -4319,7 +4319,7 @@ mod tests {
                 // matching the trait default.
                 None => {
                     let confirmed = self.confirm_tx(tx_hash).await?;
-                    Ok(csv_adapter_core::TxFinality {
+                    Ok(csv_chain_ports::TxFinality {
                         block_height: confirmed.block_height,
                         confirmations: u64::MAX,
                         observed_tip_height: None,
@@ -4331,7 +4331,7 @@ mod tests {
         async fn get_balance(
             &self,
             _address: &str,
-        ) -> Result<String, csv_adapter_core::AdapterError> {
+        ) -> Result<String, csv_chain_ports::AdapterError> {
             Ok("0".to_string())
         }
 
@@ -4767,8 +4767,8 @@ mod tests {
             async fn lock_sanad(
                 &self,
                 _t: &RuntimeCrossChainTransfer,
-            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<LockResult, csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Celestia is not a transfer source".to_string(),
                 ))
             }
@@ -4776,8 +4776,8 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _p: &[u8],
-            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<MintResult, csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Celestia does not authorize destination mints".to_string(),
                 ))
             }
@@ -4785,8 +4785,8 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _l: &LockResult,
-            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Celestia is not a transfer proof source".to_string(),
                 ))
             }
@@ -4794,24 +4794,24 @@ mod tests {
                 &self,
                 _t: &RuntimeCrossChainTransfer,
                 _p: &ProofBundle,
-            ) -> Result<(), csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<(), csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Celestia is not a transfer proof source".to_string(),
                 ))
             }
             async fn check_seal_registry(
                 &self,
                 _s: &[u8],
-            ) -> Result<csv_adapter_core::SealRegistryStatus, csv_adapter_core::AdapterError>
+            ) -> Result<csv_chain_ports::SealRegistryStatus, csv_chain_ports::AdapterError>
             {
-                Err(csv_adapter_core::AdapterError::Generic(
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Celestia has no transfer seal registry".to_string(),
                 ))
             }
             async fn get_balance(
                 &self,
                 _address: &str,
-            ) -> Result<String, csv_adapter_core::AdapterError> {
+            ) -> Result<String, csv_chain_ports::AdapterError> {
                 Ok("0".to_string())
             }
             fn as_any(&self) -> &dyn std::any::Any {
@@ -5487,7 +5487,7 @@ mod tests {
             async fn lock_sanad(
                 &self,
                 _transfer: &CrossChainTransfer,
-            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+            ) -> Result<LockResult, csv_chain_ports::AdapterError> {
                 Ok(LockResult {
                     tx_hash: hex::encode([0x11u8; 32]),
                     block_height: 100,
@@ -5498,8 +5498,8 @@ mod tests {
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &[u8],
-            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<MintResult, csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
             }
@@ -5508,8 +5508,8 @@ mod tests {
                 &self,
                 _transfer: &CrossChainTransfer,
                 _lock_result: &LockResult,
-            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
             }
@@ -5518,8 +5518,8 @@ mod tests {
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &ProofBundle,
-            ) -> Result<(), csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<(), csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "Malicious proof bundle detected".to_string(),
                 ))
             }
@@ -5527,14 +5527,14 @@ mod tests {
             async fn check_seal_registry(
                 &self,
                 _seal_id: &[u8],
-            ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+            ) -> Result<SealRegistryStatus, csv_chain_ports::AdapterError> {
                 Ok(SealRegistryStatus::Available)
             }
 
             async fn get_balance(
                 &self,
                 _address: &str,
-            ) -> Result<String, csv_adapter_core::AdapterError> {
+            ) -> Result<String, csv_chain_ports::AdapterError> {
                 Ok("0".to_string())
             }
 
@@ -6001,14 +6001,14 @@ mod tests {
             async fn lock_sanad(
                 &self,
                 _transfer: &CrossChainTransfer,
-            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+            ) -> Result<LockResult, csv_chain_ports::AdapterError> {
                 Ok(LocalTestAdapter::build_fake_lock_result())
             }
             async fn mint_sanad(
                 &self,
                 _transfer: &CrossChainTransfer,
                 proof_bundle: &[u8],
-            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            ) -> Result<MintResult, csv_chain_ports::AdapterError> {
                 *self.mint_payload.lock().unwrap() = Some(proof_bundle.to_vec());
                 Ok(LocalTestAdapter::build_fake_mint_result())
             }
@@ -6016,31 +6016,31 @@ mod tests {
                 &self,
                 transfer: &CrossChainTransfer,
                 _lock_result: &LockResult,
-            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+            ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
                 LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
-                    .map_err(csv_adapter_core::AdapterError::Generic)
+                    .map_err(csv_chain_ports::AdapterError::Generic)
             }
             async fn validate_source_proof(
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &ProofBundle,
-            ) -> Result<(), csv_adapter_core::AdapterError> {
+            ) -> Result<(), csv_chain_ports::AdapterError> {
                 Ok(())
             }
             async fn check_seal_registry(
                 &self,
                 _seal_id: &[u8],
-            ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+            ) -> Result<SealRegistryStatus, csv_chain_ports::AdapterError> {
                 Ok(SealRegistryStatus::Available)
             }
             async fn confirm_tx(
                 &self,
                 tx_hash: &str,
-            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            ) -> Result<MintResult, csv_chain_ports::AdapterError> {
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height: 100,
-                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                         "test-chain",
                     ),
                 })
@@ -6048,7 +6048,7 @@ mod tests {
             async fn get_balance(
                 &self,
                 _address: &str,
-            ) -> Result<String, csv_adapter_core::AdapterError> {
+            ) -> Result<String, csv_chain_ports::AdapterError> {
                 Ok("0".to_string())
             }
             fn as_any(&self) -> &dyn std::any::Any {
@@ -6162,14 +6162,14 @@ mod tests {
             async fn lock_sanad(
                 &self,
                 _transfer: &CrossChainTransfer,
-            ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+            ) -> Result<LockResult, csv_chain_ports::AdapterError> {
                 Ok(LocalTestAdapter::build_fake_lock_result())
             }
             async fn mint_sanad(
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &[u8],
-            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            ) -> Result<MintResult, csv_chain_ports::AdapterError> {
                 self.mint_called
                     .store(true, std::sync::atomic::Ordering::SeqCst);
                 Ok(LocalTestAdapter::build_fake_mint_result())
@@ -6178,33 +6178,33 @@ mod tests {
                 &self,
                 transfer: &CrossChainTransfer,
                 _lock_result: &LockResult,
-            ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+            ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
                 LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
-                    .map_err(csv_adapter_core::AdapterError::Generic)
+                    .map_err(csv_chain_ports::AdapterError::Generic)
             }
             async fn validate_source_proof(
                 &self,
                 _transfer: &CrossChainTransfer,
                 _proof_bundle: &ProofBundle,
-            ) -> Result<(), csv_adapter_core::AdapterError> {
-                Err(csv_adapter_core::AdapterError::Generic(
+            ) -> Result<(), csv_chain_ports::AdapterError> {
+                Err(csv_chain_ports::AdapterError::Generic(
                     "source proof rejected".to_string(),
                 ))
             }
             async fn check_seal_registry(
                 &self,
                 _seal_id: &[u8],
-            ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+            ) -> Result<SealRegistryStatus, csv_chain_ports::AdapterError> {
                 Ok(SealRegistryStatus::Available)
             }
             async fn confirm_tx(
                 &self,
                 tx_hash: &str,
-            ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+            ) -> Result<MintResult, csv_chain_ports::AdapterError> {
                 Ok(MintResult {
                     tx_hash: tx_hash.to_string(),
                     block_height: 100,
-                    materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                    materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                         "test-chain",
                     ),
                 })
@@ -6212,7 +6212,7 @@ mod tests {
             async fn get_balance(
                 &self,
                 _address: &str,
-            ) -> Result<String, csv_adapter_core::AdapterError> {
+            ) -> Result<String, csv_chain_ports::AdapterError> {
                 Ok("0".to_string())
             }
             fn as_any(&self) -> &dyn std::any::Any {
@@ -6293,26 +6293,26 @@ mod tests {
         async fn lock_sanad(
             &self,
             _transfer: &CrossChainTransfer,
-        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+        ) -> Result<LockResult, csv_chain_ports::AdapterError> {
             Ok(LocalTestAdapter::build_fake_lock_result())
         }
         async fn mint_sanad(
             &self,
             _transfer: &CrossChainTransfer,
             _proof_bundle: &[u8],
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             let attempt = self
                 .mint_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if attempt < self.fail_until {
-                return Err(csv_adapter_core::AdapterError::Generic(
+                return Err(csv_chain_ports::AdapterError::Generic(
                     "destination mint reverted".to_string(),
                 ));
             }
             Ok(MintResult {
                 tx_hash: hex::encode([0x7u8; 32]),
                 block_height: 4242,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             })
@@ -6321,17 +6321,17 @@ mod tests {
             &self,
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
-        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+        ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
             LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
-                .map_err(csv_adapter_core::AdapterError::Generic)
+                .map_err(csv_chain_ports::AdapterError::Generic)
         }
         async fn validate_source_proof(
             &self,
             transfer: &CrossChainTransfer,
             proof_bundle: &ProofBundle,
-        ) -> Result<(), csv_adapter_core::AdapterError> {
+        ) -> Result<(), csv_chain_ports::AdapterError> {
             if proof_bundle.seal_ref.id != transfer.sanad_id.as_bytes() {
-                return Err(csv_adapter_core::AdapterError::Generic(
+                return Err(csv_chain_ports::AdapterError::Generic(
                     "proof is not bound to the requested sanad".to_string(),
                 ));
             }
@@ -6340,17 +6340,17 @@ mod tests {
         async fn check_seal_registry(
             &self,
             _seal_id: &[u8],
-        ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+        ) -> Result<SealRegistryStatus, csv_chain_ports::AdapterError> {
             Ok(SealRegistryStatus::Available)
         }
         async fn confirm_tx(
             &self,
             tx_hash: &str,
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             })
@@ -6358,7 +6358,7 @@ mod tests {
         async fn get_balance(
             &self,
             _address: &str,
-        ) -> Result<String, csv_adapter_core::AdapterError> {
+        ) -> Result<String, csv_chain_ports::AdapterError> {
             Ok("0".to_string())
         }
         fn as_any(&self) -> &dyn std::any::Any {
@@ -6404,7 +6404,7 @@ mod tests {
         async fn lock_sanad(
             &self,
             transfer: &CrossChainTransfer,
-        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+        ) -> Result<LockResult, csv_chain_ports::AdapterError> {
             Ok(LockResult {
                 tx_hash: hex::encode(&transfer.lock_tx_hash),
                 block_height: 100,
@@ -6414,37 +6414,37 @@ mod tests {
             &self,
             _transfer: &CrossChainTransfer,
             proof_bundle: &[u8],
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             let request: RuntimeMintRequest = csv_codec::from_canonical_cbor(proof_bundle)
-                .map_err(|e| csv_adapter_core::AdapterError::SerializationError(e.to_string()))?;
+                .map_err(|e| csv_chain_ports::AdapterError::SerializationError(e.to_string()))?;
             let attestation = request.attestation;
 
             if self.enforce_lock_events {
                 let mut locks = self.used_lock_events.lock().map_err(|e| {
-                    csv_adapter_core::AdapterError::Generic(format!("lock set poisoned: {e}"))
+                    csv_chain_ports::AdapterError::Generic(format!("lock set poisoned: {e}"))
                 })?;
                 if !locks.insert(attestation.lock_event_id) {
-                    return Err(csv_adapter_core::AdapterError::Generic(
+                    return Err(csv_chain_ports::AdapterError::Generic(
                         "duplicate lock event rejected".to_string(),
                     ));
                 }
             }
 
             let mut nullifiers = self.used_nullifiers.lock().map_err(|e| {
-                csv_adapter_core::AdapterError::Generic(format!("nullifier set poisoned: {e}"))
+                csv_chain_ports::AdapterError::Generic(format!("nullifier set poisoned: {e}"))
             })?;
             if !nullifiers.insert(attestation.nullifier) {
-                return Err(csv_adapter_core::AdapterError::Generic(
+                return Err(csv_chain_ports::AdapterError::Generic(
                     "duplicate nullifier rejected".to_string(),
                 ));
             }
             drop(nullifiers);
 
             let mut sanads = self.minted_sanads.lock().map_err(|e| {
-                csv_adapter_core::AdapterError::Generic(format!("sanad set poisoned: {e}"))
+                csv_chain_ports::AdapterError::Generic(format!("sanad set poisoned: {e}"))
             })?;
             if !sanads.insert(attestation.sanad_id) {
-                return Err(csv_adapter_core::AdapterError::Generic(
+                return Err(csv_chain_ports::AdapterError::Generic(
                     "duplicate sanad mint rejected".to_string(),
                 ));
             }
@@ -6455,7 +6455,7 @@ mod tests {
             Ok(MintResult {
                 tx_hash: hex::encode([0xA0 | call; 32]),
                 block_height: 700 + u64::from(call),
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             })
@@ -6464,9 +6464,9 @@ mod tests {
             &self,
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
-        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+        ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
             let mut bundle = LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
-                .map_err(csv_adapter_core::AdapterError::Generic)?;
+                .map_err(csv_chain_ports::AdapterError::Generic)?;
             if let Some(seal_id) = self.fixed_seal_id {
                 bundle.seal_ref.id = seal_id.to_vec();
             }
@@ -6476,9 +6476,9 @@ mod tests {
             &self,
             transfer: &CrossChainTransfer,
             proof_bundle: &ProofBundle,
-        ) -> Result<(), csv_adapter_core::AdapterError> {
+        ) -> Result<(), csv_chain_ports::AdapterError> {
             if proof_bundle.anchor_ref.anchor_id != transfer.sanad_id.as_bytes() {
-                return Err(csv_adapter_core::AdapterError::Generic(
+                return Err(csv_chain_ports::AdapterError::Generic(
                     "proof anchor is not bound to the requested sanad".to_string(),
                 ));
             }
@@ -6487,17 +6487,17 @@ mod tests {
         async fn check_seal_registry(
             &self,
             _seal_id: &[u8],
-        ) -> Result<SealRegistryStatus, csv_adapter_core::AdapterError> {
+        ) -> Result<SealRegistryStatus, csv_chain_ports::AdapterError> {
             Ok(SealRegistryStatus::Available)
         }
         async fn confirm_tx(
             &self,
             tx_hash: &str,
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             })
@@ -6505,7 +6505,7 @@ mod tests {
         async fn get_balance(
             &self,
             _address: &str,
-        ) -> Result<String, csv_adapter_core::AdapterError> {
+        ) -> Result<String, csv_chain_ports::AdapterError> {
             Ok("0".to_string())
         }
         fn as_any(&self) -> &dyn std::any::Any {
@@ -6867,7 +6867,7 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(csv_adapter_core::AdapterError::SerializationError(_))
+                Err(csv_chain_ports::AdapterError::SerializationError(_))
             ),
             "malformed authorization payload must be rejected, got {:?}",
             result
@@ -6976,45 +6976,45 @@ mod tests {
         async fn lock_sanad(
             &self,
             _transfer: &CrossChainTransfer,
-        ) -> Result<LockResult, csv_adapter_core::AdapterError> {
+        ) -> Result<LockResult, csv_chain_ports::AdapterError> {
             Ok(LocalTestAdapter::build_fake_lock_result())
         }
         async fn mint_sanad(
             &self,
             _transfer: &CrossChainTransfer,
             _proof_bundle: &[u8],
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             Ok(LocalTestAdapter::build_fake_mint_result())
         }
         async fn build_inclusion_proof(
             &self,
             transfer: &CrossChainTransfer,
             _lock_result: &LockResult,
-        ) -> Result<ProofBundle, csv_adapter_core::AdapterError> {
+        ) -> Result<ProofBundle, csv_chain_ports::AdapterError> {
             LocalTestAdapter::build_fake_inclusion_proof(&transfer.sanad_id)
-                .map_err(csv_adapter_core::AdapterError::Generic)
+                .map_err(csv_chain_ports::AdapterError::Generic)
         }
         async fn validate_source_proof(
             &self,
             _transfer: &CrossChainTransfer,
             _proof_bundle: &ProofBundle,
-        ) -> Result<(), csv_adapter_core::AdapterError> {
+        ) -> Result<(), csv_chain_ports::AdapterError> {
             Ok(())
         }
         async fn check_seal_registry(
             &self,
             _seal_id: &[u8],
-        ) -> Result<csv_adapter_core::SealRegistryStatus, csv_adapter_core::AdapterError> {
-            Ok(csv_adapter_core::SealRegistryStatus::Available)
+        ) -> Result<csv_chain_ports::SealRegistryStatus, csv_chain_ports::AdapterError> {
+            Ok(csv_chain_ports::SealRegistryStatus::Available)
         }
         async fn confirm_tx(
             &self,
             tx_hash: &str,
-        ) -> Result<MintResult, csv_adapter_core::AdapterError> {
+        ) -> Result<MintResult, csv_chain_ports::AdapterError> {
             Ok(MintResult {
                 tx_hash: tx_hash.to_string(),
                 block_height: 100,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "test-chain",
                 ),
             })
@@ -7022,18 +7022,18 @@ mod tests {
         async fn get_balance(
             &self,
             _address: &str,
-        ) -> Result<String, csv_adapter_core::AdapterError> {
+        ) -> Result<String, csv_chain_ports::AdapterError> {
             Ok("0".to_string())
         }
         async fn settle_escrow(
             &self,
             _transfer: &CrossChainTransfer,
             settlement_request: &[u8],
-        ) -> Result<csv_adapter_core::SettlementResult, csv_adapter_core::AdapterError> {
+        ) -> Result<csv_chain_ports::SettlementResult, csv_chain_ports::AdapterError> {
             self.settle_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             *self.last_settle_payload.lock().unwrap() = Some(settlement_request.to_vec());
-            Ok(csv_adapter_core::SettlementResult {
+            Ok(csv_chain_ports::SettlementResult {
                 tx_hash: hex::encode([0x5eu8; 32]),
                 block_height: 200,
             })
@@ -7041,10 +7041,10 @@ mod tests {
         async fn refund_escrow(
             &self,
             _transfer: &CrossChainTransfer,
-        ) -> Result<csv_adapter_core::SettlementResult, csv_adapter_core::AdapterError> {
+        ) -> Result<csv_chain_ports::SettlementResult, csv_chain_ports::AdapterError> {
             self.refund_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(csv_adapter_core::SettlementResult {
+            Ok(csv_chain_ports::SettlementResult {
                 tx_hash: hex::encode([0x4eu8; 32]),
                 block_height: 201,
             })

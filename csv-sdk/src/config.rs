@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::rpc_identity::EndpointValidator;
 use crate::rpc_policy::{
     ChainRpcPolicy, RpcCapability, RpcEndpoint, RpcEndpointSource, RpcPolicyError,
     RpcSelectionMode, RpcTransport,
@@ -659,6 +660,68 @@ impl Config {
             .map(|endpoint| endpoint.url.clone())
     }
 
+    /// Resolve a request URL exactly like [`Self::required_request_url`], but
+    /// restricted to endpoints that have passed live identity validation in
+    /// `validator` (RFC-0013 / RPC-003).
+    ///
+    /// An endpoint that was never probed, is degraded, or was identity-rejected
+    /// is excluded. When no validated request-capable endpoint remains this
+    /// fails closed rather than serving an unvalidated one — there is no bypass,
+    /// and built-in endpoints are gated exactly like user endpoints.
+    pub fn validated_request_url(
+        &self,
+        chain: &str,
+        validator: &EndpointValidator,
+    ) -> Result<String, crate::CsvError> {
+        let policy = self
+            .chains
+            .get(chain)
+            .and_then(|config| config.rpc.policy.as_ref())
+            .ok_or_else(|| crate::CsvError::ConfigError(format!("missing {chain} RPC policy")))?;
+        let candidates = policy
+            .candidates(RpcCapability::Read)
+            .map_err(|error| crate::CsvError::ConfigError(error.to_string()))?;
+        validator
+            .usable(&candidates, RpcCapability::Read)
+            .into_iter()
+            .find(|endpoint| endpoint.transport != RpcTransport::WebSocket)
+            .map(|endpoint| endpoint.url.clone())
+            .ok_or_else(|| {
+                crate::CsvError::ConfigError(format!(
+                    "{chain} has no identity-validated request endpoint"
+                ))
+            })
+    }
+
+    /// Deterministic endpoint candidates for a capability, restricted to
+    /// identity-validated endpoints (RFC-0013 / RPC-003) and preserving the
+    /// policy's candidate order. Fails closed with [`RpcPolicyError::NoCandidate`]
+    /// when none are validated.
+    pub fn validated_candidates<'a>(
+        &'a self,
+        chain: &str,
+        capability: RpcCapability,
+        validator: &EndpointValidator,
+    ) -> Result<Vec<&'a RpcEndpoint>, RpcPolicyError> {
+        let policy = self
+            .chains
+            .get(chain)
+            .and_then(|config| config.rpc.policy.as_ref())
+            .ok_or(RpcPolicyError::NoCandidate {
+                capability,
+                selection: RpcSelectionMode::BuiltInOnly,
+            })?;
+        let candidates = policy.candidates(capability)?;
+        let validated = validator.usable(&candidates, capability);
+        if validated.is_empty() {
+            return Err(RpcPolicyError::NoCandidate {
+                capability,
+                selection: policy.selection,
+            });
+        }
+        Ok(validated)
+    }
+
     /// Return deterministic endpoint candidates for a chain capability.
     pub fn rpc_candidates(
         &self,
@@ -794,5 +857,92 @@ mod tests {
         // leaves no request-capable endpoint, and there is no scalar URL to fall
         // back to: request resolution fails closed.
         assert!(config.required_request_url("solana").is_err());
+    }
+
+    /// A prober that reports a fixed chain id for every endpoint, so a matching
+    /// or mismatching network identity can be simulated deterministically.
+    struct FixedChainIdProbe {
+        reported_chain_id: &'static str,
+    }
+
+    impl crate::rpc_identity::IdentityProbe for FixedChainIdProbe {
+        async fn observe(
+            &self,
+            _endpoint: &RpcEndpoint,
+        ) -> Result<crate::rpc_identity::ObservedIdentity, crate::rpc_identity::ProbeError> {
+            Ok(crate::rpc_identity::ObservedIdentity {
+                chain_id: Some(self.reported_chain_id.to_string()),
+                ..Default::default()
+            })
+        }
+    }
+
+    fn sepolia_expected() -> crate::rpc_identity::ExpectedIdentity {
+        crate::rpc_identity::ExpectedIdentity {
+            chain: "ethereum".into(),
+            network: "sepolia".into(),
+            chain_id: Some("11155111".into()),
+            genesis_hash: None,
+            requires_deployment: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolution_is_gated_by_identity_validation() {
+        let config = Config::default();
+        let candidates = config
+            .rpc_candidates(ChainId::new("ethereum"), RpcCapability::Read)
+            .expect("built-in ethereum candidates");
+        let endpoints: Vec<RpcEndpoint> = candidates.into_iter().cloned().collect();
+        let expected = sepolia_expected();
+
+        // Never-probed: the endpoint is not usable, so resolution fails closed
+        // even though the policy has a request-capable candidate.
+        let mut validator = EndpointValidator::new(3600, 0);
+        assert!(config.validated_request_url("ethereum", &validator).is_err());
+        assert!(
+            config
+                .validated_candidates("ethereum", RpcCapability::Read, &validator)
+                .is_err()
+        );
+
+        // A probe reporting the wrong chain id rejects the endpoint (fail closed).
+        validator
+            .validate_all(
+                &endpoints,
+                &expected,
+                &FixedChainIdProbe {
+                    reported_chain_id: "1",
+                },
+                1,
+            )
+            .await;
+        assert!(config.validated_request_url("ethereum", &validator).is_err());
+
+        // A probe reporting the expected chain id validates the endpoint, and it
+        // now resolves through the gate to its reviewed URL.
+        let mut validator = EndpointValidator::new(3600, 0);
+        validator
+            .validate_all(
+                &endpoints,
+                &expected,
+                &FixedChainIdProbe {
+                    reported_chain_id: "11155111",
+                },
+                1,
+            )
+            .await;
+        assert_eq!(
+            config
+                .validated_request_url("ethereum", &validator)
+                .expect("validated request url"),
+            "https://ethereum-sepolia-rpc.publicnode.com"
+        );
+        assert!(
+            !config
+                .validated_candidates("ethereum", RpcCapability::Read, &validator)
+                .expect("validated candidates")
+                .is_empty()
+        );
     }
 }

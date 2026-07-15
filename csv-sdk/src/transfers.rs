@@ -25,10 +25,10 @@ use crate::runtime::ChainRuntime;
 
 use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
-pub use csv_adapter_core::DestinationMaterialization;
+pub use csv_chain_ports::DestinationMaterialization;
 
 #[cfg(feature = "runtime-coordinator")]
-use csv_adapter_core::CrossChainTransfer;
+use csv_chain_ports::CrossChainTransfer;
 #[cfg(feature = "runtime-coordinator")]
 use csv_runtime::TransferCoordinator;
 #[cfg(feature = "runtime-coordinator")]

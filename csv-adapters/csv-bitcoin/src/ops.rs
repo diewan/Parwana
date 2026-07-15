@@ -1,6 +1,6 @@
 //! Chain Operations Implementation for Bitcoin
 //!
-//! Implements the core chain operation traits from csv-adapter-core
+//! Implements the core chain operation traits from csv-chain-ports
 //! for real Bitcoin chain interactions.
 
 use async_trait::async_trait;

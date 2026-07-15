@@ -5,8 +5,8 @@ edition = "2024"
 description = "Unified SDK for CSV (Client-Side Validation) protocol — single entry point for all CSV operations"
 license = "MIT OR Apache-2.0"
 authors = ["Amin Razavi"]
-repository = "https://github.com/Diewan/csv-protocol"
-homepage = "https://github.com/Diewan/csv-protocol"
+repository = "https://github.com/diewan/parwana"
+homepage = "https://github.com/diewan/parwana"
 documentation = "https://docs.rs/csv-sdk"
 readme = "README.md"
 keywords = ["blockchain", "cryptography", "csv-validation", "cross-chain", "smart-contracts"]
@@ -28,7 +28,7 @@ csv-hash = { version = "0.1.5", path = "../csv-hash" }
 csv-proof = { version = "0.1.5", path = "../csv-proof" }
 csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
 csv-p2p = { version = "0.1.5", path = "../csv-p2p", optional = true }
-csv-adapter-core = { version = "0.1.5", path = "../csv-adapters/csv-adapter-core" }
+csv-chain-ports = { version = "0.1.5", path = "../csv-chain-ports" }
 
 # Chain adapters — optional, enabled via feature flags
 # csv-bitcoin compiles for all targets

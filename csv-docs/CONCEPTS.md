@@ -668,7 +668,7 @@ csv-runtime
    ├ csv-protocol / csv-proof / csv-verifier
    ├ csv-hash / csv-codec / csv-wire
    ├ csv-storage
-   └ csv-adapter-core  (chain-agnostic interfaces)
+   └ csv-chain-ports   (chain-agnostic interfaces)
 
 csv-coordinator / csv-adapter-factory
  └ feature-gated concrete adapters (bitcoin, ethereum, solana, sui, aptos)

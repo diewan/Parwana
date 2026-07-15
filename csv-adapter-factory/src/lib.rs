@@ -7,7 +7,7 @@
 //! Protocol traits, not concrete adapter types.
 
 use async_trait::async_trait;
-use csv_adapter_core::ChainAdapter;
+use csv_chain_ports::ChainAdapter;
 use csv_hash::chain_id::ChainId;
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use csv_protocol::secret::SharedSecretHandle;
@@ -29,6 +29,7 @@ pub mod mint_signer;
 mod solana;
 #[cfg(feature = "sui")]
 mod sui;
+mod wallet_factory;
 
 #[cfg(feature = "aptos")]
 pub use aptos::AptosFactory;
@@ -39,6 +40,10 @@ pub use ethereum::EthereumFactory;
 pub use solana::SolanaFactory;
 #[cfg(feature = "sui")]
 pub use sui::SuiFactory;
+pub use wallet_factory::{
+    get_wallet_factory, get_wallet_operations, init_wallet_factory, is_chain_registered,
+    registered_chains,
+};
 
 /// Legacy/default env var name holding the RFC-0012 mint verifier's secp256k1
 /// signing key. Re-exported from [`mint_signer`] for backwards compatibility;

@@ -2788,13 +2788,7 @@ dependencies = [
 name = "csv-adapter-core"
 version = "0.1.5"
 dependencies = [
- "async-trait",
- "csv-hash",
- "csv-proof",
- "csv-protocol",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
+ "csv-chain-ports",
 ]
 
 [[package]]
@@ -2805,15 +2799,16 @@ dependencies = [
  "async-trait",
  "blake2",
  "bs58",
- "csv-adapter-core",
  "csv-aptos",
  "csv-bitcoin",
+ "csv-chain-ports",
  "csv-ethereum",
  "csv-hash",
  "csv-keys",
  "csv-protocol",
  "csv-solana",
  "csv-sui",
+ "csv-wallet",
  "ed25519-dalek",
  "hex",
  "log",
@@ -2849,7 +2844,7 @@ dependencies = [
  "bcs",
  "blst",
  "chrono",
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-codec",
  "csv-hash",
  "csv-keys",
@@ -2893,7 +2888,7 @@ dependencies = [
  "bitcoin 0.32.101",
  "bitcoin_hashes 0.14.101",
  "bitcoincore-rpc",
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-hash",
  "csv-keys",
  "csv-proof",
@@ -2925,7 +2920,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cid",
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-codec",
  "csv-hash",
  "csv-proof",
@@ -2947,6 +2942,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv-chain-ports"
+version = "0.1.5"
+dependencies = [
+ "async-trait",
+ "csv-hash",
+ "csv-proof",
+ "csv-protocol",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "csv-cli"
 version = "0.1.5"
 dependencies = [
@@ -2961,11 +2968,11 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
+ "csv-adapter-factory",
  "csv-admission",
  "csv-algebra",
  "csv-codec",
  "csv-content",
- "csv-coordinator",
  "csv-hash",
  "csv-keys",
  "csv-observability",
@@ -3053,18 +3060,10 @@ version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
- "bitcoin 0.32.101",
- "csv-aptos",
- "csv-bitcoin",
- "csv-ethereum",
  "csv-hash",
- "csv-keys",
  "csv-protocol",
- "csv-solana",
  "csv-storage",
- "csv-sui",
  "csv-verifier",
- "csv-wallet",
  "hex",
  "reqwest 0.12.28",
  "serde_json",
@@ -3092,7 +3091,7 @@ dependencies = [
  "ark-snark",
  "async-trait",
  "base64 0.22.1",
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-codec",
  "csv-hash",
  "csv-keys",
@@ -3277,8 +3276,8 @@ version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
- "csv-adapter-core",
  "csv-admission",
+ "csv-chain-ports",
  "csv-codec",
  "csv-coordinator",
  "csv-hash",
@@ -3326,10 +3325,10 @@ dependencies = [
  "blake2",
  "bs58",
  "chrono",
- "csv-adapter-core",
  "csv-adapter-factory",
  "csv-aptos",
  "csv-bitcoin",
+ "csv-chain-ports",
  "csv-codec",
  "csv-ethereum",
  "csv-hash",
@@ -3376,7 +3375,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "bs58",
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-codec",
  "csv-hash",
  "csv-keys",
@@ -3467,7 +3466,7 @@ dependencies = [
  "bs58",
  "bytes",
  "chrono",
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-codec",
  "csv-hash",
  "csv-keys",
@@ -3501,7 +3500,7 @@ dependencies = [
 name = "csv-testkit"
 version = "0.1.5"
 dependencies = [
- "csv-adapter-core",
+ "csv-chain-ports",
  "csv-codec",
  "csv-hash",
  "csv-proof",

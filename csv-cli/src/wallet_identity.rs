@@ -38,8 +38,8 @@ impl WalletIdentity {
     pub(crate) fn address(&self, chain: &Chain, account: u32, index: u32) -> Result<String> {
         let chain_id = ChainId::new(chain.as_str());
         if chain.as_str() == "bitcoin" {
-            let _factory = csv_coordinator::init_wallet_factory();
-            let operations = csv_coordinator::get_wallet_operations(&chain_id)
+            let _factory = csv_adapter_factory::init_wallet_factory();
+            let operations = csv_adapter_factory::get_wallet_operations(&chain_id)
                 .ok_or_else(|| anyhow::anyhow!("Bitcoin wallet operations are unavailable"))?;
             return operations
                 .derive_address(&self.seed, account, index)

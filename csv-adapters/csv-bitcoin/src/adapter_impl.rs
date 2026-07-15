@@ -1,7 +1,7 @@
-//! Implementation of csv-adapter-core traits for Bitcoin adapter
+//! Implementation of csv-chain-ports traits for Bitcoin adapter
 
 use async_trait::async_trait;
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterResult, ChainOps, MintAdapter, MintReceipt, MintStatus, ProofAdapter, TransactionStatus,
 };
 use csv_hash::Hash;
@@ -35,7 +35,7 @@ impl ProofAdapter for BitcoinAdapter {
         // Use anchor_id as the commitment hash for verification
         let anchor_id = &bundle.anchor_ref.anchor_id;
         if anchor_id.len() != 32 {
-            return Err(csv_adapter_core::AdapterError::SerializationError(format!(
+            return Err(csv_chain_ports::AdapterError::SerializationError(format!(
                 "anchor_id must be 32 bytes, got {}",
                 anchor_id.len()
             )));
@@ -47,7 +47,7 @@ impl ProofAdapter for BitcoinAdapter {
         provider
             .verify_proof_bundle_native(inclusion_proof, finality_proof, &commitment_hash)
             .map_err(|e| {
-                csv_adapter_core::AdapterError::ProofVerificationFailed(format!(
+                csv_chain_ports::AdapterError::ProofVerificationFailed(format!(
                     "Proof verification failed: {}",
                     e
                 ))
@@ -78,7 +78,7 @@ impl MintAdapter for BitcoinAdapter {
             .create_op_return_transaction(commitment_bytes, fee_rate)
             .await
             .map_err(|e| {
-                csv_adapter_core::AdapterError::RpcError(format!(
+                csv_chain_ports::AdapterError::RpcError(format!(
                     "Failed to create OP_RETURN transaction: {}",
                     e
                 ))
@@ -94,7 +94,7 @@ impl MintAdapter for BitcoinAdapter {
             .get_tx_confirmations(*tx_hash.as_bytes())
             .await
             .map_err(|e| {
-                csv_adapter_core::AdapterError::RpcError(format!(
+                csv_chain_ports::AdapterError::RpcError(format!(
                     "Failed to get transaction confirmations from Bitcoin RPC: {}",
                     e
                 ))
@@ -114,7 +114,7 @@ impl MintAdapter for BitcoinAdapter {
             .get_tx_confirmations(*tx_hash.as_bytes())
             .await
             .map_err(|e| {
-                csv_adapter_core::AdapterError::RpcError(format!(
+                csv_chain_ports::AdapterError::RpcError(format!(
                     "Failed to get transaction confirmations from Bitcoin RPC: {}",
                     e
                 ))
@@ -122,7 +122,7 @@ impl MintAdapter for BitcoinAdapter {
 
         // Get current block height to estimate block number
         let current_height = self.rpc.get_block_count().await.map_err(|e| {
-            csv_adapter_core::AdapterError::RpcError(format!(
+            csv_chain_ports::AdapterError::RpcError(format!(
                 "Failed to get block count from Bitcoin RPC: {}",
                 e
             ))
@@ -136,7 +136,7 @@ impl MintAdapter for BitcoinAdapter {
         };
 
         let block_hash = self.rpc.get_block_hash(block_height).await.map_err(|e| {
-            csv_adapter_core::AdapterError::RpcError(format!(
+            csv_chain_ports::AdapterError::RpcError(format!(
                 "Failed to get block hash from Bitcoin RPC: {}",
                 e
             ))
@@ -144,7 +144,7 @@ impl MintAdapter for BitcoinAdapter {
 
         // Get block header for timestamp
         let block_header = self.rpc.get_block_header(block_hash).await.map_err(|e| {
-            csv_adapter_core::AdapterError::RpcError(format!(
+            csv_chain_ports::AdapterError::RpcError(format!(
                 "Failed to get block header from Bitcoin RPC: {}",
                 e
             ))
@@ -163,7 +163,7 @@ impl MintAdapter for BitcoinAdapter {
 impl ChainOps for BitcoinAdapter {
     async fn get_chain_height(&self) -> AdapterResult<u64> {
         self.rpc.get_block_count().await.map_err(|e| {
-            csv_adapter_core::AdapterError::RpcError(format!(
+            csv_chain_ports::AdapterError::RpcError(format!(
                 "Failed to get block count from Bitcoin RPC: {}",
                 e
             ))
@@ -176,7 +176,7 @@ impl ChainOps for BitcoinAdapter {
             .get_utxos_for_address(address.to_string())
             .await
             .map_err(|e| {
-                csv_adapter_core::AdapterError::RpcError(format!(
+                csv_chain_ports::AdapterError::RpcError(format!(
                     "Failed to query UTXOs from Bitcoin RPC: {}",
                     e
                 ))
@@ -192,7 +192,7 @@ impl ChainOps for BitcoinAdapter {
             .get_tx_confirmations(*tx_hash.as_bytes())
             .await
             .map_err(|e| {
-                csv_adapter_core::AdapterError::RpcError(format!(
+                csv_chain_ports::AdapterError::RpcError(format!(
                     "Failed to get transaction confirmations from Bitcoin RPC: {}",
                     e
                 ))
@@ -211,7 +211,7 @@ impl ChainOps for BitcoinAdapter {
             .send_raw_transaction(tx_bytes.to_vec())
             .await
             .map_err(|e| {
-                csv_adapter_core::AdapterError::RpcError(format!(
+                csv_chain_ports::AdapterError::RpcError(format!(
                     "Failed to broadcast transaction via Bitcoin RPC: {}",
                     e
                 ))

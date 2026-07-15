@@ -6,7 +6,7 @@
 
 #![allow(missing_docs)]
 
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterError, AdapterRegistry as AdapterRegistryTrait, ChainAdapter, ChainCapabilityPort,
     ChainLockPort, ChainMintPort, ChainProofPort, ChainReadPort, ChainSealRegistryPort,
     CrossChainTransfer, LockResult, MintResult, SealRegistryStatus, SettlementResult, TxFinality,
@@ -270,7 +270,7 @@ mod tests {
             Ok(MintResult {
                 tx_hash: "0xmock".to_string(),
                 block_height: 200,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     "mock-chain",
                 ),
             })

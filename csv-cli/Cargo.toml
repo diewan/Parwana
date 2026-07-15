@@ -5,9 +5,9 @@ edition = "2024"
 description = "CLI tool for CSV Adapter — cross-chain Sanads, proofs, wallets, and end-to-end testing"
 license = "MIT OR Apache-2.0"
 authors = ["Amin Razavi"]
-repository = "https://github.com/Diewan/csv-protocol"
-homepage = "https://github.com/Diewan/csv-protocol"
-documentation = "https://github.com/Diewan/csv-protocol/blob/main/csv-cli/README.md"
+repository = "https://github.com/diewan/parwana"
+homepage = "https://github.com/diewan/parwana"
+documentation = "https://github.com/diewan/parwana/blob/main/csv-cli/README.md"
 readme = "README.md"
 keywords = ["cli", "blockchain", "cryptography", "csv-validation", "cross-chain"]
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
@@ -33,7 +33,7 @@ csv-schema = { version = "0.1.5", path = "../csv-schema" }
 csv-store = { version = "0.1.5", path = "../csv-store", features = ["clap"] }
 csv-keys = { version = "0.1.5", path = "../csv-keys" }
 csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
-csv-coordinator = { version = "0.1.5", path = "../csv-coordinator", features = ["bitcoin", "ethereum", "sui", "aptos", "solana"] }
+csv-adapter-factory = { version = "0.1.5", path = "../csv-adapter-factory", features = ["bitcoin", "ethereum", "sui", "aptos", "solana"] }
 csv-admission = { version = "0.1.5", path = "../csv-admission" }
 csv-observability = { version = "0.1.5", path = "../csv-observability" }
 csv-content = { version = "0.1.5", path = "../csv-content" }

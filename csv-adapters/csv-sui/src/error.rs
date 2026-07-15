@@ -103,7 +103,7 @@ pub enum SuiError {
     #[error("Feature not enabled: {0}")]
     FeatureNotEnabled(String),
 
-    /// Core adapter error from csv-adapter-core.
+    /// Core adapter error from csv-chain-ports.
     #[error(transparent)]
     CoreError(#[from] csv_protocol::ProtocolError),
 }

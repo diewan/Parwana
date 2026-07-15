@@ -1,10 +1,10 @@
 //! Runtime adapter wrapper for Aptos chain adapter
 //!
-//! This module implements the ChainAdapter trait from csv-adapter-core,
+//! This module implements the ChainAdapter trait from csv-chain-ports,
 //! bridging the Aptos-specific implementation with the generic
 //! runtime orchestration layer.
 
-use csv_adapter_core::{
+use csv_chain_ports::{
     AdapterError, ChainAdapter, CrossChainTransfer, LockResult, MintResult, RuntimeMintRequest,
     SealRegistryStatus,
 };
@@ -192,7 +192,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
             Ok(MintResult {
                 tx_hash: result.transaction_hash,
                 block_height: result.block_height,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     self.chain_id.clone(),
                 ),
             })
@@ -417,7 +417,7 @@ impl ChainAdapter for AptosRuntimeAdapter {
             Ok(MintResult {
                 tx_hash: hex::encode(tx_hash_bytes),
                 block_height: tx.version,
-                materialization: csv_adapter_core::DestinationMaterialization::unavailable(
+                materialization: csv_chain_ports::DestinationMaterialization::unavailable(
                     self.chain_id.clone(),
                 ),
             })
@@ -490,7 +490,7 @@ mod tests {
     use crate::ops::AptosBackend;
     use crate::rpc::MockAptosRpc;
     use crate::seal_protocol::AptosSealProtocol;
-    use csv_adapter_core::MintAttestationInputs;
+    use csv_chain_ports::MintAttestationInputs;
     use csv_hash::Hash;
 
     const MODULE_ADDR: &str = "0x00000000000000000000000000000000000000000000000000000000000000aa";

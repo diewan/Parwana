@@ -303,7 +303,7 @@ impl CsvClient {
     /// Register a chain adapter for cross-chain transfers.
     ///
     /// This method allows manual registration of chain adapters that implement
-    /// the `ChainAdapter` trait from `csv_adapter_core`.
+    /// the `ChainAdapter` trait from `csv_chain_ports`.
     ///
     /// # Example
     ///
@@ -320,14 +320,14 @@ impl CsvClient {
     ///     bitcoin::Network::Regtest,
     ///     wallet,
     ///     rpc,
-    /// )) as Box<dyn csv_adapter_core::ChainAdapter>;
+    /// )) as Box<dyn csv_chain_ports::ChainAdapter>;
     ///
     /// client.register_adapter(bitcoin_adapter)?;
     /// # Ok::<_, csv_sdk::CsvError>(())
     /// ```
     pub fn register_adapter(
         &self,
-        adapter: Box<dyn csv_adapter_core::ChainAdapter>,
+        adapter: Box<dyn csv_chain_ports::ChainAdapter>,
     ) -> Result<(), CsvError> {
         self.adapter_registry
             .lock()

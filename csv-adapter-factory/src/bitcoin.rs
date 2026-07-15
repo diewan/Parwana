@@ -2,7 +2,7 @@
 
 use super::{AdapterConfig, AdapterFactory, AdapterResult, FactoryError, NetworkType};
 use async_trait::async_trait;
-use csv_adapter_core::ChainAdapter;
+use csv_chain_ports::ChainAdapter;
 use csv_protocol::chain_adapter_traits::ChainBackend;
 use std::sync::Arc;
 

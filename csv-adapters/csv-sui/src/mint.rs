@@ -15,7 +15,7 @@
 //! `destinationContract = Registry` object id, computes and signs the digest,
 //! then hands the finished [`SuiMintArgs`] here.
 
-use csv_adapter_core::MintAttestationInputs;
+use csv_chain_ports::MintAttestationInputs;
 
 #[cfg(feature = "rpc")]
 use crate::error::{SuiError, SuiResult};

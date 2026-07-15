@@ -174,7 +174,7 @@ pub fn materialize_sdk_receipt(
 }
 
 /// Map destination materialization metadata onto the wire.
-fn materialization(m: &csv_adapter_core::DestinationMaterialization) -> MaterializationWire {
+fn materialization(m: &csv_chain_ports::DestinationMaterialization) -> MaterializationWire {
     MaterializationWire {
         chain_id: m.chain_id.clone(),
         object_id: m.object_id.clone(),
@@ -420,7 +420,7 @@ mod tests {
             replay_id: csv_hash::Hash::new([0x22; 32]),
             lock_tx_hash: "aa".repeat(32),
             mint_tx_hash: "bb".repeat(32),
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable("sui"),
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable("sui"),
             finality: Some(observation(6, Some(106))),
             assurance: Some(VerificationLevel::StructuralOnly),
         };
@@ -444,7 +444,7 @@ mod tests {
             replay_id: csv_hash::Hash::new([0x22; 32]),
             lock_tx_hash: "aa".repeat(32),
             mint_tx_hash: "bb".repeat(32),
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable("sui"),
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable("sui"),
             finality: Some(observation(6, Some(106))),
             assurance: Some(VerificationLevel::ConsensusVerified),
         };

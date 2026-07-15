@@ -1,6 +1,6 @@
 //! Chain Operation Traits Implementation for Sui
 //!
-//! This module implements all chain operation traits from csv-adapter-core:
+//! This module implements all chain operation traits from csv-chain-ports:
 //! - ChainQuery: Querying chain state
 //! - ChainSigner: Signing operations
 //! - ChainBroadcaster: Transaction broadcasting

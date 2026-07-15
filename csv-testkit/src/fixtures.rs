@@ -159,21 +159,19 @@ impl TestAdapter {
     }
 
     /// Build a fake lock result for testing
-    pub fn build_fake_lock_result() -> csv_adapter_core::LockResult {
-        csv_adapter_core::LockResult {
+    pub fn build_fake_lock_result() -> csv_chain_ports::LockResult {
+        csv_chain_ports::LockResult {
             tx_hash: hex::encode([0x11u8; 32]),
             block_height: 100,
         }
     }
 
     /// Build a fake mint result for testing
-    pub fn build_fake_mint_result() -> csv_adapter_core::MintResult {
-        csv_adapter_core::MintResult {
+    pub fn build_fake_mint_result() -> csv_chain_ports::MintResult {
+        csv_chain_ports::MintResult {
             tx_hash: hex::encode([0x22u8; 32]),
             block_height: 200,
-            materialization: csv_adapter_core::DestinationMaterialization::unavailable(
-                "test-chain",
-            ),
+            materialization: csv_chain_ports::DestinationMaterialization::unavailable("test-chain"),
         }
     }
 }

@@ -18,6 +18,27 @@
 /// FORBIDDEN: algebra importing another workspace crate.
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
+
+#[test]
+fn protected_core_api_snapshots_are_checked_in() {
+    for crate_name in [
+        "csv-algebra",
+        "csv-wire",
+        "csv-hash",
+        "csv-protocol",
+        "csv-verifier",
+    ] {
+        let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("api-snapshots")
+            .join(format!("{crate_name}.txt"));
+        assert!(
+            snapshot.is_file(),
+            "protected core API snapshot is missing: {}; regenerate intentionally with CORE_API_SNAPSHOT_UPDATE=1 scripts/check-core-api.sh",
+            snapshot.display()
+        );
+    }
+}
 
 #[test]
 fn forbidden_dependency_edges_are_absent() {
@@ -141,7 +162,10 @@ fn intentional_workspace_crates_are_allowlisted() {
         .exec()
         .expect("cargo metadata must succeed");
     let allowed = [
+        // Compatibility facade during the csv-chain-ports migration. Runtime
+        // authority must use csv-chain-ports directly.
         "csv-adapter-core",
+        "csv-chain-ports",
         "csv-adapter-factory",
         "csv-admission",
         "csv-algebra",

@@ -15,7 +15,7 @@
 //! the §9.2 digest, then hands the finished [`AptosMintArgs`] to the backend for
 //! submission (`AptosBackend::submit_attested_mint`).
 
-use csv_adapter_core::MintAttestationInputs;
+use csv_chain_ports::MintAttestationInputs;
 
 /// Frozen §9.2 Move-call arguments for `csv_seal::mint_sanad`.
 ///

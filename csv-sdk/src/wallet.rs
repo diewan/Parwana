@@ -739,7 +739,7 @@ impl WalletManager {
     ///
     /// This operation requires RPC connectivity through a configured chain adapter.
     /// The runtime delegates to chain adapters implementing the [`ChainQuery`] trait
-    /// from csv-adapter-core.
+    /// from csv-chain-ports.
     ///
     /// # Errors
     ///

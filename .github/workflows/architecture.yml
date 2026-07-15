@@ -1,4 +1,4 @@
-name: Architectural Constitution
+name: Rust Release and Architecture Gates
 
 on:
   push:
@@ -11,9 +11,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check dependency graph constitution
         run: cargo test -p csv-architecture --test dep_graph_constitution
+
+      - name: Protected L0-L4 public API snapshot
+        run: |
+          cargo install cargo-public-api --locked
+          scripts/check-core-api.sh
+      - name: Protected L0-L4 changelog gate
+        run: scripts/check-core-changelog.sh "origin/${{ github.base_ref || 'main' }}"
 
       - name: No tokio::runtime::Builder in adapters
         run: |
@@ -34,15 +43,15 @@ jobs:
             exit 1
           fi
 
-      - name: Adapter configs must use csv-adapter-core
+      - name: Adapter implementations must use neutral chain ports
         run: |
           for adapter in csv-adapters/csv-*; do
             if [ "$adapter" = "csv-adapters/csv-adapter-core" ]; then
               continue
             fi
             if [ -f "$adapter/Cargo.toml" ]; then
-              if ! grep -q "csv-adapter-core" "$adapter/Cargo.toml"; then
-                echo "FAIL: $adapter does not depend on csv-adapter-core"
+              if ! grep -q "csv-chain-ports" "$adapter/Cargo.toml"; then
+                echo "FAIL: $adapter does not depend on csv-chain-ports"
                 exit 1
               fi
             fi
@@ -82,6 +91,60 @@ jobs:
           cargo build -p csv-runtime --target wasm32-unknown-unknown
           cargo build -p csv-sdk --no-default-features --features std,wasm,wallet --target wasm32-unknown-unknown
           cargo build -p csv-sdk --no-default-features --features std,wasm,wallet,runtime-coordinator --target wasm32-unknown-unknown
+
+  rust-release-matrix:
+    name: Rust release matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Locked all-feature build
+        run: CXXFLAGS="-include cstdint" cargo build --workspace --all-features --locked
+      - name: Locked all-feature tests
+        run: CXXFLAGS="-include cstdint" cargo test --workspace --all-features --locked
+      - name: Documentation tests
+        run: CXXFLAGS="-include cstdint" cargo test --workspace --doc --locked
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy with warnings denied
+        run: CXXFLAGS="-include cstdint" cargo clippy --workspace --all-features --locked -- -D warnings
+      - name: Supported WASM combinations
+        run: |
+          cargo build -p csv-runtime --no-default-features --target wasm32-unknown-unknown --locked
+          cargo build -p csv-sdk --no-default-features --features std,wasm,wallet --target wasm32-unknown-unknown --locked
+          cargo build -p csv-sdk --no-default-features --features std,wasm,wallet,runtime-coordinator --target wasm32-unknown-unknown --locked
+      - name: Release package and dependency policy
+        run: |
+          scripts/check-release.sh
+          cargo metadata --locked --format-version 1 >/tmp/cargo-metadata.json
+          cargo tree --workspace --locked --duplicates
+
+  layer-groups:
+    name: Layer group (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [core, runtime, adapters, tools]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test independent layer group
+        run: scripts/test-layer-groups.sh ${{ matrix.group }}
+      - name: Shared conformance corpus
+        run: cargo test -p csv-testkit --test conformance_corpus -p csv-protocol --test golden_vectors
+
+  ignored-rpc-integration-policy:
+    name: Ignored RPC integration policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Document why live RPC tests are separate
+        run: |
+          test -f csv-docs/runbooks/OPERATOR_ROLLOUT_MULTICHAIN.md
+          echo "Ignored RPC integration tests require operator-owned credentials and run only in the retained testnet evidence workflow."
 
   formal-verification:
     name: Formal model check
