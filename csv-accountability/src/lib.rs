@@ -12,7 +12,12 @@ pub mod assurance;
 pub mod dispute;
 pub mod evidence;
 pub mod execution;
-pub mod identifiers;
+pub mod id;
 pub mod intent;
 pub mod mandate;
 pub mod verification;
+
+pub use id::{
+    AssuranceProfileId, AttemptId, BundleId, EvidenceNodeId, GateProfileId, IntentId, MandateId,
+    ObjectVersion, ProtocolVersion, ReceiptId, VerificationContextId, VersionError,
+};

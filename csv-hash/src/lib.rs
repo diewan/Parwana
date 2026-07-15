@@ -82,8 +82,12 @@ pub use dag::{DAGNode, DAGSegment};
 pub use domain_hash::{Domain, DomainSeparatedHash};
 pub use domain_separation::{DomainSeparator, derive_domain_separator};
 pub use domains::{
-    AptosAnchorDomain, BitcoinSealDomain, EthereumMintDomain, GenesisDomain, ProofBundleDomain,
+    ACCOUNTABILITY_DOMAIN_TAGS, ActionIntentDomain, ActionMandateDomain, AptosAnchorDomain,
+    AssuranceProfileDomain, BitcoinSealDomain, DisclosureCommitmentDomain, DisputeBundleDomain,
+    EthereumMintDomain, EvidenceNodeDomain, ExecutionAttemptDomain, ExecutionReceiptDomain,
+    GateProfileDomain, GenesisDomain, PreservationEnvelopeDomain, ProofBundleDomain,
     ReplayRegistryDomain, SanadIdDomain, SchemaDomain, TransferCommitmentDomain, TransitionDomain,
+    VerificationContextDomain,
 };
 pub use hash_registry::{
     CommitmentHash, DomainCategory, Hash, HashDomain, HashParseError, MerkleHash, NullifierHash,
