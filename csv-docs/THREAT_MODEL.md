@@ -14,7 +14,7 @@ This document covers the CSV (Cross-chain Sanad Validation) protocol, including:
 - MCP server in `csv-mcp-server`
 - Smart contracts in `csv-contracts`
 
-**Note:** `csv-wallet` is a workspace crate. `csv-explorer/*` and `typescript-sdk/` do not exist in the current codebase.
+**Note:** `csv-wallet` is a workspace crate. `tuppira/*` and `typescript-sdk/` do not exist in the current codebase.
 
 **Out of scope:** Chain-level consensus, external oracle services, user device security.
 

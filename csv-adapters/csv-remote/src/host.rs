@@ -66,16 +66,22 @@ pub async fn dispatch(registry: &dyn AdapterRegistry, request: RemoteRequest) ->
 
     let chain = request.chain_id.as_str();
     let payload = match request.payload {
-        RemoteRequestPayload::Capabilities => {
-            RemoteResponsePayload::Capabilities(registry.capabilities(chain))
-        }
-        RemoteRequestPayload::SignatureScheme => {
-            RemoteResponsePayload::SignatureScheme(registry.signature_scheme(chain))
-        }
+        RemoteRequestPayload::Capabilities => match registry.capabilities(chain) {
+            Some(capabilities) => RemoteResponsePayload::Capabilities(Some(capabilities)),
+            None => RemoteResponsePayload::Error(RemoteError::UnknownChain(chain.to_string())),
+        },
+        RemoteRequestPayload::SignatureScheme => match registry.signature_scheme(chain) {
+            Some(signature_scheme) => {
+                RemoteResponsePayload::SignatureScheme(Some(signature_scheme))
+            }
+            None => RemoteResponsePayload::Error(RemoteError::UnknownChain(chain.to_string())),
+        },
         RemoteRequestPayload::LockSanad { transfer } => {
             let transfer = convert::transfer_from_wire(&transfer);
             match registry.lock_sanad(chain, &transfer).await {
-                Ok(result) => RemoteResponsePayload::LockSanad(convert::lock_result_to_wire(&result)),
+                Ok(result) => {
+                    RemoteResponsePayload::LockSanad(convert::lock_result_to_wire(&result))
+                }
                 Err(err) => RemoteResponsePayload::Error(adapter_error_to_remote(chain, err)),
             }
         }
@@ -85,7 +91,9 @@ pub async fn dispatch(registry: &dyn AdapterRegistry, request: RemoteRequest) ->
         } => {
             let transfer = convert::transfer_from_wire(&transfer);
             match registry.mint_sanad(chain, &transfer, &proof_bundle).await {
-                Ok(result) => RemoteResponsePayload::MintSanad(convert::mint_result_to_wire(&result)),
+                Ok(result) => {
+                    RemoteResponsePayload::MintSanad(convert::mint_result_to_wire(&result))
+                }
                 Err(err) => RemoteResponsePayload::Error(adapter_error_to_remote(chain, err)),
             }
         }
@@ -108,9 +116,7 @@ pub async fn dispatch(registry: &dyn AdapterRegistry, request: RemoteRequest) ->
                 .await
             {
                 Ok(bundle) => match bundle.to_canonical_bytes() {
-                    Ok(proof_bundle) => {
-                        RemoteResponsePayload::BuildInclusionProof { proof_bundle }
-                    }
+                    Ok(proof_bundle) => RemoteResponsePayload::BuildInclusionProof { proof_bundle },
                     Err(err) => RemoteResponsePayload::Error(RemoteError::Adapter(format!(
                         "failed to encode inclusion proof: {err}"
                     ))),
@@ -138,7 +144,9 @@ pub async fn dispatch(registry: &dyn AdapterRegistry, request: RemoteRequest) ->
         }
         RemoteRequestPayload::ConfirmTx { tx_hash } => {
             match registry.confirm_tx(chain, &tx_hash).await {
-                Ok(result) => RemoteResponsePayload::ConfirmTx(convert::mint_result_to_wire(&result)),
+                Ok(result) => {
+                    RemoteResponsePayload::ConfirmTx(convert::mint_result_to_wire(&result))
+                }
                 Err(err) => RemoteResponsePayload::Error(adapter_error_to_remote(chain, err)),
             }
         }

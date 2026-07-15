@@ -286,7 +286,7 @@ Transfer orchestration belongs exclusively to:
 
 **Non-publishable workspace member:** `csv-examples/`
 
-**Does not exist:** `csv-explorer/`, `typescript-sdk/`
+**Does not exist:** `tuppira/`, `typescript-sdk/`
 
 **Documentation:** `csv-docs/` (not `docs/`)
 

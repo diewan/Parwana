@@ -33,7 +33,7 @@
 //! - `typescript-sdk/src/types.ts`
 //! - `csv-cli/src/output.rs`
 //! - `csv-mcp-server/src/types/`
-//! - `csv-explorer/shared/src/types.rs`
+//! - `tuppira/shared/src/types.rs`
 //! - `csv-wallet/src/services/`
 
 use csv_hash::chain_id::ChainId;

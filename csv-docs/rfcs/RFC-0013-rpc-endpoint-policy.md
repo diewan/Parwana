@@ -2,7 +2,7 @@
 
 **Status:** Accepted for incremental implementation
 **Date:** 2026-07-14
-**Scope:** csv-sdk/runtime/adapters, csv-cli, Hemion, and csv-explorer
+**Scope:** csv-sdk/runtime/adapters, csv-cli, Hemion, and tuppira
 
 ## Decision
 
@@ -174,7 +174,7 @@ credential = { id = "rpc/solana/example-net" }
 - Explorer: use the same policy schema but separate service-owned credentials;
   no `rpc_config.json` side channel.
 
-Hemion never sends user RPC credentials to csv-explorer. A wallet user endpoint
+Hemion never sends user RPC credentials to tuppira. A wallet user endpoint
 is used by the wallet/runtime boundary only. Explorer endpoints are configured
 by its operator.
 

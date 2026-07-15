@@ -20,7 +20,9 @@ use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 use csv_remote::transport::RemoteTransport;
 use csv_remote::{RemoteChainAdapter, host};
-use csv_wire::remote::{RemoteError, RemoteRequest, RemoteResponse, RemoteResponsePayload};
+use csv_wire::remote::{
+    RemoteError, RemoteRequest, RemoteRequestPayload, RemoteResponse, RemoteResponsePayload,
+};
 
 // ---------------------------------------------------------------------------
 // Mock host adapter + registry
@@ -50,7 +52,13 @@ fn sample_proof_bundle(transfer: &CrossChainTransfer) -> Result<ProofBundle, Ada
     use csv_hash::seal::{CommitAnchor, SealPoint};
     use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
 
-    let node = DAGNode::new(csv_hash::Hash::new([1u8; 32]), vec![], vec![], vec![], vec![]);
+    let node = DAGNode::new(
+        csv_hash::Hash::new([1u8; 32]),
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+    );
     let seal_point = SealPoint::new(transfer.sanad_id.as_bytes().to_vec(), Some(0), None)
         .map_err(|e| AdapterError::Generic(format!("seal point: {e}")))?;
     let commit_anchor = CommitAnchor::new(vec![1u8; 32], 100, vec![])
@@ -423,8 +431,7 @@ async fn lock_verify_mint_round_trip() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[tokio::test]
-async fn resume_after_dropped_connection_is_idempotent()
--> Result<(), Box<dyn std::error::Error>> {
+async fn resume_after_dropped_connection_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(MockRegistry::new("mock-chain"));
     let transport = Arc::new(InProcessTransport::dropping_first(registry.clone()));
     let adapter = RemoteChainAdapter::connect("mock-chain", transport).await?;
@@ -481,6 +488,20 @@ async fn unknown_chain_fails_closed() -> Result<(), Box<dyn std::error::Error>> 
         Ok(_) => Err("expected a typed unknown-chain error, got a connected adapter".into()),
         Err(other) => Err(format!("expected a typed unknown-chain error, got {other:?}").into()),
     }
+}
+
+#[tokio::test]
+async fn unknown_chain_metadata_returns_typed_wire_error() {
+    let registry = MockRegistry::new("mock-chain");
+    let request = RemoteRequest::new("other-chain", RemoteRequestPayload::Capabilities);
+
+    let response = host::dispatch(&registry, request).await;
+
+    assert!(matches!(
+        response.payload,
+        RemoteResponsePayload::Error(RemoteError::UnknownChain(chain))
+            if chain == "other-chain"
+    ));
 }
 
 #[tokio::test]

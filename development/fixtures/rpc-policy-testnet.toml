@@ -1,6 +1,6 @@
 # Cross-application RFC-0013 policy fixture.
 #
-# SDK, Hemion, and csv-explorer tests must deserialize this exact document into
+# SDK, Hemion, and tuppira tests must deserialize this exact document into
 # their shared `ChainRpcPolicy` representation. It deliberately contains no
 # credential material.
 chain = "ethereum"

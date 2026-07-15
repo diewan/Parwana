@@ -57,7 +57,7 @@ Rust monorepo (virtual Cargo workspace, edition 2024, rust-version 1.95). The pr
 **CLI Tutorial:** `csv-cli-tutorial.md` — comprehensive CLI command reference with testnet examples.
 **Examples:** `csv-examples/` — organized examples (getting-started/, advanced/, cli-tutorial/).
 
-**Note:** `csv-explorer/*` and `typescript-sdk/` do not exist in the current codebase. `csv-wallet/` does exist and is a workspace member.
+**Note:** `tuppira/*` and `typescript-sdk/` do not exist in the current codebase. `csv-wallet/` does exist and is a workspace member.
 
 ## Commands
 

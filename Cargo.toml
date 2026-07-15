@@ -33,11 +33,10 @@ members = [
     "csv-architecture",
     "csv-examples",
     # Explorer sub-crates (optional local checkout)
-    # "csv-explorer/shared",
-    # "csv-explorer/storage",
-    # "csv-explorer/indexer",
-    # "csv-explorer/api",
-    # "csv-explorer/ui",
+    # "tuppira/shared",
+    # "tuppira/storage",
+    # "tuppira/indexer",
+    # "tuppira/api",
     # Chain adapter crates
     "csv-adapters/csv-adapter-core",
     "csv-adapters/csv-bitcoin",
