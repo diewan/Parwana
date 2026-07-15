@@ -75,6 +75,8 @@ pub mod events;
 pub mod local_store;
 pub mod mcp;
 pub mod prelude;
+pub mod rpc_identity;
+pub mod rpc_policy;
 pub mod runtime;
 pub mod sanads;
 pub mod transfers;

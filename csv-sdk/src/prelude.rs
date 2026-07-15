@@ -15,6 +15,10 @@ pub use crate::error::CsvError;
 pub use crate::events::Event;
 #[cfg(feature = "tokio")]
 pub use crate::events::EventStream;
+pub use crate::rpc_policy::{
+    ChainRpcPolicy, RpcCapability, RpcCredentialRef, RpcEndpoint, RpcEndpointSource,
+    RpcPolicyError, RpcSelectionMode, RpcTransport, RpcTrustRequirement,
+};
 pub use crate::sanads::{SanadFilters, SanadsManager};
 pub use crate::transfers::{TransferBuilder, TransferManager};
 pub use crate::wallet::Wallet;

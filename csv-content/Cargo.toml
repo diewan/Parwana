@@ -7,5 +7,23 @@ description = "CSV Content - Content tree system with Merkleized structures"
 
 [dependencies]
 csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
+
+# Per-recipient key wrapping (RPC-007). All pure-Rust and wasm32-compatible;
+# the shared path takes an RNG by value so no native-only entropy source is
+# pulled into the library.
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+sha2 = "0.10"
+zeroize = { version = "1.7", features = ["zeroize_derive"] }
+rand_core = "0.6"
+
+# Browser entropy shim so the recipient-wrap crypto compiles for the web build.
+# getrandom/js is the standard wasm32 randomness source; it is not native-only
+# crypto and is only needed to satisfy transitive rand_core on wasm targets.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+

@@ -120,7 +120,7 @@ async fn query_balance(
     config: &Config,
     state: &UnifiedStateManager,
 ) -> Result<f64> {
-    use csv_sdk::config::{ChainConfig, RpcConfig, StoreConfig};
+    use csv_sdk::config::{ChainConfig, StoreConfig};
     use csv_sdk::prelude::NetworkType;
     use std::collections::HashMap;
 
@@ -150,14 +150,7 @@ async fn query_balance(
 
     let mut sdk_chains = HashMap::new();
     if let Some(cc) = &sdk_chain {
-        let rpc = RpcConfig {
-            url: cc.rpc_url.clone(),
-            indexer_url: cc.indexer_url.clone(),
-            indexer_backend: cc.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30_000,
-            max_retries: 3,
-        };
+        let rpc = crate::config::sdk_rpc_config(core_chain.as_str(), cc);
         sdk_chains.insert(
             core_chain.to_string(),
             ChainConfig {
@@ -175,16 +168,15 @@ async fn query_balance(
             },
         );
     } else {
-        // Use default chain config with seed/xpub from wallet config
-        let rpc_url = config.get_rpc_url(&core_chain);
-        let rpc = RpcConfig {
-            url: rpc_url,
-            indexer_url: None,
-            indexer_backend: None,
-            api_key: None,
-            timeout_ms: 30_000,
-            max_retries: 3,
+        // No per-chain config: use the reviewed built-in policy for the chain
+        // and network (RFC-0013), with seed/xpub from wallet config below.
+        let sdk_net = if config.network().is_testnet() {
+            csv_sdk::config::Network::Testnet
+        } else {
+            csv_sdk::config::Network::Mainnet
         };
+        let rpc = csv_sdk::config::Config::builtin_rpc(core_chain.as_str(), sdk_net, None, None)
+            .unwrap_or_default();
         sdk_chains.insert(
             core_chain.to_string(),
             ChainConfig {

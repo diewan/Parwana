@@ -1,10 +1,24 @@
 chain_id = "aptos-testnet"
 chain_name = "aptos-testnet"
 default_network = "testnet"
-rpc_endpoints = ["https://fullnode.testnet.aptoslabs.com/v1"]
+
 block_explorer_urls = ["https://explorer.aptoslabs.com/?network=testnet"]
 start_block = 0
 contract_address = "0x0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f"
+
+[rpc_policy]
+chain = "aptos"
+network = "testnet"
+selection = "built_in_only"
+
+[[rpc_policy.endpoints]]
+id = "aptos-testnet-fullnode"
+url = "https://fullnode.testnet.aptoslabs.com/v1"
+transport = "rest"
+capabilities = ["read", "broadcast", "verify"]
+source = "built_in"
+provider = "aptos-labs"
+priority = 0
 
 [finality_guarantee]
 max_reorg_depth = 0

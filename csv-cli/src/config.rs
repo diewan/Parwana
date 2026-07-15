@@ -325,30 +325,34 @@ impl Config {
             .get(chain)
             .ok_or_else(|| anyhow::anyhow!("Chain {} not configured", chain))
     }
+}
 
-    /// Get RPC URL for a chain
-    pub fn get_rpc_url(&self, chain: &Chain) -> String {
-        // First check if chain config has an RPC URL
-        if let Ok(chain_config) = self.chain(chain)
-            && !chain_config.rpc_url.is_empty()
-        {
-            return chain_config.rpc_url.clone();
-        }
+/// Build the SDK's typed RPC config (RFC-0013) for a chain from a CLI/store
+/// chain config.
+///
+/// The endpoint policy is the reviewed built-in for the chain and network, with
+/// the host's configured request and REST address-index URLs applied as
+/// transport-preserving overrides. Endpoint transport, capabilities, provider
+/// identity, and trust class come from the reviewed registry — never guessed
+/// from a URL string — and credentials are resolved by the host keyring, never
+/// stored in this config. This is the single seam converting CLI platform
+/// configuration into the typed policy consumed by the SDK/runtime.
+pub fn sdk_rpc_config(chain: &str, chain_config: &ChainConfig) -> csv_sdk::config::RpcConfig {
+    csv_sdk::config::Config::builtin_rpc(
+        chain,
+        sdk_network(chain_config.network),
+        Some(&chain_config.rpc_url),
+        chain_config.indexer_url.as_deref(),
+    )
+    .unwrap_or_default()
+}
 
-        // Fall back to environment variables
-        match chain.as_str() {
-            "bitcoin" => std::env::var("BTC_RPC_URL")
-                .unwrap_or_else(|_| "https://signet.bc-2.jp".to_string()),
-            "ethereum" => std::env::var("ETH_RPC_URL")
-                .unwrap_or_else(|_| "https://sepolia.infura.io/v3/YOUR_API_KEY".to_string()),
-            "solana" => std::env::var("SOL_RPC_URL")
-                .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string()),
-            "sui" => std::env::var("SUI_RPC_URL")
-                .unwrap_or_else(|_| "https://fullnode.testnet.sui.io:443".to_string()),
-            "aptos" => std::env::var("APTOS_RPC_URL")
-                .unwrap_or_else(|_| "https://fullnode.testnet.aptoslabs.com/v1".to_string()),
-            _ => String::new(),
-        }
+/// Map the CLI/store network to the SDK network enum.
+pub fn sdk_network(network: Network) -> csv_sdk::config::Network {
+    match network {
+        Network::Test => csv_sdk::config::Network::Testnet,
+        Network::Main => csv_sdk::config::Network::Mainnet,
+        Network::Dev => csv_sdk::config::Network::Devnet,
     }
 }
 

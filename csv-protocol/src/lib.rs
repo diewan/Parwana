@@ -25,6 +25,7 @@ pub mod error;
 pub mod events;
 pub mod failure_domains;
 pub mod lease;
+pub mod manifest_signature;
 pub mod proof_taxonomy;
 pub mod proof_validation;
 pub mod proof_verification;

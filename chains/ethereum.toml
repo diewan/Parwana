@@ -1,10 +1,24 @@
 # Ethereum Sepolia testnet — contract addresses updated by csv-contracts/ethereum/scripts/deploy.sh
 chain_id = "ethereum-sepolia"
 chain_name = "Ethereum Sepolia"
-default_network = "testnet"
-rpc_endpoints = ["https://rpc.sepolia.org"]
+default_network = "sepolia"
+
 block_explorer_urls = ["https://sepolia.etherscan.io"]
 start_block = 0
+
+[rpc_policy]
+chain = "ethereum"
+network = "sepolia"
+selection = "built_in_only"
+
+[[rpc_policy.endpoints]]
+id = "ethereum-sepolia-publicnode"
+url = "https://ethereum-sepolia-rpc.publicnode.com"
+transport = "json_rpc_http"
+capabilities = ["read", "broadcast", "verify"]
+source = "built_in"
+provider = "publicnode"
+priority = 0
 
 [finality_guarantee]
 max_reorg_depth = 12

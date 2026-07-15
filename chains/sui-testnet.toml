@@ -1,10 +1,24 @@
 chain_id = "sui-testnet"
 chain_name = "sui-testnet"
 default_network = "testnet"
-rpc_endpoints = ["https://fullnode.testnet.sui.io:443"]
+
 block_explorer_urls = ["https://suiscan.xyz/testnet"]
 start_block = 0
 contract_address = "0x3377372f20b25f8b04f6374eefc25957af76c18fd0af11c89ebf27dc4b429f68"
+
+[rpc_policy]
+chain = "sui"
+network = "testnet"
+selection = "built_in_only"
+
+[[rpc_policy.endpoints]]
+id = "sui-testnet-fullnode"
+url = "https://fullnode.testnet.sui.io:443"
+transport = "json_rpc_http"
+capabilities = ["read", "broadcast", "verify"]
+source = "built_in"
+provider = "mysten-labs"
+priority = 0
 
 [finality_guarantee]
 max_reorg_depth = 0

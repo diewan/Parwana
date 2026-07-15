@@ -221,38 +221,6 @@ impl Network {
 }
 
 impl BitcoinConfig {
-    /// Create config with RPC URL from environment variable if available
-    /// Checks environment variables in priority order:
-    /// 1. BITCOIN_RPC_URL (generic)
-    /// 2. BITCOIN_ALCHEMY_SIGNET_HTTP_RPC (Alchemy)
-    /// 3. BITCOIN_ANKR_SIGNET_HTTP_RPC (Ankr)
-    /// 4. BITCOIN_TATUM_SIGNET_JSON_RPC (Tatum JSON-RPC)
-    /// 5. BITCOIN_TATUM_SIGNET_REST_RPC (Tatum REST)
-    ///
-    /// Also loads API key from TATUM_SIGNET_API_KEY if using Tatum endpoints
-    ///
-    /// This only overrides the URL and API key; it does NOT change `rpc_backend`.
-    /// The transport is an explicit choice of the caller — pointing an env var at
-    /// an endpoint of a different transport than the configured backend is a
-    /// configuration error the caller must resolve by setting `rpc_backend` too.
-    pub fn with_env_rpc(mut self) -> Result<Self, String> {
-        let rpc_url = std::env::var("BITCOIN_RPC_URL")
-            .or_else(|_| std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC"))
-            .or_else(|_| std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC"))
-            .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_JSON_RPC"))
-            .or_else(|_| std::env::var("BITCOIN_TATUM_SIGNET_REST_RPC"))
-            .ok();
-
-        if let Some(url) = rpc_url {
-            // If using Tatum endpoint, load the API key
-            if url.contains("tatum.io") {
-                self.api_key = std::env::var("TATUM_SIGNET_API_KEY").ok();
-            }
-            self.rpc_url = url;
-        }
-        Ok(self)
-    }
-
     /// Resolve the REST/esplora indexer base URL to use for address scanning.
     ///
     /// Returns the explicitly-configured `indexer_url` if set; otherwise falls

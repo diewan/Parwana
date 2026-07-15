@@ -362,14 +362,7 @@ async fn cmd_create(
 
     // Convert chain config to SDK format
     let sdk_chain_config = csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_config.rpc_url.clone(),
-            indexer_url: chain_config.indexer_url.clone(),
-            indexer_backend: chain_config.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
+        rpc: crate::config::sdk_rpc_config(chain.as_str(), chain_config),
         finality_depth: chain_config.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
@@ -766,17 +759,7 @@ async fn cmd_create(
     let seed_hex = identity.bitcoin_seed_hex();
 
     let sdk_chain_config = csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_cfg.rpc_url.clone(),
-            // Carry the explicit REST indexer selection through to the SDK so the
-            // runtime adapter scans/queries via the right transport (e.g. Alchemy
-            // Blockbook) instead of appending esplora paths to a JSON-RPC URL.
-            indexer_url: chain_cfg.indexer_url.clone(),
-            indexer_backend: chain_cfg.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
+        rpc: crate::config::sdk_rpc_config(chain.as_str(), chain_cfg),
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
@@ -1769,17 +1752,7 @@ async fn cmd_consume(
     // Convert chain config to SDK format
     let chain_cfg = config.chain(&chain)?;
     let sdk_chain_config = csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_cfg.rpc_url.clone(),
-            // Carry the explicit REST indexer selection through to the SDK so the
-            // runtime adapter scans/queries via the right transport (e.g. Alchemy
-            // Blockbook) instead of appending esplora paths to a JSON-RPC URL.
-            indexer_url: chain_cfg.indexer_url.clone(),
-            indexer_backend: chain_cfg.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
+        rpc: crate::config::sdk_rpc_config(chain.as_str(), chain_cfg),
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(&chain).and_then(|w| w.xpub.clone()),
@@ -2246,17 +2219,7 @@ fn build_sdk_config_from_cli_config(
     };
 
     let sdk_chain_config = csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_cfg.rpc_url.clone(),
-            // Carry the explicit REST indexer selection through to the SDK so the
-            // runtime adapter scans/queries via the right transport (e.g. Alchemy
-            // Blockbook) instead of appending esplora paths to a JSON-RPC URL.
-            indexer_url: chain_cfg.indexer_url.clone(),
-            indexer_backend: chain_cfg.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
+        rpc: crate::config::sdk_rpc_config(chain.as_str(), chain_cfg),
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(chain).and_then(|w| w.xpub.clone()),

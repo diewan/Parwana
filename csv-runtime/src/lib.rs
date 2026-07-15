@@ -46,6 +46,7 @@ pub mod runtime_mode;
 pub mod send_transfer;
 pub mod transfer_coordinator;
 pub mod user_runtime_lease;
+pub mod verification_quorum;
 
 // Wallet operations (facade over chain adapters)
 pub mod wallet;

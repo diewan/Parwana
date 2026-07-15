@@ -1,9 +1,23 @@
 chain_id = "bitcoin-signet"
 chain_name = "bitcoin-signet"
 default_network = "signet"
-rpc_endpoints = ["${BITCOIN_ALCHEMY_SIGNET_HTTP_RPC:-${BITCOIN_ANKR_SIGNET_HTTP_RPC:-${BITCOIN_TATUM_SIGNET_JSON_RPC:-${BITCOIN_TATUM_SIGNET_REST_RPC:-}}}}"]
+
 block_explorer_urls = ["https://mempool.space/signet", "https://blockstream.info/signet"]
 start_block = 0
+
+[rpc_policy]
+chain = "bitcoin"
+network = "signet"
+selection = "built_in_only"
+
+[[rpc_policy.endpoints]]
+id = "bitcoin-signet-mempool-space"
+url = "https://mempool.space/signet/api"
+transport = "rest"
+capabilities = ["read", "broadcast", "address_index", "verify"]
+source = "built_in"
+provider = "mempool-space"
+priority = 0
 
 [finality_guarantee]
 max_reorg_depth = 6

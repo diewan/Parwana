@@ -1,9 +1,23 @@
 chain_id = "solana-devnet"
 chain_name = "solana-devnet"
-default_network = "testnet"
-rpc_endpoints = ["https://api.devnet.solana.com"]
+default_network = "devnet"
+
 block_explorer_urls = ["https://explorer.solana.com/?cluster=devnet"]
 start_block = 0
+
+[rpc_policy]
+chain = "solana"
+network = "devnet"
+selection = "built_in_only"
+
+[[rpc_policy.endpoints]]
+id = "solana-devnet-foundation"
+url = "https://api.devnet.solana.com"
+transport = "json_rpc_http"
+capabilities = ["read", "broadcast", "verify"]
+source = "built_in"
+provider = "solana-foundation"
+priority = 0
 # Thin-registry verifier-attested mint (RFC-0012 §9). Mints are authorized by an
 # M-of-N verifier-signed attestation over the §9.2 digest — there is NO proof
 # root and NO fallback mint path. The csv-seal program id is the RFC-0012 §9.2

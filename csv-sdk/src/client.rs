@@ -461,22 +461,7 @@ impl CsvClient {
             #[cfg(all(feature = "bitcoin", feature = "rpc"))]
             "bitcoin" => {
                 log::info!("Building Bitcoin adapter for {:?} network", network);
-                let config_rpc_url = _config
-                    .chains
-                    .get("bitcoin")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC").unwrap_or_else(|_| {
-                                "https://bitcoin-signet.g.alchemy.com/v2/".to_string()
-                            })
-                        } else {
-                            std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
-                                .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string())
-                        }
-                    });
-                let rpc_url = config_rpc_url;
+                let rpc_url = _config.required_request_url("bitcoin")?;
                 let chain_config = _config.chains.get("bitcoin");
                 let mut utxos = Vec::new();
                 let mut sanad_seals = Vec::new();
@@ -523,28 +508,22 @@ impl CsvClient {
                     .and_then(|keys| keys.get("bitcoin"))
                     .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
-                // Create RPC endpoint configuration. Address scanning + queries
-                // need a REST indexer; the transport is chosen explicitly from
-                // config (never sniffed). For Alchemy's Blockbook UTXO API, point
-                // the endpoint at the Blockbook base with the Blockbook protocol —
-                // that one client serves scan, gettxout, fees and broadcast.
-                let indexer_backend = chain_config.and_then(|c| c.rpc.indexer_backend.clone());
-                let indexer_url = chain_config.and_then(|c| c.rpc.indexer_url.clone());
-                let (endpoint_url, protocol) = match indexer_backend.as_deref() {
-                    Some("blockbook") | Some("alchemy") => (
-                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
-                        RpcProtocol::Blockbook,
-                    ),
-                    // esplora / default: prefer an explicit indexer_url if set.
-                    _ => (
-                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
-                        RpcProtocol::Rest,
-                    ),
-                };
+                // Address scanning + queries need a REST address-index endpoint,
+                // resolved from the typed policy's `AddressIndex` capability
+                // (RFC-0013); the transport is declared by the endpoint, never
+                // sniffed. It falls back to the request endpoint only when the
+                // request endpoint is itself the indexer (the reviewed built-in
+                // serves read and address-index over one REST URL).
+                let endpoint_url = _config
+                    .indexer_url("bitcoin")
+                    .unwrap_or_else(|| rpc_url.clone());
                 let rpc_endpoint = RpcEndpoint {
                     url: endpoint_url,
-                    protocol,
-                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    protocol: RpcProtocol::Rest,
+                    // Credentials are resolved by the host from the endpoint's
+                    // typed RpcCredentialRef via its keyring; the reviewed
+                    // built-ins attach none.
+                    api_key: None,
                     priority: 0,
                 };
 
@@ -596,18 +575,7 @@ impl CsvClient {
             #[cfg(all(feature = "ethereum", feature = "runtime-coordinator"))]
             "ethereum" => {
                 log::info!("Building Ethereum adapter for {:?} network", network);
-                let rpc_url = _config
-                    .chains
-                    .get("ethereum")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://ethereum-sepolia-rpc.publicnode.com".to_string()
-                        } else {
-                            "https://ethereum-rpc.publicnode.com".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("ethereum")?;
                 let chain_config = _config.chains.get("ethereum");
 
                 let address = chain_config
@@ -628,7 +596,10 @@ impl CsvClient {
                 let rpc_endpoint = RpcEndpoint {
                     url: rpc_url.clone(),
                     protocol: RpcProtocol::JsonRpc,
-                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    // Credentials are resolved by the host from the endpoint's
+                    // typed RpcCredentialRef via its keyring (RFC-0013); the
+                    // reviewed built-ins attach none.
+                    api_key: None,
                     priority: 0,
                 };
 
@@ -674,18 +645,7 @@ impl CsvClient {
             }
             #[cfg(all(feature = "ethereum", not(feature = "runtime-coordinator")))]
             "ethereum" => {
-                let rpc_url = _config
-                    .chains
-                    .get("ethereum")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://ethereum-sepolia-rpc.publicnode.com".to_string()
-                        } else {
-                            "https://ethereum-rpc.publicnode.com".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("ethereum")?;
                 let eth_network = if _is_testnet {
                     csv_ethereum::config::Network::Sepolia
                 } else {
@@ -753,18 +713,7 @@ impl CsvClient {
             #[cfg(all(feature = "sui", feature = "runtime-coordinator"))]
             "sui" => {
                 log::info!("Building Sui adapter for {:?} network", network);
-                let rpc_url = _config
-                    .chains
-                    .get("sui")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://fullnode.testnet.sui.io:443".to_string()
-                        } else {
-                            "https://fullnode.mainnet.sui.io:443".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("sui")?;
                 let chain_config = _config.chains.get("sui");
 
                 let contract_address = chain_config
@@ -783,7 +732,10 @@ impl CsvClient {
                 let rpc_endpoint = RpcEndpoint {
                     url: rpc_url.clone(),
                     protocol: RpcProtocol::Grpc,
-                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    // Credentials are resolved by the host from the endpoint's
+                    // typed RpcCredentialRef via its keyring (RFC-0013); the
+                    // reviewed built-ins attach none.
+                    api_key: None,
                     priority: 0,
                 };
 
@@ -830,18 +782,7 @@ impl CsvClient {
             }
             #[cfg(all(feature = "sui", not(feature = "runtime-coordinator")))]
             "sui" => {
-                let rpc_url = _config
-                    .chains
-                    .get("sui")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://fullnode.testnet.sui.io:443".to_string()
-                        } else {
-                            "https://fullnode.mainnet.sui.io:443".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("sui")?;
                 let sui_network = if _is_testnet {
                     csv_sui::config::SuiNetwork::Testnet
                 } else {
@@ -920,18 +861,7 @@ impl CsvClient {
             #[cfg(all(feature = "aptos", feature = "runtime-coordinator"))]
             "aptos" => {
                 log::info!("Building Aptos adapter for {:?} network", network);
-                let rpc_url = _config
-                    .chains
-                    .get("aptos")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://api.testnet.aptoslabs.com/v1".to_string()
-                        } else {
-                            "https://api.mainnet.aptoslabs.com/v1".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("aptos")?;
                 let chain_config = _config.chains.get("aptos");
 
                 // Extract Aptos private key from private_keys if available
@@ -940,28 +870,20 @@ impl CsvClient {
                     .and_then(|keys| keys.get("aptos"))
                     .and_then(|k| k.as_bytes().map(|b| b.to_vec()));
 
-                // Create RPC endpoint configuration. Address scanning + queries
-                // need a REST indexer; the transport is chosen explicitly from
-                // config (never sniffed). For Alchemy's Blockbook UTXO API, point
-                // the endpoint at the Blockbook base with the Blockbook protocol —
-                // that one client serves scan, gettxout, fees and broadcast.
-                let indexer_backend = chain_config.and_then(|c| c.rpc.indexer_backend.clone());
-                let indexer_url = chain_config.and_then(|c| c.rpc.indexer_url.clone());
-                let (endpoint_url, protocol) = match indexer_backend.as_deref() {
-                    Some("blockbook") | Some("alchemy") => (
-                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
-                        RpcProtocol::Blockbook,
-                    ),
-                    // esplora / default: prefer an explicit indexer_url if set.
-                    _ => (
-                        indexer_url.clone().unwrap_or_else(|| rpc_url.clone()),
-                        RpcProtocol::Rest,
-                    ),
-                };
+                // Aptos queries use the fullnode REST API. Any distinct indexer
+                // is a separate REST address-index endpoint resolved from the
+                // typed policy (RFC-0013); absent one, the request endpoint is
+                // used. Transport is declared by the endpoint, never sniffed.
+                let endpoint_url = _config
+                    .indexer_url("aptos")
+                    .unwrap_or_else(|| rpc_url.clone());
                 let rpc_endpoint = RpcEndpoint {
                     url: endpoint_url,
-                    protocol,
-                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    protocol: RpcProtocol::Rest,
+                    // Credentials are resolved by the host from the endpoint's
+                    // typed RpcCredentialRef via its keyring; the reviewed
+                    // built-ins attach none.
+                    api_key: None,
                     priority: 0,
                 };
 
@@ -1008,18 +930,7 @@ impl CsvClient {
             }
             #[cfg(all(feature = "aptos", not(feature = "runtime-coordinator")))]
             "aptos" => {
-                let rpc_url = _config
-                    .chains
-                    .get("aptos")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://api.testnet.aptoslabs.com/v1".to_string()
-                        } else {
-                            "https://api.mainnet.aptoslabs.com/v1".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("aptos")?;
 
                 // Derive signer address from private key if available
                 // In Aptos, address = last 32 bytes of sha3-256(public_key + 0x00)
@@ -1104,18 +1015,7 @@ impl CsvClient {
             #[cfg(all(feature = "solana", feature = "runtime-coordinator"))]
             "solana" => {
                 log::info!("Building Solana adapter for {:?} network", network);
-                let rpc_url = _config
-                    .chains
-                    .get("solana")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://api.devnet.solana.com".to_string()
-                        } else {
-                            "https://api.mainnet-beta.solana.com".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("solana")?;
                 let chain_config = _config.chains.get("solana");
 
                 let program_id = chain_config
@@ -1137,7 +1037,10 @@ impl CsvClient {
                 let rpc_endpoint = RpcEndpoint {
                     url: rpc_url.clone(),
                     protocol: RpcProtocol::JsonRpc,
-                    api_key: chain_config.and_then(|c| c.rpc.api_key.clone()),
+                    // Credentials are resolved by the host from the endpoint's
+                    // typed RpcCredentialRef via its keyring (RFC-0013); the
+                    // reviewed built-ins attach none.
+                    api_key: None,
                     priority: 0,
                 };
 
@@ -1184,18 +1087,7 @@ impl CsvClient {
             }
             #[cfg(all(feature = "solana", not(feature = "runtime-coordinator")))]
             "solana" => {
-                let rpc_url = _config
-                    .chains
-                    .get("solana")
-                    .map(|c| c.rpc.url.clone())
-                    .filter(|url| !url.is_empty())
-                    .unwrap_or_else(|| {
-                        if _is_testnet {
-                            "https://api.devnet.solana.com".to_string()
-                        } else {
-                            "https://api.mainnet-beta.solana.com".to_string()
-                        }
-                    });
+                let rpc_url = _config.required_request_url("solana")?;
                 let sol_network = if _is_testnet {
                     csv_solana::config::Network::Devnet
                 } else {

@@ -249,14 +249,7 @@ async fn cmd_readiness(
     // Convert chain config to SDK format
     let chain_cfg = config.chain(chain)?;
     let sdk_chain_config = csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_cfg.rpc_url.clone(),
-            indexer_url: chain_cfg.indexer_url.clone(),
-            indexer_backend: chain_cfg.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
+        rpc: crate::config::sdk_rpc_config(chain.as_str(), chain_cfg),
         finality_depth: chain_cfg.finality_depth as u32,
         enabled: true,
         xpub: config.wallets.get(chain).and_then(|w| w.xpub.clone()),

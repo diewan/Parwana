@@ -248,12 +248,33 @@ impl ChainDiscovery {
             .unwrap_or("mainnet")
             .to_string();
 
+        // RPC-001 stores endpoint metadata in the canonical policy block. This
+        // legacy discovery projection keeps existing adapter construction
+        // working until RPC-002 replaces scalar adapter consumption with
+        // capability-aware resolution.
         let rpc_urls = value
-            .get("rpc_endpoints")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .get("rpc_policy")
+            .and_then(|policy| policy.get("endpoints"))
+            .and_then(toml::Value::as_array)
+            .map(|endpoints| {
+                endpoints
+                    .iter()
+                    .filter(|endpoint| {
+                        endpoint
+                            .get("capabilities")
+                            .and_then(toml::Value::as_array)
+                            .is_some_and(|capabilities| {
+                                capabilities
+                                    .iter()
+                                    .any(|capability| capability.as_str() == Some("read"))
+                            })
+                    })
+                    .filter_map(|endpoint| {
+                        endpoint
+                            .get("url")
+                            .and_then(toml::Value::as_str)
+                            .map(ToString::to_string)
+                    })
                     .collect()
             })
             .unwrap_or_default();

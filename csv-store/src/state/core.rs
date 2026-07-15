@@ -96,12 +96,13 @@ impl ChainConfig {
     pub fn default_for(chain: &ChainId, network: &Network) -> Self {
         match chain.as_str() {
             "bitcoin" => Self {
+                // Reviewed built-in defaults. No environment override below the
+                // application layer (RFC-0013): a host that needs a different
+                // endpoint supplies a typed policy explicitly.
                 rpc_url: match network {
                     Network::Dev => "http://localhost:18443".to_string(),
-                    Network::Test => std::env::var("BITCOIN_ALCHEMY_SIGNET_HTTP_RPC")
-                        .unwrap_or_else(|_| "https://bitcoin-signet.g.alchemy.com/v2/".to_string()),
-                    Network::Main => std::env::var("BITCOIN_ANKR_SIGNET_HTTP_RPC")
-                        .unwrap_or_else(|_| "https://rpc.ankr.com/btc".to_string()),
+                    Network::Test => "https://bitcoin-signet.g.alchemy.com/v2/".to_string(),
+                    Network::Main => "https://rpc.ankr.com/btc".to_string(),
                 },
                 // Default `rpc_url` above is JSON-RPC (Alchemy/Ankr), which has no
                 // address index, so provide an explicit esplora indexer for scans.

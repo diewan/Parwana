@@ -1,12 +1,18 @@
 //! Configuration management for the CSV Adapter.
 //!
 //! Provides a serializable [`Config`] struct that can be loaded from a TOML
-//! file (`~/.csv/config.toml`) with environment variable overrides.
+//! file (`~/.csv/config.toml`). The SDK never reads RPC environment variables
+//! or `.env` files implicitly; host applications must supply overrides through
+//! the typed RPC policy API.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::rpc_policy::{
+    ChainRpcPolicy, RpcCapability, RpcEndpoint, RpcEndpointSource, RpcPolicyError,
+    RpcSelectionMode, RpcTransport,
+};
 use csv_hash::chain_id::ChainId;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
@@ -50,35 +56,31 @@ impl std::fmt::Display for Network {
 }
 
 /// RPC configuration for a specific chain.
+///
+/// Endpoints are described exclusively by the typed [`ChainRpcPolicy`]. The
+/// legacy scalar URL/indexer/api-key fields were deleted (RFC-0013): an endpoint
+/// is never a bare URL, its transport is never guessed, and credentials are
+/// resolved from a host-owned keyring via [`RpcCredentialRef`], never stored
+/// here. Hosts convert their platform configuration into a policy explicitly
+/// (see [`Config::builtin_rpc`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcConfig {
-    /// RPC endpoint URL.
-    pub url: String,
-    /// REST/esplora indexer base URL for Bitcoin address scanning. `None` falls
-    /// back to `url` when that is itself a REST endpoint.
-    #[serde(default)]
-    pub indexer_url: Option<String>,
-    /// Explicit indexer transport for Bitcoin scanning: `"esplora"` or
-    /// `"blockbook"` (Alchemy UTXO API). Selected explicitly, never sniffed.
-    #[serde(default)]
-    pub indexer_backend: Option<String>,
-    /// API key (if required by the provider).
-    pub api_key: Option<String>,
     /// Request timeout in milliseconds.
     pub timeout_ms: u64,
     /// Maximum number of retries for transient failures.
     pub max_retries: u32,
+    /// Typed endpoint selection and trust policy. This is the sole authority for
+    /// endpoint URLs, transport, capabilities, provider identity, and trust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<ChainRpcPolicy>,
 }
 
 impl Default for RpcConfig {
     fn default() -> Self {
         Self {
-            url: String::new(),
-            indexer_url: None,
-            indexer_backend: None,
-            api_key: None,
             timeout_ms: 30_000,
             max_retries: 3,
+            policy: None,
         }
     }
 }
@@ -164,6 +166,275 @@ impl Default for ChainConfig {
     }
 }
 
+fn reviewed_endpoint(
+    id: &str,
+    url: &str,
+    transport: RpcTransport,
+    capabilities: Vec<RpcCapability>,
+    provider: &str,
+) -> RpcEndpoint {
+    RpcEndpoint {
+        id: id.to_string(),
+        url: url.to_string(),
+        transport,
+        capabilities,
+        source: RpcEndpointSource::BuiltIn,
+        provider: provider.to_string(),
+        priority: 0,
+        credential: None,
+    }
+}
+
+fn reviewed_chain_config(chain: &str, network: Network) -> ChainConfig {
+    // The third tuple element records the historical REST indexer dialect
+    // (esplora/blockbook). It is retained for documentation of intent only: the
+    // address-index endpoint's REST transport now carries that meaning, and no
+    // consumer selects a non-esplora dialect. See RFC-0013 "chain transport
+    // matrix" for the typed successor.
+    let (exact_network, endpoint, _indexer_dialect) = match (chain, network) {
+        ("bitcoin", Network::Mainnet) => (
+            "mainnet",
+            reviewed_endpoint(
+                "bitcoin-mainnet-mempool-space",
+                "https://mempool.space/api",
+                RpcTransport::Rest,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::AddressIndex,
+                    RpcCapability::Verify,
+                ],
+                "mempool-space",
+            ),
+            Some("esplora".to_string()),
+        ),
+        ("bitcoin", Network::Devnet | Network::Regtest) => (
+            "regtest",
+            reviewed_endpoint(
+                "bitcoin-local-json-rpc",
+                "http://127.0.0.1:18443",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "local",
+            ),
+            None,
+        ),
+        ("bitcoin", Network::Testnet) => (
+            "signet",
+            reviewed_endpoint(
+                "bitcoin-signet-mempool-space",
+                "https://mempool.space/signet/api",
+                RpcTransport::Rest,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::AddressIndex,
+                    RpcCapability::Verify,
+                ],
+                "mempool-space",
+            ),
+            Some("esplora".to_string()),
+        ),
+        ("ethereum", Network::Mainnet) => (
+            "mainnet",
+            reviewed_endpoint(
+                "ethereum-mainnet-publicnode",
+                "https://ethereum-rpc.publicnode.com",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "publicnode",
+            ),
+            None,
+        ),
+        ("ethereum", Network::Devnet | Network::Regtest) => (
+            "local",
+            reviewed_endpoint(
+                "ethereum-local-json-rpc",
+                "http://127.0.0.1:8545",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "local",
+            ),
+            None,
+        ),
+        ("ethereum", Network::Testnet) => (
+            "sepolia",
+            reviewed_endpoint(
+                "ethereum-sepolia-publicnode",
+                "https://ethereum-sepolia-rpc.publicnode.com",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "publicnode",
+            ),
+            None,
+        ),
+        ("sui", Network::Mainnet) => (
+            "mainnet",
+            reviewed_endpoint(
+                "sui-mainnet-fullnode",
+                "https://fullnode.mainnet.sui.io:443",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "mysten-labs",
+            ),
+            None,
+        ),
+        ("sui", Network::Devnet | Network::Regtest) => (
+            "local",
+            reviewed_endpoint(
+                "sui-local-json-rpc",
+                "http://127.0.0.1:9000",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "local",
+            ),
+            None,
+        ),
+        ("sui", Network::Testnet) => (
+            "testnet",
+            reviewed_endpoint(
+                "sui-testnet-fullnode",
+                "https://fullnode.testnet.sui.io:443",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "mysten-labs",
+            ),
+            None,
+        ),
+        ("aptos", Network::Mainnet) => (
+            "mainnet",
+            reviewed_endpoint(
+                "aptos-mainnet-fullnode",
+                "https://fullnode.mainnet.aptoslabs.com/v1",
+                RpcTransport::Rest,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "aptos-labs",
+            ),
+            None,
+        ),
+        ("aptos", Network::Devnet | Network::Regtest) => (
+            "local",
+            reviewed_endpoint(
+                "aptos-local-fullnode",
+                "http://127.0.0.1:8080",
+                RpcTransport::Rest,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "local",
+            ),
+            None,
+        ),
+        ("aptos", Network::Testnet) => (
+            "testnet",
+            reviewed_endpoint(
+                "aptos-testnet-fullnode",
+                "https://fullnode.testnet.aptoslabs.com/v1",
+                RpcTransport::Rest,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "aptos-labs",
+            ),
+            None,
+        ),
+        ("solana", Network::Mainnet) => (
+            "mainnet-beta",
+            reviewed_endpoint(
+                "solana-mainnet-foundation",
+                "https://api.mainnet-beta.solana.com",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "solana-foundation",
+            ),
+            None,
+        ),
+        ("solana", Network::Devnet | Network::Regtest) => (
+            "local",
+            reviewed_endpoint(
+                "solana-local-json-rpc",
+                "http://127.0.0.1:8899",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "local",
+            ),
+            None,
+        ),
+        ("solana", Network::Testnet) => (
+            "devnet",
+            reviewed_endpoint(
+                "solana-devnet-foundation",
+                "https://api.devnet.solana.com",
+                RpcTransport::JsonRpcHttp,
+                vec![
+                    RpcCapability::Read,
+                    RpcCapability::Broadcast,
+                    RpcCapability::Verify,
+                ],
+                "solana-foundation",
+            ),
+            None,
+        ),
+        _ => return ChainConfig::default(),
+    };
+    ChainConfig {
+        rpc: RpcConfig {
+            policy: Some(ChainRpcPolicy {
+                chain: chain.to_string(),
+                network: exact_network.to_string(),
+                selection: RpcSelectionMode::BuiltInOnly,
+                endpoints: vec![endpoint],
+            }),
+            ..RpcConfig::default()
+        },
+        ..ChainConfig::default()
+    }
+}
+
 /// Store backend configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "backend", rename_all = "lowercase")]
@@ -181,26 +452,35 @@ pub enum StoreConfig {
 
 /// Top-level CSV Adapter configuration.
 ///
-/// Can be loaded from a TOML file or constructed programmatically.
-/// Environment variables prefixed with `CSV_` override file values.
+/// Can be loaded from a TOML file or constructed programmatically. Loading is
+/// deterministic: process environment and `.env` files are never consulted.
 ///
 /// # Example TOML (`~/.csv/config.toml`)
 ///
+/// Endpoints are described by a typed policy (RFC-0013), never a bare URL: each
+/// endpoint declares its transport, capabilities, and provider so the transport
+/// is never guessed and credentials stay in a host keyring.
+///
 /// ```toml
 /// network = "testnet"
-///
-/// [chains.bitcoin]
-/// enabled = true
-/// finality_depth = 6
-/// [chains.bitcoin.rpc]
-/// url = "https://mempool.space/api"
-/// timeout_ms = 30000
 ///
 /// [chains.ethereum]
 /// enabled = true
 /// finality_depth = 12
 /// [chains.ethereum.rpc]
-/// url = "https://eth.llamarpc.com"
+/// timeout_ms = 30000
+/// max_retries = 3
+/// [chains.ethereum.rpc.policy]
+/// chain = "ethereum"
+/// network = "sepolia"
+/// selection = "user_only"
+/// [[chains.ethereum.rpc.policy.endpoints]]
+/// id = "my-eth-http"
+/// url = "https://rpc.example.net/eth"
+/// transport = "json_rpc_http"
+/// capabilities = ["read", "broadcast", "verify"]
+/// source = "user"
+/// provider = "self-hosted"
 ///
 /// [store]
 /// backend = "sqlite"
@@ -222,23 +502,66 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let mut chains = HashMap::new();
-        chains.insert("bitcoin".to_string(), ChainConfig::default());
-        chains.insert("ethereum".to_string(), ChainConfig::default());
-        chains.insert("sui".to_string(), ChainConfig::default());
-        chains.insert("aptos".to_string(), ChainConfig::default());
+        Self::for_network(Network::Testnet)
+    }
+}
 
+impl Config {
+    /// Construct reviewed endpoint defaults for an exact network family.
+    pub fn for_network(network: Network) -> Self {
+        let chains = ["bitcoin", "ethereum", "sui", "aptos", "solana"]
+            .into_iter()
+            .map(|chain| (chain.to_string(), reviewed_chain_config(chain, network)))
+            .collect();
         Self {
-            network: Network::Testnet,
+            network,
             chains,
             store: StoreConfig::default(),
             log_level: Some("info".to_string()),
             data_dir: None,
         }
     }
-}
 
-impl Config {
+    /// Build a reviewed built-in [`RpcConfig`] for a chain/network, applying
+    /// optional host overrides for the request and REST address-index endpoint
+    /// URLs.
+    ///
+    /// This is the single seam a host (CLI, service, container entrypoint) uses
+    /// to convert its own platform configuration — including values it may read
+    /// from a config file or process environment at the executable layer — into
+    /// the typed policy. Per-chain transport, capabilities, and provider identity
+    /// come from the reviewed registry, so the transport of an overridden URL is
+    /// taken from the endpoint it replaces and is never guessed from the string.
+    ///
+    /// Returns `None` for a chain that has no reviewed built-in policy.
+    pub fn builtin_rpc(
+        chain: &str,
+        network: Network,
+        request_url_override: Option<&str>,
+        indexer_url_override: Option<&str>,
+    ) -> Option<RpcConfig> {
+        let mut rpc = reviewed_chain_config(chain, network).rpc;
+        let policy = rpc.policy.as_mut()?;
+        if let Some(url) = request_url_override.map(str::trim).filter(|u| !u.is_empty()) {
+            if let Some(endpoint) = policy.endpoints.iter_mut().find(|endpoint| {
+                endpoint.capabilities.contains(&RpcCapability::Read)
+                    && endpoint.transport != RpcTransport::WebSocket
+            }) {
+                endpoint.url = url.to_string();
+            }
+        }
+        if let Some(url) = indexer_url_override.map(str::trim).filter(|u| !u.is_empty()) {
+            if let Some(endpoint) = policy
+                .endpoints
+                .iter_mut()
+                .find(|endpoint| endpoint.capabilities.contains(&RpcCapability::AddressIndex))
+            {
+                endpoint.url = url.to_string();
+            }
+        }
+        Some(rpc)
+    }
+
     /// Default configuration file path: `~/.csv/config.toml`.
     ///
     /// Returns `~/.csv/config.toml` on native targets.
@@ -264,66 +587,32 @@ impl Config {
     /// Load configuration from a TOML file.
     pub fn from_file(path: &PathBuf) -> Result<Self, crate::CsvError> {
         let content = std::fs::read_to_string(path)?;
-        let mut config: Config = toml::from_str(&content)?;
-        config.apply_env_overrides();
+        let config: Config = toml::from_str(&content)?;
+        config
+            .validate_rpc_policies()
+            .map_err(|error| crate::CsvError::ConfigError(error.to_string()))?;
         Ok(config)
     }
 
-    /// Load from the default path, falling back to defaults if the file
-    /// does not exist.
-    pub fn load() -> Self {
+    /// Load from the default path. A missing file yields reviewed defaults;
+    /// malformed or unsafe configuration is returned as an error.
+    pub fn load() -> Result<Self, crate::CsvError> {
         let path = Self::default_path();
-        Self::from_file(&path).unwrap_or_else(|_| {
-            let mut config = Self::default();
-            config.apply_env_overrides();
-            config
-        })
+        if path.exists() {
+            Self::from_file(&path)
+        } else {
+            Ok(Self::default())
+        }
     }
 
-    /// Apply environment variable overrides.
-    ///
-    /// Environment variables follow the pattern `CSV_<SECTION>_<KEY>`:
-    /// - `CSV_NETWORK` — override the global network
-    /// - `CSV_BITCOIN_RPC_URL` — override Bitcoin RPC URL
-    /// - `CSV_ETHEREUM_RPC_URL` — override Ethereum RPC URL
-    /// - `CSV_SUI_RPC_URL` — override Sui RPC URL
-    /// - `CSV_APTOS_RPC_URL` — override Aptos RPC URL
-    /// - `CSV_STORE_BACKEND` — override store backend ("sqlite" or "in-memory")
-    /// - `CSV_STORE_PATH` — override SQLite path
-    fn apply_env_overrides(&mut self) {
-        // Network override
-        if let Ok(val) = std::env::var("CSV_NETWORK") {
-            self.network = match val.to_lowercase().as_str() {
-                "mainnet" => Network::Mainnet,
-                "testnet" => Network::Testnet,
-                "devnet" => Network::Devnet,
-                "regtest" => Network::Regtest,
-                _ => self.network,
-            };
-        }
-
-        // Per-chain RPC overrides
-        for (name, chain_cfg) in self.chains.iter_mut() {
-            let env_key = format!("CSV_{}_RPC_URL", name.to_uppercase());
-            if let Ok(url) = std::env::var(&env_key) {
-                chain_cfg.rpc.url = url;
-                chain_cfg.enabled = true;
+    /// Validate every typed RPC policy in the configuration.
+    pub fn validate_rpc_policies(&self) -> Result<(), RpcPolicyError> {
+        for chain in self.chains.values() {
+            if let Some(policy) = &chain.rpc.policy {
+                policy.validate()?;
             }
         }
-
-        // Store backend override
-        if let Ok(backend) = std::env::var("CSV_STORE_BACKEND") {
-            match backend.to_lowercase().as_str() {
-                "sqlite" => {
-                    let path = std::env::var("CSV_STORE_PATH")
-                        .unwrap_or_else(|_| "~/.csv/data.db".to_string());
-                    self.store = StoreConfig::Sqlite { path };
-                }
-                _ => {
-                    self.store = StoreConfig::InMemory;
-                }
-            }
-        }
+        Ok(())
     }
 
     /// Get the RPC configuration for a specific chain.
@@ -332,18 +621,178 @@ impl Config {
         self.chains.get(&name).map(|c| &c.rpc)
     }
 
+    /// Resolve the single request endpoint URL consumed by concrete adapters.
+    ///
+    /// The typed policy is the sole authority. A chain without a policy, or with
+    /// no request-capable (non-WebSocket, `Read`) endpoint under its selection
+    /// mode, is a fail-closed error — never an environment or hard-coded
+    /// fallback.
+    pub fn required_request_url(&self, chain: &str) -> Result<String, crate::CsvError> {
+        let policy = self
+            .chains
+            .get(chain)
+            .and_then(|config| config.rpc.policy.as_ref())
+            .ok_or_else(|| crate::CsvError::ConfigError(format!("missing {chain} RPC policy")))?;
+        let endpoint = policy
+            .candidates(RpcCapability::Read)
+            .map_err(|error| crate::CsvError::ConfigError(error.to_string()))?
+            .into_iter()
+            .find(|endpoint| endpoint.transport != RpcTransport::WebSocket)
+            .ok_or_else(|| {
+                crate::CsvError::ConfigError(format!("{chain} has no request-capable RPC endpoint"))
+            })?;
+        Ok(endpoint.url.clone())
+    }
+
+    /// Resolve the REST address-index (esplora-dialect) endpoint URL for a chain
+    /// from the typed policy, if one is configured. Address indexing is a
+    /// distinct REST capability (RFC-0013); a JSON-RPC request endpoint does not
+    /// satisfy it, so this returns `None` rather than falling back to the request
+    /// URL.
+    pub fn indexer_url(&self, chain: &str) -> Option<String> {
+        let policy = self.chains.get(chain)?.rpc.policy.as_ref()?;
+        policy
+            .candidates(RpcCapability::AddressIndex)
+            .ok()?
+            .into_iter()
+            .find(|endpoint| endpoint.transport == RpcTransport::Rest)
+            .map(|endpoint| endpoint.url.clone())
+    }
+
+    /// Return deterministic endpoint candidates for a chain capability.
+    pub fn rpc_candidates(
+        &self,
+        chain: ChainId,
+        capability: RpcCapability,
+    ) -> Result<Vec<&RpcEndpoint>, RpcPolicyError> {
+        let name = chain.to_string();
+        let policy = self
+            .chains
+            .get(&name)
+            .and_then(|config| config.rpc.policy.as_ref())
+            .ok_or(RpcPolicyError::NoCandidate {
+                capability,
+                selection: RpcSelectionMode::BuiltInOnly,
+            })?;
+        policy.candidates(capability)
+    }
+
     /// Check if a chain is enabled in the configuration.
     pub fn is_chain_enabled(&self, chain: ChainId) -> bool {
         let name = chain.to_string();
         self.chains.get(&name).map(|c| c.enabled).unwrap_or(false)
     }
 
-    /// Set the RPC URL for a specific chain.
-    pub fn with_rpc_url(mut self, chain: ChainId, url: impl Into<String>) -> Self {
+    /// Inject a typed user endpoint for a chain.
+    ///
+    /// Injection always switches that chain to strict user-only selection. The
+    /// caller must explicitly call [`Self::with_rpc_selection`] to permit a
+    /// fallback to reviewed built-in endpoints.
+    pub fn with_rpc_endpoint(
+        mut self,
+        chain: ChainId,
+        network: impl Into<String>,
+        endpoint: RpcEndpoint,
+    ) -> Result<Self, RpcPolicyError> {
+        if endpoint.source != RpcEndpointSource::User {
+            return Err(RpcPolicyError::InvalidEndpoint(
+                "wallet/operator injection requires source = user".to_string(),
+            ));
+        }
         let name = chain.to_string();
-        let entry = self.chains.entry(name).or_default();
-        entry.rpc.url = url.into();
+        let network = network.into();
+        let entry = self.chains.entry(name.clone()).or_default();
+        if let Some(policy) = &entry.rpc.policy
+            && policy.network != network
+        {
+            return Err(RpcPolicyError::InvalidEndpoint(format!(
+                "cannot inject {network} endpoint into {} policy",
+                policy.network
+            )));
+        }
+        let policy = entry.rpc.policy.get_or_insert_with(|| ChainRpcPolicy {
+            chain: name,
+            network,
+            selection: RpcSelectionMode::UserOnly,
+            endpoints: Vec::new(),
+        });
+        policy.use_user_endpoint(endpoint)?;
         entry.enabled = true;
-        self
+        Ok(self)
+    }
+
+    /// Set endpoint source/fallback behavior explicitly for one chain.
+    pub fn with_rpc_selection(
+        mut self,
+        chain: ChainId,
+        selection: RpcSelectionMode,
+    ) -> Result<Self, RpcPolicyError> {
+        let name = chain.to_string();
+        let policy = self
+            .chains
+            .get_mut(&name)
+            .and_then(|config| config.rpc.policy.as_mut())
+            .ok_or(RpcPolicyError::NoCandidate {
+                capability: RpcCapability::Read,
+                selection,
+            })?;
+        policy.selection = selection;
+        policy.validate()?;
+        Ok(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_endpoint_updates_policy_and_resolves_request_url() {
+        let endpoint = RpcEndpoint {
+            id: "my-solana".to_string(),
+            url: "https://rpc.example.test".to_string(),
+            transport: RpcTransport::JsonRpcHttp,
+            capabilities: vec![RpcCapability::Read, RpcCapability::Broadcast],
+            source: RpcEndpointSource::User,
+            provider: "self-hosted".to_string(),
+            priority: 0,
+            credential: None,
+        };
+        let config = Config::default()
+            .with_rpc_endpoint(ChainId::new("solana"), "devnet", endpoint)
+            .expect("valid endpoint");
+        let chain = config.chains.get("solana").expect("chain created");
+        assert!(chain.enabled);
+        assert_eq!(
+            chain.rpc.policy.as_ref().expect("policy").selection,
+            RpcSelectionMode::UserOnly
+        );
+        // The typed policy is the sole authority: the request URL resolves from
+        // the injected user endpoint, not a scalar field.
+        assert_eq!(
+            config.required_request_url("solana").expect("request url"),
+            "https://rpc.example.test"
+        );
+    }
+
+    #[test]
+    fn websocket_injection_yields_no_request_endpoint() {
+        let endpoint = RpcEndpoint {
+            id: "my-solana-ws".to_string(),
+            url: "wss://rpc.example.test".to_string(),
+            transport: RpcTransport::WebSocket,
+            capabilities: vec![RpcCapability::Subscribe],
+            source: RpcEndpointSource::User,
+            provider: "self-hosted".to_string(),
+            priority: 0,
+            credential: None,
+        };
+        let config = Config::default()
+            .with_rpc_endpoint(ChainId::new("solana"), "devnet", endpoint)
+            .expect("valid endpoint");
+        // A subscribe-only WebSocket endpoint under strict user-only selection
+        // leaves no request-capable endpoint, and there is no scalar URL to fall
+        // back to: request resolution fails closed.
+        assert!(config.required_request_url("solana").is_err());
     }
 }

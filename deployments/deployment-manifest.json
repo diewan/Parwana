@@ -8,7 +8,8 @@
     "ethereum": {
       "network": "sepolia",
       "chain_id": 11155111,
-      "deployment_block": "11084747",
+      "deployment_block": "11225104",
+      "deployment_block_note": "Reconciled 2026-07-15 (RPC-006). deployment_block is the block that mined the active CSVSeal deployment tx and now equals contracts[CSVSeal].block_number; the prior value 11084747 referred to a superseded deploy attempt. The 2026-07-14 testnet audit confirmed 11225104 (tx 0x8c2179...ab217) as the live deployment. Each contract's block_number remains the per-contract authority.",
       "deployment_timestamp": "2026-06-18T17:21:00Z",
       "verified": false,
       "contracts": [

@@ -282,14 +282,7 @@ pub(super) async fn build_client(
         };
 
         let chain_config = csv_sdk::config::ChainConfig {
-            rpc: csv_sdk::config::RpcConfig {
-                url: from_chain_config.rpc_url.clone(),
-                indexer_url: from_chain_config.indexer_url.clone(),
-                indexer_backend: from_chain_config.indexer_backend.clone(),
-                api_key: None,
-                timeout_ms: 30000,
-                max_retries: 3,
-            },
+            rpc: crate::config::sdk_rpc_config(from.as_str(), from_chain_config),
             finality_depth: finality_depth.unwrap_or(from_chain_config.finality_depth) as u32,
             enabled: true,
             xpub: None,
@@ -327,14 +320,7 @@ pub(super) async fn build_client(
     // Destination chain config.
     if let Ok(to_chain_config) = config.chain(to) {
         let chain_config = csv_sdk::config::ChainConfig {
-            rpc: csv_sdk::config::RpcConfig {
-                url: to_chain_config.rpc_url.clone(),
-                indexer_url: to_chain_config.indexer_url.clone(),
-                indexer_backend: to_chain_config.indexer_backend.clone(),
-                api_key: None,
-                timeout_ms: 30000,
-                max_retries: 3,
-            },
+            rpc: crate::config::sdk_rpc_config(to.as_str(), to_chain_config),
             finality_depth: to_chain_config.finality_depth as u32,
             enabled: true,
             xpub: None,
@@ -2145,12 +2131,18 @@ async fn lock_and_mint(
     if let Ok(from_chain_config) = config.chain(&from) {
         sdk_config_check
             .chains
-            .insert(from.to_string(), capability_chain_config(from_chain_config));
+            .insert(
+                from.to_string(),
+                capability_chain_config(from.as_str(), from_chain_config),
+            );
     }
     if let Ok(to_chain_config) = config.chain(&to) {
         sdk_config_check
             .chains
-            .insert(to.to_string(), capability_chain_config(to_chain_config));
+            .insert(
+                to.to_string(),
+                capability_chain_config(to.as_str(), to_chain_config),
+            );
     }
 
     let check_client = CsvClient::builder()
@@ -2523,17 +2515,11 @@ fn runtime_journal_path(config: &Config) -> PathBuf {
 
 /// Minimal chain config used only for capability probing (no wallet material).
 fn capability_chain_config(
+    chain: &str,
     chain_config: &crate::config::ChainConfig,
 ) -> csv_sdk::config::ChainConfig {
     csv_sdk::config::ChainConfig {
-        rpc: csv_sdk::config::RpcConfig {
-            url: chain_config.rpc_url.clone(),
-            indexer_url: chain_config.indexer_url.clone(),
-            indexer_backend: chain_config.indexer_backend.clone(),
-            api_key: None,
-            timeout_ms: 30000,
-            max_retries: 3,
-        },
+        rpc: crate::config::sdk_rpc_config(chain, chain_config),
         finality_depth: chain_config.finality_depth as u32,
         enabled: true,
         xpub: None,

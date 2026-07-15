@@ -53,6 +53,7 @@ pub mod content_tree;
 pub mod encryption;
 pub mod manifest;
 pub mod participants;
+pub mod recipient_wrap;
 pub mod resource_accounting;
 pub mod selective_disclosure;
 
@@ -84,6 +85,11 @@ pub use selective_disclosure::{DisclosureProof, EncryptedSubtreeProof, RedactedM
 
 // Re-exports from encryption
 pub use encryption::{EncryptionDescriptor, EncryptionEnvelope, KeyAccess};
+
+// Re-exports from recipient_wrap (RPC-007)
+pub use recipient_wrap::{
+    RecipientPublicKey, RecipientSecretKey, RecipientWrapSet, SealedObject, WrapError, WrappedKey,
+};
 
 // Re-exports from resource_accounting
 pub use resource_accounting::{ResourceError, VerificationCost as ResourceCost, VerificationLimit};
