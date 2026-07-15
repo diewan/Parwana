@@ -276,7 +276,7 @@ impl<'a> BcsCursor<'a> {
 /// Sui chain operations implementation
 ///
 /// This struct provides complete implementations of all chain operation traits
-/// for the Sui blockchain, enabling production use of the CSV protocol.
+/// for the Sui blockchain, enabling production use of the Parwana.
 pub struct SuiBackend {
     /// Chain configuration
     config: SuiConfig,

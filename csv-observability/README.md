@@ -1,10 +1,10 @@
 # csv-observability
 
-Observability utilities for the CSV Protocol — metrics collection and structured logging.
+Observability utilities for the Parwana — metrics collection and structured logging.
 
 ## Overview
 
-`csv-observability` provides observability primitives for the CSV protocol, including metrics collection and structured logging integration.
+`csv-observability` provides observability primitives for the Parwana, including metrics collection and structured logging integration.
 
 ## Features
 

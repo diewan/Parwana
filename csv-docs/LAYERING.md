@@ -1,8 +1,8 @@
-# CSV Protocol Layering System
+# Parwana Layering System
 
 ## Overview
 
-The CSV protocol uses a layered type system to enforce canonical encoding rules and prevent serialization bugs that could lead to hash collisions or protocol divergence. Each layer has specific encoding requirements and serde policies that must be followed.
+The Parwana uses a layered type system to enforce canonical encoding rules and prevent serialization bugs that could lead to hash collisions or protocol divergence. Each layer has specific encoding requirements and serde policies that must be followed.
 
 ## Layer Definitions
 

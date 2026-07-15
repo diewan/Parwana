@@ -3,7 +3,7 @@
  * CSV MCP Server — AI Agent Integration
  *
  * Enables AI agents (Claude, GPT-4, LangChain, AutoGPT, custom agents) to
- * operate CSV protocol workflows through the Model Context Protocol (MCP).
+ * operate Parwana workflows through the Model Context Protocol (MCP).
  *
  * SECURITY CONTRACT:
  *   - No tool bypasses TransferCoordinator.

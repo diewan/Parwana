@@ -4,7 +4,7 @@
 
 use crate::error::CodecError;
 
-/// Current CSV protocol version
+/// Current Parwana version
 pub const PROTOCOL_VERSION_MAJOR: u16 = 1;
 #[allow(missing_docs)]
 pub const PROTOCOL_VERSION_MINOR: u16 = 0;

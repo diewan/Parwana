@@ -1,11 +1,11 @@
 //! Hash Registry - Domain-separated hash types
 //!
-//! This module provides a registry of hash domains for the CSV protocol.
+//! This module provides a registry of hash domains for the Parwana.
 //! Each domain has a unique tag to prevent cross-domain hash collisions.
 //!
 //! # Hash Domains
 //!
-//! The CSV protocol uses domain-separated hashing to prevent cross-protocol
+//! The Parwana uses domain-separated hashing to prevent cross-protocol
 //! binding attacks. Each hash domain has a unique tag that is prepended to
 //! the data before hashing.
 //!
@@ -17,7 +17,7 @@
 
 use crate::Hash;
 
-/// Typed hash domain tags for CSV protocol (distinct from hash_registry::HashDomain)
+/// Typed hash domain tags for Parwana (distinct from hash_registry::HashDomain)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypedHashDomain {
     /// Sanad header hash

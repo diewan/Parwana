@@ -1,10 +1,10 @@
 # csv-celestia
 
-Celestia adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend` traits for Celestia data availability seals.
+Celestia adapter for the Parwana — implements `SealProtocol` and `ChainBackend` traits for Celestia data availability seals.
 
 ## Overview
 
-`csv-celestia` provides the Celestia-specific implementation of the CSV Protocol chain adapter interface, enabling data availability operations and proof generation on the Celestia network.
+`csv-celestia` provides the Celestia-specific implementation of the Parwana chain adapter interface, enabling data availability operations and proof generation on the Celestia network.
 
 ## Roadmap Decision
 

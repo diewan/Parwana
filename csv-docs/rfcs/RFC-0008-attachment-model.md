@@ -1,7 +1,7 @@
 # RFC-0008: Attachment Model with Resource Accounting
 
 **Status:** Proposed
-**Author:** CSV Protocol Core Team
+**Author:** Parwana Core Team
 **Date:** 2026-05-21
 **Version:** 1.0.0
 

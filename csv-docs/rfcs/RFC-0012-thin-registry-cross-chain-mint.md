@@ -22,7 +22,7 @@ There are three distinct models available:
 
 This RFC chooses the third model and makes it the protocol rule.
 
-The reason this must be explicit is architectural, not tactical. The rest of the CSV protocol already treats proofs as portable artifacts verified outside the destination contract. `ProofBundle`, finality rules, replay policy, and canonical verification all point in that direction. A destination contract that attempts to re-adjudicate the proof using a separate trusted-root mechanism creates a second source of truth.
+The reason this must be explicit is architectural, not tactical. The rest of the Parwana already treats proofs as portable artifacts verified outside the destination contract. `ProofBundle`, finality rules, replay policy, and canonical verification all point in that direction. A destination contract that attempts to re-adjudicate the proof using a separate trusted-root mechanism creates a second source of truth.
 
 That second source of truth is undesirable even before deployment:
 
@@ -41,7 +41,7 @@ CSV follows RGB. A transfer exposes **two user-selectable modes, chosen per tran
 
 2. **Materialization (optional on-chain object).** The sanad is materialized as a first-class on-chain object on the destination chain (registry entry usable by destination-chain contracts). This mode uses the thin-registry mint defined in the rest of this RFC. Its authenticity evolves along a fixed seam:
    - interim: verifier-signed attestation (§9) — a trusted attestor, stated as temporary
-   - target: **zero-knowledge proof** — the attestor is replaced by an untrusted prover; the destination contract verifies a succinct proof of (a) source-chain inclusion/finality and (b) CSV protocol validity, materializing trustlessly. The ZK proof-carrying types already exist (`Proof::ZK`, `InclusionProof::ZkSeal`, `ZkPublicInputs`, `ZkHeader`).
+   - target: **zero-knowledge proof** — the attestor is replaced by an untrusted prover; the destination contract verifies a succinct proof of (a) source-chain inclusion/finality and (b) Parwana validity, materializing trustlessly. The ZK proof-carrying types already exist (`Proof::ZK`, `InclusionProof::ZkSeal`, `ZkPublicInputs`, `ZkHeader`).
 
 The attestor is therefore **not** a permanent correctness dependency of CSV. It exists only on the materialization mode's on-chain path, only until the ZK prover lands, and never on the interactive mode. Sections 1–10 below specify the materialization mode's on-chain registry and its authenticity seam; they do not apply to the interactive mode.
 

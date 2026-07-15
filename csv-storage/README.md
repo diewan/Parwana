@@ -1,10 +1,10 @@
 # csv-storage
 
-Storage traits and backends (RocksDB, PostgreSQL, in-memory) for CSV Protocol.
+Storage traits and backends (RocksDB, PostgreSQL, in-memory) for Parwana.
 
 ## Overview
 
-`csv-storage` provides storage abstraction and implementations for the CSV protocol, including replay databases, transfer registries, and event stores.
+`csv-storage` provides storage abstraction and implementations for the Parwana, including replay databases, transfer registries, and event stores.
 
 ## Key Features
 

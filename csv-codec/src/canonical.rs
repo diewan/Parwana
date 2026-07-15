@@ -1,4 +1,4 @@
-//! Canonical serialization primitives for CSV Protocol
+//! Canonical serialization primitives for Parwana
 //!
 //! All proof payloads, sanad envelopes, and commitment inputs MUST use
 //! these functions. Raw serde JSON is forbidden in any hashing path.
@@ -13,12 +13,12 @@
 use crate::error::CodecError;
 use ciborium::value::{CanonicalValue, Value};
 
-/// CBOR tag range reserved for CSV protocol types (0x1C0–0x1FF = 448–511)
+/// CBOR tag range reserved for Parwana types (0x1C0–0x1FF = 448–511)
 pub const CBOR_TAG_RANGE_START: u64 = 448;
 /// Last CBOR tag in the CSV reserved range (inclusive).
 pub const CBOR_TAG_RANGE_END: u64 = 511;
 
-/// CBOR tags for CSV protocol types
+/// CBOR tags for Parwana types
 pub mod cbor_tags {
     /// ProofBundle CBOR tag
     pub const PROOF_BUNDLE: u64 = 448;

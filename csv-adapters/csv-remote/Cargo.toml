@@ -1,0 +1,49 @@
+[package]
+name = "csv-remote"
+version = "0.1.5"
+edition = "2024"
+description = "Remote chain-dispatch adapter for CSV — forwards adapter port calls to a user-owned native host (WASM-REMOTE-001)"
+license = "MIT OR Apache-2.0"
+authors = ["Amin Razavi"]
+repository = "https://github.com/diewan/parwana"
+homepage = "https://github.com/diewan/parwana"
+documentation = "https://docs.rs/csv-remote"
+readme = "README.md"
+keywords = ["blockchain", "cryptography", "csv-validation", "wasm", "remote"]
+categories = ["cryptography::cryptocurrencies"]
+publish = true
+rust-version.workspace = true
+
+[dependencies]
+csv-chain-ports = { version = "0.1.5", path = "../../csv-chain-ports" }
+csv-wire = { version = "0.1.5", path = "../../csv-wire" }
+csv-codec = { version = "0.1.5", path = "../../csv-codec" }
+csv-protocol = { version = "0.1.5", path = "../../csv-protocol" }
+csv-hash = { version = "0.1.5", path = "../../csv-hash" }
+async-trait = { workspace = true }
+
+# HTTP transport. reqwest's fetch backend keeps the crate wasm-clean; on native
+# it uses the workspace reqwest (with TLS). Transport is fully async — no block_on.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+reqwest = { version = "0.12", default-features = false, optional = true }
+# On wasm the reqwest fetch backend's client/response are `!Send`. wasm is
+# single-threaded, so wrapping them in SendWrapper is sound and lets the
+# transport satisfy the `Send` bound the ChainAdapter port requires. Never used
+# on native (where it would be unsound under multi-threaded executors).
+send_wrapper = { version = "0.6", features = ["futures"], optional = true }
+
+[features]
+default = ["http"]
+# Bundled reqwest HTTP transport for the client adapter. `send_wrapper` is only
+# a real dependency on wasm (target-scoped); enabling it here is a no-op on
+# native.
+http = ["dep:reqwest", "dep:send_wrapper"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "sync"] }
+
+[lints]
+workspace = true

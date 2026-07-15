@@ -1,6 +1,6 @@
 //! CSV Observability
 //!
-//! This crate provides observability features for the CSV Protocol,
+//! This crate provides observability features for the Parwana,
 //! including metrics, logging, and monitoring.
 
 pub mod logging;

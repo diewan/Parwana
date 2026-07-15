@@ -55,7 +55,7 @@ prompt_step() {
 }
 
 echo "=============================================="
-echo "  CSV Protocol CLI - Content Management Demo"
+echo "  Parwana CLI - Content Management Demo"
 echo "=============================================="
 echo ""
 echo "This tutorial demonstrates content tree operations including creation,"

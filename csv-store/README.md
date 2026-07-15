@@ -1,10 +1,10 @@
 # csv-store
 
-Persistence layer for the CSV Protocol — seal storage, anchor storage, and replay registry.
+Persistence layer for the Parwana — seal storage, anchor storage, and replay registry.
 
 ## Overview
 
-`csv-store` provides persistence backends for CSV protocol data, supporting multiple storage engines for different deployment scenarios.
+`csv-store` provides persistence backends for Parwana data, supporting multiple storage engines for different deployment scenarios.
 
 ## Features
 
@@ -19,7 +19,7 @@ Persistence layer for the CSV Protocol — seal storage, anchor storage, and rep
 
 - **Domain types**: Sanads, transfers, contracts, seals, proofs, transactions (see `state/domain.rs`)
 - **Storage backends**: Pluggable storage implementations (see `state/backend.rs`)
-- **State management**: Unified storage interface for all CSV protocol state (see `state/storage.rs`)
+- **State management**: Unified storage interface for all Parwana state (see `state/storage.rs`)
 
 The legacy `SqliteSealStore` implementation has been retired in favor of the unified state module architecture. The state module provides a cleaner abstraction that supports multiple backends (SQLite, filesystem, browser IndexedDB) through a common interface.
 

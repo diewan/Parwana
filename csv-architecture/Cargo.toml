@@ -3,7 +3,7 @@ name = "csv-architecture"
 version = "0.1.5"
 edition = "2024"
 rust-version.workspace = true
-description = "Architecture guardrails for the CSV Protocol workspace"
+description = "Architecture guardrails for the Parwana workspace"
 license = "MIT OR Apache-2.0"
 publish = false
 

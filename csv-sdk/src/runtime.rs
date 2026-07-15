@@ -47,6 +47,7 @@ use sha2::Digest as Sha2Digest;
 #[allow(unused_imports)]
 use sha3::Digest;
 
+use csv_chain_ports::{ChainAdapter, CrossChainTransfer, LockResult};
 use csv_hash::Hash;
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
@@ -55,6 +56,7 @@ use csv_protocol::chain_adapter_traits::{
     SanadOperationResult, SealOwnershipTarget, TransactionInfo, TransactionStatus,
 };
 use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_runtime::adapter_registry::AdapterRegistryImpl;
 
 use crate::client::ClientRef;
 use crate::error::CsvError;
@@ -76,6 +78,7 @@ use crate::error::CsvError;
 pub struct ChainRuntime {
     client: Arc<ClientRef>,
     adapters: Arc<Mutex<HashMap<ChainId, Arc<dyn ChainBackend>>>>,
+    adapter_registry: Arc<std::sync::Mutex<Option<Arc<std::sync::Mutex<AdapterRegistryImpl>>>>>,
 }
 
 /// Pre-fetched seal consumption data for verification.
@@ -90,6 +93,7 @@ impl ChainRuntime {
         Self {
             client,
             adapters: Arc::new(Mutex::new(HashMap::new())),
+            adapter_registry: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -104,7 +108,24 @@ impl ChainRuntime {
         Self {
             client,
             adapters: Arc::new(Mutex::new(adapters)),
+            adapter_registry: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    /// Attach the chain-neutral adapter registry used by the coordinator.
+    ///
+    /// Proof generation obtains an adapter handle before awaiting any RPC, so
+    /// the registry lock is never held across network I/O.
+    pub(crate) fn set_adapter_registry(
+        &self,
+        adapter_registry: Arc<std::sync::Mutex<AdapterRegistryImpl>>,
+    ) -> Result<(), CsvError> {
+        let mut registry = self
+            .adapter_registry
+            .lock()
+            .map_err(|e| CsvError::Generic(format!("Failed to configure adapter registry: {e}")))?;
+        *registry = Some(adapter_registry);
+        Ok(())
     }
 
     /// Register a chain adapter for the given chain.
@@ -595,9 +616,8 @@ impl ChainRuntime {
     ///    exist and be confirmed) before use. The hint is a lookup key, never
     ///    authority; the adapter's `build_inclusion_proof` independently re-fetches
     ///    the receipt/accumulator evidence and binds it to the sanad.
-    /// 3. Otherwise the chain tip is used as a last resort, which the adapter's own
-    ///    `build_inclusion_proof` then rejects (fails closed) rather than
-    ///    fabricating a tip-anchored proof.
+    /// 3. Without either mapping or hint, proof generation fails closed. A chain
+    ///    tip is never an anchor transaction and must not be substituted here.
     ///
     /// # Security
     /// - Fetches real inclusion proof from chain state
@@ -654,112 +674,77 @@ impl ChainRuntime {
                             hint.anchor_tx_hex
                         ),
                     })?;
-                    let anchor_bytes = hex::decode(hint.anchor_tx_hex.trim_start_matches("0x"))
-                        .map_err(|e| CsvError::ProtocolError {
-                            chain: chain.clone(),
-                            message: format!(
-                                "Invalid anchor transaction hex {}: {e}",
-                                hint.anchor_tx_hex
-                            ),
-                        })?;
+                    // The chain-neutral transfer context preserves the
+                    // chain-native transaction identifier verbatim. Ethereum,
+                    // Aptos, and Sui commonly use hex; Solana uses base58. The
+                    // runtime adapter consumes `LockResult::tx_hash`, so this
+                    // field is context only and must not impose a false hex-only
+                    // constraint on a confirmed Solana signature.
+                    let anchor_bytes = hint.anchor_tx_hex.as_bytes().to_vec();
                     (block_height, anchor_bytes, Some(hint.anchor_tx_hex))
                 }
                 None => {
-                    let tip = adapter.get_latest_block_height().await.map_err(|e| {
-                        CsvError::ProtocolError {
-                            chain: chain.clone(),
-                            message: format!("Failed to get latest block height: {}", e),
-                        }
-                    })?;
-                    (tip, sanad_id.as_bytes().to_vec(), None)
+                    return Err(CsvError::ProtocolError {
+                        chain: chain.clone(),
+                        message: "No confirmed sanad anchor is known. Supply the real lock transaction hash or create the sanad through this client so its anchor is recorded.".to_string(),
+                    });
                 }
             },
         };
 
-        // Create commitment from sanad_id (the sanad's hash is the commitment)
-        let commitment = csv_hash::Hash::new(*sanad_id.as_bytes());
-
-        // Build inclusion proof from chain state, against the resolved anchor.
-        let inclusion_proof = adapter
-            .build_inclusion_proof(&commitment, block_height, &anchor_id_bytes)
+        let tx_hash = resolved_tx_hash.ok_or_else(|| CsvError::ProtocolError {
+            chain: chain.clone(),
+            message:
+                "No confirmed sanad anchor was resolved; provide the real lock transaction hash"
+                    .to_string(),
+        })?;
+        let registry = self
+            .adapter_registry
+            .lock()
+            .map_err(|e| CsvError::Generic(format!("Failed to access adapter registry: {e}")))?
+            .clone()
+            .ok_or_else(|| CsvError::ProtocolError {
+                chain: chain.clone(),
+                message:
+                    "Runtime adapter registry is unavailable; cannot build a receipt-backed proof"
+                        .to_string(),
+            })?;
+        let proof_adapter: Arc<dyn ChainAdapter> = registry
+            .lock()
+            .map_err(|e| CsvError::Generic(format!("Failed to access adapter registry: {e}")))?
+            .adapter_for(chain.as_str())
+            .map_err(|e| CsvError::ProtocolError {
+                chain: chain.clone(),
+                message: format!("No runtime proof adapter is available: {e}"),
+            })?;
+        let transfer = CrossChainTransfer {
+            id: format!("proof-generation:{}", hex::encode(sanad_id.as_bytes())),
+            source_chain: chain.as_str().to_string(),
+            destination_chain: chain.as_str().to_string(),
+            lock_tx_hash: anchor_id_bytes,
+            lock_output_index: 0,
+            sanad_id: Hash::new(*sanad_id.as_bytes()),
+            transition_id: Vec::new(),
+        };
+        let proof_bundle = proof_adapter
+            .build_inclusion_proof(
+                &transfer,
+                &LockResult {
+                    tx_hash,
+                    block_height,
+                },
+            )
             .await
             .map_err(|e| CsvError::ProtocolError {
                 chain: chain.clone(),
-                message: format!("Failed to build inclusion proof: {}", e),
+                message: format!("Failed to build receipt-backed inclusion proof: {e}"),
             })?;
-
-        // Finality proof over the resolved anchor transaction. With a resolved
-        // anchor we use its hash directly; otherwise fall back to the legacy
-        // sanad-id lookup (which itself fails closed on non-resolving adapters).
-        let tx_hash = match resolved_tx_hash {
-            Some(hash) => hash,
-            None => {
-                let tx_hash_lookup = hex::encode(sanad_id.as_bytes());
-                adapter
-                    .get_transaction(tx_hash_lookup.as_str())
-                    .await
-                    .map_err(|e| CsvError::ProtocolError {
-                        chain: chain.clone(),
-                        message: format!("Failed to load proof anchor transaction: {e}"),
-                    })?
-                    .hash
-            }
-        };
-
-        // Build finality proof using the transaction hash
-        let finality_proof =
-            adapter
-                .build_finality_proof(&tx_hash)
-                .await
-                .map_err(|e| CsvError::ProtocolError {
-                    chain: chain.clone(),
-                    message: format!("Failed to build finality proof: {}", e),
-                })?;
-
-        // Create a simple DAG segment with the sanad commitment
-        use csv_hash::dag::{DAGNode, DAGSegment};
-        let dag_node = DAGNode::new(
-            commitment,
-            vec![], // No inputs for lock operation
-            vec![], // No signatures yet - added later
-            vec![], // No outputs yet
-            vec![], // No state transitions yet
-        );
-        let dag_segment = DAGSegment::new(vec![dag_node], commitment);
-
-        // Create the proof bundle
-        let seal_id = sanad_id.as_bytes().to_vec();
-        let proof_bundle = ProofBundle::new(
-            dag_segment,
-            vec![], // Signatures will be added by the caller
-            csv_hash::seal::SealPoint::new(seal_id.clone(), None, None).map_err(|e| {
-                CsvError::ProtocolError {
-                    chain: chain.clone(),
-                    message: format!("Failed to create seal ref: {}", e),
-                }
-            })?,
-            csv_hash::seal::CommitAnchor::new(
-                seal_id,
-                block_height,
-                inclusion_proof.proof_bytes.clone(),
-            )
-            .map_err(|e| CsvError::ProtocolError {
-                chain: chain.clone(),
-                message: format!("Failed to create anchor ref: {}", e),
-            })?,
-            inclusion_proof,
-            finality_proof,
-        )
-        .map_err(|e| CsvError::ProtocolError {
-            chain: chain.clone(),
-            message: format!("Failed to create proof bundle: {}", e),
-        })?;
 
         log::info!(
             "Generated proof bundle for sanad {:?} on {:?} at block {}",
             sanad_id,
             chain.clone(),
-            block_height
+            proof_bundle.anchor_ref.block_height
         );
 
         Ok(proof_bundle)

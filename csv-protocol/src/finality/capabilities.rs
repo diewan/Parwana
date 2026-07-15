@@ -82,7 +82,7 @@ pub enum ReorgRisk {
     None,
 }
 
-/// A chain's role in the CSV protocol architecture.
+/// A chain's role in the Parwana architecture.
 /// Celestia is DA, not Settlement. This distinction must be enforced.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ChainRole {

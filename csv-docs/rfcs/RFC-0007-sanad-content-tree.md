@@ -1,7 +1,7 @@
 # RFC-0007: Sanad Content Tree with Selective Disclosure
 
 **Status:** Proposed
-**Author:** CSV Protocol Core Team
+**Author:** Parwana Core Team
 **Date:** 2026-05-21
 **Version:** 1.0.0
 

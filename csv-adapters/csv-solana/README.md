@@ -1,10 +1,10 @@
 # csv-solana
 
-Solana chain adapter for CSV Protocol.
+Solana chain adapter for Parwana.
 
 ## Overview
 
-`csv-solana` provides the Solana-specific implementation of the CSV Protocol chain adapter interface, enabling seal operations, proof generation, and minting on the Solana blockchain.
+`csv-solana` provides the Solana-specific implementation of the Parwana chain adapter interface, enabling seal operations, proof generation, and minting on the Solana blockchain.
 
 ## Key Features
 
@@ -63,7 +63,7 @@ let proof = backend.generate_proof(&seal).await?;
 ## Design Principles
 
 - **Solana-native**: Follows Solana conventions
-- **Protocol-compliant**: Implements CSV protocol correctly
+- **Protocol-compliant**: Implements Parwana correctly
 - **Efficient**: Minimizes RPC calls
 - **Error-handling**: Comprehensive error types
 

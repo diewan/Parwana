@@ -1,6 +1,6 @@
 # csv-coordinator
 
-Per-chain execution cells with isolated failure domains for CSV Protocol.
+Per-chain execution cells with isolated failure domains for Parwana.
 
 ## Overview
 

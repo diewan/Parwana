@@ -1,7 +1,7 @@
 #![allow(unexpected_cfgs)]
 #![allow(clippy::let_and_return)]
 #![allow(clippy::collapsible_if)]
-//! P2P proof transport layer for the CSV protocol.
+//! P2P proof transport layer for the Parwana.
 //!
 //! This crate provides traits and implementations for distributing proof
 //! bundles across peer-to-peer networks using Nostr as the primary transport.
@@ -178,7 +178,7 @@ pub trait ConsignmentTransport: Send + Sync {
     async fn disconnect(&self);
 }
 
-/// Default Nostr relays used by the CSV protocol.
+/// Default Nostr relays used by the Parwana.
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
     "wss://nos.lol",

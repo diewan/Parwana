@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ============================================================================
-#  CSV Protocol — Off-chain (interactive) transfer, end-to-end, for beginners
+#  Parwana — Off-chain (interactive) transfer, end-to-end, for beginners
 # ============================================================================
 #
 #  What this demonstrates

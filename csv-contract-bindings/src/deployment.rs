@@ -1,4 +1,4 @@
-//! Deployment framework for CSV protocol contracts
+//! Deployment framework for Parwana contracts
 //!
 //! This module provides a deployment framework with manifest, checksums,
 //! and reproducibility for all chain contracts.

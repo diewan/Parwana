@@ -1,10 +1,10 @@
 # csv-testkit
 
-Test fixtures and adversarial testing utilities for CSV Protocol.
+Test fixtures and adversarial testing utilities for Parwana.
 
 ## Overview
 
-`csv-testkit` provides testing utilities, fixtures, and adversarial testing tools for the CSV protocol to ensure robustness and security.
+`csv-testkit` provides testing utilities, fixtures, and adversarial testing tools for the Parwana to ensure robustness and security.
 
 ## Key Features
 

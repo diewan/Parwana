@@ -186,6 +186,9 @@ fn intentional_workspace_crates_are_allowlisted() {
         "csv-p2p",
         "csv-proof",
         "csv-protocol",
+        // Remote chain-dispatch adapter: browser/thin-client forwards adapter
+        // port calls to a user-owned native host (WASM-REMOTE-001).
+        "csv-remote",
         "csv-runtime",
         "csv-schema",
         "csv-sdk",

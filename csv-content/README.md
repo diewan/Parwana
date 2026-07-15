@@ -1,10 +1,10 @@
 # csv-content
 
-Content types for CSV Protocol — Merkle trees, selective disclosure, encryption, and content integrity.
+Content types for Parwana — Merkle trees, selective disclosure, encryption, and content integrity.
 
 ## Overview
 
-`csv-content` provides content type definitions, Merkle tree operations, and selective disclosure for the CSV protocol. It enables content commitment, proof generation, and privacy-preserving disclosure.
+`csv-content` provides content type definitions, Merkle tree operations, and selective disclosure for the Parwana. It enables content commitment, proof generation, and privacy-preserving disclosure.
 
 ## Key Features
 

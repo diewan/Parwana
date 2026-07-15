@@ -1,6 +1,6 @@
 //! Schema validation
 //!
-//! This module provides schema validation for CSV protocol types.
+//! This module provides schema validation for Parwana types.
 //! It enforces structural constraints on schemas, descriptors, and
 //! payload configurations to prevent malformed or malicious inputs.
 //!

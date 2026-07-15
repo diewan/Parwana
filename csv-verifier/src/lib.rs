@@ -2,7 +2,7 @@
 #![allow(clippy::collapsible_if)]
 #![allow(unused_variables)]
 #![allow(clippy::type_complexity)]
-//! Canonical verifier for CSV protocol proofs
+//! Canonical verifier for Parwana proofs
 //!
 //! Provides the unified verification entry point for all proof types.
 //! All verification must route through this verifier to ensure consistency.

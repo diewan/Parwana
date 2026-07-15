@@ -1,6 +1,6 @@
 # csv-admission
 
-Admission control and pressure boundaries for CSV Protocol runtime.
+Admission control and pressure boundaries for Parwana runtime.
 
 ## Overview
 

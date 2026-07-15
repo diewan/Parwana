@@ -1,7 +1,7 @@
 # RFC-0009: Contract Canonical Events and ABI Constitution
 
 **Status:** Proposed
-**Author:** CSV Protocol Core Team
+**Author:** Parwana Core Team
 **Date:** 2026-05-21
 **Version:** 1.0.0
 

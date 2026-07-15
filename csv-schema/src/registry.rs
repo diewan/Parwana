@@ -1,6 +1,6 @@
 //! Schema registry
 //!
-//! This module provides a registry for CSV protocol schemas with
+//! This module provides a registry for Parwana schemas with
 //! version management, schema compilation, and diffing capabilities.
 
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,4 @@
-# CSV Protocol Testnet Deployments
+# Parwana Testnet Deployments
 
 Governed deployment manifest for testnet contract and program anchors.
 

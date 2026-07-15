@@ -1,10 +1,10 @@
 # csv-verifier
 
-Canonical proof verification for CSV Protocol.
+Canonical proof verification for Parwana.
 
 ## Overview
 
-`csv-verifier` provides the canonical proof verification logic for the CSV protocol. It ensures consistent verification semantics across all protocol implementations.
+`csv-verifier` provides the canonical proof verification logic for the Parwana. It ensures consistent verification semantics across all protocol implementations.
 
 ## Key Features
 

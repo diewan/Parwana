@@ -2,7 +2,7 @@
 
 ## Overview
 
-The CSV protocol requires deployed seal contracts on each supported chain to enable Sanad creation and consumption. This document outlines the deployment requirements for each chain.
+The Parwana requires deployed seal contracts on each supported chain to enable Sanad creation and consumption. This document outlines the deployment requirements for each chain.
 
 ## Chain-Specific Requirements
 

@@ -1,4 +1,4 @@
-//! Chain configuration types for CSV protocol
+//! Chain configuration types for Parwana
 
 use serde::{Deserialize, Serialize};
 

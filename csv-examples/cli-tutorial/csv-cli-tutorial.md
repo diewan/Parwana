@@ -1,8 +1,8 @@
-# CSV Protocol CLI Tutorial
+# Parwana CLI Tutorial
 
 > **Note:** This tutorial has been moved to the root of the repository. See `csv-cli-tutorial.md` for the latest version.
 
-A comprehensive guide to using the CSV Protocol CLI for cross-chain Sanad management, proof generation, trust management, and content operations on testnet.
+A comprehensive guide to using the Parwana CLI for cross-chain Sanad management, proof generation, trust management, and content operations on testnet.
 
 ## Table of Contents
 
@@ -1415,7 +1415,7 @@ csv test results
 
 ## Complete Workflow Example
 
-Here's a complete end-to-end workflow demonstrating the full CSV Protocol CLI capabilities on testnet:
+Here's a complete end-to-end workflow demonstrating the full Parwana CLI capabilities on testnet:
 
 ### Step 1: Initialize Your Wallet
 

@@ -1,13 +1,13 @@
 # RFC-0001: Canonical Serialization Hardening
 
 **Status:** Proposed
-**Author:** CSV Protocol Core Team
+**Author:** Parwana Core Team
 **Date:** 2026-05-21
 **Version:** 1.0.0
 
 ## Abstract
 
-This RFC hardens the canonical CBOR serialization used throughout the CSV protocol. It defines strict rules for deterministic serialization, introduces CBOR tag enforcement, and establishes a golden corpus validation pipeline.
+This RFC hardens the canonical CBOR serialization used throughout the Parwana. It defines strict rules for deterministic serialization, introduces CBOR tag enforcement, and establishes a golden corpus validation pipeline.
 
 ## Motivation
 

@@ -5,7 +5,7 @@
 //! **Serde Policy:** MAY use serde (serialization is the primary use case)
 //!
 //! Provides Merkleized content trees, selective disclosure proofs,
-//! attachment references, and resource accounting for the CSV protocol.
+//! attachment references, and resource accounting for the Parwana.
 //!
 //! # Architecture
 //!

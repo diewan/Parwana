@@ -1,4 +1,4 @@
-//! CSV Protocol Coordinator
+//! Parwana Coordinator
 //!
 //! This crate provides per-chain execution cells with isolated failure domains.
 //! Each chain has its own bounded queue, circuit breaker, and memory ceiling.

@@ -1,10 +1,10 @@
 # csv-ethereum
 
-Ethereum adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend` traits for Ethereum seal protocols.
+Ethereum adapter for the Parwana — implements `SealProtocol` and `ChainBackend` traits for Ethereum seal protocols.
 
 ## Overview
 
-`csv-ethereum` provides the Ethereum-specific implementation of the CSV Protocol chain adapter interface, enabling seal operations, proof generation, and minting on the Ethereum blockchain.
+`csv-ethereum` provides the Ethereum-specific implementation of the Parwana chain adapter interface, enabling seal operations, proof generation, and minting on the Ethereum blockchain.
 
 ## Features
 

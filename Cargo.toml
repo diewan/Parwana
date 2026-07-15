@@ -46,6 +46,8 @@ members = [
     "csv-adapters/csv-sui",
     "csv-adapters/csv-aptos",
     "csv-adapters/csv-celestia",
+    # Remote chain-dispatch adapter (browser/thin-client → native host)
+    "csv-adapters/csv-remote",
     # Adapter factory crate
     "csv-adapter-factory",
 ]

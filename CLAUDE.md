@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-CSV Protocol — a multi-chain, client-side-validated cryptographic state protocol (Single-Use Seals + Sanads + proof-carrying ownership). Rust monorepo, Cargo workspace, **edition 2024**, toolchain pinned to **1.95** (`rust-toolchain.toml`). Root crate is `csv-protocol`.
+Parwana — a multi-chain, client-side-validated cryptographic state protocol (Single-Use Seals + Sanads + proof-carrying ownership). Rust monorepo, Cargo workspace, **edition 2024**, toolchain pinned to **1.95** (`rust-toolchain.toml`). Root crate is `csv-protocol`.
 
 ## Build & test
 

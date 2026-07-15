@@ -1,7 +1,7 @@
 //! Celestia-specific Types for CSV
 //!
 //! This module defines Celestia-specific seal points, anchors, and finality
-//! proofs that integrate with the core CSV protocol.
+//! proofs that integrate with the core Parwana.
 //!
 //! ## Single Use Seal on Celestia
 //!

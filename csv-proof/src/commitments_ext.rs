@@ -1,4 +1,4 @@
-//! Advanced commitment types and proof metadata for the CSV protocol.
+//! Advanced commitment types and proof metadata for the Parwana.
 //!
 //! This module extends the basic commitment and proof types to support:
 //! - Multiple commitment scheme versions (V2, V3, hash-based, KZG, etc.)

@@ -29,6 +29,9 @@ csv-proof = { version = "0.1.5", path = "../csv-proof" }
 csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
 csv-p2p = { version = "0.1.5", path = "../csv-p2p", optional = true }
 csv-chain-ports = { version = "0.1.5", path = "../csv-chain-ports" }
+# Remote chain-dispatch adapter (WASM-REMOTE-001). wasm-clean; the reqwest HTTP
+# transport rides its `http` feature (on by default) and compiles on wasm too.
+csv-remote = { version = "0.1.5", path = "../csv-adapters/csv-remote" }
 
 # Chain adapters — optional, enabled via feature flags
 # csv-bitcoin compiles for all targets

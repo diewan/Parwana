@@ -3,7 +3,7 @@ name = "csv-p2p"
 version = "0.1.5"
 edition = "2024"
 rust-version.workspace = true
-description = "P2P proof transport layer for CSV protocol using Nostr"
+description = "P2P proof transport layer for Parwana using Nostr"
 license = "MIT OR Apache-2.0"
 authors = ["Amin Razavi"]
 

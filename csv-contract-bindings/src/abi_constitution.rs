@@ -1,11 +1,11 @@
-//! ABI Constitution for CSV Protocol Contracts
+//! ABI Constitution for Parwana Contracts
 //!
 //! This module defines the ABI constitution that all chain contracts MUST follow.
 //! Uses canonical snake_case naming across all chains (Ethereum, Solana, Sui, Aptos).
 //!
 //! # ABI Constitution Requirements
 //!
-//! All CSV protocol contracts MUST:
+//! All Parwana contracts MUST:
 //! 1. Emit canonical events with indexed parameters
 //! 2. Use deterministic error codes
 //! 3. Implement required functions with exact signatures (snake_case)

@@ -1,10 +1,10 @@
 # csv-wire
 
-Wire encoding and transport layer for CSV Protocol.
+Wire encoding and transport layer for Parwana.
 
 ## Overview
 
-`csv-wire` provides the wire format encoding, transport serialization, and RPC type conversions for the CSV Protocol. This crate owns ALL serde serialization, ALL transport encoding, and ALL RPC wire format conversions.
+`csv-wire` provides the wire format encoding, transport serialization, and RPC type conversions for the Parwana. This crate owns ALL serde serialization, ALL transport encoding, and ALL RPC wire format conversions.
 
 ## Key Features
 

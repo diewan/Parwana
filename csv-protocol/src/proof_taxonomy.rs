@@ -4,7 +4,7 @@
 //! **Encoding:** MUST use canonical_cbor for verification
 //! **Serde Policy:** SHOULD NOT use serde - verification must use canonical_cbor
 //!
-//! This module defines the canonical proof types used across the CSV protocol.
+//! This module defines the canonical proof types used across the Parwana.
 //! All proofs must be one of these variants, ensuring consistent semantics
 //! and enabling unified verification.
 //!
@@ -346,7 +346,7 @@ pub const MAX_FINALITY_DATA: usize = 4 * 1024;
 /// Maximum allowed size for signatures in a bundle (1MB total)
 pub const MAX_SIGNATURES_TOTAL_SIZE: usize = 1024 * 1024;
 
-/// The canonical proof taxonomy for the CSV protocol.
+/// The canonical proof taxonomy for the Parwana.
 ///
 /// Every proof in the system must be one of these variants.
 /// This enum provides a unified type that enables:

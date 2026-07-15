@@ -1,5 +1,6 @@
 
-# CSV Protocol
+# Parwana
+
 ## Constitutional Cross-Chain Verification Infrastructure
 
 > A protocol-grade, adversarially-aware, multi-chain verification and transfer system designed around deterministic state evolution, replay resistance, canonical proof semantics, and mechanically enforced invariants.
@@ -8,7 +9,7 @@
 
 # 1. What This Repository Is
 
-CSV Protocol is not a blockchain application.
+Parwana is not a blockchain application.
 
 It is a **cross-chain computational protocol environment** that coordinates:
 
@@ -37,7 +38,7 @@ The architecture prioritizes:
 
 # 2. Core Philosophy
 
-CSV Protocol assumes:
+Parwana assumes:
 
 - chains can reorg,
 - RPC endpoints can lie,
@@ -58,7 +59,7 @@ The repository is built around the idea that protocol safety should become progr
 
 # 3. What The Protocol Does
 
-CSV Protocol coordinates secure cross-chain verification and transfer workflows across heterogeneous chains including:
+Parwana coordinates secure cross-chain verification and transfer workflows across heterogeneous chains including:
 
 - Ethereum
 - Bitcoin
@@ -114,7 +115,7 @@ The system can act as:
                              │
                              ▼
 ┌────────────────────────────────────────────────────────────┐
-│                    CSV PROTOCOL                           │
+│                    PARWANA                           │
 │------------------------------------------------------------│
 │ State Machine                                              │
 │ Finality Abstractions                                      │
@@ -175,12 +176,12 @@ The system can act as:
 
 The repository enforces architectural direction through:
 
-* protocol constitutions,
-* compile-fail invariants,
-* dependency governance,
-* architecture tests,
-* canonical encoding rules,
-* adversarial CI assumptions.
+- protocol constitutions,
+- compile-fail invariants,
+- dependency governance,
+- architecture tests,
+- canonical encoding rules,
+- adversarial CI assumptions.
 
 This is not merely “well-structured code.”
 
@@ -194,14 +195,14 @@ The protocol models transfer evolution explicitly.
 
 Core states include:
 
-* Locked
-* AwaitingFinality
-* ProofBuilding
-* ProofValidated
-* Minting
-* Completed
-* RolledBack
-* Compromised
+- Locked
+- AwaitingFinality
+- ProofBuilding
+- ProofValidated
+- Minting
+- Completed
+- RolledBack
+- Compromised
 
 Transitions are intentionally monotonic and constrained.
 
@@ -215,12 +216,12 @@ Replay prevention is a first-class architectural concern.
 
 The protocol contains:
 
-* replay registries,
-* replay algebra,
-* deterministic replay storage,
-* replay domain separation,
-* replay-resistant commitments,
-* replay constitution tests.
+- replay registries,
+- replay algebra,
+- deterministic replay storage,
+- replay domain separation,
+- replay-resistant commitments,
+- replay constitution tests.
 
 Replay protection is not treated as an application feature.
 It is embedded into the execution model itself.
@@ -233,19 +234,19 @@ The protocol aggressively avoids serialization ambiguity.
 
 The system includes:
 
-* canonical codecs,
-* version-aware encoding,
-* schema governance,
-* hash domain separation,
-* proof canonicalization,
-* canonical wire representations.
+- canonical codecs,
+- version-aware encoding,
+- schema governance,
+- hash domain separation,
+- proof canonicalization,
+- canonical wire representations.
 
 This reduces:
 
-* proof drift,
-* cross-runtime inconsistencies,
-* hash instability,
-* multi-language incompatibilities.
+- proof drift,
+- cross-runtime inconsistencies,
+- hash instability,
+- multi-language incompatibilities.
 
 ---
 
@@ -255,12 +256,12 @@ Runtime recovery is explicitly modeled.
 
 The runtime includes:
 
-* execution journals,
-* replay persistence,
-* crash recovery,
-* deterministic recovery paths,
-* event rehydration,
-* state restoration semantics.
+- execution journals,
+- replay persistence,
+- crash recovery,
+- deterministic recovery paths,
+- event rehydration,
+- state restoration semantics.
 
 The system assumes crashes are inevitable.
 
@@ -274,21 +275,21 @@ The protocol assumes hostile conditions.
 
 The architecture is designed around:
 
-* malformed proof rejection,
-* finality enforcement,
-* replay prevention,
-* canonical hashing,
-* explicit verification boundaries,
-* deterministic execution.
+- malformed proof rejection,
+- finality enforcement,
+- replay prevention,
+- canonical hashing,
+- explicit verification boundaries,
+- deterministic execution.
 
 The repository contains dedicated:
 
-* adversarial tests,
-* Byzantine simulations,
-* reorg simulations,
-* replay attack tests,
-* crash consistency tests,
-* differential verification suites.
+- adversarial tests,
+- Byzantine simulations,
+- reorg simulations,
+- replay attack tests,
+- crash consistency tests,
+- differential verification suites.
 
 ---
 
@@ -316,14 +317,14 @@ The protocol does not treat all chains identically.
 
 Different chains have fundamentally different finality semantics:
 
-* Ethereum → probabilistic + consensus-driven
-* Bitcoin → confirmation depth
-* Solana → optimistic commitment
-* Aptos → HotStuff quorum certification
-* Celestia → DA inclusion
-* Sui → Move object finality
+- Ethereum → probabilistic + consensus-driven
+- Bitcoin → confirmation depth
+- Solana → optimistic commitment
+- Aptos → HotStuff quorum certification
+- Celestia → DA inclusion
+- Sui → Move object finality
 
-CSV Protocol models these explicitly rather than pretending all chains behave uniformly.
+Parwana models these explicitly rather than pretending all chains behave uniformly.
 
 ---
 
@@ -333,11 +334,11 @@ CSV Protocol models these explicitly rather than pretending all chains behave un
 
 The repository is designed to scale through:
 
-* adapter isolation,
-* canonical protocol algebra,
-* shared adapter-core traits,
-* runtime decoupling,
-* capability-driven orchestration.
+- adapter isolation,
+- canonical protocol algebra,
+- shared adapter-core traits,
+- runtime decoupling,
+- capability-driven orchestration.
 
 New chains integrate through controlled semantic boundaries.
 
@@ -347,11 +348,11 @@ New chains integrate through controlled semantic boundaries.
 
 The runtime already includes foundational support for:
 
-* backpressure handling,
-* failure isolation,
-* bounded coordination,
-* lease orchestration,
-* recovery containment.
+- backpressure handling,
+- failure isolation,
+- bounded coordination,
+- lease orchestration,
+- recovery containment.
 
 The architecture assumes overload conditions must be survivable.
 
@@ -363,12 +364,12 @@ The adapter model supports heterogeneous execution systems without collapsing th
 
 This allows:
 
-* Bitcoin SPV flows,
-* Ethereum contract verification,
-* Solana program coordination,
-* Aptos quorum checkpoints,
-* Celestia DA commitments,
-* zk-proof integrations.
+- Bitcoin SPV flows,
+- Ethereum contract verification,
+- Solana program coordination,
+- Aptos quorum checkpoints,
+- Celestia DA commitments,
+- zk-proof integrations.
 
 The architecture scales semantically, not merely operationally.
 
@@ -376,16 +377,16 @@ The architecture scales semantically, not merely operationally.
 
 # 8. Anti-Fragile Characteristics
 
-CSV Protocol is intentionally adversarially shaped.
+Parwana is intentionally adversarially shaped.
 
 The system becomes stronger under stress because the architecture continuously validates assumptions through:
 
-* reorg testing,
-* Byzantine RPC tests,
-* replay simulations,
-* crash recovery verification,
-* differential verification,
-* formal protocol modeling.
+- reorg testing,
+- Byzantine RPC tests,
+- replay simulations,
+- crash recovery verification,
+- differential verification,
+- formal protocol modeling.
 
 The repository does not assume the environment behaves correctly.
 
@@ -397,14 +398,14 @@ It assumes systems fail constantly.
 
 The repository includes formal modeling artifacts:
 
-* TLA+
-* Alloy
+- TLA+
+- Alloy
 
 These models encode:
 
-* replay safety,
-* ownership semantics,
-* state evolution guarantees.
+- replay safety,
+- ownership semantics,
+- state evolution guarantees.
 
 This indicates the protocol is evolving toward mathematically constrained execution semantics.
 
@@ -500,11 +501,11 @@ Replay protection, canonical encoding, deterministic recovery, and explicit stat
 
 The protocol validates itself through:
 
-* compile-fail guarantees,
-* adversarial simulations,
-* differential verification,
-* runtime crash testing,
-* Byzantine modeling.
+- compile-fail guarantees,
+- adversarial simulations,
+- differential verification,
+- runtime crash testing,
+- Byzantine modeling.
 
 ---
 
@@ -512,12 +513,12 @@ The protocol validates itself through:
 
 The repository increasingly separates:
 
-* algebra,
-* runtime,
-* protocol,
-* transport,
-* storage,
-* chain semantics.
+- algebra,
+- runtime,
+- protocol,
+- transport,
+- storage,
+- chain semantics.
 
 This is critical for long-term survivability.
 
@@ -547,10 +548,10 @@ The remaining work is concentrated in enforcement closure and cryptographic comp
 
 Some verification paths still require full implementation:
 
-* aggregate signature verification,
-* certain Merkle verification paths,
-* finality enforcement closure,
-* proof completeness guarantees.
+- aggregate signature verification,
+- certain Merkle verification paths,
+- finality enforcement closure,
+- proof completeness guarantees.
 
 No placeholder verification may remain in production paths.
 
@@ -562,10 +563,10 @@ Some invariants are constitutionally defined but not yet mechanically universal.
 
 The final step is ensuring:
 
-* no bypass paths exist,
-* no legacy APIs remain reachable,
-* no verification downgrade is possible,
-* all execution flows pass through runtime governance.
+- no bypass paths exist,
+- no legacy APIs remain reachable,
+- no verification downgrade is possible,
+- all execution flows pass through runtime governance.
 
 ---
 
@@ -585,11 +586,11 @@ style proof-carrying semantics instead of permissive truth-style APIs.
 
 Further work remains around:
 
-* distributed congestion handling,
-* RPC quorum reconciliation,
-* Byzantine endpoint aggregation,
-* adaptive capability negotiation,
-* stronger flow-pressure propagation.
+- distributed congestion handling,
+- RPC quorum reconciliation,
+- Byzantine endpoint aggregation,
+- adaptive capability negotiation,
+- stronger flow-pressure propagation.
 
 ---
 
@@ -597,10 +598,10 @@ Further work remains around:
 
 The final production threshold requires:
 
-* zero placeholder verification,
-* zero semantic ambiguity,
-* zero silent fallback behavior,
-* complete proof validation coverage.
+- zero placeholder verification,
+- zero semantic ambiguity,
+- zero silent fallback behavior,
+- complete proof validation coverage.
 
 ---
 

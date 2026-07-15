@@ -499,6 +499,30 @@ pub struct Config {
     pub log_level: Option<String>,
     /// Data directory override.
     pub data_dir: Option<String>,
+    /// Remote chain-dispatch host (WASM-REMOTE-001).
+    ///
+    /// When set, the client (typically a browser / thin client that cannot run
+    /// concrete chain adapters) registers one remote adapter per enabled chain
+    /// that forwards chain actions to this user-owned native host. Absent → no
+    /// remote dispatch (fail closed: the coordinator's registry stays empty on
+    /// wasm and chain-touching calls error rather than fall back).
+    #[serde(default)]
+    pub remote: Option<RemoteHostConfig>,
+}
+
+/// Connection details for a remote chain-dispatch host (WASM-REMOTE-001).
+///
+/// The host is a user-owned native `csv` daemon, not a public service, so
+/// requests are authenticated with a bearer token. No private key material is
+/// ever sent to it; it holds only its own chain-submission keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteHostConfig {
+    /// Base URL the client POSTs remote-dispatch envelopes to.
+    pub url: String,
+    /// Bearer token authenticating the client to the host. `None` only when the
+    /// host authenticates another way (mTLS, a localhost-only socket).
+    #[serde(default)]
+    pub auth_token: Option<String>,
 }
 
 impl Default for Config {
@@ -520,6 +544,7 @@ impl Config {
             store: StoreConfig::default(),
             log_level: Some("info".to_string()),
             data_dir: None,
+            remote: None,
         }
     }
 

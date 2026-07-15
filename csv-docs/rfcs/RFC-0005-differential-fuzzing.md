@@ -1,13 +1,13 @@
 # RFC-0005: Differential Fuzzing Framework
 
 **Status:** Proposed
-**Author:** CSV Protocol Core Team
+**Author:** Parwana Core Team
 **Date:** 2026-05-21
 **Version:** 1.0.0
 
 ## Abstract
 
-This RFC establishes a differential fuzzing framework for the CSV protocol's canonical serialization and hashing. It compares multiple implementations (Rust, TypeScript) to detect serialization inconsistencies that could lead to verification failures.
+This RFC establishes a differential fuzzing framework for the Parwana's canonical serialization and hashing. It compares multiple implementations (Rust, TypeScript) to detect serialization inconsistencies that could lead to verification failures.
 
 ## Motivation
 

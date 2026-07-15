@@ -1,4 +1,4 @@
-//! csv-runtime — CSV Protocol orchestration facade
+//! csv-runtime — Parwana orchestration facade
 //!
 //! This crate is a facade that composes focused orchestration crates:
 //! - csv-coordinator: Per-chain execution cells with isolated failure domains

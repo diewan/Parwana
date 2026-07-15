@@ -55,7 +55,7 @@ prompt_step() {
 }
 
 echo "=============================================="
-echo "  CSV Protocol CLI - Cross-Chain Transfer Demo"
+echo "  Parwana CLI - Cross-Chain Transfer Demo"
 echo "=============================================="
 echo ""
 echo "This tutorial demonstrates a complete cross-chain transfer workflow."
@@ -425,6 +425,6 @@ echo ""
 echo "About Trust Packages:"
 echo "  - For TESTING: Cross-chain transfers work without trust packages"
 echo "  - For PRODUCTION: Import official trust package before transfers"
-echo "  - Get trust packages from: CSV Protocol team or official repositories"
+echo "  - Get trust packages from: Parwana team or official repositories"
 echo "  - Verify before import: csv trust verify <package.json>"
 echo ""

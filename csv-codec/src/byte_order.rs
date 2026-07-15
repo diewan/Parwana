@@ -1,7 +1,7 @@
 //! Byte ordering utilities
 //!
 //! This module provides byte ordering utilities for cross-chain compatibility.
-//! CSV Protocol uses LITTLE ENDIAN exclusively for all protocol-critical data.
+//! Parwana uses LITTLE ENDIAN exclusively for all protocol-critical data.
 
 /// Convert to little-endian bytes
 pub fn to_le_bytes<T: Into<u64>>(value: T) -> [u8; 8] {

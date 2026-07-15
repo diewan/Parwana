@@ -2,7 +2,7 @@
 
 ## 1. The Core Thesis
 
-The CSV Protocol allows a party to receive an asset and prove its validity without querying a blockchain node at the moment of receipt.
+The Parwana allows a party to receive an asset and prove its validity without querying a blockchain node at the moment of receipt.
 
 ## 2. The Proof Bundle Anatomy
 

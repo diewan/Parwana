@@ -115,6 +115,11 @@ pub mod experimental {
 }
 
 /// Re-export error types
+/// Remote chain-dispatch (WASM-REMOTE-001): forward adapter port calls to a
+/// user-owned native host. Re-exported so hosts (e.g. `csv runtime serve`) can
+/// reach [`csv_remote::host`] without importing the adapter crate directly.
+pub use csv_remote;
+
 pub use error::CsvError;
 
 /// Re-export client

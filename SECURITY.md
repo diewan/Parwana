@@ -6,7 +6,7 @@ We recommend using the latest version of each crate for security updates.
 
 ## Reporting a Vulnerability
 
-We take the security of the CSV Protocol seriously. If you believe you have found a security vulnerability, please report it to us as described below.
+We take the security of the Parwana seriously. If you believe you have found a security vulnerability, please report it to us as described below.
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**
 
@@ -30,4 +30,4 @@ We prefer all communications to be in English.
 
 ## Scope
 
-This security policy applies to all crates in the CSV Protocol workspace and their respective smart contracts.
+This security policy applies to all crates in the Parwana workspace and their respective smart contracts.

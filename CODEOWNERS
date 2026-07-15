@@ -1,6 +1,9 @@
 # Rules-encoded ownership: L0-L4 changes require the architecture/API gate and
+
 # a changelog entry. Git hosting may map this path to a team later; `TBD` is
-# intentional until that authority is configured.
+
+# intentional until that authority is configured
+
 /csv-algebra/ @TBD
 /csv-wire/ @TBD
 /csv-hash/ @TBD

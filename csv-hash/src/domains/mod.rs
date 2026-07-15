@@ -1,4 +1,4 @@
-//! Domain-separated hash types for CSV protocol
+//! Domain-separated hash types for Parwana
 //!
 //! This module provides domain-separated hash types for different
 //! protocol contexts to prevent hash collisions across different use cases.

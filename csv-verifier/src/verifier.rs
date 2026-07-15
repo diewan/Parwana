@@ -402,7 +402,7 @@ pub struct ChainVerificationData {
 
 /// Canonical verifier implementation (PHASE 5.4).
 ///
-/// This is the single source of truth for proof verification in the CSV protocol.
+/// This is the single source of truth for proof verification in the Parwana.
 /// All other components MUST delegate to this verifier for protocol-level checks.
 pub struct CanonicalVerifierImpl {
     /// Verification configuration.

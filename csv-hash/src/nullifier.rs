@@ -5,7 +5,7 @@
 //!
 //! ## Security Purpose
 //!
-//! This registry is the **primary defense against double-spending** in the CSV protocol.
+//! This registry is the **primary defense against double-spending** in the Parwana.
 //! When a Sanad is consumed, the seal that enforced it is recorded here.
 //! Any subsequent attempt to consume the same seal will be detected and rejected.
 //!
@@ -92,7 +92,7 @@ pub enum SealStatus {
 ///
 /// Tracks all consumed seals across all chains and provides
 /// double-consumption detection. This is the primary defense against
-/// double-spending in the CSV protocol.
+/// double-spending in the Parwana.
 ///
 /// # Security Properties
 ///

@@ -1,4 +1,4 @@
-//! CSV Protocol Version and Canonical Contract
+//! Parwana Version and Canonical Contract
 //!
 //! This module defines the **single source of truth** for all protocol-facing
 //! consumers: Rust adapters, CLI, TypeScript SDK, MCP server, Explorer, and Wallet.
@@ -356,7 +356,7 @@ impl std::fmt::Display for SimplifiedTransferStatus {
 // Error Code Registry [🟡 BETA]
 // ===========================================================================
 
-/// CSV protocol error codes.
+/// Parwana error codes.
 ///
 /// All error codes follow the pattern: `CSV_<CATEGORY>_<NUMBER>`
 ///

@@ -10,6 +10,7 @@ pub mod hexbytes;
 pub mod invoice;
 pub mod primitives;
 pub mod proof;
+pub mod remote;
 pub mod rpc;
 pub mod seal;
 pub mod transfer;
@@ -25,6 +26,11 @@ pub use consignment::{CONSIGNMENT_VERSION, Consignment};
 pub use invoice::{INVOICE_VERSION, Invoice};
 pub use primitives::{CommitmentWire, HashWire, SanadIdWire};
 pub use proof::ProofBundleWire;
+pub use remote::{
+    REMOTE_DISPATCH_VERSION, RemoteError, RemoteLockResult, RemoteMaterialization, RemoteMintResult,
+    RemoteRequest, RemoteRequestPayload, RemoteResponse, RemoteResponsePayload,
+    RemoteSealRegistryStatus, RemoteSettlementResult, RemoteTransfer, RemoteTxFinality,
+};
 pub use seal::{SealDefinition, SealPointWire};
 pub use transfer::TransferWire;
 pub use transfer_state::{

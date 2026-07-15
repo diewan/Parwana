@@ -1,4 +1,4 @@
-# AGENTS.md — CSV Protocol Operational Guide
+# AGENTS.md — Parwana Operational Guide
 
 ## Repo structure
 

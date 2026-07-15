@@ -1,6 +1,6 @@
 //! CSV Schema - Schema registry and validation
 //!
-//! This crate provides schema validation and registry for CSV protocol types.
+//! This crate provides schema validation and registry for Parwana types.
 //! Supports JSON Schema compilation, field-level validation, schema versioning,
 //! diffing, and canonical schema hashing.
 

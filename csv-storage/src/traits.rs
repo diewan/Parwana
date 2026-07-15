@@ -1,6 +1,6 @@
 //! Storage traits
 //!
-//! This module defines the canonical storage traits for the CSV protocol.
+//! This module defines the canonical storage traits for the Parwana.
 //! All implementations MUST use these traits, not custom interfaces.
 
 use super::errors::{ReplayDbError, StorageError};

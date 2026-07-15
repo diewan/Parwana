@@ -1,10 +1,10 @@
 # csv-bitcoin
 
-Bitcoin adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend` traits for Bitcoin UTXO seals and SPV proofs.
+Bitcoin adapter for the Parwana — implements `SealProtocol` and `ChainBackend` traits for Bitcoin UTXO seals and SPV proofs.
 
 ## Overview
 
-`csv-bitcoin` provides the Bitcoin-specific implementation of the CSV Protocol chain adapter interface, enabling seal operations, proof generation, and minting on the Bitcoin blockchain.
+`csv-bitcoin` provides the Bitcoin-specific implementation of the Parwana chain adapter interface, enabling seal operations, proof generation, and minting on the Bitcoin blockchain.
 
 ## Features
 

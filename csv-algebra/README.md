@@ -1,6 +1,6 @@
 # csv-algebra
 
-Pure no_std typestate algebra for CSV Protocol transfer state machine.
+Pure no_std typestate algebra for Parwana transfer state machine.
 
 ## Overview
 

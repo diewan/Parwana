@@ -4,7 +4,7 @@ Unified SDK for the CSV (Client-Side Validation) protocol — single entry point
 
 ## Overview
 
-`csv-sdk` provides a unified, high-level API for CSV protocol operations, abstracting away the complexity of cross-chain transfers. It delegates to `csv-runtime` for orchestration and chain adapters for chain-specific operations.
+`csv-sdk` provides a unified, high-level API for Parwana operations, abstracting away the complexity of cross-chain transfers. It delegates to `csv-runtime` for orchestration and chain adapters for chain-specific operations.
 
 ## Features
 

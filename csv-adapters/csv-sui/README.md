@@ -1,10 +1,10 @@
 # csv-sui
 
-Sui adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend` traits for Sui seal protocols.
+Sui adapter for the Parwana — implements `SealProtocol` and `ChainBackend` traits for Sui seal protocols.
 
 ## Overview
 
-`csv-sui` provides the Sui-specific implementation of the CSV Protocol chain adapter interface, enabling seal operations, proof generation, and minting on the Sui blockchain.
+`csv-sui` provides the Sui-specific implementation of the Parwana chain adapter interface, enabling seal operations, proof generation, and minting on the Sui blockchain.
 
 ## Features
 

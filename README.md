@@ -1,4 +1,4 @@
-# CSV Protocol
+# Parwana
 
 > [!WARNING]
 > ATTENTION : PROJECT IS IN EXPERIMENTAL MODE
@@ -14,7 +14,7 @@
 
 # 1. Introduction
 
-CSV Protocol is a constitutional protocol system built around three foundational ideas:
+Parwana is a constitutional protocol system built around three foundational ideas:
 
 - **Client-Side Validation**
 - **Single-Use Seals**
@@ -30,7 +30,7 @@ Together, these create a protocol where:
 - provenance becomes cryptographically portable,
 - state scales without requiring universal replication.
 
-CSV Protocol is not a traditional blockchain application.
+Parwana is not a traditional blockchain application.
 
 It is a **client-validated cryptographic state protocol** capable of operating across heterogeneous chains while preserving deterministic ownership semantics and adversarial integrity.
 
@@ -74,7 +74,7 @@ Global Replication
 Global Validation
 ```
 
-### CSV Protocol Model
+### Parwana Model
 
 ```text
 Local Ownership
@@ -207,7 +207,7 @@ They evolve through seal consumption and client-side validation.
 
 # 4. Protocol Goals
 
-CSV Protocol is designed to provide:
+Parwana is designed to provide:
 
 - scalable ownership systems,
 - replay-safe state evolution,
@@ -229,7 +229,7 @@ Traditional blockchains force every node to:
 - store everything,
 - validate everything.
 
-CSV Protocol rejects this model.
+Parwana rejects this model.
 
 Instead:
 
@@ -289,7 +289,7 @@ Every state transition:
 
 ## 6.1 Architectural Philosophy
 
-CSV Protocol is built as a constitutional system.
+Parwana is built as a constitutional system.
 
 The repository does not merely organize code.
 It attempts to constrain what the system is allowed to become.
@@ -375,7 +375,7 @@ The architecture prioritizes:
 
 # 8. Multi-Chain Model
 
-CSV Protocol is chain-aware, not chain-naive.
+Parwana is chain-aware, not chain-naive.
 
 Different chains provide different guarantees.
 
@@ -405,7 +405,7 @@ Instead, it adapts to:
 
 ## 9.1 Adversarial Assumptions
 
-CSV Protocol assumes:
+Parwana assumes:
 
 - chains reorg,
 - RPC nodes lie,
@@ -480,7 +480,7 @@ This prevents:
 
 # 10. Anti-Fragile Runtime Design
 
-CSV Protocol is intentionally designed for hostile environments.
+Parwana is intentionally designed for hostile environments.
 
 The repository contains:
 
@@ -665,12 +665,12 @@ Additional work remains around:
 
 # 15. Final Assessment
 
-CSV Protocol is not a bridge.
+Parwana is not a bridge.
 
 It is not merely a transfer runtime.
 
 It is not a blockchain application.
 
-CSV Protocol is evolving into a:
+Parwana is evolving into a:
 
 > constitutional client-side validation protocol for cryptographic ownership, provenance, and multi-chain state evolution.

@@ -1,4 +1,4 @@
-# CSV Protocol — Concepts & Developer Primer
+# Parwana — Concepts & Developer Primer
 
 > **Read this first.** This is the single self-contained explanation of the CSV
 > vocabulary — *Sanad, Seal, Consignment, Materialization, Seeding, Verifier,

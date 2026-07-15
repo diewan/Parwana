@@ -68,6 +68,7 @@ struct BuilderState {
     config: Option<Config>,
     private_keys:
         Option<std::collections::HashMap<String, csv_protocol::secret::SharedSecretHandle>>,
+    remote: Option<crate::config::RemoteHostConfig>,
     #[cfg(feature = "runtime-coordinator")]
     enable_runtime_coordinator: bool,
 }
@@ -196,6 +197,24 @@ impl ClientBuilder {
         self
     }
 
+    /// Configure a remote chain-dispatch host (WASM-REMOTE-001).
+    ///
+    /// When set, the builder registers one remote adapter per enabled chain that
+    /// forwards chain actions to a user-owned native host, instead of leaving the
+    /// coordinator's adapter registry empty. This is how a browser / thin client
+    /// (which cannot run concrete chain adapters) executes lock / mint / read
+    /// operations while keeping client-side validation, proof verification, and
+    /// finality checks local.
+    ///
+    /// Remote adapters are only registered for chains that do not already have a
+    /// local adapter, so on a native build with concrete adapters this is a
+    /// no-op unless a chain is otherwise unserved. Overrides any host set via
+    /// [`with_config`](Self::with_config).
+    pub fn with_remote_host(mut self, config: crate::config::RemoteHostConfig) -> Self {
+        self.state.remote = Some(config);
+        self
+    }
+
     /// Enable the runtime coordinator for cross-chain transfer execution.
     ///
     /// When enabled, the client will initialize a full TransferCoordinator with
@@ -257,10 +276,10 @@ impl ClientBuilder {
             chain_runtime: None,
             private_keys: self.state.private_keys.clone(),
         });
-        let chain_runtime = crate::runtime::ChainRuntime::new(client_ref.clone());
-
         // Create adapter registry for cross-chain transfers
         let adapter_registry = Arc::new(std::sync::Mutex::new(AdapterRegistryImpl::new()));
+        let chain_runtime = crate::runtime::ChainRuntime::new(client_ref.clone());
+        chain_runtime.set_adapter_registry(adapter_registry.clone())?;
 
         // Initialize runtime coordinator if enabled
         #[cfg(feature = "runtime-coordinator")]
@@ -365,6 +384,16 @@ impl ClientBuilder {
             }
         }
 
+        // Remote chain dispatch (WASM-REMOTE-001): when a host is configured,
+        // register one remote adapter per enabled chain that has no local
+        // adapter, so the coordinator's registry is not empty on wasm / thin
+        // clients. No host configured → the registry is left as-is (fail closed:
+        // chain-touching calls error rather than fall back).
+        if let Some(remote) = self.state.remote.clone().or_else(|| config.remote.clone()) {
+            Self::register_remote_adapters(&adapter_registry, &self.state.enabled_chains, &remote)
+                .await?;
+        }
+
         Ok(crate::client::CsvClient {
             enabled_chains: self.state.enabled_chains,
             wallet: self.state.wallet,
@@ -377,6 +406,61 @@ impl ClientBuilder {
             #[cfg(feature = "runtime-coordinator")]
             transfer_coordinator,
         })
+    }
+
+    /// Register one [`csv_remote::RemoteChainAdapter`] per enabled chain that
+    /// has no local adapter, connecting to `remote` and caching each chain's
+    /// capabilities / signature scheme.
+    ///
+    /// Chains that already have a local adapter (native builds) are left
+    /// untouched, so this only fills the empty slots a browser / thin client
+    /// would otherwise fail closed on.
+    async fn register_remote_adapters(
+        adapter_registry: &Arc<std::sync::Mutex<AdapterRegistryImpl>>,
+        enabled_chains: &HashSet<ChainId>,
+        remote: &crate::config::RemoteHostConfig,
+    ) -> Result<(), CsvError> {
+        for chain in enabled_chains {
+            // Skip chains that already have a local adapter registered.
+            {
+                let guard = adapter_registry.lock().unwrap_or_else(|e| e.into_inner());
+                if guard.get(chain.as_str()).is_some() {
+                    continue;
+                }
+            }
+
+            let transport: Arc<dyn csv_remote::RemoteTransport> = match &remote.auth_token {
+                Some(token) => Arc::new(csv_remote::HttpTransport::with_bearer_token(
+                    remote.url.clone(),
+                    token.clone(),
+                )),
+                None => Arc::new(csv_remote::HttpTransport::new(remote.url.clone())),
+            };
+
+            let adapter =
+                csv_remote::RemoteChainAdapter::connect(chain.as_str().to_string(), transport)
+                    .await
+                    .map_err(|e| {
+                        CsvError::BuilderError(format!(
+                            "failed to connect remote adapter for chain {}: {e}",
+                            chain.as_str()
+                        ))
+                    })?;
+
+            adapter_registry
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .register_adapter(Box::new(adapter))
+                .map_err(|e| {
+                    CsvError::BuilderError(format!(
+                        "failed to register remote adapter for chain {}: {e}",
+                        chain.as_str()
+                    ))
+                })?;
+
+            log::info!("Registered remote chain-dispatch adapter for chain: {chain:?}");
+        }
+        Ok(())
     }
 
     #[cfg(feature = "runtime-coordinator")]

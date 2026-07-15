@@ -4,7 +4,7 @@
 //! **Encoding:** MUST use canonical_cbor for protocol-critical paths
 //! **Serde Policy:** MUST NOT use serde derives (enforced by deny.toml)
 //!
-//! This module defines the hash domains and hash types used in the CSV protocol.
+//! This module defines the hash domains and hash types used in the Parwana.
 //! All types in this module are L0 types and must NOT use serde for serialization.
 //!
 //! # Types

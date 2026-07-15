@@ -1,6 +1,6 @@
 # csv-runtime
 
-Runtime orchestration engine for the CSV protocol. Manages transfer coordination, lease management, replay detection, circuit breakers, and crash-safe execution journaling.
+Runtime orchestration engine for the Parwana. Manages transfer coordination, lease management, replay detection, circuit breakers, and crash-safe execution journaling.
 
 ## Overview
 

@@ -1,6 +1,6 @@
 //! Protocol invariants
 //!
-//! This module defines the core invariants that the CSV protocol must maintain.
+//! This module defines the core invariants that the Parwana must maintain.
 //! These invariants are enforced through the type system and verification logic.
 //!
 //! **Layer Classification:**

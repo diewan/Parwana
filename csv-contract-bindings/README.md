@@ -1,10 +1,10 @@
 # csv-contract-bindings
 
-Smart contract bindings for CSV Protocol.
+Smart contract bindings for Parwana.
 
 ## Overview
 
-`csv-contract-bindings` provides type-safe bindings and interfaces for interacting with CSV Protocol smart contracts across different blockchains.
+`csv-contract-bindings` provides type-safe bindings and interfaces for interacting with Parwana smart contracts across different blockchains.
 
 ## Key Features
 

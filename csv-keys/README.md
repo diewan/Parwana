@@ -1,10 +1,10 @@
 # csv-keys
 
-Secure key storage for the CSV Protocol with BIP-39/BIP-44 support.
+Secure key storage for the Parwana with BIP-39/BIP-44 support.
 
 ## Overview
 
-`csv-keys` provides secure key storage and management for the CSV protocol, supporting multiple cryptographic algorithms and derivation paths.
+`csv-keys` provides secure key storage and management for the Parwana, supporting multiple cryptographic algorithms and derivation paths.
 
 ## Features
 

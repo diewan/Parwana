@@ -1,12 +1,12 @@
-# CSV Protocol Examples
+# Parwana Examples
 
-This directory contains example code and tutorials demonstrating how to use the CSV Protocol SDK and CLI.
+This directory contains example code and tutorials demonstrating how to use the Parwana SDK and CLI.
 
 ## Overview
 
 The examples are organized into three categories:
 
-- **Getting Started** - Basic examples for newcomers to the CSV Protocol
+- **Getting Started** - Basic examples for newcomers to the Parwana
 - **Advanced** - Complex use cases and integration patterns
 - **CLI Tutorial** - Shell scripts and documentation for the CSV CLI tool
 
@@ -94,7 +94,7 @@ cargo run --example parallel_verification --features "all-chains,tokio"
 
 ### performance.rs
 
-Performance benchmarking example for measuring CSV Protocol operations.
+Performance benchmarking example for measuring Parwana operations.
 
 **Run:**
 
@@ -175,7 +175,7 @@ csv cross-chain materialize --from bitcoin --to sui --sanad-id <id> --dest-owner
 
 ## Architecture Notes
 
-All Rust examples use the `csv-sdk` crate, which provides a high-level facade over the CSV Protocol runtime:
+All Rust examples use the `csv-sdk` crate, which provides a high-level facade over the Parwana runtime:
 
 - **csv-sdk** - Public SDK facade
 - **csv-runtime** - Orchestration, execution journal, health monitoring
@@ -209,4 +209,4 @@ To add a new example:
 
 ## License
 
-These examples are part of the CSV Protocol project and follow the same license terms.
+These examples are part of the Parwana project and follow the same license terms.

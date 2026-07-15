@@ -1,6 +1,6 @@
 //! CSV Codec - Canonical serialization, deterministic decoding, schema validation, byte ordering
 //!
-//! This crate provides canonical CBOR serialization for the CSV protocol.
+//! This crate provides canonical CBOR serialization for the Parwana.
 //! All protocol-critical data must be serialized using this crate to ensure
 //! determinism and cross-chain compatibility.
 //!

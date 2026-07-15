@@ -1,10 +1,10 @@
 # csv-schema
 
-Schema definitions for CSV Protocol data structures.
+Schema definitions for Parwana data structures.
 
 ## Overview
 
-`csv-schema` provides schema definitions for CSV Protocol data structures, enabling validation and documentation of protocol types.
+`csv-schema` provides schema definitions for Parwana data structures, enabling validation and documentation of protocol types.
 
 ## Key Features
 

@@ -1,6 +1,6 @@
 # csv-cli
 
-CLI tool for the CSV Protocol — cross-chain Sanads, proofs, content, trust, and runtime management.
+CLI tool for the Parwana — cross-chain Sanads, proofs, content, trust, and runtime management.
 
 ## Overview
 

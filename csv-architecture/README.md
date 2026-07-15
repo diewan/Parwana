@@ -1,10 +1,10 @@
 # csv-architecture
 
-Architecture guardrails for the CSV Protocol workspace.
+Architecture guardrails for the Parwana workspace.
 
 ## Overview
 
-`csv-architecture` provides compile-time and runtime checks to enforce architectural rules and prevent architectural drift in the CSV Protocol workspace.
+`csv-architecture` provides compile-time and runtime checks to enforce architectural rules and prevent architectural drift in the Parwana workspace.
 
 ## Key Features
 

@@ -354,11 +354,11 @@ let registry = default_verifier_registry(); // Zero-length keys, no security
 
 ## RPC Trust Model
 
-**This section documents the explicit trust stance regarding RPC (Remote Procedure Call) nodes in the CSV protocol.**
+**This section documents the explicit trust stance regarding RPC (Remote Procedure Call) nodes in the Parwana.**
 
 ### Position
 
-The CSV protocol uses a **quorum RPC model** as its Stage 1 operational stance. This means:
+The Parwana uses a **quorum RPC model** as its Stage 1 operational stance. This means:
 
 - **RPC-minimized, not RPC-free**: The protocol reduces trust surface compared to a single trusted node but does not eliminate RPC trust entirely.
 - **Quorum of independent nodes**: Multiple independent RPC providers are queried for the same evidence. Disagreement among providers causes rejection.

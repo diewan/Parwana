@@ -1,6 +1,6 @@
-# CSV Protocol RFCs
+# Parwana RFCs
 
-This directory contains Request for Comments (RFCs) for the CSV Protocol.
+This directory contains Request for Comments (RFCs) for the Parwana.
 
 ## RFC Process
 

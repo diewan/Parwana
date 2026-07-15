@@ -1,10 +1,10 @@
 # csv-aptos
 
-Aptos adapter for the CSV Protocol — implements `SealProtocol` and `ChainBackend` traits for Aptos seal protocols.
+Aptos adapter for the Parwana — implements `SealProtocol` and `ChainBackend` traits for Aptos seal protocols.
 
 ## Overview
 
-`csv-aptos` provides the Aptos-specific implementation of the CSV Protocol chain adapter interface, enabling seal operations, proof generation, and minting on the Aptos blockchain.
+`csv-aptos` provides the Aptos-specific implementation of the Parwana chain adapter interface, enabling seal operations, proof generation, and minting on the Aptos blockchain.
 
 ## Features
 

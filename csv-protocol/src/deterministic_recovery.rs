@@ -1,6 +1,6 @@
 //! Deterministic recovery with checkpoints
 //!
-//! This module provides deterministic recovery mechanisms for the CSV protocol
+//! This module provides deterministic recovery mechanisms for the Parwana
 //! runtime, enabling system recovery from crashes and failures.
 //!
 //! # Recovery Strategy

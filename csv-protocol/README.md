@@ -1,6 +1,6 @@
 # csv-protocol
 
-Protocol orchestration layer for CSV Protocol - state machines, protocol constants, types, invariants, replay semantics, transition legality, and versioning.
+Protocol orchestration layer for Parwana - state machines, protocol constants, types, invariants, replay semantics, transition legality, and versioning.
 
 ## Overview
 

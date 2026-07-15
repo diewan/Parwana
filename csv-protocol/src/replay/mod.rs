@@ -1,6 +1,6 @@
 //! Replay semantics
 //!
-//! This module defines the replay protection semantics for the CSV protocol.
+//! This module defines the replay protection semantics for the Parwana.
 //! Replay protection prevents duplicate proof acceptance across chains.
 
 /// Replay protection semantics

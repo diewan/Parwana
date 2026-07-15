@@ -3,7 +3,7 @@ name = "csv-chain-ports"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Chain-neutral runtime adapter ports for CSV Protocol"
+description = "Chain-neutral runtime adapter ports for Parwana"
 license.workspace = true
 
 [dependencies]

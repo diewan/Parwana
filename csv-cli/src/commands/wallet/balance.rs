@@ -208,6 +208,7 @@ async fn query_balance(
         store: StoreConfig::default(),
         log_level: None,
         data_dir: None,
+        remote: None,
     };
 
     // Build CSV client with the requested chain enabled and config

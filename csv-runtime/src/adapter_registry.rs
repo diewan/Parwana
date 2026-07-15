@@ -17,7 +17,7 @@ use csv_protocol::signature::SignatureScheme;
 
 /// Implementation of the adapter registry.
 pub struct AdapterRegistryImpl {
-    adapters: std::collections::HashMap<String, Box<dyn ChainAdapter>>,
+    adapters: std::collections::HashMap<String, std::sync::Arc<dyn ChainAdapter>>,
 }
 
 impl AdapterRegistryImpl {
@@ -29,23 +29,49 @@ impl AdapterRegistryImpl {
 
     pub fn register_adapter(&mut self, adapter: Box<dyn ChainAdapter>) -> Result<(), AdapterError> {
         let chain_id = adapter.chain_id().to_string();
-        self.adapters.insert(chain_id, adapter);
+        self.adapters
+            .insert(chain_id, std::sync::Arc::from(adapter));
         Ok(())
     }
 
-    fn adapter(&self, chain_id: &str) -> Result<&dyn ChainAdapter, AdapterError> {
+    fn adapter(&self, chain_id: &str) -> Result<std::sync::Arc<dyn ChainAdapter>, AdapterError> {
         self.adapters
             .get(chain_id)
-            .map(|adapter| adapter.as_ref())
+            .cloned()
             .ok_or(AdapterError::Generic(format!(
                 "Adapter not found for chain: {}",
                 chain_id
             )))
     }
 
-    /// Get a mutable reference to an adapter by chain ID (for registration operations)
-    pub fn get(&mut self, chain_id: &str) -> Option<&mut Box<dyn ChainAdapter>> {
-        self.adapters.get_mut(chain_id)
+    /// Return a chain adapter without retaining the registry lock during RPC.
+    ///
+    /// The returned handle is shared and immutable, so callers can perform an
+    /// asynchronous chain operation without blocking adapter registration or
+    /// other chains' requests.
+    pub fn adapter_for(
+        &self,
+        chain_id: &str,
+    ) -> Result<std::sync::Arc<dyn ChainAdapter>, AdapterError> {
+        self.adapter(chain_id)
+    }
+
+    /// Return the registered adapter for compatibility operations that need a
+    /// chain-specific extension point.
+    pub fn get(&self, chain_id: &str) -> Option<std::sync::Arc<dyn ChainAdapter>> {
+        self.adapters.get(chain_id).cloned()
+    }
+
+    /// Produce a cheap shared snapshot of the current adapters.
+    ///
+    /// Only the `Arc` handles are cloned, so the snapshot shares the same
+    /// underlying adapters. It lets a caller (e.g. the remote-dispatch host
+    /// endpoint) serve concurrent reads over `&dyn AdapterRegistry` without
+    /// holding the registration mutex across `await` points.
+    pub fn shared_snapshot(&self) -> Self {
+        Self {
+            adapters: self.adapters.clone(),
+        }
     }
 }
 

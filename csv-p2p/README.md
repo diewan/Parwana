@@ -1,6 +1,6 @@
 # csv-p2p
 
-P2P proof transport layer for the CSV protocol using Nostr.
+P2P proof transport layer for the Parwana using Nostr.
 
 ## Overview
 

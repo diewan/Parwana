@@ -389,7 +389,7 @@ impl CsvClient {
                 message: format!("Failed to lock adapter registry: {}", e),
             })?
             .get(chain)
-            && let Some(sanad_ops) = (**adapter)
+            && let Some(sanad_ops) = adapter
                 .as_any()
                 .downcast_ref::<csv_bitcoin::BitcoinChainSanadOps>()
         {

@@ -96,7 +96,7 @@ impl RuntimePolicy {
     /// Set the runtime mode and update policy settings accordingly.
     ///
     /// Note: enforce_strict_finality is always true regardless of mode.
-    /// Finality is never optional in the CSV protocol.
+    /// Finality is never optional in the Parwana.
     pub fn set_mode(&mut self, mode: RuntimeMode) {
         self.mode = mode;
         self.allow_rpc_fallback = mode.allows_rpc_fallback();

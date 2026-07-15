@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// CSVSeal contract ABI (canonical version)
 pub const CSV_SEAL_ABI: &str =
-    include_str!("../../csv-contracts/ethereum/contracts/out/CSVSeal.sol/CSVSeal.json");
+    include_str!("../../../csv-contracts/ethereum/contracts/out/CSVSeal.sol/CSVSeal.json");
 
 /// CSVSeal contract methods (canonical snake_case naming)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

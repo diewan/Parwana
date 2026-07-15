@@ -233,6 +233,9 @@ async fn main() -> anyhow::Result<()> {
             | Commands::Seal { .. }
             | Commands::Test { .. }
             | Commands::Validate { .. }
+            | Commands::Runtime {
+                action: commands::runtime::RuntimeAction::Serve { .. }
+            }
     );
     let mut state = if needs_state {
         let passphrase = UnifiedStateManager::prompt_passphrase()?;
@@ -285,7 +288,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Inspect { action } => commands::inspect::execute(action),
         Commands::Schema { action } => commands::schema_cmd::execute(action),
         Commands::Content { action } => commands::content::execute(action, &config),
-        Commands::Runtime { action } => commands::runtime::execute(action, &config),
+        Commands::Runtime { action } => {
+            commands::runtime::execute(action, &config, state.as_ref()).await
+        }
         Commands::Trust { action } => commands::trust::execute(action, &config),
     };
 

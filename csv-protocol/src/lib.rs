@@ -1,4 +1,4 @@
-//! CSV Protocol - State machines, protocol constants, types, invariants, replay semantics, transition legality, versioning
+//! Parwana - State machines, protocol constants, types, invariants, replay semantics, transition legality, versioning
 //!
 //! This crate contains the core protocol logic without dependencies on serialization, hashing, or proof systems.
 //! It defines the state machines, invariants, and transition rules that all other protocol components must follow.

@@ -3,7 +3,7 @@ name = "csv-runtime"
 version = "0.1.5"
 edition = "2024"
 rust-version.workspace = true
-description = "CSV Protocol runtime orchestration engine"
+description = "Parwana runtime orchestration engine"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

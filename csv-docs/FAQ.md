@@ -1,22 +1,22 @@
-# ❓ CSV Protocol: Comprehensive FAQ & Defensibility Guide
+# ❓ Parwana: Comprehensive FAQ & Defensibility Guide
 
 ## 1. Philosophical & Strategic Foundations
 
-### What is the CSV Protocol?
+### What is the Parwana?
 
-CSV stands for **Client-Side Validation**. Instead of a global blockchain validating every state transition, the CSV Protocol allows the parties involved in a transaction to validate the state themselves. The L1 (Bitcoin/Ethereum) acts only as a "Double-Spend Registry" through **Single-Use Seals**.
+CSV stands for **Client-Side Validation**. Instead of a global blockchain validating every state transition, the Parwana allows the parties involved in a transaction to validate the state themselves. The L1 (Bitcoin/Ethereum) acts only as a "Double-Spend Registry" through **Single-Use Seals**.
 
 ### What is a Single-Use Seal?
 
 A primitive that can be closed exactly once. On Bitcoin, this is a UTXO. On Ethereum, it is a specific state entry in a smart contract. Once "spent," the seal is closed forever, preventing double-spends at the hardware/consensus level of the L1.
 
-### What is the core innovation of CSV Protocol?
+### What is the core innovation of Parwana?
 
 Most interoperability solutions focus on "messaging" or "bridging." CSV (Client-Side Validation) focuses on Sovereign State Portability. We treat the L1 not as an execution environment, but as a decentralized, immutable Single-Use Seal registry. The logic, history, and verification of an asset live with the user, not the chain.
 
 ### Is this a Bridge?
 
-**No.** Bridges usually rely on a set of third-party validators (a multisig or a new consensus layer) to "lock and mint" assets. CSV Protocol moves the *right to spend* a seal across chains. The security comes from the source chain's finality and the mathematical integrity of the Proof Bundle, not a third-party committee.
+**No.** Bridges usually rely on a set of third-party validators (a multisig or a new consensus layer) to "lock and mint" assets. Parwana moves the *right to spend* a seal across chains. The security comes from the source chain's finality and the mathematical integrity of the Proof Bundle, not a third-party committee.
 
 ### Why do we avoid the term "Bridge"?
 
@@ -57,7 +57,7 @@ This is the "Ghost Seal" problem. Our protocol handles this through **Causal Inv
 
 ### "This is overengineered. Why not just use a ZK-Rollup?"
 
-ZK-Rollups are excellent but tethered to a single "L1" host. CSV Protocol is **chain-agnostic**. It allows a Bitcoin UTXO to "commit" to a state transition that ends up on Solana without a centralized sequencer. We provide sovereign interoperability, not just vertical scaling.
+ZK-Rollups are excellent but tethered to a single "L1" host. Parwana is **chain-agnostic**. It allows a Bitcoin UTXO to "commit" to a state transition that ends up on Solana without a centralized sequencer. We provide sovereign interoperability, not just vertical scaling.
 
 ### How does "Offline Verification" actually work without a Node?
 
@@ -104,7 +104,7 @@ IBC requires "Light Client" logic on both chains. This is extremely expensive (g
 
 ### How is this different from RGB or BitVM?
 
-We share ancestors with RGB, but CSV Protocol is designed for Multi-Chain Native Seals. While RGB is primarily Bitcoin-centric, we provide a unified verification layer for Ethereum, Solana, and Move-based chains using the same Proof Bundle format.
+We share ancestors with RGB, but Parwana is designed for Multi-Chain Native Seals. While RGB is primarily Bitcoin-centric, we provide a unified verification layer for Ethereum, Solana, and Move-based chains using the same Proof Bundle format.
 
 ## 4. CLI & Tooling
 

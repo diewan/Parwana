@@ -4,7 +4,7 @@
 //! **Encoding:** MUST use canonical_cbor for protocol-critical paths
 //! **Serde Policy:** MUST NOT use serde derives (enforced by deny.toml)
 //!
-//! This crate provides cryptographic hashing utilities for the CSV protocol.
+//! This crate provides cryptographic hashing utilities for the Parwana.
 //! All hash operations must use this crate to ensure domain separation and
 //! cross-chain compatibility.
 //!

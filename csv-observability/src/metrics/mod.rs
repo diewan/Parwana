@@ -696,7 +696,7 @@ impl Default for PipelineMetrics {
 // Unified Metrics Collector
 // =========================================================================
 
-/// Unified metrics collector that aggregates all CSV protocol metrics.
+/// Unified metrics collector that aggregates all Parwana metrics.
 ///
 /// This is the primary interface for emitting observability events.
 /// Each metric category is independent and can be used separately.

@@ -1,11 +1,11 @@
-//! Failure domains classification for CSV protocol
+//! Failure domains classification for Parwana
 //!
 //! This module defines the failure domain classification system that enables
 //! deterministic error handling and recovery strategies.
 //!
 //! # Failure Domains
 //!
-//! All errors in the CSV protocol are classified into failure domains:
+//! All errors in the Parwana are classified into failure domains:
 //! - **Transient**: Temporary failures that may resolve with retry
 //! - **Permanent**: Irrecoverable failures requiring manual intervention
 //! - **Recoverable**: Failures with deterministic recovery paths

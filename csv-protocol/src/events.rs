@@ -1,6 +1,6 @@
 //! Shared Event Schemas for Cross-Chain Transfers
 //!
-//! This module defines standardized event types for the CSV protocol.
+//! This module defines standardized event types for the Parwana.
 //! These events are used by:
 //! - Chain adapters to emit events
 //! - Explorer indexer plugins to index chain events
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use crate::wire::{HashWire, SanadIdWire};
 use csv_hash::{Hash, SanadId};
 
-/// Standard event names in the CSV protocol
+/// Standard event names in the Parwana
 pub mod event_names {
     /// Sanad created on chain
     pub const SANAD_CREATED: &str = "SanadCreated";
@@ -821,7 +821,7 @@ pub enum EventFinalityStatus {
     Finalized,
 }
 
-// Canonical event schema for CSV protocol contracts
+// Canonical event schema for Parwana contracts
 //
 // This module defines the canonical event schema that all chain contracts
 // MUST emit. This ensures cross-chain event equivalence and enables

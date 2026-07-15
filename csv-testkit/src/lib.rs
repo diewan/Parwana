@@ -1,7 +1,7 @@
 //! CSV Testkit - Testing utilities and shared fixtures
 //!
 //! This crate provides testing utilities, shared fixtures, and helpers
-//! for testing the CSV protocol across all crates.
+//! for testing the Parwana across all crates.
 
 #![warn(missing_docs)]
 

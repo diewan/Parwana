@@ -1,6 +1,6 @@
 //! Test fixtures
 //!
-//! This module provides shared test fixtures for CSV protocol testing.
+//! This module provides shared test fixtures for Parwana testing.
 //! All fixtures use safe constructors with valid test data.
 
 use csv_hash::Hash;

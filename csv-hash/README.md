@@ -1,10 +1,10 @@
 # csv-hash
 
-Hash types, SanadId, replay ID types, and cryptographic operations for CSV Protocol.
+Hash types, SanadId, replay ID types, and cryptographic operations for Parwana.
 
 ## Overview
 
-`csv-hash` provides the cryptographic foundation for the CSV protocol, including hash types, domain-specific hashing, seal identifiers, and replay protection identifiers.
+`csv-hash` provides the cryptographic foundation for the Parwana, including hash types, domain-specific hashing, seal identifiers, and replay protection identifiers.
 
 ## Key Features
 

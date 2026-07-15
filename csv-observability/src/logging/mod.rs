@@ -1,6 +1,6 @@
 //! Structured Logging and Tracing Module
 //!
-//! This module provides structured logging and tracing capabilities for the CSV Protocol.
+//! This module provides structured logging and tracing capabilities for the Parwana.
 //! It includes:
 //! - Structured log levels and formats
 //! - Tracing instrumentation for distributed tracing

@@ -1,7 +1,7 @@
 //! Core SealProtocol trait - SECURITY CRITICAL
 //!
 //! This trait defines the interface that all chain-specific adapters must implement.
-//! It is the primary security boundary for the entire CSV protocol.
+//! It is the primary security boundary for the entire Parwana.
 //!
 //! # Security Invariants (for Auditors)
 //!

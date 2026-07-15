@@ -1,4 +1,4 @@
-# CSV Protocol Constitution
+# Parwana Constitution
 
 **Version:** 1.0.0
 **Status:** Constitutional Hardening Phase
@@ -635,4 +635,4 @@ All implementations MUST pass the following checks:
 
 ---
 
-*This constitution is a living document. As the CSV Protocol evolves, this document MUST be updated to reflect the current state of the protocol. All changes require governance approval per Section 14.3.*
+*This constitution is a living document. As the Parwana evolves, this document MUST be updated to reflect the current state of the protocol. All changes require governance approval per Section 14.3.*

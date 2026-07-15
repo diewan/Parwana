@@ -1,10 +1,10 @@
 # csv-proof
 
-Proof bundle types, replay ID derivation, and cryptographic proof structures for CSV Protocol.
+Proof bundle types, replay ID derivation, and cryptographic proof structures for Parwana.
 
 ## Overview
 
-`csv-proof` provides the proof bundle types and cryptographic proof structures used for cross-chain verification in the CSV protocol.
+`csv-proof` provides the proof bundle types and cryptographic proof structures used for cross-chain verification in the Parwana.
 
 ## Key Features
 
@@ -26,6 +26,7 @@ Proof bundle types, replay ID derivation, and cryptographic proof structures for
 ## Architecture Role
 
 `csv-proof` is the proof layer that:
+
 - Defines the structure of proof bundles
 - Provides replay ID derivation for nullifier tracking
 - Supports multiple signature schemes for different chains
@@ -41,6 +42,7 @@ Proof bundle types, replay ID derivation, and cryptographic proof structures for
 ## Proof Bundle Structure
 
 A proof bundle contains:
+
 - **version**: Protocol version
 - **transition_dag**: State transition DAG segment
 - **signatures**: Authorizing signatures

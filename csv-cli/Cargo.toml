@@ -43,7 +43,9 @@ csv-wallet = { version = "0.1.5", path = "../csv-wallet" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+# HTTP server for the remote chain-dispatch host endpoint (`csv runtime serve`).
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio"] }
 hex = "0.4"
 log = "0.4"
 env_logger = "0.11"

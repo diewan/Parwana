@@ -55,7 +55,7 @@ prompt_step() {
 }
 
 echo "=============================================="
-echo "  CSV Protocol CLI - Quick Start"
+echo "  Parwana CLI - Quick Start"
 echo "=============================================="
 echo ""
 echo "This tutorial will guide you through the basic CSV CLI workflow."
@@ -111,7 +111,7 @@ if [ -z "$SKIP_ALL" ]; then
 fi
 
 if [ -z "$SKIP_ALL" ]; then
-    prompt_step "Check Trust Package" "Verifies trust package status for proof verification (optional)" "csv trust status || echo '  (No trust package - for testing this is OK, for production contact CSV Protocol team)'"
+    prompt_step "Check Trust Package" "Verifies trust package status for proof verification (optional)" "csv trust status || echo '  (No trust package - for testing this is OK, for production contact Parwana team)'"
 fi
 
 echo "=============================================="
@@ -141,6 +141,6 @@ echo "  - Chain names: Run 'csv chain list' to see all supported chains"
 echo ""
 echo "About Trust Packages:"
 echo "  - For TESTING: You can skip trust package setup (current setup)"
-echo "  - For PRODUCTION: Contact CSV Protocol team for official trust packages"
+echo "  - For PRODUCTION: Contact Parwana team for official trust packages"
 echo "  - See trust-management.sh for detailed trust package operations"
 echo ""

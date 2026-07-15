@@ -1,4 +1,4 @@
-//! Lease management for CSV protocol
+//! Lease management for Parwana
 //!
 //! This module provides two lease systems:
 //!
