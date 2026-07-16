@@ -6,6 +6,90 @@ use csv_accountability::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Public accountability object kinds carried by a canonical artifact envelope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountabilityObjectKind {
+    /// Exact proposed action.
+    ActionIntent,
+    /// Signed pre-action authority.
+    ActionMandate,
+    /// One provider dispatch attempt.
+    ExecutionAttempt,
+    /// Signed execution outcome report.
+    ExecutionReceipt,
+    /// Content-addressed evidence node.
+    EvidenceNode,
+    /// Portable dispute case file.
+    DisputeBundle,
+    /// Hash-bound verifier inputs.
+    VerificationContext,
+    /// Dimensioned assurance result.
+    AssuranceProfile,
+}
+
+/// Transport envelope for bytes produced by the canonical semantic serializer.
+///
+/// This type deliberately does not serialize semantic objects itself. Producers
+/// must call the corresponding `csv-accountability::canonical_bytes` method and
+/// place those bytes here unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalAccountabilityObjectWire {
+    /// Semantic object kind.
+    pub kind: AccountabilityObjectKind,
+    /// Accountability object schema version.
+    pub object_version: u16,
+    /// Domain-separated semantic identifier, encoded as lower-case hex.
+    pub object_id_hex: String,
+    /// Exact canonical semantic bytes, encoded as lower-case hex.
+    pub canonical_bytes_hex: String,
+}
+
+impl CanonicalAccountabilityObjectWire {
+    /// Constructs an envelope and rejects malformed identifiers or empty bytes.
+    pub fn new(
+        kind: AccountabilityObjectKind,
+        object_id: [u8; 32],
+        canonical_bytes: &[u8],
+    ) -> Result<Self, &'static str> {
+        if canonical_bytes.is_empty() {
+            return Err("canonical bytes must not be empty");
+        }
+        let canonical_bytes = csv_codec::preserve_accountability_bytes(canonical_bytes)
+            .map_err(|_| "canonical bytes must be within the transport bound")?;
+        Ok(Self {
+            kind,
+            object_version: ACCOUNTABILITY_OBJECT_VERSION.get(),
+            object_id_hex: hex::encode(object_id),
+            canonical_bytes_hex: hex::encode(canonical_bytes),
+        })
+    }
+
+    /// Validates and decodes the exact canonical bytes.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, &'static str> {
+        if self.object_version != ACCOUNTABILITY_OBJECT_VERSION.get()
+            || self.object_id_hex.len() != 64
+            || !is_lower_hex(&self.object_id_hex)
+            || self.canonical_bytes_hex.is_empty()
+            || !self.canonical_bytes_hex.len().is_multiple_of(2)
+            || !is_lower_hex(&self.canonical_bytes_hex)
+        {
+            return Err("invalid canonical accountability envelope");
+        }
+        let bytes = hex::decode(&self.canonical_bytes_hex)
+            .map_err(|_| "invalid canonical accountability envelope")?;
+        csv_codec::preserve_accountability_bytes(&bytes)
+            .map_err(|_| "invalid canonical accountability envelope")
+    }
+}
+
+fn is_lower_hex(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 /// Wire selection for GitHub required commit-status contexts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "contexts", deny_unknown_fields)]
@@ -305,5 +389,27 @@ mod tests {
             Err(IntentError::TargetMismatch)
         );
         assert_eq!(intent.intent_version, ACCOUNTABILITY_OBJECT_VERSION);
+    }
+
+    #[test]
+    fn canonical_envelope_rejects_noncanonical_hex_and_unknown_fields() {
+        let envelope = CanonicalAccountabilityObjectWire::new(
+            AccountabilityObjectKind::ActionIntent,
+            [0xab; 32],
+            &[2, 3],
+        )
+        .unwrap();
+        assert_eq!(envelope.canonical_bytes().unwrap(), vec![2, 3]);
+
+        let mut uppercase = envelope.clone();
+        uppercase.object_id_hex.make_ascii_uppercase();
+        assert!(uppercase.canonical_bytes().is_err());
+
+        let mut json = serde_json::to_value(envelope).unwrap();
+        json.as_object_mut().unwrap().insert(
+            "semantic_object".into(),
+            serde_json::json!({"forged": true}),
+        );
+        assert!(serde_json::from_value::<CanonicalAccountabilityObjectWire>(json).is_err());
     }
 }

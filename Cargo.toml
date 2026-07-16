@@ -6,6 +6,7 @@ members = [
     # Core crates (Phase 1 restructuring)
     "csv-algebra",
     "csv-accountability",
+    "csv-accountability-verify",
     "csv-wire",
     "csv-protocol",
     "csv-codec",

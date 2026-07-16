@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ActionIntentWire",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version_major", "protocol_version_minor", "intent_version", "profile_id", "action_type", "target", "parameters_commitment", "parameters_media_type", "requested_by", "requested_at", "request_nonce", "context_commitments", "profile"],
+  "properties": {
+    "protocol_version_major": {"type": "integer"},
+    "protocol_version_minor": {"type": "integer"},
+    "intent_version": {"type": "integer"},
+    "profile_id": {"type": "array", "items": {"type": "integer"}},
+    "action_type": {"type": "string"},
+    "target": {"type": "array", "items": {"type": "integer"}},
+    "parameters_commitment": {"type": "array", "items": {"type": "integer"}},
+    "parameters_media_type": {"type": "string"},
+    "requested_by": {"type": "array", "items": {"type": "integer"}},
+    "requested_at": {"type": "integer"},
+    "request_nonce": {"type": "array", "items": {"type": "integer"}},
+    "context_commitments": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+    "profile": {"type": "object"}
+  }
+}

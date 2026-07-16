@@ -65,6 +65,7 @@
 #![warn(missing_docs)]
 
 // Internal modules
+pub mod accountability;
 pub mod builder;
 pub mod client;
 pub mod config;

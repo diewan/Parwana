@@ -15,6 +15,7 @@
 
 #![warn(missing_docs)]
 
+pub mod accountability;
 pub mod byte_order;
 pub mod canonical;
 pub mod decode;
@@ -25,6 +26,7 @@ pub mod schema;
 pub mod versioning;
 
 // Re-exports
+pub use accountability::{MAX_ACCOUNTABILITY_CANONICAL_BYTES, preserve_accountability_bytes};
 pub use canonical::{
     CBOR_TAG_RANGE_END, CBOR_TAG_RANGE_START, canonical_hash, cbor_tags, from_canonical_cbor,
     from_canonical_cbor_full, from_canonical_cbor_with_checksum, to_canonical_cbor,

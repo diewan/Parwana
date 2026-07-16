@@ -2,6 +2,7 @@
 
 #![allow(deprecated)]
 
+pub mod accountability;
 pub mod chain;
 pub mod chain_management;
 pub mod content;

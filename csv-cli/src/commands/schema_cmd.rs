@@ -28,6 +28,15 @@ pub enum SchemaAction {
         #[arg(long)]
         right: PathBuf,
     },
+    /// Print a generated accountability wire schema.
+    Accountability {
+        /// Schema name.
+        #[arg(long)]
+        name: String,
+        /// Output file; stdout when omitted.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 pub fn execute(action: SchemaAction) -> Result<()> {
@@ -35,7 +44,21 @@ pub fn execute(action: SchemaAction) -> Result<()> {
         SchemaAction::Validate { file } => validate_schema(file),
         SchemaAction::Compile { file, out } => compile_schema(file, out),
         SchemaAction::Diff { left, right } => diff_schemas(left, right),
+        SchemaAction::Accountability { name, out } => write_accountability_schema(name, out),
     }
+}
+
+fn write_accountability_schema(name: String, out: Option<PathBuf>) -> Result<()> {
+    let schema = csv_schema::accountability_schema(&name)
+        .ok_or_else(|| anyhow::anyhow!("unsupported accountability schema: {name}"))?;
+    let json = serde_json::to_string_pretty(&schema).context("serialize accountability schema")?;
+    if let Some(path) = out {
+        fs::write(&path, format!("{json}\n"))
+            .with_context(|| format!("write {}", path.display()))?;
+    } else {
+        println!("{json}");
+    }
+    Ok(())
 }
 
 fn load_schema(path: &PathBuf) -> Result<Schema> {

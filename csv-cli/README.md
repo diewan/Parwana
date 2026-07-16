@@ -6,6 +6,22 @@ CLI tool for the Parwana — cross-chain Sanads, proofs, content, trust, and run
 
 The CLI is a **stateless client** that delegates all protocol authority to `csv-runtime`. It holds NO protocol state (leases, transfers, replay registry). All lease management, transfer execution, and replay protection is handled exclusively by the runtime.
 
+## Accountability objects
+
+Create a canonical action-intent artifact from the strict generated wire
+schema, then inspect it without acquiring wallet or runtime state:
+
+```bash
+csv schema accountability --name action-intent-wire
+csv accountability create-intent --input intent.json --out intent.artifact.json
+csv accountability inspect --file intent.artifact.json
+csv schema accountability --name canonical-accountability-object
+```
+
+The CLI rejects unknown JSON fields, changed fixed GitHub deployment controls,
+unsupported versions, non-lower-case identifiers, and malformed canonical
+bytes. Canonical serialization remains owned by `csv-accountability`.
+
 The CLI provides a comprehensive interface for:
 
 - Chain configuration and status monitoring

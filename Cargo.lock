@@ -2843,6 +2843,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv-accountability-verify"
+version = "0.1.5"
+dependencies = [
+ "csv-accountability",
+]
+
+[[package]]
 name = "csv-adapter-core"
 version = "0.1.5"
 dependencies = [
@@ -3401,6 +3408,7 @@ dependencies = [
  "blake2",
  "bs58",
  "chrono",
+ "csv-accountability",
  "csv-adapter-factory",
  "csv-aptos",
  "csv-bitcoin",

@@ -7,6 +7,10 @@
 //! ```
 
 // Core types
+pub use crate::accountability::{
+    ActionIntent, ActionIntentWire, CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1,
+    GitHubDeploymentIntentV1Wire, RequiredContexts, RequiredContextsWire,
+};
 pub use crate::builder::{ClientBuilder, StoreBackend};
 pub use crate::client::{CsvClient, NetworkType};
 pub use crate::config::{Config, Network, RpcConfig};

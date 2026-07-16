@@ -248,6 +248,10 @@ fn intentional_workspace_crates_are_allowlisted() {
         "csv-adapter-factory",
         "csv-admission",
         "csv-accountability",
+        // Pure, side-effect-free verifier for accountability bundles. It may
+        // depend on csv-accountability but owns no network, storage, or runtime
+        // authority.
+        "csv-accountability-verify",
         "csv-algebra",
         "csv-aptos",
         "csv-architecture",

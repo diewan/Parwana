@@ -205,10 +205,13 @@ fn test_commands_use_csv_sdk_runtime() {
             // - trust.rs: Trust package management (local operations)
             // - chain.rs: Chain configuration management (no chain operations)
             // - chain_management.rs: Chain configuration management (no chain operations)
+            // - accountability.rs: Pure canonical object creation/inspection
+            //   through the csv-sdk facade; it owns no live authority.
             let filename = path.file_name().unwrap_or_default().to_string_lossy();
             let needs_runtime = !matches!(
                 filename.as_ref(),
                 "inspect.rs"
+                    | "accountability.rs"
                     | "schema_cmd.rs"
                     | "mod.rs"
                     | "import.rs"

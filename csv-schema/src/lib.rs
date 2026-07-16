@@ -6,10 +6,12 @@
 
 #![warn(missing_docs)]
 
+pub mod accountability;
 pub mod registry;
 pub mod validation;
 
 // Re-exports
+pub use accountability::{ACCOUNTABILITY_SCHEMA_NAMES, accountability_schema};
 pub use registry::{
     CompiledSchema, FieldConstraint, FieldType, Schema, SchemaDiff, SchemaDiffOp, SchemaError,
     SchemaField, SchemaRegistry, ValidationError,

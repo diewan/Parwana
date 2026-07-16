@@ -6,6 +6,29 @@ Unified SDK for the CSV (Client-Side Validation) protocol — single entry point
 
 `csv-sdk` provides a unified, high-level API for Parwana operations, abstracting away the complexity of cross-chain transfers. It delegates to `csv-runtime` for orchestration and chain adapters for chain-specific operations.
 
+## Accountability protocol facade
+
+Applications import accountability objects through `csv_sdk::accountability`,
+not through Parwana's internal crate layout. The facade exposes supported
+semantic types, strict JSON wire types, and `encode_action_intent`.
+
+`encode_action_intent` calls the canonical serializer owned by
+`csv-accountability` and returns a `CanonicalAccountabilityObjectWire`. The SDK
+does not maintain authority state or define an alternate serializer.
+
+```rust
+use csv_sdk::accountability::{
+    ActionIntentWire, action_intent_from_wire, encode_action_intent,
+};
+
+# fn example(wire: ActionIntentWire) -> Result<(), String> {
+let intent = action_intent_from_wire(wire).map_err(|error| format!("{error:?}"))?;
+let artifact = encode_action_intent(&intent).map_err(|error| format!("{error:?}"))?;
+assert_eq!(artifact.object_version, 1);
+# Ok(())
+# }
+```
+
 ## Features
 
 - **std** — Standard library support

@@ -1,0 +1,13 @@
+[package]
+name = "csv-accountability-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic, side-effect-free verification for Parwana accountability bundles"
+
+[dependencies]
+csv-accountability = { version = "0.1.5", path = "../csv-accountability" }
+
+[lints]
+workspace = true

@@ -170,6 +170,12 @@ enum Commands {
         action: commands::inspect::InspectAction,
     },
 
+    /// Create and inspect canonical accountability protocol objects
+    Accountability {
+        #[command(subcommand)]
+        action: commands::accountability::AccountabilityAction,
+    },
+
     /// Schema registry tooling
     Schema {
         #[command(subcommand)]
@@ -286,6 +292,7 @@ async fn main() -> anyhow::Result<()> {
             validate::execute(action, &config, required_state(&state)?)
         }
         Commands::Inspect { action } => commands::inspect::execute(action),
+        Commands::Accountability { action } => commands::accountability::execute(action),
         Commands::Schema { action } => commands::schema_cmd::execute(action),
         Commands::Content { action } => commands::content::execute(action, &config),
         Commands::Runtime { action } => {

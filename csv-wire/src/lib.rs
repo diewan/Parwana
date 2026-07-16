@@ -17,7 +17,10 @@ pub mod seal;
 pub mod transfer;
 pub mod transfer_state;
 
-pub use accountability::{ActionIntentWire, GitHubDeploymentIntentV1Wire, RequiredContextsWire};
+pub use accountability::{
+    AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,
+    GitHubDeploymentIntentV1Wire, RequiredContextsWire,
+};
 pub use app::{
     APP_CONTRACT_SCHEMA_VERSION, ArtifactKind, ContractArtifact, ContractError, ContractHeader,
     FinalityEvidence, NextAction, RecoveryPlan, RecoveryReason, RuntimeHealthReport, SigningIntent,
