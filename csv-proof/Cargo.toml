@@ -9,6 +9,8 @@ description = "CSV Proof - Thin re-export crate for backward compatibility"
 csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
 csv-hash = { version = "0.1.5", path = "../csv-hash", features = ["serde"] }
 csv-codec = { version = "0.1.5", path = "../csv-codec" }
+csv-accountability = { version = "0.1.5", path = "../csv-accountability" }
+ed25519-dalek = "2"
 thiserror = "1"
 async-trait = "0.1"
 log = "0.4"

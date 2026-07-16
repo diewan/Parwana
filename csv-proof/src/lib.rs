@@ -26,6 +26,7 @@ pub mod zk_proof;
 // Migrated from csv-core - these types are still here for now
 pub mod commitment_chain;
 pub mod commitments_ext;
+pub mod mandate_signature;
 pub mod proof_material;
 pub mod provenance;
 

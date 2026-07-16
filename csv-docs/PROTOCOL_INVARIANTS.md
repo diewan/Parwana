@@ -2,6 +2,87 @@
 
 This document defines the fundamental invariants of the CSV (Client-Side Validation) protocol. These invariants are non-negotiable and exist for security reasons. Any code change that violates these invariants must be rejected.
 
+## Accountability Profile v0.1
+
+This section is normative for Parwana accountability objects. “MUST”, “MUST
+NOT”, and “REJECT” describe protocol requirements, not product advice.
+Applications may present simpler language, but they may not weaken these rules
+or reinterpret a result as authority to perform an action.
+
+### Accountability invariants and executable evidence
+
+Each invariant maps to at least one automated test. The test paths and names
+are part of the review traceability contract: if code or test names move, this
+table must be updated in the same change.
+
+| ID | Normative invariant | Automated test mapping |
+|---|---|---|
+| `ACC-01` | An issued mandate MUST bind the canonical digest of exactly one intent. | `csv-accountability/src/mandate.rs::every_authority_dimension_is_hash_bound`; `csv-proof/src/mandate_signature.rs::valid_signature_verifies_and_mutations_fail` |
+| `ACC-02` | Execution dispatch MUST NOT become eligible until an atomic reservation compare-and-swap succeeds. | `csv-accountability/tests/state_semantics.rs::reservation_contract_has_one_database_winner`; `csv-accountability/tests/state_semantics.rs::reservation_fails_closed_at_time_and_identity_boundaries` |
+| `ACC-03` | A reservation MUST NOT be released after a possibly accepted dispatch unless the active profile supplies the required reconciliation evidence. | `csv-accountability/tests/state_semantics.rs::quarantine_release_requires_exact_profile_defined_evidence`; `csv-accountability/tests/state_semantics.rs::github_v1_quarantine_can_only_be_consumed_or_abandoned` |
+| `ACC-04` | A consumed mandate MUST NOT return to an executable or reservable state. | `csv-accountability/tests/state_semantics.rs::consumed_mandate_cannot_be_reserved_again`; `csv-accountability/tests/state_semantics.rs::exported_journal_validates_revisions_order_and_reconciliation` |
+| `ACC-05` | Changing any security-relevant intent or mandate parameter MUST invalidate matching or change the bound identifier. | `csv-accountability/src/intent.rs::every_profile_field_mutation_changes_the_intent_id`; `csv-accountability/src/intent.rs::generic_fields_are_bound_or_tampering_is_rejected` |
+| `ACC-06` | An execution receipt MUST bind the exact mandate, intent, attempt, and consumption record. | `csv-accountability/tests/execution_receipt.rs::receipt_cannot_bind_a_different_intent_or_attempt`; `csv-accountability/tests/execution_receipt.rs::success_failure_rejected_and_unknown_vectors_are_distinct_and_valid` |
+| `ACC-07` | An unknown external outcome MUST remain unknown until reconciliation evidence establishes a permitted transition. | `csv-accountability/tests/execution_receipt.rs::unknown_is_preserved_and_cannot_claim_a_result`; `csv-accountability/tests/state_semantics.rs::quarantine_release_requires_exact_profile_defined_evidence` |
+| `ACC-08` | Claims and observations MUST remain type-distinct in encoding and validation. | `csv-accountability/tests/evidence_graph.rs::claim_observation_confusion_and_future_event_times_are_rejected`; `csv-accountability/tests/evidence_graph.rs::bounded_acyclic_graph_validates` |
+| `ACC-09` | Selective disclosure MUST NOT imply that withheld or undisclosed branches are absent. | `csv-accountability/tests/dispute_bundle.rs::explicit_disclosed_and_withheld_tables_are_deterministic`; `csv-accountability/tests/dispute_bundle.rs::missing_objects_and_digest_mismatches_fail_closed` |
+| `ACC-10` | Assurance MUST remain dimensioned and reasoned. A scalar label MUST NOT authorize an action. | `csv-accountability/tests/assurance_profile.rs::all_four_dimension_statuses_are_representable`; `csv-accountability/tests/assurance_profile.rs::gate_derives_three_outcomes_without_hiding_dimensions` |
+| `ACC-11` | Verifier output MUST bind and echo the effective `VerificationContext`. | `csv-accountability/tests/verification_context.rs::fixed_clock_is_repeatable_and_output_echoes_context`; `csv-accountability/tests/verification_context.rs::every_context_input_is_hash_bound` |
+| `ACC-12` | Application caches, indexes, summaries, and display records MUST NOT substitute for canonical evidence bytes and content-address resolution. | `csv-accountability/tests/dispute_bundle.rs::missing_objects_and_digest_mismatches_fail_closed`; `csv-accountability/tests/evidence_graph.rs::missing_edges_and_cycles_fail_closed` |
+| `ACC-13` | Provider-specific normalization MUST be versioned, deterministic, and covered by vectors; caller-controlled display fields MUST NOT override stable identifiers. | `csv-accountability/src/intent.rs::display_names_cannot_override_stable_target_ids`; `csv-accountability/src/intent.rs::weakening_and_malicious_normalization_fail_closed` |
+| `ACC-14` | Protocol hashes MUST use approved canonical bytes and unique domain tags. | `csv-hash/src/domains/accountability.rs::accountability_domains_are_unique_and_well_formed`; `csv-hash/src/domains/accountability.rs::accountability_domains_do_not_collide_with_existing_registry`; `csv-accountability/src/mandate.rs::canonical_mandate_and_signature_envelope_round_trip` |
+| `ACC-15` | Bundle and evidence verification MUST enforce deterministic resource limits and fail closed when they are exceeded. | `csv-accountability/tests/dispute_bundle.rs::disclosure_ambiguity_and_size_limits_are_rejected`; `csv-accountability/tests/evidence_graph.rs::missing_edges_and_cycles_fail_closed` |
+
+### Accountability authority boundaries
+
+- Parwana defines canonical objects, identifiers, transition validity, and
+  deterministic verification semantics. It holds no live deployment state.
+- Piteka PostgreSQL is the sole live-state authority for mandate reservation,
+  dispatch, and recovery. A Parwana object or verifier result does not perform
+  a reservation or side effect.
+- A `GateProfile` reduces dimensioned assurance to an operator disposition
+  only after its own digest is bound. The disposition never replaces the
+  underlying dimensions and is not a reusable execution credential.
+- External information enters verification as canonical, hash-addressed
+  evidence or trust material. Network calls, provider queries, caches, and
+  indexes remain outside the pure verifier.
+
+### What Evidence Never Proves
+
+These negative clauses are normative. User interfaces, reports, APIs, and
+agent responses MUST preserve them in language appropriate to their audience.
+
+- A valid signature proves that the signed bytes verify under a key. It does
+  not prove that every statement in those bytes is true, current, complete, or
+  organizationally approved.
+- A technically valid credential, token, repository permission, or MCP scope
+  does not prove that an action was authorized. Authorization requires the
+  applicable pre-action mandate.
+- Evidence reconstructed after an event never becomes a mandate. It can show
+  `Compatible`, `Incompatible`, or `Indeterminate`; it cannot show
+  `Authorized`.
+- A receipt proves only the canonical claims and observations it binds. It
+  does not prove success when the external outcome is `Unknown`.
+- Missing evidence does not prove non-occurrence. That conclusion requires a
+  verified completeness mechanism covering the relevant source, identity, and
+  time window.
+- A disclosed branch does not prove that undisclosed branches are absent,
+  empty, harmless, or consistent.
+- A content digest proves integrity relative to bytes. It does not prove
+  provenance, truthful interpretation, lawful collection, or completeness.
+- An observation proves what a named producer reported or measured under the
+  recorded context. It does not automatically prove the corresponding claim.
+- A passing gate disposition does not grant authority and does not erase
+  indeterminate or not-applicable assurance dimensions.
+- Agreement among caches, indexes, normalized rows, or product summaries does
+  not replace canonical evidence or establish independent corroboration when
+  those views share one underlying source.
+- Deterministic verification proves repeatability within the bound
+  `VerificationContext`. It does not prove that the selected policies, trust
+  roots, algorithms, or evaluation time are appropriate for another context.
+- A blockchain anchor proves the anchored bytes and the properties supplied by
+  its verification policy. It does not prove every off-chain statement is true.
+
 ## Invariant 1: Seal IDs Must Come From Real Blockchain Transactions
 
 **Rule:** A `SealPoint.seal_id` must come from a real blockchain transaction.

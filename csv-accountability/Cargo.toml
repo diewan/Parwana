@@ -10,6 +10,8 @@ description = "Pure accountability protocol semantics for Parwana"
 default = []
 
 [dependencies]
+csv-hash = { version = "0.1.5", path = "../csv-hash" }
+csv-codec = { version = "0.1.5", path = "../csv-codec" }
 
 [lints]
 workspace = true

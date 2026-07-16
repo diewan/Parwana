@@ -2837,6 +2837,10 @@ dependencies = [
 [[package]]
 name = "csv-accountability"
 version = "0.1.5"
+dependencies = [
+ "csv-codec",
+ "csv-hash",
+]
 
 [[package]]
 name = "csv-adapter-core"
@@ -3282,9 +3286,11 @@ name = "csv-proof"
 version = "0.1.5"
 dependencies = [
  "async-trait",
+ "csv-accountability",
  "csv-codec",
  "csv-hash",
  "csv-protocol",
+ "ed25519-dalek",
  "hex",
  "log",
  "serde",
@@ -3636,6 +3642,7 @@ dependencies = [
 name = "csv-wire"
 version = "0.1.5"
 dependencies = [
+ "csv-accountability",
  "csv-algebra",
  "csv-codec",
  "csv-hash",

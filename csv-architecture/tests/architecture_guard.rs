@@ -333,6 +333,49 @@ fn production_code_has_no_todo_or_unimplemented() {
 }
 
 #[test]
+fn accountability_invariants_remain_mapped_to_automated_tests() {
+    let root = workspace_root();
+    let document = fs::read_to_string(root.join("csv-docs/PROTOCOL_INVARIANTS.md"))
+        .expect("accountability invariant document must be readable");
+
+    assert!(
+        document.contains("### What Evidence Never Proves"),
+        "the normative negative-clauses section must remain published"
+    );
+
+    for number in 1..=15 {
+        let invariant_id = format!("`ACC-{number:02}`");
+        assert!(
+            document.contains(&invariant_id),
+            "missing accountability invariant {invariant_id}"
+        );
+    }
+
+    for test_name in [
+        "every_authority_dimension_is_hash_bound",
+        "reservation_contract_has_one_database_winner",
+        "quarantine_release_requires_exact_profile_defined_evidence",
+        "consumed_mandate_cannot_be_reserved_again",
+        "every_profile_field_mutation_changes_the_intent_id",
+        "receipt_cannot_bind_a_different_intent_or_attempt",
+        "unknown_is_preserved_and_cannot_claim_a_result",
+        "claim_observation_confusion_and_future_event_times_are_rejected",
+        "explicit_disclosed_and_withheld_tables_are_deterministic",
+        "gate_derives_three_outcomes_without_hiding_dimensions",
+        "fixed_clock_is_repeatable_and_output_echoes_context",
+        "missing_objects_and_digest_mismatches_fail_closed",
+        "weakening_and_malicious_normalization_fail_closed",
+        "accountability_domains_do_not_collide_with_existing_registry",
+        "disclosure_ambiguity_and_size_limits_are_rejected",
+    ] {
+        assert!(
+            document.contains(test_name),
+            "accountability invariant mapping missing test {test_name}"
+        );
+    }
+}
+
+#[test]
 fn production_code_has_no_panics() {
     let root = workspace_root();
     let production_dirs = [

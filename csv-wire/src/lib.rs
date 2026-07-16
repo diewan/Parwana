@@ -3,6 +3,7 @@
 //! This crate owns ALL serde, ALL transport encoding, and ALL RPC wire format conversions.
 //! It depends on csv-algebra. The inverse is forbidden by deny.toml.
 
+pub mod accountability;
 pub mod app;
 pub mod canonical;
 pub mod consignment;
@@ -16,6 +17,7 @@ pub mod seal;
 pub mod transfer;
 pub mod transfer_state;
 
+pub use accountability::{ActionIntentWire, GitHubDeploymentIntentV1Wire, RequiredContextsWire};
 pub use app::{
     APP_CONTRACT_SCHEMA_VERSION, ArtifactKind, ContractArtifact, ContractError, ContractHeader,
     FinalityEvidence, NextAction, RecoveryPlan, RecoveryReason, RuntimeHealthReport, SigningIntent,
@@ -27,8 +29,8 @@ pub use invoice::{INVOICE_VERSION, Invoice};
 pub use primitives::{CommitmentWire, HashWire, SanadIdWire};
 pub use proof::ProofBundleWire;
 pub use remote::{
-    REMOTE_DISPATCH_VERSION, RemoteError, RemoteLockResult, RemoteMaterialization, RemoteMintResult,
-    RemoteRequest, RemoteRequestPayload, RemoteResponse, RemoteResponsePayload,
+    REMOTE_DISPATCH_VERSION, RemoteError, RemoteLockResult, RemoteMaterialization,
+    RemoteMintResult, RemoteRequest, RemoteRequestPayload, RemoteResponse, RemoteResponsePayload,
     RemoteSealRegistryStatus, RemoteSettlementResult, RemoteTransfer, RemoteTxFinality,
 };
 pub use seal::{SealDefinition, SealPointWire};
