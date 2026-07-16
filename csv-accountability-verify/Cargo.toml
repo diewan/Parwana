@@ -9,5 +9,8 @@ description = "Deterministic, side-effect-free verification for Parwana accounta
 [dependencies]
 csv-accountability = { version = "0.1.5", path = "../csv-accountability" }
 
+[dev-dependencies]
+csv-testkit = { version = "0.1.5", path = "../csv-testkit" }
+
 [lints]
 workspace = true

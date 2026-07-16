@@ -1,0 +1,50 @@
+corpus_version = "0.1"
+profile = "github-deployment-v1"
+
+[[case]]
+id = "valid"
+source = "csv-accountability-verify/tests/conformance.rs::valid_vector_is_ordered_context_bound_and_dimension_preserving"
+expected = "valid"
+
+[[case]]
+id = "expired"
+source = "csv-accountability-verify/tests/conformance.rs::wrong_subject_expiry_revocation_and_replay_fail_closed"
+expected = "invalid:MandateExpired"
+
+[[case]]
+id = "replayed"
+source = "csv-accountability-verify/tests/conformance.rs::wrong_subject_expiry_revocation_and_replay_fail_closed"
+expected = "invalid:ReplayDetected"
+
+[[case]]
+id = "mutated-intent"
+source = "csv-accountability-verify/tests/conformance.rs::wrong_commit_and_environment_do_not_match_the_mandate"
+expected = "invalid:IntentMismatch"
+
+[[case]]
+id = "forged-source"
+source = "csv-accountability-verify/tests/conformance.rs::forged_source_is_invalid_and_unknown_authenticity_is_indeterminate"
+expected = "invalid:EvidenceAuthenticityRejected"
+
+[[case]]
+id = "ambiguous-outcome"
+source = "csv-accountability-verify/tests/conformance.rs::ambiguous_outcome_selective_disclosure_and_missing_evidence_remain_indeterminate"
+expected = "indeterminate:OutcomeAmbiguous"
+
+[[case]]
+id = "selectively-disclosed"
+source = "csv-accountability-verify/tests/conformance.rs::ambiguous_outcome_selective_disclosure_and_missing_evidence_remain_indeterminate"
+expected = "indeterminate:SelectiveDisclosureLimitsEvaluation"
+
+[[case]]
+id = "missing-required-evidence"
+source = "csv-accountability-verify/tests/conformance.rs::ambiguous_outcome_selective_disclosure_and_missing_evidence_remain_indeterminate"
+expected = "indeterminate:RequiredEvidenceMissing"
+
+[[deferred]]
+id = "contradiction"
+requires = "org.diewan.evidence.contradiction.v1"
+
+[[deferred]]
+id = "preservation-renewal"
+requires = "org.diewan.evidence.preservation-envelope.v1"

@@ -5,12 +5,14 @@
 
 #![warn(missing_docs)]
 
+pub mod accountability;
 pub mod adversarial;
 pub mod fixtures;
 pub mod helpers;
 pub mod traces;
 
 // Re-exports
+pub use accountability::AccountabilityFixture;
 pub use adversarial::{
     AdversarialConfig, AdversarialRunner, ByzantineBehavior, ByzantineFaultMode, ByzantineRpcReader,
 };

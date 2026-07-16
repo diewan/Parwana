@@ -2847,6 +2847,7 @@ name = "csv-accountability-verify"
 version = "0.1.5"
 dependencies = [
  "csv-accountability",
+ "csv-testkit",
 ]
 
 [[package]]
@@ -3585,6 +3586,7 @@ dependencies = [
 name = "csv-testkit"
 version = "0.1.5"
 dependencies = [
+ "csv-accountability",
  "csv-chain-ports",
  "csv-codec",
  "csv-hash",
