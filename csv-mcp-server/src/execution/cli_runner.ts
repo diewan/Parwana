@@ -8,6 +8,9 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 export interface CliResult {
   stdout: string;
@@ -18,7 +21,7 @@ export interface CliResult {
 
 export function resolveCsvBinary(): string {
   if (process.env.CSV_BIN) return process.env.CSV_BIN;
-  const localBin = path.resolve(__dirname, '../../../target/release/csv');
+  const localBin = path.resolve(moduleDirectory, '../../../target/release/csv');
   try {
     fs.accessSync(localBin, fs.constants.X_OK);
     return localBin;

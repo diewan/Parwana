@@ -2,6 +2,7 @@
 node_modules/
 dist/
 coverage/
+.diewan/run/
 off-chain-test/
 
 # Environment

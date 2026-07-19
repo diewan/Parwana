@@ -6,7 +6,7 @@
  * Leases expire; the agent must not cache them across retries.
  */
 
-import { executeCsvCommand, parseCliOutput } from './cli_runner';
+import { executeCsvCommand, parseCliOutput } from './cli_runner.js';
 
 export interface Lease {
   token: string;
