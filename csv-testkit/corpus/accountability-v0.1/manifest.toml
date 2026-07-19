@@ -41,6 +41,13 @@ id = "missing-required-evidence"
 source = "csv-accountability-verify/tests/conformance.rs::ambiguous_outcome_selective_disclosure_and_missing_evidence_remain_indeterminate"
 expected = "indeterminate:RequiredEvidenceMissing"
 
+[[differential]]
+id = "independent-minimal-checker"
+source = "csv-accountability-verify/tests/differential.rs::independent_checker_matches_digest_signature_intent_and_replay_semantics"
+checker = "tools/independent-checker/check.py"
+checks = ["canonical-digest", "ed25519-signature", "intent-binding", "replay-journal"]
+negative_reasons = ["CanonicalDigestMismatch", "MandateSignatureInvalid", "IntentMismatch", "ReplayDetected", "ReplayStatusUnknown"]
+
 [[deferred]]
 id = "contradiction"
 requires = "org.diewan.evidence.contradiction.v1"

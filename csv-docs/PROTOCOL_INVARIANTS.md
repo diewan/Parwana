@@ -9,6 +9,30 @@ NOT”, and “REJECT” describe protocol requirements, not product advice.
 Applications may present simpler language, but they may not weaken these rules
 or reinterpret a result as authority to perform an action.
 
+### Status, scope, and compatibility
+
+- Profile version `0.1` is experimental but normative for object schema `1`.
+  An implementation claiming conformance MUST enforce every `ACC-*` invariant
+  below; partial conformance MUST NOT be represented as conformance.
+- The profile covers the first vertical slice only: one exact
+  `GitHubDeploymentIntentV1` is authorized by one pre-action mandate, reserved
+  once by Piteka, dispatched, evidenced, and independently verified.
+- Readers MUST reject unsupported major profile versions and unsupported
+  object schema versions. A newer minor profile version is not implicitly
+  supported. Additive extensions are valid only when the active version and
+  extension registry define how they are validated and hash-bound.
+- Canonical bytes, domain-separated identifiers, and verifier semantics are
+  owned by Parwana. Product-local serializers, summaries, or verdicts are not
+  conforming substitutes.
+- Verification is pure and deterministic for the same bundle and effective
+  `VerificationContext`. Reservation, dispatch, reconciliation, and other
+  side effects remain application responsibilities and are never performed by
+  verification.
+
+The automated traceability check is
+`csv-accountability/tests/profile_document.rs`; it rejects missing, duplicate,
+or stale invariant mappings and removal of the required negative clauses.
+
 ### Accountability invariants and executable evidence
 
 Each invariant maps to at least one automated test. The test paths and names
@@ -51,6 +75,9 @@ table must be updated in the same change.
 
 These negative clauses are normative. User interfaces, reports, APIs, and
 agent responses MUST preserve them in language appropriate to their audience.
+They may be shortened or translated, but the subject, limitation, and any
+explicit uncertainty MUST remain visible at the point where the evidence or
+result is explained.
 
 - A valid signature proves that the signed bytes verify under a key. It does
   not prove that every statement in those bytes is true, current, complete, or

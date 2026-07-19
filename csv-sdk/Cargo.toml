@@ -49,7 +49,7 @@ csv-wire = { version = "0.1.5", path = "../csv-wire", optional = true, default-f
 csv-observability = { version = "0.1.5", path = "../csv-observability", optional = true }
 
 # Key management
-csv-keys = { version = "0.1.5", path = "../csv-keys", optional = true }
+csv-keys = { version = "0.1.5", path = "../csv-keys", optional = true, features = ["wasm", "production"] }
 csv-wallet = { version = "0.1.5", path = "../csv-wallet", optional = true }
 
 # Async runtime

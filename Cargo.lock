@@ -2848,6 +2848,9 @@ version = "0.1.5"
 dependencies = [
  "csv-accountability",
  "csv-testkit",
+ "ed25519-dalek",
+ "hex",
+ "serde_json",
 ]
 
 [[package]]
@@ -3429,6 +3432,7 @@ dependencies = [
  "csv-store",
  "csv-sui",
  "csv-verifier",
+ "csv-wallet",
  "csv-wire",
  "dirs",
  "ed25519-dalek",
