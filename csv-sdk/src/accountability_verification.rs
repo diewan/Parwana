@@ -3,7 +3,7 @@
 pub use csv_accountability_verify::{
     AlgorithmStatus, AuthenticityStatus, EvidenceSummary, ReasonCode, ReplayStatus,
     RevocationStatus, Stage, StageDisposition, StageResult, TemporalContext,
-    VerificationDisposition, VerificationInput, VerificationReport, verify,
+    VerificationDisposition, VerificationInput, VerificationReport, assurance_profile, verify,
 };
 
 use csv_accountability::{

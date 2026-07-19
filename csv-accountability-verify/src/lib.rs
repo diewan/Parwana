@@ -6,9 +6,10 @@
 #![forbid(unsafe_code)]
 
 use csv_accountability::{
-    ActionIntent, ActionMandate, ContextBoundOutput, EvidenceKind, EvidenceNode, EvidenceNodeId,
-    ExecutionAttempt, ExecutionOutcome, ExecutionReceipt, MandateSubject, SourceLocator,
-    VerificationContext, validate_evidence_graph,
+    ActionIntent, ActionMandate, AssuranceDimension, AssuranceProfile, ContextBoundOutput,
+    DimensionResult, DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt,
+    ExecutionOutcome, ExecutionReceipt, MandateSubject, SourceLocator, VerificationContext,
+    VerificationContextId, validate_evidence_graph,
 };
 
 /// Stable verification stage ordering for protocol version 0.1.
@@ -60,6 +61,39 @@ pub enum ReasonCode {
     PreservationSemanticsDeferred,
 }
 
+impl ReasonCode {
+    /// Stable registry identifier suitable for machine output and UI display.
+    pub const fn registry_id(self) -> &'static str {
+        match self {
+            Self::MalformedStructure => "ACCOUNTABILITY.STRUCTURE.MALFORMED",
+            Self::IntentMismatch => "ACCOUNTABILITY.AUTHORITY.INTENT_MISMATCH",
+            Self::MandateInvalid => "ACCOUNTABILITY.AUTHORITY.MANDATE_INVALID",
+            Self::WrongExecutor => "ACCOUNTABILITY.AUTHORITY.WRONG_EXECUTOR",
+            Self::MandateNotYetValid => "ACCOUNTABILITY.TEMPORAL.NOT_YET_VALID",
+            Self::MandateExpired => "ACCOUNTABILITY.TEMPORAL.EXPIRED",
+            Self::MandateRevoked => "ACCOUNTABILITY.TEMPORAL.REVOKED",
+            Self::RevocationStatusUnknown => "ACCOUNTABILITY.TEMPORAL.REVOCATION_UNKNOWN",
+            Self::AlgorithmDisallowed => "ACCOUNTABILITY.TEMPORAL.ALGORITHM_DISALLOWED",
+            Self::AlgorithmStatusUnknown => "ACCOUNTABILITY.TEMPORAL.ALGORITHM_UNKNOWN",
+            Self::ReplayDetected => "ACCOUNTABILITY.SINGLE_USE.REPLAY_DETECTED",
+            Self::ReplayStatusUnknown => "ACCOUNTABILITY.SINGLE_USE.REPLAY_UNKNOWN",
+            Self::EvidenceInvalid => "ACCOUNTABILITY.EVIDENCE.INVALID",
+            Self::EvidenceReferenceMissing => "ACCOUNTABILITY.EVIDENCE.REFERENCE_MISSING",
+            Self::EvidenceAuthenticityRejected => "ACCOUNTABILITY.EVIDENCE.AUTHENTICITY_REJECTED",
+            Self::EvidenceAuthenticityUnknown => "ACCOUNTABILITY.EVIDENCE.AUTHENTICITY_UNKNOWN",
+            Self::RequiredEvidenceMissing => {
+                "ACCOUNTABILITY.COMPLETENESS.REQUIRED_EVIDENCE_MISSING"
+            }
+            Self::SelectiveDisclosureLimitsEvaluation => {
+                "ACCOUNTABILITY.COMPLETENESS.DISCLOSURE_LIMITED"
+            }
+            Self::ReceiptInvalid => "ACCOUNTABILITY.EXECUTION.RECEIPT_INVALID",
+            Self::OutcomeAmbiguous => "ACCOUNTABILITY.EXECUTION.OUTCOME_AMBIGUOUS",
+            Self::PreservationSemanticsDeferred => "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1",
+        }
+    }
+}
+
 /// A deterministic stage result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StageResult {
@@ -82,6 +116,110 @@ pub struct VerificationReport {
     pub stages: Vec<StageResult>,
     pub evidence_summary: EvidenceSummary,
     pub temporal_context: TemporalContext,
+}
+
+/// Convert an ordered verifier report into the complete v0.1 assurance model.
+///
+/// This projection lives beside the verifier so applications cannot invent a
+/// second mapping from verification stages to protocol assurance dimensions.
+pub fn assurance_profile(
+    verification_context_id: VerificationContextId,
+    report: &VerificationReport,
+) -> AssuranceProfile {
+    use AssuranceDimension as Dimension;
+
+    AssuranceProfile {
+        verification_context_id,
+        dimensions: vec![
+            evaluated_dimension(Dimension::Structural, report, &[Stage::Structure]),
+            deferred_dimension(Dimension::Cryptographic),
+            deferred_dimension(Dimension::Identity),
+            evaluated_dimension(
+                Dimension::Authority,
+                report,
+                &[Stage::Intent, Stage::Authority, Stage::Executor],
+            ),
+            evaluated_dimension(Dimension::Temporal, report, &[Stage::Temporal]),
+            evaluated_dimension(Dimension::SingleUse, report, &[Stage::Replay]),
+            evaluated_dimension(Dimension::Execution, report, &[Stage::Receipt]),
+            deferred_dimension(Dimension::ExternalCorroboration),
+            evaluated_dimension(Dimension::Completeness, report, &[Stage::Evidence]),
+            deferred_dimension(Dimension::Custody),
+            evaluated_dimension(
+                Dimension::Preservation,
+                report,
+                &[Stage::DeferredPreservation],
+            ),
+        ],
+    }
+}
+
+fn evaluated_dimension(
+    dimension: AssuranceDimension,
+    report: &VerificationReport,
+    stages: &[Stage],
+) -> DimensionResult {
+    let results = report
+        .stages
+        .iter()
+        .filter(|result| stages.contains(&result.stage))
+        .collect::<Vec<_>>();
+    let status = if results
+        .iter()
+        .any(|result| matches!(result.disposition, StageDisposition::Fail(_)))
+    {
+        DimensionStatus::NotSatisfied
+    } else if results
+        .iter()
+        .any(|result| matches!(result.disposition, StageDisposition::Indeterminate(_)))
+    {
+        DimensionStatus::Indeterminate
+    } else if results.is_empty()
+        || results
+            .iter()
+            .any(|result| matches!(result.disposition, StageDisposition::Unsupported(_)))
+    {
+        DimensionStatus::NotApplicable
+    } else {
+        DimensionStatus::Satisfied
+    };
+    let mut reason_codes = results
+        .iter()
+        .filter_map(|result| match result.disposition {
+            StageDisposition::Fail(reason)
+            | StageDisposition::Indeterminate(reason)
+            | StageDisposition::Unsupported(reason) => Some(reason.registry_id().to_owned()),
+            StageDisposition::Pass => None,
+        })
+        .collect::<Vec<_>>();
+    if status == DimensionStatus::Satisfied {
+        reason_codes.push("ACCOUNTABILITY.REQUIREMENT_MET".into());
+    }
+    reason_codes.sort();
+    reason_codes.dedup();
+    DimensionResult {
+        dimension,
+        status,
+        assurance_level: None,
+        reason_codes,
+        supporting_evidence_refs: Vec::new(),
+        limitations: if status == DimensionStatus::NotApplicable {
+            vec!["Not evaluated by accountability profile v0.1".into()]
+        } else {
+            vec!["Conclusion is limited to the selected, hash-bound verification context".into()]
+        },
+    }
+}
+
+fn deferred_dimension(dimension: AssuranceDimension) -> DimensionResult {
+    DimensionResult {
+        dimension,
+        status: DimensionStatus::NotApplicable,
+        assurance_level: None,
+        reason_codes: vec!["ACCOUNTABILITY.PROFILE_V0_1.NOT_EVALUATED".into()],
+        supporting_evidence_refs: Vec::new(),
+        limitations: vec!["Not evaluated by accountability profile v0.1".into()],
+    }
 }
 
 /// Explicit temporal policy material used by the evaluation.

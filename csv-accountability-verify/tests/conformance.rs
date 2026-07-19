@@ -3,7 +3,7 @@ use csv_accountability::{
 };
 use csv_accountability_verify::{
     AlgorithmStatus, AuthenticityStatus, ReasonCode, ReplayStatus, RevocationStatus, Stage,
-    StageDisposition, VerificationDisposition, VerificationInput, verify,
+    StageDisposition, VerificationDisposition, VerificationInput, assurance_profile, verify,
 };
 use csv_testkit::AccountabilityFixture;
 
@@ -98,6 +98,61 @@ fn valid_vector_is_ordered_context_bound_and_dimension_preserving() {
         Stage::DeferredPreservation,
         StageDisposition::Unsupported(ReasonCode::PreservationSemanticsDeferred)
     ));
+}
+
+#[test]
+fn assurance_projection_is_complete_non_scalar_and_context_bound() {
+    let fixture = AccountabilityFixture::valid();
+    let report = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Fresh,
+    );
+    let context_id = fixture.context.id().unwrap();
+    let assurance = assurance_profile(context_id, &report);
+    assurance.validate().expect("projection remains canonical");
+    assert_eq!(assurance.verification_context_id, context_id);
+    assert_eq!(assurance.dimensions.len(), 11);
+    assert!(assurance.dimensions.iter().all(|dimension| {
+        !dimension.reason_codes.is_empty() && !dimension.limitations.is_empty()
+    }));
+    assert_eq!(
+        assurance.dimensions[1].limitations,
+        ["Not evaluated by accountability profile v0.1"]
+    );
+    assert!(
+        assurance
+            .dimensions
+            .iter()
+            .all(|dimension| dimension.assurance_level.is_none())
+    );
+}
+
+#[test]
+fn assurance_projection_preserves_failure_and_uncertainty() {
+    let mut fixture = AccountabilityFixture::valid();
+    fixture.intent.profile.commit_sha = "a".repeat(40);
+    let report = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Unknown,
+    );
+    let assurance = assurance_profile(fixture.context.id().unwrap(), &report);
+    assert_eq!(
+        assurance.dimensions[3].status,
+        csv_accountability::DimensionStatus::NotSatisfied
+    );
+    assert!(
+        assurance.dimensions[3]
+            .reason_codes
+            .contains(&"ACCOUNTABILITY.AUTHORITY.INTENT_MISMATCH".into())
+    );
+    assert_eq!(
+        assurance.dimensions[5].status,
+        csv_accountability::DimensionStatus::Indeterminate
+    );
 }
 
 #[test]

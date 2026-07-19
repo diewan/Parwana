@@ -6,10 +6,10 @@
 
 pub use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ActionIntent, ActionMandate,
-    AssuranceProfile, ContextBoundOutput, DisputeBundle, EvidenceNode, EvidenceNodeId,
-    ExecutionAttempt, ExecutionReceipt, GateProfileId, GitHubDeploymentIntentV1, IntentError,
-    MandateSignatureEnvelope, ObjectVersion, ProtocolVersion, RequiredContexts,
-    VerificationContext, VerificationContextId,
+    AssuranceDimension, AssuranceProfile, ContextBoundOutput, DimensionResult, DimensionStatus,
+    DisputeBundle, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt, ExecutionReceipt,
+    GateProfileId, GitHubDeploymentIntentV1, IntentError, MandateSignatureEnvelope, ObjectVersion,
+    ProtocolVersion, RequiredContexts, SourceLocator, VerificationContext, VerificationContextId,
 };
 pub use csv_wire::{
     AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,
