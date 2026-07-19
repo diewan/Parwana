@@ -121,3 +121,50 @@ fn test_sdk_registers_chain_adapter() {
         "SDK should register ChainAdapter in adapter_registry"
     );
 }
+
+#[test]
+fn client_and_accountability_are_separate_product_neutral_capabilities() {
+    let manifest = include_str!("../Cargo.toml");
+    let library = include_str!("../src/lib.rs");
+
+    for dependency in [
+        "csv-runtime",
+        "csv-storage",
+        "csv-remote",
+        "csv-chain-ports",
+        "csv-observability",
+        "csv-keys",
+    ] {
+        let declaration = manifest
+            .lines()
+            .find(|line| line.starts_with(dependency))
+            .unwrap_or_else(|| panic!("missing {dependency} dependency declaration"));
+        assert!(
+            declaration.contains("optional = true"),
+            "{dependency} must remain optional for accountability-only consumers"
+        );
+    }
+
+    for module in [
+        "builder",
+        "client",
+        "contract",
+        "runtime",
+        "transfers",
+        "wallet",
+    ] {
+        assert!(
+            library.contains(&format!("#[cfg(feature = \"client\")]\npub mod {module};")),
+            "{module} must stay behind the primary Parwana client feature"
+        );
+    }
+
+    assert!(
+        library.contains("#[cfg(feature = \"accountability\")]\npub mod accountability;"),
+        "the Accountability add-on must have its own compilation boundary"
+    );
+    assert!(
+        !manifest.contains("legacy = [") && !manifest.contains("piteka = ["),
+        "Parwana features must not deprecate its SDK or encode a consumer project"
+    );
+}

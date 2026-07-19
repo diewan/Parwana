@@ -1,0 +1,24 @@
+[package]
+name = "csv-accountability-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+csv-accountability = { path = "../csv-accountability" }
+csv-accountability-verify = { path = "../csv-accountability-verify" }
+csv-testkit = { path = "../csv-testkit" }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "accountability_verify"
+path = "fuzz_targets/accountability_verify.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

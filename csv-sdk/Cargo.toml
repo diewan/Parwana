@@ -23,16 +23,16 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Core — always included
-csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
-csv-accountability = { version = "0.1.5", path = "../csv-accountability" }
-csv-hash = { version = "0.1.5", path = "../csv-hash" }
-csv-proof = { version = "0.1.5", path = "../csv-proof" }
-csv-verifier = { version = "0.1.5", path = "../csv-verifier" }
+csv-protocol = { version = "0.1.5", path = "../csv-protocol", optional = true }
+csv-accountability = { version = "0.1.5", path = "../csv-accountability", optional = true }
+csv-hash = { version = "0.1.5", path = "../csv-hash", optional = true }
+csv-proof = { version = "0.1.5", path = "../csv-proof", optional = true }
+csv-verifier = { version = "0.1.5", path = "../csv-verifier", optional = true }
 csv-p2p = { version = "0.1.5", path = "../csv-p2p", optional = true }
-csv-chain-ports = { version = "0.1.5", path = "../csv-chain-ports" }
+csv-chain-ports = { version = "0.1.5", path = "../csv-chain-ports", optional = true }
 # Remote chain-dispatch adapter (WASM-REMOTE-001). wasm-clean; the reqwest HTTP
 # transport rides its `http` feature (on by default) and compiles on wasm too.
-csv-remote = { version = "0.1.5", path = "../csv-adapters/csv-remote" }
+csv-remote = { version = "0.1.5", path = "../csv-adapters/csv-remote", optional = true }
 
 # Chain adapters — optional, enabled via feature flags
 # csv-bitcoin compiles for all targets
@@ -43,13 +43,14 @@ csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optiona
 # Persistence
 csv-store = { version = "0.1.5", path = "../csv-store", optional = true }
 csv-storage = { version = "0.1.5", path = "../csv-storage", optional = true }
-csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
-csv-codec = { version = "0.1.5", path = "../csv-codec" }
-csv-wire = { version = "0.1.5", path = "../csv-wire" }
-csv-observability = { version = "0.1.5", path = "../csv-observability" }
+csv-runtime = { version = "0.1.5", path = "../csv-runtime", optional = true }
+csv-codec = { version = "0.1.5", path = "../csv-codec", optional = true }
+csv-wire = { version = "0.1.5", path = "../csv-wire", optional = true, default-features = false }
+csv-observability = { version = "0.1.5", path = "../csv-observability", optional = true }
 
 # Key management
-csv-keys = { version = "0.1.5", path = "../csv-keys" }
+csv-keys = { version = "0.1.5", path = "../csv-keys", optional = true }
+csv-wallet = { version = "0.1.5", path = "../csv-wallet", optional = true }
 
 # Async runtime
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"], optional = true }
@@ -59,19 +60,19 @@ web-sys = { workspace = true, features = ["Window", "Document", "HtmlElement", "
 gloo-timers = { version = "0.3", features = ["futures"], optional = true }
 
 # Serialization / utilities
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
-hex = "0.4.3"
-bs58 = "0.5"
-blake2 = "0.10"
-sha2 = "0.10"
-sha3 = "0.10"
-log = "0.4"
-toml = "0.8"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+thiserror = { version = "1.0", optional = true }
+hex = { version = "0.4.3", optional = true }
+bs58 = { version = "0.5", optional = true }
+blake2 = { version = "0.10", optional = true }
+sha2 = { version = "0.10", optional = true }
+sha3 = { version = "0.10", optional = true }
+log = { version = "0.4", optional = true }
+toml = { version = "0.8", optional = true }
 dirs = { version = "5.0", optional = true }
-rand = "0.8"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+rand = { version = "0.8", optional = true }
+uuid = { version = "1.0", features = ["v4", "serde"], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 sqlx = { version = "0.8.2", features = ["sqlite", "_rt-tokio", "tls-rustls", "chrono"], optional = true }
 
@@ -102,15 +103,35 @@ csv-adapter-factory = { version = "0.1.5", path = "../csv-adapter-factory", opti
 ] }
 
 [features]
-default = ["std", "tokio", "native"]
+default = ["std", "tokio", "native", "client"]
 std = []
 
+# Parwana's primary client SDK: protocol, transfer, wallet, and runtime APIs.
+# This remains the default product surface. It is a named capability—not a
+# compatibility or deprecation tier—so optional add-ons can compile separately.
+client = [
+    "dep:csv-protocol", "dep:csv-hash", "dep:csv-proof", "dep:csv-verifier",
+    "dep:csv-chain-ports", "dep:csv-remote", "dep:csv-runtime", "dep:csv-codec",
+    "dep:csv-wire", "dep:csv-observability", "dep:csv-keys", "dep:serde", "dep:serde_json",
+    "dep:thiserror", "dep:hex", "dep:bs58", "dep:blake2", "dep:sha2",
+    "dep:sha3", "dep:log", "dep:toml", "dep:rand", "dep:uuid",
+]
+
+# Optional Accountability protocol facade. Consumers opt into this capability
+# explicitly; no consumer-project identity is encoded in Parwana's features.
+# This boundary is intended to become the add-on registration seam.
+accountability = [
+    "dep:csv-accountability",
+    "dep:csv-wire",
+    "csv-wire/accountability",
+]
+
 # Chain features
-bitcoin = ["dep:csv-bitcoin", "dep:bitcoin", "csv-bitcoin/signet-rest"]
-ethereum = ["dep:csv-ethereum", "csv-ethereum/rpc"]
-sui = ["dep:csv-sui", "dep:ed25519-dalek", "csv-sui/rpc"]
-aptos = ["dep:csv-aptos", "csv-aptos/rpc", "dep:ed25519-dalek"]
-solana = ["dep:csv-solana", "csv-solana/rpc"]
+bitcoin = ["client", "dep:csv-bitcoin", "dep:bitcoin", "csv-bitcoin/signet-rest"]
+ethereum = ["client", "dep:csv-ethereum", "csv-ethereum/rpc"]
+sui = ["client", "dep:csv-sui", "dep:ed25519-dalek", "csv-sui/rpc"]
+aptos = ["client", "dep:csv-aptos", "csv-aptos/rpc", "dep:ed25519-dalek"]
+solana = ["client", "dep:csv-solana", "csv-solana/rpc"]
 all-chains = ["bitcoin", "ethereum", "sui", "aptos", "solana"]
 
 # RPC features for chain queries
@@ -145,6 +166,18 @@ runtime-coordinator = ["dep:csv-storage", "csv-storage/redb", "csv-runtime/persi
 # Wallet / crypto
 wallet = ["dep:ed25519-dalek", "dep:bip32", "dep:k256", "dep:tiny-hderive"]
 
+# Supported application-consumer facade used by external wallets and protocol
+# consoles. It exposes portable key, encrypted-wallet, and browser-storage
+# capabilities without requiring consumers to import implementation crates.
+consumer-wallet = [
+    "client",
+    "wallet",
+    "dep:csv-wallet",
+    "dep:csv-store",
+    "csv-store/browser-storage",
+    "csv-store/encrypted-storage",
+]
+
 # P2P proof delivery.
 # ROADMAP-P2P-001 decision: this remains an SDK opt-in feature. The shipped
 # csv-cli does not enable it until P2P consignment delivery has an operator
@@ -157,7 +190,7 @@ p2p = ["dep:csv-p2p"]
 native = ["dep:dirs"]
 
 # Experimental features
-experimental = []
+experimental = ["client"]
 
 [dev-dependencies]
 rand = "0.8"

@@ -52,17 +52,23 @@ fn missing_edges_and_cycles_fail_closed() {
         Err(EvidenceError::MissingRelationship)
     );
 
-    let mut cyclic = node(
+    let first_id = EvidenceNodeId::from_digest([7; 32]);
+    let second_id = EvidenceNodeId::from_digest([8; 32]);
+    let first = node(
         EvidenceKind::Claim {
             proposition_digest: [1; 32],
         },
-        vec![],
+        vec![second_id],
     );
-    let provisional_id = cyclic.id().unwrap();
-    cyclic.relationships = vec![provisional_id];
+    let second = node(
+        EvidenceKind::Claim {
+            proposition_digest: [2; 32],
+        },
+        vec![first_id],
+    );
     assert_eq!(
-        validate_evidence_graph(&[(cyclic.id().unwrap(), cyclic)]),
-        Err(EvidenceError::MissingRelationship)
+        validate_evidence_graph(&[(first_id, first), (second_id, second)]),
+        Err(EvidenceError::Cycle)
     );
 }
 

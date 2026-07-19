@@ -568,7 +568,9 @@ impl Config {
     ) -> Option<RpcConfig> {
         let mut rpc = reviewed_chain_config(chain, network).rpc;
         let policy = rpc.policy.as_mut()?;
-        if let Some(url) = request_url_override.map(str::trim).filter(|u| !u.is_empty())
+        if let Some(url) = request_url_override
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
             && let Some(endpoint) = policy.endpoints.iter_mut().find(|endpoint| {
                 endpoint.capabilities.contains(&RpcCapability::Read)
                     && endpoint.transport != RpcTransport::WebSocket
@@ -576,7 +578,9 @@ impl Config {
         {
             endpoint.url = url.to_string();
         }
-        if let Some(url) = indexer_url_override.map(str::trim).filter(|u| !u.is_empty())
+        if let Some(url) = indexer_url_override
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
             && let Some(endpoint) = policy
                 .endpoints
                 .iter_mut()
@@ -893,7 +897,8 @@ mod tests {
         async fn observe(
             &self,
             _endpoint: &RpcEndpoint,
-        ) -> Result<crate::rpc_identity::ObservedIdentity, crate::rpc_identity::ProbeError> {
+        ) -> Result<crate::rpc_identity::ObservedIdentity, crate::rpc_identity::ProbeError>
+        {
             Ok(crate::rpc_identity::ObservedIdentity {
                 chain_id: Some(self.reported_chain_id.to_string()),
                 ..Default::default()
@@ -923,7 +928,11 @@ mod tests {
         // Never-probed: the endpoint is not usable, so resolution fails closed
         // even though the policy has a request-capable candidate.
         let mut validator = EndpointValidator::new(3600, 0);
-        assert!(config.validated_request_url("ethereum", &validator).is_err());
+        assert!(
+            config
+                .validated_request_url("ethereum", &validator)
+                .is_err()
+        );
         assert!(
             config
                 .validated_candidates("ethereum", RpcCapability::Read, &validator)
@@ -941,7 +950,11 @@ mod tests {
                 1,
             )
             .await;
-        assert!(config.validated_request_url("ethereum", &validator).is_err());
+        assert!(
+            config
+                .validated_request_url("ethereum", &validator)
+                .is_err()
+        );
 
         // A probe reporting the expected chain id validates the endpoint, and it
         // now resolves through the gate to its reviewed URL.

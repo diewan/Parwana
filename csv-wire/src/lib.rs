@@ -3,6 +3,7 @@
 //! This crate owns ALL serde, ALL transport encoding, and ALL RPC wire format conversions.
 //! It depends on csv-algebra. The inverse is forbidden by deny.toml.
 
+#[cfg(feature = "accountability")]
 pub mod accountability;
 pub mod app;
 pub mod canonical;
@@ -17,6 +18,7 @@ pub mod seal;
 pub mod transfer;
 pub mod transfer_state;
 
+#[cfg(feature = "accountability")]
 pub use accountability::{
     AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,
     GitHubDeploymentIntentV1Wire, RequiredContextsWire,

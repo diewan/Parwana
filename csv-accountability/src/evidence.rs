@@ -265,12 +265,18 @@ pub fn validate_evidence_graph(
     if nodes.len() > MAX_EVIDENCE_NODES {
         return Err(EvidenceError::BoundsExceeded);
     }
-    for (index, (id, node)) in nodes.iter().enumerate() {
+    // Check the supplied graph structure first so a cyclic hostile graph is
+    // classified as a cycle rather than being masked by its necessarily
+    // inconsistent content identifiers. Canonical identifier validation still
+    // follows for every structurally valid graph.
+    for index in 0..nodes.len() {
+        let mut path = Vec::new();
+        visit(nodes, index, &mut path, 0)?;
+    }
+    for (id, node) in nodes {
         if *id != node.id()? {
             return Err(EvidenceError::IdentifierMismatch);
         }
-        let mut path = Vec::new();
-        visit(nodes, index, &mut path, 0)?;
     }
     Ok(())
 }

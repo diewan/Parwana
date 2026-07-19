@@ -24,6 +24,7 @@ off-chain-test/
 
 # Build artifacts
 target/
+**/*.pyc
 
 # Foundry build artifacts (Ethereum)
 **/out/

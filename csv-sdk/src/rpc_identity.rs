@@ -73,10 +73,9 @@ impl ExpectedIdentity {
             "ethereum" => (
                 ethereum_chain_id_from(manifest).map(|id| id.to_string()),
                 deployments.ethereum.as_ref().is_some_and(|ethereum| {
-                    ethereum
-                        .contracts
-                        .iter()
-                        .any(|contract| contract.name == "CSVSeal" && !contract.address.trim().is_empty())
+                    ethereum.contracts.iter().any(|contract| {
+                        contract.name == "CSVSeal" && !contract.address.trim().is_empty()
+                    })
                 }),
             ),
             "solana" => (
@@ -389,7 +388,11 @@ impl<T: IdentityTransport> IdentityProbe for EvmIdentityProbe<T> {
         }
         let chain_id_result = self
             .transport
-            .json_rpc(&endpoint.url, "eth_chainId", serde_json::Value::Array(vec![]))
+            .json_rpc(
+                &endpoint.url,
+                "eth_chainId",
+                serde_json::Value::Array(vec![]),
+            )
             .await?;
         // eth_chainId returns a 0x-prefixed hex quantity; normalize to decimal so
         // it compares against the manifest's numeric chain id. A malformed value
@@ -662,7 +665,8 @@ mod tests {
 
     #[test]
     fn expected_identity_from_manifest_bitcoin_is_network_only() {
-        let m = manifest(r#"{"deployments":{"ethereum":null,"solana":null,"sui":null,"aptos":null}}"#);
+        let m =
+            manifest(r#"{"deployments":{"ethereum":null,"solana":null,"sui":null,"aptos":null}}"#);
         let expected = ExpectedIdentity::from_manifest("bitcoin", "signet", &m);
         assert_eq!(expected.chain_id, None);
         assert!(!expected.requires_deployment);
@@ -759,7 +763,11 @@ mod tests {
                 "solana":null,"sui":null,"aptos":null}}"#,
         );
         let expected = ExpectedIdentity::from_manifest("ethereum", "sepolia", &m);
-        let ep = endpoint("eth-req", RpcEndpointSource::BuiltIn, &[RpcCapability::Read]);
+        let ep = endpoint(
+            "eth-req",
+            RpcEndpointSource::BuiltIn,
+            &[RpcCapability::Read],
+        );
 
         // Honest endpoint: probed valid, becomes usable.
         let probe = EvmIdentityProbe::new(

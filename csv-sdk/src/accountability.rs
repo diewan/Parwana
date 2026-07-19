@@ -7,8 +7,8 @@
 pub use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ActionIntent, ActionMandate,
     AssuranceProfile, DisputeBundle, EvidenceNode, ExecutionAttempt, ExecutionReceipt,
-    GateProfileId, GitHubDeploymentIntentV1, MandateSignatureEnvelope, RequiredContexts,
-    VerificationContext,
+    GateProfileId, GitHubDeploymentIntentV1, IntentError, MandateSignatureEnvelope, ObjectVersion,
+    ProtocolVersion, RequiredContexts, VerificationContext,
 };
 pub use csv_wire::{
     AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,
