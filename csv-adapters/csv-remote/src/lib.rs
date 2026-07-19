@@ -48,13 +48,13 @@ use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
 use csv_wire::remote::{
-    RemoteError, RemoteRequest, RemoteRequestPayload, RemoteResponse, RemoteResponsePayload,
-    REMOTE_DISPATCH_VERSION,
+    REMOTE_DISPATCH_VERSION, RemoteError, RemoteRequest, RemoteRequestPayload, RemoteResponse,
+    RemoteResponsePayload,
 };
 
-pub use transport::RemoteTransport;
 #[cfg(feature = "http")]
 pub use transport::HttpTransport;
+pub use transport::RemoteTransport;
 
 /// Translate a typed wire error into the adapter error surface. Always
 /// fail-closed — no variant maps to a success or default value.
@@ -100,17 +100,16 @@ impl RemoteChainAdapter {
     ) -> Result<Self, AdapterError> {
         let chain_id = chain_id.into();
 
-        let capabilities = match call(&transport, &chain_id, RemoteRequestPayload::Capabilities)
-            .await?
-        {
-            RemoteResponsePayload::Capabilities(Some(caps)) => caps,
-            RemoteResponsePayload::Capabilities(None) => {
-                return Err(AdapterError::Generic(format!(
-                    "remote host has no adapter for chain: {chain_id}"
-                )));
-            }
-            other => return Err(unexpected_variant("Capabilities", &other)),
-        };
+        let capabilities =
+            match call(&transport, &chain_id, RemoteRequestPayload::Capabilities).await? {
+                RemoteResponsePayload::Capabilities(Some(caps)) => caps,
+                RemoteResponsePayload::Capabilities(None) => {
+                    return Err(AdapterError::Generic(format!(
+                        "remote host has no adapter for chain: {chain_id}"
+                    )));
+                }
+                other => return Err(unexpected_variant("Capabilities", &other)),
+            };
 
         let signature_scheme =
             match call(&transport, &chain_id, RemoteRequestPayload::SignatureScheme).await? {

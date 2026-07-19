@@ -112,8 +112,8 @@ async fn dispatch_handler(
 
     // The dispatch logic (and every `.mint_sanad` / `.lock_sanad` call) lives in
     // csv-remote's host module, not here: the CLI holds no protocol authority.
-    let response = csv_sdk::csv_remote::host::dispatch_bytes(serve_state.registry.as_ref(), &body)
-        .await;
+    let response =
+        csv_sdk::csv_remote::host::dispatch_bytes(serve_state.registry.as_ref(), &body).await;
     ([(header::CONTENT_TYPE, "application/cbor")], response).into_response()
 }
 
@@ -248,7 +248,14 @@ async fn cmd_serve(
 
     let served: Vec<String> = chain_list.iter().map(|c| c.as_str().to_string()).collect();
     output::kv("Chains", &served.join(", "));
-    output::kv("Auth", if token.is_some() { "bearer token" } else { "none" });
+    output::kv(
+        "Auth",
+        if token.is_some() {
+            "bearer token"
+        } else {
+            "none"
+        },
+    );
     output::kv("Bind", &bind);
 
     let serve_state = ServeState {

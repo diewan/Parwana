@@ -100,13 +100,15 @@ fn reservation_fails_closed_at_time_and_identity_boundaries() {
 
 #[test]
 fn consumed_mandate_cannot_be_reserved_again() {
-    assert!(validate_mandate_transition(
-        MandateState::Consumed,
-        MandateState::Reserved,
-        Some(ExecutionAttemptState::Prepared),
-        &TransitionContext::before_dispatch(),
-    )
-    .is_err());
+    assert!(
+        validate_mandate_transition(
+            MandateState::Consumed,
+            MandateState::Reserved,
+            Some(ExecutionAttemptState::Prepared),
+            &TransitionContext::before_dispatch(),
+        )
+        .is_err()
+    );
 }
 
 #[test]

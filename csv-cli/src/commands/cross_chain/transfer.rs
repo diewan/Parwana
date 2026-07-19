@@ -2129,20 +2129,16 @@ async fn lock_and_mint(
     // destination can be a cross-chain destination before we lock anything.
     let mut sdk_config_check = csv_sdk::config::Config::default();
     if let Ok(from_chain_config) = config.chain(&from) {
-        sdk_config_check
-            .chains
-            .insert(
-                from.to_string(),
-                capability_chain_config(from.as_str(), from_chain_config),
-            );
+        sdk_config_check.chains.insert(
+            from.to_string(),
+            capability_chain_config(from.as_str(), from_chain_config),
+        );
     }
     if let Ok(to_chain_config) = config.chain(&to) {
-        sdk_config_check
-            .chains
-            .insert(
-                to.to_string(),
-                capability_chain_config(to.as_str(), to_chain_config),
-            );
+        sdk_config_check.chains.insert(
+            to.to_string(),
+            capability_chain_config(to.as_str(), to_chain_config),
+        );
     }
 
     let check_client = CsvClient::builder()
