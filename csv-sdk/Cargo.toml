@@ -25,6 +25,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Core — always included
 csv-protocol = { version = "0.1.5", path = "../csv-protocol", optional = true }
 csv-accountability = { version = "0.1.5", path = "../csv-accountability", optional = true }
+csv-accountability-verify = { version = "0.1.5", path = "../csv-accountability-verify", optional = true }
 csv-hash = { version = "0.1.5", path = "../csv-hash", optional = true }
 csv-proof = { version = "0.1.5", path = "../csv-proof", optional = true }
 csv-verifier = { version = "0.1.5", path = "../csv-verifier", optional = true }
@@ -122,8 +123,10 @@ client = [
 # This boundary is intended to become the add-on registration seam.
 accountability = [
     "dep:csv-accountability",
+    "dep:csv-accountability-verify",
     "dep:csv-wire",
     "csv-wire/accountability",
+    "dep:serde", "dep:serde_json", "dep:hex",
 ]
 
 # Chain features
@@ -196,6 +199,7 @@ experimental = ["client"]
 rand = "0.8"
 tempfile = "3"
 csv-store = { version = "0.1.5", path = "../csv-store" }
+csv-testkit = { version = "0.1.5", path = "../csv-testkit" }
 
 [lints]
 workspace = true

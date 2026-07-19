@@ -69,6 +69,8 @@
 // Internal modules
 #[cfg(feature = "accountability")]
 pub mod accountability;
+#[cfg(feature = "accountability")]
+pub mod accountability_verification;
 #[cfg(feature = "client")]
 pub mod builder;
 #[cfg(feature = "client")]
