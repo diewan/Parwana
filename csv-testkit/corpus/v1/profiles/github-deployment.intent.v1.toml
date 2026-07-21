@@ -1,0 +1,38 @@
+# Published ProfileDescriptor (Master Plan §35, §36).
+#
+# This is the data half of a registered accountability profile. It mirrors
+# csv_accountability::github_deployment_descriptor(); the Rust codec
+# (GitHubDeploymentCodec) is the behavioural half. Registering a profile means
+# publishing a descriptor like this and shipping a ProfileCodec — no edit to the
+# accountability core.
+
+profile_id = "org.diewan.accountability.github-deployment.intent.v1"
+action_type = "github.deployment"
+parameters_media_type = "application/vnd.diewan.github-deployment-v1+csv-binary"
+parameters_domain_tag = "github-deployment-parameters-v1"
+max_context_commitments = 32
+max_identity_bytes = 4096
+
+# Whether a quarantined mandate can ever be released. The first GitHub profile has
+# no sufficient absence predicate, so a quarantine is never releasable.
+quarantine_release = "never_releasable"
+
+# Complete evidence-source inventory, each with its independence class:
+#   executor               -> the reporting executor's own claim
+#   provider_corroborating -> external to the executor; may share provider trust
+#   external_anchor        -> external to both executor and provider (strongest)
+[[evidence_source]]
+id = "evidence.executor.attempt-record"
+class = "executor"
+
+[[evidence_source]]
+id = "evidence.github.deployment-record"
+class = "provider_corroborating"
+
+[[evidence_source]]
+id = "evidence.github.webhook-delivery"
+class = "provider_corroborating"
+
+[[evidence_source]]
+id = "evidence.github.authenticated-environment-configuration"
+class = "provider_corroborating"

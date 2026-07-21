@@ -132,7 +132,7 @@ fn assurance_projection_is_complete_non_scalar_and_context_bound() {
 #[test]
 fn assurance_projection_preserves_failure_and_uncertainty() {
     let mut fixture = AccountabilityFixture::valid();
-    fixture.intent.profile.commit_sha = "a".repeat(40);
+    mutate_commit(&mut fixture.intent);
     let report = run(
         &fixture,
         &authenticity(&fixture),
@@ -345,15 +345,20 @@ fn claim_observation_attestation_and_gap_are_counted_without_conflation() {
     ));
 }
 
+fn github_profile(intent: &ActionIntent) -> csv_accountability::GitHubDeploymentIntentV1 {
+    csv_accountability::GitHubDeploymentIntentV1::from_canonical_bytes(&intent.profile_bytes)
+        .expect("intent carries a canonical github profile")
+}
+
 fn mutate_commit(intent: &mut ActionIntent) {
-    let mut profile = intent.profile.clone();
+    let mut profile = github_profile(intent);
     profile.commit_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into();
     profile.exact_ref = profile.commit_sha.clone();
     *intent = rebuild_intent(intent, profile);
 }
 
 fn mutate_environment(intent: &mut ActionIntent) {
-    let mut profile = intent.profile.clone();
+    let mut profile = github_profile(intent);
     profile.environment_id += 1;
     *intent = rebuild_intent(intent, profile);
 }
@@ -363,7 +368,6 @@ fn rebuild_intent(
     profile: csv_accountability::GitHubDeploymentIntentV1,
 ) -> ActionIntent {
     ActionIntent::github_deployment(
-        original.profile_id,
         original.requested_by.clone(),
         original.requested_at,
         original.request_nonce,

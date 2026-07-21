@@ -71,9 +71,7 @@ fn write_json(value: &impl serde::Serialize, out: Option<PathBuf>) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use csv_sdk::accountability::{
-        ActionIntent, GateProfileId, GitHubDeploymentIntentV1, RequiredContexts,
-    };
+    use csv_sdk::accountability::{ActionIntent, GitHubDeploymentIntentV1, RequiredContexts};
 
     fn input_wire() -> ActionIntentWire {
         let required_contexts = RequiredContexts::AllSubmitted;
@@ -91,7 +89,6 @@ mod tests {
             artifact_digest: None,
         };
         let intent = ActionIntent::github_deployment(
-            GateProfileId::from_digest([9; 32]),
             b"requester:alice".to_vec(),
             1_750_000_000,
             [7; 32],
@@ -122,8 +119,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("intent.json");
         let output = dir.path().join("artifact.json");
+        // A non-canonical profile encoding (trailing byte) must fail closed on decode.
         let mut wire = input_wire();
-        wire.profile.auto_merge = true;
+        wire.profile_bytes_hex.push_str("00");
         fs::write(&input, serde_json::to_vec(&wire).unwrap()).unwrap();
         assert!(create_intent(input, Some(output.clone())).is_err());
 

@@ -6,6 +6,10 @@ use csv_codec::ManualEncoder;
 use csv_hash::{ActionIntentDomain, DomainSeparatedHash, GateProfileDomain};
 
 use crate::id::{ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION};
+use crate::profile::{
+    EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ProfileCodec, ProfileDescriptor,
+    ProfileId, QuarantineReleaseRule,
+};
 use crate::{GateProfileId, IntentId, ObjectVersion, ProtocolVersion};
 
 /// Maximum UTF-8 byte length of any presentation label.
@@ -54,62 +58,98 @@ pub enum IntentError {
     GatePolicyMismatch,
     /// A profile omitted, overlapped, or otherwise blurred its evidence-source classes.
     InvalidEvidenceSourceDeclaration,
+    /// A stable profile or evidence-source identifier was malformed.
+    InvalidProfileId,
+    /// Profile parameter bytes were not the canonical encoding of a valid profile value.
+    MalformedProfileBytes,
+    /// The intent's action type resolves to no registered profile.
+    UnregisteredProfile,
+    /// A profile id was registered more than once.
+    DuplicateProfile,
 }
 
-/// A registered evidence source expected by an action profile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ProfileEvidenceSource {
-    /// The executor's own execution-attempt record.
-    ExecutorAttemptRecord,
-    /// GitHub's accepted Deployments API object and status records.
-    GitHubDeploymentRecord,
-    /// A correlated GitHub webhook delivery retained with authenticity material.
-    GitHubWebhookDelivery,
-    /// Environment-protection configuration obtained from an authenticated GitHub API response.
-    GitHubAuthenticatedEnvironmentConfiguration,
-}
+/// Stable, namespaced identifier of the first GitHub deployment profile.
+pub const GITHUB_DEPLOYMENT_PROFILE_ID: &str =
+    "org.diewan.accountability.github-deployment.intent.v1";
+/// Stable action type bound into a GitHub deployment intent.
+pub const GITHUB_DEPLOYMENT_ACTION_TYPE: &str = "github.deployment";
+/// Domain separator hashed with the profile bytes to form the parameters commitment.
+pub const GITHUB_DEPLOYMENT_PARAMETERS_DOMAIN_TAG: &[u8] = b"github-deployment-parameters-v1";
 
-mod profile_sealed {
-    use super::IntentError;
+/// Stable evidence-source identifier: the executor's own execution-attempt record.
+pub const EVIDENCE_EXECUTOR_ATTEMPT_RECORD: &str = "evidence.executor.attempt-record";
+/// Stable evidence-source identifier: GitHub's accepted Deployments API record.
+pub const EVIDENCE_GITHUB_DEPLOYMENT_RECORD: &str = "evidence.github.deployment-record";
+/// Stable evidence-source identifier: a correlated, authenticated GitHub webhook delivery.
+pub const EVIDENCE_GITHUB_WEBHOOK_DELIVERY: &str = "evidence.github.webhook-delivery";
+/// Stable evidence-source identifier: authenticated GitHub environment-protection config.
+pub const EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION: &str =
+    "evidence.github.authenticated-environment-configuration";
 
-    pub trait Sealed {
-        fn validate_fields(&self) -> Result<(), IntentError>;
+/// Returns the registered descriptor for the first GitHub deployment profile.
+pub fn github_deployment_descriptor() -> ProfileDescriptor {
+    ProfileDescriptor {
+        profile_id: ProfileId::new(GITHUB_DEPLOYMENT_PROFILE_ID)
+            .expect("static github profile id is valid"),
+        action_type: String::from(GITHUB_DEPLOYMENT_ACTION_TYPE),
+        parameters_media_type: String::from(PARAMETERS_MEDIA_TYPE_V1),
+        parameters_domain_tag: GITHUB_DEPLOYMENT_PARAMETERS_DOMAIN_TAG.to_vec(),
+        evidence_sources: alloc::vec![
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(EVIDENCE_EXECUTOR_ATTEMPT_RECORD)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::Executor,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(EVIDENCE_GITHUB_DEPLOYMENT_RECORD)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ProviderCorroborating,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(EVIDENCE_GITHUB_WEBHOOK_DELIVERY)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ProviderCorroborating,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ProviderCorroborating,
+            ),
+        ],
+        // The first GitHub profile has no sufficient absence predicate: after ambiguous
+        // dispatch no query can prove non-acceptance, so a quarantine is never released.
+        quarantine_release: QuarantineReleaseRule::NeverReleasable,
+        max_context_commitments: MAX_CONTEXT_COMMITMENTS,
+        max_identity_bytes: MAX_IDENTITY_BYTES,
     }
 }
 
-/// Validation contract implemented by every versioned action profile.
+/// The registerable codec for the first GitHub deployment profile.
 ///
-/// The two source sets are mandatory and disjoint. Corroborating means evidence
-/// external to the reporting executor; it does not by itself claim that the
-/// source is independent of the target provider or that its assertions are true.
-pub trait ProfileValidator: profile_sealed::Sealed {
-    /// Complete source inventory for this profile version; omission is invalid.
-    const EXPECTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource];
-    /// Sources that corroborate the executor's report.
-    const CORROBORATING_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource];
-    /// Sources whose claims originate with the executor itself.
-    const SELF_REPORTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource];
+/// It decodes and validates a [`GitHubDeploymentIntentV1`] from its canonical bytes, so
+/// an independent verifier reconstructs and re-checks the profile from bundle bytes alone.
+pub struct GitHubDeploymentCodec {
+    descriptor: ProfileDescriptor,
 }
 
-/// Validates a profile's fields and its complete, disjoint evidence-source declaration.
-pub fn validate_profile<P: ProfileValidator>(profile: &P) -> Result<(), IntentError> {
-    validate_evidence_source_declaration::<P>()?;
-    profile_sealed::Sealed::validate_fields(profile)
+impl Default for GitHubDeploymentCodec {
+    fn default() -> Self {
+        Self {
+            descriptor: github_deployment_descriptor(),
+        }
+    }
 }
 
-const GITHUB_CORROBORATING_EVIDENCE: &[ProfileEvidenceSource] = &[
-    ProfileEvidenceSource::GitHubDeploymentRecord,
-    ProfileEvidenceSource::GitHubWebhookDelivery,
-    ProfileEvidenceSource::GitHubAuthenticatedEnvironmentConfiguration,
-];
-const GITHUB_SELF_REPORTED_EVIDENCE: &[ProfileEvidenceSource] =
-    &[ProfileEvidenceSource::ExecutorAttemptRecord];
-const GITHUB_EXPECTED_EVIDENCE: &[ProfileEvidenceSource] = &[
-    ProfileEvidenceSource::ExecutorAttemptRecord,
-    ProfileEvidenceSource::GitHubDeploymentRecord,
-    ProfileEvidenceSource::GitHubWebhookDelivery,
-    ProfileEvidenceSource::GitHubAuthenticatedEnvironmentConfiguration,
-];
+impl ProfileCodec for GitHubDeploymentCodec {
+    fn descriptor(&self) -> &ProfileDescriptor {
+        &self.descriptor
+    }
+
+    fn validate_canonical_bytes(&self, profile_bytes: &[u8]) -> Result<Vec<u8>, IntentError> {
+        let profile = GitHubDeploymentIntentV1::from_canonical_bytes(profile_bytes)?;
+        Ok(profile.stable_target())
+    }
+}
 
 /// How GitHub commit-status contexts are applied to a deployment.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,7 +234,7 @@ pub struct GitHubDeploymentIntentV1 {
 impl GitHubDeploymentIntentV1 {
     /// Validates all fixed and constrained fields of the production profile.
     pub fn validate(&self) -> Result<(), IntentError> {
-        validate_profile(self)
+        self.validate_profile_fields()
     }
 
     fn validate_profile_fields(&self) -> Result<(), IntentError> {
@@ -287,67 +327,159 @@ impl GitHubDeploymentIntentV1 {
         out.extend_from_slice(self.deployment_gate_policy_digest.as_bytes());
         Ok(out)
     }
-}
 
-impl ProfileValidator for GitHubDeploymentIntentV1 {
-    const EXPECTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] = GITHUB_EXPECTED_EVIDENCE;
-    const CORROBORATING_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-        GITHUB_CORROBORATING_EVIDENCE;
-    const SELF_REPORTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-        GITHUB_SELF_REPORTED_EVIDENCE;
-}
-
-impl profile_sealed::Sealed for GitHubDeploymentIntentV1 {
-    fn validate_fields(&self) -> Result<(), IntentError> {
-        self.validate_profile_fields()
+    /// Decodes and validates a profile from its exact canonical byte encoding.
+    ///
+    /// Fails closed on any non-canonical, truncated, or trailing input: the decoded
+    /// value must re-encode to precisely `bytes`, so an independent verifier reproduces
+    /// the profile (and therefore the intent's parameters commitment) from bytes alone.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, IntentError> {
+        let mut cur = Cursor::new(bytes);
+        let version = cur.read_u16()?;
+        if version != ACCOUNTABILITY_OBJECT_VERSION.get() {
+            return Err(IntentError::UnsupportedVersion);
+        }
+        let repository_id = cur.read_u64()?;
+        let repository_owner = cur.read_string()?;
+        let repository_name = cur.read_string()?;
+        let commit_sha = cur.read_string()?;
+        let exact_ref = cur.read_string()?;
+        let task = cur.read_string()?;
+        if task != GITHUB_DEPLOYMENT_TASK_V1 {
+            return Err(IntentError::UnsupportedTask);
+        }
+        let environment_id = cur.read_u64()?;
+        let environment_name = cur.read_string()?;
+        let required_contexts = match cur.read_u8()? {
+            0 => RequiredContexts::AllSubmitted,
+            1 => {
+                let count = cur.read_u32()? as usize;
+                if count > MAX_REQUIRED_CONTEXTS {
+                    return Err(IntentError::InvalidRequiredContexts);
+                }
+                let mut contexts = Vec::with_capacity(count);
+                for _ in 0..count {
+                    contexts.push(cur.read_string()?);
+                }
+                RequiredContexts::explicit(contexts)?
+            }
+            _ => return Err(IntentError::MalformedProfileBytes),
+        };
+        if cur.read_u8()? != 0 {
+            return Err(IntentError::AutoMergeForbidden);
+        }
+        let payload_commitment = cur.read_hash()?;
+        if cur.read_u8()? != 1 || cur.read_u8()? != 0 {
+            return Err(IntentError::InvalidEnvironmentClassification);
+        }
+        let artifact_digest = match cur.read_u8()? {
+            0 => None,
+            1 => Some(cur.read_hash()?),
+            _ => return Err(IntentError::MalformedProfileBytes),
+        };
+        let deployment_gate_policy_digest = GateProfileId::from_digest(cur.read_hash()?);
+        if !cur.is_empty() {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        let profile = Self {
+            repository_id,
+            repository_owner,
+            repository_name,
+            commit_sha,
+            exact_ref,
+            environment_id,
+            environment_name,
+            required_contexts,
+            payload_commitment,
+            artifact_digest,
+            deployment_gate_policy_digest,
+        };
+        profile.validate()?;
+        // Reject any encoding that is valid-looking but not the unique canonical form.
+        if profile.canonical_bytes()? != bytes {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        Ok(profile)
     }
 }
 
-fn validate_evidence_source_declaration<P: ProfileValidator>() -> Result<(), IntentError> {
-    let corroborating = P::CORROBORATING_EVIDENCE_SOURCES;
-    let self_reported = P::SELF_REPORTED_EVIDENCE_SOURCES;
-    let expected = P::EXPECTED_EVIDENCE_SOURCES;
-    if corroborating.is_empty()
-        || self_reported.is_empty()
-        || expected.is_empty()
-        || corroborating
-            .iter()
-            .any(|source| self_reported.contains(source))
-        || has_duplicate_sources(corroborating)
-        || has_duplicate_sources(self_reported)
-        || has_duplicate_sources(expected)
-        || expected
-            .iter()
-            .any(|source| !corroborating.contains(source) && !self_reported.contains(source))
-        || corroborating
-            .iter()
-            .chain(self_reported.iter())
-            .any(|source| !expected.contains(source))
-    {
-        return Err(IntentError::InvalidEvidenceSourceDeclaration);
+/// Minimal fail-closed cursor over the little-endian manual encoding used by profiles.
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
     }
-    Ok(())
+
+    fn is_empty(&self) -> bool {
+        self.pos == self.bytes.len()
+    }
+
+    fn take(&mut self, len: usize) -> Result<&'a [u8], IntentError> {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or(IntentError::MalformedProfileBytes)?;
+        if end > self.bytes.len() {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        let slice = &self.bytes[self.pos..end];
+        self.pos = end;
+        Ok(slice)
+    }
+
+    fn read_u8(&mut self) -> Result<u8, IntentError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn read_u16(&mut self) -> Result<u16, IntentError> {
+        let bytes = self.take(2)?;
+        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn read_u32(&mut self) -> Result<u32, IntentError> {
+        let bytes = self.take(4)?;
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn read_u64(&mut self) -> Result<u64, IntentError> {
+        let bytes = self.take(8)?;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(bytes);
+        Ok(u64::from_le_bytes(arr))
+    }
+
+    fn read_hash(&mut self) -> Result<[u8; 32], IntentError> {
+        let bytes = self.take(32)?;
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(bytes);
+        Ok(arr)
+    }
+
+    fn read_string(&mut self) -> Result<String, IntentError> {
+        let len = self.read_u32()? as usize;
+        let bytes = self.take(len)?;
+        core::str::from_utf8(bytes)
+            .map(String::from)
+            .map_err(|_| IntentError::MalformedProfileBytes)
+    }
 }
 
-fn has_duplicate_sources(sources: &[ProfileEvidenceSource]) -> bool {
-    sources
-        .iter()
-        .enumerate()
-        .any(|(index, source)| sources[index + 1..].contains(source))
-}
-
-/// Exact generic action proposal bound to a versioned provider profile.
+/// Exact generic action proposal bound to a registered provider profile.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionIntent {
     /// Accountability protocol compatibility version.
     pub protocol_version: ProtocolVersion,
     /// Schema version of the generic intent.
     pub intent_version: ObjectVersion,
-    /// Stable profile identifier.
-    pub profile_id: GateProfileId,
-    /// Stable action type.
+    /// Stable, registered profile identifier.
+    pub profile_id: ProfileId,
+    /// Stable action type (bound by the registered descriptor).
     pub action_type: String,
-    /// Stable provider target bytes.
+    /// Stable provider target bytes (derived by the profile codec).
     pub target: Vec<u8>,
     /// Commitment to canonical profile parameters.
     pub parameters_commitment: [u8; 32],
@@ -361,53 +493,90 @@ pub struct ActionIntent {
     pub request_nonce: [u8; 32],
     /// Ordered context commitments.
     pub context_commitments: Vec<[u8; 32]>,
-    /// The exact provider profile envelope.
-    pub profile: GitHubDeploymentIntentV1,
+    /// Canonical bytes of the registered profile envelope.
+    pub profile_bytes: Vec<u8>,
 }
 
 impl ActionIntent {
-    /// Constructs a validated GitHub deployment action intent.
-    pub fn github_deployment(
-        profile_id: GateProfileId,
+    /// Constructs a validated action intent for any registered profile.
+    ///
+    /// The `descriptor` supplies the stable action type, media type, size limits, and the
+    /// domain tag used for the parameters commitment; the `codec` validates
+    /// `profile_bytes` as the profile's exact canonical encoding and derives the stable
+    /// target. Neither the action type nor the target is taken from the caller.
+    pub fn new(
+        descriptor: &ProfileDescriptor,
+        codec: &dyn ProfileCodec,
+        profile_bytes: Vec<u8>,
         requested_by: Vec<u8>,
         requested_at: u64,
         request_nonce: [u8; 32],
         context_commitments: Vec<[u8; 32]>,
-        profile: GitHubDeploymentIntentV1,
     ) -> Result<Self, IntentError> {
-        profile.validate()?;
+        descriptor.validate()?;
+        let target = codec.validate_canonical_bytes(&profile_bytes)?;
         if requested_by.is_empty() {
             return Err(IntentError::EmptyField("requested_by"));
         }
-        if requested_by.len() > MAX_IDENTITY_BYTES {
+        if requested_by.len() > descriptor.max_identity_bytes {
             return Err(IntentError::IdentityTooLong);
         }
-        if context_commitments.len() > MAX_CONTEXT_COMMITMENTS {
+        if context_commitments.len() > descriptor.max_context_commitments {
             return Err(IntentError::TooManyContextCommitments);
         }
-        let profile_bytes = profile.canonical_bytes()?;
-        let commitment = DomainSeparatedHash::<GateProfileDomain>::hash_multiple([
-            b"github-deployment-parameters-v1".as_slice(),
+        let parameters_commitment = DomainSeparatedHash::<GateProfileDomain>::hash_multiple([
+            descriptor.parameters_domain_tag.as_slice(),
             profile_bytes.as_slice(),
         ])
         .into_inner();
         Ok(Self {
             protocol_version: ACCOUNTABILITY_PROTOCOL_VERSION,
             intent_version: ACCOUNTABILITY_OBJECT_VERSION,
-            profile_id,
-            action_type: String::from("github.deployment"),
-            target: profile.stable_target(),
-            parameters_commitment: commitment,
-            parameters_media_type: String::from(PARAMETERS_MEDIA_TYPE_V1),
+            profile_id: descriptor.profile_id.clone(),
+            action_type: descriptor.action_type.clone(),
+            target,
+            parameters_commitment,
+            parameters_media_type: descriptor.parameters_media_type.clone(),
             requested_by,
             requested_at,
             request_nonce,
             context_commitments,
-            profile,
+            profile_bytes,
         })
     }
 
-    /// Validates bindings between generic fields and the provider profile.
+    /// Constructs a validated GitHub deployment action intent.
+    ///
+    /// Thin migration shim over [`Self::new`] using the registered GitHub deployment
+    /// descriptor and codec; kept until every caller speaks generic intents.
+    pub fn github_deployment(
+        requested_by: Vec<u8>,
+        requested_at: u64,
+        request_nonce: [u8; 32],
+        context_commitments: Vec<[u8; 32]>,
+        profile: GitHubDeploymentIntentV1,
+    ) -> Result<Self, IntentError> {
+        let codec = GitHubDeploymentCodec::default();
+        let profile_bytes = profile.canonical_bytes()?;
+        Self::new(
+            codec.descriptor(),
+            &codec,
+            profile_bytes,
+            requested_by,
+            requested_at,
+            request_nonce,
+            context_commitments,
+        )
+    }
+
+    /// Structural validation of the generic intent envelope.
+    ///
+    /// Checks versions, identifier well-formedness, and identity/context bounds. It does
+    /// not re-derive the target or parameters commitment — those require the registered
+    /// [`ProfileCodec`]; use [`Self::verify_with_codec`] (or a [`ProfileRegistry`]) for
+    /// that independent re-check.
+    ///
+    /// [`ProfileRegistry`]: crate::registry::ProfileRegistry
     pub fn validate(&self) -> Result<(), IntentError> {
         if self.protocol_version != ACCOUNTABILITY_PROTOCOL_VERSION {
             return Err(IntentError::UnsupportedVersion);
@@ -415,23 +584,13 @@ impl ActionIntent {
         if self.intent_version != ACCOUNTABILITY_OBJECT_VERSION {
             return Err(IntentError::UnsupportedVersion);
         }
-        self.profile.validate()?;
-        if self.action_type != "github.deployment" {
-            return Err(IntentError::UnsupportedTask);
+        // Reject a malformed profile identifier.
+        ProfileId::new(self.profile_id.as_str())?;
+        if self.action_type.is_empty() {
+            return Err(IntentError::EmptyField("action_type"));
         }
-        if self.target != self.profile.stable_target() {
-            return Err(IntentError::TargetMismatch);
-        }
-        let profile_bytes = self.profile.canonical_bytes()?;
-        let expected = DomainSeparatedHash::<GateProfileDomain>::hash_multiple([
-            b"github-deployment-parameters-v1".as_slice(),
-            profile_bytes.as_slice(),
-        ])
-        .into_inner();
-        if self.parameters_commitment != expected
-            || self.parameters_media_type != PARAMETERS_MEDIA_TYPE_V1
-        {
-            return Err(IntentError::ParametersCommitmentMismatch);
+        if self.parameters_media_type.is_empty() {
+            return Err(IntentError::EmptyField("parameters_media_type"));
         }
         if self.requested_by.is_empty() {
             return Err(IntentError::EmptyField("requested_by"));
@@ -445,6 +604,39 @@ impl ActionIntent {
         Ok(())
     }
 
+    /// Independently re-derives the target and parameters commitment from `codec` and
+    /// checks they match the stored fields.
+    ///
+    /// This is the profile-aware half of verification: any tampering with `profile_bytes`,
+    /// `target`, `parameters_commitment`, `action_type`, or `parameters_media_type` fails
+    /// closed. A verifier obtains `descriptor`/`codec` for `self.profile_id` from the
+    /// registry.
+    pub fn verify_with_codec(
+        &self,
+        descriptor: &ProfileDescriptor,
+        codec: &dyn ProfileCodec,
+    ) -> Result<(), IntentError> {
+        self.validate()?;
+        if self.profile_id != descriptor.profile_id || self.action_type != descriptor.action_type {
+            return Err(IntentError::UnregisteredProfile);
+        }
+        let target = codec.validate_canonical_bytes(&self.profile_bytes)?;
+        if self.target != target {
+            return Err(IntentError::TargetMismatch);
+        }
+        let expected = DomainSeparatedHash::<GateProfileDomain>::hash_multiple([
+            descriptor.parameters_domain_tag.as_slice(),
+            self.profile_bytes.as_slice(),
+        ])
+        .into_inner();
+        if self.parameters_commitment != expected
+            || self.parameters_media_type != descriptor.parameters_media_type
+        {
+            return Err(IntentError::ParametersCommitmentMismatch);
+        }
+        Ok(())
+    }
+
     /// Returns canonical bytes for hashing and independent verification.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IntentError> {
         self.validate()?;
@@ -452,7 +644,7 @@ impl ActionIntent {
         push_u16(&mut out, self.protocol_version.major());
         push_u16(&mut out, self.protocol_version.minor());
         push_u16(&mut out, self.intent_version.get());
-        out.extend_from_slice(self.profile_id.as_bytes());
+        push_string(&mut out, self.profile_id.as_str());
         push_string(&mut out, &self.action_type);
         push_bytes(&mut out, &self.target);
         out.extend_from_slice(&self.parameters_commitment);
@@ -464,7 +656,7 @@ impl ActionIntent {
         for commitment in &self.context_commitments {
             out.extend_from_slice(commitment);
         }
-        push_bytes(&mut out, &self.profile.canonical_bytes()?);
+        push_bytes(&mut out, &self.profile_bytes);
         Ok(out)
     }
 
@@ -536,15 +728,7 @@ mod tests {
     }
 
     fn intent(profile: GitHubDeploymentIntentV1) -> ActionIntent {
-        ActionIntent::github_deployment(
-            GateProfileId::from_digest([9; 32]),
-            vec![8],
-            123,
-            [7; 32],
-            vec![[6; 32]],
-            profile,
-        )
-        .unwrap()
+        ActionIntent::github_deployment(vec![8], 123, [7; 32], vec![[6; 32]], profile).unwrap()
     }
 
     #[test]
@@ -641,87 +825,88 @@ mod tests {
     }
 
     #[test]
-    fn github_profile_declares_disjoint_corroborating_and_self_reported_sources() {
-        let corroborating =
-            <GitHubDeploymentIntentV1 as ProfileValidator>::CORROBORATING_EVIDENCE_SOURCES;
-        let self_reported =
-            <GitHubDeploymentIntentV1 as ProfileValidator>::SELF_REPORTED_EVIDENCE_SOURCES;
+    fn github_descriptor_declares_disjoint_evidence_source_classes() {
+        let descriptor = github_deployment_descriptor();
+        assert_eq!(descriptor.validate(), Ok(()));
+        let executor: Vec<_> = descriptor
+            .evidence_sources
+            .iter()
+            .filter(|decl| matches!(decl.class, EvidenceSourceClass::Executor))
+            .map(|decl| decl.id.as_str())
+            .collect();
+        let corroborating: Vec<_> = descriptor
+            .evidence_sources
+            .iter()
+            .filter(|decl| decl.class.is_corroborating())
+            .map(|decl| decl.id.as_str())
+            .collect();
+        assert_eq!(executor, vec![EVIDENCE_EXECUTOR_ATTEMPT_RECORD]);
         assert_eq!(
             corroborating,
-            &[
-                ProfileEvidenceSource::GitHubDeploymentRecord,
-                ProfileEvidenceSource::GitHubWebhookDelivery,
-                ProfileEvidenceSource::GitHubAuthenticatedEnvironmentConfiguration,
+            vec![
+                EVIDENCE_GITHUB_DEPLOYMENT_RECORD,
+                EVIDENCE_GITHUB_WEBHOOK_DELIVERY,
+                EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION,
             ]
         );
-        assert_eq!(
-            self_reported,
-            &[ProfileEvidenceSource::ExecutorAttemptRecord]
-        );
-        assert!(
-            corroborating
-                .iter()
-                .all(|source| !self_reported.contains(source))
-        );
-        assert_eq!(validate_profile(&profile()), Ok(()));
     }
 
     #[test]
-    fn invalid_profile_source_declarations_fail_closed() {
-        struct EmptySources;
-        impl ProfileValidator for EmptySources {
-            const EXPECTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-                &[ProfileEvidenceSource::ExecutorAttemptRecord];
-            const CORROBORATING_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] = &[];
-            const SELF_REPORTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] = &[];
-        }
-        impl profile_sealed::Sealed for EmptySources {
-            fn validate_fields(&self) -> Result<(), IntentError> {
-                Ok(())
-            }
-        }
-        struct OverlappingSources;
-        impl ProfileValidator for OverlappingSources {
-            const EXPECTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-                &[ProfileEvidenceSource::GitHubDeploymentRecord];
-            const CORROBORATING_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-                &[ProfileEvidenceSource::GitHubDeploymentRecord];
-            const SELF_REPORTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-                &[ProfileEvidenceSource::GitHubDeploymentRecord];
-        }
-        impl profile_sealed::Sealed for OverlappingSources {
-            fn validate_fields(&self) -> Result<(), IntentError> {
-                Ok(())
-            }
-        }
-        struct MissingSource;
-        impl ProfileValidator for MissingSource {
-            const EXPECTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] = &[
-                ProfileEvidenceSource::ExecutorAttemptRecord,
-                ProfileEvidenceSource::GitHubDeploymentRecord,
-                ProfileEvidenceSource::GitHubWebhookDelivery,
-            ];
-            const CORROBORATING_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-                &[ProfileEvidenceSource::GitHubDeploymentRecord];
-            const SELF_REPORTED_EVIDENCE_SOURCES: &'static [ProfileEvidenceSource] =
-                &[ProfileEvidenceSource::ExecutorAttemptRecord];
-        }
-        impl profile_sealed::Sealed for MissingSource {
-            fn validate_fields(&self) -> Result<(), IntentError> {
-                Ok(())
-            }
-        }
+    fn invalid_descriptor_evidence_declarations_fail_closed() {
+        let executor = EvidenceSourceDecl::new(
+            EvidenceSourceId::new(EVIDENCE_EXECUTOR_ATTEMPT_RECORD).unwrap(),
+            EvidenceSourceClass::Executor,
+        );
+        let corroborating = EvidenceSourceDecl::new(
+            EvidenceSourceId::new(EVIDENCE_GITHUB_DEPLOYMENT_RECORD).unwrap(),
+            EvidenceSourceClass::ProviderCorroborating,
+        );
+        let with_sources = |sources: Vec<EvidenceSourceDecl>| ProfileDescriptor {
+            evidence_sources: sources,
+            ..github_deployment_descriptor()
+        };
+        // Empty inventory.
         assert_eq!(
-            validate_profile(&EmptySources),
+            with_sources(Vec::new()).validate(),
             Err(IntentError::InvalidEvidenceSourceDeclaration)
         );
+        // No executor-class source.
         assert_eq!(
-            validate_profile(&OverlappingSources),
+            with_sources(vec![corroborating.clone()]).validate(),
             Err(IntentError::InvalidEvidenceSourceDeclaration)
         );
+        // No corroborating source.
         assert_eq!(
-            validate_profile(&MissingSource),
+            with_sources(vec![executor.clone()]).validate(),
             Err(IntentError::InvalidEvidenceSourceDeclaration)
+        );
+        // Duplicate identifier.
+        assert_eq!(
+            with_sources(vec![executor.clone(), corroborating.clone(), corroborating])
+                .validate(),
+            Err(IntentError::InvalidEvidenceSourceDeclaration)
+        );
+    }
+
+    #[test]
+    fn profile_bytes_round_trip_and_noncanonical_input_fails_closed() {
+        let profile = profile();
+        let bytes = profile.canonical_bytes().unwrap();
+        assert_eq!(
+            GitHubDeploymentIntentV1::from_canonical_bytes(&bytes),
+            Ok(profile)
+        );
+        // Trailing byte.
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert_eq!(
+            GitHubDeploymentIntentV1::from_canonical_bytes(&trailing),
+            Err(IntentError::MalformedProfileBytes)
+        );
+        // Truncated.
+        assert_eq!(
+            GitHubDeploymentIntentV1::from_canonical_bytes(&bytes[..bytes.len() - 1]),
+            Err(IntentError::MalformedProfileBytes)
         );
     }
 
@@ -729,11 +914,13 @@ mod tests {
     fn generic_fields_are_bound_or_tampering_is_rejected() {
         let base = intent(profile());
         let base_id = base.id().unwrap();
+        let codec = GitHubDeploymentCodec::default();
+        assert_eq!(base.verify_with_codec(codec.descriptor(), &codec), Ok(()));
         let mut changed = base.clone();
         changed.protocol_version = ProtocolVersion::new(0, 2);
         assert_eq!(changed.id(), Err(IntentError::UnsupportedVersion));
         let mut changed = base.clone();
-        changed.profile_id = GateProfileId::from_digest([11; 32]);
+        changed.profile_id = ProfileId::new("org.diewan.accountability.other.intent.v1").unwrap();
         assert_ne!(changed.id().unwrap(), base_id);
         let mut changed = base.clone();
         changed.requested_by.push(9);
@@ -747,10 +934,12 @@ mod tests {
         let mut changed = base.clone();
         changed.context_commitments.push([12; 32]);
         assert_ne!(changed.id().unwrap(), base_id);
+        // A tampered commitment changes the id (tamper-evident) and fails codec re-check.
         let mut tampered = base;
         tampered.parameters_commitment[0] ^= 1;
+        assert_ne!(tampered.id().unwrap(), base_id);
         assert_eq!(
-            tampered.id(),
+            tampered.verify_with_codec(codec.descriptor(), &codec),
             Err(IntentError::ParametersCommitmentMismatch)
         );
     }

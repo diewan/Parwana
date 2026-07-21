@@ -18,7 +18,7 @@ fuzz_target!(|data: &[u8]| {
     if let Some(selector) = data.first() {
         match selector % 6 {
             0 => fixture.context.evaluation_time = fixture.mandate.expires_at,
-            1 => fixture.intent.profile.commit_sha = "a".repeat(40),
+            1 => fixture.intent.request_nonce[0] ^= 1,
             2 => fixture.executor = b"executor:other".to_vec(),
             3 => {
                 fixture.receipt.outcome = ExecutionOutcome::Unknown;

@@ -17,7 +17,9 @@ pub mod execution;
 pub mod id;
 pub mod intent;
 pub mod mandate;
+pub mod profile;
 pub mod receipt;
+pub mod registry;
 pub mod state;
 pub mod verification;
 
@@ -49,11 +51,19 @@ pub use id::{
     ReceiptId, VerificationContextId, VersionError,
 };
 pub use intent::{
-    ActionIntent, GITHUB_DEPLOYMENT_TASK_V1, GitHubDeploymentIntentV1, IntentError,
-    MAX_CONTEXT_COMMITMENTS, MAX_DISPLAY_BYTES, MAX_IDENTITY_BYTES, MAX_REQUIRED_CONTEXTS,
-    PARAMETERS_MEDIA_TYPE_V1, ProfileEvidenceSource, ProfileValidator, RequiredContexts,
-    validate_profile,
+    ActionIntent, EVIDENCE_EXECUTOR_ATTEMPT_RECORD, EVIDENCE_GITHUB_DEPLOYMENT_RECORD,
+    EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION, EVIDENCE_GITHUB_WEBHOOK_DELIVERY,
+    GITHUB_DEPLOYMENT_ACTION_TYPE, GITHUB_DEPLOYMENT_PARAMETERS_DOMAIN_TAG,
+    GITHUB_DEPLOYMENT_PROFILE_ID, GITHUB_DEPLOYMENT_TASK_V1, GitHubDeploymentCodec,
+    GitHubDeploymentIntentV1, IntentError, MAX_CONTEXT_COMMITMENTS, MAX_DISPLAY_BYTES,
+    MAX_IDENTITY_BYTES, MAX_REQUIRED_CONTEXTS, PARAMETERS_MEDIA_TYPE_V1, RequiredContexts,
+    github_deployment_descriptor,
 };
+pub use profile::{
+    BoxedProfileCodec, EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId,
+    MAX_PROFILE_ID_BYTES, ProfileCodec, ProfileDescriptor, ProfileId, QuarantineReleaseRule,
+};
+pub use registry::{ProfileRegistry, default_registry};
 pub use mandate::{
     ActionMandate, ED25519_SIGNATURE_ALGORITHM, ExecutionPolicy, MandateError, MandateRequirement,
     MandateSignatureEnvelope, MandateSubject, SignatureRequirements,

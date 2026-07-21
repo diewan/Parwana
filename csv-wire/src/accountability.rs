@@ -2,7 +2,7 @@
 
 use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ActionIntent, GateProfileId, GitHubDeploymentIntentV1,
-    IntentError, ObjectVersion, ProtocolVersion, RequiredContexts,
+    IntentError, ObjectVersion, ProfileId, ProtocolVersion, RequiredContexts, default_registry,
 };
 use serde::{Deserialize, Serialize};
 
@@ -137,7 +137,11 @@ pub struct GitHubDeploymentIntentV1Wire {
     pub deployment_gate_policy_digest: [u8; 32],
 }
 
-/// Complete transport envelope for an action intent.
+/// Complete, profile-agnostic transport envelope for an action intent.
+///
+/// The profile envelope is carried as opaque canonical bytes (`profile_bytes_hex`) keyed
+/// by a registered `profile_id`, so a new profile needs no new wire type. Decoding
+/// re-validates the bytes against the registered codec via the default registry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionIntentWire {
@@ -147,8 +151,8 @@ pub struct ActionIntentWire {
     pub protocol_version_minor: u16,
     /// Generic intent object version.
     pub intent_version: u16,
-    /// Stable profile identifier.
-    pub profile_id: [u8; 32],
+    /// Stable, registered profile identifier.
+    pub profile_id: String,
     /// Stable action type.
     pub action_type: String,
     /// Stable provider target.
@@ -165,8 +169,8 @@ pub struct ActionIntentWire {
     pub request_nonce: [u8; 32],
     /// Ordered context commitments.
     pub context_commitments: Vec<[u8; 32]>,
-    /// Exact provider profile.
-    pub profile: GitHubDeploymentIntentV1Wire,
+    /// Opaque canonical bytes of the registered profile, lower-case hex.
+    pub profile_bytes_hex: String,
 }
 
 impl From<&RequiredContexts> for RequiredContextsWire {
@@ -252,7 +256,7 @@ impl From<&ActionIntent> for ActionIntentWire {
             protocol_version_major: value.protocol_version.major(),
             protocol_version_minor: value.protocol_version.minor(),
             intent_version: value.intent_version.get(),
-            profile_id: value.profile_id.into_bytes(),
+            profile_id: value.profile_id.as_str().into(),
             action_type: value.action_type.clone(),
             target: value.target.clone(),
             parameters_commitment: value.parameters_commitment,
@@ -261,7 +265,7 @@ impl From<&ActionIntent> for ActionIntentWire {
             requested_at: value.requested_at,
             request_nonce: value.request_nonce,
             context_commitments: value.context_commitments.clone(),
-            profile: (&value.profile).into(),
+            profile_bytes_hex: hex::encode(&value.profile_bytes),
         }
     }
 }
@@ -273,6 +277,8 @@ impl TryFrom<ActionIntentWire> for ActionIntent {
         if value.intent_version != ACCOUNTABILITY_OBJECT_VERSION.get() {
             return Err(IntentError::UnsupportedVersion);
         }
+        let profile_bytes =
+            hex::decode(&value.profile_bytes_hex).map_err(|_| IntentError::MalformedProfileBytes)?;
         let intent = Self {
             protocol_version: ProtocolVersion::new(
                 value.protocol_version_major,
@@ -280,7 +286,7 @@ impl TryFrom<ActionIntentWire> for ActionIntent {
             ),
             intent_version: ObjectVersion::try_new(value.intent_version)
                 .map_err(|_| IntentError::EmptyField("intent_version"))?,
-            profile_id: GateProfileId::from_digest(value.profile_id),
+            profile_id: ProfileId::new(value.profile_id)?,
             action_type: value.action_type,
             target: value.target,
             parameters_commitment: value.parameters_commitment,
@@ -289,9 +295,20 @@ impl TryFrom<ActionIntentWire> for ActionIntent {
             requested_at: value.requested_at,
             request_nonce: value.request_nonce,
             context_commitments: value.context_commitments,
-            profile: value.profile.try_into()?,
+            profile_bytes,
         };
         intent.validate()?;
+        // Independently re-check the target and parameters commitment against the
+        // registered codec, so a wire envelope cannot claim bindings its profile bytes
+        // do not support.
+        let registry = default_registry();
+        let descriptor = registry
+            .descriptor(&intent.profile_id)
+            .ok_or(IntentError::UnregisteredProfile)?;
+        let codec = registry
+            .codec(&intent.profile_id)
+            .ok_or(IntentError::UnregisteredProfile)?;
+        intent.verify_with_codec(descriptor, codec)?;
         Ok(intent)
     }
 }
@@ -373,15 +390,8 @@ mod tests {
     #[test]
     fn generic_tampering_cannot_override_stable_profile_ids() {
         let profile = GitHubDeploymentIntentV1::try_from(wire_profile()).unwrap();
-        let intent = ActionIntent::github_deployment(
-            GateProfileId::from_digest([9; 32]),
-            vec![8],
-            1,
-            [7; 32],
-            Vec::new(),
-            profile,
-        )
-        .unwrap();
+        let intent =
+            ActionIntent::github_deployment(vec![8], 1, [7; 32], Vec::new(), profile).unwrap();
         let mut wire = ActionIntentWire::from(&intent);
         wire.target[0] ^= 1;
         assert_eq!(

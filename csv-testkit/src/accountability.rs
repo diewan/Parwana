@@ -4,7 +4,7 @@ use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ActionIntent, ActionMandate,
     AuthenticityMaterial, ConsumptionRecord, ED25519_SIGNATURE_ALGORITHM, EvidenceKind,
     EvidenceNode, EvidenceNodeId, EvidenceRequirementStatus, ExecutionAttempt,
-    ExecutionAttemptState, ExecutionOutcome, ExecutionPolicy, ExecutionReceipt, GateProfileId,
+    ExecutionAttemptState, ExecutionOutcome, ExecutionPolicy, ExecutionReceipt,
     GitHubDeploymentIntentV1, MandateRequirement, MandateSubject, RequiredContexts,
     SignatureRequirements, SourceLocator, VerificationContext,
 };
@@ -50,7 +50,6 @@ impl AccountabilityFixture {
             artifact_digest: Some([4; 32]),
         };
         let intent = ActionIntent::github_deployment(
-            GateProfileId::from_digest([5; 32]),
             b"requester:alice".to_vec(),
             90,
             [6; 32],

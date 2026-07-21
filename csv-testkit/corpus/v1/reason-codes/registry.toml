@@ -1,0 +1,104 @@
+# Published reason-code registry (Master Plan §37).
+#
+# csv_accountability_verify::ReasonCode is the source of truth; each variant maps to a
+# stable namespaced identifier via ReasonCode::registry_id(). This table is the published
+# projection. The affirmative and reserved-anchor codes are also published so the
+# namespaces are owned before Phase B emits them.
+
+registry_version = 1
+affirmative = "ACCOUNTABILITY.REQUIREMENT_MET"
+
+[[code]]
+variant = "MalformedStructure"
+id = "ACCOUNTABILITY.STRUCTURE.MALFORMED"
+
+[[code]]
+variant = "IntentMismatch"
+id = "ACCOUNTABILITY.AUTHORITY.INTENT_MISMATCH"
+
+[[code]]
+variant = "MandateInvalid"
+id = "ACCOUNTABILITY.AUTHORITY.MANDATE_INVALID"
+
+[[code]]
+variant = "WrongExecutor"
+id = "ACCOUNTABILITY.AUTHORITY.WRONG_EXECUTOR"
+
+[[code]]
+variant = "MandateNotYetValid"
+id = "ACCOUNTABILITY.TEMPORAL.NOT_YET_VALID"
+
+[[code]]
+variant = "MandateExpired"
+id = "ACCOUNTABILITY.TEMPORAL.EXPIRED"
+
+[[code]]
+variant = "MandateRevoked"
+id = "ACCOUNTABILITY.TEMPORAL.REVOKED"
+
+[[code]]
+variant = "RevocationStatusUnknown"
+id = "ACCOUNTABILITY.TEMPORAL.REVOCATION_UNKNOWN"
+
+[[code]]
+variant = "AlgorithmDisallowed"
+id = "ACCOUNTABILITY.TEMPORAL.ALGORITHM_DISALLOWED"
+
+[[code]]
+variant = "AlgorithmStatusUnknown"
+id = "ACCOUNTABILITY.TEMPORAL.ALGORITHM_UNKNOWN"
+
+[[code]]
+variant = "ReplayDetected"
+id = "ACCOUNTABILITY.SINGLE_USE.REPLAY_DETECTED"
+
+[[code]]
+variant = "ReplayStatusUnknown"
+id = "ACCOUNTABILITY.SINGLE_USE.REPLAY_UNKNOWN"
+
+[[code]]
+variant = "EvidenceInvalid"
+id = "ACCOUNTABILITY.EVIDENCE.INVALID"
+
+[[code]]
+variant = "EvidenceReferenceMissing"
+id = "ACCOUNTABILITY.EVIDENCE.REFERENCE_MISSING"
+
+[[code]]
+variant = "EvidenceAuthenticityRejected"
+id = "ACCOUNTABILITY.EVIDENCE.AUTHENTICITY_REJECTED"
+
+[[code]]
+variant = "EvidenceAuthenticityUnknown"
+id = "ACCOUNTABILITY.EVIDENCE.AUTHENTICITY_UNKNOWN"
+
+[[code]]
+variant = "RequiredEvidenceMissing"
+id = "ACCOUNTABILITY.COMPLETENESS.REQUIRED_EVIDENCE_MISSING"
+
+[[code]]
+variant = "SelectiveDisclosureLimitsEvaluation"
+id = "ACCOUNTABILITY.COMPLETENESS.DISCLOSURE_LIMITED"
+
+[[code]]
+variant = "ReceiptInvalid"
+id = "ACCOUNTABILITY.EXECUTION.RECEIPT_INVALID"
+
+[[code]]
+variant = "OutcomeAmbiguous"
+id = "ACCOUNTABILITY.EXECUTION.OUTCOME_AMBIGUOUS"
+
+[[code]]
+variant = "PreservationSemanticsDeferred"
+id = "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1"
+
+# Reserved for profile/anchor-contributed evidence (Phase B). Registered before use so
+# the namespaces cannot silently collide with the core set above.
+[[reserved]]
+id = "ACCOUNTABILITY.SINGLE_USE.INDEPENDENTLY_ENFORCED"
+
+[[reserved]]
+id = "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_CONSUMPTION_VALID"
+
+[[reserved]]
+id = "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_COMMITMENT_ANCHORED"

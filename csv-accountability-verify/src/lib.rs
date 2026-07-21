@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod reason_codes;
+
 use csv_accountability::{
     ActionIntent, ActionMandate, AssuranceDimension, AssuranceProfile, ContextBoundOutput,
     DimensionResult, DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt,
@@ -193,7 +195,7 @@ fn evaluated_dimension(
         })
         .collect::<Vec<_>>();
     if status == DimensionStatus::Satisfied {
-        reason_codes.push("ACCOUNTABILITY.REQUIREMENT_MET".into());
+        reason_codes.push(reason_codes::REQUIREMENT_MET.into());
     }
     reason_codes.sort();
     reason_codes.dedup();
