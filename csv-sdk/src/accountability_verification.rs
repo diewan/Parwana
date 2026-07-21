@@ -11,7 +11,7 @@ use csv_accountability::{
     AttemptId, AuthenticityMaterial, ConsumptionRecord, ContextExtension, EvidenceKind,
     EvidenceNode, EvidenceNodeId, EvidenceRequirementStatus, ExecutionAttempt,
     ExecutionAttemptState, ExecutionOutcome, ExecutionReceipt, IntentId, MandateId, ObjectVersion,
-    ProtocolVersion, SourceLocator, VerificationContext,
+    ProtocolVersion, SealConsumptionRecord, SourceLocator, VerificationContext,
 };
 use csv_wire::ActionIntentWire;
 use serde::Deserialize;
@@ -31,6 +31,11 @@ pub struct DecodedVerificationBundle {
     pub receipt: ExecutionReceipt,
     /// Canonically identified evidence graph.
     pub evidence: Vec<(EvidenceNodeId, EvidenceNode)>,
+    /// Optional preserved single-use anchor, re-checked offline for independent single-use
+    /// enforcement (Phase B, §5.9). `None` when the envelope carried no seal-consumption
+    /// record, which the verifier reports as an external-corroboration limitation, never a
+    /// failure (§5.5).
+    pub single_use_anchor: Option<SealConsumptionRecord>,
 }
 
 /// Operator-selected, hash-bound context plus the conclusions supplied by its committed packages.
@@ -75,6 +80,40 @@ struct Envelope {
     attempt: AttemptWire,
     receipt: ReceiptWire,
     evidence: Vec<EvidenceWire>,
+    /// Optional disclosed single-use anchor. Absent in older bundles, so it defaults to
+    /// `None`; a present-but-malformed record fails the whole import closed rather than
+    /// being silently dropped.
+    #[serde(default)]
+    single_use_anchor: Option<SealConsumptionWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SealConsumptionWire {
+    seal_id_hex: String,
+    nullifier_hex: String,
+    commitment_hex: String,
+    anchor_backend: String,
+}
+
+impl SealConsumptionWire {
+    /// Decode into the canonical anchor type, failing closed on any drift.
+    fn decode(self) -> Result<SealConsumptionRecord, ImportError> {
+        let record = SealConsumptionRecord {
+            seal_id: decode_digest32(&self.seal_id_hex)?,
+            nullifier: decode_digest32(&self.nullifier_hex)?,
+            commitment: decode_digest32(&self.commitment_hex)?,
+            anchor_backend: self.anchor_backend,
+        };
+        record.validate().map_err(|_| ImportError::InvalidObject)?;
+        Ok(record)
+    }
+}
+
+/// Decode exactly 32 hex-encoded bytes, rejecting any other length or malformed hex.
+fn decode_digest32(hex_str: &str) -> Result<[u8; 32], ImportError> {
+    let bytes = hex::decode(hex_str).map_err(|_| ImportError::Malformed)?;
+    bytes.try_into().map_err(|_| ImportError::InvalidObject)
 }
 
 #[derive(Deserialize)]
@@ -249,12 +288,17 @@ pub fn decode_local_verification_bundle(
         .map(EvidenceWire::decode)
         .collect::<Result<Vec<_>, _>>()?;
     evidence.sort_by_key(|item| item.0);
+    let single_use_anchor = wire
+        .single_use_anchor
+        .map(SealConsumptionWire::decode)
+        .transpose()?;
     Ok(DecodedVerificationBundle {
         intent,
         mandate,
         attempt,
         receipt,
         evidence,
+        single_use_anchor,
     })
 }
 
@@ -519,6 +563,61 @@ mod tests {
         assert_eq!(imported.name, "Production policy");
         assert!(imported.context.id().is_ok());
         assert_eq!(imported.revocation_status, RevocationStatus::Unknown);
+    }
+
+    #[test]
+    fn seal_consumption_wire_decodes_a_well_formed_record() {
+        let wire = SealConsumptionWire {
+            seal_id_hex: "11".repeat(32),
+            nullifier_hex: "22".repeat(32),
+            commitment_hex: "33".repeat(32),
+            anchor_backend: "csv-seal.local.v1".to_owned(),
+        };
+        let record = wire.decode().expect("well-formed anchor decodes");
+        assert_eq!(record.seal_id, [0x11; 32]);
+        assert_eq!(record.nullifier, [0x22; 32]);
+        assert_eq!(record.commitment, [0x33; 32]);
+        assert_eq!(record.anchor_backend, "csv-seal.local.v1");
+    }
+
+    #[test]
+    fn seal_consumption_wire_fails_closed_on_malformed_records() {
+        // Malformed hex is a transport error.
+        let bad_hex = SealConsumptionWire {
+            seal_id_hex: "zz".repeat(32),
+            nullifier_hex: "22".repeat(32),
+            commitment_hex: "33".repeat(32),
+            anchor_backend: "csv-seal.local.v1".to_owned(),
+        };
+        assert!(matches!(bad_hex.decode(), Err(ImportError::Malformed)));
+
+        // A wrong-length digest is a bound violation, not mere syntax.
+        let short = SealConsumptionWire {
+            seal_id_hex: "11".repeat(31),
+            nullifier_hex: "22".repeat(32),
+            commitment_hex: "33".repeat(32),
+            anchor_backend: "csv-seal.local.v1".to_owned(),
+        };
+        assert!(matches!(short.decode(), Err(ImportError::InvalidObject)));
+
+        // An all-zero digest and an empty backend both fail the canonical validation.
+        let zero = SealConsumptionWire {
+            seal_id_hex: "00".repeat(32),
+            nullifier_hex: "22".repeat(32),
+            commitment_hex: "33".repeat(32),
+            anchor_backend: "csv-seal.local.v1".to_owned(),
+        };
+        assert!(matches!(zero.decode(), Err(ImportError::InvalidObject)));
+        let empty_backend = SealConsumptionWire {
+            seal_id_hex: "11".repeat(32),
+            nullifier_hex: "22".repeat(32),
+            commitment_hex: "33".repeat(32),
+            anchor_backend: String::new(),
+        };
+        assert!(matches!(
+            empty_backend.decode(),
+            Err(ImportError::InvalidObject)
+        ));
     }
 
     #[test]
