@@ -7,12 +7,17 @@
 pub use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ActionIntent, ActionMandate,
     AssuranceDimension, AssuranceProfile, BoxedProfileCodec, ContextBoundOutput, DimensionResult,
-    DimensionStatus, DisputeBundle, EvidenceKind, EvidenceNode, EvidenceNodeId, EvidenceSourceClass,
-    EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt, ExecutionReceipt, GateProfileId,
-    GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError, MandateSignatureEnvelope,
-    ObjectVersion, ProfileCodec, ProfileDescriptor, ProfileId, ProfileRegistry, ProtocolVersion,
-    QuarantineReleaseRule, RequiredContexts, SourceLocator, VerificationContext,
-    VerificationContextId, default_registry, github_deployment_descriptor,
+    DimensionStatus, DisputeBundle, EvidenceKind, EvidenceNode, EvidenceNodeId,
+    EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt, ExecutionReceipt,
+    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError,
+    MandateSignatureEnvelope, ObjectVersion, ProfileCodec, ProfileDescriptor, ProfileId,
+    ProfileRegistry, ProtocolVersion, QuarantineReleaseRule, RequiredContexts, SourceLocator,
+    VerificationContext, VerificationContextId, default_registry, github_deployment_descriptor,
+};
+pub use csv_accountability::{
+    AnchorError, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE,
+    CommitmentAnchorRecord, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, SealConsumptionRecord, SingleUseAnchorAssessment,
 };
 pub use csv_wire::{
     AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,

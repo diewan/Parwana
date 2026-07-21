@@ -11,6 +11,14 @@ use crate::ReasonCode;
 /// The affirmative "requirement met" code emitted when no reason opposes a dimension.
 pub const REQUIREMENT_MET: &str = "ACCOUNTABILITY.REQUIREMENT_MET";
 
+/// Affirmative code: the mandate's single use was independently enforced by a preserved
+/// seal consumption, not only by the private reservation store (Phase B).
+pub const SINGLE_USE_INDEPENDENTLY_ENFORCED: &str =
+    "ACCOUNTABILITY.SINGLE_USE.INDEPENDENTLY_ENFORCED";
+
+/// Affirmative code: a preserved seal-consumption record re-checked offline as valid.
+pub const CSV_SEAL_CONSUMPTION_VALID: &str = "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_CONSUMPTION_VALID";
+
 /// Every reason code the reference verifier can emit, in stable order.
 ///
 /// A test asserts this list is exhaustive over [`ReasonCode`], so adding a variant
@@ -36,6 +44,8 @@ pub const ALL_REASON_CODES: &[ReasonCode] = &[
     ReasonCode::SelectiveDisclosureLimitsEvaluation,
     ReasonCode::ReceiptInvalid,
     ReasonCode::OutcomeAmbiguous,
+    ReasonCode::IndependentSingleUseUnverified,
+    ReasonCode::IndependentSingleUseInconsistent,
     ReasonCode::PreservationSemanticsDeferred,
 ];
 
@@ -47,11 +57,13 @@ pub const ALL_REASON_CODES: &[ReasonCode] = &[
 /// anchoring dimension.
 pub const RESERVED_ANCHOR_CODES: &[&str] = &[
     // The mandate's single use is corroborated by an independent seal consumption,
-    // not only by the private Postgres reservation.
-    "ACCOUNTABILITY.SINGLE_USE.INDEPENDENTLY_ENFORCED",
-    // A preserved seal-consumption record re-checks offline as valid.
-    "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_CONSUMPTION_VALID",
-    // A bundle digest was anchored as an external commitment.
+    // not only by the private Postgres reservation. Now emitted by the external-
+    // corroboration dimension (Phase B).
+    SINGLE_USE_INDEPENDENTLY_ENFORCED,
+    // A preserved seal-consumption record re-checks offline as valid. Now emitted.
+    CSV_SEAL_CONSUMPTION_VALID,
+    // A bundle digest was anchored as an external commitment. Reserved for a future
+    // commitment-anchor dimension.
     "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_COMMITMENT_ANCHORED",
 ];
 
@@ -83,9 +95,11 @@ mod tests {
     fn registry_is_exhaustive_unique_and_well_formed() {
         // Exhaustiveness: the count matches the enum's variant count. This is kept in sync
         // with the enum via the `assert` below and the compiler's match in `registry_id`.
-        assert_eq!(ALL_REASON_CODES.len(), 21);
-        let mut ids: Vec<&'static str> =
-            ALL_REASON_CODES.iter().map(|code| code.registry_id()).collect();
+        assert_eq!(ALL_REASON_CODES.len(), 23);
+        let mut ids: Vec<&'static str> = ALL_REASON_CODES
+            .iter()
+            .map(|code| code.registry_id())
+            .collect();
         for id in &ids {
             assert!(is_well_formed(id), "malformed reason code: {id}");
             assert!(
@@ -102,10 +116,15 @@ mod tests {
     #[test]
     fn affirmative_and_reserved_codes_are_well_formed_and_disjoint() {
         assert!(is_well_formed(REQUIREMENT_MET));
-        let core: Vec<&'static str> =
-            ALL_REASON_CODES.iter().map(|code| code.registry_id()).collect();
+        let core: Vec<&'static str> = ALL_REASON_CODES
+            .iter()
+            .map(|code| code.registry_id())
+            .collect();
         for reserved in RESERVED_ANCHOR_CODES {
-            assert!(is_well_formed(reserved), "malformed reserved code: {reserved}");
+            assert!(
+                is_well_formed(reserved),
+                "malformed reserved code: {reserved}"
+            );
             assert!(
                 !core.contains(reserved),
                 "reserved code collides with a core reason code: {reserved}"

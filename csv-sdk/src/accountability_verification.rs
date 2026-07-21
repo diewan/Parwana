@@ -552,6 +552,7 @@ mod tests {
                 revocation_status: RevocationStatus::NotRevoked,
                 algorithm_status: AlgorithmStatus::Allowed,
                 replay_status: ReplayStatus::Fresh,
+                single_use_anchor: None,
             },
         )
         .expect("fixture context is supported");

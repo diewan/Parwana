@@ -49,9 +49,7 @@ impl ProfileRegistry {
 
     /// Returns the published descriptor for `profile_id`, if any.
     pub fn descriptor(&self, profile_id: &ProfileId) -> Option<&ProfileDescriptor> {
-        self.entries
-            .get(profile_id)
-            .map(|codec| codec.descriptor())
+        self.entries.get(profile_id).map(|codec| codec.descriptor())
     }
 
     /// Returns every registered descriptor, in stable id order.

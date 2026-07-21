@@ -75,6 +75,7 @@ fn rust_replay_reason(fixture: &AccountabilityFixture, replay: ReplayStatus) -> 
             revocation_status: RevocationStatus::NotRevoked,
             algorithm_status: AlgorithmStatus::Allowed,
             replay_status: replay,
+            single_use_anchor: None,
         },
     )
     .expect("valid context")

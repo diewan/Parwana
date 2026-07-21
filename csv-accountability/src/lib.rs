@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+pub mod anchor;
 pub mod assurance;
 pub mod bundle;
 pub mod context;
@@ -23,6 +24,12 @@ pub mod registry;
 pub mod state;
 pub mod verification;
 
+pub use anchor::{
+    AnchorError, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE,
+    CommitmentAnchorRecord, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord,
+    SingleUseAnchorAssessment,
+};
 pub use assurance::{
     ASSURANCE_DIMENSIONS, AssuranceDimension, AssuranceError, AssuranceProfile, DimensionGateRule,
     DimensionResult, DimensionStatus, GateDisposition, GateOutcome, GateProfile, GateResult,
@@ -59,20 +66,20 @@ pub use intent::{
     MAX_IDENTITY_BYTES, MAX_REQUIRED_CONTEXTS, PARAMETERS_MEDIA_TYPE_V1, RequiredContexts,
     github_deployment_descriptor,
 };
-pub use profile::{
-    BoxedProfileCodec, EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId,
-    MAX_PROFILE_ID_BYTES, ProfileCodec, ProfileDescriptor, ProfileId, QuarantineReleaseRule,
-};
-pub use registry::{ProfileRegistry, default_registry};
 pub use mandate::{
     ActionMandate, ED25519_SIGNATURE_ALGORITHM, ExecutionPolicy, MandateError, MandateRequirement,
     MandateSignatureEnvelope, MandateSubject, SignatureRequirements,
+};
+pub use profile::{
+    BoxedProfileCodec, EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId,
+    MAX_PROFILE_ID_BYTES, ProfileCodec, ProfileDescriptor, ProfileId, QuarantineReleaseRule,
 };
 pub use receipt::{
     ConsumptionRecord, EvidenceRequirementStatus, ExecutionOutcome, ExecutionReceipt,
     MAX_RECEIPT_EVIDENCE_ITEMS, MAX_RECEIPT_REGISTRY_ID_BYTES, MAX_RECEIPT_SIGNATURE_BYTES,
     ReceiptError,
 };
+pub use registry::{ProfileRegistry, default_registry};
 pub use state::{
     CasReservation, DispatchCertainty, ExecutionAttemptState, MandateJournalEntry, MandateState,
     NonAcceptanceEvidence, QuarantineReleasePolicy, ReservationError, ReservationSnapshot,

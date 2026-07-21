@@ -89,6 +89,14 @@ variant = "OutcomeAmbiguous"
 id = "ACCOUNTABILITY.EXECUTION.OUTCOME_AMBIGUOUS"
 
 [[code]]
+variant = "IndependentSingleUseUnverified"
+id = "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_ABSENT"
+
+[[code]]
+variant = "IndependentSingleUseInconsistent"
+id = "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_INCONSISTENT"
+
+[[code]]
 variant = "PreservationSemanticsDeferred"
 id = "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1"
 

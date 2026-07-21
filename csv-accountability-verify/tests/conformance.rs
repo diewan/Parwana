@@ -1,5 +1,6 @@
 use csv_accountability::{
-    ActionIntent, EvidenceKind, ExecutionAttemptState, ExecutionOutcome, SourceLocator,
+    ActionIntent, DimensionStatus, EvidenceKind, ExecutionAttemptState, ExecutionOutcome,
+    SealConsumptionRecord, SourceLocator,
 };
 use csv_accountability_verify::{
     AlgorithmStatus, AuthenticityStatus, ReasonCode, ReplayStatus, RevocationStatus, Stage,
@@ -37,6 +38,7 @@ fn run(
             revocation_status,
             algorithm_status: AlgorithmStatus::Allowed,
             replay_status,
+            single_use_anchor: None,
         },
     )
     .expect("fixture context is valid")
@@ -79,6 +81,7 @@ fn valid_vector_is_ordered_context_bound_and_dimension_preserving() {
             Stage::Replay,
             Stage::Evidence,
             Stage::Receipt,
+            Stage::ExternalCorroboration,
             Stage::DeferredPreservation,
         ]
     );
@@ -404,4 +407,88 @@ fn released_corpus_indexes_every_required_v01_vector() {
     }
     assert!(manifest.contains("id = \"contradiction\""));
     assert!(manifest.contains("id = \"preservation-renewal\""));
+}
+
+/// The Phase-B single-use anchoring loop: a preserved seal-consumption record that binds
+/// exactly this mandate's reservation-token digest (nullifier) and authorized intent id
+/// (commitment) re-checks offline as independent single-use enforcement, surfacing the
+/// affirmative registered codes on the external-corroboration dimension.
+#[test]
+fn preserved_seal_consumption_corroborates_single_use_offline() {
+    let fixture = AccountabilityFixture::valid();
+    let matching = SealConsumptionRecord {
+        seal_id: [42u8; 32],
+        nullifier: fixture.attempt.reservation_token_digest,
+        commitment: *fixture.mandate.intent_id.as_bytes(),
+        anchor_backend: "csv-seal.local.v1".into(),
+    };
+    let build = |anchor: Option<&SealConsumptionRecord>| {
+        verify(
+            &fixture.context,
+            VerificationInput {
+                intent: &fixture.intent,
+                mandate: &fixture.mandate,
+                attempt: &fixture.attempt,
+                receipt: &fixture.receipt,
+                evidence: &fixture.evidence,
+                evidence_authenticity: &authenticity(&fixture),
+                expected_executor: &fixture.executor,
+                revocation_status: RevocationStatus::NotRevoked,
+                algorithm_status: AlgorithmStatus::Allowed,
+                replay_status: ReplayStatus::Fresh,
+                single_use_anchor: anchor,
+            },
+        )
+        .expect("fixture context is valid")
+        .result
+    };
+
+    // Matching record → Satisfied external corroboration with the affirmative codes.
+    let report = build(Some(&matching));
+    assert_eq!(report.disposition, VerificationDisposition::Valid);
+    assert!(has_reason(
+        &report,
+        Stage::ExternalCorroboration,
+        StageDisposition::Pass
+    ));
+    let assurance = assurance_profile(fixture.context.id().unwrap(), &report);
+    let external = &assurance.dimensions[7];
+    assert_eq!(
+        external.dimension,
+        csv_accountability::AssuranceDimension::ExternalCorroboration
+    );
+    assert_eq!(external.status, DimensionStatus::Satisfied);
+    assert!(
+        external
+            .reason_codes
+            .contains(&"ACCOUNTABILITY.SINGLE_USE.INDEPENDENTLY_ENFORCED".into())
+    );
+    assert!(
+        external
+            .reason_codes
+            .contains(&"ACCOUNTABILITY.EVIDENCE.CSV_SEAL_CONSUMPTION_VALID".into())
+    );
+
+    // Absent record → NotApplicable limitation, never a failure; disposition unchanged.
+    let absent = build(None);
+    assert_eq!(absent.disposition, VerificationDisposition::Valid);
+    let absent_dim = &assurance_profile(fixture.context.id().unwrap(), &absent).dimensions[7];
+    assert_eq!(absent_dim.status, DimensionStatus::NotApplicable);
+    assert!(
+        absent_dim
+            .reason_codes
+            .contains(&"ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_ABSENT".into())
+    );
+
+    // Inconsistent record (wrong nullifier) → Indeterminate corroboration, still not a fail.
+    let mut mismatched = matching.clone();
+    mismatched.nullifier = [7u8; 32];
+    let report = build(Some(&mismatched));
+    assert_eq!(report.disposition, VerificationDisposition::Indeterminate);
+    let dim = &assurance_profile(fixture.context.id().unwrap(), &report).dimensions[7];
+    assert_eq!(dim.status, DimensionStatus::Indeterminate);
+    assert!(
+        dim.reason_codes
+            .contains(&"ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_INCONSISTENT".into())
+    );
 }

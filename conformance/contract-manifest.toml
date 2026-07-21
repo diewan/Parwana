@@ -1,6 +1,6 @@
 schema_version = 1
 publisher = "github.com/diewan/parwana"
-contract_version = "0.1.6"
+contract_version = "0.1.7"
 protocol_version = "1.0.0"
 stability = "pre_stable"
 minimum_rust_version = "1.95"
@@ -13,7 +13,7 @@ value = "9b3fd916cd99b5f72aa41d6540a9e7947675848f"
 version = 1
 path = "csv-testkit/corpus/v1"
 algorithm = "sha256-length-prefixed-tree-v1"
-digest = "8d2718ec1e6b7faec7d99877c261ccadc5f7eefdb04836b0a035b7fd09b5214e"
+digest = "122e424856f0c787d755feb3e2913872fe521a4bfe4c5688508fe69bd5e1f49b"
 
 [compatibility]
 wire = "exact"

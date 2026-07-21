@@ -115,6 +115,19 @@ pub fn github_deployment_descriptor() -> ProfileDescriptor {
                     .expect("static evidence id is valid"),
                 EvidenceSourceClass::ProviderCorroborating,
             ),
+            // Optional single-use corroboration external to both executor and provider
+            // (Phase B). Registered here so an independent seal consumption/anchor is a
+            // recognized evidence source without a core edit (Master Plan §5.9, §36).
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ExternalAnchor,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(crate::anchor::EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ExternalAnchor,
+            ),
         ],
         // The first GitHub profile has no sufficient absence predicate: after ambiguous
         // dispatch no query can prove non-acceptance, so a quarantine is never released.
@@ -840,6 +853,12 @@ mod tests {
             .filter(|decl| decl.class.is_corroborating())
             .map(|decl| decl.id.as_str())
             .collect();
+        let external_anchor: Vec<_> = descriptor
+            .evidence_sources
+            .iter()
+            .filter(|decl| matches!(decl.class, EvidenceSourceClass::ExternalAnchor))
+            .map(|decl| decl.id.as_str())
+            .collect();
         assert_eq!(executor, vec![EVIDENCE_EXECUTOR_ATTEMPT_RECORD]);
         assert_eq!(
             corroborating,
@@ -847,6 +866,16 @@ mod tests {
                 EVIDENCE_GITHUB_DEPLOYMENT_RECORD,
                 EVIDENCE_GITHUB_WEBHOOK_DELIVERY,
                 EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION,
+                // External-anchor sources are corroborating too (Phase B).
+                crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+                crate::anchor::EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
+            ]
+        );
+        assert_eq!(
+            external_anchor,
+            vec![
+                crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+                crate::anchor::EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
             ]
         );
     }
@@ -882,8 +911,7 @@ mod tests {
         );
         // Duplicate identifier.
         assert_eq!(
-            with_sources(vec![executor.clone(), corroborating.clone(), corroborating])
-                .validate(),
+            with_sources(vec![executor.clone(), corroborating.clone(), corroborating]).validate(),
             Err(IntentError::InvalidEvidenceSourceDeclaration)
         );
     }

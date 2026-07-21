@@ -36,3 +36,13 @@ class = "provider_corroborating"
 [[evidence_source]]
 id = "evidence.github.authenticated-environment-configuration"
 class = "provider_corroborating"
+
+# Optional single-use corroboration external to both executor and provider (Phase B):
+# an independent Single-Use Seal consumption record and a bundle commitment anchor.
+[[evidence_source]]
+id = "evidence.csv-seal.consumption-record"
+class = "external_anchor"
+
+[[evidence_source]]
+id = "evidence.csv-seal.commitment-anchor"
+class = "external_anchor"

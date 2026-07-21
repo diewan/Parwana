@@ -10,8 +10,9 @@ pub mod reason_codes;
 use csv_accountability::{
     ActionIntent, ActionMandate, AssuranceDimension, AssuranceProfile, ContextBoundOutput,
     DimensionResult, DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt,
-    ExecutionOutcome, ExecutionReceipt, MandateSubject, SourceLocator, VerificationContext,
-    VerificationContextId, validate_evidence_graph,
+    ExecutionOutcome, ExecutionReceipt, MandateSubject, SealConsumptionRecord,
+    SingleUseAnchorAssessment, SourceLocator, VerificationContext, VerificationContextId,
+    validate_evidence_graph,
 };
 
 /// Stable verification stage ordering for protocol version 0.1.
@@ -25,6 +26,7 @@ pub enum Stage {
     Replay,
     Evidence,
     Receipt,
+    ExternalCorroboration,
     DeferredPreservation,
 }
 
@@ -60,6 +62,8 @@ pub enum ReasonCode {
     SelectiveDisclosureLimitsEvaluation,
     ReceiptInvalid,
     OutcomeAmbiguous,
+    IndependentSingleUseUnverified,
+    IndependentSingleUseInconsistent,
     PreservationSemanticsDeferred,
 }
 
@@ -91,6 +95,12 @@ impl ReasonCode {
             }
             Self::ReceiptInvalid => "ACCOUNTABILITY.EXECUTION.RECEIPT_INVALID",
             Self::OutcomeAmbiguous => "ACCOUNTABILITY.EXECUTION.OUTCOME_AMBIGUOUS",
+            Self::IndependentSingleUseUnverified => {
+                "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_ABSENT"
+            }
+            Self::IndependentSingleUseInconsistent => {
+                "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_INCONSISTENT"
+            }
             Self::PreservationSemanticsDeferred => "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1",
         }
     }
@@ -144,7 +154,7 @@ pub fn assurance_profile(
             evaluated_dimension(Dimension::Temporal, report, &[Stage::Temporal]),
             evaluated_dimension(Dimension::SingleUse, report, &[Stage::Replay]),
             evaluated_dimension(Dimension::Execution, report, &[Stage::Receipt]),
-            deferred_dimension(Dimension::ExternalCorroboration),
+            external_corroboration_dimension(report),
             evaluated_dimension(Dimension::Completeness, report, &[Stage::Evidence]),
             deferred_dimension(Dimension::Custody),
             evaluated_dimension(
@@ -224,6 +234,56 @@ fn deferred_dimension(dimension: AssuranceDimension) -> DimensionResult {
     }
 }
 
+/// Projects the external-corroboration dimension from the single-use anchor stage.
+///
+/// Unlike the generic projection, a `Satisfied` conclusion here emits the *affirmative*
+/// registered codes for independent single-use enforcement rather than the generic
+/// requirement-met code, and an absent anchor is reported as an explicit limitation
+/// (`NotApplicable`) rather than a silent gap (§5.5, §37).
+fn external_corroboration_dimension(report: &VerificationReport) -> DimensionResult {
+    let disposition = report
+        .stages
+        .iter()
+        .find(|result| result.stage == Stage::ExternalCorroboration)
+        .map(|result| result.disposition);
+    let (status, reason_codes, limitation) = match disposition {
+        Some(StageDisposition::Pass) => (
+            DimensionStatus::Satisfied,
+            {
+                let mut codes = vec![
+                    reason_codes::SINGLE_USE_INDEPENDENTLY_ENFORCED.to_owned(),
+                    reason_codes::CSV_SEAL_CONSUMPTION_VALID.to_owned(),
+                ];
+                codes.sort();
+                codes
+            },
+            "Conclusion is limited to the selected, hash-bound verification context",
+        ),
+        Some(StageDisposition::Indeterminate(reason)) => (
+            DimensionStatus::Indeterminate,
+            vec![reason.registry_id().to_owned()],
+            "A preserved single-use anchor did not corroborate this mandate",
+        ),
+        _ => (
+            DimensionStatus::NotApplicable,
+            vec![
+                ReasonCode::IndependentSingleUseUnverified
+                    .registry_id()
+                    .to_owned(),
+            ],
+            "No independent single-use anchor was preserved for this mandate",
+        ),
+    };
+    DimensionResult {
+        dimension: AssuranceDimension::ExternalCorroboration,
+        status,
+        assurance_level: None,
+        reason_codes,
+        supporting_evidence_refs: Vec::new(),
+        limitations: vec![limitation.to_owned()],
+    }
+}
+
 /// Explicit temporal policy material used by the evaluation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TemporalContext {
@@ -288,6 +348,10 @@ pub struct VerificationInput<'a> {
     pub revocation_status: RevocationStatus,
     pub algorithm_status: AlgorithmStatus,
     pub replay_status: ReplayStatus,
+    /// Optional preserved single-use anchor (a seal consumption record) re-checked
+    /// offline for independent single-use enforcement. Its absence is a limitation on
+    /// the external-corroboration dimension, never a failure (§5.5, §5.9).
+    pub single_use_anchor: Option<&'a SealConsumptionRecord>,
 }
 
 /// Verify in a stable, fail-closed order without network or storage access.
@@ -295,7 +359,7 @@ pub fn verify(
     context: &VerificationContext,
     input: VerificationInput<'_>,
 ) -> Result<ContextBoundOutput<VerificationReport>, csv_accountability::ContextError> {
-    let mut stages = Vec::with_capacity(9);
+    let mut stages = Vec::with_capacity(10);
     let structure = if input.intent.validate().is_ok()
         && input.mandate.validate().is_ok()
         && input.attempt.validate(input.mandate).is_ok()
@@ -426,6 +490,27 @@ pub fn verify(
             StageDisposition::Pass
         },
     ));
+    // External corroboration of single use: re-check any preserved seal-consumption
+    // record offline. The record must bind exactly this mandate's reservation-token
+    // digest (the nullifier) and its authorized intent id (the commitment). A missing
+    // record is Unsupported (a limitation), and an inconsistent or malformed record is
+    // Indeterminate — corroboration can only strengthen, never invalidate (§5.5).
+    stages.push(result(
+        Stage::ExternalCorroboration,
+        match input.single_use_anchor {
+            None => StageDisposition::Unsupported(ReasonCode::IndependentSingleUseUnverified),
+            Some(record) => match record.assess(
+                input.attempt.reservation_token_digest,
+                *input.mandate.intent_id.as_bytes(),
+            ) {
+                SingleUseAnchorAssessment::IndependentlyEnforced => StageDisposition::Pass,
+                SingleUseAnchorAssessment::Inconsistent | SingleUseAnchorAssessment::Malformed => {
+                    StageDisposition::Indeterminate(ReasonCode::IndependentSingleUseInconsistent)
+                }
+            },
+        },
+    ));
+
     stages.push(result(
         Stage::DeferredPreservation,
         StageDisposition::Unsupported(ReasonCode::PreservationSemanticsDeferred),

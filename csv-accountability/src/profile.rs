@@ -21,9 +21,9 @@ pub const MAX_PROFILE_ID_BYTES: usize = 128;
 fn is_stable_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_PROFILE_ID_BYTES
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-'))
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
 }
 
 /// Stable, namespaced identifier of a registered action profile.
