@@ -1,5 +1,18 @@
 # ❓ Parwana: Comprehensive FAQ & Defensibility Guide
 
+## Glossary
+
+The core terms the answers below assume:
+
+| Term | Kind | Plain-English meaning | Real-world example |
+|------|------|-----------------------|--------------------|
+| CSV (Client-Side Validation) | Keyword | Parties validate state themselves; the L1 acts only as a single-use registry. | Checking a signed receipt yourself instead of trusting a clearinghouse. |
+| Single-Use Seal | Data structure | A primitive closed exactly once (a UTXO on Bitcoin, a state entry on Ethereum). | A tamper-evident seal that breaks once. |
+| Sanad | Data structure | The asset whose logic, history, and verification live with the user, not the chain. | A passport the owner carries and can prove. |
+| Proof Bundle | Data structure | The mathematical evidence a transfer is valid; security rests on it plus source-chain finality. | A sealed dossier that stands on its own. |
+| Finality | Keyword | The source chain's irreversible settlement the proof relies on. | A cleared bank payment that can't be reversed. |
+| Escrow | Keyword | Source-chain native fee locked to pay the proof-delivery operator on confirmed mint. | A held deposit released once delivery is confirmed. |
+
 ## 1. Philosophical & Strategic Foundations
 
 ### What is the Parwana?

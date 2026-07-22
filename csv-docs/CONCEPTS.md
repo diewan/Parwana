@@ -14,6 +14,47 @@
 > [OFFLINE_VERIFICATION_MODEL.md](OFFLINE_VERIFICATION_MODEL.md),
 > [WHY.md](WHY.md).
 
+## Topology
+
+Where Parwana sits in the DieWan Accountability Platform — the concepts below are
+Parwana's; the products around it build on them:
+
+```mermaid
+flowchart TB
+  PAR["Parwana · protocol<br/>canonical bytes · verifier · SDK"]
+  PIT["Piteka · product<br/>authorize · execute · investigate · Postgres live state"]
+  TUP["Tuppira · data plane<br/>observe · index · read model"]
+  HEM["Hemion · developer console<br/>explorer · local verifier · wallet"]
+  CON["csv-contracts · chain anchors<br/>optional anchor provider"]
+
+  PIT -->|uses protocol + verifier| PAR
+  PIT -->|signed evidence feed| TUP
+  TUP -->|read model| HEM
+  HEM -->|verifies locally| PAR
+  PAR -.->|anchors commitments| CON
+  TUP -.->|observes anchors| CON
+
+  classDef here fill:#2563eb,stroke:#1d4ed8,color:#ffffff;
+  class PAR here;
+```
+
+## At-a-glance glossary
+
+The headline nouns, one line each. Every term is expanded in full below (with
+*what → why → when → what it looks like*); this table is the quick map.
+
+| Term | Kind | Plain-English meaning | Real-world example |
+|------|------|-----------------------|--------------------|
+| CSV (Client-Side Validation) | Keyword | The receiving party validates an asset locally from proof, instead of trusting consensus or a bridge. | Verifying a signed PDF yourself instead of asking a central server. |
+| Seal (Single-Use Seal) | Data structure | A consumable condition a chain lets you close exactly once. | A tamper-evident seal on a package: once broken, it can't be reused. |
+| Sanad | Data structure | The proof-carrying, chain-agnostic asset passport that lives with the owner. | A passport whose stamps prove where it has been. |
+| Commitment | Keyword | The canonical hash of state that is published (anchored) on a chain. | A fingerprint pinning exact contents. |
+| Nullifier | Data structure | The value that marks a seal as spent so it can't be reused. | The cancellation stamp on a used ticket. |
+| Consignment | Data structure | The bundle of proofs and history handed to the receiver to validate a transfer. | The full paper trail shipped with a parcel. |
+| Materialization | Keyword | The on-chain minting/settlement of a validated cross-chain transfer. | Cashing a proven cheque at the destination bank. |
+| Verifier | Component | The local logic that checks a consignment's proofs. | You, checking the parcel's paperwork yourself. |
+| Attestor | Component | A role that co-signs/attests during cross-chain materialization. | A notary countersigning at the destination. |
+
 ---
 
 ## How to read this document

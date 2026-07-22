@@ -1,5 +1,47 @@
 # AGENTS.md — Parwana Operational Guide
 
+## Topology
+
+Where Parwana sits in the DieWan Accountability Platform (this guide maps
+Parwana's crates; the diagram localizes the repo in the org):
+
+```mermaid
+flowchart TB
+  PAR["Parwana · protocol<br/>canonical bytes · verifier · SDK"]
+  PIT["Piteka · product<br/>authorize · execute · investigate · Postgres live state"]
+  TUP["Tuppira · data plane<br/>observe · index · read model"]
+  HEM["Hemion · developer console<br/>explorer · local verifier · wallet"]
+  CON["csv-contracts · chain anchors<br/>optional anchor provider"]
+
+  PIT -->|uses protocol + verifier| PAR
+  PIT -->|signed evidence feed| TUP
+  TUP -->|read model| HEM
+  HEM -->|verifies locally| PAR
+  PAR -.->|anchors commitments| CON
+  TUP -.->|observes anchors| CON
+
+  classDef here fill:#2563eb,stroke:#1d4ed8,color:#ffffff;
+  class PAR here;
+```
+
+**You are here — Parwana**, the neutral protocol. Org charter:
+[`../development/ARCHITECTURE.md`](../development/ARCHITECTURE.md).
+
+## Glossary
+
+Core protocol concepts behind the crate map below:
+
+| Term | Kind | Plain-English meaning | Real-world example |
+|------|------|-----------------------|--------------------|
+| Sanad | Data structure | Parwana's proof-carrying asset instrument; `SanadId` identifies one. | A property deed that carries its own proof. |
+| Seal (Single-Use Seal) | Data structure | A consumable condition closed exactly once. | A tamper-evident package seal. |
+| Proof Bundle | Data structure | The verifiable evidence of a transfer (`csv-proof`), checked by `csv-verifier`. | A sealed dossier anyone can validate. |
+| Transfer | Data structure | A deterministic ownership transition driven by the typestate algebra (`csv-algebra`). | Endorsing a cheque to a new payee. |
+| Replay resistance | Keyword | The guarantee a transition can't be re-applied (replay DB, replay IDs). | A one-time password unusable twice. |
+| Canonical serialization | Keyword | Deterministic CBOR (`csv-codec`) on all hashing paths — never `serde_json`. | One official byte-for-byte file format. |
+| Verifier | Component | Canonical proof verification (`csv-verifier`). | A referee applying a fixed rulebook. |
+| Anchor | Keyword | Publishing a commitment on-chain. | A notary stamp proving existence. |
+
 ## Repo structure
 
 Rust monorepo (virtual Cargo workspace, edition 2024, rust-version 1.95). The primary protocol crate is `csv-protocol`.

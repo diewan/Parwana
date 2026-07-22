@@ -5,6 +5,48 @@
 
 > A protocol-grade, adversarially-aware, multi-chain verification and transfer system designed around deterministic state evolution, replay resistance, canonical proof semantics, and mechanically enforced invariants.
 
+## Topology
+
+Where Parwana sits in the DieWan Accountability Platform (this document details
+Parwana's *internal* architecture; the diagram localizes it in the org):
+
+```mermaid
+flowchart TB
+  PAR["Parwana · protocol<br/>canonical bytes · verifier · SDK"]
+  PIT["Piteka · product<br/>authorize · execute · investigate · Postgres live state"]
+  TUP["Tuppira · data plane<br/>observe · index · read model"]
+  HEM["Hemion · developer console<br/>explorer · local verifier · wallet"]
+  CON["csv-contracts · chain anchors<br/>optional anchor provider"]
+
+  PIT -->|uses protocol + verifier| PAR
+  PIT -->|signed evidence feed| TUP
+  TUP -->|read model| HEM
+  HEM -->|verifies locally| PAR
+  PAR -.->|anchors commitments| CON
+  TUP -.->|observes anchors| CON
+
+  classDef here fill:#2563eb,stroke:#1d4ed8,color:#ffffff;
+  class PAR here;
+```
+
+**You are here — Parwana**, the neutral protocol every product depends on. See
+the org charter in [`../development/ARCHITECTURE.md`](../development/ARCHITECTURE.md).
+
+## Glossary
+
+Core protocol concepts used throughout this document:
+
+| Term | Kind | Plain-English meaning | Real-world example |
+|------|------|-----------------------|--------------------|
+| Proof | Data structure | Self-contained cryptographic evidence that a state transition is valid, carried with the asset. | A signed certificate you can check without phoning the issuer. |
+| Transfer | Data structure | A deterministic state transition that moves ownership by consuming a seal and creating new ones. | Endorsing a cheque over to a new payee. |
+| Replay resistance | Keyword | The guarantee that a past transition can't be re-applied to double-spend. | A one-time password that stops working after a single use. |
+| Finality | Keyword | The point at which a transition is settled and can't be reorged away. | A bank transfer clearing irreversibly. |
+| Commitment | Keyword | The canonical byte/hash summary of state that a chain anchors. | A tamper-proof fingerprint of a document. |
+| Anchor | Keyword | Publishing a commitment on a chain as timestamp/settlement evidence. | A notary stamp proving existence at a point in time. |
+| Canonical serialization | Keyword | The single deterministic byte encoding (CBOR) used everywhere hashing happens — never `serde_json`. | One official file format everyone must produce byte-for-byte. |
+| Verifier | Component | The side-effect-free logic that checks a proof against the rules to reach a deterministic verdict. | A referee applying a fixed rulebook to reach the same call every time. |
+
 ---
 
 # 1. What This Repository Is

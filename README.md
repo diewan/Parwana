@@ -10,6 +10,50 @@
 
 > A multi-chain, client-validated protocol for cryptographic ownership, transfer, provenance, and state evolution using Single-Use Seals, canonical commitments, deterministic replay resistance, and adversarial runtime orchestration.
 
+## Topology
+
+Where Parwana sits in the DieWan Accountability Platform:
+
+```mermaid
+flowchart TB
+  PAR["Parwana · protocol<br/>canonical bytes · verifier · SDK"]
+  PIT["Piteka · product<br/>authorize · execute · investigate · Postgres live state"]
+  TUP["Tuppira · data plane<br/>observe · index · read model"]
+  HEM["Hemion · developer console<br/>explorer · local verifier · wallet"]
+  CON["csv-contracts · chain anchors<br/>optional anchor provider"]
+
+  PIT -->|uses protocol + verifier| PAR
+  PIT -->|signed evidence feed| TUP
+  TUP -->|read model| HEM
+  HEM -->|verifies locally| PAR
+  PAR -.->|anchors commitments| CON
+  TUP -.->|observes anchors| CON
+
+  classDef here fill:#2563eb,stroke:#1d4ed8,color:#ffffff;
+  class PAR here;
+```
+
+**You are here — Parwana**, the neutral protocol. It defines what mandates,
+receipts, and sanads *mean*, owns the canonical byte/hash pipeline, and provides
+the verifier. Every product above ([Piteka](../piteka), [Tuppira](../tuppira),
+[Hemion](../hemion)) depends on Parwana and must never redefine its meaning. See
+the org charter in [`development/ARCHITECTURE.md`](../development/ARCHITECTURE.md).
+
+## Glossary
+
+Foundational terms for a newcomer to Parwana:
+
+| Term | Kind | Plain-English meaning | Real-world example |
+|------|------|-----------------------|--------------------|
+| CSV (Client-Side Validation) | Keyword | Clients validate truth locally from proofs that travel with ownership; chains only anchor commitments, never execute global state. | Verifying a signed PDF yourself instead of asking a central server. |
+| Sanad | Data structure | Parwana's native proof-carrying ownership instrument (سند, "deed/title"). | A property deed that carries its own chain of proof, not just a DB row. |
+| Single-Use Seal | Data structure | A consumable ownership condition that can be closed exactly once, giving replay/double-spend resistance. | A tamper-evident seal on a package: once broken, it can't be reused. |
+| Transfer | Data structure | A state transition that consumes a seal and creates new ones, moving ownership deterministically. | Endorsing a cheque over to a new payee — the old claim is spent. |
+| Commitment | Keyword | The canonical, deterministic byte/hash encoding of protocol state that a chain can anchor. | An official, byte-for-byte fingerprint everyone can re-derive and cite. |
+| Anchor | Keyword | Publishing a commitment to a chain as optional timestamp/settlement evidence. | A notary stamp proving something existed at a point in time. |
+| Verifier | Component | The side-effect-free function that turns evidence + rules into a deterministic verdict. | A referee applying a fixed rulebook to reach the same call every time. |
+| Replay resistance | Keyword | The guarantee that a past transition can't be re-applied to double-spend. | A one-time password that stops working after a single use. |
+
 ---
 
 # 1. Introduction

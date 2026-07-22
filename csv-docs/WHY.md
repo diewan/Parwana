@@ -10,6 +10,21 @@ The fundamental issue is not engineering quality. It is architectural: **these s
 
 ---
 
+## Glossary
+
+The core concepts this argument rests on:
+
+| Term | Kind | Plain-English meaning | Real-world example |
+|------|------|-----------------------|--------------------|
+| CSV (Client-Side Validation) | Keyword | A verification model where value moves through proof, not through a trusted intermediary. | Checking a signed document yourself instead of trusting the courier who carried it. |
+| Single-Use Seal | Data structure | A primitive each chain can close exactly once (a Bitcoin UTXO, a Sui object). | A tamper-evident seal that only breaks once. |
+| Sanad (asset passport) | Data structure | The portable, chain-agnostic asset representation that lives off-chain with the client. | A passport the owner carries, stamped as it moves. |
+| Proof Bundle | Data structure | The self-contained evidence that a single-use event occurred, verifiable offline. | A sealed dossier anyone can check without calling the source. |
+| Anchor | Keyword | Committing the asset's state onto a chain. | A notary stamp fixing a point in time. |
+| Verifier | Component | The receiver-side logic that validates the proof locally — no RPC, no internet. | You reading the dossier yourself, offline. |
+
+---
+
 ## The CSV Insight
 
 **CSV (Client-Side Validation) Protocol is not a bridge. It is a verification model.**
