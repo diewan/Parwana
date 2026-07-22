@@ -13,11 +13,12 @@ pub use csv_accountability::{
     DbMigrationCodec, DbMigrationIntentV1, DimensionResult, DimensionStatus, DisputeBundle,
     EVIDENCE_DB_MIGRATION_APPLIED_RECORD, EvidenceKind, EvidenceNode, EvidenceNodeId,
     EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt, ExecutionReceipt,
-    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError,
+    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError, MandateId,
     MandateSignatureEnvelope, MigrationDirection, ObjectVersion, ProfileCodec, ProfileDescriptor,
     ProfileId, ProfileRegistry, ProtocolVersion, QuarantineReleaseRule, RequiredContexts,
     SourceLocator, VerificationContext, VerificationContextId, db_migration_descriptor,
     default_registry, github_deployment_descriptor,
+    AUTHORITY_RECONSTRUCTION_REGISTRY_ID,
 };
 pub use csv_accountability::{
     AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation, CHAIN_ANCHOR_DOMAIN_TAG,
