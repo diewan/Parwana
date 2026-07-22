@@ -48,9 +48,20 @@ checker = "tools/independent-checker/check.py"
 checks = ["canonical-digest", "ed25519-signature", "intent-binding", "replay-journal"]
 negative_reasons = ["CanonicalDigestMismatch", "MandateSignatureInvalid", "IntentMismatch", "ReplayDetected", "ReplayStatusUnknown"]
 
-[[deferred]]
-id = "contradiction"
-requires = "org.diewan.evidence.contradiction.v1"
+[[case]]
+id = "counterclaim-with-omitted-contradiction"
+source = "csv-accountability-verify/tests/conformance.rs::stage_12_preserves_conflicts_and_flags_an_omitted_contradiction"
+expected = "indeterminate:ContradictoryEvidenceOmitted"
+
+[[case]]
+id = "preserved-contradiction"
+source = "csv-accountability-verify/tests/conformance.rs::stage_12_preserves_conflicts_and_flags_an_omitted_contradiction"
+expected = "indeterminate:ConflictingEvidencePreserved"
+
+[[case]]
+id = "disclosed-custody"
+source = "csv-accountability-verify/tests/conformance.rs::stage_14_reports_disclosed_custody_without_simulating_preservation"
+expected = "valid:custody-pass"
 
 [[deferred]]
 id = "preservation-renewal"

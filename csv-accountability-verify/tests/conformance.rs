@@ -1,6 +1,6 @@
 use csv_accountability::{
-    ActionIntent, DimensionStatus, EvidenceKind, ExecutionAttemptState, ExecutionOutcome,
-    SealConsumptionRecord, SourceLocator,
+    ActionIntent, DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId,
+    ExecutionAttemptState, ExecutionOutcome, SealConsumptionRecord, SourceLocator,
 };
 use csv_accountability_verify::{
     AlgorithmStatus, AuthenticityStatus, ReasonCode, ReplayStatus, RevocationStatus, Stage,
@@ -80,8 +80,10 @@ fn valid_vector_is_ordered_context_bound_and_dimension_preserving() {
             Stage::Temporal,
             Stage::Replay,
             Stage::Evidence,
+            Stage::ContradictionAndGap,
             Stage::Receipt,
             Stage::ExternalCorroboration,
+            Stage::Custody,
             Stage::DeferredPreservation,
         ]
     );
@@ -387,6 +389,102 @@ fn rebind_evidence_refs(fixture: &mut AccountabilityFixture) {
     fixture.receipt.evidence_requirements_status[0].evidence_refs = ids;
 }
 
+fn v02_node(kind: EvidenceKind, relationships: Vec<EvidenceNodeId>) -> EvidenceNode {
+    EvidenceNode {
+        kind,
+        producer_identity: b"investigator:1".to_vec(),
+        collected_at: 20,
+        asserted_event_at: Some(10),
+        content_digest: [91; 32],
+        media_type: "application/cbor".into(),
+        source_locator: SourceLocator::Disclosed("case:evidence:1".into()),
+        authenticity: None,
+        disclosure_classification: "case-parties".into(),
+        relationships,
+    }
+}
+
+#[test]
+fn stage_12_preserves_conflicts_and_flags_an_omitted_contradiction() {
+    let mut fixture = AccountabilityFixture::valid();
+    let subject_id = fixture.evidence[0].0;
+    let counterclaim = v02_node(
+        EvidenceKind::Counterclaim {
+            subject_evidence_id: subject_id,
+            proposition_digest: [92; 32],
+        },
+        vec![subject_id],
+    );
+    let counterclaim_id = counterclaim.id().unwrap();
+    fixture.evidence.push((counterclaim_id, counterclaim));
+    let omitted = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Fresh,
+    );
+    assert!(has_reason(
+        &omitted,
+        Stage::ContradictionAndGap,
+        StageDisposition::Indeterminate(ReasonCode::ContradictoryEvidenceOmitted)
+    ));
+
+    let mut relationships = vec![subject_id, counterclaim_id];
+    relationships.sort_unstable();
+    let contradiction = v02_node(
+        EvidenceKind::Contradiction {
+            left_evidence_id: subject_id,
+            right_evidence_id: counterclaim_id,
+            analysis_digest: [93; 32],
+        },
+        relationships,
+    );
+    fixture
+        .evidence
+        .push((contradiction.id().unwrap(), contradiction));
+    let preserved = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Fresh,
+    );
+    assert!(has_reason(
+        &preserved,
+        Stage::ContradictionAndGap,
+        StageDisposition::Indeterminate(ReasonCode::ConflictingEvidencePreserved)
+    ));
+    assert_eq!(preserved.evidence_summary.counterclaims, 1);
+    assert_eq!(preserved.evidence_summary.contradictions, 1);
+}
+
+#[test]
+fn stage_14_reports_disclosed_custody_without_simulating_preservation() {
+    let mut fixture = AccountabilityFixture::valid();
+    let subject_id = fixture.evidence[0].0;
+    let custody = v02_node(
+        EvidenceKind::CustodyRecord {
+            subject_evidence_id: subject_id,
+            previous_custody_id: None,
+            custodian_identity: b"custodian:1".to_vec(),
+        },
+        vec![subject_id],
+    );
+    fixture.evidence.push((custody.id().unwrap(), custody));
+    let report = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Fresh,
+    );
+    assert!(has_reason(&report, Stage::Custody, StageDisposition::Pass));
+    assert!(has_reason(
+        &report,
+        Stage::DeferredPreservation,
+        StageDisposition::Unsupported(ReasonCode::PreservationSemanticsDeferred)
+    ));
+    assert_eq!(report.evidence_summary.custody_records, 1);
+}
+
 #[test]
 fn released_corpus_indexes_every_required_v01_vector() {
     let manifest = include_str!("../../csv-testkit/corpus/accountability-v0.1/manifest.toml");
@@ -405,7 +503,9 @@ fn released_corpus_indexes_every_required_v01_vector() {
             "missing corpus vector: {required}"
         );
     }
-    assert!(manifest.contains("id = \"contradiction\""));
+    assert!(manifest.contains("id = \"counterclaim-with-omitted-contradiction\""));
+    assert!(manifest.contains("id = \"preserved-contradiction\""));
+    assert!(manifest.contains("id = \"disclosed-custody\""));
     assert!(manifest.contains("id = \"preservation-renewal\""));
 }
 

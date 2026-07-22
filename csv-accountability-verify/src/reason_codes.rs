@@ -42,10 +42,14 @@ pub const ALL_REASON_CODES: &[ReasonCode] = &[
     ReasonCode::EvidenceAuthenticityUnknown,
     ReasonCode::RequiredEvidenceMissing,
     ReasonCode::SelectiveDisclosureLimitsEvaluation,
+    ReasonCode::ContradictoryEvidenceOmitted,
+    ReasonCode::ConflictingEvidencePreserved,
     ReasonCode::ReceiptInvalid,
     ReasonCode::OutcomeAmbiguous,
     ReasonCode::IndependentSingleUseUnverified,
     ReasonCode::IndependentSingleUseInconsistent,
+    ReasonCode::CustodyEvidenceAbsent,
+    ReasonCode::CustodyDisclosureLimited,
     ReasonCode::PreservationSemanticsDeferred,
 ];
 
@@ -95,7 +99,7 @@ mod tests {
     fn registry_is_exhaustive_unique_and_well_formed() {
         // Exhaustiveness: the count matches the enum's variant count. This is kept in sync
         // with the enum via the `assert` below and the compiler's match in `registry_id`.
-        assert_eq!(ALL_REASON_CODES.len(), 23);
+        assert_eq!(ALL_REASON_CODES.len(), 27);
         let mut ids: Vec<&'static str> = ALL_REASON_CODES
             .iter()
             .map(|code| code.registry_id())

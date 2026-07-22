@@ -25,8 +25,10 @@ pub enum Stage {
     Temporal,
     Replay,
     Evidence,
+    ContradictionAndGap,
     Receipt,
     ExternalCorroboration,
+    Custody,
     DeferredPreservation,
 }
 
@@ -60,10 +62,14 @@ pub enum ReasonCode {
     EvidenceAuthenticityUnknown,
     RequiredEvidenceMissing,
     SelectiveDisclosureLimitsEvaluation,
+    ContradictoryEvidenceOmitted,
+    ConflictingEvidencePreserved,
     ReceiptInvalid,
     OutcomeAmbiguous,
     IndependentSingleUseUnverified,
     IndependentSingleUseInconsistent,
+    CustodyEvidenceAbsent,
+    CustodyDisclosureLimited,
     PreservationSemanticsDeferred,
 }
 
@@ -93,6 +99,10 @@ impl ReasonCode {
             Self::SelectiveDisclosureLimitsEvaluation => {
                 "ACCOUNTABILITY.COMPLETENESS.DISCLOSURE_LIMITED"
             }
+            Self::ContradictoryEvidenceOmitted => {
+                "ACCOUNTABILITY.CONTRADICTION.OPPOSING_EVIDENCE_OMITTED"
+            }
+            Self::ConflictingEvidencePreserved => "ACCOUNTABILITY.CONTRADICTION.CONFLICT_PRESERVED",
             Self::ReceiptInvalid => "ACCOUNTABILITY.EXECUTION.RECEIPT_INVALID",
             Self::OutcomeAmbiguous => "ACCOUNTABILITY.EXECUTION.OUTCOME_AMBIGUOUS",
             Self::IndependentSingleUseUnverified => {
@@ -101,6 +111,8 @@ impl ReasonCode {
             Self::IndependentSingleUseInconsistent => {
                 "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_INCONSISTENT"
             }
+            Self::CustodyEvidenceAbsent => "ACCOUNTABILITY.CUSTODY.EVIDENCE_ABSENT",
+            Self::CustodyDisclosureLimited => "ACCOUNTABILITY.CUSTODY.DISCLOSURE_LIMITED",
             Self::PreservationSemanticsDeferred => "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1",
         }
     }
@@ -155,8 +167,12 @@ pub fn assurance_profile(
             evaluated_dimension(Dimension::SingleUse, report, &[Stage::Replay]),
             evaluated_dimension(Dimension::Execution, report, &[Stage::Receipt]),
             external_corroboration_dimension(report),
-            evaluated_dimension(Dimension::Completeness, report, &[Stage::Evidence]),
-            deferred_dimension(Dimension::Custody),
+            evaluated_dimension(
+                Dimension::Completeness,
+                report,
+                &[Stage::Evidence, Stage::ContradictionAndGap],
+            ),
+            evaluated_dimension(Dimension::Custody, report, &[Stage::Custody]),
             evaluated_dimension(
                 Dimension::Preservation,
                 report,
@@ -299,6 +315,9 @@ pub struct EvidenceSummary {
     pub observations: u32,
     pub attestations: u32,
     pub gaps: u32,
+    pub counterclaims: u32,
+    pub contradictions: u32,
+    pub custody_records: u32,
     pub withheld_locators: u32,
 }
 
@@ -359,7 +378,7 @@ pub fn verify(
     context: &VerificationContext,
     input: VerificationInput<'_>,
 ) -> Result<ContextBoundOutput<VerificationReport>, csv_accountability::ContextError> {
-    let mut stages = Vec::with_capacity(10);
+    let mut stages = Vec::with_capacity(12);
     let structure = if input.intent.validate().is_ok()
         && input.mandate.validate().is_ok()
         && input.attempt.validate(input.mandate).is_ok()
@@ -476,6 +495,23 @@ pub fn verify(
     };
     stages.push(result(Stage::Evidence, evidence));
 
+    // Stage 12 preserves disclosed conflict instead of resolving it as truth.
+    // A counterclaim without a contradiction node linking that counterclaim to
+    // its challenged evidence is an explicit omission, hence Indeterminate.
+    let graph_is_valid = validate_evidence_graph(input.evidence).is_ok();
+    let contradiction_and_gap = if !graph_is_valid {
+        StageDisposition::Fail(ReasonCode::EvidenceInvalid)
+    } else if has_unpaired_counterclaim(input.evidence) {
+        StageDisposition::Indeterminate(ReasonCode::ContradictoryEvidenceOmitted)
+    } else if evidence_summary.contradictions > 0 {
+        StageDisposition::Indeterminate(ReasonCode::ConflictingEvidencePreserved)
+    } else if evidence_summary.gaps > 0 {
+        StageDisposition::Indeterminate(ReasonCode::RequiredEvidenceMissing)
+    } else {
+        StageDisposition::Pass
+    };
+    stages.push(result(Stage::ContradictionAndGap, contradiction_and_gap));
+
     stages.push(result(
         Stage::Receipt,
         if input
@@ -510,6 +546,23 @@ pub fn verify(
             },
         },
     ));
+
+    // The custody portion of stage 14 is independently reported. Absence is a
+    // limitation, while a disclosed but withheld custody source remains
+    // Indeterminate and can never be interpreted as an unbroken chain.
+    let custody = if !graph_is_valid {
+        StageDisposition::Fail(ReasonCode::EvidenceInvalid)
+    } else if evidence_summary.custody_records == 0 {
+        StageDisposition::Unsupported(ReasonCode::CustodyEvidenceAbsent)
+    } else if input.evidence.iter().any(|(_, node)| {
+        matches!(node.kind, EvidenceKind::CustodyRecord { .. })
+            && matches!(node.source_locator, SourceLocator::Withheld(_))
+    }) {
+        StageDisposition::Indeterminate(ReasonCode::CustodyDisclosureLimited)
+    } else {
+        StageDisposition::Pass
+    };
+    stages.push(result(Stage::Custody, custody));
 
     stages.push(result(
         Stage::DeferredPreservation,
@@ -556,12 +609,29 @@ fn summarize_evidence(evidence: &[(EvidenceNodeId, EvidenceNode)]) -> EvidenceSu
             EvidenceKind::Observation { .. } => summary.observations += 1,
             EvidenceKind::Attestation { .. } => summary.attestations += 1,
             EvidenceKind::EvidenceGap { .. } => summary.gaps += 1,
+            EvidenceKind::Counterclaim { .. } => summary.counterclaims += 1,
+            EvidenceKind::Contradiction { .. } => summary.contradictions += 1,
+            EvidenceKind::CustodyRecord { .. } => summary.custody_records += 1,
         }
         if matches!(node.source_locator, SourceLocator::Withheld(_)) {
             summary.withheld_locators += 1;
         }
     }
     summary
+}
+
+fn has_unpaired_counterclaim(evidence: &[(EvidenceNodeId, EvidenceNode)]) -> bool {
+    evidence.iter().any(|(counterclaim_id, node)| {
+        matches!(node.kind, EvidenceKind::Counterclaim { .. })
+            && !evidence.iter().any(|(_, candidate)| match candidate.kind {
+                EvidenceKind::Contradiction {
+                    left_evidence_id,
+                    right_evidence_id,
+                    ..
+                } => left_evidence_id == *counterclaim_id || right_evidence_id == *counterclaim_id,
+                _ => false,
+            })
+    })
 }
 
 fn authenticity_assessments_are_canonical(

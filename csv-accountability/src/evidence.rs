@@ -23,16 +23,19 @@ pub const OBSERVATION_REGISTRY_ID: &str = "org.diewan.evidence.observation.v1";
 pub const ATTESTATION_REGISTRY_ID: &str = "org.diewan.evidence.attestation.v1";
 /// Stable registry identifier for an explicit evidence gap.
 pub const EVIDENCE_GAP_REGISTRY_ID: &str = "org.diewan.evidence.gap.v1";
+/// Stable registry identifier for a claim made in opposition to disclosed evidence.
+pub const COUNTERCLAIM_REGISTRY_ID: &str = "org.diewan.evidence.counterclaim.v1";
+/// Stable registry identifier for an explicit conflict between two evidence nodes.
+pub const CONTRADICTION_REGISTRY_ID: &str = "org.diewan.evidence.contradiction.v1";
+/// Stable registry identifier for a custody hand-off concerning disclosed evidence.
+pub const CUSTODY_RECORD_REGISTRY_ID: &str = "org.diewan.evidence.custody-record.v1";
 
 /// Reserved v0.2 registry identifiers; no v0.1 constructor accepts these.
 pub const RESERVED_EVIDENCE_REGISTRY_IDS: &[&str] = &[
     "org.diewan.evidence.anchor.v1",
-    "org.diewan.evidence.custody-record.v1",
     "org.diewan.evidence.identity-binding.v1",
     "org.diewan.evidence.revocation-record.v1",
     "org.diewan.evidence.policy-snapshot.v1",
-    "org.diewan.evidence.counterclaim.v1",
-    "org.diewan.evidence.contradiction.v1",
     "org.diewan.evidence.disclosure-commitment.v1",
     "org.diewan.evidence.preservation-envelope.v1",
 ];
@@ -55,7 +58,8 @@ pub struct AuthenticityMaterial {
     pub material_digest: [u8; 32],
 }
 
-/// One of the four evidence meanings implemented in v0.1.
+/// A protocol evidence meaning. Variants are distinct so conflicts and
+/// provenance cannot be flattened into generic claims by consumers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EvidenceKind {
     /// A proposition asserted by a producer.
@@ -80,6 +84,31 @@ pub enum EvidenceKind {
         /// Human-display-safe reason commitment, not an assertion of non-occurrence.
         reason_digest: [u8; 32],
     },
+    /// A proposition made in opposition to one disclosed evidence node.
+    Counterclaim {
+        /// Evidence node whose proposition or observation is challenged.
+        subject_evidence_id: EvidenceNodeId,
+        /// Digest of the exact opposing proposition.
+        proposition_digest: [u8; 32],
+    },
+    /// An explicit declaration that two disclosed nodes cannot both hold.
+    Contradiction {
+        /// First conflicting evidence node.
+        left_evidence_id: EvidenceNodeId,
+        /// Second conflicting evidence node.
+        right_evidence_id: EvidenceNodeId,
+        /// Digest of the exact conflict analysis retained as content.
+        analysis_digest: [u8; 32],
+    },
+    /// A custody event for one disclosed evidence node.
+    CustodyRecord {
+        /// Evidence whose custody is recorded.
+        subject_evidence_id: EvidenceNodeId,
+        /// Previous custody record, absent only for the first disclosed event.
+        previous_custody_id: Option<EvidenceNodeId>,
+        /// Identity accepting custody at this event.
+        custodian_identity: Vec<u8>,
+    },
 }
 
 impl EvidenceKind {
@@ -90,6 +119,9 @@ impl EvidenceKind {
             Self::Observation { .. } => OBSERVATION_REGISTRY_ID,
             Self::Attestation { .. } => ATTESTATION_REGISTRY_ID,
             Self::EvidenceGap { .. } => EVIDENCE_GAP_REGISTRY_ID,
+            Self::Counterclaim { .. } => COUNTERCLAIM_REGISTRY_ID,
+            Self::Contradiction { .. } => CONTRADICTION_REGISTRY_ID,
+            Self::CustodyRecord { .. } => CUSTODY_RECORD_REGISTRY_ID,
         }
     }
 }
@@ -136,6 +168,12 @@ pub enum EvidenceError {
     BoundsExceeded,
     /// The supplied identifier does not match canonical node bytes.
     IdentifierMismatch,
+    /// The graph contains the same content identifier more than once.
+    DuplicateIdentifier,
+    /// A typed relationship points to the wrong evidence meaning or subject.
+    InvalidRelationshipSemantics,
+    /// Canonical bytes are truncated, malformed, or use an unknown registry id.
+    MalformedEncoding,
 }
 
 impl EvidenceNode {
@@ -189,6 +227,43 @@ impl EvidenceNode {
                     return Err(EvidenceError::InvalidField("reason_digest"));
                 }
             }
+            EvidenceKind::Counterclaim {
+                subject_evidence_id,
+                proposition_digest,
+            } => {
+                if *proposition_digest == [0; 32]
+                    || !self.relationships.contains(subject_evidence_id)
+                {
+                    return Err(EvidenceError::InvalidField("counterclaim"));
+                }
+            }
+            EvidenceKind::Contradiction {
+                left_evidence_id,
+                right_evidence_id,
+                analysis_digest,
+            } => {
+                if left_evidence_id == right_evidence_id
+                    || *analysis_digest == [0; 32]
+                    || !self.relationships.contains(left_evidence_id)
+                    || !self.relationships.contains(right_evidence_id)
+                {
+                    return Err(EvidenceError::InvalidField("contradiction"));
+                }
+            }
+            EvidenceKind::CustodyRecord {
+                subject_evidence_id,
+                previous_custody_id,
+                custodian_identity,
+            } => {
+                validate_bytes(custodian_identity, "custodian_identity")?;
+                if !self.relationships.contains(subject_evidence_id)
+                    || previous_custody_id.is_some_and(|previous| {
+                        previous == *subject_evidence_id || !self.relationships.contains(&previous)
+                    })
+                {
+                    return Err(EvidenceError::InvalidField("custody_relationship"));
+                }
+            }
             EvidenceKind::Claim { .. } => {}
         }
         if self.relationships.len() > MAX_EVIDENCE_RELATIONSHIPS
@@ -216,6 +291,37 @@ impl EvidenceNode {
             } => {
                 push_text(&mut out, missing_registry_id);
                 out.extend_from_slice(reason_digest);
+            }
+            EvidenceKind::Counterclaim {
+                subject_evidence_id,
+                proposition_digest,
+            } => {
+                out.extend_from_slice(subject_evidence_id.as_bytes());
+                out.extend_from_slice(proposition_digest);
+            }
+            EvidenceKind::Contradiction {
+                left_evidence_id,
+                right_evidence_id,
+                analysis_digest,
+            } => {
+                out.extend_from_slice(left_evidence_id.as_bytes());
+                out.extend_from_slice(right_evidence_id.as_bytes());
+                out.extend_from_slice(analysis_digest);
+            }
+            EvidenceKind::CustodyRecord {
+                subject_evidence_id,
+                previous_custody_id,
+                custodian_identity,
+            } => {
+                out.extend_from_slice(subject_evidence_id.as_bytes());
+                match previous_custody_id {
+                    Some(previous) => {
+                        out.push(1);
+                        out.extend_from_slice(previous.as_bytes());
+                    }
+                    None => out.push(0),
+                }
+                push_bytes(&mut out, custodian_identity);
             }
         }
         push_bytes(&mut out, &self.producer_identity);
@@ -249,6 +355,97 @@ impl EvidenceNode {
         Ok(out)
     }
 
+    /// Decodes one canonical evidence node and rejects trailing or non-canonical bytes.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EvidenceError> {
+        let mut cursor = Cursor::new(bytes);
+        let registry_id = cursor.text()?;
+        let kind = match registry_id.as_str() {
+            CLAIM_REGISTRY_ID => EvidenceKind::Claim {
+                proposition_digest: cursor.array32()?,
+            },
+            OBSERVATION_REGISTRY_ID => EvidenceKind::Observation {
+                method_id: cursor.text()?,
+            },
+            ATTESTATION_REGISTRY_ID => EvidenceKind::Attestation {
+                attester_identity: cursor.bytes()?,
+            },
+            EVIDENCE_GAP_REGISTRY_ID => EvidenceKind::EvidenceGap {
+                missing_registry_id: cursor.text()?,
+                reason_digest: cursor.array32()?,
+            },
+            COUNTERCLAIM_REGISTRY_ID => EvidenceKind::Counterclaim {
+                subject_evidence_id: EvidenceNodeId::from_digest(cursor.array32()?),
+                proposition_digest: cursor.array32()?,
+            },
+            CONTRADICTION_REGISTRY_ID => EvidenceKind::Contradiction {
+                left_evidence_id: EvidenceNodeId::from_digest(cursor.array32()?),
+                right_evidence_id: EvidenceNodeId::from_digest(cursor.array32()?),
+                analysis_digest: cursor.array32()?,
+            },
+            CUSTODY_RECORD_REGISTRY_ID => EvidenceKind::CustodyRecord {
+                subject_evidence_id: EvidenceNodeId::from_digest(cursor.array32()?),
+                previous_custody_id: match cursor.byte()? {
+                    0 => None,
+                    1 => Some(EvidenceNodeId::from_digest(cursor.array32()?)),
+                    _ => return Err(EvidenceError::MalformedEncoding),
+                },
+                custodian_identity: cursor.bytes()?,
+            },
+            _ => return Err(EvidenceError::MalformedEncoding),
+        };
+        let producer_identity = cursor.bytes()?;
+        let collected_at = cursor.u64()?;
+        let asserted_event_at = match cursor.byte()? {
+            0 => None,
+            1 => Some(cursor.u64()?),
+            _ => return Err(EvidenceError::MalformedEncoding),
+        };
+        let content_digest = cursor.array32()?;
+        let media_type = cursor.text()?;
+        let source_locator = match cursor.byte()? {
+            0 => SourceLocator::Disclosed(cursor.text()?),
+            1 => SourceLocator::Withheld(cursor.array32()?),
+            _ => return Err(EvidenceError::MalformedEncoding),
+        };
+        let authenticity = match cursor.byte()? {
+            0 => None,
+            1 => Some(AuthenticityMaterial {
+                scheme_id: cursor.text()?,
+                material_digest: cursor.array32()?,
+            }),
+            _ => return Err(EvidenceError::MalformedEncoding),
+        };
+        let disclosure_classification = cursor.text()?;
+        let relationship_count = cursor.u32()? as usize;
+        if relationship_count > MAX_EVIDENCE_RELATIONSHIPS {
+            return Err(EvidenceError::BoundsExceeded);
+        }
+        let mut relationships = Vec::with_capacity(relationship_count);
+        for _ in 0..relationship_count {
+            relationships.push(EvidenceNodeId::from_digest(cursor.array32()?));
+        }
+        if !cursor.is_empty() {
+            return Err(EvidenceError::MalformedEncoding);
+        }
+        let node = Self {
+            kind,
+            producer_identity,
+            collected_at,
+            asserted_event_at,
+            content_digest,
+            media_type,
+            source_locator,
+            authenticity,
+            disclosure_classification,
+            relationships,
+        };
+        node.validate()?;
+        if node.canonical_bytes()?.as_slice() != bytes {
+            return Err(EvidenceError::MalformedEncoding);
+        }
+        Ok(node)
+    }
+
     /// Derives this node's domain-separated content identifier.
     pub fn id(&self) -> Result<EvidenceNodeId, EvidenceError> {
         let bytes = self.canonical_bytes()?;
@@ -265,6 +462,14 @@ pub fn validate_evidence_graph(
     if nodes.len() > MAX_EVIDENCE_NODES {
         return Err(EvidenceError::BoundsExceeded);
     }
+    for (index, (id, _)) in nodes.iter().enumerate() {
+        if nodes[index + 1..]
+            .iter()
+            .any(|(candidate, _)| candidate == id)
+        {
+            return Err(EvidenceError::DuplicateIdentifier);
+        }
+    }
     // Check the supplied graph structure first so a cyclic hostile graph is
     // classified as a cycle rather than being masked by its necessarily
     // inconsistent content identifiers. Canonical identifier validation still
@@ -276,6 +481,29 @@ pub fn validate_evidence_graph(
     for (id, node) in nodes {
         if *id != node.id()? {
             return Err(EvidenceError::IdentifierMismatch);
+        }
+    }
+    for (_, node) in nodes {
+        if let EvidenceKind::CustodyRecord {
+            subject_evidence_id,
+            previous_custody_id: Some(previous_custody_id),
+            ..
+        } = &node.kind
+        {
+            let previous = nodes
+                .iter()
+                .find(|(id, _)| id == previous_custody_id)
+                .map(|(_, node)| node)
+                .ok_or(EvidenceError::MissingRelationship)?;
+            if !matches!(
+                &previous.kind,
+                EvidenceKind::CustodyRecord {
+                    subject_evidence_id: previous_subject,
+                    ..
+                } if previous_subject == subject_evidence_id
+            ) {
+                return Err(EvidenceError::InvalidRelationshipSemantics);
+            }
         }
     }
     Ok(())
@@ -345,5 +573,66 @@ fn push_option_u64(out: &mut Vec<u8>, value: Option<u64>) {
             push_u64(out, value);
         }
         None => out.push(0),
+    }
+}
+
+struct Cursor<'a> {
+    remaining: &'a [u8],
+}
+
+impl<'a> Cursor<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { remaining: bytes }
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.remaining.is_empty()
+    }
+
+    fn take(&mut self, len: usize) -> Result<&'a [u8], EvidenceError> {
+        if len > self.remaining.len() {
+            return Err(EvidenceError::MalformedEncoding);
+        }
+        let (value, rest) = self.remaining.split_at(len);
+        self.remaining = rest;
+        Ok(value)
+    }
+
+    fn byte(&mut self) -> Result<u8, EvidenceError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u32(&mut self) -> Result<u32, EvidenceError> {
+        Ok(u32::from_be_bytes(
+            self.take(4)?
+                .try_into()
+                .map_err(|_| EvidenceError::MalformedEncoding)?,
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64, EvidenceError> {
+        Ok(u64::from_be_bytes(
+            self.take(8)?
+                .try_into()
+                .map_err(|_| EvidenceError::MalformedEncoding)?,
+        ))
+    }
+
+    fn array32(&mut self) -> Result<[u8; 32], EvidenceError> {
+        self.take(32)?
+            .try_into()
+            .map_err(|_| EvidenceError::MalformedEncoding)
+    }
+
+    fn bytes(&mut self) -> Result<Vec<u8>, EvidenceError> {
+        let len = self.u32()? as usize;
+        if len > MAX_EVIDENCE_TEXT_BYTES {
+            return Err(EvidenceError::BoundsExceeded);
+        }
+        Ok(self.take(len)?.to_vec())
+    }
+
+    fn text(&mut self) -> Result<String, EvidenceError> {
+        String::from_utf8(self.bytes()?).map_err(|_| EvidenceError::MalformedEncoding)
     }
 }

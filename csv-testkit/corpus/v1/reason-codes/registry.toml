@@ -81,6 +81,14 @@ variant = "SelectiveDisclosureLimitsEvaluation"
 id = "ACCOUNTABILITY.COMPLETENESS.DISCLOSURE_LIMITED"
 
 [[code]]
+variant = "ContradictoryEvidenceOmitted"
+id = "ACCOUNTABILITY.CONTRADICTION.OPPOSING_EVIDENCE_OMITTED"
+
+[[code]]
+variant = "ConflictingEvidencePreserved"
+id = "ACCOUNTABILITY.CONTRADICTION.CONFLICT_PRESERVED"
+
+[[code]]
 variant = "ReceiptInvalid"
 id = "ACCOUNTABILITY.EXECUTION.RECEIPT_INVALID"
 
@@ -95,6 +103,14 @@ id = "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_ABSENT"
 [[code]]
 variant = "IndependentSingleUseInconsistent"
 id = "ACCOUNTABILITY.EXTERNAL_CORROBORATION.ANCHOR_INCONSISTENT"
+
+[[code]]
+variant = "CustodyEvidenceAbsent"
+id = "ACCOUNTABILITY.CUSTODY.EVIDENCE_ABSENT"
+
+[[code]]
+variant = "CustodyDisclosureLimited"
+id = "ACCOUNTABILITY.CUSTODY.DISCLOSURE_LIMITED"
 
 [[code]]
 variant = "PreservationSemanticsDeferred"
