@@ -88,3 +88,37 @@ fn published_chain_anchor_contract_matches_code() {
     assert!(anchor.finality.is_final());
     assert_eq!(anchor.chain_id, "ethereum-sepolia");
 }
+
+/// PROFILE-02: the published database-migration descriptor must match
+/// `csv_accountability::db_migration_descriptor()` — same profile id, action
+/// type, media type, and complete evidence-source inventory with classes.
+#[test]
+fn published_db_migration_profile_descriptor_matches_code() {
+    use csv_accountability::{EvidenceSourceClass, db_migration_descriptor};
+
+    let published = include_str!("../corpus/v1/profiles/db-migration.intent.v1.toml");
+    let descriptor = db_migration_descriptor();
+    // The descriptor itself must be well-formed (executor + corroborating source).
+    descriptor.validate().expect("descriptor is well-formed");
+
+    assert!(published.contains(descriptor.profile_id.as_str()));
+    assert!(published.contains(&descriptor.action_type));
+    assert!(published.contains(&descriptor.parameters_media_type));
+
+    for source in &descriptor.evidence_sources {
+        assert!(
+            published.contains(source.id.as_str()),
+            "published descriptor missing evidence source {}",
+            source.id.as_str()
+        );
+        let class = match source.class {
+            EvidenceSourceClass::Executor => "executor",
+            EvidenceSourceClass::ProviderCorroborating => "provider_corroborating",
+            EvidenceSourceClass::ExternalAnchor => "external_anchor",
+        };
+        assert!(
+            published.contains(class),
+            "published descriptor missing class {class}"
+        );
+    }
+}

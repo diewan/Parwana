@@ -7,7 +7,7 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use crate::intent::{GitHubDeploymentCodec, IntentError};
+use crate::intent::{DbMigrationCodec, GitHubDeploymentCodec, IntentError};
 use crate::profile::{BoxedProfileCodec, ProfileCodec, ProfileDescriptor, ProfileId};
 
 /// A run-time table of registered profiles.
@@ -78,13 +78,17 @@ impl ProfileRegistry {
 
 /// Returns a registry preloaded with the built-in profiles.
 ///
-/// Currently this registers the first GitHub deployment profile so existing callers keep
-/// working; new profiles are added by registering their codec, not by editing the core.
+/// Registers the GitHub deployment profile and the database-migration profile
+/// (PROFILE-02). New profiles are added by registering their codec, not by
+/// editing the core, which is the whole point of the open registry.
 pub fn default_registry() -> ProfileRegistry {
     let mut registry = ProfileRegistry::new();
     registry
         .register(alloc::boxed::Box::new(GitHubDeploymentCodec::default()))
         .expect("built-in github deployment profile registers cleanly");
+    registry
+        .register(alloc::boxed::Box::new(DbMigrationCodec::default()))
+        .expect("built-in db-migration profile registers cleanly");
     registry
 }
 

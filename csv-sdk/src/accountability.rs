@@ -6,13 +6,16 @@
 
 pub use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ActionIntent, ActionMandate,
-    AssuranceDimension, AssuranceProfile, BoxedProfileCodec, ContextBoundOutput, DimensionResult,
-    DimensionStatus, DisputeBundle, EvidenceKind, EvidenceNode, EvidenceNodeId,
+    AssuranceDimension, AssuranceProfile, BoxedProfileCodec, ContextBoundOutput,
+    DB_MIGRATION_ACTION_TYPE, DB_MIGRATION_PARAMETERS_MEDIA_TYPE, DB_MIGRATION_PROFILE_ID,
+    DbMigrationCodec, DbMigrationIntentV1, DimensionResult, DimensionStatus, DisputeBundle,
+    EVIDENCE_DB_MIGRATION_APPLIED_RECORD, EvidenceKind, EvidenceNode, EvidenceNodeId,
     EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt, ExecutionReceipt,
-    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError,
+    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError, MigrationDirection,
     MandateSignatureEnvelope, ObjectVersion, ProfileCodec, ProfileDescriptor, ProfileId,
     ProfileRegistry, ProtocolVersion, QuarantineReleaseRule, RequiredContexts, SourceLocator,
-    VerificationContext, VerificationContextId, default_registry, github_deployment_descriptor,
+    VerificationContext, VerificationContextId, db_migration_descriptor, default_registry,
+    github_deployment_descriptor,
 };
 pub use csv_accountability::{
     AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation,

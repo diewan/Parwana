@@ -1,0 +1,38 @@
+# Published ProfileDescriptor (PROFILE-02; Master Plan §35, §36, §3.2).
+#
+# The second registered accountability profile, proving the model is not
+# GitHub-specific. It mirrors csv_accountability::db_migration_descriptor(); the
+# Rust codec (DbMigrationCodec) is the behavioural half. A production database
+# migration has weaker native governance than a GitHub deployment, so the
+# exact-intent single-use mandate is the primary control.
+
+profile_id = "org.diewan.accountability.db-migration.intent.v1"
+action_type = "db.migration"
+parameters_media_type = "application/vnd.diewan.db-migration-v1+csv-binary"
+parameters_domain_tag = "db-migration-parameters-v1"
+max_context_commitments = 32
+max_identity_bytes = 4096
+
+# A migration provider has no sufficient absence predicate: after an ambiguous
+# apply, no query proves the migration did not partially land, so a quarantined
+# mandate is never releasable.
+quarantine_release = "never_releasable"
+
+# Complete evidence-source inventory, each with its independence class.
+[[evidence_source]]
+id = "evidence.executor.attempt-record"
+class = "executor"
+
+[[evidence_source]]
+id = "evidence.db-migration.applied-record"
+class = "provider_corroborating"
+
+# Independent single-use / on-chain anchor corroboration, external to both the
+# executor and the provider (§5.9).
+[[evidence_source]]
+id = "evidence.csv-seal.consumption-record"
+class = "external_anchor"
+
+[[evidence_source]]
+id = "evidence.chain.commitment-anchor"
+class = "external_anchor"

@@ -416,6 +416,263 @@ impl GitHubDeploymentIntentV1 {
     }
 }
 
+// ── Second profile: production database migration (PROFILE-02) ───────────────
+//
+// A database migration has weaker native governance than a GitHub deployment
+// (Master Plan §3.2): the provider offers no environment-protection gate, so the
+// exact-intent single-use mandate is the primary control. Every security-relevant
+// field — the exact migration plan digest, the direction, whether destructive
+// statements are permitted, the statement count — is bound into the parameters
+// commitment, so an agent cannot widen the authorized change after approval, and
+// presentation-only names never displace the stable database/environment ids.
+
+/// Stable, namespaced identifier of the first database-migration profile.
+pub const DB_MIGRATION_PROFILE_ID: &str = "org.diewan.accountability.db-migration.intent.v1";
+/// Stable action type bound into a database-migration intent.
+pub const DB_MIGRATION_ACTION_TYPE: &str = "db.migration";
+/// Domain separator hashed with the profile bytes to form the parameters commitment.
+pub const DB_MIGRATION_PARAMETERS_DOMAIN_TAG: &[u8] = b"db-migration-parameters-v1";
+/// Registered media type of the canonical database-migration parameter commitment.
+pub const DB_MIGRATION_PARAMETERS_MEDIA_TYPE: &str =
+    "application/vnd.diewan.db-migration-v1+csv-binary";
+/// Stable evidence-source identifier: the provider's applied-migration record.
+pub const EVIDENCE_DB_MIGRATION_APPLIED_RECORD: &str = "evidence.db-migration.applied-record";
+/// Maximum byte length of a migration identifier.
+pub const MAX_MIGRATION_ID_BYTES: usize = 255;
+
+/// Direction of a migration. A rollback weakens control and is bound into the
+/// digest, so it can never be substituted for an approved forward migration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MigrationDirection {
+    /// Apply the migration forward.
+    Forward,
+    /// Roll the migration back.
+    Rollback,
+}
+
+impl MigrationDirection {
+    const fn tag(self) -> u8 {
+        match self {
+            Self::Forward => 0,
+            Self::Rollback => 1,
+        }
+    }
+
+    const fn from_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0 => Some(Self::Forward),
+            1 => Some(Self::Rollback),
+            _ => None,
+        }
+    }
+}
+
+/// Returns the registered descriptor for the first database-migration profile.
+pub fn db_migration_descriptor() -> ProfileDescriptor {
+    ProfileDescriptor {
+        profile_id: ProfileId::new(DB_MIGRATION_PROFILE_ID)
+            .expect("static db-migration profile id is valid"),
+        action_type: String::from(DB_MIGRATION_ACTION_TYPE),
+        parameters_media_type: String::from(DB_MIGRATION_PARAMETERS_MEDIA_TYPE),
+        parameters_domain_tag: DB_MIGRATION_PARAMETERS_DOMAIN_TAG.to_vec(),
+        evidence_sources: alloc::vec![
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(EVIDENCE_EXECUTOR_ATTEMPT_RECORD)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::Executor,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(EVIDENCE_DB_MIGRATION_APPLIED_RECORD)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ProviderCorroborating,
+            ),
+            // Independent single-use / anchor corroboration (§5.9), external to
+            // both executor and provider.
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ExternalAnchor,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::new(crate::anchor::EVIDENCE_CHAIN_COMMITMENT_ANCHOR)
+                    .expect("static evidence id is valid"),
+                EvidenceSourceClass::ExternalAnchor,
+            ),
+        ],
+        // A migration provider has no sufficient absence predicate: after an
+        // ambiguous apply, no query proves the migration did not partially land,
+        // so a quarantined mandate is never released.
+        quarantine_release: QuarantineReleaseRule::NeverReleasable,
+        max_context_commitments: MAX_CONTEXT_COMMITMENTS,
+        max_identity_bytes: MAX_IDENTITY_BYTES,
+    }
+}
+
+/// Exact, constrained production database-migration profile.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DbMigrationIntentV1 {
+    /// Stable provider database identifier; names never replace it.
+    pub database_id: u64,
+    /// Presentation-only database name.
+    pub database_name: String,
+    /// Stable provider environment identifier.
+    pub environment_id: u64,
+    /// Presentation-only environment name.
+    pub environment_name: String,
+    /// Stable migration identifier (version/name), bound into the digest.
+    pub migration_id: String,
+    /// Commitment to the exact migration plan/script bytes constructed outside the agent.
+    pub migration_digest: [u8; 32],
+    /// Migration direction; a rollback is a distinct, digest-bound authorization.
+    pub direction: MigrationDirection,
+    /// Whether destructive statements are permitted by this exact authorization.
+    pub allow_destructive: bool,
+    /// Number of statements in the approved plan; zero is rejected.
+    pub statement_count: u32,
+    /// Presentation-only change-ticket reference (the weak-native governance record).
+    pub change_ticket: String,
+}
+
+impl DbMigrationIntentV1 {
+    /// Validates all fixed and constrained fields of the profile.
+    pub fn validate(&self) -> Result<(), IntentError> {
+        if self.database_id == 0 || self.environment_id == 0 {
+            return Err(IntentError::InvalidStableId);
+        }
+        for (field, value) in [
+            ("database_name", self.database_name.as_str()),
+            ("environment_name", self.environment_name.as_str()),
+            ("change_ticket", self.change_ticket.as_str()),
+        ] {
+            if value.is_empty() {
+                return Err(IntentError::EmptyField(field));
+            }
+            if value.len() > MAX_DISPLAY_BYTES
+                || value.trim() != value
+                || value.chars().any(char::is_control)
+            {
+                return Err(IntentError::DisplayFieldTooLong(field));
+            }
+        }
+        if self.migration_id.is_empty() {
+            return Err(IntentError::EmptyField("migration_id"));
+        }
+        if self.migration_id.len() > MAX_MIGRATION_ID_BYTES
+            || self.migration_id.trim() != self.migration_id
+            || self.migration_id.chars().any(char::is_control)
+        {
+            return Err(IntentError::DisplayFieldTooLong("migration_id"));
+        }
+        // The migration plan digest binds the exact SQL; an all-zero digest binds
+        // nothing and is rejected.
+        if self.migration_digest == [0u8; 32] {
+            return Err(IntentError::EmptyField("migration_digest"));
+        }
+        // A zero-statement migration authorizes nothing concrete.
+        if self.statement_count == 0 {
+            return Err(IntentError::EmptyField("statement_count"));
+        }
+        Ok(())
+    }
+
+    /// Stable target bytes, independent of presentation names.
+    #[must_use]
+    pub fn stable_target(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(&self.database_id.to_be_bytes());
+        bytes.extend_from_slice(&self.environment_id.to_be_bytes());
+        bytes
+    }
+
+    /// Canonical profile bytes used by the generic intent commitment.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IntentError> {
+        self.validate()?;
+        let mut out = Vec::new();
+        push_u16(&mut out, ACCOUNTABILITY_OBJECT_VERSION.get());
+        push_u64(&mut out, self.database_id);
+        push_string(&mut out, &self.database_name);
+        push_u64(&mut out, self.environment_id);
+        push_string(&mut out, &self.environment_name);
+        push_string(&mut out, &self.migration_id);
+        out.extend_from_slice(&self.migration_digest);
+        out.push(self.direction.tag());
+        out.push(u8::from(self.allow_destructive));
+        push_u32(&mut out, self.statement_count);
+        push_string(&mut out, &self.change_ticket);
+        Ok(out)
+    }
+
+    /// Decodes and validates a profile from its exact canonical byte encoding,
+    /// failing closed on any non-canonical, truncated, or trailing input.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, IntentError> {
+        let mut cur = Cursor::new(bytes);
+        let version = cur.read_u16()?;
+        if version != ACCOUNTABILITY_OBJECT_VERSION.get() {
+            return Err(IntentError::UnsupportedVersion);
+        }
+        let database_id = cur.read_u64()?;
+        let database_name = cur.read_string()?;
+        let environment_id = cur.read_u64()?;
+        let environment_name = cur.read_string()?;
+        let migration_id = cur.read_string()?;
+        let migration_digest = cur.read_hash()?;
+        let direction = MigrationDirection::from_tag(cur.read_u8()?)
+            .ok_or(IntentError::MalformedProfileBytes)?;
+        let allow_destructive = match cur.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(IntentError::MalformedProfileBytes),
+        };
+        let statement_count = cur.read_u32()?;
+        let change_ticket = cur.read_string()?;
+        if !cur.is_empty() {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        let profile = Self {
+            database_id,
+            database_name,
+            environment_id,
+            environment_name,
+            migration_id,
+            migration_digest,
+            direction,
+            allow_destructive,
+            statement_count,
+            change_ticket,
+        };
+        profile.validate()?;
+        // Reject any encoding that is valid-looking but not the unique canonical form.
+        if profile.canonical_bytes()? != bytes {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        Ok(profile)
+    }
+}
+
+/// The registerable codec for the first database-migration profile.
+pub struct DbMigrationCodec {
+    descriptor: ProfileDescriptor,
+}
+
+impl Default for DbMigrationCodec {
+    fn default() -> Self {
+        Self {
+            descriptor: db_migration_descriptor(),
+        }
+    }
+}
+
+impl ProfileCodec for DbMigrationCodec {
+    fn descriptor(&self) -> &ProfileDescriptor {
+        &self.descriptor
+    }
+
+    fn validate_canonical_bytes(&self, profile_bytes: &[u8]) -> Result<Vec<u8>, IntentError> {
+        let profile = DbMigrationIntentV1::from_canonical_bytes(profile_bytes)?;
+        Ok(profile.stable_target())
+    }
+}
+
 /// Minimal fail-closed cursor over the little-endian manual encoding used by profiles.
 struct Cursor<'a> {
     bytes: &'a [u8],
@@ -970,5 +1227,165 @@ mod tests {
             tampered.verify_with_codec(codec.descriptor(), &codec),
             Err(IntentError::ParametersCommitmentMismatch)
         );
+    }
+}
+
+#[cfg(test)]
+mod db_migration_tests {
+    use super::*;
+    use crate::profile::ProfileCodec;
+    use crate::registry::default_registry;
+
+    fn valid_intent() -> DbMigrationIntentV1 {
+        DbMigrationIntentV1 {
+            database_id: 42,
+            database_name: String::from("orders-prod"),
+            environment_id: 7,
+            environment_name: String::from("production"),
+            migration_id: String::from("2026_07_22_add_index"),
+            migration_digest: [0x33u8; 32],
+            direction: MigrationDirection::Forward,
+            allow_destructive: false,
+            statement_count: 3,
+            change_ticket: String::from("CHG-1024"),
+        }
+    }
+
+    #[test]
+    fn valid_intent_round_trips_through_canonical_bytes() {
+        let intent = valid_intent();
+        let bytes = intent.canonical_bytes().unwrap();
+        assert_eq!(DbMigrationIntentV1::from_canonical_bytes(&bytes).unwrap(), intent);
+    }
+
+    #[test]
+    fn stable_target_is_the_ids_only_so_display_fields_cannot_override_it() {
+        let mut a = valid_intent();
+        let mut b = valid_intent();
+        // Different presentation names, same stable ids → identical target.
+        a.database_name = String::from("orders-prod");
+        b.database_name = String::from("a-totally-different-display-name");
+        b.environment_name = String::from("prod-us-east");
+        b.change_ticket = String::from("CHG-9999");
+        assert_eq!(a.stable_target(), b.stable_target());
+        // A different stable id changes the target.
+        b.database_id = 99;
+        assert_ne!(a.stable_target(), b.stable_target());
+    }
+
+    #[test]
+    fn mutating_any_security_field_changes_the_canonical_bytes() {
+        let base = valid_intent().canonical_bytes().unwrap();
+        let mutate = |f: &dyn Fn(&mut DbMigrationIntentV1)| {
+            let mut intent = valid_intent();
+            f(&mut intent);
+            intent.canonical_bytes().unwrap()
+        };
+        assert_ne!(base, mutate(&|i| i.migration_digest = [0x44u8; 32]));
+        assert_ne!(base, mutate(&|i| i.direction = MigrationDirection::Rollback));
+        assert_ne!(base, mutate(&|i| i.allow_destructive = true));
+        assert_ne!(base, mutate(&|i| i.statement_count = 4));
+        assert_ne!(base, mutate(&|i| i.migration_id = String::from("other")));
+    }
+
+    #[test]
+    fn control_weakening_and_malformed_vectors_are_rejected() {
+        // Zero stable ids.
+        let mut bad = valid_intent();
+        bad.database_id = 0;
+        assert_eq!(bad.canonical_bytes(), Err(IntentError::InvalidStableId));
+
+        // A zero migration digest binds nothing.
+        let mut bad = valid_intent();
+        bad.migration_digest = [0u8; 32];
+        assert_eq!(
+            bad.canonical_bytes(),
+            Err(IntentError::EmptyField("migration_digest"))
+        );
+
+        // A zero-statement migration authorizes nothing concrete.
+        let mut bad = valid_intent();
+        bad.statement_count = 0;
+        assert_eq!(
+            bad.canonical_bytes(),
+            Err(IntentError::EmptyField("statement_count"))
+        );
+
+        // Trailing bytes fail closed.
+        let mut bytes = valid_intent().canonical_bytes().unwrap();
+        bytes.push(0);
+        assert_eq!(
+            DbMigrationIntentV1::from_canonical_bytes(&bytes),
+            Err(IntentError::MalformedProfileBytes)
+        );
+
+        // An invalid direction tag fails closed. The direction byte sits right
+        // after the 32-byte migration digest.
+        let intent = valid_intent();
+        let mut bytes = intent.canonical_bytes().unwrap();
+        let direction_offset = 2
+            + 8
+            + (4 + intent.database_name.len())
+            + 8
+            + (4 + intent.environment_name.len())
+            + (4 + intent.migration_id.len())
+            + 32;
+        assert_eq!(bytes[direction_offset], MigrationDirection::Forward.tag());
+        bytes[direction_offset] = 2; // not a valid direction
+        assert_eq!(
+            DbMigrationIntentV1::from_canonical_bytes(&bytes),
+            Err(IntentError::MalformedProfileBytes)
+        );
+
+        // A control char in a display field is rejected.
+        let mut bad = valid_intent();
+        bad.environment_name = String::from("prod\u{0007}");
+        assert_eq!(
+            bad.canonical_bytes(),
+            Err(IntentError::DisplayFieldTooLong("environment_name"))
+        );
+    }
+
+    #[test]
+    fn profile_is_registered_and_decodes_via_the_registry() {
+        let registry = default_registry();
+        let profile_id = ProfileId::new(DB_MIGRATION_PROFILE_ID).unwrap();
+        let descriptor = registry.descriptor(&profile_id).expect("registered");
+        assert_eq!(descriptor.action_type, DB_MIGRATION_ACTION_TYPE);
+        descriptor.validate().expect("descriptor is well-formed");
+
+        // The registry's codec derives the stable target from canonical bytes.
+        let intent = valid_intent();
+        let bytes = intent.canonical_bytes().unwrap();
+        let codec = registry.codec(&profile_id).expect("codec");
+        assert_eq!(codec.validate_canonical_bytes(&bytes).unwrap(), intent.stable_target());
+        // A foreign byte string is rejected by the codec.
+        assert!(codec.validate_canonical_bytes(b"not a migration").is_err());
+    }
+
+    #[test]
+    fn a_generic_action_intent_binds_the_profile_parameters() {
+        // Building an ActionIntent through the descriptor + codec binds the exact
+        // profile bytes into the parameters commitment (PROFILE-02 end to end).
+        let registry = default_registry();
+        let profile_id = ProfileId::new(DB_MIGRATION_PROFILE_ID).unwrap();
+        let descriptor = registry.descriptor(&profile_id).unwrap();
+        let codec = registry.codec(&profile_id).unwrap();
+        let profile_bytes = valid_intent().canonical_bytes().unwrap();
+
+        let intent = ActionIntent::new(
+            descriptor,
+            codec,
+            profile_bytes.clone(),
+            b"svc:migrator".to_vec(),
+            1_700_000_000,
+            [0x55u8; 32],
+            alloc::vec![],
+        )
+        .expect("action intent builds");
+        assert_eq!(intent.action_type, DB_MIGRATION_ACTION_TYPE);
+        assert_eq!(intent.profile_bytes, profile_bytes);
+        // The target is derived by the codec, not supplied by the caller.
+        assert_eq!(intent.target, valid_intent().stable_target());
     }
 }
