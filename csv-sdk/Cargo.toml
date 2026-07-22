@@ -42,7 +42,11 @@ csv-bitcoin = { version = "0.1.5", path = "../csv-adapters/csv-bitcoin", optiona
 # that don't compile for wasm32 — see target-specific dependencies below
 
 # Persistence
-csv-store = { version = "0.1.5", path = "../csv-store", optional = true }
+# default-features = false so enabling csv-store (e.g. via consumer-wallet for
+# browser storage) does NOT drag in its default `sqlite` feature, which pulls
+# rusqlite/bundled (libsqlite3-sys) and cannot compile to wasm32. Native SQLite
+# is re-enabled explicitly by the `sqlite` feature below.
+csv-store = { version = "0.1.5", path = "../csv-store", optional = true, default-features = false }
 csv-storage = { version = "0.1.5", path = "../csv-storage", optional = true }
 csv-runtime = { version = "0.1.5", path = "../csv-runtime", optional = true }
 csv-codec = { version = "0.1.5", path = "../csv-codec", optional = true }
@@ -152,7 +156,9 @@ async-std = ["dep:async-std"]
 wasm = ["dep:wasm-bindgen-futures", "dep:web-sys", "dep:gloo-timers"]
 
 # Storage features
-sqlite = ["dep:csv-store", "dep:sqlx", "dep:chrono"]
+# Re-enables csv-store's native SQLite persistence (its former default feature
+# set), now that the dependency is declared with default-features = false.
+sqlite = ["dep:csv-store", "csv-store/sqlite", "csv-store/file-storage", "dep:sqlx", "dep:chrono"]
 in-memory = []
 
 # Cross-chain persistence (SC-02)

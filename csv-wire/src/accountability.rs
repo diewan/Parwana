@@ -277,8 +277,8 @@ impl TryFrom<ActionIntentWire> for ActionIntent {
         if value.intent_version != ACCOUNTABILITY_OBJECT_VERSION.get() {
             return Err(IntentError::UnsupportedVersion);
         }
-        let profile_bytes =
-            hex::decode(&value.profile_bytes_hex).map_err(|_| IntentError::MalformedProfileBytes)?;
+        let profile_bytes = hex::decode(&value.profile_bytes_hex)
+            .map_err(|_| IntentError::MalformedProfileBytes)?;
         let intent = Self {
             protocol_version: ProtocolVersion::new(
                 value.protocol_version_major,
