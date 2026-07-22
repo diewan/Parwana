@@ -21,6 +21,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use cargo_metadata::CargoOpt;
+
 const ACCOUNTABILITY_FORBIDDEN_DEPENDENCIES: &[&str] = &[
     "async-trait",
     "axum",
@@ -146,6 +148,27 @@ fn forbidden_dependency_edges_are_absent() {
         violations.is_empty(),
         "ARCHITECTURAL CONSTITUTION VIOLATED:\n{}",
         violations.join("\n")
+    );
+}
+
+#[test]
+fn all_features_exclude_legacy_libsecp256k1() {
+    let mut command = cargo_metadata::MetadataCommand::new();
+    command
+        .manifest_path("./Cargo.toml")
+        .features(CargoOpt::AllFeatures);
+    let metadata = command.exec().expect("all-features metadata must succeed");
+
+    let forbidden: Vec<_> = metadata
+        .packages
+        .iter()
+        .filter(|package| package.name == "libsecp256k1" || package.name == "tiny-hderive")
+        .map(|package| format!("{} {}", package.name, package.version))
+        .collect();
+    assert!(
+        forbidden.is_empty(),
+        "legacy secp256k1 dependency path re-entered the all-features graph: {}",
+        forbidden.join(", ")
     );
 }
 

@@ -127,4 +127,31 @@ mod tests {
         sig[0] ^= 0xFF;
         assert!(verify_bitcoin_signature(&sig, &pk, &msg).is_err());
     }
+
+    #[test]
+    fn rejects_out_of_range_r_and_s_scalars() {
+        let (_, public_key, message) = generate_test_signature();
+        let curve_order = hex::decode(
+            "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+        )
+        .unwrap();
+        let maximum_scalar = [0xff; 32];
+
+        for (label, offset, scalar) in [
+            ("r equals curve order", 0, curve_order.as_slice()),
+            ("r exceeds curve order", 0, maximum_scalar.as_slice()),
+            ("s equals curve order", 32, curve_order.as_slice()),
+            ("s exceeds curve order", 32, maximum_scalar.as_slice()),
+        ] {
+            let mut signature = [0u8; 64];
+            signature[offset..offset + 32].copy_from_slice(scalar);
+            // Keep the other scalar minimally non-zero so rejection is
+            // specifically exercised at the out-of-range component.
+            signature[if offset == 0 { 63 } else { 31 }] = 1;
+            assert!(
+                verify_bitcoin_signature(&signature, &public_key, &message).is_err(),
+                "{label} must fail closed"
+            );
+        }
+    }
 }
