@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["kind", "object_version", "object_id_hex", "canonical_bytes_hex"],
   "properties": {
-    "kind": {"type": "string", "enum": ["action_intent", "action_mandate", "execution_attempt", "execution_receipt", "evidence_node", "dispute_bundle", "verification_context", "assurance_profile"]},
+    "kind": {"type": "string", "enum": ["action_intent", "action_mandate", "execution_attempt", "execution_receipt", "evidence_node", "dispute_bundle", "verification_context", "assurance_profile", "authority_reconstruction"]},
     "object_version": {"type": "integer", "minimum": 1, "maximum": 1},
     "object_id_hex": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"},
     "canonical_bytes_hex": {"type": "string", "minLength": 2, "pattern": "^([0-9a-f]{2})+$"}

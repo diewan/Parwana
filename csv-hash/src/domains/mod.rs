@@ -19,9 +19,9 @@ pub mod transition;
 // Re-export domain types for convenience
 pub use accountability::{
     ACCOUNTABILITY_DOMAIN_TAGS, ActionIntentDomain, ActionMandateDomain, AssuranceProfileDomain,
-    DisclosureCommitmentDomain, DisputeBundleDomain, EvidenceNodeDomain, ExecutionAttemptDomain,
-    ExecutionReceiptDomain, GateProfileDomain, PreservationEnvelopeDomain,
-    VerificationContextDomain,
+    AuthorityReconstructionDomain, DisclosureCommitmentDomain, DisputeBundleDomain,
+    EvidenceNodeDomain, ExecutionAttemptDomain, ExecutionReceiptDomain, GateProfileDomain,
+    PreservationEnvelopeDomain, VerificationContextDomain,
 };
 pub use aptos_anchor::AptosAnchorDomain;
 pub use bitcoin_seal::BitcoinSealDomain;

@@ -10,6 +10,7 @@ extern crate alloc;
 
 pub mod anchor;
 pub mod assurance;
+pub mod authority;
 pub mod bundle;
 pub mod context;
 pub mod dispute;
@@ -37,6 +38,12 @@ pub use assurance::{
     DimensionResult, DimensionStatus, GateDisposition, GateOutcome, GateProfile, GateResult,
     MAX_ASSURANCE_ITEMS, MAX_ASSURANCE_TEXT_BYTES,
 };
+pub use authority::{
+    AUTHORITY_RECONSTRUCTION_REASON_CODES, AUTHORITY_RECONSTRUCTION_REGISTRY_ID,
+    AuthorityAuthenticity, AuthorityConclusion, AuthorityError, AuthorityEvaluation, AuthorityLink,
+    AuthorityReason, AuthorityReconstruction, AuthoritySourceCompleteness,
+    MAX_AUTHORITY_CONTRADICTIONS, MAX_AUTHORITY_FIELD_BYTES, MAX_AUTHORITY_LINKS,
+};
 pub use bundle::{
     BundleError, DisclosedObject, DisputeBundle, MAX_BUNDLE_OBJECT_BYTES, MAX_BUNDLE_OBJECTS,
     MAX_BUNDLE_TEXT_BYTES, MAX_BUNDLE_TOTAL_BYTES, WithheldObject, bundle_object_digest,
@@ -56,9 +63,9 @@ pub use execution::{
     ExecutionAttempt, ExecutionError, MAX_CORRELATION_KEY_BYTES, MAX_EXECUTION_IDENTITY_BYTES,
 };
 pub use id::{
-    ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, AssuranceProfileId, AttemptId,
-    BundleId, EvidenceNodeId, GateProfileId, IntentId, MandateId, ObjectVersion, ProtocolVersion,
-    ReceiptId, VerificationContextId, VersionError,
+    ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, AssuranceProfileId,
+    AttemptId, AuthorityReconstructionId, BundleId, EvidenceNodeId, GateProfileId, IntentId,
+    MandateId, ObjectVersion, ProtocolVersion, ReceiptId, VerificationContextId, VersionError,
 };
 pub use intent::{
     ActionIntent, DB_MIGRATION_ACTION_TYPE, DB_MIGRATION_PARAMETERS_DOMAIN_TAG,

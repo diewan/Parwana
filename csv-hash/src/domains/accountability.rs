@@ -68,6 +68,11 @@ accountability_domain!(
     b"csv.accountability.preservation.v1",
     "Reserved preservation-envelope domain."
 );
+accountability_domain!(
+    AuthorityReconstructionDomain,
+    b"csv.accountability.authority-reconstruction.v1",
+    "Historical authority-reconstruction content domain."
+);
 
 /// Complete v0.1 domain registry used by collision audits.
 pub const ACCOUNTABILITY_DOMAIN_TAGS: &[&[u8]] = &[
@@ -82,6 +87,7 @@ pub const ACCOUNTABILITY_DOMAIN_TAGS: &[&[u8]] = &[
     GateProfileDomain::DOMAIN,
     DisclosureCommitmentDomain::DOMAIN,
     PreservationEnvelopeDomain::DOMAIN,
+    AuthorityReconstructionDomain::DOMAIN,
 ];
 
 #[cfg(test)]

@@ -8,12 +8,130 @@
 pub mod reason_codes;
 
 use csv_accountability::{
-    ActionIntent, ActionMandate, AssuranceDimension, AssuranceProfile, ContextBoundOutput,
-    DimensionResult, DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt,
+    ActionIntent, ActionMandate, AssuranceDimension, AssuranceProfile, AuthorityAuthenticity,
+    AuthorityConclusion, AuthorityEvaluation, AuthorityLink, AuthorityReason,
+    AuthorityReconstruction, AuthoritySourceCompleteness, ContextBoundOutput, DimensionResult,
+    DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt,
     ExecutionOutcome, ExecutionReceipt, MandateSubject, SealConsumptionRecord,
     SingleUseAnchorAssessment, SourceLocator, VerificationContext, VerificationContextId,
     validate_evidence_graph,
 };
+
+/// Evaluate historical authority evidence without turning it into a mandate.
+pub fn evaluate_authority_reconstruction(
+    reconstruction: &AuthorityReconstruction,
+) -> AuthorityEvaluation {
+    if reconstruction.validate().is_err() {
+        return authority_incompatible(AuthorityReason::MalformedReconstruction);
+    }
+    if authority_has_conflicting_parents(&reconstruction.links) {
+        return authority_incompatible(AuthorityReason::ConflictingParents);
+    }
+    if authority_has_cycle(&reconstruction.links) {
+        return authority_incompatible(AuthorityReason::Cycle);
+    }
+    if reconstruction
+        .links
+        .iter()
+        .filter(|link| link.parent_mandate_id.is_none())
+        .count()
+        != 1
+    {
+        return authority_incompatible(AuthorityReason::ConflictingRoots);
+    }
+    if reconstruction.snapshot_authenticity == AuthorityAuthenticity::Rejected
+        || reconstruction
+            .links
+            .iter()
+            .any(|link| link.authenticity == AuthorityAuthenticity::Rejected)
+    {
+        return authority_incompatible(AuthorityReason::AuthenticityRejected);
+    }
+    if reconstruction.links.iter().any(|link| {
+        reconstruction.evaluation_time < link.effective_from
+            || reconstruction.evaluation_time >= link.effective_until
+    }) {
+        return authority_incompatible(AuthorityReason::DelegationMismatch);
+    }
+    for link in &reconstruction.links {
+        if let Some(parent_id) = link.parent_mandate_id {
+            let Some(parent) = reconstruction
+                .links
+                .iter()
+                .find(|item| item.mandate_id == parent_id)
+            else {
+                return authority_indeterminate(AuthorityReason::ParentMissing);
+            };
+            if parent.subject_identity != link.issuer_identity
+                || parent.authority_domain != link.authority_domain
+                || link.effective_from < parent.effective_from
+                || link.effective_until > parent.effective_until
+                || parent.scope_digest != link.scope_digest
+            {
+                return authority_incompatible(AuthorityReason::DelegationMismatch);
+            }
+        }
+    }
+    if reconstruction.source_completeness != AuthoritySourceCompleteness::Complete {
+        return authority_indeterminate(AuthorityReason::SourceIncomplete);
+    }
+    if reconstruction.snapshot_authenticity == AuthorityAuthenticity::Unknown
+        || reconstruction
+            .links
+            .iter()
+            .any(|link| link.authenticity == AuthorityAuthenticity::Unknown)
+    {
+        return authority_indeterminate(AuthorityReason::AuthenticityUnknown);
+    }
+    if !reconstruction.contradiction_refs.is_empty() {
+        return authority_indeterminate(AuthorityReason::ContradictionPresent);
+    }
+    AuthorityEvaluation {
+        conclusion: AuthorityConclusion::Compatible,
+        reason: AuthorityReason::ChainCompatible,
+    }
+}
+
+fn authority_has_conflicting_parents(links: &[AuthorityLink]) -> bool {
+    links.iter().enumerate().any(|(index, link)| {
+        links[index + 1..].iter().any(|candidate| {
+            candidate.mandate_id == link.mandate_id
+                && candidate.parent_mandate_id != link.parent_mandate_id
+        })
+    })
+}
+
+fn authority_has_cycle(links: &[AuthorityLink]) -> bool {
+    links.iter().any(|start| {
+        let mut current = Some(start.mandate_id);
+        let mut visited = Vec::new();
+        while let Some(id) = current {
+            if visited.contains(&id) {
+                return true;
+            }
+            visited.push(id);
+            current = links
+                .iter()
+                .find(|link| link.mandate_id == id)
+                .and_then(|link| link.parent_mandate_id);
+        }
+        false
+    })
+}
+
+const fn authority_incompatible(reason: AuthorityReason) -> AuthorityEvaluation {
+    AuthorityEvaluation {
+        conclusion: AuthorityConclusion::Incompatible,
+        reason,
+    }
+}
+
+const fn authority_indeterminate(reason: AuthorityReason) -> AuthorityEvaluation {
+    AuthorityEvaluation {
+        conclusion: AuthorityConclusion::Indeterminate,
+        reason,
+    }
+}
 
 /// Stable verification stage ordering for protocol version 0.1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

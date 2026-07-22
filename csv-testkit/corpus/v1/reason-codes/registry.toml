@@ -126,3 +126,38 @@ id = "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_CONSUMPTION_VALID"
 
 [[reserved]]
 id = "ACCOUNTABILITY.EVIDENCE.CSV_SEAL_COMMITMENT_ANCHORED"
+
+# Historical reconstruction codes are emitted by the dedicated pure evaluator;
+# they describe evidence compatibility and never constitute execution authority.
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.COMPATIBLE"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.SOURCE_INCOMPLETE"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.AUTHENTICITY_UNKNOWN"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.AUTHENTICITY_REJECTED"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.PARENT_MISSING"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.CYCLE"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.CONFLICTING_PARENTS"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.CONFLICTING_ROOTS"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.DELEGATION_MISMATCH"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.CONTRADICTION_PRESENT"
+
+[[authority_reconstruction]]
+id = "ACCOUNTABILITY.AUTHORITY_RECONSTRUCTION.MALFORMED"

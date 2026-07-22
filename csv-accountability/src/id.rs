@@ -138,6 +138,10 @@ content_id!(
     GateProfileId,
     "Content-derived identifier of a gate profile."
 );
+content_id!(
+    AuthorityReconstructionId,
+    "Content-derived identifier of a historical authority reconstruction."
+);
 
 #[cfg(test)]
 mod tests {

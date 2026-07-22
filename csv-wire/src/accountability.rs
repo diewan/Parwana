@@ -26,6 +26,8 @@ pub enum AccountabilityObjectKind {
     VerificationContext,
     /// Dimensioned assurance result.
     AssuranceProfile,
+    /// Historical authority compatibility analysis; never an execution mandate.
+    AuthorityReconstruction,
 }
 
 /// Transport envelope for bytes produced by the canonical semantic serializer.

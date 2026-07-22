@@ -13,5 +13,8 @@ default = []
 csv-hash = { version = "0.1.5", path = "../csv-hash" }
 csv-codec = { version = "0.1.5", path = "../csv-codec" }
 
+[dev-dependencies]
+csv-accountability-verify = { version = "0.1.5", path = "../csv-accountability-verify" }
+
 [lints]
 workspace = true
