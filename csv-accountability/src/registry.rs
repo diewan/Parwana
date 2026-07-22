@@ -83,12 +83,18 @@ impl ProfileRegistry {
 /// editing the core, which is the whole point of the open registry.
 pub fn default_registry() -> ProfileRegistry {
     let mut registry = ProfileRegistry::new();
-    registry
+    if registry
         .register(alloc::boxed::Box::new(GitHubDeploymentCodec::default()))
-        .expect("built-in github deployment profile registers cleanly");
-    registry
+        .is_err()
+    {
+        return ProfileRegistry::new();
+    }
+    if registry
         .register(alloc::boxed::Box::new(DbMigrationCodec::default()))
-        .expect("built-in db-migration profile registers cleanly");
+        .is_err()
+    {
+        return ProfileRegistry::new();
+    }
     registry
 }
 

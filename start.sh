@@ -17,7 +17,11 @@ rm -f "$pid_file"
 command -v npm >/dev/null || { echo "npm is required" >&2; exit 1; }
 [[ -d "$server_dir/node_modules" ]] || { echo "Run 'npm ci' in $server_dir first." >&2; exit 1; }
 (cd "$server_dir" && npm run build >>"$log_file" 2>&1)
-(cd "$server_dir" && nohup setsid node dist/index.js --sse --port="$port" >>"$log_file" 2>&1 & echo $! >"$pid_file")
+(
+  cd "$server_dir"
+  exec nohup setsid node dist/index.js --sse --port="$port" >>"$log_file" 2>&1
+) &
+echo $! >"$pid_file"
 
 ready=false
 for _ in {1..30}; do

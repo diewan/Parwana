@@ -43,6 +43,15 @@ impl ProfileId {
         }
     }
 
+    /// Constructs an identifier from a protocol-owned static constant.
+    ///
+    /// The containing [`ProfileDescriptor`] still validates the identifier before
+    /// registration, so a malformed built-in constant fails closed without a
+    /// production panic.
+    pub(crate) fn from_protocol_constant(value: &'static str) -> Self {
+        Self(String::from(value))
+    }
+
     /// Returns the stable identifier string.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -64,6 +73,11 @@ impl EvidenceSourceId {
         } else {
             Err(IntentError::InvalidProfileId)
         }
+    }
+
+    /// Constructs an identifier from a protocol-owned static constant.
+    pub(crate) fn from_protocol_constant(value: &'static str) -> Self {
+        Self(String::from(value))
     }
 
     /// Returns the stable identifier string.
@@ -166,7 +180,16 @@ impl ProfileDescriptor {
     /// carries exactly one class, the earlier "complete and disjoint" requirement is
     /// satisfied by construction.
     pub fn validate(&self) -> Result<(), IntentError> {
+        if !is_stable_identifier(self.profile_id.as_str()) {
+            return Err(IntentError::InvalidProfileId);
+        }
         let sources = &self.evidence_sources;
+        if sources
+            .iter()
+            .any(|decl| !is_stable_identifier(decl.id.as_str()))
+        {
+            return Err(IntentError::InvalidProfileId);
+        }
         if sources.is_empty() {
             return Err(IntentError::InvalidEvidenceSourceDeclaration);
         }

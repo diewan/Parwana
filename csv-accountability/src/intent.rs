@@ -89,43 +89,40 @@ pub const EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION: &str =
 /// Returns the registered descriptor for the first GitHub deployment profile.
 pub fn github_deployment_descriptor() -> ProfileDescriptor {
     ProfileDescriptor {
-        profile_id: ProfileId::new(GITHUB_DEPLOYMENT_PROFILE_ID)
-            .expect("static github profile id is valid"),
+        profile_id: ProfileId::from_protocol_constant(GITHUB_DEPLOYMENT_PROFILE_ID),
         action_type: String::from(GITHUB_DEPLOYMENT_ACTION_TYPE),
         parameters_media_type: String::from(PARAMETERS_MEDIA_TYPE_V1),
         parameters_domain_tag: GITHUB_DEPLOYMENT_PARAMETERS_DOMAIN_TAG.to_vec(),
         evidence_sources: alloc::vec![
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(EVIDENCE_EXECUTOR_ATTEMPT_RECORD)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_EXECUTOR_ATTEMPT_RECORD),
                 EvidenceSourceClass::Executor,
             ),
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(EVIDENCE_GITHUB_DEPLOYMENT_RECORD)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_GITHUB_DEPLOYMENT_RECORD),
                 EvidenceSourceClass::ProviderCorroborating,
             ),
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(EVIDENCE_GITHUB_WEBHOOK_DELIVERY)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_GITHUB_WEBHOOK_DELIVERY),
                 EvidenceSourceClass::ProviderCorroborating,
             ),
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_GITHUB_ENVIRONMENT_CONFIGURATION),
                 EvidenceSourceClass::ProviderCorroborating,
             ),
             // Optional single-use corroboration external to both executor and provider
             // (Phase B). Registered here so an independent seal consumption/anchor is a
             // recognized evidence source without a core edit (Master Plan §5.9, §36).
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(
+                    crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+                ),
                 EvidenceSourceClass::ExternalAnchor,
             ),
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(crate::anchor::EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(
+                    crate::anchor::EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
+                ),
                 EvidenceSourceClass::ExternalAnchor,
             ),
         ],
@@ -470,32 +467,31 @@ impl MigrationDirection {
 /// Returns the registered descriptor for the first database-migration profile.
 pub fn db_migration_descriptor() -> ProfileDescriptor {
     ProfileDescriptor {
-        profile_id: ProfileId::new(DB_MIGRATION_PROFILE_ID)
-            .expect("static db-migration profile id is valid"),
+        profile_id: ProfileId::from_protocol_constant(DB_MIGRATION_PROFILE_ID),
         action_type: String::from(DB_MIGRATION_ACTION_TYPE),
         parameters_media_type: String::from(DB_MIGRATION_PARAMETERS_MEDIA_TYPE),
         parameters_domain_tag: DB_MIGRATION_PARAMETERS_DOMAIN_TAG.to_vec(),
         evidence_sources: alloc::vec![
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(EVIDENCE_EXECUTOR_ATTEMPT_RECORD)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_EXECUTOR_ATTEMPT_RECORD),
                 EvidenceSourceClass::Executor,
             ),
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(EVIDENCE_DB_MIGRATION_APPLIED_RECORD)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_DB_MIGRATION_APPLIED_RECORD),
                 EvidenceSourceClass::ProviderCorroborating,
             ),
             // Independent single-use / anchor corroboration (§5.9), external to
             // both executor and provider.
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(
+                    crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+                ),
                 EvidenceSourceClass::ExternalAnchor,
             ),
             EvidenceSourceDecl::new(
-                EvidenceSourceId::new(crate::anchor::EVIDENCE_CHAIN_COMMITMENT_ANCHOR)
-                    .expect("static evidence id is valid"),
+                EvidenceSourceId::from_protocol_constant(
+                    crate::anchor::EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
+                ),
                 EvidenceSourceClass::ExternalAnchor,
             ),
         ],
@@ -1233,7 +1229,6 @@ mod tests {
 #[cfg(test)]
 mod db_migration_tests {
     use super::*;
-    use crate::profile::ProfileCodec;
     use crate::registry::default_registry;
 
     fn valid_intent() -> DbMigrationIntentV1 {

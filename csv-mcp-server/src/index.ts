@@ -425,8 +425,12 @@ async function startServer(
       const t = new SSEServerTransport('/message', res);
       server.connect(t);
     });
-    app.listen(port, () => {
-      process.stderr.write(`CSV MCP Server listening on port ${port}\n`);
+    await new Promise<void>((resolve, reject) => {
+      const httpServer = app.listen(port, () => {
+        process.stderr.write(`CSV MCP Server listening on port ${port}\n`);
+      });
+      httpServer.once('error', reject);
+      httpServer.once('close', resolve);
     });
   }
 }
