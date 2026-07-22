@@ -1,0 +1,34 @@
+# Published on-chain commitment anchor contract (ANCHOR-01; Master Plan §5.9,
+# §10.6, §25, §30, threat #15).
+#
+# csv_accountability::anchor::ChainAnchor is the source of truth. This table is
+# the published projection: the stable evidence-source id, media type, hash
+# domain tag, and a canonical golden vector. csv-accountability's
+# `published_chain_anchor_contract_matches_code` drift-guard test binds this file
+# to the code. New, additive protocol bytes (experimental 0.x); no existing
+# object bytes change.
+
+contract = "chain-commitment-anchor.v1"
+evidence_source_id = "evidence.chain.commitment-anchor"
+evidence_source_class = "external_anchor"
+media_type = "application/vnd.diewan.chain-commitment-anchor-v1+csv-binary"
+# The hash domain tag folded into the ChainAnchor identifier digest.
+domain_tag = "diewan.accountability.chain-anchor.v1"
+
+# Canonical byte layout (big-endian, length-prefixed like the other anchor
+# records): commitment[32] || len(chain_id) chain_id || len(anchor_ref) anchor_ref
+# || block_height[u64] || block_hash[32] || finality(tag[1] observed[u64]
+# required[u64]) || len(anchor_backend) anchor_backend.
+#
+# Golden vector for the fixed ChainAnchor:
+#   commitment      = 0x11 * 32
+#   chain_id        = "ethereum-sepolia"
+#   anchor_ref      = deadbeef
+#   block_height    = 1000
+#   block_hash      = 0x22 * 32
+#   finality        = Final at 12 confirmations (required 12)
+#   anchor_backend  = "chain.ethereum-sepolia.v1"
+[[golden]]
+id = "chain-anchor-final-ethereum-sepolia"
+canonical_bytes_hex = "111111111111111111111111111111111111111111111111111111111111111100000010657468657265756d2d7365706f6c696100000004deadbeef00000000000003e8222222222222222222222222222222222222222222222222222222222222222201000000000000000c000000000000000000000019636861696e2e657468657265756d2d7365706f6c69612e7631"
+digest_hex = "6f433cf34fa516ae58671ac6dffb29098c4f456d21a46026585db8a195f6c1ea"

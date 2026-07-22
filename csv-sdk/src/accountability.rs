@@ -15,9 +15,12 @@ pub use csv_accountability::{
     VerificationContext, VerificationContextId, default_registry, github_deployment_descriptor,
 };
 pub use csv_accountability::{
-    AnchorError, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE,
-    CommitmentAnchorRecord, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
-    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, SealConsumptionRecord, SingleUseAnchorAssessment,
+    AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation,
+    CHAIN_ANCHOR_DOMAIN_TAG, CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE,
+    CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor,
+    ChainAnchorAssessment, CommitmentAnchorRecord, EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+    SealConsumptionRecord, SingleUseAnchorAssessment, reconcile_anchor,
 };
 pub use csv_wire::{
     AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,

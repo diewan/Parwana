@@ -25,10 +25,12 @@ pub mod state;
 pub mod verification;
 
 pub use anchor::{
-    AnchorError, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE,
-    CommitmentAnchorRecord, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
-    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord,
-    SingleUseAnchorAssessment,
+    AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation,
+    CHAIN_ANCHOR_DOMAIN_TAG, CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE,
+    CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor,
+    ChainAnchorAssessment, CommitmentAnchorRecord, EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+    MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord, SingleUseAnchorAssessment, reconcile_anchor,
 };
 pub use assurance::{
     ASSURANCE_DIMENSIONS, AssuranceDimension, AssuranceError, AssuranceProfile, DimensionGateRule,
