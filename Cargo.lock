@@ -3119,6 +3119,7 @@ dependencies = [
  "ark-snark",
  "async-trait",
  "base64 0.22.1",
+ "csv-accountability",
  "csv-chain-ports",
  "csv-codec",
  "csv-hash",

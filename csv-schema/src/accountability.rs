@@ -3,8 +3,11 @@
 use crate::Schema;
 
 /// Names of the generated accountability schemas.
-pub const ACCOUNTABILITY_SCHEMA_NAMES: &[&str] =
-    &["action-intent-wire", "canonical-accountability-object"];
+pub const ACCOUNTABILITY_SCHEMA_NAMES: &[&str] = &[
+    "action-intent-wire",
+    "canonical-accountability-object",
+    "preservation-envelope",
+];
 
 /// Returns a versioned JSON Schema for a supported accountability wire type.
 pub fn accountability_schema(name: &str) -> Option<Schema> {
@@ -13,6 +16,7 @@ pub fn accountability_schema(name: &str) -> Option<Schema> {
         "canonical-accountability-object" => {
             include_str!("../schemas/canonical-accountability-object-v1.json")
         }
+        "preservation-envelope" => include_str!("../schemas/preservation-envelope-v1.json"),
         _ => return None,
     };
     Some(Schema {

@@ -79,5 +79,6 @@ test-utils = []
 serde_json = "1.0"
 
 [dev-dependencies]
+csv-accountability = { version = "0.1.5", path = "../../csv-accountability" }
 rand = "0.8"
 tokio = { version = "1", features = ["rt", "macros"] }

@@ -18,7 +18,7 @@ is never reused for a different semantic object.
 | Assurance profile | `csv.accountability.assurance-profile.v1` |
 | Gate profile | `csv.accountability.gate-profile.v1` |
 | Disclosure commitment | `csv.accountability.disclosure.v1` |
-| Preservation envelope (reserved) | `csv.accountability.preservation.v1` |
+| Preservation envelope | `csv.accountability.preservation.v1` |
 
 Adding a semantic object requires a new unique tag, collision-test coverage,
 and governed compatibility review. Changing an existing tag creates different

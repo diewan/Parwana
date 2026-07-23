@@ -1,6 +1,9 @@
 use csv_accountability::{
-    ActionIntent, DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId,
-    ExecutionAttemptState, ExecutionOutcome, SealConsumptionRecord, SourceLocator,
+    ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ALGORITHM_SHA256_TAGGED_V1,
+    ActionIntent, AlgorithmPolicyStatus, AlgorithmStatusEntry, DimensionStatus, DisclosedObject,
+    DisputeBundle, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttemptState,
+    ExecutionOutcome, PreservationEnvelope, SealConsumptionRecord, SourceLocator,
+    bundle_object_digest,
 };
 use csv_accountability_verify::{
     AlgorithmStatus, AuthenticityStatus, ReasonCode, ReplayStatus, RevocationStatus, Stage,
@@ -39,6 +42,9 @@ fn run(
             algorithm_status: AlgorithmStatus::Allowed,
             replay_status,
             single_use_anchor: None,
+            preservation_envelopes: &[],
+            preservation_authenticity: &[],
+            preservation_algorithm_statuses: &[],
         },
     )
     .expect("fixture context is valid")
@@ -84,7 +90,7 @@ fn valid_vector_is_ordered_context_bound_and_dimension_preserving() {
             Stage::Receipt,
             Stage::ExternalCorroboration,
             Stage::Custody,
-            Stage::DeferredPreservation,
+            Stage::Preservation,
         ]
     );
     assert_eq!(report.evidence_summary.claims, 1);
@@ -100,9 +106,93 @@ fn valid_vector_is_ordered_context_bound_and_dimension_preserving() {
     );
     assert!(has_reason(
         &report,
-        Stage::DeferredPreservation,
-        StageDisposition::Unsupported(ReasonCode::PreservationSemanticsDeferred)
+        Stage::Preservation,
+        StageDisposition::Unsupported(ReasonCode::PreservationEvidenceAbsent)
     ));
+}
+
+#[test]
+fn database_migration_receipt_and_portable_bundle_verify_offline() {
+    let fixture = AccountabilityFixture::valid_db_migration();
+
+    // Preserve the exact canonical objects an independent verifier needs. No
+    // network, database, product projection, or provider API participates in
+    // either bundle construction or the verification below.
+    let mut disclosed_objects = vec![
+        disclosed(
+            "org.diewan.accountability.action-intent.v1",
+            fixture.intent.canonical_bytes().unwrap(),
+        ),
+        disclosed(
+            "org.diewan.accountability.action-mandate.v1",
+            fixture.mandate.canonical_bytes().unwrap(),
+        ),
+        disclosed(
+            "org.diewan.accountability.execution-attempt.v1",
+            fixture.attempt.canonical_bytes(&fixture.mandate).unwrap(),
+        ),
+        disclosed(
+            "org.diewan.accountability.execution-receipt.v1",
+            fixture
+                .receipt
+                .canonical_bytes(&fixture.mandate, &fixture.attempt)
+                .unwrap(),
+        ),
+    ];
+    disclosed_objects.sort_by(|left, right| {
+        (&left.registry_id, left.content_digest).cmp(&(&right.registry_id, right.content_digest))
+    });
+    let bundle = DisputeBundle {
+        protocol_version: ACCOUNTABILITY_PROTOCOL_VERSION,
+        bundle_version: ACCOUNTABILITY_OBJECT_VERSION,
+        case_id: Some("case:db-migration:20260723".into()),
+        subject_intent_id: fixture.intent.id().unwrap(),
+        disclosed_objects,
+        withheld_objects: vec![],
+        recommended_context: Some(fixture.context.id().unwrap()),
+        producer_identity: b"piteka:bundle-export".to_vec(),
+        producer_signature: vec![35; 64],
+    };
+    bundle.validate().expect("portable bundle is canonical");
+    let canonical_bundle = bundle.canonical_bytes().unwrap();
+    let bundle_id = bundle.id().unwrap();
+    assert!(!canonical_bundle.is_empty());
+    assert_ne!(bundle_id.as_bytes(), &[0; 32]);
+    println!(
+        "profile02_bundle_evidence bundle_id={} canonical_bytes={} disclosed_objects={}",
+        hex::encode(bundle_id.as_bytes()),
+        canonical_bundle.len(),
+        bundle.disclosed_objects.len(),
+    );
+
+    let report = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Fresh,
+    );
+    assert_eq!(report.disposition, VerificationDisposition::Valid);
+    assert!(has_reason(&report, Stage::Receipt, StageDisposition::Pass,));
+
+    // Corruption of retained receipt bytes fails at the bundle boundary before
+    // the semantic verifier can consume the artifact.
+    let mut corrupted = bundle.clone();
+    let receipt = corrupted
+        .disclosed_objects
+        .iter_mut()
+        .find(|object| object.registry_id.ends_with("execution-receipt.v1"))
+        .unwrap();
+    receipt.bytes[0] ^= 0x80;
+    assert!(corrupted.validate().is_err());
+}
+
+fn disclosed(registry_id: &str, bytes: Vec<u8>) -> DisclosedObject {
+    DisclosedObject {
+        registry_id: registry_id.into(),
+        media_type: "application/vnd.diewan.accountability-object-v1+csv-binary".into(),
+        content_digest: bundle_object_digest(&bytes),
+        bytes,
+    }
 }
 
 #[test]
@@ -458,7 +548,7 @@ fn stage_12_preserves_conflicts_and_flags_an_omitted_contradiction() {
 }
 
 #[test]
-fn stage_14_reports_disclosed_custody_without_simulating_preservation() {
+fn stage_14_reports_disclosed_custody_and_absent_preservation_separately() {
     let mut fixture = AccountabilityFixture::valid();
     let subject_id = fixture.evidence[0].0;
     let custody = v02_node(
@@ -479,10 +569,132 @@ fn stage_14_reports_disclosed_custody_without_simulating_preservation() {
     assert!(has_reason(&report, Stage::Custody, StageDisposition::Pass));
     assert!(has_reason(
         &report,
-        Stage::DeferredPreservation,
-        StageDisposition::Unsupported(ReasonCode::PreservationSemanticsDeferred)
+        Stage::Preservation,
+        StageDisposition::Unsupported(ReasonCode::PreservationEvidenceAbsent)
     ));
     assert_eq!(report.evidence_summary.custody_records, 1);
+}
+
+#[test]
+fn preservation_policy_is_explicit_and_renewal_cannot_rewrite_history() {
+    let fixture = AccountabilityFixture::valid();
+    let first = PreservationEnvelope {
+        version: csv_accountability::ACCOUNTABILITY_OBJECT_VERSION,
+        object_registry_id: "org.diewan.accountability.bundle.v1".into(),
+        original_canonical_bytes: fixture.intent.canonical_bytes().unwrap(),
+        algorithm_ids: vec![ALGORITHM_SHA256_TAGGED_V1.into()],
+        preserved_at: 1,
+        previous_envelope_id: None,
+        renewal_material_digest: [71; 32],
+    };
+    let first_id = first.id().unwrap();
+    let policy = [AlgorithmStatusEntry {
+        algorithm_id: ALGORITHM_SHA256_TAGGED_V1.into(),
+        status: AlgorithmPolicyStatus::Allowed,
+    }];
+    let evaluate = |envelopes: &[(
+        csv_accountability::PreservationEnvelopeId,
+        PreservationEnvelope,
+    )],
+                    preservation_authenticity: &[(
+        csv_accountability::PreservationEnvelopeId,
+        AuthenticityStatus,
+    )],
+                    statuses: &[AlgorithmStatusEntry]| {
+        verify(
+            &fixture.context,
+            VerificationInput {
+                intent: &fixture.intent,
+                mandate: &fixture.mandate,
+                attempt: &fixture.attempt,
+                receipt: &fixture.receipt,
+                evidence: &fixture.evidence,
+                evidence_authenticity: &authenticity(&fixture),
+                expected_executor: &fixture.executor,
+                revocation_status: RevocationStatus::NotRevoked,
+                algorithm_status: AlgorithmStatus::Allowed,
+                replay_status: ReplayStatus::Fresh,
+                single_use_anchor: None,
+                preservation_envelopes: envelopes,
+                preservation_authenticity,
+                preservation_algorithm_statuses: statuses,
+            },
+        )
+        .unwrap()
+        .result
+    };
+
+    let verified = [(first_id, AuthenticityStatus::Verified)];
+    let allowed = evaluate(&[(first_id, first.clone())], &verified, &policy);
+    assert!(has_reason(
+        &allowed,
+        Stage::Preservation,
+        StageDisposition::Pass
+    ));
+
+    for (status, expected) in [
+        (
+            AlgorithmPolicyStatus::Deprecated,
+            StageDisposition::Indeterminate(ReasonCode::PreservationAlgorithmDeprecated),
+        ),
+        (
+            AlgorithmPolicyStatus::Unknown,
+            StageDisposition::Indeterminate(ReasonCode::PreservationAlgorithmUnknown),
+        ),
+        (
+            AlgorithmPolicyStatus::Disallowed,
+            StageDisposition::Fail(ReasonCode::PreservationAlgorithmDisallowed),
+        ),
+    ] {
+        let report = evaluate(
+            &[(first_id, first.clone())],
+            &verified,
+            &[AlgorithmStatusEntry {
+                algorithm_id: ALGORITHM_SHA256_TAGGED_V1.into(),
+                status,
+            }],
+        );
+        assert!(has_reason(&report, Stage::Preservation, expected));
+    }
+
+    let rejected_authenticity = evaluate(
+        &[(first_id, first.clone())],
+        &[(first_id, AuthenticityStatus::Rejected)],
+        &policy,
+    );
+    assert!(has_reason(
+        &rejected_authenticity,
+        Stage::Preservation,
+        StageDisposition::Fail(ReasonCode::PreservationAuthenticityRejected)
+    ));
+    let missing_authenticity = evaluate(&[(first_id, first.clone())], &[], &policy);
+    assert!(has_reason(
+        &missing_authenticity,
+        Stage::Preservation,
+        StageDisposition::Indeterminate(ReasonCode::PreservationAuthenticityUnknown)
+    ));
+
+    let mut rewritten = first.clone();
+    rewritten.previous_envelope_id = Some(first_id);
+    rewritten.preserved_at = 2;
+    rewritten.original_canonical_bytes.push(0xff);
+    rewritten.renewal_material_digest = [72; 32];
+    let rewritten_id = rewritten.id().unwrap();
+    let mut renewal_authenticity = vec![
+        (first_id, AuthenticityStatus::Verified),
+        (rewritten_id, AuthenticityStatus::Verified),
+    ];
+    renewal_authenticity.sort_unstable_by_key(|(id, _)| *id);
+    let rejected = evaluate(
+        &[(first_id, first), (rewritten_id, rewritten)],
+        &renewal_authenticity,
+        &policy,
+    );
+    assert!(has_reason(
+        &rejected,
+        Stage::Preservation,
+        StageDisposition::Fail(ReasonCode::PreservationEvidenceInvalid)
+    ));
 }
 
 #[test]
@@ -537,6 +749,9 @@ fn preserved_seal_consumption_corroborates_single_use_offline() {
                 algorithm_status: AlgorithmStatus::Allowed,
                 replay_status: ReplayStatus::Fresh,
                 single_use_anchor: anchor,
+                preservation_envelopes: &[],
+                preservation_authenticity: &[],
+                preservation_algorithm_statuses: &[],
             },
         )
         .expect("fixture context is valid")

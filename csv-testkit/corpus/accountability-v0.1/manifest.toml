@@ -63,6 +63,7 @@ id = "disclosed-custody"
 source = "csv-accountability-verify/tests/conformance.rs::stage_14_reports_disclosed_custody_without_simulating_preservation"
 expected = "valid:custody-pass"
 
-[[deferred]]
+[[case]]
 id = "preservation-renewal"
-requires = "org.diewan.evidence.preservation-envelope.v1"
+source = "csv-accountability-verify/tests/conformance.rs::preservation_policy_is_explicit_and_renewal_cannot_rewrite_history"
+expected = "allowed:valid; deprecated/unknown:indeterminate; disallowed/rewrite:invalid"

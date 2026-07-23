@@ -19,6 +19,7 @@ pub mod execution;
 pub mod id;
 pub mod intent;
 pub mod mandate;
+pub mod preservation;
 pub mod profile;
 pub mod receipt;
 pub mod registry;
@@ -26,12 +27,12 @@ pub mod state;
 pub mod verification;
 
 pub use anchor::{
-    AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation,
-    CHAIN_ANCHOR_DOMAIN_TAG, CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE,
-    CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor,
-    ChainAnchorAssessment, CommitmentAnchorRecord, EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
-    EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
-    MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord, SingleUseAnchorAssessment, reconcile_anchor,
+    AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation, CHAIN_ANCHOR_DOMAIN_TAG,
+    CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE,
+    CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment, CommitmentAnchorRecord,
+    EVIDENCE_CHAIN_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord,
+    SingleUseAnchorAssessment, reconcile_anchor,
 };
 pub use assurance::{
     ASSURANCE_DIMENSIONS, AssuranceDimension, AssuranceError, AssuranceProfile, DimensionGateRule,
@@ -63,9 +64,10 @@ pub use execution::{
     ExecutionAttempt, ExecutionError, MAX_CORRELATION_KEY_BYTES, MAX_EXECUTION_IDENTITY_BYTES,
 };
 pub use id::{
-    ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, AssuranceProfileId,
-    AttemptId, AuthorityReconstructionId, BundleId, EvidenceNodeId, GateProfileId, IntentId,
-    MandateId, ObjectVersion, ProtocolVersion, ReceiptId, VerificationContextId, VersionError,
+    ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, AssuranceProfileId, AttemptId,
+    AuthorityReconstructionId, BundleId, EvidenceNodeId, GateProfileId, IntentId, MandateId,
+    ObjectVersion, PreservationEnvelopeId, ProtocolVersion, ReceiptId, VerificationContextId,
+    VersionError,
 };
 pub use intent::{
     ActionIntent, DB_MIGRATION_ACTION_TYPE, DB_MIGRATION_PARAMETERS_DOMAIN_TAG,
@@ -82,6 +84,12 @@ pub use intent::{
 pub use mandate::{
     ActionMandate, ED25519_SIGNATURE_ALGORITHM, ExecutionPolicy, MandateError, MandateRequirement,
     MandateSignatureEnvelope, MandateSubject, SignatureRequirements,
+};
+pub use preservation::{
+    ALGORITHM_SHA256_TAGGED_V1, AlgorithmPolicyStatus, AlgorithmStatusEntry,
+    MAX_PRESERVATION_ALGORITHMS, MAX_PRESERVATION_BYTES, MAX_PRESERVATION_CHAIN,
+    MAX_PRESERVATION_TEXT_BYTES, PRESERVATION_ENVELOPE_REGISTRY_ID, PreservationEnvelope,
+    PreservationError, validate_preservation_chain,
 };
 pub use profile::{
     BoxedProfileCodec, EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId,

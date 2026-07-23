@@ -2,11 +2,12 @@
 
 use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION, ActionIntent, ActionMandate,
-    AuthenticityMaterial, ConsumptionRecord, ED25519_SIGNATURE_ALGORITHM, EvidenceKind,
-    EvidenceNode, EvidenceNodeId, EvidenceRequirementStatus, ExecutionAttempt,
-    ExecutionAttemptState, ExecutionOutcome, ExecutionPolicy, ExecutionReceipt,
-    GitHubDeploymentIntentV1, MandateRequirement, MandateSubject, RequiredContexts,
-    SignatureRequirements, SourceLocator, VerificationContext,
+    AuthenticityMaterial, ConsumptionRecord, DbMigrationCodec, DbMigrationIntentV1,
+    ED25519_SIGNATURE_ALGORITHM, EvidenceKind, EvidenceNode, EvidenceNodeId,
+    EvidenceRequirementStatus, ExecutionAttempt, ExecutionAttemptState, ExecutionOutcome,
+    ExecutionPolicy, ExecutionReceipt, GitHubDeploymentIntentV1, MandateRequirement,
+    MandateSubject, MigrationDirection, ProfileCodec, RequiredContexts, SignatureRequirements,
+    SourceLocator, VerificationContext,
 };
 
 /// Complete, internally consistent first-slice verification fixture.
@@ -192,6 +193,85 @@ impl AccountabilityFixture {
             executor,
             context,
         }
+    }
+
+    /// Builds a complete database-migration (PROFILE-02) fixture from exact
+    /// canonical profile bytes through a bound receipt and evidence graph.
+    ///
+    /// This is intentionally a second profile rather than a renamed GitHub
+    /// fixture: its target, requirement, correlation key, provider evidence,
+    /// and authenticity schemes all carry database-migration semantics.
+    pub fn valid_db_migration() -> Self {
+        let mut fixture = Self::valid();
+        let profile = DbMigrationIntentV1 {
+            database_id: 9001,
+            database_name: "accounts".into(),
+            environment_id: 42,
+            environment_name: "production".into(),
+            migration_id: "20260723_add_receipt_index".into(),
+            migration_digest: [31; 32],
+            direction: MigrationDirection::Forward,
+            allow_destructive: false,
+            statement_count: 2,
+            change_ticket: "CHG-2026-0723".into(),
+        };
+        let codec = DbMigrationCodec::default();
+        fixture.intent = ActionIntent::new(
+            codec.descriptor(),
+            &codec,
+            profile
+                .canonical_bytes()
+                .expect("static profile is canonical"),
+            b"requester:alice".to_vec(),
+            90,
+            [6; 32],
+            vec![[7; 32]],
+        )
+        .expect("static database migration intent is valid");
+
+        fixture.mandate.intent_id = fixture.intent.id().expect("static intent has an id");
+        fixture.mandate.evidence_requirements[0].registry_id =
+            "evidence.db-migration.applied-record".into();
+        fixture.attempt.correlation_key = b"db-migration:20260723_add_receipt_index".to_vec();
+        fixture.attempt.provider_request_digest = [32; 32];
+        fixture.attempt.provider_response_digest = Some([33; 32]);
+
+        for (_, node) in &mut fixture.evidence {
+            node.source_locator =
+                SourceLocator::Disclosed("database:migration:20260723_add_receipt_index".into());
+            match &mut node.kind {
+                EvidenceKind::Claim { .. } => {
+                    node.producer_identity = b"executor:piteka-migration".to_vec();
+                }
+                EvidenceKind::Observation { method_id } => {
+                    *method_id = "org.diewan.observe.database-migration.v1".into();
+                    node.producer_identity = b"database:provider-api".to_vec();
+                }
+                EvidenceKind::Attestation { attester_identity } => {
+                    *attester_identity = b"database:migration-ledger".to_vec();
+                    node.producer_identity = b"database:migration-ledger".to_vec();
+                }
+                _ => unreachable!("base fixture contains only positive evidence kinds"),
+            }
+            if let Some(authenticity) = &mut node.authenticity {
+                authenticity.scheme_id = "org.diewan.auth.database-provider-response.v1".into();
+            }
+        }
+        fixture.evidence = fixture
+            .evidence
+            .into_iter()
+            .map(|(_, node)| (node.id().expect("static evidence has an id"), node))
+            .collect();
+        fixture.evidence.sort_by_key(|(id, _)| *id);
+        let evidence_ids: Vec<_> = fixture.evidence.iter().map(|(id, _)| *id).collect();
+        fixture.receipt.dispatch_evidence_refs = evidence_ids.clone();
+        fixture.receipt.target_evidence_refs = evidence_ids.clone();
+        fixture.receipt.evidence_requirements_status[0].registry_id =
+            fixture.mandate.evidence_requirements[0].registry_id.clone();
+        fixture.receipt.evidence_requirements_status[0].evidence_refs = evidence_ids;
+        fixture.receipt.result_commitment = Some([34; 32]);
+        fixture.rebind_execution();
+        fixture
     }
 
     /// Rebinds the attempt and receipt after a deliberate mandate mutation.

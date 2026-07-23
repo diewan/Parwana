@@ -113,8 +113,32 @@ variant = "CustodyDisclosureLimited"
 id = "ACCOUNTABILITY.CUSTODY.DISCLOSURE_LIMITED"
 
 [[code]]
-variant = "PreservationSemanticsDeferred"
-id = "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1"
+variant = "PreservationEvidenceAbsent"
+id = "ACCOUNTABILITY.PRESERVATION.EVIDENCE_ABSENT"
+
+[[code]]
+variant = "PreservationEvidenceInvalid"
+id = "ACCOUNTABILITY.PRESERVATION.EVIDENCE_INVALID"
+
+[[code]]
+variant = "PreservationAuthenticityRejected"
+id = "ACCOUNTABILITY.PRESERVATION.AUTHENTICITY_REJECTED"
+
+[[code]]
+variant = "PreservationAuthenticityUnknown"
+id = "ACCOUNTABILITY.PRESERVATION.AUTHENTICITY_UNKNOWN"
+
+[[code]]
+variant = "PreservationAlgorithmDeprecated"
+id = "ACCOUNTABILITY.PRESERVATION.ALGORITHM_DEPRECATED"
+
+[[code]]
+variant = "PreservationAlgorithmDisallowed"
+id = "ACCOUNTABILITY.PRESERVATION.ALGORITHM_DISALLOWED"
+
+[[code]]
+variant = "PreservationAlgorithmUnknown"
+id = "ACCOUNTABILITY.PRESERVATION.ALGORITHM_UNKNOWN"
 
 # Reserved for profile/anchor-contributed evidence (Phase B). Registered before use so
 # the namespaces cannot silently collide with the core set above.

@@ -82,6 +82,9 @@ fn overreach_yields_independent_intent_mismatch_verdict() {
             algorithm_status: AlgorithmStatus::Allowed,
             replay_status: ReplayStatus::Fresh,
             single_use_anchor: None,
+            preservation_envelopes: &[],
+            preservation_authenticity: &[],
+            preservation_algorithm_statuses: &[],
         },
     )
     .expect("fixture context is supported");
@@ -145,6 +148,9 @@ fn untouched_fixture_still_satisfies_authority() {
             algorithm_status: AlgorithmStatus::Allowed,
             replay_status: ReplayStatus::Fresh,
             single_use_anchor: None,
+            preservation_envelopes: &[],
+            preservation_authenticity: &[],
+            preservation_algorithm_statuses: &[],
         },
     )
     .expect("fixture context is supported");

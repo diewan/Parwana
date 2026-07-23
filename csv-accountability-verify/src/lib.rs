@@ -8,13 +8,14 @@
 pub mod reason_codes;
 
 use csv_accountability::{
-    ActionIntent, ActionMandate, AssuranceDimension, AssuranceProfile, AuthorityAuthenticity,
-    AuthorityConclusion, AuthorityEvaluation, AuthorityLink, AuthorityReason,
-    AuthorityReconstruction, AuthoritySourceCompleteness, ContextBoundOutput, DimensionResult,
-    DimensionStatus, EvidenceKind, EvidenceNode, EvidenceNodeId, ExecutionAttempt,
-    ExecutionOutcome, ExecutionReceipt, MandateSubject, SealConsumptionRecord,
-    SingleUseAnchorAssessment, SourceLocator, VerificationContext, VerificationContextId,
-    validate_evidence_graph,
+    ActionIntent, ActionMandate, AlgorithmPolicyStatus, AlgorithmStatusEntry, AssuranceDimension,
+    AssuranceProfile, AuthorityAuthenticity, AuthorityConclusion, AuthorityEvaluation,
+    AuthorityLink, AuthorityReason, AuthorityReconstruction, AuthoritySourceCompleteness,
+    ContextBoundOutput, DimensionResult, DimensionStatus, EvidenceKind, EvidenceNode,
+    EvidenceNodeId, ExecutionAttempt, ExecutionOutcome, ExecutionReceipt, MandateSubject,
+    PreservationEnvelope, PreservationEnvelopeId, SealConsumptionRecord, SingleUseAnchorAssessment,
+    SourceLocator, VerificationContext, VerificationContextId, validate_evidence_graph,
+    validate_preservation_chain,
 };
 
 /// Evaluate historical authority evidence without turning it into a mandate.
@@ -147,7 +148,7 @@ pub enum Stage {
     Receipt,
     ExternalCorroboration,
     Custody,
-    DeferredPreservation,
+    Preservation,
 }
 
 /// Result of one verification stage.
@@ -188,7 +189,13 @@ pub enum ReasonCode {
     IndependentSingleUseInconsistent,
     CustodyEvidenceAbsent,
     CustodyDisclosureLimited,
-    PreservationSemanticsDeferred,
+    PreservationEvidenceAbsent,
+    PreservationEvidenceInvalid,
+    PreservationAuthenticityRejected,
+    PreservationAuthenticityUnknown,
+    PreservationAlgorithmDeprecated,
+    PreservationAlgorithmDisallowed,
+    PreservationAlgorithmUnknown,
 }
 
 impl ReasonCode {
@@ -231,7 +238,21 @@ impl ReasonCode {
             }
             Self::CustodyEvidenceAbsent => "ACCOUNTABILITY.CUSTODY.EVIDENCE_ABSENT",
             Self::CustodyDisclosureLimited => "ACCOUNTABILITY.CUSTODY.DISCLOSURE_LIMITED",
-            Self::PreservationSemanticsDeferred => "ACCOUNTABILITY.PRESERVATION.NOT_EVALUATED_V0_1",
+            Self::PreservationEvidenceAbsent => "ACCOUNTABILITY.PRESERVATION.EVIDENCE_ABSENT",
+            Self::PreservationEvidenceInvalid => "ACCOUNTABILITY.PRESERVATION.EVIDENCE_INVALID",
+            Self::PreservationAuthenticityRejected => {
+                "ACCOUNTABILITY.PRESERVATION.AUTHENTICITY_REJECTED"
+            }
+            Self::PreservationAuthenticityUnknown => {
+                "ACCOUNTABILITY.PRESERVATION.AUTHENTICITY_UNKNOWN"
+            }
+            Self::PreservationAlgorithmDeprecated => {
+                "ACCOUNTABILITY.PRESERVATION.ALGORITHM_DEPRECATED"
+            }
+            Self::PreservationAlgorithmDisallowed => {
+                "ACCOUNTABILITY.PRESERVATION.ALGORITHM_DISALLOWED"
+            }
+            Self::PreservationAlgorithmUnknown => "ACCOUNTABILITY.PRESERVATION.ALGORITHM_UNKNOWN",
         }
     }
 }
@@ -291,11 +312,7 @@ pub fn assurance_profile(
                 &[Stage::Evidence, Stage::ContradictionAndGap],
             ),
             evaluated_dimension(Dimension::Custody, report, &[Stage::Custody]),
-            evaluated_dimension(
-                Dimension::Preservation,
-                report,
-                &[Stage::DeferredPreservation],
-            ),
+            evaluated_dimension(Dimension::Preservation, report, &[Stage::Preservation]),
         ],
     }
 }
@@ -489,6 +506,14 @@ pub struct VerificationInput<'a> {
     /// offline for independent single-use enforcement. Its absence is a limitation on
     /// the external-corroboration dimension, never a failure (§5.5, §5.9).
     pub single_use_anchor: Option<&'a SealConsumptionRecord>,
+    /// Ordered preservation generations. Each successor must retain the exact
+    /// historical bytes and point to the immediately preceding generation.
+    pub preservation_envelopes: &'a [(PreservationEnvelopeId, PreservationEnvelope)],
+    /// Canonically sorted, context-supplied authenticity conclusions for every
+    /// preservation generation. A digest is commitment material, not proof by itself.
+    pub preservation_authenticity: &'a [(PreservationEnvelopeId, AuthenticityStatus)],
+    /// Canonically sorted conclusions from the context-bound algorithm policy.
+    pub preservation_algorithm_statuses: &'a [AlgorithmStatusEntry],
 }
 
 /// Verify in a stable, fail-closed order without network or storage access.
@@ -683,8 +708,12 @@ pub fn verify(
     stages.push(result(Stage::Custody, custody));
 
     stages.push(result(
-        Stage::DeferredPreservation,
-        StageDisposition::Unsupported(ReasonCode::PreservationSemanticsDeferred),
+        Stage::Preservation,
+        assess_preservation(
+            input.preservation_envelopes,
+            input.preservation_authenticity,
+            input.preservation_algorithm_statuses,
+        ),
     ));
 
     let disposition = if stages
@@ -717,6 +746,74 @@ pub fn verify(
 
 const fn result(stage: Stage, disposition: StageDisposition) -> StageResult {
     StageResult { stage, disposition }
+}
+
+fn assess_preservation(
+    envelopes: &[(PreservationEnvelopeId, PreservationEnvelope)],
+    authenticity: &[(PreservationEnvelopeId, AuthenticityStatus)],
+    statuses: &[AlgorithmStatusEntry],
+) -> StageDisposition {
+    if envelopes.is_empty() {
+        return StageDisposition::Unsupported(ReasonCode::PreservationEvidenceAbsent);
+    }
+    if validate_preservation_chain(envelopes).is_err()
+        || statuses.iter().any(|entry| {
+            entry.algorithm_id.is_empty()
+                || entry.algorithm_id.len() > csv_accountability::MAX_PRESERVATION_TEXT_BYTES
+                || entry.algorithm_id.trim() != entry.algorithm_id
+                || !entry.algorithm_id.is_ascii()
+                || entry.algorithm_id.chars().any(char::is_control)
+        })
+        || statuses
+            .windows(2)
+            .any(|pair| pair[0].algorithm_id >= pair[1].algorithm_id)
+        || authenticity.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+    {
+        return StageDisposition::Fail(ReasonCode::PreservationEvidenceInvalid);
+    }
+    let mut authenticity_unknown = false;
+    for (envelope_id, _) in envelopes {
+        match authenticity
+            .iter()
+            .find(|(assessed_id, _)| assessed_id == envelope_id)
+            .map(|(_, status)| *status)
+        {
+            Some(AuthenticityStatus::Verified) => {}
+            Some(AuthenticityStatus::Rejected) => {
+                return StageDisposition::Fail(ReasonCode::PreservationAuthenticityRejected);
+            }
+            Some(AuthenticityStatus::Unknown) | None => authenticity_unknown = true,
+        }
+    }
+    if authenticity_unknown {
+        return StageDisposition::Indeterminate(ReasonCode::PreservationAuthenticityUnknown);
+    }
+    let Some((_, latest)) = envelopes.last() else {
+        return StageDisposition::Unsupported(ReasonCode::PreservationEvidenceAbsent);
+    };
+    let mut deprecated = false;
+    let mut unknown = false;
+    for algorithm_id in &latest.algorithm_ids {
+        match statuses
+            .iter()
+            .find(|entry| entry.algorithm_id == *algorithm_id)
+            .map(|entry| entry.status)
+        {
+            Some(AlgorithmPolicyStatus::Allowed) => {}
+            Some(AlgorithmPolicyStatus::Deprecated) => deprecated = true,
+            Some(AlgorithmPolicyStatus::Disallowed) => {
+                return StageDisposition::Fail(ReasonCode::PreservationAlgorithmDisallowed);
+            }
+            Some(AlgorithmPolicyStatus::Unknown) | None => unknown = true,
+        }
+    }
+    if unknown {
+        StageDisposition::Indeterminate(ReasonCode::PreservationAlgorithmUnknown)
+    } else if deprecated {
+        StageDisposition::Indeterminate(ReasonCode::PreservationAlgorithmDeprecated)
+    } else {
+        StageDisposition::Pass
+    }
 }
 
 fn summarize_evidence(evidence: &[(EvidenceNodeId, EvidenceNode)]) -> EvidenceSummary {

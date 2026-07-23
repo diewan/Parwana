@@ -142,6 +142,10 @@ content_id!(
     AuthorityReconstructionId,
     "Content-derived identifier of a historical authority reconstruction."
 );
+content_id!(
+    PreservationEnvelopeId,
+    "Content-derived identifier of a preservation envelope."
+);
 
 #[cfg(test)]
 mod tests {

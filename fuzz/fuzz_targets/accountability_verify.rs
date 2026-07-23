@@ -74,6 +74,10 @@ fuzz_target!(|data: &[u8]| {
             revocation_status: RevocationStatus::NotRevoked,
             algorithm_status: AlgorithmStatus::Allowed,
             replay_status,
+            single_use_anchor: None,
+            preservation_envelopes: &[],
+            preservation_authenticity: &[],
+            preservation_algorithm_statuses: &[],
         },
     );
 });

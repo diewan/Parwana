@@ -28,6 +28,8 @@ pub enum AccountabilityObjectKind {
     AssuranceProfile,
     /// Historical authority compatibility analysis; never an execution mandate.
     AuthorityReconstruction,
+    /// Immutable historical bytes plus append-only renewal metadata.
+    PreservationEnvelope,
 }
 
 /// Transport envelope for bytes produced by the canonical semantic serializer.
