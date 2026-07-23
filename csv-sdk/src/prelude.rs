@@ -9,8 +9,9 @@
 // Core types
 #[cfg(feature = "accountability")]
 pub use crate::accountability::{
-    ActionIntent, ActionIntentWire, CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1,
-    GitHubDeploymentIntentV1Wire, RequiredContexts, RequiredContextsWire,
+    ActionIntent, ActionIntentJsonV1, ActionIntentWire, CanonicalAccountabilityObjectWire,
+    GitHubDeploymentIntentV1, GitHubDeploymentIntentV1Wire, RequiredContexts,
+    RequiredContextsWire,
 };
 #[cfg(feature = "client")]
 pub use crate::builder::{ClientBuilder, StoreBackend};

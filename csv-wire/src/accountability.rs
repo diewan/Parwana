@@ -148,7 +148,7 @@ pub struct GitHubDeploymentIntentV1Wire {
 /// re-validates the bytes against the registered codec via the default registry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ActionIntentWire {
+pub struct ActionIntentJsonV1 {
     /// Accountability protocol major version.
     pub protocol_version_major: u16,
     /// Accountability protocol minor version.
@@ -254,7 +254,7 @@ impl TryFrom<GitHubDeploymentIntentV1Wire> for GitHubDeploymentIntentV1 {
     }
 }
 
-impl From<&ActionIntent> for ActionIntentWire {
+impl From<&ActionIntent> for ActionIntentJsonV1 {
     fn from(value: &ActionIntent) -> Self {
         Self {
             protocol_version_major: value.protocol_version.major(),
@@ -274,10 +274,10 @@ impl From<&ActionIntent> for ActionIntentWire {
     }
 }
 
-impl TryFrom<ActionIntentWire> for ActionIntent {
+impl TryFrom<ActionIntentJsonV1> for ActionIntent {
     type Error = IntentError;
 
-    fn try_from(value: ActionIntentWire) -> Result<Self, Self::Error> {
+    fn try_from(value: ActionIntentJsonV1) -> Result<Self, Self::Error> {
         if value.intent_version != ACCOUNTABILITY_OBJECT_VERSION.get() {
             return Err(IntentError::UnsupportedVersion);
         }
@@ -316,6 +316,13 @@ impl TryFrom<ActionIntentWire> for ActionIntent {
         Ok(intent)
     }
 }
+
+/// Compatibility name for [`ActionIntentJsonV1`].
+///
+/// `Wire` did not reveal that this is the versioned JSON input DTO rather than
+/// the canonical accountability encoding.
+#[deprecated(since = "0.1.6", note = "use ActionIntentJsonV1")]
+pub type ActionIntentWire = ActionIntentJsonV1;
 
 #[cfg(test)]
 mod tests {

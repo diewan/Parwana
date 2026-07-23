@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ActionIntentWire",
+  "title": "ActionIntentJsonV1",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocol_version_major", "protocol_version_minor", "intent_version", "profile_id", "action_type", "target", "parameters_commitment", "parameters_media_type", "requested_by", "requested_at", "request_nonce", "context_commitments", "profile"],

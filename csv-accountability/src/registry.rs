@@ -95,6 +95,12 @@ pub fn default_registry() -> ProfileRegistry {
     {
         return ProfileRegistry::new();
     }
+    if registry
+        .register(alloc::boxed::Box::new(crate::PaymentCodec::default()))
+        .is_err()
+    {
+        return ProfileRegistry::new();
+    }
     registry
 }
 

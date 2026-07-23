@@ -20,7 +20,8 @@ pub mod transfer_state;
 
 #[cfg(feature = "accountability")]
 pub use accountability::{
-    AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,
+    AccountabilityObjectKind, ActionIntentJsonV1, ActionIntentWire,
+    CanonicalAccountabilityObjectWire,
     GitHubDeploymentIntentV1Wire, RequiredContextsWire,
 };
 pub use app::{

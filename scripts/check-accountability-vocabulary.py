@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-POLICY = Path(__file__).resolve().parents[1] / "development/CANONICAL-NAMING.md"
+POLICY = Path(__file__).resolve().parents[2] / "development/CANONICAL-NAMING.md"
 REQUIRED_TERMS = ("Mandate", "Receipt", "Observation", "Claim", "Verification", "Assurance")
 REQUIRED_CLAUSES = (
     "existing `csv-*` crate names remain unchanged",

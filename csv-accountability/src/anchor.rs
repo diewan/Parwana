@@ -30,7 +30,7 @@ pub const EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR: &str = "evidence.csv-seal.commitm
 pub const CSV_SEAL_CONSUMPTION_MEDIA_TYPE: &str =
     "application/vnd.diewan.csv-seal-consumption-v1+csv-binary";
 
-/// Media type of a canonical [`CommitmentAnchorRecord`] disclosed object.
+/// Media type of a canonical [`ExternalCommitmentAnchorReference`] disclosed object.
 pub const CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE: &str =
     "application/vnd.diewan.csv-seal-commitment-anchor-v1+csv-binary";
 
@@ -152,7 +152,7 @@ impl SealConsumptionRecord {
 /// Design-complete but not yet consumed by the reference verifier's dimensions; it lets a
 /// bundle carry existence/chronology corroboration (§5.9) alongside single-use.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommitmentAnchorRecord {
+pub struct ExternalCommitmentAnchorReference {
     /// Digest of the anchored bundle.
     pub bundle_digest: [u8; 32],
     /// Opaque, backend-defined anchor reference (for example a seal id or a txid).
@@ -161,7 +161,7 @@ pub struct CommitmentAnchorRecord {
     pub anchor_backend: String,
 }
 
-impl CommitmentAnchorRecord {
+impl ExternalCommitmentAnchorReference {
     /// Validates that the record is structurally well-formed.
     pub fn validate(&self) -> Result<(), AnchorError> {
         if self.bundle_digest == [0; 32] {
@@ -216,22 +216,23 @@ impl CommitmentAnchorRecord {
 /// finality reading, so a verifier can weight existence/chronology corroboration.
 pub const EVIDENCE_CHAIN_COMMITMENT_ANCHOR: &str = "evidence.chain.commitment-anchor";
 
-/// Media type of a canonical [`ChainAnchor`] disclosed object.
+/// Media type of canonical [`ChainCommitmentAnchorEvidence`] bytes.
 pub const CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE: &str =
     "application/vnd.diewan.chain-commitment-anchor-v1+csv-binary";
 
-/// Domain tag separating a [`ChainAnchor`] identifier digest from every other
+/// Domain tag separating a [`ChainCommitmentAnchorEvidence`] identifier digest from every other
 /// hashed protocol object. New, additive protocol bytes (experimental `0.x`).
 pub const CHAIN_ANCHOR_DOMAIN_TAG: &[u8] = b"diewan.accountability.chain-anchor.v1";
 
 /// Finality of an on-chain anchor, read from chain observations.
 ///
-/// The only path to [`AnchorFinality::Final`] is [`AnchorFinality::from_confirmations`]
+/// The only path to [`ChainAnchorFinalityStatus::Final`] is
+/// [`ChainAnchorFinalityStatus::from_confirmations`]
 /// with a positive required depth that the observed depth meets. A shallow,
 /// zero-requirement, or unknown reading is `Pending`; finality is never
 /// fabricated (§5.9, threat #15).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AnchorFinality {
+pub enum ChainAnchorFinalityStatus {
     /// Anchored but not yet reorg-safe. Carries the observed and required
     /// confirmation depths so the gap is explicit.
     Pending {
@@ -247,7 +248,7 @@ pub enum AnchorFinality {
     },
 }
 
-impl AnchorFinality {
+impl ChainAnchorFinalityStatus {
     /// Classifies a confirmation reading. `Final` requires a positive
     /// `required_confirmations` met by `observed_confirmations`; everything else
     /// is `Pending`.
@@ -322,12 +323,12 @@ impl AnchorFinality {
     }
 }
 
-/// Offline conclusion of re-checking a [`ChainAnchor`] against an expected commitment.
+/// Result of verifying [`ChainCommitmentAnchorEvidence`] against an expected commitment.
 ///
 /// Corroboration only: a mismatch or malformed anchor is reported as inconsistent
 /// or malformed, never as a validity failure of the mandate/receipt (§5.9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChainAnchorAssessment {
+pub enum ChainAnchorVerificationResult {
     /// The anchor binds the expected commitment and is reorg-safe final.
     AnchoredFinal,
     /// The anchor binds the expected commitment but is not yet final.
@@ -346,7 +347,7 @@ pub enum ChainAnchorAssessment {
 /// chain via [`csv_chain_ports`]-style adapters) lives outside this crate, off the
 /// dispatch hot path.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChainAnchor {
+pub struct ChainCommitmentAnchorEvidence {
     /// The anchored commitment digest (for example a bundle or mandate digest).
     pub commitment: [u8; 32],
     /// Canonical chain identifier (for example `ethereum-sepolia`).
@@ -358,12 +359,12 @@ pub struct ChainAnchor {
     /// Hash of the including block, used to detect reorgs across observations.
     pub block_hash: [u8; 32],
     /// Finality reading at capture time.
-    pub finality: AnchorFinality,
+    pub finality: ChainAnchorFinalityStatus,
     /// Stable identifier of the backing that produced this record.
     pub anchor_backend: String,
 }
 
-impl ChainAnchor {
+impl ChainCommitmentAnchorEvidence {
     /// Validates that the anchor is structurally well-formed.
     pub fn validate(&self) -> Result<(), AnchorError> {
         if self.commitment == [0; 32] || self.block_hash == [0; 32] {
@@ -400,7 +401,7 @@ impl ChainAnchor {
         let anchor_ref = cursor.take_bytes()?;
         let block_height = cursor.take_u64()?;
         let block_hash = cursor.take_array()?;
-        let finality = AnchorFinality::take_canonical(&mut cursor)?;
+        let finality = ChainAnchorFinalityStatus::take_canonical(&mut cursor)?;
         let anchor_backend = cursor.take_text()?;
         if !cursor.is_empty() {
             return Err(AnchorError::MalformedBytes);
@@ -427,25 +428,35 @@ impl ChainAnchor {
 
     /// Re-checks the anchor offline against the expected commitment.
     #[must_use]
-    pub fn assess(&self, expected_commitment: [u8; 32]) -> ChainAnchorAssessment {
+    pub fn verify_commitment(
+        &self,
+        expected_commitment: [u8; 32],
+    ) -> ChainAnchorVerificationResult {
         if self.validate().is_err() {
-            return ChainAnchorAssessment::Malformed;
+            return ChainAnchorVerificationResult::Malformed;
         }
         if self.commitment != expected_commitment {
-            return ChainAnchorAssessment::Inconsistent;
+            return ChainAnchorVerificationResult::Inconsistent;
         }
         if self.finality.is_final() {
-            ChainAnchorAssessment::AnchoredFinal
+            ChainAnchorVerificationResult::AnchoredFinal
         } else {
-            ChainAnchorAssessment::AnchoredPending
+            ChainAnchorVerificationResult::AnchoredPending
         }
+    }
+
+    /// Compatibility spelling for [`Self::verify_commitment`].
+    #[deprecated(since = "0.1.6", note = "use verify_commitment")]
+    #[must_use]
+    pub fn assess(&self, expected_commitment: [u8; 32]) -> ChainAnchorVerificationResult {
+        self.verify_commitment(expected_commitment)
     }
 }
 
 /// One chain read of an anchor from a named source, for reorg/disagreement
 /// reconciliation.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AnchorObservation {
+pub struct ChainAnchorSourceObservation {
     /// The observing source (for example an RPC endpoint id).
     pub source: String,
     /// The block height the source reports for the anchor.
@@ -453,12 +464,12 @@ pub struct AnchorObservation {
     /// The block hash the source reports at that height.
     pub block_hash: [u8; 32],
     /// The finality the source reports.
-    pub finality: AnchorFinality,
+    pub finality: ChainAnchorFinalityStatus,
 }
 
-/// The reconciliation across a set of [`AnchorObservation`]s of the same anchor.
+/// Result of reconciling [`ChainAnchorSourceObservation`] values for the same anchor.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AnchorReconciliation {
+pub enum ChainAnchorReconciliationResult {
     /// No observations were supplied. Absence is not non-occurrence.
     NoObservations,
     /// Every source agrees on the including block; the reconciled finality is the
@@ -467,7 +478,7 @@ pub enum AnchorReconciliation {
         /// The agreed block height.
         block_height: u64,
         /// The agreed reconciled finality.
-        finality: AnchorFinality,
+        finality: ChainAnchorFinalityStatus,
     },
     /// Sources disagree on the including block (a reorg or RPC disagreement). The
     /// disagreement is preserved and never collapsed into a false final.
@@ -480,21 +491,24 @@ pub enum AnchorReconciliation {
 /// Reconciles chain reads of one anchor.
 ///
 /// If any two sources report a different block hash, the result is a
-/// [`AnchorReconciliation::Disagreement`] (a reorg or RPC disagreement) — never a
+/// [`ChainAnchorReconciliationResult::Disagreement`] (a reorg or RPC
+/// disagreement) — never a
 /// final verdict. Only unanimous agreement on the including block yields
-/// [`AnchorReconciliation::Agreed`], and then finality is `Final` only if every
+/// [`ChainAnchorReconciliationResult::Agreed`], and then finality is `Final` only if every
 /// source independently reports final.
 #[must_use]
-pub fn reconcile_anchor(observations: &[AnchorObservation]) -> AnchorReconciliation {
+pub fn reconcile_chain_anchor_observations(
+    observations: &[ChainAnchorSourceObservation],
+) -> ChainAnchorReconciliationResult {
     let Some(first) = observations.first() else {
-        return AnchorReconciliation::NoObservations;
+        return ChainAnchorReconciliationResult::NoObservations;
     };
 
     let mut hashes: Vec<[u8; 32]> = observations.iter().map(|o| o.block_hash).collect();
     hashes.sort_unstable();
     hashes.dedup();
     if hashes.len() > 1 {
-        return AnchorReconciliation::Disagreement {
+        return ChainAnchorReconciliationResult::Disagreement {
             reported_block_hashes: hashes,
         };
     }
@@ -505,18 +519,18 @@ pub fn reconcile_anchor(observations: &[AnchorObservation]) -> AnchorReconciliat
     let min_observed = observations
         .iter()
         .map(|o| match o.finality {
-            AnchorFinality::Pending {
+            ChainAnchorFinalityStatus::Pending {
                 observed_confirmations,
                 ..
             }
-            | AnchorFinality::Final {
+            | ChainAnchorFinalityStatus::Final {
                 observed_confirmations,
             } => observed_confirmations,
         })
         .min()
         .unwrap_or(0);
     let finality = if all_final {
-        AnchorFinality::Final {
+        ChainAnchorFinalityStatus::Final {
             observed_confirmations: min_observed,
         }
     } else {
@@ -525,23 +539,71 @@ pub fn reconcile_anchor(observations: &[AnchorObservation]) -> AnchorReconciliat
         let required = observations
             .iter()
             .filter_map(|o| match o.finality {
-                AnchorFinality::Pending {
+                ChainAnchorFinalityStatus::Pending {
                     required_confirmations,
                     ..
                 } => Some(required_confirmations),
-                AnchorFinality::Final { .. } => None,
+                ChainAnchorFinalityStatus::Final { .. } => None,
             })
             .max()
             .unwrap_or(min_observed.saturating_add(1));
-        AnchorFinality::Pending {
+        ChainAnchorFinalityStatus::Pending {
             observed_confirmations: min_observed,
             required_confirmations: required,
         }
     };
-    AnchorReconciliation::Agreed {
+    ChainAnchorReconciliationResult::Agreed {
         block_height: first.block_height,
         finality,
     }
+}
+
+/// Compatibility name for [`ExternalCommitmentAnchorReference`].
+#[deprecated(
+    since = "0.1.6",
+    note = "use ExternalCommitmentAnchorReference; Record is reserved for persistence DTOs"
+)]
+pub type CommitmentAnchorRecord = ExternalCommitmentAnchorReference;
+
+/// Compatibility name for [`ChainCommitmentAnchorEvidence`].
+#[deprecated(
+    since = "0.1.6",
+    note = "use ChainCommitmentAnchorEvidence"
+)]
+pub type ChainAnchor = ChainCommitmentAnchorEvidence;
+
+/// Compatibility name for [`ChainAnchorFinalityStatus`].
+#[deprecated(since = "0.1.6", note = "use ChainAnchorFinalityStatus")]
+pub type AnchorFinality = ChainAnchorFinalityStatus;
+
+/// Compatibility name for [`ChainAnchorVerificationResult`].
+#[deprecated(
+    since = "0.1.6",
+    note = "use ChainAnchorVerificationResult"
+)]
+pub type ChainAnchorAssessment = ChainAnchorVerificationResult;
+
+/// Compatibility name for [`ChainAnchorSourceObservation`].
+#[deprecated(since = "0.1.6", note = "use ChainAnchorSourceObservation")]
+pub type AnchorObservation = ChainAnchorSourceObservation;
+
+/// Compatibility name for [`ChainAnchorReconciliationResult`].
+#[deprecated(
+    since = "0.1.6",
+    note = "use ChainAnchorReconciliationResult"
+)]
+pub type AnchorReconciliation = ChainAnchorReconciliationResult;
+
+/// Compatibility spelling for [`reconcile_chain_anchor_observations`].
+#[deprecated(
+    since = "0.1.6",
+    note = "use reconcile_chain_anchor_observations"
+)]
+#[must_use]
+pub fn reconcile_anchor(
+    observations: &[ChainAnchorSourceObservation],
+) -> ChainAnchorReconciliationResult {
+    reconcile_chain_anchor_observations(observations)
 }
 
 fn validate_field(value: &str, name: &'static str) -> Result<(), AnchorError> {

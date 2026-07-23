@@ -6,8 +6,8 @@ use csv_accountability::{
     ED25519_SIGNATURE_ALGORITHM, EvidenceKind, EvidenceNode, EvidenceNodeId,
     EvidenceRequirementStatus, ExecutionAttempt, ExecutionAttemptState, ExecutionOutcome,
     ExecutionPolicy, ExecutionReceipt, GitHubDeploymentIntentV1, MandateRequirement,
-    MandateSubject, MigrationDirection, ProfileCodec, RequiredContexts, SignatureRequirements,
-    SourceLocator, VerificationContext,
+    MandateSubject, MigrationDirection, PaymentCodec, PaymentIntentV1, ProfileCodec,
+    RequiredContexts, SignatureRequirements, SourceLocator, VerificationContext,
 };
 
 /// Complete, internally consistent first-slice verification fixture.
@@ -270,6 +270,76 @@ impl AccountabilityFixture {
             fixture.mandate.evidence_requirements[0].registry_id.clone();
         fixture.receipt.evidence_requirements_status[0].evidence_refs = evidence_ids;
         fixture.receipt.result_commitment = Some([34; 32]);
+        fixture.rebind_execution();
+        fixture
+    }
+
+    /// Builds a capped single-use payment fixture with portable provider evidence.
+    pub fn valid_payment() -> Self {
+        let mut fixture = Self::valid();
+        let profile = PaymentIntentV1 {
+            payer_id: "org:payer-acme".into(),
+            merchant_id: "merchant:coffee-42".into(),
+            recipient_account_digest: [41; 32],
+            amount_minor: 2_500,
+            cap_minor: 5_000,
+            currency: "USD".into(),
+            expires_at: 200,
+            payment_reference: "invoice:2026-0042".into(),
+        };
+        let codec = PaymentCodec::default();
+        fixture.intent = ActionIntent::new(
+            codec.descriptor(),
+            &codec,
+            profile.canonical_bytes().expect("static profile is canonical"),
+            b"agent:payment".to_vec(),
+            90,
+            [42; 32],
+            vec![[43; 32]],
+        )
+        .expect("static payment intent is valid");
+
+        fixture.mandate.intent_id = fixture.intent.id().expect("static intent has an id");
+        fixture.mandate.evidence_requirements[0].registry_id =
+            "evidence.payment.settlement-record".into();
+        fixture.attempt.correlation_key = b"payment:invoice:2026-0042".to_vec();
+        fixture.attempt.provider_request_digest = [44; 32];
+        fixture.attempt.provider_response_digest = Some([45; 32]);
+
+        for (_, node) in &mut fixture.evidence {
+            node.source_locator =
+                SourceLocator::Disclosed("payment:provider:invoice:2026-0042".into());
+            match &mut node.kind {
+                EvidenceKind::Claim { .. } => {
+                    node.producer_identity = b"agent:payment".to_vec();
+                }
+                EvidenceKind::Observation { method_id } => {
+                    *method_id = "org.diewan.observe.payment-provider.v1".into();
+                    node.producer_identity = b"payment:provider-api".to_vec();
+                }
+                EvidenceKind::Attestation { attester_identity } => {
+                    *attester_identity = b"payment:settlement-ledger".to_vec();
+                    node.producer_identity = b"payment:settlement-ledger".to_vec();
+                }
+                _ => unreachable!("base fixture contains only positive evidence kinds"),
+            }
+            if let Some(authenticity) = &mut node.authenticity {
+                authenticity.scheme_id = "org.diewan.auth.payment-provider-response.v1".into();
+            }
+        }
+        fixture.evidence = fixture
+            .evidence
+            .into_iter()
+            .map(|(_, node)| (node.id().expect("static evidence has an id"), node))
+            .collect();
+        fixture.evidence.sort_by_key(|(id, _)| *id);
+        let evidence_ids: Vec<_> = fixture.evidence.iter().map(|(id, _)| *id).collect();
+        fixture.receipt.dispatch_evidence_refs = evidence_ids.clone();
+        fixture.receipt.target_evidence_refs = evidence_ids.clone();
+        fixture.receipt.evidence_requirements_status[0].registry_id =
+            fixture.mandate.evidence_requirements[0].registry_id.clone();
+        fixture.receipt.evidence_requirements_status[0].evidence_refs = evidence_ids;
+        fixture.receipt.result_commitment = Some([46; 32]);
         fixture.rebind_execution();
         fixture
     }

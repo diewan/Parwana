@@ -669,6 +669,187 @@ impl ProfileCodec for DbMigrationCodec {
     }
 }
 
+// ── Capped single-use payment profile (DEMO-05) ─────────────────────────────
+
+/// Stable identifier of the capped payment profile.
+pub const PAYMENT_PROFILE_ID: &str = "org.diewan.accountability.payment.intent.v1";
+/// Stable action type bound into a payment intent.
+pub const PAYMENT_ACTION_TYPE: &str = "payment.transfer";
+/// Domain separator for the canonical payment parameters commitment.
+pub const PAYMENT_PARAMETERS_DOMAIN_TAG: &[u8] = b"payment-parameters-v1";
+/// Media type of canonical capped-payment parameters.
+pub const PAYMENT_PARAMETERS_MEDIA_TYPE: &str = "application/vnd.diewan.payment-v1+csv-binary";
+/// Provider-side payment settlement evidence.
+pub const EVIDENCE_PAYMENT_SETTLEMENT_RECORD: &str = "evidence.payment.settlement-record";
+/// Maximum length of a stable payer, merchant, or reference identifier.
+pub const MAX_PAYMENT_ID_BYTES: usize = 255;
+
+/// Returns the registered descriptor for capped single-use payments.
+pub fn payment_descriptor() -> ProfileDescriptor {
+    ProfileDescriptor {
+        profile_id: ProfileId::from_protocol_constant(PAYMENT_PROFILE_ID),
+        action_type: String::from(PAYMENT_ACTION_TYPE),
+        parameters_media_type: String::from(PAYMENT_PARAMETERS_MEDIA_TYPE),
+        parameters_domain_tag: PAYMENT_PARAMETERS_DOMAIN_TAG.to_vec(),
+        evidence_sources: alloc::vec![
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_EXECUTOR_ATTEMPT_RECORD),
+                EvidenceSourceClass::Executor,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::from_protocol_constant(EVIDENCE_PAYMENT_SETTLEMENT_RECORD),
+                EvidenceSourceClass::ProviderCorroborating,
+            ),
+            EvidenceSourceDecl::new(
+                EvidenceSourceId::from_protocol_constant(
+                    crate::anchor::EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+                ),
+                EvidenceSourceClass::ExternalAnchor,
+            ),
+        ],
+        // An unavailable payment-provider query cannot prove non-acceptance.
+        quarantine_release: QuarantineReleaseRule::NeverReleasable,
+        max_context_commitments: MAX_CONTEXT_COMMITMENTS,
+        max_identity_bytes: MAX_IDENTITY_BYTES,
+    }
+}
+
+/// Exact payment parameters bound to a capped, recipient-specific authorization.
+///
+/// Amounts use unsigned minor currency units; floating-point and locale-sensitive
+/// representations are forbidden. The recipient account is represented only by a
+/// digest so portable evidence need not disclose raw financial coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaymentIntentV1 {
+    /// Stable payer identity.
+    pub payer_id: String,
+    /// Stable merchant/payee identity.
+    pub merchant_id: String,
+    /// Digest of the exact recipient account coordinates.
+    pub recipient_account_digest: [u8; 32],
+    /// Exact transfer amount in minor currency units.
+    pub amount_minor: u64,
+    /// Maximum amount authorized by the mandate in minor currency units.
+    pub cap_minor: u64,
+    /// Upper-case ISO-4217 alphabetic currency code.
+    pub currency: String,
+    /// Unix timestamp after which dispatch must fail.
+    pub expires_at: u64,
+    /// Stable payer-generated reference used for provider idempotency.
+    pub payment_reference: String,
+}
+
+impl PaymentIntentV1 {
+    /// Validates recipient, cap, currency, expiry, and stable identifiers.
+    pub fn validate(&self) -> Result<(), IntentError> {
+        for (field, value) in [
+            ("payer_id", self.payer_id.as_str()),
+            ("merchant_id", self.merchant_id.as_str()),
+            ("payment_reference", self.payment_reference.as_str()),
+        ] {
+            if value.is_empty() {
+                return Err(IntentError::EmptyField(field));
+            }
+            if value.len() > MAX_PAYMENT_ID_BYTES
+                || value.trim() != value
+                || value.chars().any(char::is_control)
+            {
+                return Err(IntentError::DisplayFieldTooLong(field));
+            }
+        }
+        if self.recipient_account_digest == [0; 32] {
+            return Err(IntentError::EmptyField("recipient_account_digest"));
+        }
+        if self.amount_minor == 0 {
+            return Err(IntentError::EmptyField("amount_minor"));
+        }
+        if self.cap_minor == 0 || self.amount_minor > self.cap_minor {
+            return Err(IntentError::EmptyField("cap_minor"));
+        }
+        if self.currency.len() != 3 || !self.currency.bytes().all(|byte| byte.is_ascii_uppercase())
+        {
+            return Err(IntentError::EmptyField("currency"));
+        }
+        if self.expires_at == 0 {
+            return Err(IntentError::EmptyField("expires_at"));
+        }
+        Ok(())
+    }
+
+    /// Stable payer-to-merchant target, independent of display or account details.
+    pub fn stable_target(&self) -> Vec<u8> {
+        let mut target = Vec::new();
+        push_string(&mut target, &self.payer_id);
+        push_string(&mut target, &self.merchant_id);
+        target
+    }
+
+    /// Encodes the unique canonical payment parameter representation.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IntentError> {
+        self.validate()?;
+        let mut out = Vec::new();
+        push_u16(&mut out, ACCOUNTABILITY_OBJECT_VERSION.get());
+        push_string(&mut out, &self.payer_id);
+        push_string(&mut out, &self.merchant_id);
+        out.extend_from_slice(&self.recipient_account_digest);
+        push_u64(&mut out, self.amount_minor);
+        push_u64(&mut out, self.cap_minor);
+        push_string(&mut out, &self.currency);
+        push_u64(&mut out, self.expires_at);
+        push_string(&mut out, &self.payment_reference);
+        Ok(out)
+    }
+
+    /// Decodes exact canonical payment bytes and rejects trailing/non-canonical data.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, IntentError> {
+        let mut cur = Cursor::new(bytes);
+        if cur.read_u16()? != ACCOUNTABILITY_OBJECT_VERSION.get() {
+            return Err(IntentError::UnsupportedVersion);
+        }
+        let profile = Self {
+            payer_id: cur.read_string()?,
+            merchant_id: cur.read_string()?,
+            recipient_account_digest: cur.read_hash()?,
+            amount_minor: cur.read_u64()?,
+            cap_minor: cur.read_u64()?,
+            currency: cur.read_string()?,
+            expires_at: cur.read_u64()?,
+            payment_reference: cur.read_string()?,
+        };
+        if !cur.is_empty() {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        profile.validate()?;
+        if profile.canonical_bytes()? != bytes {
+            return Err(IntentError::MalformedProfileBytes);
+        }
+        Ok(profile)
+    }
+}
+
+/// Registerable codec for [`PaymentIntentV1`].
+pub struct PaymentCodec {
+    descriptor: ProfileDescriptor,
+}
+
+impl Default for PaymentCodec {
+    fn default() -> Self {
+        Self {
+            descriptor: payment_descriptor(),
+        }
+    }
+}
+
+impl ProfileCodec for PaymentCodec {
+    fn descriptor(&self) -> &ProfileDescriptor {
+        &self.descriptor
+    }
+
+    fn validate_canonical_bytes(&self, profile_bytes: &[u8]) -> Result<Vec<u8>, IntentError> {
+        Ok(PaymentIntentV1::from_canonical_bytes(profile_bytes)?.stable_target())
+    }
+}
+
 /// Minimal fail-closed cursor over the little-endian manual encoding used by profiles.
 struct Cursor<'a> {
     bytes: &'a [u8],

@@ -186,6 +186,60 @@ fn database_migration_receipt_and_portable_bundle_verify_offline() {
     assert!(corrupted.validate().is_err());
 }
 
+#[test]
+fn capped_payment_receipt_and_portable_bundle_verify_offline() {
+    let fixture = AccountabilityFixture::valid_payment();
+    let mut disclosed_objects = vec![
+        disclosed(
+            "org.diewan.accountability.action-intent.v1",
+            fixture.intent.canonical_bytes().unwrap(),
+        ),
+        disclosed(
+            "org.diewan.accountability.action-mandate.v1",
+            fixture.mandate.canonical_bytes().unwrap(),
+        ),
+        disclosed(
+            "org.diewan.accountability.execution-attempt.v1",
+            fixture.attempt.canonical_bytes(&fixture.mandate).unwrap(),
+        ),
+        disclosed(
+            "org.diewan.accountability.execution-receipt.v1",
+            fixture
+                .receipt
+                .canonical_bytes(&fixture.mandate, &fixture.attempt)
+                .unwrap(),
+        ),
+    ];
+    disclosed_objects.sort_by(|left, right| {
+        (&left.registry_id, left.content_digest).cmp(&(&right.registry_id, right.content_digest))
+    });
+    let bundle = DisputeBundle {
+        protocol_version: ACCOUNTABILITY_PROTOCOL_VERSION,
+        bundle_version: ACCOUNTABILITY_OBJECT_VERSION,
+        case_id: Some("case:payment:invoice:2026-0042".into()),
+        subject_intent_id: fixture.intent.id().unwrap(),
+        disclosed_objects,
+        withheld_objects: vec![],
+        recommended_context: Some(fixture.context.id().unwrap()),
+        producer_identity: b"piteka:payment-bundle-export".to_vec(),
+        producer_signature: vec![47; 64],
+    };
+    bundle.validate().expect("portable payment bundle is canonical");
+
+    let report = run(
+        &fixture,
+        &authenticity(&fixture),
+        RevocationStatus::NotRevoked,
+        ReplayStatus::Fresh,
+    );
+    assert_eq!(report.disposition, VerificationDisposition::Valid);
+    assert!(has_reason(&report, Stage::Receipt, StageDisposition::Pass));
+
+    let assurance = assurance_profile(fixture.context.id().unwrap(), &report);
+    assert_eq!(assurance.verification_context_id, fixture.context.id().unwrap());
+    assert_eq!(assurance.dimensions[0].status, DimensionStatus::Satisfied);
+}
+
 fn disclosed(registry_id: &str, bytes: Vec<u8>) -> DisclosedObject {
     DisclosedObject {
         registry_id: registry_id.into(),

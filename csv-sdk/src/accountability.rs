@@ -11,27 +11,33 @@ pub use csv_accountability::{
     AuthorityEvaluation, AuthorityLink, AuthorityReason, AuthorityReconstruction,
     AuthorityReconstructionId, AuthoritySourceCompleteness, BoxedProfileCodec, ContextBoundOutput,
     DB_MIGRATION_ACTION_TYPE, DB_MIGRATION_PARAMETERS_MEDIA_TYPE, DB_MIGRATION_PROFILE_ID,
-    DbMigrationCodec, DbMigrationIntentV1, DimensionResult, DimensionStatus, DisputeBundle,
-    EVIDENCE_DB_MIGRATION_APPLIED_RECORD, EvidenceKind, EvidenceNode, EvidenceNodeId,
+    DbMigrationCodec, DbMigrationIntentV1, DimensionResult, DimensionStatus, DisclosedObject,
+    DisputeBundle, EVIDENCE_DB_MIGRATION_APPLIED_RECORD, EvidenceKind, EvidenceNode, EvidenceNodeId,
     EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt, ExecutionReceipt,
-    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError, MandateId,
-    MandateSignatureEnvelope, MigrationDirection, ObjectVersion, PreservationEnvelope,
-    PreservationEnvelopeId, PreservationError, ProfileCodec, ProfileDescriptor, ProfileId,
-    ProfileRegistry, ProtocolVersion, QuarantineReleaseRule, RequiredContexts, SourceLocator,
-    VerificationContext, VerificationContextId, db_migration_descriptor, default_registry,
-    github_deployment_descriptor,
+    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError, IntentId,
+    MandateId, MandateSignatureEnvelope, MigrationDirection, ObjectVersion, PAYMENT_ACTION_TYPE,
+    PAYMENT_PARAMETERS_MEDIA_TYPE, PAYMENT_PROFILE_ID, PaymentCodec, PaymentIntentV1,
+    PreservationEnvelope, PreservationEnvelopeId, PreservationError, ProfileCodec,
+    ProfileDescriptor, ProfileId, ProfileRegistry, ProtocolVersion, QuarantineReleaseRule,
+    RequiredContexts, SourceLocator, VerificationContext, VerificationContextId, WithheldObject,
+    bundle_object_digest, db_migration_descriptor, default_registry, github_deployment_descriptor,
+    payment_descriptor, validate_evidence_graph,
 };
 pub use csv_accountability::{
     AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation, CHAIN_ANCHOR_DOMAIN_TAG,
     CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE,
     CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment, CommitmentAnchorRecord,
+    ChainAnchorFinalityStatus, ChainAnchorReconciliationResult, ChainAnchorSourceObservation,
+    ChainAnchorVerificationResult, ChainCommitmentAnchorEvidence,
     EVIDENCE_CHAIN_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
-    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, SealConsumptionRecord, SingleUseAnchorAssessment,
-    reconcile_anchor,
+    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, ExternalCommitmentAnchorReference,
+    SealConsumptionRecord, SingleUseAnchorAssessment, reconcile_anchor,
+    reconcile_chain_anchor_observations,
 };
 pub use csv_accountability_verify::evaluate_authority_reconstruction;
 pub use csv_wire::{
-    AccountabilityObjectKind, ActionIntentWire, CanonicalAccountabilityObjectWire,
+    AccountabilityObjectKind, ActionIntentJsonV1, ActionIntentWire,
+    CanonicalAccountabilityObjectWire,
     GitHubDeploymentIntentV1Wire, RequiredContextsWire,
 };
 
@@ -45,11 +51,19 @@ pub fn encode_action_intent(
         .map_err(|_| csv_accountability::IntentError::EmptyField("canonical_bytes"))
 }
 
-/// Decodes and validates the public JSON wire representation of an action intent.
-pub fn action_intent_from_wire(
-    wire: ActionIntentWire,
+/// Decodes and validates the versioned public JSON representation of an action intent.
+pub fn action_intent_from_json(
+    wire: ActionIntentJsonV1,
 ) -> Result<ActionIntent, csv_accountability::IntentError> {
     wire.try_into()
+}
+
+/// Compatibility spelling for [`action_intent_from_json`].
+#[deprecated(since = "0.1.6", note = "use action_intent_from_json")]
+pub fn action_intent_from_wire(
+    wire: ActionIntentJsonV1,
+) -> Result<ActionIntent, csv_accountability::IntentError> {
+    action_intent_from_json(wire)
 }
 
 /// Encodes a reconstruction with its distinct non-mandate transport kind.
