@@ -142,7 +142,10 @@ fn v02_conflict_and_custody_nodes_have_distinct_canonical_bytes() {
     }
     for value in [&counterclaim, &contradiction, &custody] {
         let canonical = value.canonical_bytes().unwrap();
-        assert_eq!(EvidenceNode::from_canonical_bytes(&canonical).unwrap(), *value);
+        assert_eq!(
+            EvidenceNode::from_canonical_bytes(&canonical).unwrap(),
+            *value
+        );
         let mut trailing = canonical;
         trailing.push(0);
         assert_eq!(

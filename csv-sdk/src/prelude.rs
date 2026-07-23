@@ -8,10 +8,11 @@
 
 // Core types
 #[cfg(feature = "accountability")]
+#[allow(deprecated)]
+// Prelude preserves source compatibility while steering new code to JSON V1.
 pub use crate::accountability::{
     ActionIntent, ActionIntentJsonV1, ActionIntentWire, CanonicalAccountabilityObjectWire,
-    GitHubDeploymentIntentV1, GitHubDeploymentIntentV1Wire, RequiredContexts,
-    RequiredContextsWire,
+    GitHubDeploymentIntentV1, GitHubDeploymentIntentV1Wire, RequiredContexts, RequiredContextsWire,
 };
 #[cfg(feature = "client")]
 pub use crate::builder::{ClientBuilder, StoreBackend};

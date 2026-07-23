@@ -41,8 +41,14 @@ fn overreach_intent() -> ActionIntent {
         payload_commitment: [3; 32],
         artifact_digest: Some([4; 32]),
     };
-    ActionIntent::github_deployment(b"requester:alice".to_vec(), 90, [6; 32], vec![[7; 32]], profile)
-        .expect("overreach intent is structurally valid")
+    ActionIntent::github_deployment(
+        b"requester:alice".to_vec(),
+        90,
+        [6; 32],
+        vec![[7; 32]],
+        profile,
+    )
+    .expect("overreach intent is structurally valid")
 }
 
 #[test]
@@ -111,7 +117,10 @@ fn overreach_yields_independent_intent_mismatch_verdict() {
         "authority must be NotSatisfied for an overreach"
     );
     assert!(
-        authority.reason_codes.iter().any(|code| code == INTENT_MISMATCH),
+        authority
+            .reason_codes
+            .iter()
+            .any(|code| code == INTENT_MISMATCH),
         "authority reason codes must include {INTENT_MISMATCH}, got {:?}",
         authority.reason_codes
     );

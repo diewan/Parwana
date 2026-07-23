@@ -1431,7 +1431,10 @@ mod db_migration_tests {
     fn valid_intent_round_trips_through_canonical_bytes() {
         let intent = valid_intent();
         let bytes = intent.canonical_bytes().unwrap();
-        assert_eq!(DbMigrationIntentV1::from_canonical_bytes(&bytes).unwrap(), intent);
+        assert_eq!(
+            DbMigrationIntentV1::from_canonical_bytes(&bytes).unwrap(),
+            intent
+        );
     }
 
     #[test]
@@ -1458,7 +1461,10 @@ mod db_migration_tests {
             intent.canonical_bytes().unwrap()
         };
         assert_ne!(base, mutate(&|i| i.migration_digest = [0x44u8; 32]));
-        assert_ne!(base, mutate(&|i| i.direction = MigrationDirection::Rollback));
+        assert_ne!(
+            base,
+            mutate(&|i| i.direction = MigrationDirection::Rollback)
+        );
         assert_ne!(base, mutate(&|i| i.allow_destructive = true));
         assert_ne!(base, mutate(&|i| i.statement_count = 4));
         assert_ne!(base, mutate(&|i| i.migration_id = String::from("other")));
@@ -1534,7 +1540,10 @@ mod db_migration_tests {
         let intent = valid_intent();
         let bytes = intent.canonical_bytes().unwrap();
         let codec = registry.codec(&profile_id).expect("codec");
-        assert_eq!(codec.validate_canonical_bytes(&bytes).unwrap(), intent.stable_target());
+        assert_eq!(
+            codec.validate_canonical_bytes(&bytes).unwrap(),
+            intent.stable_target()
+        );
         // A foreign byte string is rejected by the codec.
         assert!(codec.validate_canonical_bytes(b"not a migration").is_err());
     }

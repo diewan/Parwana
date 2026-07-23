@@ -291,7 +291,9 @@ impl AccountabilityFixture {
         fixture.intent = ActionIntent::new(
             codec.descriptor(),
             &codec,
-            profile.canonical_bytes().expect("static profile is canonical"),
+            profile
+                .canonical_bytes()
+                .expect("static profile is canonical"),
             b"agent:payment".to_vec(),
             90,
             [42; 32],

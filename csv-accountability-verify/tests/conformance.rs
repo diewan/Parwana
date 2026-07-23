@@ -224,7 +224,9 @@ fn capped_payment_receipt_and_portable_bundle_verify_offline() {
         producer_identity: b"piteka:payment-bundle-export".to_vec(),
         producer_signature: vec![47; 64],
     };
-    bundle.validate().expect("portable payment bundle is canonical");
+    bundle
+        .validate()
+        .expect("portable payment bundle is canonical");
 
     let report = run(
         &fixture,
@@ -236,7 +238,10 @@ fn capped_payment_receipt_and_portable_bundle_verify_offline() {
     assert!(has_reason(&report, Stage::Receipt, StageDisposition::Pass));
 
     let assurance = assurance_profile(fixture.context.id().unwrap(), &report);
-    assert_eq!(assurance.verification_context_id, fixture.context.id().unwrap());
+    assert_eq!(
+        assurance.verification_context_id,
+        fixture.context.id().unwrap()
+    );
     assert_eq!(assurance.dimensions[0].status, DimensionStatus::Satisfied);
 }
 

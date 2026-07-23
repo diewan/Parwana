@@ -131,10 +131,9 @@ mod tests {
     #[test]
     fn rejects_out_of_range_r_and_s_scalars() {
         let (_, public_key, message) = generate_test_signature();
-        let curve_order = hex::decode(
-            "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
-        )
-        .unwrap();
+        let curve_order =
+            hex::decode("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141")
+                .unwrap();
         let maximum_scalar = [0xff; 32];
 
         for (label, offset, scalar) in [

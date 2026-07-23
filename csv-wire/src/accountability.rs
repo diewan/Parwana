@@ -403,7 +403,7 @@ mod tests {
         let profile = GitHubDeploymentIntentV1::try_from(wire_profile()).unwrap();
         let intent =
             ActionIntent::github_deployment(vec![8], 1, [7; 32], Vec::new(), profile).unwrap();
-        let mut wire = ActionIntentWire::from(&intent);
+        let mut wire = ActionIntentJsonV1::from(&intent);
         wire.target[0] ^= 1;
         assert_eq!(
             ActionIntent::try_from(wire),

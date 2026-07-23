@@ -7,7 +7,8 @@
 #![cfg(feature = "rpc")]
 
 use csv_accountability::{
-    AnchorFinality, CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment,
+    CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, ChainAnchorFinalityStatus,
+    ChainAnchorVerificationResult, ChainCommitmentAnchorEvidence,
 };
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -116,32 +117,32 @@ async fn commitment_anchor_progresses_from_pending_to_final_on_live_dev_rpc() {
         .expect("transaction hash")
         .trim_start_matches("0x")
         .to_owned();
-    let pending = ChainAnchor {
+    let pending = ChainCommitmentAnchorEvidence {
         commitment,
         chain_id: "ethereum-anvil-31337".into(),
         anchor_ref: anchor_ref.as_bytes().to_vec(),
         block_height: anchor_block,
         block_hash,
-        finality: AnchorFinality::from_confirmations(1, 2),
+        finality: ChainAnchorFinalityStatus::from_confirmations(1, 2),
         anchor_backend: "chain.ethereum-anvil.v1".into(),
     };
     pending.validate().expect("pending anchor is canonical");
     assert_eq!(
-        pending.assess(commitment),
-        ChainAnchorAssessment::AnchoredPending
+        pending.verify_commitment(commitment),
+        ChainAnchorVerificationResult::AnchoredPending
     );
 
     rpc(&client, &endpoint, "evm_mine", json!([])).await;
     let latest = hex_u64(&rpc(&client, &endpoint, "eth_blockNumber", json!([])).await);
     let confirmations = latest.saturating_sub(anchor_block) + 1;
-    let final_anchor = ChainAnchor {
-        finality: AnchorFinality::from_confirmations(confirmations, 2),
+    let final_anchor = ChainCommitmentAnchorEvidence {
+        finality: ChainAnchorFinalityStatus::from_confirmations(confirmations, 2),
         ..pending
     };
     final_anchor.validate().expect("final anchor is canonical");
     assert_eq!(
-        final_anchor.assess(commitment),
-        ChainAnchorAssessment::AnchoredFinal
+        final_anchor.verify_commitment(commitment),
+        ChainAnchorVerificationResult::AnchoredFinal
     );
     println!(
         "anchor_evidence commitment={} tx_hash={} block_height={} block_hash={} pending_confirmations=1 final_confirmations={confirmations} required_confirmations=2",

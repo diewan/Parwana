@@ -4,6 +4,7 @@
 //! `csv-accountability`. This module provides stable SDK imports and transport
 //! helpers without copying protocol logic.
 
+#[allow(deprecated)] // Stable facade keeps the old imports during the migration window.
 pub use csv_accountability::{
     ACCOUNTABILITY_OBJECT_VERSION, ACCOUNTABILITY_PROTOCOL_VERSION,
     AUTHORITY_RECONSTRUCTION_REGISTRY_ID, ActionIntent, ActionMandate, AssuranceDimension,
@@ -12,33 +13,33 @@ pub use csv_accountability::{
     AuthorityReconstructionId, AuthoritySourceCompleteness, BoxedProfileCodec, ContextBoundOutput,
     DB_MIGRATION_ACTION_TYPE, DB_MIGRATION_PARAMETERS_MEDIA_TYPE, DB_MIGRATION_PROFILE_ID,
     DbMigrationCodec, DbMigrationIntentV1, DimensionResult, DimensionStatus, DisclosedObject,
-    DisputeBundle, EVIDENCE_DB_MIGRATION_APPLIED_RECORD, EvidenceKind, EvidenceNode, EvidenceNodeId,
-    EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt, ExecutionReceipt,
-    GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError, IntentId,
-    MandateId, MandateSignatureEnvelope, MigrationDirection, ObjectVersion, PAYMENT_ACTION_TYPE,
-    PAYMENT_PARAMETERS_MEDIA_TYPE, PAYMENT_PROFILE_ID, PaymentCodec, PaymentIntentV1,
-    PreservationEnvelope, PreservationEnvelopeId, PreservationError, ProfileCodec,
+    DisputeBundle, EVIDENCE_DB_MIGRATION_APPLIED_RECORD, EvidenceKind, EvidenceNode,
+    EvidenceNodeId, EvidenceSourceClass, EvidenceSourceDecl, EvidenceSourceId, ExecutionAttempt,
+    ExecutionReceipt, GateProfileId, GitHubDeploymentCodec, GitHubDeploymentIntentV1, IntentError,
+    IntentId, MandateId, MandateSignatureEnvelope, MigrationDirection, ObjectVersion,
+    PAYMENT_ACTION_TYPE, PAYMENT_PARAMETERS_MEDIA_TYPE, PAYMENT_PROFILE_ID, PaymentCodec,
+    PaymentIntentV1, PreservationEnvelope, PreservationEnvelopeId, PreservationError, ProfileCodec,
     ProfileDescriptor, ProfileId, ProfileRegistry, ProtocolVersion, QuarantineReleaseRule,
     RequiredContexts, SourceLocator, VerificationContext, VerificationContextId, WithheldObject,
     bundle_object_digest, db_migration_descriptor, default_registry, github_deployment_descriptor,
     payment_descriptor, validate_evidence_graph,
 };
+#[allow(deprecated)] // Stable facade keeps old anchor imports during the migration window.
 pub use csv_accountability::{
     AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation, CHAIN_ANCHOR_DOMAIN_TAG,
     CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE,
-    CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment, CommitmentAnchorRecord,
-    ChainAnchorFinalityStatus, ChainAnchorReconciliationResult, ChainAnchorSourceObservation,
-    ChainAnchorVerificationResult, ChainCommitmentAnchorEvidence,
-    EVIDENCE_CHAIN_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
-    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, ExternalCommitmentAnchorReference,
-    SealConsumptionRecord, SingleUseAnchorAssessment, reconcile_anchor,
-    reconcile_chain_anchor_observations,
+    CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment, ChainAnchorFinalityStatus,
+    ChainAnchorReconciliationResult, ChainAnchorSourceObservation, ChainAnchorVerificationResult,
+    ChainCommitmentAnchorEvidence, CommitmentAnchorRecord, EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+    ExternalCommitmentAnchorReference, SealConsumptionRecord, SingleUseAnchorAssessment,
+    reconcile_anchor, reconcile_chain_anchor_observations,
 };
 pub use csv_accountability_verify::evaluate_authority_reconstruction;
+#[allow(deprecated)] // Stable facade keeps ActionIntentWire as a compatibility alias.
 pub use csv_wire::{
     AccountabilityObjectKind, ActionIntentJsonV1, ActionIntentWire,
-    CanonicalAccountabilityObjectWire,
-    GitHubDeploymentIntentV1Wire, RequiredContextsWire,
+    CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1Wire, RequiredContextsWire,
 };
 
 /// Encodes an action intent using the sole canonical serializer in the semantic crate.

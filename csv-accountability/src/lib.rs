@@ -26,16 +26,16 @@ pub mod registry;
 pub mod state;
 pub mod verification;
 
+#[allow(deprecated)] // Public compatibility aliases retained through the documented migration.
 pub use anchor::{
     AnchorError, AnchorFinality, AnchorObservation, AnchorReconciliation, CHAIN_ANCHOR_DOMAIN_TAG,
     CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, CSV_SEAL_COMMITMENT_ANCHOR_MEDIA_TYPE,
-    CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment, CommitmentAnchorRecord,
-    ChainAnchorFinalityStatus, ChainAnchorReconciliationResult, ChainAnchorSourceObservation,
-    ChainAnchorVerificationResult, ChainCommitmentAnchorEvidence,
-    EVIDENCE_CHAIN_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR,
-    EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD, ExternalCommitmentAnchorReference,
-    MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord, SingleUseAnchorAssessment, reconcile_anchor,
-    reconcile_chain_anchor_observations,
+    CSV_SEAL_CONSUMPTION_MEDIA_TYPE, ChainAnchor, ChainAnchorAssessment, ChainAnchorFinalityStatus,
+    ChainAnchorReconciliationResult, ChainAnchorSourceObservation, ChainAnchorVerificationResult,
+    ChainCommitmentAnchorEvidence, CommitmentAnchorRecord, EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
+    EVIDENCE_CSV_SEAL_COMMITMENT_ANCHOR, EVIDENCE_CSV_SEAL_CONSUMPTION_RECORD,
+    ExternalCommitmentAnchorReference, MAX_ANCHOR_FIELD_BYTES, SealConsumptionRecord,
+    SingleUseAnchorAssessment, reconcile_anchor, reconcile_chain_anchor_observations,
 };
 pub use assurance::{
     ASSURANCE_DIMENSIONS, AssuranceDimension, AssuranceError, AssuranceProfile, DimensionGateRule,

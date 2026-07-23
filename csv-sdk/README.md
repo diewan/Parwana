@@ -18,11 +18,11 @@ does not maintain authority state or define an alternate serializer.
 
 ```rust
 use csv_sdk::accountability::{
-    ActionIntentWire, action_intent_from_wire, encode_action_intent,
+    ActionIntentJsonV1, action_intent_from_json, encode_action_intent,
 };
 
-# fn example(wire: ActionIntentWire) -> Result<(), String> {
-let intent = action_intent_from_wire(wire).map_err(|error| format!("{error:?}"))?;
+# fn example(wire: ActionIntentJsonV1) -> Result<(), String> {
+let intent = action_intent_from_json(wire).map_err(|error| format!("{error:?}"))?;
 let artifact = encode_action_intent(&intent).map_err(|error| format!("{error:?}"))?;
 assert_eq!(artifact.object_version, 1);
 # Ok(())

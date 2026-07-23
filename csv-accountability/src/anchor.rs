@@ -566,10 +566,7 @@ pub fn reconcile_chain_anchor_observations(
 pub type CommitmentAnchorRecord = ExternalCommitmentAnchorReference;
 
 /// Compatibility name for [`ChainCommitmentAnchorEvidence`].
-#[deprecated(
-    since = "0.1.6",
-    note = "use ChainCommitmentAnchorEvidence"
-)]
+#[deprecated(since = "0.1.6", note = "use ChainCommitmentAnchorEvidence")]
 pub type ChainAnchor = ChainCommitmentAnchorEvidence;
 
 /// Compatibility name for [`ChainAnchorFinalityStatus`].
@@ -577,10 +574,7 @@ pub type ChainAnchor = ChainCommitmentAnchorEvidence;
 pub type AnchorFinality = ChainAnchorFinalityStatus;
 
 /// Compatibility name for [`ChainAnchorVerificationResult`].
-#[deprecated(
-    since = "0.1.6",
-    note = "use ChainAnchorVerificationResult"
-)]
+#[deprecated(since = "0.1.6", note = "use ChainAnchorVerificationResult")]
 pub type ChainAnchorAssessment = ChainAnchorVerificationResult;
 
 /// Compatibility name for [`ChainAnchorSourceObservation`].
@@ -588,17 +582,11 @@ pub type ChainAnchorAssessment = ChainAnchorVerificationResult;
 pub type AnchorObservation = ChainAnchorSourceObservation;
 
 /// Compatibility name for [`ChainAnchorReconciliationResult`].
-#[deprecated(
-    since = "0.1.6",
-    note = "use ChainAnchorReconciliationResult"
-)]
+#[deprecated(since = "0.1.6", note = "use ChainAnchorReconciliationResult")]
 pub type AnchorReconciliation = ChainAnchorReconciliationResult;
 
 /// Compatibility spelling for [`reconcile_chain_anchor_observations`].
-#[deprecated(
-    since = "0.1.6",
-    note = "use reconcile_chain_anchor_observations"
-)]
+#[deprecated(since = "0.1.6", note = "use reconcile_chain_anchor_observations")]
 #[must_use]
 pub fn reconcile_anchor(
     observations: &[ChainAnchorSourceObservation],
@@ -683,6 +671,7 @@ impl<'a> Cursor<'a> {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // These tests exercise the source-compatible public aliases.
 mod tests {
     use super::*;
 
@@ -851,7 +840,10 @@ mod tests {
             ChainAnchorAssessment::AnchoredFinal
         );
         let pending = chain_anchor(AnchorFinality::from_confirmations(3, 12));
-        assert_eq!(pending.assess([5u8; 32]), ChainAnchorAssessment::AnchoredPending);
+        assert_eq!(
+            pending.assess([5u8; 32]),
+            ChainAnchorAssessment::AnchoredPending
+        );
         // A different commitment cannot corroborate this object.
         assert_eq!(
             final_anchor.assess([9u8; 32]),
@@ -888,7 +880,11 @@ mod tests {
         // One source lagging → the reconciliation is pending, not final.
         let mixed = reconcile_anchor(&[
             observation("rpc-a", [6u8; 32], final_f),
-            observation("rpc-b", [6u8; 32], AnchorFinality::from_confirmations(2, 12)),
+            observation(
+                "rpc-b",
+                [6u8; 32],
+                AnchorFinality::from_confirmations(2, 12),
+            ),
         ]);
         match mixed {
             AnchorReconciliation::Agreed { finality, .. } => assert!(!finality.is_final()),
@@ -901,8 +897,16 @@ mod tests {
         // Two sources report different block hashes at the same height: a reorg /
         // RPC disagreement. It must never collapse into a final verdict.
         let disagreement = reconcile_anchor(&[
-            observation("rpc-a", [6u8; 32], AnchorFinality::from_confirmations(20, 12)),
-            observation("rpc-b", [7u8; 32], AnchorFinality::from_confirmations(20, 12)),
+            observation(
+                "rpc-a",
+                [6u8; 32],
+                AnchorFinality::from_confirmations(20, 12),
+            ),
+            observation(
+                "rpc-b",
+                [7u8; 32],
+                AnchorFinality::from_confirmations(20, 12),
+            ),
         ]);
         match disagreement {
             AnchorReconciliation::Disagreement {
