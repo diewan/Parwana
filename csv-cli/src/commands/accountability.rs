@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use csv_sdk::accountability::{
-    ActionIntent, ActionIntentJsonV1, CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1,
+    ActionIntent, ActionIntentWireV1, CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1,
     RequiredContexts, action_intent_from_json, encode_action_intent,
 };
 use std::{fs, path::PathBuf};
@@ -18,7 +18,7 @@ pub enum AccountabilityAction {
     },
     /// Create a canonical action-intent artifact from strict JSON wire input.
     CreateIntent {
-        /// Input ActionIntentJsonV1 file; see csv-docs/accountability/getting-started.md.
+        /// Input ActionIntentWireV1 file; see csv-docs/accountability/getting-started.md.
         #[arg(long)]
         input: PathBuf,
         /// Output artifact JSON file; stdout when omitted.
@@ -66,13 +66,13 @@ fn example_intent(out: Option<PathBuf>) -> Result<()> {
         profile,
     )
     .map_err(|error| anyhow::anyhow!("construct example intent: {error:?}"))?;
-    write_json(&ActionIntentJsonV1::from(&intent), out)
+    write_json(&ActionIntentWireV1::from(&intent), out)
 }
 
 fn create_intent(input: PathBuf, out: Option<PathBuf>) -> Result<()> {
     let json = fs::read_to_string(&input).with_context(|| format!("read {}", input.display()))?;
-    let wire: ActionIntentJsonV1 =
-        serde_json::from_str(&json).context("parse strict ActionIntentJsonV1 JSON")?;
+    let wire: ActionIntentWireV1 =
+        serde_json::from_str(&json).context("parse strict ActionIntentWireV1 JSON")?;
     let intent = action_intent_from_json(wire).map_err(|error| anyhow::anyhow!("{error:?}"))?;
     let artifact = encode_action_intent(&intent).map_err(|error| anyhow::anyhow!("{error:?}"))?;
     write_json(&artifact, out)
@@ -108,7 +108,7 @@ mod tests {
     use super::*;
     use csv_sdk::accountability::{ActionIntent, GitHubDeploymentIntentV1, RequiredContexts};
 
-    fn input_wire() -> ActionIntentJsonV1 {
+    fn input_wire() -> ActionIntentWireV1 {
         let required_contexts = RequiredContexts::AllSubmitted;
         let profile = GitHubDeploymentIntentV1 {
             repository_id: 42,
@@ -131,7 +131,7 @@ mod tests {
             profile,
         )
         .unwrap();
-        ActionIntentJsonV1::from(&intent)
+        ActionIntentWireV1::from(&intent)
     }
 
     #[test]

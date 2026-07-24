@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ActionIntentJsonV1",
+  "title": "ActionIntentWireV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol_version_major", "protocol_version_minor", "intent_version", "profile_id", "action_type", "target", "parameters_commitment", "parameters_media_type", "requested_by", "requested_at", "request_nonce", "context_commitments", "profile"],
+  "required": ["protocol_version_major", "protocol_version_minor", "intent_version", "profile_id", "action_type", "target", "parameters_commitment", "parameters_media_type", "requested_by", "requested_at", "request_nonce", "context_commitments", "profile_bytes_hex"],
   "properties": {
     "protocol_version_major": {"type": "integer"},
     "protocol_version_minor": {"type": "integer"},
     "intent_version": {"type": "integer"},
-    "profile_id": {"type": "array", "items": {"type": "integer"}},
+    "profile_id": {"type": "string"},
     "action_type": {"type": "string"},
     "target": {"type": "array", "items": {"type": "integer"}},
     "parameters_commitment": {"type": "array", "items": {"type": "integer"}},
@@ -17,6 +17,6 @@
     "requested_at": {"type": "integer"},
     "request_nonce": {"type": "array", "items": {"type": "integer"}},
     "context_commitments": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
-    "profile": {"type": "object"}
+    "profile_bytes_hex": {"type": "string", "pattern": "^[0-9a-f]*$"}
   }
 }

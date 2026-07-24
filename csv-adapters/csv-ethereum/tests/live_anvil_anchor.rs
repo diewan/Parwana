@@ -7,8 +7,8 @@
 #![cfg(feature = "rpc")]
 
 use csv_accountability::{
-    CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, ChainAnchorFinalityStatus,
-    ChainAnchorVerificationResult, ChainCommitmentAnchorEvidence,
+    CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, ChainAnchorFinalityStatus, ChainAnchorVerificationResult,
+    ChainCommitmentAnchorEvidence,
 };
 use serde_json::{Value, json};
 use std::time::Duration;

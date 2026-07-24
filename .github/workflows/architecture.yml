@@ -17,6 +17,9 @@ jobs:
       - name: Check dependency graph constitution
         run: cargo test -p csv-architecture --test dep_graph_constitution
 
+      - name: Check versioned accountability wire/schema agreement
+        run: cargo test -p csv-wire --features accountability action_intent_schema_fields_match_the_serialized_wire_type
+
       - name: Protected L0-L4 public API snapshot
         run: |
           cargo install cargo-public-api --locked

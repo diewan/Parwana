@@ -21,7 +21,7 @@ pub mod transfer_state;
 #[cfg(feature = "accountability")]
 #[allow(deprecated)] // Public compatibility alias retained through the documented migration.
 pub use accountability::{
-    AccountabilityObjectKind, ActionIntentJsonV1, ActionIntentWire,
+    AccountabilityObjectKind, ActionIntentWire, ActionIntentWireV1,
     CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1Wire, RequiredContextsWire,
 };
 pub use app::{

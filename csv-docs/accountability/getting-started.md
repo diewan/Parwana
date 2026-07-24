@@ -12,7 +12,7 @@ cargo run -p csv-cli -- accountability example-intent \
   --out /tmp/diewan-action-intent-v1.json
 ```
 
-The output is an `ActionIntentJsonV1`: a strict, versioned JSON input DTO. It
+The output is an `ActionIntentWireV1`: a strict, versioned JSON wire representation. It
 contains a complete GitHub deployment profile, including fixed controls and
 opaque byte fields encoded for JSON. Generate it rather than guessing digest,
 nonce, context, or profile encodings.
@@ -49,15 +49,15 @@ authorization or claim successful execution.
 | Name | Role |
 |---|---|
 | `ActionIntent` | Canonical protocol domain object describing the exact proposed action. |
-| `ActionIntentJsonV1` | Version 1 JSON input DTO; not the canonical hashing representation. |
+| `ActionIntentWireV1` | Version 1 JSON wire representation; not the canonical hashing representation. |
 | `GitHubDeploymentIntentV1Wire` | Provider-profile JSON shape nested inside the DTO. |
 | `CanonicalAccountabilityObjectWire` | Transport envelope preserving canonical semantic bytes. |
 
 `ActionIntentWire` and `action_intent_from_wire` remain deprecated
 source-compatible aliases for the 0.1.6 migration window. They serialize the
 same JSON fields and do not alter canonical bytes or registered identifiers.
-New code uses `ActionIntentJsonV1` and `action_intent_from_json`.
+New code uses `ActionIntentWireV1` and `action_intent_from_json`.
 
-The JSON Schema title is `ActionIntentJsonV1`. The legacy schema lookup key
+The JSON Schema title is `ActionIntentWireV1`. The legacy schema lookup key
 `action-intent-wire` remains available for CLI compatibility; its title and
 content describe the current versioned JSON DTO.

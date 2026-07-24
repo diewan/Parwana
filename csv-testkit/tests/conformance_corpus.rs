@@ -55,8 +55,8 @@ fn published_github_profile_descriptor_matches_code() {
 #[test]
 fn published_chain_anchor_contract_matches_code() {
     use csv_accountability::{
-        CHAIN_ANCHOR_DOMAIN_TAG, CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE,
-        ChainCommitmentAnchorEvidence, EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
+        CHAIN_ANCHOR_DOMAIN_TAG, CHAIN_COMMITMENT_ANCHOR_MEDIA_TYPE, ChainCommitmentAnchorEvidence,
+        EVIDENCE_CHAIN_COMMITMENT_ANCHOR,
     };
 
     let published = include_str!("../corpus/v1/anchors/chain-commitment-anchor.v1.toml");

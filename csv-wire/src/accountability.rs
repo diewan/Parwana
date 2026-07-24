@@ -148,7 +148,7 @@ pub struct GitHubDeploymentIntentV1Wire {
 /// re-validates the bytes against the registered codec via the default registry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ActionIntentJsonV1 {
+pub struct ActionIntentWireV1 {
     /// Accountability protocol major version.
     pub protocol_version_major: u16,
     /// Accountability protocol minor version.
@@ -254,7 +254,7 @@ impl TryFrom<GitHubDeploymentIntentV1Wire> for GitHubDeploymentIntentV1 {
     }
 }
 
-impl From<&ActionIntent> for ActionIntentJsonV1 {
+impl From<&ActionIntent> for ActionIntentWireV1 {
     fn from(value: &ActionIntent) -> Self {
         Self {
             protocol_version_major: value.protocol_version.major(),
@@ -274,10 +274,10 @@ impl From<&ActionIntent> for ActionIntentJsonV1 {
     }
 }
 
-impl TryFrom<ActionIntentJsonV1> for ActionIntent {
+impl TryFrom<ActionIntentWireV1> for ActionIntent {
     type Error = IntentError;
 
-    fn try_from(value: ActionIntentJsonV1) -> Result<Self, Self::Error> {
+    fn try_from(value: ActionIntentWireV1) -> Result<Self, Self::Error> {
         if value.intent_version != ACCOUNTABILITY_OBJECT_VERSION.get() {
             return Err(IntentError::UnsupportedVersion);
         }
@@ -317,12 +317,12 @@ impl TryFrom<ActionIntentJsonV1> for ActionIntent {
     }
 }
 
-/// Compatibility name for [`ActionIntentJsonV1`].
+/// Compatibility name for [`ActionIntentWireV1`].
 ///
 /// `Wire` did not reveal that this is the versioned JSON input DTO rather than
 /// the canonical accountability encoding.
-#[deprecated(since = "0.1.6", note = "use ActionIntentJsonV1")]
-pub type ActionIntentWire = ActionIntentJsonV1;
+#[deprecated(since = "0.1.6", note = "use ActionIntentWireV1")]
+pub type ActionIntentWire = ActionIntentWireV1;
 
 #[cfg(test)]
 mod tests {
@@ -403,13 +403,45 @@ mod tests {
         let profile = GitHubDeploymentIntentV1::try_from(wire_profile()).unwrap();
         let intent =
             ActionIntent::github_deployment(vec![8], 1, [7; 32], Vec::new(), profile).unwrap();
-        let mut wire = ActionIntentJsonV1::from(&intent);
+        let mut wire = ActionIntentWireV1::from(&intent);
         wire.target[0] ^= 1;
         assert_eq!(
             ActionIntent::try_from(wire),
             Err(IntentError::TargetMismatch)
         );
         assert_eq!(intent.intent_version, ACCOUNTABILITY_OBJECT_VERSION);
+    }
+
+    #[test]
+    fn action_intent_schema_fields_match_the_serialized_wire_type() {
+        let profile = GitHubDeploymentIntentV1::try_from(wire_profile()).unwrap();
+        let intent =
+            ActionIntent::github_deployment(vec![8], 1, [7; 32], Vec::new(), profile).unwrap();
+        let encoded = serde_json::to_value(ActionIntentWireV1::from(&intent)).unwrap();
+        let encoded_fields: std::collections::BTreeSet<_> =
+            encoded.as_object().unwrap().keys().cloned().collect();
+
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../csv-schema/schemas/action-intent-wire-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(schema["title"], "ActionIntentWireV1");
+        let schema_fields: std::collections::BTreeSet<_> = schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        let required_fields: std::collections::BTreeSet<_> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(schema_fields, encoded_fields);
+        assert_eq!(required_fields, encoded_fields);
+        assert_eq!(schema["properties"]["profile_id"]["type"], "string");
+        assert_eq!(schema["properties"]["profile_bytes_hex"]["type"], "string");
     }
 
     #[test]

@@ -11,7 +11,7 @@
 #[allow(deprecated)]
 // Prelude preserves source compatibility while steering new code to JSON V1.
 pub use crate::accountability::{
-    ActionIntent, ActionIntentJsonV1, ActionIntentWire, CanonicalAccountabilityObjectWire,
+    ActionIntent, ActionIntentWire, ActionIntentWireV1, CanonicalAccountabilityObjectWire,
     GitHubDeploymentIntentV1, GitHubDeploymentIntentV1Wire, RequiredContexts, RequiredContextsWire,
 };
 #[cfg(feature = "client")]

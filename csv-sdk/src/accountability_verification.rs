@@ -13,7 +13,7 @@ use csv_accountability::{
     ExecutionAttemptState, ExecutionOutcome, ExecutionReceipt, IntentId, MandateId, ObjectVersion,
     ProtocolVersion, SealConsumptionRecord, SourceLocator, VerificationContext,
 };
-use csv_wire::ActionIntentJsonV1;
+use csv_wire::ActionIntentWireV1;
 use serde::Deserialize;
 
 /// Maximum accepted local verification-envelope size.
@@ -75,7 +75,7 @@ pub enum ImportError {
 #[serde(deny_unknown_fields)]
 struct Envelope {
     format: String,
-    intent: ActionIntentJsonV1,
+    intent: ActionIntentWireV1,
     mandate_canonical_hex: String,
     attempt: AttemptWire,
     receipt: ReceiptWire,

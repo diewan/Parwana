@@ -38,7 +38,7 @@ pub use csv_accountability::{
 pub use csv_accountability_verify::evaluate_authority_reconstruction;
 #[allow(deprecated)] // Stable facade keeps ActionIntentWire as a compatibility alias.
 pub use csv_wire::{
-    AccountabilityObjectKind, ActionIntentJsonV1, ActionIntentWire,
+    AccountabilityObjectKind, ActionIntentWire, ActionIntentWireV1,
     CanonicalAccountabilityObjectWire, GitHubDeploymentIntentV1Wire, RequiredContextsWire,
 };
 
@@ -54,7 +54,7 @@ pub fn encode_action_intent(
 
 /// Decodes and validates the versioned public JSON representation of an action intent.
 pub fn action_intent_from_json(
-    wire: ActionIntentJsonV1,
+    wire: ActionIntentWireV1,
 ) -> Result<ActionIntent, csv_accountability::IntentError> {
     wire.try_into()
 }
@@ -62,7 +62,7 @@ pub fn action_intent_from_json(
 /// Compatibility spelling for [`action_intent_from_json`].
 #[deprecated(since = "0.1.6", note = "use action_intent_from_json")]
 pub fn action_intent_from_wire(
-    wire: ActionIntentJsonV1,
+    wire: ActionIntentWireV1,
 ) -> Result<ActionIntent, csv_accountability::IntentError> {
     action_intent_from_json(wire)
 }
