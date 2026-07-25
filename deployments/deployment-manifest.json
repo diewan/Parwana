@@ -2,7 +2,7 @@
   "manifest_version": "2.1.0",
   "protocol_version": "0.2.0",
   "network": "testnet",
-  "updated_at": "2026-07-10T18:59:39.550515Z",
+  "updated_at": "2026-07-25T13:25:45.773782Z",
   "mint_model": "thin-registry-verifier-attested (RFC-0012 \u00a79)",
   "deployments": {
     "ethereum": {
@@ -43,29 +43,29 @@
     },
     "sui": {
       "network": "testnet",
-      "package_id": "0x3377372f20b25f8b04f6374eefc25957af76c18fd0af11c89ebf27dc4b429f68",
+      "package_id": "0x303e03098022ac2c5cd09e64679c6995ced7c2acd81ffe814d9f9cc62323a670",
       "registry_id": "0x3f0ef69c47d2553e7b46fadbffc2ce6afae34a29e70dea6d4d08f94c060aefe5",
       "admin_cap": "0xb9876bc77dc1ad9b576115d977c960753778a0e6c1c0e60c745eef2f9a103dd6",
       "upgrade_cap": "0x3ca383d410156c0bf99a61dc7a12f7089af5b6cbdcd5ab3ab00bc64a6c684f6a",
-      "deployment_tx": "FPTkvdPimCHBA879uzVN5As9mzbeHiJQtSoQPWAfj6LU",
+      "deployment_tx": "4ZWgY11yMEb9BsYg8CCxPK8Ci43aQunKxXHJsBHje3YH",
       "verified": true,
       "verifier_set": [
         "0x0339e90e058f0a1e6fdc584fcfde25f6a1ec665071f53c5037303ee356a2cbe077"
       ],
       "mint_threshold": 1,
-      "note": "TRM-ROLLOUT-001: RFC-0012 thin-registry csv_seal published to Sui testnet 2026-07-05. registry_id is the shared Registry object (\u00a79.2 destinationContract); the Sui adapter resolves it via get_sui_registry_id. Verifier set seeded/repaired 2026-07-10: add_verifier tx 9hYRi7hgbLUZgFn6oTrcaPsuTYxrtRYmdYLLwnmZfcnv; set_threshold=1 tx EunWBWzqvMztHUbnCqxVteEBkWsiCEZwHoF1morMBxMW. MINT ENABLED when the runtime holds the matching CSV_MINT_VERIFIER_KEY."
+      "note": "NAM-05 additive upgrade 2026-07-25: package upgraded to 0x303e0309\u20262323a670 (upgrade tx 4ZWgY11yMEb9BsYg8CCxPK8Ci43aQunKxXHJsBHje3YH) to dual-emit canonical SanadLocked alongside legacy CrossChainLock. The shared Registry 0x3f0ef69c\u2026060aefe5 (RFC-0012 \u00a79.2 destinationContract) and its seeded verifier set (1 verifier 0x0339e9\u2026a2cbe077, threshold 1) are PRESERVED by the in-place upgrade \u2014 verified on-chain. Original publish 2026-07-05 pkg 0x3377372f\u20264b429f68 tx FPTkvdPimCHBA879uzVN5As9mzbeHiJQtSoQPWAfj6LU. UpgradeCap/AdminCap held by 0x6cc73fe3\u20267f9a08f1. MINT ENABLED when the runtime holds the matching CSV_MINT_VERIFIER_KEY."
     },
     "aptos": {
       "network": "testnet",
       "module_address": "0x0d1d46fcb30008269b2bf96879136c157276c38b418b2a37e6a5e3382649716f",
-      "deployment_tx": "0xcc184a2febe0e124e7804d29536f9699a0f62acf9385e9cca2e40b407fdad7c5",
+      "deployment_tx": "0xb6c409277a4fcaecaa5913b0599b87e477233f2ba3612c72afcb1d2d9253d0e6",
       "deployment_type": "account_publish",
       "verified": true,
       "verifier_set": [
         "0x0339e90e058f0a1e6fdc584fcfde25f6a1ec665071f53c5037303ee356a2cbe077"
       ],
       "mint_threshold": 1,
-      "note": "TRM-ROLLOUT-001: Canonical source-Sanad registry deployed to Aptos testnet 2026-07-10 under account 0x0d1d46fc\u20269716f. Initialized initialize_module (tx 0x7c2b4c2c\u202658787), init_registry (tx 0x6c6c5a6e\u202643e61), init_sanad_registry (tx 0x3d8d3038\u2026617b1), and init_mint_authority with threshold 1 (tx 0x2d40f752\u2026eb6fe). This deployment adds publish_sanad and canonical get_sanad_info views and replaces the incomplete 0x845182cd\u2026248de deployment. MINT ENABLED when the runtime holds the matching CSV_MINT_VERIFIER_KEY."
+      "note": "NAM-05 additive upgrade 2026-07-25: in-place module upgrade under account 0x0d1d46fc\u20269716f (publish tx 0xb6c409277a4fcaecaa5913b0599b87e477233f2ba3612c72afcb1d2d9253d0e6) adds canonical SanadLocked/SanadRefunded/CommitmentAnchored events (dual-emitted with legacy CrossChainLock/CrossChainRefund/AnchorEvent) and canonical lock_sanad \u2014 verified on-chain. Backward-compatible: existing resources, LockRegistry, and the seeded MintAuthority (1 verifier 0x0339e9\u2026a2cbe077, threshold 1) are PRESERVED. Original canonical registry deployed 2026-07-10 (initialize_module/init_registry/init_sanad_registry/init_mint_authority). MINT ENABLED when the runtime holds the matching CSV_MINT_VERIFIER_KEY."
     }
   },
   "checksums": {
