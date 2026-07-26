@@ -38,4 +38,5 @@ evidence. Each failure crosses the wire API with a stable
 
 Legacy `Consignment` remains the V1 inspection shape. It is not accepted by the
 explicit V2 decoder and cannot acquire V2 closure assurance through this API.
-The complete V1 inspection policy is specified by PAR-WIRE-002.
+The complete V1 inspection policy is specified in
+[`CONSIGNMENT-V1-COMPATIBILITY.md`](./CONSIGNMENT-V1-COMPATIBILITY.md).

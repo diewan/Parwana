@@ -29,7 +29,8 @@ pub const CONSIGNMENT_V2_ENVELOPE_VERSION: u16 = 2;
 pub const CONSIGNMENT_V2_COMMITMENT_TAG: &str = "consignment-v2";
 
 /// The sender-produced envelope delivering a sanad against a recipient invoice.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Consignment {
     /// Consignment envelope wire version.
     pub version: u16,
@@ -40,6 +41,91 @@ pub struct Consignment {
     /// Reused proof bundle: the transition DAG history back to a validated anchor,
     /// plus inclusion and finality proofs. See [`ProofBundle`].
     pub proof_bundle: ProofBundle,
+}
+
+/// Inspection-only status for a V1 integrity dimension.
+///
+/// None of these values is a V2 assurance verdict. In particular,
+/// [`Self::Unavailable`] must not be treated as successful verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyIntegrityStatus {
+    /// The legacy artifact carries the material, but this decoder has not
+    /// cryptographically verified it.
+    PresentUnverified,
+    /// A structural relationship is internally consistent.
+    StructurallyConsistent,
+    /// A structural relationship is internally contradictory.
+    Contradicted,
+    /// V1 has no representation for this integrity dimension.
+    Unavailable,
+}
+
+/// Integrity dimensions reported by inspection of a legacy V1 consignment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyIntegrityDimensions {
+    /// Whether the legacy proof bundle names the invoice's destination seal.
+    pub destination_binding: LegacyIntegrityStatus,
+    /// Legacy proof material is retained but is not verified by wire decoding.
+    pub legacy_proof_bundle: LegacyIntegrityStatus,
+    /// V1 does not identify and close one distinct consumed state.
+    pub source_closure: LegacyIntegrityStatus,
+    /// V1 signatures do not authorize a commitment over the complete envelope.
+    pub complete_envelope_authorization: LegacyIntegrityStatus,
+    /// Portable non-equivocation requires V2 source closure and is unavailable.
+    pub portable_non_equivocation: LegacyIntegrityStatus,
+}
+
+/// Safely inspectable fields from a canonical legacy V1 consignment.
+///
+/// This type deliberately has no conversion into [`ConsignmentV2`] and is not
+/// accepted by the V2 validation API. Migration must reconstruct and verify a
+/// complete V2 payload through the explicit V2 constructors.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyConsignmentInspection {
+    /// Exact legacy envelope version.
+    pub legacy_version: u16,
+    /// Recipient invoice present in the legacy envelope.
+    pub invoice: Invoice,
+    /// Sanad identifier present in the legacy envelope.
+    pub sanad_id: SanadIdWire,
+    /// Legacy proof material, retained for forensic inspection only.
+    pub proof_bundle: ProofBundle,
+    /// Explicit availability of each relevant integrity dimension.
+    pub integrity: LegacyIntegrityDimensions,
+}
+
+/// Stable failure codes for explicit V1 inspection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyConsignmentErrorCode {
+    /// Bytes were not a decodable V1 CBOR object.
+    MalformedEncoding,
+    /// The input was extended, had trailing data, or was not canonical.
+    NonCanonicalEncoding,
+    /// The envelope version is not the one supported legacy version.
+    UnsupportedVersion,
+    /// A required V1 field is malformed or uses an unsupported nested version.
+    UnsupportedArtifact,
+}
+
+/// A V1 inspection failure with a stable machine-readable code.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{code:?}: {detail}")]
+pub struct LegacyConsignmentError {
+    /// Stable code suitable for SDK and CLI boundaries.
+    pub code: LegacyConsignmentErrorCode,
+    /// Actionable diagnostic detail.
+    pub detail: String,
+}
+
+impl LegacyConsignmentError {
+    fn new(code: LegacyConsignmentErrorCode, detail: impl Into<String>) -> Self {
+        Self {
+            code,
+            detail: detail.into(),
+        }
+    }
 }
 
 impl Consignment {
@@ -59,6 +145,91 @@ impl Consignment {
     /// Returns a [`CodecError`] if canonical encoding fails.
     pub fn canonical_cbor(&self) -> Result<Vec<u8>, CodecError> {
         to_canonical_cbor(self)
+    }
+
+    /// Explicitly decode a canonical V1 envelope for inspection only.
+    ///
+    /// This entry point never probes for another format and never returns an
+    /// acceptance-capable V2 value.
+    pub fn decode_v1_for_inspection(
+        bytes: &[u8],
+    ) -> Result<LegacyConsignmentInspection, LegacyConsignmentError> {
+        let decoded: Self = from_canonical_cbor(bytes).map_err(|error| {
+            LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::MalformedEncoding,
+                error.to_string(),
+            )
+        })?;
+        let canonical = to_canonical_cbor(&decoded).map_err(|error| {
+            LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::MalformedEncoding,
+                error.to_string(),
+            )
+        })?;
+        if canonical != bytes {
+            return Err(LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::NonCanonicalEncoding,
+                "input is extended, trailing, or not the unique canonical V1 encoding",
+            ));
+        }
+        if decoded.version != CONSIGNMENT_VERSION {
+            return Err(LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::UnsupportedVersion,
+                format!("unsupported legacy consignment version {}", decoded.version),
+            ));
+        }
+        if decoded.invoice.version != crate::invoice::INVOICE_VERSION {
+            return Err(LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::UnsupportedArtifact,
+                format!(
+                    "unsupported legacy invoice version {}",
+                    decoded.invoice.version
+                ),
+            ));
+        }
+        if decoded.proof_bundle.version != 1 {
+            return Err(LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::UnsupportedArtifact,
+                format!(
+                    "unsupported legacy proof-bundle version {}",
+                    decoded.proof_bundle.version
+                ),
+            ));
+        }
+        if decoded.invoice.schema_id.is_empty() {
+            return Err(LegacyConsignmentError::new(
+                LegacyConsignmentErrorCode::UnsupportedArtifact,
+                "legacy invoice schema_id is empty",
+            ));
+        }
+        let destination_binding = match decoded.binds_invoice_seal() {
+            Ok(true) => LegacyIntegrityStatus::StructurallyConsistent,
+            Ok(false) => LegacyIntegrityStatus::Contradicted,
+            Err(error) => {
+                return Err(LegacyConsignmentError::new(
+                    LegacyConsignmentErrorCode::UnsupportedArtifact,
+                    error,
+                ));
+            }
+        };
+        let sanad_id = decoded.sanad_id.clone();
+        csv_hash::SanadId::try_from(sanad_id).map_err(|error| {
+            LegacyConsignmentError::new(LegacyConsignmentErrorCode::UnsupportedArtifact, error)
+        })?;
+
+        Ok(LegacyConsignmentInspection {
+            legacy_version: decoded.version,
+            invoice: decoded.invoice,
+            sanad_id: decoded.sanad_id,
+            proof_bundle: decoded.proof_bundle,
+            integrity: LegacyIntegrityDimensions {
+                destination_binding,
+                legacy_proof_bundle: LegacyIntegrityStatus::PresentUnverified,
+                source_closure: LegacyIntegrityStatus::Unavailable,
+                complete_envelope_authorization: LegacyIntegrityStatus::Unavailable,
+                portable_non_equivocation: LegacyIntegrityStatus::Unavailable,
+            },
+        })
     }
 
     /// Whether the bundled proof assigns the sanad to the exact [`SealPoint`] the
@@ -532,6 +703,162 @@ mod tests {
 
         let unbound = sample_consignment(sample_invoice(), false);
         assert!(!unbound.binds_invoice_seal().unwrap());
+    }
+
+    #[test]
+    fn v1_inspection_reports_unavailable_v2_integrity() {
+        let legacy = sample_consignment(sample_invoice(), true);
+        let bytes = legacy.canonical_cbor().unwrap();
+        let inspection = Consignment::decode_v1_for_inspection(&bytes).unwrap();
+
+        assert_eq!(inspection.legacy_version, CONSIGNMENT_VERSION);
+        assert_eq!(
+            inspection.integrity.destination_binding,
+            LegacyIntegrityStatus::StructurallyConsistent
+        );
+        assert_eq!(
+            inspection.integrity.legacy_proof_bundle,
+            LegacyIntegrityStatus::PresentUnverified
+        );
+        assert_eq!(
+            inspection.integrity.source_closure,
+            LegacyIntegrityStatus::Unavailable
+        );
+        assert_eq!(
+            inspection.integrity.complete_envelope_authorization,
+            LegacyIntegrityStatus::Unavailable
+        );
+        assert_eq!(
+            inspection.integrity.portable_non_equivocation,
+            LegacyIntegrityStatus::Unavailable
+        );
+        assert_eq!(
+            hex::encode(csv_tagged_hash("consignment-v1-inspection-vector", &bytes)),
+            "b21cebc995b7c215fea8e80b199e027d52aed925a17b12b8b42651c63d3000ce"
+        );
+    }
+
+    #[test]
+    fn v1_contradictory_destination_remains_inspectable() {
+        let legacy = sample_consignment(sample_invoice(), false);
+        let inspection =
+            Consignment::decode_v1_for_inspection(&legacy.canonical_cbor().unwrap()).unwrap();
+        assert_eq!(
+            inspection.integrity.destination_binding,
+            LegacyIntegrityStatus::Contradicted
+        );
+        assert_eq!(
+            inspection.integrity.portable_non_equivocation,
+            LegacyIntegrityStatus::Unavailable
+        );
+    }
+
+    #[test]
+    fn v1_decoder_rejects_extensions_and_unknown_versions() {
+        #[derive(Serialize)]
+        struct ExtendedV1 {
+            version: u16,
+            invoice: Invoice,
+            sanad_id: SanadIdWire,
+            proof_bundle: ProofBundle,
+            source_closure: Vec<u8>,
+            finality_upgrade: Vec<u8>,
+        }
+
+        let legacy = sample_consignment(sample_invoice(), true);
+        let extended = ExtendedV1 {
+            version: legacy.version,
+            invoice: legacy.invoice.clone(),
+            sanad_id: legacy.sanad_id.clone(),
+            proof_bundle: legacy.proof_bundle.clone(),
+            source_closure: vec![0xFA; 32],
+            finality_upgrade: vec![0xFB; 32],
+        };
+        let bytes = to_canonical_cbor(&extended).unwrap();
+        let error = Consignment::decode_v1_for_inspection(&bytes).unwrap_err();
+        assert_eq!(
+            error.code,
+            LegacyConsignmentErrorCode::MalformedEncoding,
+            "extension must fail with the stable malformed-encoding code"
+        );
+
+        let mut unknown = legacy;
+        unknown.version = 99;
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&unknown.canonical_cbor().unwrap())
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::UnsupportedVersion
+        );
+    }
+
+    #[test]
+    fn explicit_decoders_reject_competing_interpretations() {
+        let v1_bytes = sample_consignment(sample_invoice(), true)
+            .canonical_cbor()
+            .unwrap();
+        assert_eq!(
+            ConsignmentV2::decode_v2(&v1_bytes).unwrap_err().code,
+            ConsignmentV2ErrorCode::MalformedEncoding
+        );
+
+        let v2_bytes = sample_v2().canonical_cbor().unwrap();
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&v2_bytes)
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::MalformedEncoding
+        );
+    }
+
+    #[test]
+    fn malformed_truncated_and_extended_v1_fail_stably() {
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&[0xFF])
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::MalformedEncoding
+        );
+
+        let bytes = sample_consignment(sample_invoice(), true)
+            .canonical_cbor()
+            .unwrap();
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&bytes[..bytes.len() - 1])
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::MalformedEncoding
+        );
+
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&trailing)
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::NonCanonicalEncoding
+        );
+    }
+
+    #[test]
+    fn malformed_v1_fields_fail_as_unsupported_artifacts() {
+        let mut legacy = sample_consignment(sample_invoice(), true);
+        legacy.sanad_id.bytes = "not-hex".into();
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&legacy.canonical_cbor().unwrap())
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::UnsupportedArtifact
+        );
+
+        let mut legacy = sample_consignment(sample_invoice(), true);
+        legacy.proof_bundle.version = 2;
+        assert_eq!(
+            Consignment::decode_v1_for_inspection(&legacy.canonical_cbor().unwrap())
+                .unwrap_err()
+                .code,
+            LegacyConsignmentErrorCode::UnsupportedArtifact
+        );
     }
 
     #[test]

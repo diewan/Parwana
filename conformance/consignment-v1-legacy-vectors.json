@@ -1,0 +1,40 @@
+{
+  "vector_version": 1,
+  "format": "consignment-v1",
+  "encoding": "canonical-cbor",
+  "positive": {
+    "name": "canonical-inspection-only",
+    "digest_algorithm": "csv-tagged-hash",
+    "digest_domain": "consignment-v1-inspection-vector",
+    "digest": "b21cebc995b7c215fea8e80b199e027d52aed925a17b12b8b42651c63d3000ce",
+    "source_closure": "unavailable",
+    "complete_envelope_authorization": "unavailable",
+    "portable_non_equivocation": "unavailable"
+  },
+  "negative": [
+    {
+      "name": "truncated",
+      "error": "malformed_encoding"
+    },
+    {
+      "name": "trailing-data",
+      "error": "non_canonical_encoding"
+    },
+    {
+      "name": "unknown-version",
+      "error": "unsupported_version"
+    },
+    {
+      "name": "fake-closure-extension",
+      "error": "malformed_encoding"
+    },
+    {
+      "name": "malformed-sanad-id",
+      "error": "unsupported_artifact"
+    },
+    {
+      "name": "v1-through-v2-decoder",
+      "error": "malformed_encoding"
+    }
+  ]
+}

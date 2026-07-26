@@ -34,7 +34,8 @@ pub use consignment::{
     CONSIGNMENT_V2_COMMITMENT_TAG, CONSIGNMENT_V2_ENVELOPE_VERSION,
     CONSIGNMENT_V2_PROTOCOL_VERSION, CONSIGNMENT_VERSION, Consignment, ConsignmentAuthorization,
     ConsignmentProofRequirements, ConsignmentV2, ConsignmentV2Error, ConsignmentV2ErrorCode,
-    ConsignmentV2Payload,
+    ConsignmentV2Payload, LegacyConsignmentError, LegacyConsignmentErrorCode,
+    LegacyConsignmentInspection, LegacyIntegrityDimensions, LegacyIntegrityStatus,
 };
 pub use invoice::{INVOICE_VERSION, Invoice};
 pub use primitives::{CommitmentWire, HashWire, SanadIdWire};
