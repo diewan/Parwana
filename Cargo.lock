@@ -3398,6 +3398,7 @@ dependencies = [
  "csv-wire",
  "dirs",
  "ed25519-dalek",
+ "getrandom 0.2.17",
  "gloo-timers 0.3.0",
  "hex",
  "k256",
