@@ -14,6 +14,7 @@
 
 pub mod adapter_impl;
 pub mod bip341;
+pub mod closure;
 pub mod config;
 pub mod error;
 pub mod lock_script;
@@ -47,6 +48,7 @@ pub mod json_rpc;
 pub mod runtime_adapter;
 
 pub use bip341::{Bip341Error, TaprootOutput, derive_output_key, generate_test_keypair};
+pub use closure::{BitcoinClosureArtifact, BitcoinClosureError, build_source_closure};
 pub use config::{BitcoinConfig, BitcoinRpcBackend, Network};
 pub use rpc::BitcoinRpc;
 pub use seal_protocol::BitcoinSealProtocol;
