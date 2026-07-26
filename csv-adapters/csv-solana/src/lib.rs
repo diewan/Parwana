@@ -9,6 +9,8 @@
 
 pub mod anchor_client;
 pub mod chain_verification;
+pub mod closure;
+pub mod closure_verifier;
 pub mod config;
 pub mod error;
 pub mod mint;

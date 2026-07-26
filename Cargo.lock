@@ -3552,14 +3552,22 @@ dependencies = [
 name = "csv-testkit"
 version = "0.1.5"
 dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie 0.8.1",
  "csv-accountability",
+ "csv-aptos",
  "csv-chain-ports",
  "csv-codec",
+ "csv-ethereum",
  "csv-hash",
  "csv-proof",
  "csv-protocol",
  "csv-runtime",
+ "csv-solana",
  "csv-storage",
+ "csv-sui",
  "csv-verifier",
  "ed25519-dalek",
  "hex",

@@ -6,6 +6,15 @@
 
 #![warn(missing_docs)]
 
+pub mod checkpoint_chain;
+pub mod closure_material;
+
+pub use checkpoint_chain::{
+    ChainDigest, ChainHasher, ChainInclusion, ChainInclusionFailure, CommitmentChain,
+    decode_entries, encode_entries, verify_commitment_chain,
+};
+pub use closure_material::{ClosureMaterialError, ClosureMaterialReader, ClosureMaterialWriter};
+
 use async_trait::async_trait;
 use csv_hash::{Hash, commitment::Commitment};
 use csv_protocol::finality::ChainCapabilities;

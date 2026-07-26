@@ -7,6 +7,7 @@
 
 pub mod accountability;
 pub mod adversarial;
+pub mod closure_conformance;
 pub mod fixtures;
 pub mod helpers;
 pub mod traces;
@@ -15,6 +16,10 @@ pub mod traces;
 pub use accountability::AccountabilityFixture;
 pub use adversarial::{
     AdversarialConfig, AdversarialRunner, ByzantineBehavior, ByzantineFaultMode, ByzantineRpcReader,
+};
+pub use closure_conformance::{
+    ChainConformanceEvidence, ClosureConformanceAdapter, ClosureScenario, ClosureSupportMatrix,
+    run_closure_conformance,
 };
 pub use fixtures::{TestAdapter, TestProofBundle, TestTransfer};
 pub use helpers::{TestBuilder, TestContext};

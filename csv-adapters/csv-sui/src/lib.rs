@@ -39,6 +39,8 @@
 
 pub mod chain_verification;
 pub mod checkpoint;
+pub mod closure;
+pub mod closure_verifier;
 pub mod config;
 pub mod deploy;
 pub mod error;

@@ -1,0 +1,109 @@
+{
+  "suite_version": 1,
+  "chains": [
+    {
+      "chain_id": "ethereum",
+      "network_id": "sepolia",
+      "proof_kind": "ethereum-nullifier-storage-v1",
+      "finality_establishing_trust_modes": [
+        "FullNode",
+        "LightClient"
+      ],
+      "indeterminate_trust_modes": [
+        "RpcQuorum",
+        "AttestedRegistry"
+      ],
+      "checks_passed": [
+        "positive_closure_verifies",
+        "closure_is_deterministic",
+        "result_is_self_consistent",
+        "second_successor_is_not_closure",
+        "other_source_is_not_closure",
+        "insufficient_finality_is_not_closure",
+        "orphaned_checkpoint_is_not_closure",
+        "random_material_is_not_closure",
+        "foreign_proof_kind_is_rejected",
+        "undeclared_trust_modes_never_report_closure",
+        "closure_does_not_imply_settlement"
+      ]
+    },
+    {
+      "chain_id": "sui",
+      "network_id": "testnet",
+      "proof_kind": "sui-object-consumption-v1",
+      "finality_establishing_trust_modes": [
+        "FullNode",
+        "LightClient"
+      ],
+      "indeterminate_trust_modes": [
+        "RpcQuorum",
+        "AttestedRegistry"
+      ],
+      "checks_passed": [
+        "positive_closure_verifies",
+        "closure_is_deterministic",
+        "result_is_self_consistent",
+        "second_successor_is_not_closure",
+        "other_source_is_not_closure",
+        "insufficient_finality_is_not_closure",
+        "orphaned_checkpoint_is_not_closure",
+        "random_material_is_not_closure",
+        "foreign_proof_kind_is_rejected",
+        "undeclared_trust_modes_never_report_closure",
+        "closure_does_not_imply_settlement"
+      ]
+    },
+    {
+      "chain_id": "aptos",
+      "network_id": "testnet",
+      "proof_kind": "aptos-resource-nullifier-v1",
+      "finality_establishing_trust_modes": [
+        "FullNode",
+        "LightClient"
+      ],
+      "indeterminate_trust_modes": [
+        "RpcQuorum",
+        "AttestedRegistry"
+      ],
+      "checks_passed": [
+        "positive_closure_verifies",
+        "closure_is_deterministic",
+        "result_is_self_consistent",
+        "second_successor_is_not_closure",
+        "other_source_is_not_closure",
+        "insufficient_finality_is_not_closure",
+        "orphaned_checkpoint_is_not_closure",
+        "random_material_is_not_closure",
+        "foreign_proof_kind_is_rejected",
+        "undeclared_trust_modes_never_report_closure",
+        "closure_does_not_imply_settlement"
+      ]
+    },
+    {
+      "chain_id": "solana",
+      "network_id": "devnet",
+      "proof_kind": "solana-account-nullifier-v1",
+      "finality_establishing_trust_modes": [
+        "FullNode"
+      ],
+      "indeterminate_trust_modes": [
+        "LightClient",
+        "RpcQuorum",
+        "AttestedRegistry"
+      ],
+      "checks_passed": [
+        "positive_closure_verifies",
+        "closure_is_deterministic",
+        "result_is_self_consistent",
+        "second_successor_is_not_closure",
+        "other_source_is_not_closure",
+        "insufficient_finality_is_not_closure",
+        "orphaned_checkpoint_is_not_closure",
+        "random_material_is_not_closure",
+        "foreign_proof_kind_is_rejected",
+        "undeclared_trust_modes_never_report_closure",
+        "closure_does_not_imply_settlement"
+      ]
+    }
+  ]
+}

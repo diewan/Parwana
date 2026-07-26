@@ -63,6 +63,9 @@ pub mod invariants;
 // Reorg monitoring and censorship detection
 pub mod monitor;
 
+// Portable source-conflict identity and destination-domain closure binding
+pub mod nullifier;
+
 // Replay semantics
 pub mod replay;
 
@@ -149,6 +152,12 @@ pub use commitment::Commitment;
 pub use closure::{
     ClosureDimensionStatus, ClosureInterfaceError, ClosureProof, ClosureProofKind,
     ClosureTrustMode, ClosureVerificationResult, FinalityPolicy, FinalizedCheckpoint,
+};
+
+// Re-export portable source-conflict identity and destination binding
+pub use nullifier::{
+    CLOSURE_BINDING_TAG, CLOSURE_DOMAIN_TAG, ClosureDomain, NullifierDomainError,
+    SOURCE_NULLIFIER_TAG, SourceNullifier,
 };
 
 // Re-export envelope types

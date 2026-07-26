@@ -12,6 +12,8 @@
 
 #[cfg(feature = "rpc")]
 pub mod bindings;
+pub mod closure;
+pub mod closure_verifier;
 pub mod config;
 pub mod contract_bytecode;
 pub mod error;

@@ -22,6 +22,14 @@ rand = "0.8"
 sha2 = "0.10"
 
 [dev-dependencies]
+csv-ethereum = { version = "0.1.5", path = "../csv-adapters/csv-ethereum" }
+csv-sui = { version = "0.1.5", path = "../csv-adapters/csv-sui" }
+csv-aptos = { version = "0.1.5", path = "../csv-adapters/csv-aptos" }
+csv-solana = { version = "0.1.5", path = "../csv-adapters/csv-solana" }
+alloy-primitives = "1.5"
+alloy-trie = "0.8"
+alloy-rlp = "0.3"
+alloy-consensus = "1.8"
 csv-storage = { version = "0.1.5", path = "../csv-storage", default-features = false }
 csv-runtime = { version = "0.1.5", path = "../csv-runtime" }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
@@ -33,3 +41,7 @@ path = "tests/adversarial_integration.rs"
 [[test]]
 name = "conformance_corpus"
 path = "tests/conformance_corpus.rs"
+
+[[test]]
+name = "cross_chain_conformance"
+path = "tests/cross_chain_conformance.rs"
