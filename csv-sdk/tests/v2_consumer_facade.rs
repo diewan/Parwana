@@ -1,5 +1,8 @@
+#![cfg(feature = "client")]
+
 use csv_sdk::v2::{self, Capability};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 #[test]
 fn malformed_v2_error_crosses_the_sdk_boundary_unchanged() {
@@ -39,6 +42,40 @@ fn facade_has_no_authoritative_validation_boolean() {
     let facade = include_str!("../src/v2.rs");
     assert!(!facade.contains("proof_valid: bool"));
     assert!(!facade.contains("proof_is_valid: bool"));
+}
+
+#[test]
+fn embedded_conformance_package_is_content_addressed_and_complete() {
+    let bytes = v2::conformance_manifest();
+    assert_eq!(
+        hex::encode(Sha256::digest(bytes)),
+        v2::CONFORMANCE_MANIFEST_SHA256
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(manifest["version"], v2::CONFORMANCE_PACKAGE_VERSION);
+    assert_eq!(
+        manifest["platforms"]["wasm32"]["persistent_store"],
+        "unsupported"
+    );
+    let cases = manifest["cases"].as_array().unwrap();
+    for category in [
+        "positive",
+        "legacy",
+        "malicious-graph",
+        "bitcoin-closure",
+        "conflict",
+        "reorganization",
+        "crash",
+    ] {
+        assert!(cases.iter().any(|case| case["category"] == category));
+    }
+    assert!(cases.iter().all(|case| {
+        case["wire_version"] == 2
+            && case["contract_version"] == "0.1.10"
+            && case["expected_reason_code"]
+                .as_str()
+                .is_some_and(|code| !code.is_empty())
+    }));
 }
 
 #[test]

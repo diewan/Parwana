@@ -1,3 +1,5 @@
+#![cfg(feature = "client")]
+
 //! Regression checks for the single RPC configuration authority.
 
 use std::fs;

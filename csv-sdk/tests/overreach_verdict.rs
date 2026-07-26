@@ -1,3 +1,5 @@
+#![cfg(feature = "accountability")]
+
 //! DEMO-03 (Scenario B) — the independent overreach verdict.
 //!
 //! When an agent executes parameters its mandate never authorized (a changed

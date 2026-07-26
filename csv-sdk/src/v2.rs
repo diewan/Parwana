@@ -8,6 +8,21 @@ use csv_chain_ports::ClosureProofVerifier;
 use csv_codec::from_canonical_cbor;
 use csv_storage::AcceptedStateStore;
 
+/// Version of the embedded hostile-conformance fixture package.
+pub const CONFORMANCE_PACKAGE_VERSION: &str = "stage4-v1";
+
+/// SHA-256 of the exact embedded conformance manifest bytes.
+pub const CONFORMANCE_MANIFEST_SHA256: &str =
+    "1ff11779fb94334d24af10428996215af5b0bba30d9c754ebaee44ac11e83f0e";
+
+/// Return the exact, versioned Stage 4 conformance manifest.
+///
+/// Consumers should verify [`CONFORMANCE_MANIFEST_SHA256`] before executing
+/// cases. The returned bytes are identical on native and WASM targets.
+pub const fn conformance_manifest() -> &'static [u8] {
+    include_bytes!("../../csv-testkit/corpus/v2/manifest.json")
+}
+
 pub use csv_protocol::closure::{
     ClosureProof, ClosureProofKind, ClosureTrustMode, FinalizedCheckpoint,
 };

@@ -87,6 +87,15 @@ jobs:
       - name: Verify published contract manifest and conformance digest
         run: python3 scripts/check-contract-manifest.py
 
+      - name: Required portable non-equivocation hostile conformance
+        run: |
+          python3 scripts/generate-portable-conformance.py --check
+          cargo test -p csv-runtime isolated_recipients_cannot_both_accept_one_source
+          cargo test -p csv-runtime send_resume
+          cargo test -p csv-storage orphaning_checkpoint
+          cargo test -p csv-testkit --test conformance_corpus
+          cargo test -p csv-sdk --test v2_consumer_facade
+
       # The SDK path (runtime, coordinator, storage) must stay wasm-compilable:
       # persistence and chain adapters are target-gated to native, wasm builds
       # run on in-memory stores. These gates keep native-only deps from leaking

@@ -1,0 +1,385 @@
+{
+  "cases": [
+    {
+      "bytes_hex": "",
+      "category": "positive",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "accepted",
+        "closure": "satisfied",
+        "finality": "satisfied",
+        "freshness": "satisfied",
+        "inclusion": "satisfied",
+        "proof": "satisfied"
+      },
+      "expected_reason_code": "ACCEPT.V2.ACCEPTED",
+      "id": "valid-v2",
+      "source": "csv-runtime/src/recipient_acceptance.rs::success_returns_full_typed_report_and_is_idempotent",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "legacy",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "unsupported",
+        "closure": "indeterminate",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "indeterminate",
+        "proof": "indeterminate"
+      },
+      "expected_reason_code": "WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE",
+      "id": "legacy-v1",
+      "source": "csv-wire/src/consignment.rs::v1_inspection_never_claims_portable_non_equivocation",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.CYCLE",
+      "id": "graph-cycle",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.DUPLICATE_NODE",
+      "id": "graph-duplicate-node",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.SELF_PARENT",
+      "id": "graph-self-parent",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.MISSING_PARENT",
+      "id": "graph-missing-parent",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH",
+      "id": "graph-root-substitution",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.NON_CANONICAL_ORDER",
+      "id": "graph-noncanonical-order",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.STATE.COMMITMENT_MISMATCH",
+      "id": "state-content-mutation",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.STATE.OUTPUT_NOT_FOUND",
+      "id": "state-output-index-mutation",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.TRANSITION.COMMITMENT_MISMATCH",
+      "id": "transition-commitment-mutation",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH",
+      "id": "canonical-root-mutation",
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "ff",
+      "category": "malicious-graph",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "structure": "failed"
+      },
+      "expected_reason_code": "PROTOCOL.REFERENCE.WRONG_DISCRIMINANT",
+      "id": "consumed-evidence-substitution",
+      "source": "csv-protocol/src/reference.rs::consumed_and_evidence_references_are_domain_separated",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
+      "id": "proof-nonempty-garbage",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.INCLUSION",
+      "id": "proof-wrong-header",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.INCLUSION",
+      "id": "proof-wrong-merkle-path",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "030303030303030303030303030303030303030303030303030303030303030303030303",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
+      "id": "proof-wrong-outpoint",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "0404040404040404040404040404040404040404040404040404040404040404",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
+      "id": "proof-wrong-transition-commitment",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "failed",
+        "freshness": "indeterminate",
+        "inclusion": "satisfied",
+        "proof": "satisfied"
+      },
+      "expected_reason_code": "ACCEPT.V2.FINALITY",
+      "id": "checkpoint-insufficient-finality",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "satisfied",
+        "freshness": "failed",
+        "inclusion": "satisfied",
+        "proof": "satisfied"
+      },
+      "expected_reason_code": "ACCEPT.V2.FRESHNESS",
+      "id": "checkpoint-stale",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "indeterminate",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.VERIFICATION_CONTEXT",
+      "id": "checkpoint-wrong-network",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "bitcoin-closure",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed",
+        "finality": "failed",
+        "freshness": "indeterminate",
+        "inclusion": "failed",
+        "proof": "satisfied"
+      },
+      "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
+      "id": "checkpoint-orphaned",
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "conflict",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "rejected",
+        "closure": "failed"
+      },
+      "expected_reason_code": "ACCEPT.V2.CONFLICT",
+      "id": "losing-conflict",
+      "source": "csv-runtime/src/recipient_acceptance.rs::isolated_recipients_cannot_both_accept_one_source",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "reorganization",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "revoked",
+        "closure": "failed"
+      },
+      "expected_reason_code": "STORAGE.CHECKPOINT.ORPHANED",
+      "id": "reorganization",
+      "source": "csv-storage/src/accepted_state.rs::orphaning_checkpoint_revokes_root_and_downgrades_descendants_idempotently",
+      "wire_version": 2
+    },
+    {
+      "bytes_hex": "",
+      "category": "crash",
+      "contract_version": "0.1.10",
+      "expected_dimensions": {
+        "aggregate": "accepted"
+      },
+      "expected_reason_code": "RUNTIME.SEND.RECOVERED",
+      "id": "crash-recovery",
+      "source": "csv-runtime/src/transfer_coordinator.rs::send_resume_after_emit_interrupt_never_recloses_source_seal",
+      "wire_version": 2
+    }
+  ],
+  "package": "parwana-portable-conformance",
+  "platforms": {
+    "native": {
+      "persistent_store": "supported",
+      "verification": "supported"
+    },
+    "wasm32": {
+      "persistent_store": "unsupported",
+      "verification": "supported"
+    }
+  },
+  "schema_version": 1,
+  "version": "stage4-v1"
+}

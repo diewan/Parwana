@@ -2,6 +2,7 @@
 //! tests named in the immutable manifest.
 
 use csv_accountability::{EvidenceSourceClass, github_deployment_descriptor};
+use serde_json::Value;
 
 #[test]
 fn v1_manifest_covers_required_security_cases() {
@@ -21,6 +22,70 @@ fn v1_manifest_covers_required_security_cases() {
         );
     }
     assert!(manifest.contains("corpus_version = 1"));
+}
+
+#[test]
+fn portable_v2_manifest_covers_every_hostile_campaign() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    let cases = manifest["cases"].as_array().unwrap();
+    let required = [
+        "graph-cycle",
+        "graph-duplicate-node",
+        "graph-self-parent",
+        "graph-missing-parent",
+        "graph-root-substitution",
+        "graph-noncanonical-order",
+        "state-content-mutation",
+        "state-output-index-mutation",
+        "transition-commitment-mutation",
+        "canonical-root-mutation",
+        "consumed-evidence-substitution",
+        "proof-nonempty-garbage",
+        "proof-wrong-header",
+        "proof-wrong-merkle-path",
+        "proof-wrong-outpoint",
+        "proof-wrong-transition-commitment",
+        "checkpoint-insufficient-finality",
+        "checkpoint-stale",
+        "checkpoint-wrong-network",
+        "checkpoint-orphaned",
+        "losing-conflict",
+        "reorganization",
+        "crash-recovery",
+    ];
+    for id in required {
+        let case = cases
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap_or_else(|| panic!("missing portable conformance case {id}"));
+        assert_eq!(case["wire_version"], 2);
+        assert_eq!(case["contract_version"], "0.1.10");
+        assert!(
+            case["expected_reason_code"]
+                .as_str()
+                .is_some_and(|code| !code.is_empty())
+        );
+        assert!(
+            case["expected_dimensions"]
+                .as_object()
+                .is_some_and(|map| !map.is_empty())
+        );
+    }
+}
+
+#[test]
+fn hostile_vectors_do_not_encode_success_for_failed_proof_material() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    for case in manifest["cases"].as_array().unwrap() {
+        if case["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("proof-"))
+        {
+            assert_ne!(case["expected_dimensions"]["proof"], "satisfied");
+            assert_ne!(case["expected_dimensions"]["closure"], "satisfied");
+            assert_eq!(case["expected_dimensions"]["aggregate"], "rejected");
+        }
+    }
 }
 
 #[test]

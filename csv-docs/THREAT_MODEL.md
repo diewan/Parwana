@@ -565,17 +565,21 @@ has shipped. Current status:
 
 | Threat | Current implementation status |
 |---|---|
-| T-NE-01 | Planned: source closure and the isolated-recipient case require Stages 2–4. |
+| T-NE-01 | Implemented for Bitcoin: the isolated-recipient campaign exercises both delivery orders against one finalized source ordering and isolated recipient stores. |
 | T-NE-02 | Planned: source-domain closure and portable destination binding require Stages 2–3; additional chains are Stage 5. |
-| T-NE-03 | Partial: typed assurance refuses to equate local replay with external closure; the isolated-recipient proof remains Stage 4. |
-| T-NE-04 | Partial: caller booleans cannot upgrade typed assurance; cryptographic closure-proof verification remains Stage 2. |
-| T-NE-05 | Partial: canonical DAG identity and hostile-graph validation exist, but adapter-built graphs still use the deferred-identity path. |
-| T-NE-06 | Partial: checkpoint/freshness dimensions exist; reorganization demotion and its conformance case remain planned. |
-| T-NE-07 | Planned for the atomic acceptance and crash-recovery stages. |
-| T-NE-08 | Implemented at the protocol layer by the reference firewall and creation-time exclusivity binding; publication in the shared conformance package remains planned. |
+| T-NE-03 | Implemented for Bitcoin: typed assurance refuses to equate local replay with external closure and the isolated-recipient test uses separate stores. |
+| T-NE-04 | Implemented for Bitcoin: the versioned forged-proof corpus and cryptographic closure verifier fail closed by assurance dimension. |
+| T-NE-05 | Implemented in the V2 conformance surface: canonical DAG identity and every plan-listed hostile mutation have stable expected reasons. |
+| T-NE-06 | Implemented for Bitcoin: finality, freshness, and orphaning remain distinct checkpoint-relative outcomes. |
+| T-NE-07 | Implemented: atomic acceptance and deterministic send-resume campaigns are required release checks. |
+| T-NE-08 | Implemented by the reference firewall, creation-time exclusivity binding, and the shared V2 conformance package. |
 
-The public description of Parwana remains the plan's §8 first form until the
-Stage 4 gate passes.
+The Stage 4 release gate unlocks exactly this claim: for Bitcoin sources, an
+isolated recipient can verify that a successor consumes a uniquely ordered
+source state and is bound to the delivered destination assignment, relative to
+the named checkpoint, finality policy, proof provider, freshness bound, and
+trust mode. It does not claim equivalent closure for Ethereum, Sui, Aptos, or
+Solana; those adapters remain outside this release claim.
 
 ### 11.4 Accepted residual risk (assumptions, not mitigations)
 

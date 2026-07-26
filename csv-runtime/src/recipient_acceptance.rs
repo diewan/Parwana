@@ -226,9 +226,18 @@ async fn verify_decoded_consignment(
             "closure result provenance does not match recipient inputs",
         ));
     }
+    let closure_failure = if closure
+        .reason_codes
+        .iter()
+        .any(|code| code == "PROTOCOL.CLOSURE.CONFLICT")
+    {
+        AcceptanceErrorCode::Conflict
+    } else {
+        AcceptanceErrorCode::SourceClosure
+    };
     require_satisfied(
         closure.source_closure,
-        AcceptanceErrorCode::SourceClosure,
+        closure_failure,
         &closure.reason_codes,
     )?;
     require_satisfied(
@@ -473,6 +482,50 @@ mod tests {
         code: AcceptanceErrorCode,
     }
 
+    /// Recipient-independent stand-in for one finalized source-chain ordering.
+    #[derive(Default)]
+    struct FinalizedSourceOrdering {
+        winner: std::sync::Mutex<Option<Hash>>,
+    }
+
+    #[async_trait]
+    impl ClosureProofVerifier for FinalizedSourceOrdering {
+        async fn verify_closure(
+            &self,
+            proof: &ClosureProof,
+            checkpoint: &FinalizedCheckpoint,
+        ) -> AdapterResult<ClosureVerificationResult> {
+            let mut winner = self.winner.lock().expect("ordering lock");
+            let accepted = winner.is_none_or(|commitment| commitment == proof.successor_commitment);
+            if winner.is_none() {
+                *winner = Some(proof.successor_commitment);
+            }
+            let status = if accepted {
+                ClosureDimensionStatus::Satisfied
+            } else {
+                ClosureDimensionStatus::Failed
+            };
+            Ok(ClosureVerificationResult {
+                chain_id: checkpoint.chain_id.clone(),
+                network_id: checkpoint.network_id.clone(),
+                proof_kind: proof.proof_kind.clone(),
+                checkpoint: checkpoint.clone(),
+                proof_validity: status,
+                checkpoint_finality: ClosureDimensionStatus::Satisfied,
+                checkpoint_freshness: ClosureDimensionStatus::Satisfied,
+                source_closure: status,
+                trust_mode: ClosureTrustMode::LightClient,
+                verifier_id: "finalized-source-ordering-v1".into(),
+                proof_provider_id: "bitcoin-spv-v1".into(),
+                reason_codes: vec![if accepted {
+                    "PROTOCOL.CLOSURE.UNIQUE_SUCCESSOR".into()
+                } else {
+                    "PROTOCOL.CLOSURE.CONFLICT".into()
+                }],
+            })
+        }
+    }
+
     #[async_trait]
     impl ClosureProofVerifier for DimensionFailureVerifier {
         async fn verify_closure(
@@ -709,6 +762,28 @@ mod tests {
         let error = left.err().or_else(|| right.err()).unwrap();
         assert_eq!(error.code, AcceptanceErrorCode::Conflict);
         assert!(store.get(&first.source).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn isolated_recipients_cannot_both_accept_one_source() {
+        for first_output in [0x55, 0x56] {
+            let left = fixture(first_output, VALID_PROOF_BYTE);
+            let right = fixture(
+                if first_output == 0x55 { 0x56 } else { 0x55 },
+                VALID_PROOF_BYTE,
+            );
+            let left_store = InMemoryAcceptedStateStore::default();
+            let right_store = InMemoryAcceptedStateStore::default();
+            let ordering = FinalizedSourceOrdering::default();
+
+            let first = accept_with_verifier(&left, &left_store, &ordering).await;
+            let second = accept_with_verifier(&right, &right_store, &ordering).await;
+
+            assert!(first.is_ok());
+            assert_eq!(second.unwrap_err().code, AcceptanceErrorCode::Conflict);
+            assert!(left_store.get(&left.source).await.unwrap().is_some());
+            assert!(right_store.get(&right.source).await.unwrap().is_none());
+        }
     }
 
     #[tokio::test]
