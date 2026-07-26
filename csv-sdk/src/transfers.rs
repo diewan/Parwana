@@ -354,9 +354,10 @@ pub struct TransferReceipt {
     /// chain tip it was measured against. `None` when the receipt was reconstructed
     /// from the runtime journal without a fresh chain read.
     pub finality: Option<csv_runtime::FinalityObservation>,
-    /// What the canonical verifier established about the source proof. `None` on the
-    /// journal-reconstructed path, where no verification ran.
-    pub assurance: Option<csv_protocol::verification_levels::VerificationLevel>,
+    /// What the canonical verifier established about the source proof, per
+    /// dimension, naming each dimension's proof provider (PAR-VERIFY-001). `None`
+    /// on the journal-reconstructed path, where no verification ran.
+    pub assurance: Option<csv_verifier::ProtocolAssuranceReport>,
 }
 
 impl std::fmt::Display for TransferReceipt {

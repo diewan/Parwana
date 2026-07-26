@@ -1,0 +1,79 @@
+{
+  "schema": "diewan.parwana.transition-vectors",
+  "version": 1,
+  "wire_version": 2,
+  "compatibility": {
+    "canonical_bytes": "frozen",
+    "preserved_across_wire_changes": [
+      "consumed-state-ref-v2",
+      "evidence-ref-v2",
+      "output-use-binding-v2"
+    ],
+    "change_rule": "Any changed expected byte or digest requires a corpus version bump and a conformance changelog entry."
+  },
+  "fixture": {
+    "root_node": {
+      "bytecode_hex": "102030",
+      "signatures_hex": ["a1a2a3"],
+      "witnesses_hex": ["b1b2"],
+      "node_id_hex": "30c2b5a06bba4f51b358eee1f2787152def3cb44d15408efdbe87c7715afc5f8",
+      "canonical_bytes_hex": "30c2b5a06bba4f51b358eee1f2787152def3cb44d15408efdbe87c7715afc5f8030000001020300100000003000000a1a2a30100000002000000b1b200000000"
+    },
+    "child_node": {
+      "bytecode_hex": "4050",
+      "signatures_hex": ["c1c2"],
+      "witnesses_hex": ["d1d2d3"],
+      "node_id_hex": "310ac616140cea981b9141f35a797eaa8cc305bdf5f2f6e85566e306a6ef4fe9"
+    },
+    "segment": {
+      "root_hex": "28d5cfdfc826a84cf318b8377542d6e78c7a727b9e020d9f4b7aff113f09084a",
+      "canonical_bytes_hex": "020000004000000030c2b5a06bba4f51b358eee1f2787152def3cb44d15408efdbe87c7715afc5f8030000001020300100000003000000a1a2a30100000002000000b1b2000000005f000000310ac616140cea981b9141f35a797eaa8cc305bdf5f2f6e85566e306a6ef4fe90200000040500100000002000000c1c20100000003000000d1d2d30100000030c2b5a06bba4f51b358eee1f2787152def3cb44d15408efdbe87c7715afc5f828d5cfdfc826a84cf318b8377542d6e78c7a727b9e020d9f4b7aff113f09084a"
+    },
+    "consumed_state_ref": {
+      "transition_id_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "output_index": 7,
+      "state_type": 513,
+      "canonical_bytes_hex": "011111111111111111111111111111111111111111111111111111111111111111070000000102",
+      "digest_hex": "6bc340daba45690e609951d76a1ae9ad866a4db9b0969ef5cc84ea434fc63818"
+    },
+    "evidence_ref": {
+      "commitment_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "proof_requirement": "finalized_inclusion",
+      "canonical_bytes_hex": "02222222222222222222222222222222222222222222222222222222222222222202",
+      "digest_hex": "f997e8e3f3d9e4526bb984ef4e39be1b43da1fed032070a2cd8b994e28bb21d5"
+    },
+    "output_use_binding": {
+      "semantics_version": 2,
+      "state_type": 513,
+      "exclusivity": "exclusive",
+      "canonical_bytes_hex": "0200010202"
+    }
+  },
+  "negative_vectors": [
+    {
+      "id": "node-content-mutated",
+      "mutation": "replace root bytecode with ff2030 while retaining its declared node identifier",
+      "expected_reason": "NodeIdMismatch"
+    },
+    {
+      "id": "segment-root-substituted",
+      "mutation": "replace the segment root with 32 bytes of 33",
+      "expected_reason": "RootMismatch"
+    },
+    {
+      "id": "duplicate-node-identifier",
+      "mutation": "place the root node in the segment twice",
+      "expected_reason": "DuplicateNodeId"
+    },
+    {
+      "id": "consumed-ref-as-evidence",
+      "mutation": "truncate consumed-state reference bytes to EvidenceRef width and decode them as EvidenceRef",
+      "expected_reason": "WrongDiscriminant"
+    },
+    {
+      "id": "unknown-output-exclusivity",
+      "mutation": "replace the output-use exclusivity discriminant with ff",
+      "expected_reason": "UnknownClass"
+    }
+  ]
+}

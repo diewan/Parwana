@@ -25,7 +25,6 @@ use csv_algebra::state::AwaitingFinality;
 use csv_hash::Hash;
 use csv_hash::sanad::SanadId;
 use csv_hash::seal::SealPoint;
-use csv_protocol::verification_levels::VerificationLevel;
 use csv_runtime::execution_journal::ExecutionJournal;
 use csv_runtime::execution_journal::RedbExecutionJournal;
 use csv_runtime::{SendExecutor, SendExecutorError, SendTransfer};
@@ -1371,7 +1370,10 @@ pub struct AcceptedConsignment {
     /// display path does not print it.
     #[allow(dead_code)]
     pub anchor_height: u64,
-    pub verification_level: VerificationLevel,
+    /// The dimensioned assurance the canonical verifier reported for this
+    /// consignment, retained so the accept path can show what was and was not
+    /// established rather than a single label (PAR-VERIFY-001).
+    pub assurance: csv_verifier::ProtocolAssuranceReport,
     pub provenance_strength: Option<ProvenanceStrengthSignal>,
     pub consignment: WireConsignment,
 }
@@ -1489,18 +1491,23 @@ fn validate_consignment_bytes_inner(
             max_anchor_age_blocks: Some(max_anchor_age_blocks),
         }
     };
-    let result = csv_verifier::verify_proof_bound(
+    let report = csv_verifier::verify_proof_bound(
         &consignment.proof_bundle,
         seal_registry,
         consignment.proof_bundle.signature_scheme,
         authorized_signers,
         &expected_domain,
     );
-    if !result.is_valid || !result.errors.is_empty() {
-        for error in &result.errors {
-            output::error(&format!("✗ {}", error));
-        }
-        return Err(anyhow::anyhow!("Consignment proof verification failed"));
+    // An accepting recipient is offline by construction, so it decides against the
+    // offline policy and carries what that policy tolerated onto the accepted
+    // consignment rather than discarding it (PAR-VERIFY-001).
+    let outcome = csv_verifier::AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&report);
+    if !outcome.is_met() {
+        output::assurance_report(&report, &outcome);
+        return Err(anyhow::anyhow!(
+            "Consignment proof verification failed: {}",
+            outcome.shortfall_summary()
+        ));
     }
 
     validate_algebra_acceptance(&consignment)?;
@@ -1525,7 +1532,7 @@ fn validate_consignment_bytes_inner(
         owner,
         commitment,
         anchor_height: consignment.proof_bundle.anchor_ref.block_height,
-        verification_level: result.level,
+        assurance: report,
         provenance_strength,
         consignment,
     })
@@ -1722,9 +1729,9 @@ pub async fn cmd_accept(
     output::kv("Destination Chain", accepted.dest_chain.as_str());
 
     output::progress(3, 5, "Verifying transition proof, anchor, and finality...");
-    output::kv(
-        "Verification Level",
-        &format!("{:?}", accepted.verification_level).to_lowercase(),
+    output::assurance_report(
+        &accepted.assurance,
+        &csv_verifier::AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&accepted.assurance),
     );
 
     output::progress(4, 5, "Checking replay status...");
@@ -2329,7 +2336,7 @@ async fn drive(
                         mint_tx_hash: receipt.mint_tx_hash.clone(),
                         materialization: receipt.materialization.clone(),
                         finality: receipt.finality.clone(),
-                        assurance: receipt.assurance,
+                        assurance: receipt.assurance.clone(),
                     },
                     &sanad_id,
                     &from_chain_id,
@@ -3093,21 +3100,24 @@ mod tests {
         )
         .unwrap();
         let seal = invoice.bound_seal_point().unwrap();
-        let root = Hash::zero();
+        // PAR-DAG-001: the segment's root is derived from its nodes, so it must
+        // be sealed before anything can sign it. The node carries no signature
+        // of its own — signing the root that commits to the node it sits in
+        // would be circular; bundle-level signatures are what the verifier
+        // checks against the root.
+        let transition_dag = DAGSegment::sealed(vec![DAGNode::sealed(
+            vec![0x01, 0x02],
+            vec![],
+            vec![],
+            vec![],
+        )])
+        .expect("canonical single-node segment");
+        let root = transition_dag.root_commitment;
         let signature = make_ed25519_signature_bytes(root.as_bytes());
         let proof_bytes = vec![0x44; 32];
         let bundle = ProofBundle::with_signature_scheme(
             SignatureScheme::Ed25519,
-            DAGSegment::new(
-                vec![DAGNode::new(
-                    Hash::new([1u8; 32]),
-                    vec![0x01, 0x02],
-                    vec![signature.clone()],
-                    vec![],
-                    vec![],
-                )],
-                root,
-            ),
+            transition_dag,
             vec![signature],
             seal,
             // Anchor id must equal the Sanad id (the real adapter convention:
@@ -3226,10 +3236,27 @@ mod tests {
         assert_eq!(accepted.sanad_id, hex::encode([0x55u8; 32]));
         assert_eq!(accepted.dest_chain.as_str(), "sui");
         assert_eq!(accepted.anchor_height, 100);
-        assert!(matches!(
-            accepted.verification_level,
-            VerificationLevel::FullyVerified
-        ));
+        // PAR-VERIFY-001: an offline accept establishes structure and
+        // authorization; inclusion, finality and closure stay explicitly
+        // unestablished and are carried on the accepted consignment.
+        let outcome =
+            csv_verifier::AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&accepted.assurance);
+        assert!(outcome.is_met(), "{}", outcome.shortfall_summary());
+        assert_eq!(
+            accepted
+                .assurance
+                .reading(csv_verifier::ProtocolAssuranceDimension::Authorization)
+                .status,
+            csv_verifier::DimensionStatus::Satisfied
+        );
+        assert_ne!(
+            accepted
+                .assurance
+                .reading(csv_verifier::ProtocolAssuranceDimension::SourceClosure)
+                .status,
+            csv_verifier::DimensionStatus::Satisfied,
+            "closure is not externally grounded until Stage 2"
+        );
     }
 
     #[test]

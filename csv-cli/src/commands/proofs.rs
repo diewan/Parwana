@@ -399,7 +399,7 @@ async fn cmd_verify(
     let runtime = client.chain_runtime();
     // VERIFY-SIGNER-BINDING-001: approved verifier set from trusted local config.
     let authorized_signers = config.approved_verifier_keys()?;
-    let valid = runtime
+    let report = runtime
         .verify_proof_bundle(adapter_chain, &proof_bundle, &sanad_id, &authorized_signers)
         .await
         .map_err(|e| anyhow::anyhow!("Proof verification error: {}", e))?;
@@ -407,26 +407,26 @@ async fn cmd_verify(
     output::progress(3, 4, "Checking verification result...");
     output::progress(4, 4, "Finalizing verification...");
 
-    let level = if valid {
-        csv_protocol::VerificationLevel::FullyVerified
-    } else {
-        csv_protocol::VerificationLevel::StructuralOnly
-    };
-
+    // PAR-VERIFY-001: report what each dimension established. The old
+    // `if valid { FullyVerified }` turned one boolean into a full-verification
+    // claim the checks never supported.
+    let outcome = csv_verifier::AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&report);
     let result = serde_json::json!({
-        "valid": valid,
-        "level": format!("{:?}", level).to_lowercase(),
+        "policy": outcome.policy_id,
+        "policy_met": outcome.is_met(),
         "chain": chain.as_ref(),
+        "assurance": &report,
     });
     output::proof_tree(&result, proof_tree, canonical);
-    output::kv("Verification Level", &format!("{:?}", level).to_lowercase());
+    output::assurance_report(&report, &outcome);
 
-    if valid {
-        output::success("Proof verified successfully - cryptographic validation passed");
+    if outcome.is_met() {
+        output::success("Proof meets the chain-attested source policy; see limitations above");
         Ok(())
     } else {
         Err(anyhow::anyhow!(
-            "Proof verification failed - invalid or forged proof"
+            "Proof verification failed: {}",
+            outcome.shortfall_summary()
         ))
     }
 }
@@ -478,7 +478,7 @@ async fn cmd_verify_cross_chain(
     // VERIFY-SIGNER-BINDING-001: approved verifier set from trusted local config.
     let authorized_signers = config.approved_verifier_keys()?;
     let source_runtime = source_client.chain_runtime();
-    let source_valid = source_runtime
+    let source_report = source_runtime
         .verify_proof_bundle(
             source_adapter_chain,
             &proof_bundle,
@@ -488,10 +488,14 @@ async fn cmd_verify_cross_chain(
         .await
         .map_err(|e| anyhow::anyhow!("Source chain proof verification error: {}", e))?;
 
-    if !source_valid {
+    let source_outcome =
+        csv_verifier::AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&source_report);
+    output::assurance_report(&source_report, &source_outcome);
+    if !source_outcome.is_met() {
         return Err(anyhow::anyhow!(
-            "Proof verification failed on source chain {} - invalid or forged proof",
-            source
+            "Proof verification failed on source chain {}: {}",
+            source,
+            source_outcome.shortfall_summary()
         ));
     }
 
@@ -506,7 +510,7 @@ async fn cmd_verify_cross_chain(
         .map_err(|e| anyhow::anyhow!("Failed to build destination CSV client: {}", e))?;
 
     let dest_runtime = dest_client.chain_runtime();
-    let dest_valid = dest_runtime
+    let dest_report = dest_runtime
         .verify_proof_bundle(
             dest_adapter_chain,
             &proof_bundle,
@@ -518,19 +522,25 @@ async fn cmd_verify_cross_chain(
 
     output::progress(4, 4, "Checking seal registry for double-spend...");
 
-    if !dest_valid {
+    let dest_outcome =
+        csv_verifier::AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&dest_report);
+    output::assurance_report(&dest_report, &dest_outcome);
+    if !dest_outcome.is_met() {
         return Err(anyhow::anyhow!(
-            "Proof verification failed on destination chain {} - invalid or forged proof",
-            dest
+            "Proof verification failed on destination chain {}: {}",
+            dest,
+            dest_outcome.shortfall_summary()
         ));
     }
 
     let result = serde_json::json!({
-        "valid": true,
+        "policy": dest_outcome.policy_id,
         "source_chain": source.as_ref(),
         "dest_chain": dest.as_ref(),
+        "source_assurance": &source_report,
+        "destination_assurance": &dest_report,
     });
     output::proof_tree(&result, proof_tree, canonical);
-    output::success("Cross-chain proof verified successfully");
+    output::success("Cross-chain proof meets the chain-attested source policy on both chains");
     Ok(())
 }

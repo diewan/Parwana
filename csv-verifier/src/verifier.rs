@@ -42,12 +42,19 @@
 //! here could allow fraudulent proofs to be accepted, leading to
 //! unauthorized state transitions or double-spends.
 
+use csv_accountability::DimensionStatus;
+use csv_hash::Hash;
 use csv_protocol::error::ProtocolError;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::proof_taxonomy::ProofLeafV1;
 use csv_protocol::signature::{Signature, SignatureScheme, verify_signatures};
-use csv_protocol::verification_levels::VerificationLevel;
 use serde::Serialize;
+
+use crate::assurance::{
+    ChainNativeClaim, ChainNativeClaimReading, ChainNativeProofAssessment, ContextDigestWriter,
+    DimensionAssurance, ProofKind, ProofProvider, ProtocolAssuranceDimension,
+    ProtocolAssuranceReport, ProtocolAssuranceReportBuilder, ProtocolReasonCode,
+};
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -91,7 +98,7 @@ impl std::fmt::Display for VerificationErrorCode {
 }
 
 /// Typed verification error with retryability semantics.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VerificationError {
     /// Machine-readable error code for routing.
     pub code: VerificationErrorCode,
@@ -196,34 +203,6 @@ const MAX_PROOF_BUNDLE_SIZE: usize = 1024 * 1024;
 /// Minimum required confirmations for finality
 const MIN_REQUIRED_CONFIRMATIONS: u64 = 6;
 
-/// Result of a proof verification with explicit assurance level.
-#[derive(Debug, Clone)]
-pub struct VerificationResult {
-    /// Whether the proof passed all checks.
-    pub is_valid: bool,
-    /// The verification level achieved.
-    pub level: VerificationLevel,
-    /// Errors encountered during verification (empty if valid).
-    pub errors: Vec<VerificationError>,
-    /// Warnings (non-fatal issues).
-    pub warnings: Vec<String>,
-}
-
-impl serde::Serialize for VerificationResult {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut s = serializer.serialize_struct("VerificationResult", 4)?;
-        s.serialize_field("is_valid", &self.is_valid)?;
-        s.serialize_field("level", &format!("{:?}", self.level))?;
-        s.serialize_field("errors", &self.errors)?;
-        s.serialize_field("warnings", &self.warnings)?;
-        s.end()
-    }
-}
-
 // ============================================================================
 // Canonical Verifier Interface (PHASE 5.4)
 // ============================================================================
@@ -242,6 +221,19 @@ impl serde::Serialize for VerificationResult {
 /// - Verification MUST be deterministic (same input = same result)
 /// - All verification failures MUST be typed and explicit
 ///
+/// # Result shape (PAR-VERIFY-001)
+///
+/// Verification answers with a
+/// [`ProtocolAssuranceReport`](crate::assurance::ProtocolAssuranceReport): one
+/// reading per dimension, each naming its proof provider, all bound to the digest
+/// of the effective verification context. There is no boolean and no aggregate
+/// label. Acceptance is a caller decision, taken by evaluating the report against
+/// a named [`AssuranceRequirement`](crate::assurance::AssuranceRequirement).
+///
+/// Verification is pure, so it does not fail: material that cannot be verified
+/// produces a `NotSatisfied` or `Indeterminate` reading with a stable reason
+/// code, never an opaque error that a caller might discard.
+///
 /// # Implementation Notes
 ///
 /// The canonical implementation is provided by `CanonicalVerifier` in this module.
@@ -251,48 +243,39 @@ impl serde::Serialize for VerificationResult {
 pub trait CanonicalVerifier: Send + Sync {
     /// Verify a proof bundle according to the CSV verification pipeline.
     ///
-    /// This is the primary verification entry point. It performs all
-    /// cryptographic and structural checks required to validate a proof bundle.
+    /// This is the primary verification entry point. It reports, per dimension,
+    /// exactly what the supplied material established.
     ///
     /// # Arguments
     /// * `bundle` - The proof bundle to verify
     /// * `context` - Verification context containing chain-specific data
-    ///
-    /// # Returns
-    /// Verification result with explicit assurance level and any errors.
     fn verify_proof_bundle(
         &self,
         bundle: &ProofBundle,
         context: &VerificationContext,
-    ) -> Result<VerificationResult>;
+    ) -> ProtocolAssuranceReport;
 
-    /// Verify an inclusion proof for a specific anchor.
+    /// Report the anchor-inclusion dimension for a bundle.
     ///
-    /// # Arguments
-    /// * `anchor_ref` - The anchor reference to verify
-    /// * `context` - Verification context containing chain-specific data
-    ///
-    /// # Returns
-    /// Verification result for the inclusion proof.
+    /// The pure verifier can only recompute structure; cryptographic inclusion
+    /// comes from the context's chain-native provider, and its absence is reported
+    /// as `Indeterminate` rather than assumed either way.
     fn verify_inclusion_proof(
         &self,
-        anchor_ref: &csv_hash::seal::CommitAnchor,
+        bundle: &ProofBundle,
         context: &VerificationContext,
-    ) -> Result<VerificationResult>;
+    ) -> DimensionAssurance;
 
-    /// Verify finality for a block height.
+    /// Report the finality/checkpoint dimension for an anchor height.
     ///
-    /// # Arguments
-    /// * `block_height` - The block height to check
-    /// * `context` - Verification context containing chain-specific data
-    ///
-    /// # Returns
-    /// Verification result for finality check.
+    /// Takes the finality proof explicitly: a reading about material the caller
+    /// did not supply would be a reading about nothing.
     fn verify_finality(
         &self,
-        block_height: u64,
+        finality_proof: &csv_protocol::proof_taxonomy::FinalityProof,
+        anchor_height: u64,
         context: &VerificationContext,
-    ) -> Result<VerificationResult>;
+    ) -> DimensionAssurance;
 
     /// Verify seal registry status (check if seal has been consumed).
     ///
@@ -319,12 +302,13 @@ pub trait CanonicalVerifier: Send + Sync {
     /// * `expected_hash` - The expected hash value
     ///
     /// # Returns
-    /// Verification result indicating if the leaf hash matches.
+    /// The canonical-structure reading for the leaf: `Satisfied` when the
+    /// recomputed native hash matches, `NotSatisfied` when it does not.
     fn verify_proof_leaf(
         &self,
         leaf: &ProofLeafV1,
         expected_hash: &csv_hash::Hash,
-    ) -> Result<VerificationResult>;
+    ) -> DimensionAssurance;
 }
 
 /// Status of a seal in the registry.
@@ -356,9 +340,17 @@ pub struct VerificationContext {
     pub seal_registry: Option<Box<dyn Fn(&[u8]) -> bool + Send + Sync>>,
     /// Chain-specific verification data (inclusion proofs, headers, etc.).
     pub chain_data: Option<ChainVerificationData>,
-    /// Whether the chain adapter has cryptographically validated inclusion,
-    /// finality, and the proof's binding to the transfer being authorized.
-    pub native_proof_validated: bool,
+    /// What a named chain-native provider states it established about this bundle
+    /// (PAR-VERIFY-001).
+    ///
+    /// This replaces the former `native_proof_validated: bool`. A bare flag could
+    /// carry an entire bundle to a full-verification claim without naming who
+    /// verified what, and conflated "no provider looked" with "a provider rejected
+    /// it". Each claim raises only its own dimension, and every dimension it raises
+    /// is reported as
+    /// [`TrustMode::ProviderAttested`](crate::assurance::TrustMode::ProviderAttested)
+    /// — never as something this verifier recomputed.
+    pub chain_native_proof: ChainNativeProofAssessment,
     /// Sanad ID that the proof must bind to.
     pub sanad_id: Option<csv_hash::SanadId>,
     /// Lock transaction hash bytes (source chain lock tx).
@@ -379,11 +371,12 @@ pub struct VerificationContext {
     /// closed. Keys are raw public-key bytes as they appear in the signature
     /// blob; secp256k1 keys are compared in canonical compressed form.
     ///
-    /// The **runtime** path may leave this empty because destination
-    /// materialization is separately authorized by the on-chain §9.2
-    /// verifier-attested mint (and `native_proof_validated`). The **offline
-    /// recipient accept** path MUST populate it from trusted local config and
-    /// fails closed if it is empty — that path has no other authorization gate.
+    /// Leaving this empty no longer silently passes: the authorization dimension
+    /// is then reported as `Indeterminate` with
+    /// `PROTOCOL.AUTHORIZATION.SIGNER_SET_UNBOUND`, which every shipped
+    /// [`AssuranceRequirement`](crate::assurance::AssuranceRequirement) treats as a
+    /// blocking shortfall. Both the runtime path and the offline recipient accept
+    /// path must populate it from trusted configuration.
     pub authorized_signers: Vec<Vec<u8>>,
 }
 
@@ -465,100 +458,109 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
         &self,
         bundle: &ProofBundle,
         context: &VerificationContext,
-    ) -> Result<VerificationResult> {
-        // Step 0: Size bound (DoS protection) — reject oversized bundles before
-        // any further work (VERIFY-VALIDATIONS-DISABLED-001).
-        validate_proof_bundle_size(bundle)?;
+    ) -> ProtocolAssuranceReport {
+        let mut builder = ProtocolAssuranceReportBuilder::new(self.runtime_context_digest(context));
 
-        // Step 1: DAG Structure Validation
-        self.validate_dag_structure(bundle)?;
+        // Dimension 1 — canonical structure. Size bound, DAG identity and
+        // anchor-reference integrity are recomputed here from the bundle alone
+        // (VERIFY-VALIDATIONS-DISABLED-001).
+        // The runtime rebuilds its bundle from live chain state through an adapter
+        // that still selects node identifiers and the segment root itself, so
+        // canonical DAG identity cannot be recomputed here yet. PAR-DAG-001 and
+        // PAR-DAG-002 own closing that gap; until then this path reports it rather
+        // than claiming a check it did not run.
+        let structure = structure_reading(
+            bundle,
+            self.config.max_proof_bundle_size,
+            DagIdentityRule::Deferred,
+        );
+        record_dimension_error(&mut builder, &structure);
+        builder.record(structure);
 
-        // Step 1.5: Domain / transfer-context binding (VERIFY-DOMAIN-SEPARATION-001).
-        // Bind the bundle to the specific transfer the context authorizes so a
-        // proof built for one chain/Sanad cannot be replayed under a context for
-        // another.
-        validate_context_binding(bundle, context)?;
+        // Dimension 2 — transition semantics. Binding the bundle to the transfer
+        // the context authorizes stops a proof built for one chain/Sanad being
+        // replayed under a context for another (VERIFY-DOMAIN-SEPARATION-001).
+        // Full semantics also need consumed-state resolution, which PAR-STATE-003
+        // owns, so a verified binding is still only an Indeterminate reading.
+        let semantics = transition_semantics_reading(
+            validate_context_binding(bundle, context),
+            context
+                .chain_native_proof
+                .reading(ChainNativeClaim::TransferBinding),
+        );
+        record_dimension_error(&mut builder, &semantics);
+        builder.record(semantics);
 
-        // Step 2: Signature Verification (with approved-verifier-set binding when
-        // the context supplies one; the runtime path relies on the on-chain §9.2
-        // gate + native_proof_validated below).
-        verify_bundle_signatures(
+        // Dimension 3 — authorization.
+        let authorization = authorization_reading(
             bundle,
             context.signature_scheme,
             &context.authorized_signers,
-        )?;
+        );
+        record_dimension_error(&mut builder, &authorization);
+        builder.record(authorization);
 
-        // Step 3: Seal Replay Check
-        self.check_seal_replay(bundle, context)?;
+        // Dimension 4 — anchor inclusion.
+        let inclusion = self.verify_inclusion_proof(bundle, context);
+        record_dimension_error(&mut builder, &inclusion);
+        builder.record(inclusion);
 
-        // Step 4: Inclusion Verification
-        validate_inclusion_proof(&bundle.inclusion_proof)?;
-        self.verify_inclusion_proof(&bundle.anchor_ref, context)?;
+        // Dimension 5 — finality / checkpoint.
+        let finality = finality_reading(
+            &bundle.finality_proof,
+            bundle.anchor_ref.block_height,
+            context.required_confirmations,
+            context.current_block_height,
+            &context.chain_native_proof,
+        );
+        record_dimension_error(&mut builder, &finality);
+        builder.record(finality);
 
-        // Step 5: Finality Check
-        self.verify_finality(bundle.anchor_ref.block_height, context)?;
+        // Dimension 6 — source closure. The replay registry is a *local* defence;
+        // it is never portable non-equivocation, so this dimension cannot be
+        // Satisfied until source closure is grounded on a shared ordering
+        // (Stage 2, PAR-BTC-002).
+        let closure = source_closure_reading(self.seal_replay_reading(bundle, context));
+        record_dimension_error(&mut builder, &closure);
+        builder.record(closure);
 
-        // Step 6: Validate finality proof data integrity
-        validate_finality_proof(&bundle.finality_proof)?;
+        // Dimension 7 — freshness (VERIFY-PROOF-FRESHNESS-001).
+        let freshness = freshness_reading(
+            bundle.anchor_ref.block_height,
+            context.current_block_height,
+            self.config.max_anchor_age_blocks,
+        );
+        record_dimension_error(&mut builder, &freshness);
+        builder.record(freshness);
 
-        // Step 7: Validate anchor reference integrity
-        validate_anchor_reference(bundle)?;
-
-        if !context.native_proof_validated {
-            return Err(ProtocolError::InclusionProofFailed(
-                "chain-native proof validation evidence is required".to_string(),
-            ));
-        }
-
-        Ok(VerificationResult::fully_verified())
+        builder.build()
     }
 
     fn verify_inclusion_proof(
         &self,
-        anchor_ref: &csv_hash::seal::CommitAnchor,
-        _context: &VerificationContext,
-    ) -> Result<VerificationResult> {
-        if anchor_ref.anchor_id.is_empty() {
-            return Err(ProtocolError::InvalidInput(
-                "anchor_id is empty".to_string(),
-            ));
-        }
-
-        Ok(VerificationResult::merkle_verified())
+        bundle: &ProofBundle,
+        context: &VerificationContext,
+    ) -> DimensionAssurance {
+        inclusion_reading(
+            &bundle.inclusion_proof,
+            &bundle.anchor_ref,
+            &context.chain_native_proof,
+        )
     }
 
     fn verify_finality(
         &self,
-        block_height: u64,
+        finality_proof: &csv_protocol::proof_taxonomy::FinalityProof,
+        anchor_height: u64,
         context: &VerificationContext,
-    ) -> Result<VerificationResult> {
-        if let Some(current_height) = context.current_block_height {
-            let confirmations = current_height.saturating_sub(block_height);
-            if confirmations < context.required_confirmations {
-                return Err(ProtocolError::FinalityNotReached(format!(
-                    "{} confirmations, need {}",
-                    confirmations, context.required_confirmations
-                )));
-            }
-
-            // VERIFY-PROOF-FRESHNESS-001: reject a proof whose anchor is buried
-            // more than `max_anchor_age_blocks` below the observed tip — a stale
-            // proof being replayed long after its anchor. This is the upper bound
-            // on the same `tip - anchor` quantity finality lower-bounds, using the
-            // real observed height (deterministic, no wall clock). `u64::MAX` is
-            // the "instant-final" sentinel from chains without a depth model and
-            // is exempt (its age is not measured in blocks).
-            if let Some(max_age) = self.config.max_anchor_age_blocks
-                && current_height != u64::MAX
-                && confirmations > max_age
-            {
-                return Err(ProtocolError::ProofExpired(format!(
-                    "anchor is {confirmations} blocks below tip, exceeds max age {max_age}"
-                )));
-            }
-        }
-
-        Ok(VerificationResult::fully_verified())
+    ) -> DimensionAssurance {
+        finality_reading(
+            finality_proof,
+            anchor_height,
+            context.required_confirmations,
+            context.current_block_height,
+            &context.chain_native_proof,
+        )
     }
 
     fn verify_seal_registry(
@@ -570,192 +572,755 @@ impl CanonicalVerifier for CanonicalVerifierImpl {
             if registry(seal_id) {
                 return Ok(SealRegistryStatus::Consumed);
             }
+            return Ok(SealRegistryStatus::Available);
         }
-        Ok(SealRegistryStatus::Available)
+        Ok(SealRegistryStatus::CheckFailed(
+            "no replay registry supplied".to_string(),
+        ))
     }
 
     fn verify_proof_leaf(
         &self,
         leaf: &ProofLeafV1,
         expected_hash: &csv_hash::Hash,
-    ) -> Result<VerificationResult> {
-        // Get the native hash function for the source chain
+    ) -> DimensionAssurance {
         let hash_fn = leaf.native_hash_function();
-
-        // Compute the leaf hash using the chain's native hash function
-        let computed_hash = leaf.hash_with_function(hash_fn).map_err(|e| {
-            ProtocolError::InvalidInput(format!("Failed to compute leaf hash: {}", e))
-        })?;
-
-        // Verify the computed hash matches the expected hash
-        if computed_hash == *expected_hash {
-            Ok(VerificationResult::fully_verified())
+        let computed = match leaf.hash_with_function(hash_fn) {
+            Ok(computed) => computed,
+            Err(e) => {
+                return not_satisfied(
+                    ProtocolAssuranceDimension::CanonicalStructure,
+                    ProtocolReasonCode::InclusionProofMalformed,
+                    ProofKind::CanonicalRules,
+                    format!("proof leaf hash could not be computed: {e}"),
+                );
+            }
+        };
+        if computed == *expected_hash {
+            DimensionAssurance::new(
+                ProtocolAssuranceDimension::CanonicalStructure,
+                DimensionStatus::Satisfied,
+                [ProtocolReasonCode::StructureValidated],
+                ProofProvider::local(ProofKind::CanonicalRules),
+                [format!(
+                    "Recomputed with the source chain's native hash function ({hash_fn:?}); \
+                     leaf identity only, not inclusion"
+                )],
+            )
         } else {
-            Ok(VerificationResult {
-                is_valid: false,
-                level: VerificationLevel::StructuralOnly,
-                errors: vec![VerificationError {
-                    code: VerificationErrorCode::InclusionProofInvalid,
-                    message: format!(
-                        "Proof leaf hash mismatch: computed {:?}, expected {:?} (using {:?})",
-                        computed_hash, expected_hash, hash_fn
-                    ),
-                    retryable: false,
-                }],
-                warnings: vec![],
-            })
+            not_satisfied(
+                ProtocolAssuranceDimension::CanonicalStructure,
+                ProtocolReasonCode::InclusionProofMalformed,
+                ProofKind::CanonicalRules,
+                format!(
+                    "proof leaf hash mismatch: computed {computed:?}, expected {expected_hash:?} \
+                     (using {hash_fn:?})"
+                ),
+            )
         }
     }
 }
 
 impl CanonicalVerifierImpl {
-    /// Validate DAG structure of the proof bundle.
-    fn validate_dag_structure(&self, bundle: &ProofBundle) -> Result<()> {
-        // Basic structure validation
-        if bundle.transition_dag.nodes.is_empty() {
-            return Err(ProtocolError::InvalidInput("DAG has no nodes".to_string()));
+    /// Digest of everything in the runtime context that can change a verdict.
+    ///
+    /// The verifier configuration is part of the effective context: the same
+    /// bundle under a different confirmation floor or freshness bound is a
+    /// different evaluation, and the digest must say so.
+    fn runtime_context_digest(&self, context: &VerificationContext) -> Hash {
+        let mut writer = ContextDigestWriter::new(RUNTIME_VERIFICATION_PROFILE_ID);
+        writer
+            .text("chain_id", &context.chain_id)
+            .u64(
+                "signature_scheme",
+                signature_scheme_tag(context.signature_scheme),
+            )
+            .u64("required_confirmations", context.required_confirmations)
+            .opt_u64("current_block_height", context.current_block_height)
+            .presence("seal_registry", context.seal_registry.is_some())
+            .chain_native_proof("chain_native_proof", &context.chain_native_proof)
+            .opt_bytes(
+                "sanad_id",
+                context.sanad_id.as_ref().map(|id| id.as_bytes().as_slice()),
+            )
+            .opt_bytes("lock_tx", context.lock_tx.as_deref())
+            .opt_u64(
+                "lock_output_index",
+                context.lock_output_index.map(u64::from),
+            )
+            .opt_bytes("transition_id", context.transition_id.as_deref())
+            .opt_bytes(
+                "destination_chain",
+                context.destination_chain.as_deref().map(str::as_bytes),
+            )
+            .byte_list("authorized_signers", &context.authorized_signers)
+            .u64(
+                "config.max_proof_bundle_size",
+                self.config.max_proof_bundle_size as u64,
+            )
+            .u64(
+                "config.min_required_confirmations",
+                self.config.min_required_confirmations,
+            )
+            .opt_u64(
+                "config.max_anchor_age_blocks",
+                self.config.max_anchor_age_blocks,
+            );
+        if let Some(chain_data) = &context.chain_data {
+            writer
+                .presence("chain_data", true)
+                .opt_bytes(
+                    "chain_data.block_header",
+                    chain_data.block_header.as_deref(),
+                )
+                .opt_bytes(
+                    "chain_data.merkle_proof",
+                    chain_data.merkle_proof.as_deref(),
+                )
+                .opt_bytes(
+                    "chain_data.finality_proof",
+                    chain_data.finality_proof.as_deref(),
+                )
+                .opt_bytes("chain_data.additional", chain_data.additional.as_deref());
+        } else {
+            writer.presence("chain_data", false);
         }
-
-        Ok(())
+        writer.finish()
     }
 
-    /// Check seal replay status.
-    fn check_seal_replay(&self, bundle: &ProofBundle, context: &VerificationContext) -> Result<()> {
-        let status = self.verify_seal_registry(&bundle.seal_ref.id, context)?;
-        match status {
-            SealRegistryStatus::Consumed => Err(ProtocolError::SealReplay(format!(
-                "{:?}",
-                bundle.seal_ref.id
-            ))),
-            SealRegistryStatus::Available => Ok(()),
-            SealRegistryStatus::CheckFailed(msg) => Err(ProtocolError::InvalidInput(msg)),
-        }
-    }
-}
-
-impl VerificationResult {
-    /// Structural-only result (no cryptographic checks performed).
-    pub fn structural() -> Self {
-        Self {
-            is_valid: true,
-            level: VerificationLevel::StructuralOnly,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-
-    /// Merkle-verified result (inclusion proof verified, finality not confirmed).
-    pub fn merkle_verified() -> Self {
-        Self {
-            is_valid: true,
-            level: VerificationLevel::MerkleVerified,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-
-    /// Fully verified result (all checks passed).
-    pub fn fully_verified() -> Self {
-        Self {
-            is_valid: true,
-            level: VerificationLevel::FullyVerified,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-
-    /// Failed result with typed errors.
-    pub fn failed(errors: Vec<VerificationError>) -> Self {
-        Self {
-            is_valid: false,
-            level: VerificationLevel::StructuralOnly,
-            errors,
-            warnings: Vec::new(),
-        }
-    }
-
-    /// Failed result with a single typed error.
-    pub fn from_verification_error(e: VerificationError) -> Self {
-        Self {
-            is_valid: false,
-            level: VerificationLevel::StructuralOnly,
-            errors: vec![e],
-            warnings: Vec::new(),
-        }
-    }
-
-    /// Failed result from a ProtocolError, converted to typed error.
-    pub fn from_protocol_error(e: &ProtocolError) -> Self {
-        let error = match e {
-            ProtocolError::SealReplay(_) => VerificationError::seal_replay(&[]),
-            ProtocolError::SignatureVerificationFailed(_) => VerificationError::signature_invalid(),
-            ProtocolError::InclusionProofFailed(_) => {
-                VerificationError::inclusion_proof_invalid("verification failed")
-            }
-            ProtocolError::FinalityNotReached(msg) => {
-                // Parse confirmations from message if possible
-                let confirmations = msg
-                    .split(':')
-                    .nth(1)
-                    .and_then(|s: &str| s.split(',').next())
-                    .and_then(|s: &str| s.trim().parse::<u64>().ok())
-                    .unwrap_or(0);
-                let required = msg
-                    .split(',')
-                    .nth(1)
-                    .and_then(|s: &str| s.split(':').nth(1))
-                    .and_then(|s: &str| s.trim().parse::<u64>().ok())
-                    .unwrap_or(MIN_REQUIRED_CONFIRMATIONS);
-                VerificationError::finality_not_reached(confirmations, required)
-            }
-            _ => VerificationError::malformed_proof(&e.to_string()),
-        };
-        Self {
-            is_valid: false,
-            level: VerificationLevel::StructuralOnly,
-            errors: vec![error],
-            warnings: Vec::new(),
+    /// Local replay-registry reading for the bundle's source seal.
+    ///
+    /// `None` means no registry was supplied, which is not the same as "unconsumed".
+    fn seal_replay_reading(
+        &self,
+        bundle: &ProofBundle,
+        context: &VerificationContext,
+    ) -> Option<bool> {
+        match self.verify_seal_registry(&bundle.seal_ref.id, context) {
+            Ok(SealRegistryStatus::Consumed) => Some(true),
+            Ok(SealRegistryStatus::Available) => Some(false),
+            Ok(SealRegistryStatus::CheckFailed(_)) | Err(_) => None,
         }
     }
 }
 
-/// Verify a proof bundle according to the CSV verification pipeline.
+/// Stable name of the runtime verification pipeline, committed to every digest.
+const RUNTIME_VERIFICATION_PROFILE_ID: &str = "parwana.csv-verifier.proof-bundle.v1";
+
+/// Stable name of the offline bound-verification pipeline.
+const OFFLINE_VERIFICATION_PROFILE_ID: &str = "parwana.csv-verifier.proof-bound.v1";
+
+const fn signature_scheme_tag(scheme: SignatureScheme) -> u64 {
+    match scheme {
+        SignatureScheme::Secp256k1 => 1,
+        SignatureScheme::Ed25519 => 2,
+        SignatureScheme::MlDsa65 => 3,
+    }
+}
+
+/// A `NotSatisfied` reading carrying one reason and one explanatory limitation.
+fn not_satisfied(
+    dimension: ProtocolAssuranceDimension,
+    reason: ProtocolReasonCode,
+    proof_kind: ProofKind,
+    detail: String,
+) -> DimensionAssurance {
+    DimensionAssurance::new(
+        dimension,
+        DimensionStatus::NotSatisfied,
+        [reason],
+        ProofProvider::local(proof_kind),
+        [detail],
+    )
+}
+
+/// Mirror an unsatisfied reading into the report's typed error list.
 ///
-/// This is the **primary entry point for proof verification**. It performs
-/// all cryptographic and structural checks required to validate a proof bundle
-/// before accepting the state transition it authorizes.
+/// Errors are a routing convenience over the same readings; they never soften
+/// one. A `NotSatisfied` dimension stays `NotSatisfied` whether or not a caller
+/// reads the error list.
+fn record_dimension_error(
+    builder: &mut ProtocolAssuranceReportBuilder,
+    reading: &DimensionAssurance,
+) {
+    if reading.status != DimensionStatus::NotSatisfied {
+        return;
+    }
+    let message = format!(
+        "{} [{}]{}",
+        reading.dimension.registry_id(),
+        reading
+            .reason_codes
+            .iter()
+            .map(|code| code.registry_id())
+            .collect::<Vec<_>>()
+            .join(", "),
+        if reading.limitations.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", reading.limitations.join("; "))
+        }
+    );
+    let code = match reading.dimension {
+        ProtocolAssuranceDimension::CanonicalStructure
+        | ProtocolAssuranceDimension::TransitionSemantics => VerificationErrorCode::MalformedProof,
+        ProtocolAssuranceDimension::Authorization => VerificationErrorCode::SignatureInvalid,
+        ProtocolAssuranceDimension::AnchorInclusion => VerificationErrorCode::InclusionProofInvalid,
+        ProtocolAssuranceDimension::FinalityCheckpoint | ProtocolAssuranceDimension::Freshness => {
+            VerificationErrorCode::FinalityNotReached
+        }
+        ProtocolAssuranceDimension::SourceClosure => VerificationErrorCode::SealReplay,
+    };
+    builder.record_error(VerificationError {
+        code,
+        message,
+        // Only an insufficient confirmation depth can change with time.
+        retryable: reading
+            .reason_codes
+            .contains(&ProtocolReasonCode::ConfirmationDepthNotMet),
+    });
+}
+
+/// Canonical-structure reading: everything recomputable from the bundle alone.
+fn structure_reading(
+    bundle: &ProofBundle,
+    max_bundle_size: usize,
+    dag_rule: DagIdentityRule,
+) -> DimensionAssurance {
+    if let Err(e) = validate_proof_bundle_size_with(bundle, max_bundle_size) {
+        return not_satisfied(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::BundleTooLarge,
+            ProofKind::CanonicalRules,
+            e.to_string(),
+        );
+    }
+    // The relation rules read declared identifiers only, so they run on every
+    // path — including the one that cannot yet recompute identity. A cycle, a
+    // duplicate identifier or an unresolvable parent is a structural failure
+    // wherever the identifiers came from, and must not be reported as merely
+    // unknown (PAR-DAG-002; ARCHITECTURE.md §8: no security error downgraded to
+    // a best-effort result).
+    if let Err(e) = bundle.transition_dag.validate_relations() {
+        return not_satisfied(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::DagStructureInvalid,
+            ProofKind::CanonicalRules,
+            format!("invalid DAG structure: {e}"),
+        );
+    }
+    if dag_rule == DagIdentityRule::Recompute
+        && let Err(e) = bundle.transition_dag.validate_structure()
+    {
+        return not_satisfied(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::DagStructureInvalid,
+            ProofKind::CanonicalRules,
+            format!("invalid DAG structure: {e}"),
+        );
+    }
+    if bundle.seal_ref.id.is_empty() {
+        return not_satisfied(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::SealReferenceMissing,
+            ProofKind::CanonicalRules,
+            "seal reference is empty".to_string(),
+        );
+    }
+    if let Err(e) = validate_anchor_reference(bundle) {
+        return not_satisfied(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::AnchorReferenceInvalid,
+            ProofKind::CanonicalRules,
+            e.to_string(),
+        );
+    }
+    match dag_rule {
+        DagIdentityRule::Recompute => DimensionAssurance::new(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            DimensionStatus::Satisfied,
+            [ProtocolReasonCode::StructureValidated],
+            ProofProvider::local(ProofKind::CanonicalRules),
+            [
+                "Structural validity says nothing about whether the asserted facts are true"
+                    .to_string(),
+            ],
+        ),
+        // The size, relation, seal and anchor rules held, but node identity and
+        // the segment root were taken as given. That is not a passing
+        // canonical-structure check, so the reading stops short of Satisfied and
+        // names exactly which rules did not run.
+        DagIdentityRule::Deferred => DimensionAssurance::new(
+            ProtocolAssuranceDimension::CanonicalStructure,
+            DimensionStatus::Indeterminate,
+            [
+                ProtocolReasonCode::StructureValidated,
+                ProtocolReasonCode::DagIdentityNotRecomputed,
+            ],
+            ProofProvider::local(ProofKind::CanonicalRules),
+            [
+                "Size, DAG relation (uniqueness, acyclicity, parent resolution, roots), \
+                 seal-reference and anchor-binding rules hold, but node identifiers and \
+                 the segment root were supplied rather than recomputed from contents, so \
+                 canonical order and root commitment were not checked \
+                 (PAR-DAG-001, PAR-DAG-002)"
+                    .to_string(),
+            ],
+        ),
+    }
+}
+
+/// Whether canonical DAG identity is recomputed for a structure reading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DagIdentityRule {
+    /// Recompute node identifiers and the segment root from node contents.
+    Recompute,
+    /// Take them as supplied and report the gap.
+    ///
+    /// The runtime's chain adapters still choose node identifiers and the segment
+    /// root when they build a bundle from live chain state, so recomputing on that
+    /// path would reject every real transfer. PAR-DAG-001 and PAR-DAG-002 own
+    /// making it recomputable; this variant exists so the report states the gap
+    /// instead of papering over it.
+    Deferred,
+}
+
+/// Transition-semantics reading.
 ///
-/// # Security Requirements (CRITICAL)
+/// A verified domain binding is real but partial: resolving each consumed state
+/// reference against its parent output is PAR-STATE-003's work and is not
+/// implemented, so this dimension stops at `Indeterminate` no matter what a
+/// provider asserts. That is the point — no caller-supplied attestation can
+/// upgrade a dimension whose evidence does not exist yet.
+fn transition_semantics_reading(
+    binding: Result<()>,
+    transfer_binding: ChainNativeClaimReading<'_>,
+) -> DimensionAssurance {
+    if let Err(e) = binding {
+        return not_satisfied(
+            ProtocolAssuranceDimension::TransitionSemantics,
+            ProtocolReasonCode::DomainBindingMismatch,
+            ProofKind::CanonicalRules,
+            e.to_string(),
+        );
+    }
+    if let ChainNativeClaimReading::Rejected(attestation) = transfer_binding {
+        return DimensionAssurance::new(
+            ProtocolAssuranceDimension::TransitionSemantics,
+            DimensionStatus::NotSatisfied,
+            [ProtocolReasonCode::DomainBindingMismatch],
+            attestation.provider(ProofKind::CanonicalRules),
+            [format!(
+                "{} rejected the proof's binding to the transfer{}",
+                attestation.provider_id,
+                attestation
+                    .detail
+                    .as_ref()
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default()
+            )],
+        );
+    }
+    let provider = match transfer_binding {
+        ChainNativeClaimReading::Attested(attestation) => {
+            attestation.provider(ProofKind::CanonicalRules)
+        }
+        _ => ProofProvider::local(ProofKind::CanonicalRules),
+    };
+    DimensionAssurance::new(
+        ProtocolAssuranceDimension::TransitionSemantics,
+        DimensionStatus::Indeterminate,
+        [
+            ProtocolReasonCode::TransitionBindingVerified,
+            ProtocolReasonCode::ConsumedStateResolutionUnavailable,
+        ],
+        provider,
+        [
+            "The bundle is bound to the transfer the context names, and consumed-state \
+             resolution is implemented, but this V1 bundle supplies no parent-output \
+             history to resolve against, so transition semantics remain undecided"
+                .to_string(),
+        ],
+    )
+}
+
+/// Authorization reading.
 ///
-/// 1. **All signatures must be valid**: Any invalid signature causes rejection
-/// 2. **Seal must be unused**: Replay attacks prevented via `seal_registry` callback
-/// 3. **Proof must be non-empty**: Empty inclusion/finality proofs rejected
-/// 4. **Finality must be reached**: Zero confirmations causes rejection
-/// 5. **Proof must be recent**: Prevents replay of old proofs
-/// 6. **Proof size limited**: Prevents DoS via oversized proofs
-/// 7. **Domain separation enforced**: Prevents cross-domain attacks
+/// Signatures that verify only against sender-chosen keys prove a tautology:
+/// whoever picked the embedded public key also signed with its private key. That
+/// is `Indeterminate`, not `Satisfied` — binding to an approved verifier set is
+/// what makes the dimension conclusive (VERIFY-SIGNER-BINDING-001).
+fn authorization_reading(
+    bundle: &ProofBundle,
+    scheme: SignatureScheme,
+    authorized_signers: &[Vec<u8>],
+) -> DimensionAssurance {
+    if bundle.signatures.is_empty() {
+        return not_satisfied(
+            ProtocolAssuranceDimension::Authorization,
+            ProtocolReasonCode::SignaturesAbsent,
+            ProofKind::DigitalSignature,
+            "proof bundle carries no signatures".to_string(),
+        );
+    }
+    if let Err(e) = verify_bundle_signatures(bundle, scheme, authorized_signers) {
+        return not_satisfied(
+            ProtocolAssuranceDimension::Authorization,
+            ProtocolReasonCode::SignatureInvalid,
+            ProofKind::DigitalSignature,
+            e.to_string(),
+        );
+    }
+    if authorized_signers.is_empty() {
+        return DimensionAssurance::new(
+            ProtocolAssuranceDimension::Authorization,
+            DimensionStatus::Indeterminate,
+            [
+                ProtocolReasonCode::SignaturesVerified,
+                ProtocolReasonCode::SignerSetUnbound,
+            ],
+            ProofProvider::local(ProofKind::DigitalSignature),
+            [
+                "Signatures verify against keys the sender chose; no approved verifier set \
+                 was supplied to bind them to an authorized signer"
+                    .to_string(),
+            ],
+        );
+    }
+    DimensionAssurance::new(
+        ProtocolAssuranceDimension::Authorization,
+        DimensionStatus::Satisfied,
+        [ProtocolReasonCode::SignaturesVerified],
+        ProofProvider::local(ProofKind::DigitalSignature),
+        [format!(
+            "Every signature verified against one of {} approved verifier keys",
+            authorized_signers.len()
+        )],
+    )
+}
+
+/// Anchor-inclusion reading.
 ///
-/// # Verification Pipeline
+/// Nonempty, well-formed proof bytes are structure, not inclusion. Without a
+/// named chain-native provider this dimension is `Indeterminate`, which is what
+/// stops proof bytes alone from reaching a full-verification claim.
+fn inclusion_reading(
+    proof: &csv_protocol::proof_taxonomy::InclusionProof,
+    anchor_ref: &csv_hash::seal::CommitAnchor,
+    assessment: &ChainNativeProofAssessment,
+) -> DimensionAssurance {
+    if anchor_ref.anchor_id.is_empty() {
+        return not_satisfied(
+            ProtocolAssuranceDimension::AnchorInclusion,
+            ProtocolReasonCode::InclusionProofMalformed,
+            ProofKind::MerkleInclusion,
+            "anchor_id is empty".to_string(),
+        );
+    }
+    if let Err(e) = validate_inclusion_proof(proof) {
+        return not_satisfied(
+            ProtocolAssuranceDimension::AnchorInclusion,
+            ProtocolReasonCode::InclusionProofMalformed,
+            ProofKind::MerkleInclusion,
+            e.to_string(),
+        );
+    }
+    match assessment.reading(ChainNativeClaim::AnchorInclusion) {
+        ChainNativeClaimReading::Rejected(attestation) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::AnchorInclusion,
+            DimensionStatus::NotSatisfied,
+            [ProtocolReasonCode::InclusionRejectedByProvider],
+            attestation.provider(ProofKind::MerkleInclusion),
+            [format!(
+                "{} rejected the inclusion material{}",
+                attestation.provider_id,
+                attestation
+                    .detail
+                    .as_ref()
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default()
+            )],
+        ),
+        ChainNativeClaimReading::Attested(attestation) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::AnchorInclusion,
+            DimensionStatus::Satisfied,
+            [ProtocolReasonCode::InclusionAttestedByProvider],
+            attestation.provider(ProofKind::MerkleInclusion),
+            [format!(
+                "Inclusion was asserted by {} against {}; the pure verifier did not \
+                 recompute it and cannot, having no chain access",
+                attestation.provider_id, attestation.chain_id
+            )],
+        ),
+        ChainNativeClaimReading::Absent => DimensionAssurance::new(
+            ProtocolAssuranceDimension::AnchorInclusion,
+            DimensionStatus::Indeterminate,
+            [ProtocolReasonCode::InclusionNotCryptographicallyVerified],
+            ProofProvider::unverified(ProofKind::MerkleInclusion),
+            [
+                "The inclusion proof is well formed, which is not evidence that the anchor \
+                 is in the chain; no chain-native provider verified it"
+                    .to_string(),
+            ],
+        ),
+    }
+}
+
+/// Finality/checkpoint reading.
+fn finality_reading(
+    proof: &csv_protocol::proof_taxonomy::FinalityProof,
+    anchor_height: u64,
+    required_confirmations: u64,
+    observed_tip: Option<u64>,
+    assessment: &ChainNativeProofAssessment,
+) -> DimensionAssurance {
+    if let Err(e) = validate_finality_proof(proof) {
+        return not_satisfied(
+            ProtocolAssuranceDimension::FinalityCheckpoint,
+            ProtocolReasonCode::FinalityProofMalformed,
+            ProofKind::ConfirmationDepth,
+            e.to_string(),
+        );
+    }
+    if let ChainNativeClaimReading::Rejected(attestation) =
+        assessment.reading(ChainNativeClaim::CheckpointFinality)
+    {
+        return DimensionAssurance::new(
+            ProtocolAssuranceDimension::FinalityCheckpoint,
+            DimensionStatus::NotSatisfied,
+            [ProtocolReasonCode::CheckpointRejectedByProvider],
+            attestation.provider(ProofKind::ConfirmationDepth),
+            [format!(
+                "{} rejected the finality material{}",
+                attestation.provider_id,
+                attestation
+                    .detail
+                    .as_ref()
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default()
+            )],
+        );
+    }
+    if let Some(tip) = observed_tip {
+        let confirmations = tip.saturating_sub(anchor_height);
+        if confirmations < required_confirmations {
+            return not_satisfied(
+                ProtocolAssuranceDimension::FinalityCheckpoint,
+                ProtocolReasonCode::ConfirmationDepthNotMet,
+                ProofKind::ConfirmationDepth,
+                format!("{confirmations} confirmations, need {required_confirmations}"),
+            );
+        }
+    }
+    match (
+        assessment.reading(ChainNativeClaim::CheckpointFinality),
+        observed_tip,
+    ) {
+        (ChainNativeClaimReading::Attested(attestation), _) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::FinalityCheckpoint,
+            DimensionStatus::Satisfied,
+            [ProtocolReasonCode::CheckpointAttestedByProvider],
+            attestation.provider(ProofKind::ConfirmationDepth),
+            [format!(
+                "Checkpoint finality was asserted by {} against {}; trust in this reading \
+                 is trust in that provider's chain view",
+                attestation.provider_id, attestation.chain_id
+            )],
+        ),
+        (_, Some(tip)) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::FinalityCheckpoint,
+            DimensionStatus::Satisfied,
+            [ProtocolReasonCode::CheckpointAttestedByProvider],
+            ProofProvider::attested(OBSERVED_TIP_PROVIDER_ID, None, ProofKind::ConfirmationDepth),
+            [format!(
+                "Depth was recomputed against a context-supplied observed tip ({tip}); the \
+                 tip itself is an input this verifier cannot check"
+            )],
+        ),
+        (_, None) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::FinalityCheckpoint,
+            DimensionStatus::Indeterminate,
+            [ProtocolReasonCode::CheckpointUnobserved],
+            ProofProvider::unverified(ProofKind::ConfirmationDepth),
+            [
+                "No observed source-chain tip and no provider checkpoint, so confirmation \
+                 depth could not be established"
+                    .to_string(),
+            ],
+        ),
+    }
+}
+
+/// Identifier reported when a reading rests on a context-supplied chain observation.
+const OBSERVED_TIP_PROVIDER_ID: &str = "context.observed-source-tip";
+
+/// Source-closure reading.
 ///
-/// 1. **Size Validation** - Reject oversized proof bundles (DoS protection)
-/// 2. **DAG Structure Validation** - Verify transition graph integrity
-/// 3. **Timestamp Validation** - Ensure proof is not too old (replay protection)
-/// 4. **Signature Verification** - Cryptographically verify all signatures
-/// 5. **Domain Separation** - Validate proof is for correct domain
-/// 6. **Seal Replay Check** - Ensure seal hasn't been consumed before
-/// 7. **Inclusion Verification** - Verify proof of on-chain inclusion
-/// 8. **Finality Check** - Confirm anchor reached required confirmations
-/// 9. **Anchor Reference Validation** - Verify anchor is properly formed
+/// A local replay database answers "did *I* already see this seal spent?", which
+/// is strictly weaker than "does a shared ordering make this successor unique?".
+/// Conflating the two is the inflation this ticket exists to remove, so a clean
+/// registry is `Indeterminate` with the gap stated, never `Satisfied`. Stage 2
+/// (PAR-BTC-002) grounds closure on Bitcoin and can raise it.
+fn source_closure_reading(replay: Option<bool>) -> DimensionAssurance {
+    match replay {
+        Some(true) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::SourceClosure,
+            DimensionStatus::NotSatisfied,
+            [ProtocolReasonCode::ReplayDetected],
+            ProofProvider::local(ProofKind::ReplayRegistry),
+            ["The source seal is already recorded as consumed".to_string()],
+        ),
+        Some(false) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::SourceClosure,
+            DimensionStatus::Indeterminate,
+            [
+                ProtocolReasonCode::ReplayRegistryClean,
+                ProtocolReasonCode::SourceClosureNotExternallyGrounded,
+            ],
+            ProofProvider::local(ProofKind::ReplayRegistry),
+            [
+                "A local replay registry is not a shared ordering: it shows this holder has \
+                 not seen a conflicting spend, not that none exists (PAR-BTC-002)"
+                    .to_string(),
+            ],
+        ),
+        None => DimensionAssurance::new(
+            ProtocolAssuranceDimension::SourceClosure,
+            DimensionStatus::Indeterminate,
+            [
+                ProtocolReasonCode::ReplayRegistryAbsent,
+                ProtocolReasonCode::SourceClosureNotExternallyGrounded,
+            ],
+            ProofProvider::unverified(ProofKind::SourceSealClosure),
+            [
+                "No replay registry was supplied and closure is not grounded on a shared \
+                 ordering, so uniqueness of this successor is unknown (PAR-BTC-002)"
+                    .to_string(),
+            ],
+        ),
+    }
+}
+
+/// Freshness reading (VERIFY-PROOF-FRESHNESS-001).
 ///
-/// # Returns
-/// - `Ok(VerificationResult)` with `is_valid: true` and `level: FullyVerified` if all checks pass
-/// - `Ok(VerificationResult)` with `is_valid: false` and `level: StructuralOnly` if checks fail
+/// Height-based, not wall-clock: a bundle carries no trusted timestamp, but an
+/// anchor height plus an observed tip give a deterministic age in blocks.
+fn freshness_reading(
+    anchor_height: u64,
+    observed_tip: Option<u64>,
+    max_anchor_age_blocks: Option<u64>,
+) -> DimensionAssurance {
+    match (observed_tip, max_anchor_age_blocks) {
+        (Some(tip), Some(max_age)) => {
+            if tip == u64::MAX {
+                return DimensionAssurance::new(
+                    ProtocolAssuranceDimension::Freshness,
+                    DimensionStatus::NotApplicable,
+                    [ProtocolReasonCode::FreshnessNotMeasuredInBlocks],
+                    ProofProvider::attested(
+                        OBSERVED_TIP_PROVIDER_ID,
+                        None,
+                        ProofKind::ObservedChainTip,
+                    ),
+                    [
+                        "The chain reports instant finality, so anchor age is not measured \
+                         in blocks and no staleness bound applies"
+                            .to_string(),
+                    ],
+                );
+            }
+            let Some(age) = tip.checked_sub(anchor_height) else {
+                return not_satisfied(
+                    ProtocolAssuranceDimension::Freshness,
+                    ProtocolReasonCode::FreshnessContextIncomplete,
+                    ProofKind::ObservedChainTip,
+                    format!("observed source tip {tip} is below anchor height {anchor_height}"),
+                );
+            };
+            if age > max_age {
+                return not_satisfied(
+                    ProtocolAssuranceDimension::Freshness,
+                    ProtocolReasonCode::AnchorStale,
+                    ProofKind::ObservedChainTip,
+                    format!("anchor is {age} blocks below tip, exceeds max age {max_age}"),
+                );
+            }
+            DimensionAssurance::new(
+                ProtocolAssuranceDimension::Freshness,
+                DimensionStatus::Satisfied,
+                [ProtocolReasonCode::WithinMaxAnchorAge],
+                ProofProvider::attested(
+                    OBSERVED_TIP_PROVIDER_ID,
+                    None,
+                    ProofKind::ObservedChainTip,
+                ),
+                [format!(
+                    "Anchor is {age} blocks below a context-supplied tip, within the \
+                     configured bound of {max_age}"
+                )],
+            )
+        }
+        // A bound with nothing to measure against, or a tip with no bound to
+        // measure it by, is an unknown — not a pass. The scalar pipeline treated a
+        // half-supplied pair as a hard error and a missing bound as silent success;
+        // both told the caller less than this reading does.
+        (None, Some(_)) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::Freshness,
+            DimensionStatus::Indeterminate,
+            [ProtocolReasonCode::FreshnessContextIncomplete],
+            ProofProvider::unverified(ProofKind::ObservedChainTip),
+            [
+                "A maximum anchor age is configured but no source-chain tip was observed, \
+                 so the anchor's age is unknown"
+                    .to_string(),
+            ],
+        ),
+        (_, None) => DimensionAssurance::new(
+            ProtocolAssuranceDimension::Freshness,
+            DimensionStatus::Indeterminate,
+            [ProtocolReasonCode::FreshnessBoundNotConfigured],
+            ProofProvider::unverified(ProofKind::ObservedChainTip),
+            [
+                "No freshness bound is configured, so replay of an old but otherwise valid \
+                 proof cannot be excluded"
+                    .to_string(),
+            ],
+        ),
+    }
+}
+
+/// Verify a proof bundle offline, reporting what the bundle alone establishes.
+///
+/// This is the **primary entry point for offline proof verification**. It applies
+/// every check that is possible without chain access and reports each dimension
+/// separately.
+///
+/// # What an offline verifier can and cannot establish
+///
+/// It recomputes canonical structure, signature validity, approved-signer binding
+/// and — when the caller supplies an observed tip — freshness. It cannot
+/// recompute anchor inclusion, checkpoint finality, or source closure: those need
+/// a chain view it does not have, and they are reported as `Indeterminate` rather
+/// than assumed. Evaluate the report against
+/// [`AssuranceRequirement::OFFLINE_RECIPIENT`](crate::assurance::AssuranceRequirement::OFFLINE_RECIPIENT)
+/// and surface its accepted limitations to whoever is deciding to accept.
+///
+/// # Security requirements preserved from the scalar pipeline
+///
+/// 1. **All signatures must be valid** — an invalid signature is `NotSatisfied`.
+/// 2. **Signatures must bind to an approved verifier set** — an empty set leaves
+///    authorization `Indeterminate`, which every shipped policy rejects.
+/// 3. **Empty inclusion/finality proofs are rejected**.
+/// 4. **Insufficient confirmations are rejected**.
+/// 5. **A stale anchor is rejected** when the caller supplies freshness inputs.
+/// 6. **Oversized bundles are rejected** before any further work.
+/// 7. **Domain separation is enforced** against the caller's expected domain.
 pub fn verify_proof(
     bundle: &ProofBundle,
     seal_registry: impl Fn(&[u8]) -> bool,
     signature_scheme: SignatureScheme,
     authorized_signers: &[Vec<u8>],
-) -> VerificationResult {
+) -> ProtocolAssuranceReport {
     // No expected-domain binding for callers that only inspect a proof. The
     // authoritative offline accept path uses `verify_proof_bound` below.
     verify_proof_bound(
@@ -777,22 +1342,107 @@ pub fn verify_proof(
 ///
 /// Offline verification cannot discover a live source-chain tip by itself. When
 /// `expected.observed_source_tip` and `expected.max_anchor_age_blocks` are both
-/// populated, this function enforces the same height-based freshness cap as the
-/// runtime path. Production accept callers must supply those fields or perform an
-/// equivalent chain-backed check before recording ownership.
+/// populated, the freshness dimension is decided against them; otherwise it is
+/// reported as `Indeterminate` and the caller is told so.
 pub fn verify_proof_bound(
     bundle: &ProofBundle,
     seal_registry: impl Fn(&[u8]) -> bool,
     signature_scheme: SignatureScheme,
     authorized_signers: &[Vec<u8>],
     expected: &ExpectedDomain,
-) -> VerificationResult {
-    // Expected-domain binding first: reject a bundle built for a different
-    // Sanad / source chain before any further work.
+) -> ProtocolAssuranceReport {
+    let mut builder = ProtocolAssuranceReportBuilder::new(offline_context_digest(
+        signature_scheme,
+        authorized_signers,
+        expected,
+    ));
+
+    let structure = structure_reading(bundle, MAX_PROOF_BUNDLE_SIZE, DagIdentityRule::Recompute);
+    record_dimension_error(&mut builder, &structure);
+    builder.record(structure);
+
+    let semantics = transition_semantics_reading(
+        validate_expected_domain(bundle, expected),
+        ChainNativeClaimReading::Absent,
+    );
+    record_dimension_error(&mut builder, &semantics);
+    builder.record(semantics);
+
+    let authorization = authorization_reading(bundle, signature_scheme, authorized_signers);
+    record_dimension_error(&mut builder, &authorization);
+    builder.record(authorization);
+
+    // Offline: no chain-native provider exists, so inclusion and finality report
+    // exactly what the bundle's own bytes support and no more.
+    let inclusion = inclusion_reading(
+        &bundle.inclusion_proof,
+        &bundle.anchor_ref,
+        &ChainNativeProofAssessment::NotSupplied,
+    );
+    record_dimension_error(&mut builder, &inclusion);
+    builder.record(inclusion);
+
+    let finality = finality_reading(
+        &bundle.finality_proof,
+        bundle.anchor_ref.block_height,
+        MIN_REQUIRED_CONFIRMATIONS,
+        expected.observed_source_tip,
+        &ChainNativeProofAssessment::NotSupplied,
+    );
+    record_dimension_error(&mut builder, &finality);
+    builder.record(finality);
+
+    let closure = source_closure_reading(Some(seal_registry(bundle.seal_ref.id.as_ref())));
+    record_dimension_error(&mut builder, &closure);
+    builder.record(closure);
+
+    let freshness = freshness_reading(
+        bundle.anchor_ref.block_height,
+        expected.observed_source_tip,
+        expected.max_anchor_age_blocks,
+    );
+    record_dimension_error(&mut builder, &freshness);
+    builder.record(freshness);
+
+    builder.build()
+}
+
+/// Digest of everything the offline path treats as its effective context.
+fn offline_context_digest(
+    signature_scheme: SignatureScheme,
+    authorized_signers: &[Vec<u8>],
+    expected: &ExpectedDomain,
+) -> Hash {
+    ContextDigestWriter::new(OFFLINE_VERIFICATION_PROFILE_ID)
+        .u64("signature_scheme", signature_scheme_tag(signature_scheme))
+        .byte_list("authorized_signers", authorized_signers)
+        .opt_bytes(
+            "expected.sanad_id",
+            expected.sanad_id.as_ref().map(|id| id.as_slice()),
+        )
+        .opt_bytes(
+            "expected.source_chain",
+            expected.source_chain.as_deref().map(str::as_bytes),
+        )
+        .opt_u64("expected.observed_source_tip", expected.observed_source_tip)
+        .opt_u64(
+            "expected.max_anchor_age_blocks",
+            expected.max_anchor_age_blocks,
+        )
+        .u64("config.max_proof_bundle_size", MAX_PROOF_BUNDLE_SIZE as u64)
+        .u64(
+            "config.min_required_confirmations",
+            MIN_REQUIRED_CONFIRMATIONS,
+        )
+        .finish()
+}
+
+/// Bind a bundle to the caller's trusted expected domain.
+fn validate_expected_domain(bundle: &ProofBundle, expected: &ExpectedDomain) -> Result<()> {
     if let Some(expected_sanad) = &expected.sanad_id
         && bundle.anchor_ref.anchor_id.as_slice() != expected_sanad.as_slice()
     {
-        return VerificationResult::from_protocol_error(&ProtocolError::Generic(
+        return Err(ProtocolError::Generic(
             "Domain binding failed: proof anchor does not match the expected Sanad".to_string(),
         ));
     }
@@ -800,96 +1450,20 @@ pub fn verify_proof_bound(
         && !bundle.inclusion_proof.source.is_empty()
         && &bundle.inclusion_proof.source != expected_source
     {
-        return VerificationResult::from_protocol_error(&ProtocolError::Generic(format!(
+        return Err(ProtocolError::Generic(format!(
             "Domain binding failed: proof source chain '{}' does not match expected '{}'",
             bundle.inclusion_proof.source, expected_source
         )));
     }
-
-    // VERIFY-SIGNER-BINDING-001: the offline recipient accept path has no other
-    // authorization gate (no on-chain §9.2 attestation, no adapter
-    // native_proof_validated), so it MUST be given the approved verifier set and
-    // fails closed without it. Otherwise a bundle signed by any attacker-chosen
-    // key would reach `fully_verified()`.
-    if authorized_signers.is_empty() {
-        return VerificationResult::from_protocol_error(
-            &ProtocolError::SignatureVerificationFailed(
-                "No approved verifier keys supplied: refusing to accept a proof bundle whose \
-             signatures cannot be bound to an authorized signer"
-                    .to_string(),
-            ),
-        );
-    }
-    // Step 1: Validate proof bundle size (DoS protection). Re-enabled by
-    // VERIFY-VALIDATIONS-DISABLED-001 — an oversized bundle must be rejected
-    // before any further work.
-    if let Err(e) = validate_proof_bundle_size(bundle) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 2: Validate DAG structure (well-formed transition graph). Re-enabled
-    // by VERIFY-VALIDATIONS-DISABLED-001.
-    if let Err(e) = bundle
-        .transition_dag
-        .validate_structure()
-        .map_err(|e| ProtocolError::Generic(format!("Invalid DAG structure: {}", e)))
-    {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 3: Validate proof anchor height and optional caller-supplied
-    // freshness bounds (prevent replay of old proofs).
-    if let Err(e) = validate_proof_timestamp(bundle) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-    if let Err(e) = validate_expected_freshness(bundle, expected) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 4: Validate signatures with cryptographic verification, bound to the
-    // approved verifier set (checked non-empty above — this path fails closed
-    // without it).
-    if let Err(e) = verify_bundle_signatures(bundle, signature_scheme, authorized_signers) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 5: Validate domain separation (prevent cross-domain attacks)
-    if let Err(e) = validate_domain_separation(bundle) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 6: Validate seal reference (check for replay)
-    if seal_registry(bundle.seal_ref.id.as_ref()) {
-        return VerificationResult::from_protocol_error(&ProtocolError::SealReplay(format!(
-            "Seal {:?} has already been used",
-            bundle.seal_ref
-        )));
-    }
-
-    // Step 7: Validate inclusion proof (chain-specific, validated by adapter)
-    if let Err(e) = validate_inclusion_proof(&bundle.inclusion_proof) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 8: Validate finality proof (chain-specific, validated by adapter)
-    if let Err(e) = validate_finality_proof(&bundle.finality_proof) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    // Step 9: Validate anchor reference integrity
-    if let Err(e) = validate_anchor_reference(bundle) {
-        return VerificationResult::from_protocol_error(&e);
-    }
-
-    VerificationResult::fully_verified()
+    Ok(())
 }
 
-/// Validate proof bundle size to prevent DoS attacks (VERIFY-VALIDATIONS-DISABLED-001).
+/// Validate proof bundle size against a configured bound (VERIFY-VALIDATIONS-DISABLED-001).
 ///
 /// # Security
 /// - Prevents memory exhaustion from oversized proofs
 /// - Limits network bandwidth consumption
-fn validate_proof_bundle_size(bundle: &ProofBundle) -> Result<()> {
+fn validate_proof_bundle_size_with(bundle: &ProofBundle, max_bundle_size: usize) -> Result<()> {
     // Estimate size by summing all components
     let mut total_size: usize = 0;
 
@@ -921,87 +1495,11 @@ fn validate_proof_bundle_size(bundle: &ProofBundle) -> Result<()> {
     total_size += bundle.inclusion_proof.proof_bytes.len();
     total_size += bundle.finality_proof.finality_data.len();
 
-    if total_size > MAX_PROOF_BUNDLE_SIZE {
+    if total_size > max_bundle_size {
         return Err(ProtocolError::Generic(format!(
             "Proof bundle too large: {} bytes (max {})",
-            total_size, MAX_PROOF_BUNDLE_SIZE
+            total_size, max_bundle_size
         )));
-    }
-
-    Ok(())
-}
-
-/// Validate proof timestamp to prevent replay of old proofs.
-///
-/// # Security
-/// - Prevents replay attacks using old proofs
-/// - Ensures proofs are generated recently
-fn validate_proof_timestamp(bundle: &ProofBundle) -> Result<()> {
-    if bundle.anchor_ref.block_height == 0 {
-        return Err(ProtocolError::Generic(
-            "Invalid anchor reference: block height is 0".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
-fn validate_expected_freshness(bundle: &ProofBundle, expected: &ExpectedDomain) -> Result<()> {
-    match (
-        expected.observed_source_tip,
-        expected.max_anchor_age_blocks,
-    ) {
-        (Some(observed_tip), Some(max_age)) => {
-            if observed_tip == u64::MAX {
-                return Ok(());
-            }
-            let age = observed_tip
-                .checked_sub(bundle.anchor_ref.block_height)
-                .ok_or_else(|| {
-                    ProtocolError::Generic(format!(
-                        "Invalid freshness context: observed source tip {} is below anchor height {}",
-                        observed_tip, bundle.anchor_ref.block_height
-                    ))
-                })?;
-            if age > max_age {
-                return Err(ProtocolError::ProofExpired(format!(
-                    "anchor is {age} blocks below tip, exceeds max age {max_age}"
-                )));
-            }
-            Ok(())
-        }
-        (Some(_), None) | (None, Some(_)) => Err(ProtocolError::Generic(
-            "Incomplete freshness context: observed_source_tip and max_anchor_age_blocks must be supplied together"
-                .to_string(),
-        )),
-        (None, None) => Ok(()),
-    }
-}
-
-/// Validate domain separation to prevent cross-domain attacks.
-///
-/// # Security
-/// - Ensures proof is for the intended domain/chain
-/// - Prevents cross-chain replay attacks
-///
-/// This performs the structural sanity checks (non-empty seal / anchor). The
-/// authoritative chain/transfer binding lives in [`validate_context_binding`],
-/// which compares the bundle against the expected verification context
-/// (VERIFY-DOMAIN-SEPARATION-001).
-fn validate_domain_separation(bundle: &ProofBundle) -> Result<()> {
-    // Check that the seal reference has a valid seal ID
-    if bundle.seal_ref.id.is_empty() {
-        return Err(ProtocolError::Generic(
-            "Invalid seal reference: empty seal ID".to_string(),
-        ));
-    }
-
-    // Verify that the anchor reference has valid metadata
-    // Anchor metadata should contain the proof data or reference
-    if bundle.anchor_ref.metadata.is_empty() && bundle.anchor_ref.block_height == 0 {
-        return Err(ProtocolError::Generic(
-            "Invalid anchor reference: empty metadata and block height".to_string(),
-        ));
     }
 
     Ok(())
@@ -1294,11 +1792,15 @@ fn canonical_public_key(key: &[u8], scheme: SignatureScheme) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assurance::{
+        AssuranceRequirement, ChainNativeProofAttestation, DimensionRequirement, TrustMode,
+    };
     use csv_hash::Hash;
     use csv_hash::dag::{DAGNode, DAGSegment};
     use csv_hash::seal::{CommitAnchor, SealPoint};
     use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
     use csv_protocol::signature::SignatureScheme;
+    use csv_protocol::verification_levels::VerificationLevel;
 
     // Deterministic key so tests can build the approved-signer set now required
     // by verify_bundle_signatures (VERIFY-SIGNER-BINDING-001).
@@ -1309,6 +1811,30 @@ mod tests {
     /// Approved verifier set matching `make_ed25519_signature_bytes`'s signer.
     fn authorized() -> Vec<Vec<u8>> {
         vec![test_signing_key().verifying_key().to_bytes().to_vec()]
+    }
+
+    /// Status of one dimension in a report.
+    fn status(
+        report: &ProtocolAssuranceReport,
+        dimension: ProtocolAssuranceDimension,
+    ) -> DimensionStatus {
+        report.reading(dimension).status
+    }
+
+    /// Whether a report carries a reason code on a dimension.
+    fn has_reason(
+        report: &ProtocolAssuranceReport,
+        dimension: ProtocolAssuranceDimension,
+        code: ProtocolReasonCode,
+    ) -> bool {
+        report.reading(dimension).reason_codes.contains(&code)
+    }
+
+    /// Does the offline recipient policy accept this report?
+    fn offline_accepts(report: &ProtocolAssuranceReport) -> bool {
+        AssuranceRequirement::OFFLINE_RECIPIENT
+            .evaluate(report)
+            .is_met()
     }
 
     fn make_ed25519_signature_bytes(message: &[u8]) -> Vec<u8> {
@@ -1337,23 +1863,31 @@ mod tests {
         encoded
     }
 
+    /// A canonical single-node segment (PAR-DAG-001).
+    ///
+    /// Node identity and segment root are derived from contents, so the root
+    /// cannot be chosen and must be sealed before it can be signed. The node
+    /// carries no signature of its own: signing the root that commits to the
+    /// node holding the signature would be circular, and bundle-level
+    /// signatures are what the verifier checks against the root.
+    fn canonical_segment() -> DAGSegment {
+        DAGSegment::sealed(vec![DAGNode::sealed(
+            vec![0x01, 0x02],
+            vec![],
+            vec![],
+            vec![],
+        )])
+        .expect("canonical single-node segment")
+    }
+
     fn test_bundle_with_signatures() -> Result<ProofBundle> {
-        // The message signed is the DAG root commitment (Hash::zero() = 32 zero bytes)
-        let message = [0u8; 32];
-        let signature = make_ed25519_signature_bytes(&message);
+        // The message signed is the DAG root commitment.
+        let transition_dag = canonical_segment();
+        let signature = make_ed25519_signature_bytes(transition_dag.root_commitment.as_bytes());
 
         let seal_id = vec![1u8, 2, 3];
         let bundle = ProofBundle::new(
-            DAGSegment::new(
-                vec![DAGNode::new(
-                    Hash::new([1u8; 32]),
-                    vec![0x01, 0x02],
-                    vec![signature.clone()],
-                    vec![],
-                    vec![],
-                )],
-                Hash::zero(),
-            ),
+            transition_dag,
             vec![signature],
             SealPoint::new(seal_id.clone(), Some(42), None)
                 .map_err(|e| ProtocolError::Generic(e.to_string()))?,
@@ -1372,21 +1906,418 @@ mod tests {
         Ok(bundle)
     }
 
+    /// A runtime context with a named chain-native provider attesting inclusion,
+    /// finality and transfer binding — the shape the transfer coordinator builds.
+    fn attested_runtime_context() -> VerificationContext {
+        VerificationContext {
+            chain_id: "bitcoin".to_string(),
+            signature_scheme: SignatureScheme::Ed25519,
+            required_confirmations: 1,
+            current_block_height: Some(200),
+            seal_registry: None,
+            chain_data: None,
+            chain_native_proof: ChainNativeProofAssessment::Attested(
+                ChainNativeProofAttestation::new(
+                    "test-adapter",
+                    "bitcoin",
+                    [
+                        ChainNativeClaim::AnchorInclusion,
+                        ChainNativeClaim::CheckpointFinality,
+                        ChainNativeClaim::TransferBinding,
+                    ],
+                ),
+            ),
+            sanad_id: None,
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
+            authorized_signers: authorized(),
+        }
+    }
+
+    // ==================================================================
+    // PAR-VERIFY-001 acceptance criteria
+    // ==================================================================
+
+    #[test]
+    fn nonempty_proof_bytes_alone_cannot_produce_full_verification() {
+        // AC1. A structurally perfect bundle with nonempty inclusion and finality
+        // bytes, correctly signed, verified offline. Nothing checked those bytes
+        // against a chain, so inclusion, finality and closure must all stay short
+        // of Satisfied and no aggregate label may claim full verification.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+
+        assert!(!bundle.inclusion_proof.proof_bytes.is_empty());
+        assert!(!bundle.finality_proof.finality_data.is_empty());
+
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionStatus::Satisfied
+        );
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::AnchorInclusion),
+            DimensionStatus::Indeterminate,
+            "well-formed proof bytes are structure, not inclusion"
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::AnchorInclusion,
+            ProtocolReasonCode::InclusionNotCryptographicallyVerified
+        ));
+        assert_ne!(report.display_level(), VerificationLevel::FullyVerified);
+        assert_ne!(report.display_level(), VerificationLevel::ConsensusVerified);
+        assert!(
+            !AssuranceRequirement::COMPLETE.evaluate(&report).is_met(),
+            "no bundle can meet the complete policy while closure is ungrounded"
+        );
+    }
+
+    #[test]
+    fn a_caller_supplied_attestation_cannot_upgrade_every_dimension() {
+        // AC2. The old `native_proof_validated: bool` raised the whole bundle to
+        // FullyVerified. Its typed replacement raises only the dimensions it names,
+        // and cannot reach dimensions whose evidence does not exist yet.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let report = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::AnchorInclusion),
+            DimensionStatus::Satisfied
+        );
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::FinalityCheckpoint),
+            DimensionStatus::Satisfied
+        );
+        // Even a provider claiming transfer binding cannot conclude transition
+        // semantics (PAR-STATE-003) or source closure (PAR-BTC-002).
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::TransitionSemantics),
+            DimensionStatus::Indeterminate
+        );
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::SourceClosure),
+            DimensionStatus::Indeterminate
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::SourceClosure,
+            ProtocolReasonCode::SourceClosureNotExternallyGrounded
+        ));
+        assert_ne!(report.display_level(), VerificationLevel::FullyVerified);
+    }
+
+    #[test]
+    fn provider_attested_dimensions_are_never_reported_as_locally_recomputed() {
+        // AC2/AC3. A dimension the verifier could not recompute must say who
+        // asserted it, so a contextual reading stays visibly contextual.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let report = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+
+        let inclusion = report.reading(ProtocolAssuranceDimension::AnchorInclusion);
+        assert_eq!(inclusion.provider.trust_mode, TrustMode::ProviderAttested);
+        assert_eq!(inclusion.provider.provider_id, "test-adapter");
+        assert_eq!(inclusion.provider.chain_id.as_deref(), Some("bitcoin"));
+
+        let structure = report.reading(ProtocolAssuranceDimension::CanonicalStructure);
+        assert_eq!(structure.provider.trust_mode, TrustMode::LocalRecomputation);
+        assert_eq!(
+            structure.provider.provider_id,
+            crate::assurance::CANONICAL_VERIFIER_PROVIDER_ID
+        );
+    }
+
+    #[test]
+    fn every_report_names_its_verification_context_and_a_provider_per_dimension() {
+        // AC3.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let runtime = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+        let offline = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+
+        for report in [&runtime, &offline] {
+            assert_ne!(report.verification_context_digest(), Hash::zero());
+            assert_eq!(
+                report.dimensions().len(),
+                crate::assurance::PROTOCOL_ASSURANCE_DIMENSIONS.len()
+            );
+            for reading in report.dimensions() {
+                assert!(
+                    !reading.provider.provider_id.is_empty(),
+                    "{} has no named provider",
+                    reading.dimension.registry_id()
+                );
+                assert!(
+                    !reading.reason_codes.is_empty(),
+                    "{} states a conclusion with no reason",
+                    reading.dimension.registry_id()
+                );
+            }
+        }
+        assert_ne!(
+            runtime.verification_context_digest(),
+            offline.verification_context_digest(),
+            "different pipelines and inputs must not share a context digest"
+        );
+    }
+
+    #[test]
+    fn the_context_digest_changes_when_an_input_changes() {
+        // AC3: the digest is only useful if it actually binds the inputs.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let verifier = CanonicalVerifierImpl::default();
+
+        let baseline = verifier.verify_proof_bundle(&bundle, &attested_runtime_context());
+
+        let mut deeper = attested_runtime_context();
+        deeper.required_confirmations += 1;
+        let deeper = verifier.verify_proof_bundle(&bundle, &deeper);
+
+        let mut unattested = attested_runtime_context();
+        unattested.chain_native_proof = ChainNativeProofAssessment::NotSupplied;
+        let unattested = verifier.verify_proof_bundle(&bundle, &unattested);
+
+        assert_ne!(
+            baseline.verification_context_digest(),
+            deeper.verification_context_digest()
+        );
+        assert_ne!(
+            baseline.verification_context_digest(),
+            unattested.verification_context_digest()
+        );
+    }
+
+    #[test]
+    fn a_failed_foundational_dimension_cannot_be_hidden_behind_an_aggregate() {
+        // AC4. A rejected inclusion attestation must show up in the readings, in
+        // the foundational shortfalls, in the policy outcome and in the coarse
+        // display label — there is nowhere for it to hide.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let mut context = attested_runtime_context();
+        context.chain_native_proof = ChainNativeProofAssessment::Rejected(
+            ChainNativeProofAttestation::new("test-adapter", "bitcoin", [])
+                .with_detail("merkle path does not reach the block root"),
+        );
+        let report = CanonicalVerifierImpl::default().verify_proof_bundle(&bundle, &context);
+
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::AnchorInclusion),
+            DimensionStatus::NotSatisfied
+        );
+        assert!(
+            report
+                .foundational_shortfalls()
+                .iter()
+                .any(|reading| reading.dimension == ProtocolAssuranceDimension::AnchorInclusion)
+        );
+        let outcome = AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&report);
+        assert!(!outcome.is_met());
+        assert!(outcome.shortfall_summary().contains("ANCHOR_INCLUSION"));
+        assert_eq!(report.display_level(), VerificationLevel::StructuralOnly);
+    }
+
+    #[test]
+    fn an_unavailable_foundational_dimension_blocks_the_runtime_policy() {
+        // AC4, the "unavailable" half: no provider at all is not the same as a
+        // provider that succeeded, and the runtime policy must not accept it.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let mut context = attested_runtime_context();
+        context.chain_native_proof = ChainNativeProofAssessment::NotSupplied;
+        context.current_block_height = None;
+        let report = CanonicalVerifierImpl::default().verify_proof_bundle(&bundle, &context);
+
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::AnchorInclusion),
+            DimensionStatus::Indeterminate
+        );
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::FinalityCheckpoint),
+            DimensionStatus::Indeterminate
+        );
+        let outcome = AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&report);
+        assert!(!outcome.is_met());
+        let blocked: Vec<_> = outcome
+            .shortfalls
+            .iter()
+            .map(|entry| entry.dimension)
+            .collect();
+        assert!(blocked.contains(&ProtocolAssuranceDimension::AnchorInclusion));
+        assert!(blocked.contains(&ProtocolAssuranceDimension::FinalityCheckpoint));
+    }
+
+    #[test]
+    fn accepted_limitations_are_carried_out_of_every_successful_runtime_verification() {
+        // AC4. A met policy still hands back what it chose to tolerate, so a caller
+        // physically cannot report success without the caveats.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let report = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+        let outcome = AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&report);
+
+        assert!(outcome.is_met(), "{}", outcome.shortfall_summary());
+        assert!(
+            outcome
+                .accepted_limitations
+                .iter()
+                .any(|entry| entry.dimension == ProtocolAssuranceDimension::SourceClosure),
+            "source closure must be surfaced as an accepted limitation"
+        );
+        assert_eq!(
+            outcome.verification_context_digest,
+            report.verification_context_digest()
+        );
+    }
+
+    #[test]
+    fn the_runtime_path_reports_that_dag_identity_was_not_recomputed() {
+        // The runtime's adapters still supply node identifiers and the segment
+        // root (PAR-DAG-001/PAR-DAG-002). That gap is stated on the reading rather
+        // than absorbed into a passing structural check.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let report = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionStatus::Indeterminate
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::DagIdentityNotRecomputed
+        ));
+        // The offline path does recompute it, and says so.
+        let offline = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert_eq!(
+            status(&offline, ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionStatus::Satisfied
+        );
+    }
+
+    #[test]
+    fn a_malformed_bundle_still_fails_structurally_on_the_runtime_path() {
+        // Deferring DAG identity must not defer the rules that do run.
+        let mut bundle = test_bundle_with_signatures().unwrap();
+        bundle.transition_dag.nodes.clear();
+        let report = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionStatus::NotSatisfied
+        );
+        assert!(
+            !AssuranceRequirement::RUNTIME_SOURCE_PROOF
+                .evaluate(&report)
+                .is_met()
+        );
+    }
+
+    #[test]
+    fn a_hostile_graph_fails_structurally_even_where_identity_is_deferred() {
+        // PAR-DAG-002. The runtime path cannot recompute node identity yet, but
+        // a cycle, a self-parenting node, a duplicate identifier and an
+        // unresolvable parent are defects in the declared graph itself. Each
+        // must come back NotSatisfied — not the Indeterminate that "identity was
+        // supplied" earns — or a structural failure would be downgraded to an
+        // uncertainty on the one path real transfers take.
+        let a = Hash::new([1u8; 32]);
+        let b = Hash::new([2u8; 32]);
+        let node = |id: Hash, parents: Vec<Hash>| {
+            DAGNode::new(id, vec![0x01], vec![vec![0xAB; 8]], vec![], parents)
+        };
+
+        let hostile_graphs = [
+            ("cycle", vec![node(a, vec![b]), node(b, vec![a])]),
+            ("self-parent", vec![node(a, vec![a])]),
+            (
+                "duplicate identifier",
+                vec![node(a, vec![]), node(a, vec![])],
+            ),
+            ("missing parent", vec![node(a, vec![Hash::new([9u8; 32])])]),
+        ];
+
+        for (shape, nodes) in hostile_graphs {
+            let mut bundle = test_bundle_with_signatures().unwrap();
+            bundle.transition_dag = DAGSegment::new(nodes, bundle.transition_dag.root_commitment);
+            let report = CanonicalVerifierImpl::default()
+                .verify_proof_bundle(&bundle, &attested_runtime_context());
+            assert_eq!(
+                status(&report, ProtocolAssuranceDimension::CanonicalStructure),
+                DimensionStatus::NotSatisfied,
+                "{shape} was not reported as a structural failure"
+            );
+            assert!(
+                !AssuranceRequirement::RUNTIME_SOURCE_PROOF
+                    .evaluate(&report)
+                    .is_met(),
+                "{shape} still met the runtime acceptance policy"
+            );
+        }
+    }
+
+    #[test]
+    fn an_adapter_shaped_segment_still_passes_the_relation_rules() {
+        // The counterweight to the test above: every chain adapter builds a
+        // single parentless node with an adapter-chosen identifier and root.
+        // Enforcing the relation rules on the deferred path must not reject it —
+        // it stays Indeterminate for the identity it genuinely cannot recompute.
+        let mut bundle = test_bundle_with_signatures().unwrap();
+        bundle.transition_dag = DAGSegment::new(
+            vec![DAGNode::new(
+                Hash::new([7u8; 32]),
+                vec![0x01, 0x02],
+                vec![vec![0xAB; 8]],
+                vec![vec![0xCD; 4]],
+                vec![],
+            )],
+            Hash::new([7u8; 32]),
+        );
+        let report = CanonicalVerifierImpl::default()
+            .verify_proof_bundle(&bundle, &attested_runtime_context());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionStatus::Indeterminate
+        );
+    }
+
+    #[test]
+    fn source_closure_reports_that_it_is_not_externally_grounded() {
+        // Stage 1 exit gate: Parwana validates a transition from supplied history
+        // while explicitly reporting that closure is not yet externally grounded.
+        let bundle = test_bundle_with_signatures().unwrap();
+        for report in [
+            verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized()),
+            CanonicalVerifierImpl::default()
+                .verify_proof_bundle(&bundle, &attested_runtime_context()),
+        ] {
+            assert_ne!(
+                status(&report, ProtocolAssuranceDimension::SourceClosure),
+                DimensionStatus::Satisfied
+            );
+            assert!(has_reason(
+                &report,
+                ProtocolAssuranceDimension::SourceClosure,
+                ProtocolReasonCode::SourceClosureNotExternallyGrounded
+            ));
+        }
+    }
+
+    // ==================================================================
+    // Behaviour preserved from the scalar pipeline
+    // ==================================================================
+
     #[test]
     fn test_verify_proof_valid() {
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        let outcome = AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&report);
+        assert!(outcome.is_met(), "{}", outcome.shortfall_summary());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Authorization),
+            DimensionStatus::Satisfied
         );
-        if !result.is_valid {
-            eprintln!("Verification failed. Errors: {:?}", result.errors);
-        }
-        assert!(result.is_valid);
-        assert!(matches!(result.level, VerificationLevel::FullyVerified));
     }
 
     #[test]
@@ -1429,36 +2360,32 @@ mod tests {
         )
         .map_err(|e| ProtocolError::Generic(e.to_string()))
         .unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Authorization),
+            DimensionStatus::NotSatisfied,
+            "a bundle signed by an unauthorized key must not authorize"
         );
-        assert!(
-            !result.is_valid,
-            "a bundle signed by an unauthorized key must not verify"
-        );
+        assert!(!offline_accepts(&report));
     }
 
     #[test]
     fn verify_proof_rejects_oversized_bundle() {
-        // VERIFY-VALIDATIONS-DISABLED-001 regression: the re-enabled size bound
-        // must reject a bundle larger than MAX_PROOF_BUNDLE_SIZE (DoS protection).
+        // VERIFY-VALIDATIONS-DISABLED-001 regression: the size bound must reject a
+        // bundle larger than MAX_PROOF_BUNDLE_SIZE (DoS protection).
         let mut bundle = test_bundle_with_signatures().unwrap();
         bundle.signatures.push(vec![0u8; MAX_PROOF_BUNDLE_SIZE + 1]);
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionStatus::NotSatisfied
         );
-        assert!(
-            !result.is_valid,
-            "an oversized proof bundle must be rejected"
-        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::CanonicalStructure,
+            ProtocolReasonCode::BundleTooLarge
+        ));
+        assert!(!offline_accepts(&report));
     }
 
     #[test]
@@ -1466,7 +2393,6 @@ mod tests {
         // VERIFY-DOMAIN-SEPARATION-001: a bundle whose anchor binds Sanad A must
         // be rejected when the caller expects Sanad B (cross-domain replay).
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
 
         // The test bundle's anchor_id is the seal_id (vec![1,2,3]); an expected
         // Sanad that differs must be rejected.
@@ -1476,17 +2402,19 @@ mod tests {
             observed_source_tip: None,
             max_anchor_age_blocks: None,
         };
-        let result = verify_proof_bound(
+        let report = verify_proof_bound(
             &bundle,
-            seal_registry,
+            |_| false,
             SignatureScheme::Ed25519,
             &authorized(),
             &expected,
         );
-        assert!(
-            !result.is_valid,
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::TransitionSemantics),
+            DimensionStatus::NotSatisfied,
             "a bundle bound to a different Sanad must not verify"
         );
+        assert!(!offline_accepts(&report));
     }
 
     #[test]
@@ -1494,195 +2422,229 @@ mod tests {
         // VERIFY-DOMAIN-SEPARATION-001 on the CanonicalVerifierImpl (runtime) path:
         // a context expecting a different Sanad than the bundle's anchor must fail.
         let bundle = test_bundle_with_signatures().unwrap();
-        let verifier = CanonicalVerifierImpl::default();
-        let ctx = VerificationContext {
-            chain_id: "bitcoin".to_string(),
-            signature_scheme: SignatureScheme::Ed25519,
-            required_confirmations: 0,
-            current_block_height: Some(200),
-            seal_registry: None,
-            chain_data: None,
-            native_proof_validated: true,
-            // Anchor id in the test bundle is vec![1,2,3]; a 32-byte mismatch here
-            // must be rejected by the context binding step.
-            sanad_id: Some(csv_hash::SanadId(Hash::new([0x11u8; 32]))),
-            lock_tx: None,
-            lock_output_index: None,
-            transition_id: None,
-            destination_chain: Some("sui".to_string()),
-            authorized_signers: Vec::new(),
-        };
-        let result = verifier.verify_proof_bundle(&bundle, &ctx);
-        assert!(
-            result.is_err(),
+        let mut ctx = attested_runtime_context();
+        // Anchor id in the test bundle is vec![1,2,3]; a 32-byte mismatch here
+        // must be rejected by the context binding step.
+        ctx.sanad_id = Some(csv_hash::SanadId(Hash::new([0x11u8; 32])));
+        ctx.destination_chain = Some("sui".to_string());
+        let report = CanonicalVerifierImpl::default().verify_proof_bundle(&bundle, &ctx);
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::TransitionSemantics),
+            DimensionStatus::NotSatisfied,
             "runtime path must reject a bundle whose anchor does not match the context Sanad"
+        );
+        assert!(
+            !AssuranceRequirement::RUNTIME_SOURCE_PROOF
+                .evaluate(&report)
+                .is_met()
         );
     }
 
     fn freshness_context(current_height: u64) -> VerificationContext {
-        VerificationContext {
-            chain_id: "bitcoin".to_string(),
-            signature_scheme: SignatureScheme::Ed25519,
-            required_confirmations: 1,
-            current_block_height: Some(current_height),
-            seal_registry: None,
-            chain_data: None,
-            native_proof_validated: true,
-            sanad_id: None,
-            lock_tx: None,
-            lock_output_index: None,
-            transition_id: None,
-            destination_chain: None,
-            authorized_signers: Vec::new(),
-        }
+        let mut context = attested_runtime_context();
+        context.current_block_height = Some(current_height);
+        context
     }
 
     #[test]
-    fn verify_finality_rejects_stale_anchor_beyond_max_age() {
+    fn stale_anchor_beyond_max_age_is_reported_as_not_fresh() {
         // VERIFY-PROOF-FRESHNESS-001: with a freshness bound configured, an anchor
         // buried more than max_anchor_age_blocks below the observed tip is stale.
+        let bundle = test_bundle_with_signatures().unwrap();
         let verifier = CanonicalVerifierImpl::new(VerifierConfig {
             max_anchor_age_blocks: Some(100),
             ..VerifierConfig::default()
         });
-        let anchor_height = 1_000u64;
-        // tip is 250 blocks above the anchor -> age 250 > 100 -> expired.
-        let ctx = freshness_context(anchor_height + 250);
-        let result = verifier.verify_finality(anchor_height, &ctx);
+        // tip is 250 blocks above the anchor -> age 250 > 100 -> stale.
+        let ctx = freshness_context(bundle.anchor_ref.block_height + 250);
+        let report = verifier.verify_proof_bundle(&bundle, &ctx);
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::NotSatisfied
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::Freshness,
+            ProtocolReasonCode::AnchorStale
+        ));
         assert!(
-            matches!(result, Err(ProtocolError::ProofExpired(_))),
-            "a stale anchor must be rejected with ProofExpired, got {result:?}"
+            !AssuranceRequirement::RUNTIME_SOURCE_PROOF
+                .evaluate(&report)
+                .is_met(),
+            "a NotSatisfied dimension is a shortfall even where the policy tolerates \
+             indeterminacy"
         );
     }
 
     #[test]
-    fn verify_finality_accepts_fresh_anchor_within_max_age() {
+    fn fresh_anchor_within_max_age_satisfies_freshness() {
+        let bundle = test_bundle_with_signatures().unwrap();
         let verifier = CanonicalVerifierImpl::new(VerifierConfig {
             max_anchor_age_blocks: Some(100),
             ..VerifierConfig::default()
         });
-        let anchor_height = 1_000u64;
         // 50 blocks deep: within both the finality floor (1) and freshness cap (100).
-        let ctx = freshness_context(anchor_height + 50);
-        assert!(verifier.verify_finality(anchor_height, &ctx).is_ok());
+        let ctx = freshness_context(bundle.anchor_ref.block_height + 50);
+        let report = verifier.verify_proof_bundle(&bundle, &ctx);
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::Satisfied
+        );
     }
 
     #[test]
-    fn verify_finality_accepts_anchor_exactly_at_max_age() {
+    fn anchor_exactly_at_max_age_satisfies_freshness() {
+        let bundle = test_bundle_with_signatures().unwrap();
         let verifier = CanonicalVerifierImpl::new(VerifierConfig {
             max_anchor_age_blocks: Some(100),
             ..VerifierConfig::default()
         });
-        let anchor_height = 1_000u64;
-        let ctx = freshness_context(anchor_height + 100);
-        assert!(verifier.verify_finality(anchor_height, &ctx).is_ok());
+        let ctx = freshness_context(bundle.anchor_ref.block_height + 100);
+        let report = verifier.verify_proof_bundle(&bundle, &ctx);
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::Satisfied
+        );
     }
 
     #[test]
-    fn verify_finality_freshness_exempts_instant_final_sentinel() {
+    fn freshness_exempts_the_instant_final_sentinel() {
         // u64::MAX confirmations is the "instant-final" sentinel; its age is not
-        // measured in blocks and must not be rejected as stale.
+        // measured in blocks, so the dimension is inapplicable rather than stale.
+        let bundle = test_bundle_with_signatures().unwrap();
         let verifier = CanonicalVerifierImpl::new(VerifierConfig {
             max_anchor_age_blocks: Some(100),
             ..VerifierConfig::default()
         });
-        let ctx = freshness_context(u64::MAX);
-        assert!(verifier.verify_finality(1_000, &ctx).is_ok());
+        let report = verifier.verify_proof_bundle(&bundle, &freshness_context(u64::MAX));
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::NotApplicable
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::Freshness,
+            ProtocolReasonCode::FreshnessNotMeasuredInBlocks
+        ));
     }
 
     #[test]
-    fn verify_finality_freshness_disabled_by_default() {
-        // Default config leaves freshness off, so a very old anchor still passes
-        // finality (preserving existing behavior).
+    fn an_unconfigured_freshness_bound_is_reported_as_unknown_not_as_fresh() {
+        // The default config leaves freshness off. Under the scalar pipeline that
+        // silently passed; now it is an explicit unknown that the report carries.
+        let bundle = test_bundle_with_signatures().unwrap();
         let verifier = CanonicalVerifierImpl::default();
-        let ctx = freshness_context(1_000_000);
-        assert!(verifier.verify_finality(1, &ctx).is_ok());
+        let report = verifier.verify_proof_bundle(&bundle, &freshness_context(1_000_000));
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::Indeterminate
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::Freshness,
+            ProtocolReasonCode::FreshnessBoundNotConfigured
+        ));
     }
 
     #[test]
     fn verify_proof_bound_rejects_stale_anchor_beyond_expected_max_age() {
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
         let expected = ExpectedDomain {
             observed_source_tip: Some(bundle.anchor_ref.block_height + 101),
             max_anchor_age_blocks: Some(100),
             ..ExpectedDomain::default()
         };
 
-        let result = verify_proof_bound(
+        let report = verify_proof_bound(
             &bundle,
-            seal_registry,
+            |_| false,
             SignatureScheme::Ed25519,
             &authorized(),
             &expected,
         );
-        assert!(
-            !result.is_valid,
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::NotSatisfied,
             "offline bound verification must reject anchors older than the configured max age"
         );
+        assert!(!offline_accepts(&report));
         assert!(
-            result
-                .errors
+            report
+                .errors()
                 .iter()
-                .any(|e| e.message.contains("Proof expired")),
-            "stale anchor must surface proof expiry, got {:?}",
-            result.errors
+                .any(|e| e.message.contains("exceeds max age")),
+            "stale anchor must surface a typed error, got {:?}",
+            report.errors()
         );
     }
 
     #[test]
     fn verify_proof_bound_accepts_anchor_exactly_at_expected_max_age() {
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
         let expected = ExpectedDomain {
             observed_source_tip: Some(bundle.anchor_ref.block_height + 100),
             max_anchor_age_blocks: Some(100),
             ..ExpectedDomain::default()
         };
 
-        let result = verify_proof_bound(
+        let report = verify_proof_bound(
             &bundle,
-            seal_registry,
+            |_| false,
             SignatureScheme::Ed25519,
             &authorized(),
             &expected,
         );
-        assert!(
-            result.is_valid,
-            "offline bound verification must allow anchors exactly at the configured max age"
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::Satisfied
         );
+        assert!(offline_accepts(&report));
     }
 
     #[test]
     fn verify_proof_bound_freshness_exempts_instant_final_sentinel() {
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
         let expected = ExpectedDomain {
             observed_source_tip: Some(u64::MAX),
             max_anchor_age_blocks: Some(100),
             ..ExpectedDomain::default()
         };
 
-        let result = verify_proof_bound(
+        let report = verify_proof_bound(
             &bundle,
-            seal_registry,
+            |_| false,
             SignatureScheme::Ed25519,
             &authorized(),
             &expected,
         );
-        assert!(result.is_valid);
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Freshness),
+            DimensionStatus::NotApplicable
+        );
+        assert!(offline_accepts(&report));
     }
 
     #[test]
     fn verify_proof_fails_closed_without_authorized_set() {
-        // The offline accept path must not reach fully_verified() when no approved
-        // verifier keys are supplied.
+        // Signatures that verify only against sender-chosen keys are a tautology.
+        // The dimension says so, and every shipped policy refuses it.
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(&bundle, seal_registry, SignatureScheme::Ed25519, &[]);
-        assert!(
-            !result.is_valid,
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &[]);
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Authorization),
+            DimensionStatus::Indeterminate,
             "empty approved verifier set must fail closed"
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::Authorization,
+            ProtocolReasonCode::SignerSetUnbound
+        ));
+        assert!(!offline_accepts(&report));
+        assert!(
+            !AssuranceRequirement::RUNTIME_SOURCE_PROOF
+                .evaluate(&report)
+                .is_met()
         );
     }
 
@@ -1693,59 +2655,60 @@ mod tests {
             .map_err(|e| ProtocolError::Generic(e.to_string()))
             .unwrap();
 
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
-        );
-        assert!(result.is_valid);
-        assert!(matches!(result.level, VerificationLevel::FullyVerified));
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert!(offline_accepts(&report));
     }
 
     #[test]
     fn test_verify_proof_seal_replay() {
         let bundle = test_bundle_with_signatures().unwrap();
-        let seal_registry = |seal_id: &[u8]| seal_id == [1, 2, 3];
-        let result = verify_proof(
+        let report = verify_proof(
             &bundle,
-            seal_registry,
+            |seal_id| seal_id == [1, 2, 3],
             SignatureScheme::Ed25519,
             &authorized(),
         );
-        assert!(!result.is_valid);
-        assert!(!result.errors.is_empty());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::SourceClosure),
+            DimensionStatus::NotSatisfied
+        );
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::SourceClosure,
+            ProtocolReasonCode::ReplayDetected
+        ));
+        assert!(!offline_accepts(&report));
+        assert!(!report.errors().is_empty());
     }
 
     #[test]
     fn test_verify_proof_no_signatures() {
         let mut bundle = test_bundle_with_signatures().unwrap();
         bundle.signatures.clear();
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Authorization),
+            DimensionStatus::NotSatisfied
         );
-        assert!(!result.is_valid);
-        assert!(!result.errors.is_empty());
+        assert!(has_reason(
+            &report,
+            ProtocolAssuranceDimension::Authorization,
+            ProtocolReasonCode::SignaturesAbsent
+        ));
+        assert!(!offline_accepts(&report));
     }
 
     #[test]
     fn test_verify_proof_no_confirmations() {
         let mut bundle = test_bundle_with_signatures().unwrap();
         bundle.finality_proof.confirmations = 0;
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::FinalityCheckpoint),
+            DimensionStatus::NotSatisfied
         );
-        assert!(!result.is_valid);
-        assert!(!result.errors.is_empty());
+        assert!(!offline_accepts(&report));
+        assert!(!report.errors().is_empty());
     }
 
     #[test]
@@ -1753,91 +2716,91 @@ mod tests {
         let mut bundle = test_bundle_with_signatures().unwrap();
         // Corrupt signature format
         bundle.signatures[0] = vec![0x00, 0x00]; // Too short
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
+        let report = verify_proof(&bundle, |_| false, SignatureScheme::Ed25519, &authorized());
+        assert_eq!(
+            status(&report, ProtocolAssuranceDimension::Authorization),
+            DimensionStatus::NotSatisfied
         );
-        assert!(!result.is_valid);
-        assert!(!result.errors.is_empty());
-    }
-
-    #[test]
-    fn test_verify_proof_ed25519_valid_format() {
-        // The message signed is the DAG root commitment (Hash::zero() = 32 zero bytes)
-        let message = [0u8; 32];
-        let signature = make_ed25519_signature_bytes(&message);
-
-        let mut bundle = test_bundle_with_signatures().unwrap();
-        bundle.signatures = vec![signature];
-
-        let seal_registry = |_seal_id: &[u8]| false;
-        let result = verify_proof(
-            &bundle,
-            seal_registry,
-            SignatureScheme::Ed25519,
-            &authorized(),
-        );
-        assert!(result.is_valid);
-        assert!(matches!(result.level, VerificationLevel::FullyVerified));
+        assert!(!offline_accepts(&report));
+        assert!(!report.errors().is_empty());
     }
 
     #[test]
     fn test_seal_double_spend_regression() {
-        // Regression test for double-spend vulnerability
-        // This test ensures that the same seal cannot be used in multiple proof bundles
-
+        // Regression test for double-spend vulnerability: the same seal must not
+        // be usable in a second proof bundle.
         let seal_id = vec![1u8, 2, 3];
-
-        // Create first proof bundle with the seal
         let bundle1 = test_bundle_with_signatures().unwrap();
 
-        // Simulate a seal registry that tracks consumed seals
         let mut consumed_seals = std::collections::HashSet::new();
-
-        // First verification should succeed
-        let seal_registry1 = |seal_id_check: &[u8]| consumed_seals.contains(seal_id_check);
-        let result1 = verify_proof(
+        let report1 = verify_proof(
             &bundle1,
-            seal_registry1,
+            |candidate: &[u8]| consumed_seals.contains(candidate),
             SignatureScheme::Ed25519,
             &authorized(),
         );
-        assert!(result1.is_valid);
+        assert!(offline_accepts(&report1));
 
-        // Mark the seal as consumed
         consumed_seals.insert(seal_id.clone());
 
-        // Create second proof bundle with the same seal (double-spend attempt)
         let bundle2 = test_bundle_with_signatures().unwrap();
-
-        // Second verification should fail due to seal being consumed
-        let seal_registry2 = |seal_id_check: &[u8]| consumed_seals.contains(seal_id_check);
-        let result2 = verify_proof(
+        let report2 = verify_proof(
             &bundle2,
-            seal_registry2,
+            |candidate: &[u8]| consumed_seals.contains(candidate),
             SignatureScheme::Ed25519,
             &authorized(),
         );
 
-        // Verify that the double-spend attempt is rejected
-        assert!(!result2.is_valid, "Double-spend attempt should be rejected");
-
-        // Verify the error message indicates seal replay
-        let error_msg: String = result2
-            .errors
-            .iter()
-            .map(|e| format!("{:?}", e))
-            .collect::<Vec<_>>()
-            .join(", ");
         assert!(
-            error_msg.contains("seal")
-                || error_msg.contains("replay")
-                || error_msg.contains("consumed"),
-            "Error should indicate seal replay/consumption: {}",
-            error_msg
+            !offline_accepts(&report2),
+            "Double-spend attempt should be rejected"
+        );
+        assert!(has_reason(
+            &report2,
+            ProtocolAssuranceDimension::SourceClosure,
+            ProtocolReasonCode::ReplayDetected
+        ));
+    }
+
+    #[test]
+    fn verification_is_deterministic_for_the_same_inputs() {
+        // Same evidence, same rules, same verdict — including the same digests.
+        let bundle = test_bundle_with_signatures().unwrap();
+        let verifier = CanonicalVerifierImpl::default();
+        let first = verifier.verify_proof_bundle(&bundle, &attested_runtime_context());
+        let second = verifier.verify_proof_bundle(&bundle, &attested_runtime_context());
+        assert_eq!(first, second);
+        assert_eq!(first.digest(), second.digest());
+    }
+
+    #[test]
+    fn no_shipped_policy_can_waive_a_failed_dimension() {
+        // Structural guard on the policy vocabulary itself: whatever a policy
+        // tolerates, NotSatisfied is never acceptable.
+        for policy in [
+            AssuranceRequirement::COMPLETE,
+            AssuranceRequirement::RUNTIME_SOURCE_PROOF,
+            AssuranceRequirement::OFFLINE_RECIPIENT,
+        ] {
+            for dimension in crate::assurance::PROTOCOL_ASSURANCE_DIMENSIONS {
+                assert!(matches!(
+                    policy.rule(dimension),
+                    DimensionRequirement::MustBeSatisfied
+                        | DimensionRequirement::MayBeIndeterminate
+                        | DimensionRequirement::NotRequired
+                ));
+            }
+        }
+        // And the offline policy must still demand the two things an offline
+        // recipient can actually establish.
+        assert_eq!(
+            AssuranceRequirement::OFFLINE_RECIPIENT
+                .rule(ProtocolAssuranceDimension::CanonicalStructure),
+            DimensionRequirement::MustBeSatisfied
+        );
+        assert_eq!(
+            AssuranceRequirement::OFFLINE_RECIPIENT.rule(ProtocolAssuranceDimension::Authorization),
+            DimensionRequirement::MustBeSatisfied
         );
     }
 }

@@ -178,3 +178,45 @@ mod tests {
         assert_eq!(terminal_safe("evidence ✓ — محفوظ"), "evidence ✓ — محفوظ");
     }
 }
+
+/// Print a verification report dimension by dimension, then the outcome of the
+/// acceptance policy applied to it (PAR-VERIFY-001).
+///
+/// One renderer for every verification surface, so no command can invent its own
+/// summary. Every dimension is printed — including the ones a policy tolerated —
+/// because an accepted limitation the operator never sees is a hidden limitation.
+pub fn assurance_report(
+    report: &csv_verifier::ProtocolAssuranceReport,
+    outcome: &csv_verifier::RequirementOutcome,
+) {
+    kv(
+        "Verification context",
+        &report.verification_context_digest().to_hex(),
+    );
+    kv("Acceptance policy", outcome.policy_id);
+    let rows: Vec<Vec<String>> = report
+        .dimensions()
+        .iter()
+        .map(|reading| {
+            vec![
+                reading.dimension.registry_id().to_string(),
+                csv_verifier::status_registry_id(reading.status).to_string(),
+                reading.provider.describe(),
+                reading
+                    .reason_codes
+                    .iter()
+                    .map(|code| code.registry_id())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ]
+        })
+        .collect();
+    table(&["Dimension", "Status", "Established by", "Reasons"], &rows);
+
+    for entry in &outcome.accepted_limitations {
+        warning(&format!("Not established: {entry}"));
+    }
+    for entry in &outcome.shortfalls {
+        error(&format!("{entry}"));
+    }
+}

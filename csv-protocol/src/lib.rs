@@ -24,12 +24,15 @@ pub mod deterministic_recovery;
 pub mod envelope;
 pub mod error;
 pub mod events;
+pub mod exclusivity;
 pub mod failure_domains;
 pub mod lease;
 pub mod manifest_signature;
 pub mod proof_taxonomy;
 pub mod proof_validation;
 pub mod proof_verification;
+pub mod reference;
+pub mod resolution;
 pub mod sanad;
 pub mod seal;
 pub mod seal_protocol;
@@ -79,6 +82,22 @@ pub use version::{
 
 // Re-export state types
 pub use state::{GlobalState, Metadata, OwnedState, StateAssignment, StateRef, StateTypeId};
+
+// Re-export the disjoint consumption/evidence reference types (PAR-STATE-001)
+pub use reference::{
+    Citable, Consumable, ConsumedStateRef, EvidenceRef, ProofRequirement, ReferenceDecodeError,
+};
+
+// Re-export state-use semantics bound at output creation (PAR-STATE-002)
+pub use exclusivity::{
+    ConsumptionMode, ExclusivityClass, ExclusivityError, OutputUseBinding, StateUseSchema,
+};
+
+// Re-export consumed-state resolution (PAR-STATE-003)
+pub use resolution::{
+    ParentOutput, ParentStateSource, ResolutionError, ResolvedInput, ResolvedTransition,
+    resolve_input, resolve_transition,
+};
 
 // Re-export genesis types
 pub use genesis::Genesis;

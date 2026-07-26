@@ -65,13 +65,19 @@ impl Transition {
         DomainSeparatedHash::<TransitionDomain>::hash(&cbor_bytes)
     }
 
-    /// Get all seals consumed by this transition (from owned inputs)
-    pub fn consumed_seals(&self) -> Vec<SealPoint> {
-        // StateRef doesn't contain SealPoint directly — seals are resolved
-        // from the parent transition that created each output.
-        // This method is a basic implementation; actual resolution requires
-        // walking the transition chain.
-        Vec::new()
+    /// The consumption references this transition's declared inputs stand for.
+    ///
+    /// This replaces the former `consumed_seals()`, which returned an empty
+    /// vector unconditionally: a `StateRef` names a parent output, and the seal
+    /// that owns it lives on the *parent*, so the question is unanswerable from
+    /// a transition alone. Resolve the references against parent state
+    /// ([`crate::resolution::resolve_transition`]) and read
+    /// [`crate::resolution::ResolvedTransition::consumed_seals`], which is
+    /// derived from the resolved parents rather than guessed (PAR-STATE-003).
+    pub fn consumed_state_refs(
+        &self,
+    ) -> Result<Vec<crate::reference::ConsumedStateRef>, crate::resolution::ResolutionError> {
+        crate::resolution::consumed_state_refs(&self.owned_inputs)
     }
 
     /// Get all seals that receive new state from this transition

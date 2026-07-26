@@ -315,8 +315,286 @@ This threat model should be reviewed:
 - When modifying core cryptographic primitives
 - Annually, or when new attack vectors are discovered
 
-## 11. References
+## 11. Portable non-equivocation threats
 
+Scope of this section: the threats that [RFC-0014](./rfcs/RFC-0014-portable-non-equivocation-invariant.md)
+must survive before Parwana may advertise recipient-verifiable non-equivocation.
+It is normative for Stage 1–4 of `development/PARWANA_PORTABLE_NON_EQUIVOCATION_PLAN.md`.
+
+Three rules govern this section and differ from §4–§7 above:
+
+1. **Every threat names the verifier rule that rejects it and the conformance
+   test that proves the rejection.** An unmapped threat blocks the Stage 0 gate.
+2. **No threat is mitigated by a local database property alone.** A replay
+   database is a property of one participant (RFC-0014 §2, Claim A) and cannot
+   discharge a threat about a *second* participant. Where a local defense is
+   real but insufficient, it is listed as *defense in depth*, never as the
+   mitigation.
+3. **Residual threats are recorded as assumptions in §11.4, not omitted.**
+
+Rule identifiers (`NE-R-*`) are the names the verifier reports; test
+identifiers (`NE-T-*`) are the conformance cases that prove them. Both are
+planned deliverables of the named ticket — this section is the contract they
+must satisfy, written before the wire types change.
+
+### 11.1 Threat-to-rule mapping
+
+#### T-NE-01 — Same source state, different transition IDs
+
+**Threat:** A holder builds two successor transitions from one source state,
+differing only in transition ID, and delivers one to each of two recipients.
+
+**Impact:** Two recipients each believe they hold the unique successor. Critical.
+
+**Verifier rule:** `NE-R-CLOSURE-UNIQUE` — a successor's source-closure dimension
+verifies only if closure evidence in the source state's declared closure domain
+proves consumption of that state's closure handle *and* binds the consumption to
+this transition's commitment. Two commitments cannot both satisfy it under one
+finalized checkpoint (RFC-0014 §1.3, §1.5).
+
+`NE-R-CLOSURE-HANDLE-SINGLE-USE` — the closure-domain verifier must reject a
+second canonical consumption of the same closure handle. Assigning two
+consumptions different positions in an ordered registry does not establish
+non-equivocation (RFC-0014 §1.3, §1.7).
+
+**Conformance test:** `NE-T-ISO-DOUBLESPEND` (PAR-CONF-001, RFC-0014 §5,
+assertions A1–A2, A8).
+
+**Defense in depth (not the mitigation):** the local replay registry rejects the
+second consumption *within one process*.
+
+#### T-NE-02 — Same source state, different recipients and destination chains
+
+**Threat:** As T-NE-01, but the two successors also target different destination
+chains, so the two closures are attempted in different settlement domains.
+
+**Impact:** Cross-domain double-spend; the source appears consumed in neither
+domain's local view. Critical.
+
+**Verifier rules:**
+
+- `NE-R-CLOSURE-DOMAIN` — closure evidence is evaluated only in the closure
+  domain declared by the *source state*, never one chosen by the successor.
+  A settlement chain is not a closure domain unless it is the source's.
+- `NE-R-DEST-BINDING` — the destination assignment delivered to the recipient
+  must be the one bound by the transition commitment; a re-pointed destination
+  invalidates the commitment.
+
+**Conformance test:** `NE-T-XCHAIN-CONFLICT` (PAR-XCHAIN-001) with
+`NE-T-ISO-DOUBLESPEND` as the single-domain case.
+
+**Note:** settlement on the destination chain and closure on the source chain
+are separate invariants and are tested separately. Success at settlement is
+never evidence of source closure.
+
+#### T-NE-03 — Independent replay databases
+
+**Threat:** The sender runs two processes, two wallets, and two replay
+databases, so no local uniqueness check ever sees both attempts.
+
+**Impact:** The entire local-replay defense is bypassed at zero cost. Critical.
+
+**Verifier rule:** `NE-R-NO-LOCAL-AUTHORITY` — the source-closure dimension may
+only be satisfied by chain-native closure evidence verified against a named
+checkpoint. No local store, cache, or registry may set, upgrade, or substitute
+for that dimension. Local stores are caches of verified history only.
+
+**Conformance test:** `NE-T-ISO-DOUBLESPEND` (PAR-CONF-001). The fixture's
+isolation requirement (RFC-0014 §5.2 — no shared process, wallet, database,
+store, filesystem path, or in-memory registry) exists specifically to prove this
+threat is addressed. A test that shares any of these does not test T-NE-03.
+
+**Explicitly not a mitigation:** the replay database, the nullifier set, the
+lease system, and the accepted-state store. Each is local.
+
+#### T-NE-04 — Forged nonempty inclusion or finality payloads
+
+**Threat:** An attacker supplies syntactically well-formed, nonempty proof
+bytes — random data, a proof for a different outpoint, or a valid proof whose
+commitment binds a different transition — and relies on a length or emptiness
+check to pass.
+
+**Impact:** Fabricated closure; the whole invariant collapses. Critical.
+
+**Verifier rules:**
+
+- `NE-R-PROOF-CONSUMES` — inclusion evidence must demonstrate consumption of
+  the specific closure handle, verified cryptographically. Nonempty bytes are
+  not evidence (RFC-0014 §1.3).
+- `NE-R-PROOF-BINDS` — the consumption must commit to this transition's
+  commitment; a valid proof bound to another transition fails.
+- `NE-R-NO-CALLER-BOOLEAN` — no caller-supplied flag may raise any assurance
+  dimension. `native_proof_validated`-style booleans may cache a result
+  internally but must not cross the verifier boundary (RFC-0014 §2; plan §2
+  rule 4).
+
+**Conformance test:** `NE-T-FORGED-PROOF-CORPUS` (PAR-CONF-003) — nonempty
+garbage, wrong header, wrong Merkle path, wrong outpoint, wrong transition
+commitment; plus RFC-0014 §5.6 controls C1–C3 and C6.
+
+#### T-NE-05 — Cyclic, duplicate-ID, self-parenting, and root-substitution DAGs
+
+**Threat:** A hostile graph that decodes successfully: a cycle, two nodes
+sharing an identifier, a node listing itself as parent, a substituted segment
+root, mutated node content under a preserved identifier, or the same graph
+reordered to produce a second identity.
+
+**Impact:** Ancestry and therefore state provenance become forgeable. Critical.
+
+**Verifier rules:**
+
+- `NE-R-NODE-ID-RECOMPUTED` — node identity is recomputed from canonical node
+  content; a supplied identifier is never trusted.
+- `NE-R-ROOT-RECOMPUTED` — the segment root is recomputed from the canonical
+  node set; a supplied root is never trusted.
+- `NE-R-DOMAIN-SEPARATED` — node, edge, and root hashes use distinct domain
+  tags, so no digest is reusable across positions.
+- `NE-R-NODE-ID-UNIQUE` — duplicate node identifiers fail with a distinct error.
+- `NE-R-ACYCLIC` — cycles and self-parenting fail with distinct errors.
+- `NE-R-PARENTS-RESOLVE` — every declared parent must exist in the segment.
+- `NE-R-ROOTS-DEFINED` — a root is a node declaring no parents. Multiple roots
+  and disconnected components are **permitted**: a segment may carry parallel
+  histories, and refusing them would reject honest evidence rather than a
+  hostile shape. Ancestry must terminate inside the segment, so a nonempty
+  acyclic segment whose parents resolve always has at least one root; a segment
+  reaching the ordering step without one fails closed.
+- `NE-R-CANONICAL-ORDER` — a reordered but otherwise identical graph either
+  canonicalizes to the same identity or is rejected; it is never accepted twice
+  under two identities.
+
+**Conformance tests:** `NE-T-HOSTILE-GRAPH-CORPUS` (PAR-CONF-002) plus the
+property-generated hostile-graph suite required by PAR-DAG-002. Fixed fixtures
+alone do not discharge this threat.
+
+#### T-NE-06 — Stale checkpoints and chain reorganizations
+
+**Threat:** A recipient verifies against a checkpoint far behind the tip, or a
+reorganization orphans the block that justified an accepted result and orders a
+competing consumption first.
+
+**Impact:** A revoked closure keeps reading as final; a double-spend succeeds
+retroactively. Critical.
+
+**Verifier rules:**
+
+- `NE-R-CHECKPOINT-NAMED` — every result names the checkpoint it was evaluated
+  against. A result with no named checkpoint is not a result.
+- `NE-R-FRESHNESS-SEPARATE` — checkpoint staleness is reported as its own
+  dimension and never silently upgrades or downgrades another dimension.
+- `NE-R-REORG-DEMOTES` — an accepted result whose justifying checkpoint is
+  orphaned moves to `revoked` or `indeterminate` and can never remain `final`;
+  its descendants become nonfinal until revalidated; prior observations are
+  superseded, never erased (RFC-0014 §1.6).
+
+**Conformance tests:** `NE-T-REORG-REVOCATION` (RFC-0014 §5.5 / PAR-REORG-001),
+`NE-T-STALE-CHECKPOINT` (PAR-CONF-003; RFC-0014 §5.6 controls C4–C5).
+
+#### T-NE-07 — Crash between closure submission, persistence, and consignment emission
+
+**Threat:** The sender crashes after broadcasting the source closure but before
+journaling it, or after journaling but before emitting the consignment. On
+restart it either re-closes (creating a second closure attempt) or treats the
+source as spendable again.
+
+**Impact:** Duplicate closure attempts, or an equivocation created by accident
+rather than malice. High.
+
+**Verifier and runtime rules:**
+
+- `NE-R-ATOMIC-ACCEPT` — accepted transition, consumed source, created outputs,
+  closure identity, checkpoint, and verification report are recorded atomically
+  or not at all.
+- `NE-R-CONFLICT-KEY-IS-SOURCE` — replay and conflict keys derive from the
+  consumed source state, not from a transfer or transaction identifier, so a
+  retry under a new transfer ID cannot escape the conflict domain.
+- `NE-R-RECOVERY-DETERMINISTIC` — journal recovery reproduces the same artifact
+  and never creates a second closure; a failed emission does not make the source
+  appear spendable again.
+
+**Conformance test:** `NE-T-CRASH-CAMPAIGN` (PAR-CONF-004) with fault injection
+before and after source submission, proof acquisition, journal writes,
+consignment emission, and recipient persistence.
+
+**Defense in depth (not the mitigation):** the execution journal and the lease
+system. Both are local; they bound the damage, and the chain ordering decides.
+
+#### T-NE-08 — Reference-as-endorsement and citation-as-consumption confusion
+
+**Threat:** An `EvidenceRef` (a repeatable citation) is placed in a consumed-input
+slot, or a `ConsumedStateRef` is presented as a repeatable citation, or the two
+canonical encodings are made to collide so one decodes as the other.
+
+**Impact:** Exclusive state is consumed observationally without closure, or a
+citation is read as an endorsement of the cited material. Critical.
+
+**Verifier rules:**
+
+- `NE-R-REF-DISJOINT` — consumption references and evidence references are
+  distinct types with distinct domain tags and distinct canonical
+  discriminants; neither encoding can be reinterpreted as the other.
+- `NE-R-EXCLUSIVITY-BOUND` — exclusivity is fixed by the output's state type at
+  creation and is non-downgradable. No transition, schema revision, profile, or
+  decoding path may consume an exclusive output observationally.
+- `NE-R-CITATION-NOT-ENDORSEMENT` — citing evidence asserts only that the
+  commitment was referenced under its stated proof requirement. It never
+  asserts that the cited material is true, endorsed, or authorized.
+
+**Conformance tests:** `NE-T-REFERENCE-FIREWALL` — the type-level / compile-fail
+firewall cases required by PAR-STATE-001 and the observational-consumption
+cases in PAR-STATE-002; plus the encoded type-confusion cases in
+`NE-T-HOSTILE-GRAPH-CORPUS` (PAR-CONF-002).
+
+### 11.2 Threat matrix (non-equivocation)
+
+| ID | Threat | Likelihood | Impact | Primary rule | Conformance test |
+|----|--------|-----------|--------|--------------|------------------|
+| T-NE-01 | Same source, different transition IDs | High | Critical | `NE-R-CLOSURE-UNIQUE` | `NE-T-ISO-DOUBLESPEND` |
+| T-NE-02 | Same source, different recipients/destinations | High | Critical | `NE-R-CLOSURE-DOMAIN` | `NE-T-XCHAIN-CONFLICT` |
+| T-NE-03 | Independent replay databases | High | Critical | `NE-R-NO-LOCAL-AUTHORITY` | `NE-T-ISO-DOUBLESPEND` |
+| T-NE-04 | Forged nonempty proof payloads | Medium | Critical | `NE-R-PROOF-CONSUMES` | `NE-T-FORGED-PROOF-CORPUS` |
+| T-NE-05 | Hostile DAGs | Medium | Critical | `NE-R-NODE-ID-RECOMPUTED` | `NE-T-HOSTILE-GRAPH-CORPUS` |
+| T-NE-06 | Stale checkpoints and reorgs | High | Critical | `NE-R-REORG-DEMOTES` | `NE-T-REORG-REVOCATION` |
+| T-NE-07 | Crash between closure and emission | Medium | High | `NE-R-ATOMIC-ACCEPT` | `NE-T-CRASH-CAMPAIGN` |
+| T-NE-08 | Citation/consumption confusion | Medium | Critical | `NE-R-REF-DISJOINT` | `NE-T-REFERENCE-FIREWALL` |
+
+### 11.3 Status
+
+This section is the Stage 0 contract that Stage 1–4 must satisfy. A named rule
+is not evidence that its complete production path or portable conformance case
+has shipped. Current status:
+
+| Threat | Current implementation status |
+|---|---|
+| T-NE-01 | Planned: source closure and the isolated-recipient case require Stages 2–4. |
+| T-NE-02 | Planned: source-domain closure and portable destination binding require Stages 2–3; additional chains are Stage 5. |
+| T-NE-03 | Partial: typed assurance refuses to equate local replay with external closure; the isolated-recipient proof remains Stage 4. |
+| T-NE-04 | Partial: caller booleans cannot upgrade typed assurance; cryptographic closure-proof verification remains Stage 2. |
+| T-NE-05 | Partial: canonical DAG identity and hostile-graph validation exist, but adapter-built graphs still use the deferred-identity path. |
+| T-NE-06 | Partial: checkpoint/freshness dimensions exist; reorganization demotion and its conformance case remain planned. |
+| T-NE-07 | Planned for the atomic acceptance and crash-recovery stages. |
+| T-NE-08 | Implemented at the protocol layer by the reference firewall and creation-time exclusivity binding; publication in the shared conformance package remains planned. |
+
+The public description of Parwana remains the plan's §8 first form until the
+Stage 4 gate passes.
+
+### 11.4 Accepted residual risk (assumptions, not mitigations)
+
+These are not addressed by any rule above. They are recorded here so a reader
+cannot mistake silence for coverage.
+
+| ID | Assumption | Why it is accepted | Where it must be visible |
+|----|------------|--------------------|--------------------------|
+| A-NE-01 | The closure domain's ordering is honest — no majority-hashpower rewrite, no compromised registry. | Parwana cannot be stronger than the ordering it grounds on. | The verification report names the closure domain, trust mode, and finality model, so the reader can price this risk. |
+| A-NE-02 | The recipient's view of the checkpoint is not attacker-controlled. A lying RPC quorum can supply a false tip. | Mitigating this fully requires a light client or full node; those are trust modes, not defaults. | Trust mode (`full node` / `light client` / `RPC quorum` / `attested registry`) is named in every report. |
+| A-NE-03 | Probabilistic-finality domains may reorganize below the configured depth. | Depth is a policy choice, not a proof. | Finality strength and checkpoint are separate reported dimensions; §11.1 T-NE-06 governs retraction. |
+| A-NE-04 | Sender-side key compromise is out of scope: an attacker with the authorization key is the authorized party. | Non-equivocation orders *authorized* successors; it does not authenticate intent. | §5.1 Key Compromise. Portable closure limits the damage to one successor, which is the improvement it offers. |
+| A-NE-05 | Detection of equivocation *attempts* (as opposed to prevention of a second success) requires out-of-band comparison. | RFC-0014 §2 Claim B is detectable-after-the-fact by construction. | Reports distinguish "no conflict observed" from "uniqueness proven"; absence of an observed conflict is never reported as proof. |
+| A-NE-06 | Parwana proves binding and uniqueness, not that referenced off-chain content is true, useful, or legally operative. | Out of protocol scope. | RFC-0014 §3.2 N7; `NE-R-CITATION-NOT-ENDORSEMENT`. |
+| A-NE-07 | V1 artifacts carry no closure evidence and can never be promoted to Claim C. | They predate the invariant. | V1 reports `closure: unavailable`; no format auto-detection (PAR-WIRE-002). |
+
+## 12. References
+
+- [RFC-0014: Portable Non-Equivocation Invariant](./rfcs/RFC-0014-portable-non-equivocation-invariant.md)
 - [Protocol Constitution](./PROTOCOL_CONSTITUTION.md)
 - [Protocol Invariants](./PROTOCOL_INVARIANTS.md)
 - [Audit Implementation Specification](./audit/implementation.md)

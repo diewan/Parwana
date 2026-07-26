@@ -1,6 +1,6 @@
 {
   "signer_id": "csv-testnet-operator-2026-07",
   "scheme": "ed25519",
-  "signature": "81da8bbef9da9d136e2c16d60e9bec5426cc76fe621cfeaa55d3471c60cfa8267612174d68c2eeaaf4dc14c6c734e09810767a1e938a0e7df3827b63b2319f0e",
-  "signed_at": "2026-07-15T00:00:00Z"
+  "signature": "71449bd2a823ea47b74d780ac16e3b82bde729a5548c367d6d753cdf9089df9e54d24a33dd4fc815abb350718b8f462a210f62e3b9f1eb15efa549e5b331f40c",
+  "signed_at": "2026-07-26T00:00:00Z"
 }

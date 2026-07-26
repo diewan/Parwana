@@ -55,10 +55,17 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Map the canonical verifier's level onto the wire.
+/// Map the canonical verifier's coarse display label onto the wire.
 ///
 /// A total mapping — there is no "unknown" fallback, because a level the verifier
 /// did not return is a level no application may display.
+///
+/// The input comes from
+/// [`ProtocolAssuranceReport::display_level`](csv_verifier::ProtocolAssuranceReport::display_level),
+/// which is a deliberately lossy projection of the dimensioned report and cannot
+/// report full verification while any foundational dimension is unsatisfied
+/// (PAR-VERIFY-001). The wire label is for display; the dimensioned report on the
+/// receipt is what a verifier-grade consumer reads.
 pub fn assurance_from_level(level: VerificationLevel) -> VerificationAssuranceWire {
     match level {
         VerificationLevel::StructuralOnly => VerificationAssuranceWire::StructuralOnly,
@@ -117,9 +124,9 @@ pub fn materialize_receipt(
     source_chain: &ChainId,
     destination_chain: &ChainId,
 ) -> Result<TransferReceipt, CsvError> {
-    let verification = match receipt.assurance {
-        Some(level) => VerificationRecord::Verified {
-            assurance: assurance_from_level(level),
+    let verification = match &receipt.assurance {
+        Some(report) => VerificationRecord::Verified {
+            assurance: assurance_from_level(report.display_level()),
         },
         // The runtime completed this transfer in an earlier execution and this
         // receipt was reconstructed from its journal. The journal is the authority
@@ -168,7 +175,7 @@ pub fn materialize_sdk_receipt(
         mint_tx_hash: receipt.mint_tx_hash.clone(),
         materialization: receipt.materialization.clone(),
         finality: receipt.finality.clone(),
-        assurance: receipt.assurance,
+        assurance: receipt.assurance.clone(),
     };
     materialize_receipt(&runtime_receipt, sanad_id, source_chain, destination_chain)
 }
@@ -410,6 +417,36 @@ mod tests {
         );
     }
 
+    /// Build an assurance report whose readings produce a chosen display level.
+    ///
+    /// The readings are constructed explicitly rather than mocked out of a
+    /// verifier: these tests exercise the receipt contract's reaction to a
+    /// report, so the report is the fixture.
+    fn assurance_report(satisfy_all: bool) -> csv_verifier::ProtocolAssuranceReport {
+        let mut builder = csv_verifier::ProtocolAssuranceReportBuilder::new(
+            csv_verifier::ContextDigestWriter::new("test-fixture").finish(),
+        );
+        for dimension in csv_verifier::PROTOCOL_ASSURANCE_DIMENSIONS {
+            if !satisfy_all
+                && dimension == csv_verifier::ProtocolAssuranceDimension::AnchorInclusion
+            {
+                continue;
+            }
+            builder.record(csv_verifier::DimensionAssurance::new(
+                dimension,
+                if satisfy_all {
+                    csv_verifier::DimensionStatus::Satisfied
+                } else {
+                    csv_verifier::DimensionStatus::Indeterminate
+                },
+                [csv_verifier::ProtocolReasonCode::NotEvaluated],
+                csv_verifier::ProofProvider::local(csv_verifier::ProofKind::CanonicalRules),
+                [],
+            ));
+        }
+        builder.build()
+    }
+
     #[test]
     fn a_structurally_verified_mint_is_refused_by_the_contract() {
         // If the runtime ever handed back a completed mint whose proof was only
@@ -422,7 +459,7 @@ mod tests {
             mint_tx_hash: "bb".repeat(32),
             materialization: csv_chain_ports::DestinationMaterialization::unavailable("sui"),
             finality: Some(observation(6, Some(106))),
-            assurance: Some(VerificationLevel::StructuralOnly),
+            assurance: Some(assurance_report(false)),
         };
 
         let result = materialize_receipt(
@@ -446,7 +483,7 @@ mod tests {
             mint_tx_hash: "bb".repeat(32),
             materialization: csv_chain_ports::DestinationMaterialization::unavailable("sui"),
             finality: Some(observation(6, Some(106))),
-            assurance: Some(VerificationLevel::ConsensusVerified),
+            assurance: Some(assurance_report(true)),
         };
 
         let artifact = materialize_receipt(

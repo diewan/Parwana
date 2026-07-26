@@ -12,7 +12,6 @@
 
 use csv_hash::chain_id::ChainId;
 use csv_hash::sanad::SanadId;
-use csv_protocol::verification_levels::VerificationLevel;
 use csv_runtime::FinalityObservation;
 use csv_sdk::contract::{
     self, ArtifactKind, ContractError, FinalityEvidence, NextAction, ReceiptBody, RecoveryPlan,
@@ -44,9 +43,39 @@ fn observed(confirmations: u64, required: u64) -> FinalityObservation {
     }
 }
 
+/// Build an assurance report whose readings produce a chosen display level.
+///
+/// The readings are constructed explicitly rather than mocked out of a verifier:
+/// these tests exercise the receipt contract's reaction to a report, so the
+/// report is the fixture. `satisfy_all` gives every dimension a satisfied
+/// reading; otherwise the source-closure dimension is left unevaluated, which is
+/// what a report with a foundational shortfall looks like.
+fn assurance_report(satisfy_all: bool) -> csv_verifier::ProtocolAssuranceReport {
+    let mut builder = csv_verifier::ProtocolAssuranceReportBuilder::new(
+        csv_verifier::ContextDigestWriter::new("test-fixture").finish(),
+    );
+    for dimension in csv_verifier::PROTOCOL_ASSURANCE_DIMENSIONS {
+        if !satisfy_all && dimension == csv_verifier::ProtocolAssuranceDimension::AnchorInclusion {
+            continue;
+        }
+        builder.record(csv_verifier::DimensionAssurance::new(
+            dimension,
+            if satisfy_all {
+                csv_verifier::DimensionStatus::Satisfied
+            } else {
+                csv_verifier::DimensionStatus::Indeterminate
+            },
+            [csv_verifier::ProtocolReasonCode::NotEvaluated],
+            csv_verifier::ProofProvider::local(csv_verifier::ProofKind::CanonicalRules),
+            [],
+        ));
+    }
+    builder.build()
+}
+
 fn runtime_receipt(
     finality: Option<FinalityObservation>,
-    assurance: Option<VerificationLevel>,
+    assurance: Option<csv_verifier::ProtocolAssuranceReport>,
 ) -> csv_runtime::TransferReceipt {
     csv_runtime::TransferReceipt {
         transfer_id: "transfer-1".to_string(),
@@ -65,10 +94,7 @@ fn runtime_receipt(
 #[test]
 fn a_completed_materialize_receipts_the_runtime_transfer_and_replay_ids() {
     let receipt = contract::materialize_receipt(
-        &runtime_receipt(
-            Some(observed(6, 6)),
-            Some(VerificationLevel::ConsensusVerified),
-        ),
+        &runtime_receipt(Some(observed(6, 6)), Some(assurance_report(true))),
         &sanad_id(),
         &source(),
         &destination(),
@@ -184,10 +210,7 @@ fn a_zero_depth_finality_policy_is_rejected() {
 #[test]
 fn a_mint_verified_only_structurally_is_never_receipted() {
     let result = contract::materialize_receipt(
-        &runtime_receipt(
-            Some(observed(6, 6)),
-            Some(VerificationLevel::StructuralOnly),
-        ),
+        &runtime_receipt(Some(observed(6, 6)), Some(assurance_report(false))),
         &sanad_id(),
         &source(),
         &destination(),
@@ -201,10 +224,7 @@ fn a_mint_verified_only_structurally_is_never_receipted() {
 #[test]
 fn a_mint_whose_lock_never_reached_finality_is_never_receipted() {
     let result = contract::materialize_receipt(
-        &runtime_receipt(
-            Some(observed(2, 6)),
-            Some(VerificationLevel::ConsensusVerified),
-        ),
+        &runtime_receipt(Some(observed(2, 6)), Some(assurance_report(true))),
         &sanad_id(),
         &source(),
         &destination(),
@@ -243,10 +263,7 @@ fn a_journal_recovered_receipt_states_that_it_re_observed_nothing() {
 #[test]
 fn a_receipt_from_an_unknown_schema_version_is_refused() {
     let receipt = contract::materialize_receipt(
-        &runtime_receipt(
-            Some(observed(6, 6)),
-            Some(VerificationLevel::ConsensusVerified),
-        ),
+        &runtime_receipt(Some(observed(6, 6)), Some(assurance_report(true))),
         &sanad_id(),
         &source(),
         &destination(),
@@ -275,10 +292,7 @@ fn a_receipt_from_an_unknown_schema_version_is_refused() {
 #[test]
 fn an_artifact_of_the_wrong_kind_is_refused() {
     let receipt = contract::materialize_receipt(
-        &runtime_receipt(
-            Some(observed(6, 6)),
-            Some(VerificationLevel::ConsensusVerified),
-        ),
+        &runtime_receipt(Some(observed(6, 6)), Some(assurance_report(true))),
         &sanad_id(),
         &source(),
         &destination(),

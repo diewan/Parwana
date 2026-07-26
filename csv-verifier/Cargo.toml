@@ -10,6 +10,10 @@ csv-proof = { version = "0.1.5", path = "../csv-proof" }
 csv-hash = { version = "0.1.5", path = "../csv-hash" }
 csv-codec = { version = "0.1.5", path = "../csv-codec" }
 csv-protocol = { version = "0.1.5", path = "../csv-protocol" }
+# Shares the four-valued assurance vocabulary so the verifier does not invent a
+# second one (PAR-VERIFY-001). csv-accountability is already in this graph via
+# csv-proof and stays pure: no IO, no runtime, no application stack.
+csv-accountability = { version = "0.1.5", path = "../csv-accountability" }
 thiserror = "1.0"
 hex = "0.4.3"
 serde = { version = "1.0", features = ["derive"] }

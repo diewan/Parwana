@@ -20,6 +20,8 @@ All protocol changes MUST go through the RFC process. No protocol change without
 - RFC-0010: Adapter Capabilities
 - RFC-0011: Config-Driven Chain Addition
 - RFC-0012: Thin Registry Cross-Chain Mint
+- RFC-0013: RPC Endpoint Policy
+- RFC-0014: Portable Non-Equivocation Invariant
 
 ## RFC Template
 

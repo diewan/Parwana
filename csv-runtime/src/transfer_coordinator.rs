@@ -26,7 +26,11 @@ use csv_hash::seal::SealPoint;
 use csv_observability::metrics::{MetricsCollector, RuntimeFlowSnapshot};
 use csv_protocol::finality::CapabilityRequirements;
 use csv_storage::{ReplayDatabase, ReplayDbError};
-use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext, VerifierConfig};
+use csv_verifier::{
+    AssuranceRequirement, CanonicalVerifier, CanonicalVerifierImpl, ChainNativeClaim,
+    ChainNativeProofAssessment, ChainNativeProofAttestation, ProtocolAssuranceReport,
+    VerificationContext, VerifierConfig,
+};
 use uuid::Uuid;
 
 const LOCK_OUTPUT_INDEX_BYTES: usize = std::mem::size_of::<u32>();
@@ -572,10 +576,13 @@ pub struct TransferReceipt {
     /// already-completed transfer, where no fresh chain read was made. A consumer
     /// must render that as "not re-observed", never as "final".
     pub finality: Option<FinalityObservation>,
-    /// What the canonical verifier established about the source proof.
+    /// What the canonical verifier established about the source proof, per
+    /// dimension, naming each dimension's proof provider (PAR-VERIFY-001).
     ///
-    /// `None` on the journal-reconstructed path, for the same reason as `finality`.
-    pub assurance: Option<csv_protocol::verification_levels::VerificationLevel>,
+    /// The full report is carried rather than a single label so a consumer cannot
+    /// present an unsatisfied dimension as success. `None` on the
+    /// journal-reconstructed path, for the same reason as `finality`.
+    pub assurance: Option<ProtocolAssuranceReport>,
 }
 
 /// The single source of truth for cross-chain transfer execution.
@@ -1623,17 +1630,23 @@ impl TransferCoordinator {
             // path does not supply a registry; see the seal_status check above.
             seal_registry: None,
             chain_data: None,
-            native_proof_validated: true,
+            // The adapter registry's `validate_source_proof` above performed the
+            // chain-native checks. It is named here as the provider so the report
+            // records that inclusion and finality were *asserted by that adapter*,
+            // not recomputed by the pure verifier (PAR-VERIFY-001).
+            chain_native_proof: Self::source_proof_attestation(&transfer.source_chain),
             sanad_id: Some(csv_hash::SanadId(transfer.sanad_id)),
             lock_tx: Some(transfer.lock_tx_hash.clone()),
             lock_output_index: Some(transfer.lock_output_index),
             transition_id: Some(transfer.transition_id.clone()),
             destination_chain: Some(transfer.destination_chain.clone()),
-            // Runtime path: destination materialization is authorized by the
-            // on-chain §9.2 verifier-attested mint plus native_proof_validated
-            // above, so the DAG-signature approved-verifier binding is not the
-            // gate here (VERIFY-SIGNER-BINDING-001). The offline recipient accept
-            // path supplies and enforces this set instead.
+            // Left empty deliberately (VERIFY-SIGNER-BINDING-001): on this path
+            // destination materialization is authorized by the on-chain §9.2
+            // verifier-attested mint, not by the DAG-signature binding. That is now
+            // *reported* rather than assumed — authorization comes back
+            // Indeterminate with `SIGNER_SET_UNBOUND`, which
+            // `RUNTIME_SOURCE_PROOF` records as an accepted limitation on the
+            // receipt instead of folding into a full-verification claim.
             authorized_signers: Vec::new(),
         };
 
@@ -1643,44 +1656,25 @@ impl TransferCoordinator {
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
 
         let source_verifier = Self::runtime_source_verifier();
-        // The assurance the canonical verifier actually reached. Carried onto the
-        // receipt so an application can show what was verified instead of inferring
-        // it from the existence of a mint transaction.
-        let source_assurance =
-            match source_verifier.verify_proof_bundle(&proof_bundle, &verification_context) {
-                Ok(result) => {
-                    if !result.is_valid {
-                        self.with_metrics(|metrics| metrics.record_authorization_rejected());
-                        let _ = self.execution_journal.record(
-                            crate::execution_journal::TransferPhaseEntry {
-                                transfer_id: transfer.id.clone(),
-                                replay_id: replay_id_wire.clone(),
-                                proof_hash: [0u8; 32],
-                                proof_payload: None,
-                                phase: crate::recovery::TransferStage::ProofBuilding,
-                                ts: std::time::SystemTime::now(),
-                                outcome: crate::execution_journal::PhaseOutcome::Failed(
-                                    result
-                                        .errors
-                                        .iter()
-                                        .map(|e| e.to_string())
-                                        .collect::<Vec<_>>()
-                                        .join("; "),
-                                ),
-                                attempt: 1,
-                                transfer_context: None,
-                            },
-                        );
-                        return Err(TransferCoordinatorError::ProofVerificationFailed(
-                            result
-                                .errors
-                                .iter()
-                                .map(|e| e.to_string())
-                                .collect::<Vec<_>>()
-                                .join("; "),
-                        ));
-                    }
-                    // Proof verified successfully
+        // The dimensioned assurance the canonical verifier actually reached,
+        // carried onto the receipt so an application shows what was verified
+        // instead of inferring it from the existence of a mint transaction
+        // (PAR-VERIFY-001).
+        let source_assurance = {
+            let report = source_verifier.verify_proof_bundle(&proof_bundle, &verification_context);
+            let outcome = AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&report);
+            if outcome.is_met() {
+                if !outcome.accepted_limitations.is_empty() {
+                    // Tolerated does not mean established. Say so once, here, and
+                    // keep the readings on the receipt.
+                    tracing::info!(
+                        transfer_id = %transfer.id,
+                        policy = outcome.policy_id,
+                        limitations = %outcome.limitation_summary(),
+                        "source proof accepted with explicit assurance limitations"
+                    );
+                }
+                {
                     // Append ProofVerified event to EventStore (durable write FIRST)
                     if let Err(e) = self.event_store.append(
                         &crate::event_envelope::RuntimeEventEnvelope::new_with_auto_correlation(
@@ -1738,28 +1732,29 @@ impl TransferCoordinator {
                             TransferCoordinatorError::RuntimeError(format!("Journal error: {}", e))
                         })?;
 
-                    result.level
+                    report
                 }
-                Err(e) => {
-                    self.with_metrics(|metrics| metrics.record_authorization_rejected());
-                    let _ = self.execution_journal.record(
-                        crate::execution_journal::TransferPhaseEntry {
+            } else {
+                self.with_metrics(|metrics| metrics.record_authorization_rejected());
+                let failure = outcome.shortfall_summary();
+                let _ =
+                    self.execution_journal
+                        .record(crate::execution_journal::TransferPhaseEntry {
                             transfer_id: transfer.id.clone(),
                             replay_id: replay_id_wire.clone(),
                             proof_hash: [0u8; 32],
                             proof_payload: None,
                             phase: crate::recovery::TransferStage::ProofBuilding,
                             ts: std::time::SystemTime::now(),
-                            outcome: crate::execution_journal::PhaseOutcome::Failed(e.to_string()),
+                            outcome: crate::execution_journal::PhaseOutcome::Failed(
+                                failure.clone(),
+                            ),
                             attempt: 1,
                             transfer_context: None,
-                        },
-                    );
-                    return Err(TransferCoordinatorError::ProofVerificationFailed(
-                        e.to_string(),
-                    ));
-                }
-            };
+                        });
+                return Err(TransferCoordinatorError::ProofVerificationFailed(failure));
+            }
+        };
 
         // Serialize proof bundle for minting using canonical CBOR
         let proof_bundle_bytes = proof_bundle.to_canonical_bytes().map_err(|e| {
@@ -3195,15 +3190,15 @@ impl TransferCoordinator {
             // the fresh-execution construction site.
             seal_registry: None,
             chain_data: None,
-            native_proof_validated: true,
+            // See the fresh-execution construction site: the adapter that ran the
+            // chain-native checks is named as the provider of those readings.
+            chain_native_proof: Self::source_proof_attestation(&transfer.source_chain),
             sanad_id: Some(csv_hash::SanadId(transfer.sanad_id)),
             lock_tx: Some(transfer.lock_tx_hash.clone()),
             lock_output_index: Some(transfer.lock_output_index),
             transition_id: Some(transfer.transition_id.clone()),
             destination_chain: Some(transfer.destination_chain.clone()),
-            // Runtime path is gated by the on-chain §9.2 attested mint +
-            // native_proof_validated; see the other construction site
-            // (VERIFY-SIGNER-BINDING-001).
+            // Empty for the same reason as the fresh-execution path above.
             authorized_signers: Vec::new(),
         };
         adapter_registry
@@ -3211,21 +3206,45 @@ impl TransferCoordinator {
             .await
             .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
         let source_verifier = Self::runtime_source_verifier();
-        let result = source_verifier
-            .verify_proof_bundle(proof_bundle, &verification_context)
-            .map_err(|e| TransferCoordinatorError::ProofVerificationFailed(e.to_string()))?;
-        if result.is_valid {
+        let report = source_verifier.verify_proof_bundle(proof_bundle, &verification_context);
+        let outcome = AssuranceRequirement::RUNTIME_SOURCE_PROOF.evaluate(&report);
+        if outcome.is_met() {
+            if !outcome.accepted_limitations.is_empty() {
+                tracing::info!(
+                    transfer_id = %transfer.id,
+                    policy = outcome.policy_id,
+                    limitations = %outcome.limitation_summary(),
+                    "recovered source proof accepted with explicit assurance limitations"
+                );
+            }
             Ok(())
         } else {
             Err(TransferCoordinatorError::ProofVerificationFailed(
-                result
-                    .errors
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; "),
+                outcome.shortfall_summary(),
             ))
         }
+    }
+
+    /// Name the adapter that performed the chain-native checks for a source chain.
+    ///
+    /// The adapter registry's `validate_source_proof` has already run inclusion,
+    /// finality and transfer-binding checks against the live chain by the time the
+    /// canonical verifier is called. Those conclusions belong to that adapter, and
+    /// the assurance report records them as such rather than as something the pure
+    /// verifier recomputed (PAR-VERIFY-001, plan rule 4).
+    fn source_proof_attestation(source_chain: &str) -> ChainNativeProofAssessment {
+        ChainNativeProofAssessment::Attested(
+            ChainNativeProofAttestation::new(
+                format!("parwana.runtime.adapter-registry.{source_chain}"),
+                source_chain,
+                [
+                    ChainNativeClaim::AnchorInclusion,
+                    ChainNativeClaim::CheckpointFinality,
+                    ChainNativeClaim::TransferBinding,
+                ],
+            )
+            .with_detail("validate_source_proof accepted the bundle against the live source chain"),
+        )
     }
 
     pub async fn execute_from_lock(
@@ -4500,7 +4519,7 @@ mod tests {
             current_block_height: Some(201),
             seal_registry: None,
             chain_data: None,
-            native_proof_validated: true,
+            chain_native_proof: TransferCoordinator::source_proof_attestation("bitcoin"),
             sanad_id: None,
             lock_tx: None,
             lock_output_index: None,
@@ -4509,9 +4528,19 @@ mod tests {
             authorized_signers: Vec::new(),
         };
 
-        assert!(
-            verifier.verify_finality(100, &ctx).is_ok(),
+        let finality_proof =
+            csv_protocol::proof_taxonomy::FinalityProof::new(vec![0xAB; 16], 6, false)
+                .expect("a well-formed finality proof");
+        let finality = verifier.verify_finality(&finality_proof, 100, &ctx);
+        assert_eq!(
+            finality.status,
+            csv_verifier::DimensionStatus::Satisfied,
             "runtime verifier must accept a historical lock after native validation"
+        );
+        assert_eq!(
+            finality.provider.trust_mode,
+            csv_verifier::TrustMode::ProviderAttested,
+            "the adapter that ran the chain-native checks must be named as the provider"
         );
     }
 

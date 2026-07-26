@@ -26,7 +26,7 @@ fn verification_context_builds_for_test_chains() {
         current_block_height: ctx.current_block_height,
         seal_registry: ctx.seal_registry,
         chain_data: ctx.chain_data,
-        native_proof_validated: ctx.native_proof_validated,
+        chain_native_proof: ctx.chain_native_proof,
         sanad_id: ctx.sanad_id,
         lock_tx: ctx.lock_tx,
         lock_output_index: ctx.lock_output_index,

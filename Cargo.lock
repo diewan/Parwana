@@ -2806,6 +2806,7 @@ version = "0.1.5"
 dependencies = [
  "csv-accountability",
  "csv-testkit",
+ "csv-verifier",
  "ed25519-dalek",
  "hex",
  "serde_json",
@@ -3573,6 +3574,7 @@ dependencies = [
 name = "csv-verifier"
 version = "0.1.5"
 dependencies = [
+ "csv-accountability",
  "csv-codec",
  "csv-hash",
  "csv-proof",

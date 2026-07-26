@@ -1,19 +1,28 @@
 schema_version = 1
 publisher = "github.com/diewan/parwana"
-contract_version = "0.1.9"
+
+# The contract-package version line. It advances whenever the published corpus
+# or descriptors change, and is deliberately independent of the Cargo crate
+# version in Cargo.toml, which stayed at 0.1.5 across the 0.1.6-0.1.9 bumps.
+# Do not "reconcile" the two: a consumer pins this value, not the crate.
+contract_version = "0.1.10"
+
 protocol_version = "1.0.0"
 stability = "pre_stable"
 minimum_rust_version = "1.95"
 
+# The commit whose corpus produces the digest below. These two move together;
+# a manifest naming one commit and another commit's digest pins a combination
+# that never existed, which is how 0.1.9 came to be internally inconsistent.
 [source]
 kind = "commit"
-value = "9b3fd916cd99b5f72aa41d6540a9e7947675848f"
+value = "d6a393302a45094dd9d7a9938acc62de6f2df8dd"
 
 [corpus]
 version = 1
 path = "csv-testkit/corpus/v1"
 algorithm = "sha256-length-prefixed-tree-v1"
-digest = "08ebb8ff6d525729c3f8a23b43279dbab522ae0b48e1a63ecd9282df3944a5f8"
+digest = "39869b9206ab0a78ce60673f30c1e726c2c2ec8260e79c7e9495aea3e35ee896"
 
 [compatibility]
 wire = "exact"

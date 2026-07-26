@@ -69,8 +69,9 @@ pub const TRUSTED_MANIFEST_SIGNERS: &[TrustedSigner] = &[TrustedSigner {
     id: "csv-testnet-operator-2026-07",
     scheme: ManifestSignatureScheme::Ed25519,
     // Ed25519 public key of the offline testnet operator manifest-signing key.
-    // Generated 2026-07-15 for RPC-006. Rotate per deployments/README.md.
-    public_key_hex: "fe6d9c3c25f0ffde723f761131e7912dcc4c2fbdbf3f79009d225f1b29d9fe50",
+    // Rotated 2026-07-26 after the prior ephemeral seed became unavailable.
+    // Rotate per deployments/README.md.
+    public_key_hex: "19a983eaca991401df87918fcdfc0220634561c473517fc8b09497e6efa5a351",
 }];
 
 /// Detached signature sidecar stored next to the manifest.

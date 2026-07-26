@@ -86,8 +86,9 @@ pub use domains::{
     AssuranceProfileDomain, AuthorityReconstructionDomain, BitcoinSealDomain,
     DisclosureCommitmentDomain, DisputeBundleDomain, EthereumMintDomain, EvidenceNodeDomain,
     ExecutionAttemptDomain, ExecutionReceiptDomain, GateProfileDomain, GenesisDomain,
-    PreservationEnvelopeDomain, ProofBundleDomain, ReplayRegistryDomain, SanadIdDomain,
-    SchemaDomain, TransferCommitmentDomain, TransitionDomain, VerificationContextDomain,
+    PreservationEnvelopeDomain, ProofBundleDomain, ProtocolAssuranceReportDomain,
+    ProtocolVerificationContextDomain, ReplayRegistryDomain, SanadIdDomain, SchemaDomain,
+    TransferCommitmentDomain, TransitionDomain, VerificationContextDomain,
 };
 pub use hash_registry::{
     CommitmentHash, DomainCategory, Hash, HashDomain, HashParseError, MerkleHash, NullifierHash,

@@ -15,6 +15,7 @@ pub mod sanad_id;
 pub mod schema;
 pub mod transfer_commitment;
 pub mod transition;
+pub mod verification_assurance;
 
 // Re-export domain types for convenience
 pub use accountability::{
@@ -33,3 +34,6 @@ pub use sanad_id::SanadIdDomain;
 pub use schema::SchemaDomain;
 pub use transfer_commitment::TransferCommitmentDomain;
 pub use transition::TransitionDomain;
+pub use verification_assurance::{
+    ProtocolAssuranceReportDomain, ProtocolVerificationContextDomain,
+};

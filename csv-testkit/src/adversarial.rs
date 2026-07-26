@@ -2,7 +2,10 @@
 
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
-use csv_verifier::{CanonicalVerifier, CanonicalVerifierImpl, VerificationContext};
+use csv_verifier::{
+    AssuranceRequirement, CanonicalVerifier, CanonicalVerifierImpl, ChainNativeProofAssessment,
+    VerificationContext,
+};
 
 /// Simulated Byzantine RPC behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +65,9 @@ impl AdversarialRunner {
             current_block_height: Some(1000),
             seal_registry: None,
             chain_data: None,
-            native_proof_validated: false,
+            // A hostile bundle gets no provider attestation, so the report must
+            // stand on what the bundle itself proves.
+            chain_native_proof: ChainNativeProofAssessment::NotSupplied,
             sanad_id: None,
             lock_tx: None,
             lock_output_index: None,
@@ -70,10 +75,12 @@ impl AdversarialRunner {
             destination_chain: None,
             authorized_signers: Vec::new(),
         };
-        self.verifier
-            .verify_proof_bundle(bundle, &ctx)
-            .map(|r| !r.is_valid)
-            .unwrap_or(true)
+        // Rejection now means "no declared acceptance policy is met", read off the
+        // dimensioned report rather than a single boolean.
+        let report = self.verifier.verify_proof_bundle(bundle, &ctx);
+        !AssuranceRequirement::RUNTIME_SOURCE_PROOF
+            .evaluate(&report)
+            .is_met()
     }
 
     /// Simulate quorum: returns true when at least `quorum` nodes agree on a hash.

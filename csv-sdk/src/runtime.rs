@@ -752,21 +752,31 @@ impl ChainRuntime {
 
     /// Verify a proof bundle for a cross-chain transfer.
     ///
-    /// This implementation uses the core proof verification pipeline to cryptographically
-    /// validate the proof bundle before accepting cross-chain transfers.
+    /// Runs the chain adapter's native inclusion and finality checks, then the
+    /// canonical verification pipeline, and reports what each dimension actually
+    /// established (PAR-VERIFY-001). The adapter is named as the provider of the
+    /// inclusion and finality readings; nothing here claims the pure verifier
+    /// recomputed them.
+    ///
+    /// # Returns
+    ///
+    /// The dimensioned assurance report. There is no boolean: evaluate it against
+    /// a named [`csv_verifier::AssuranceRequirement`] — normally
+    /// `RUNTIME_SOURCE_PROOF` on this path — and surface the accepted limitations
+    /// alongside any acceptance.
     ///
     /// # Security
     /// - Verifies all signatures using the chain's signature scheme
-    /// - Checks seal registry for replay attacks
-    /// - Validates inclusion proof and finality
-    /// - Returns false for any invalid proof, true only for fully valid proofs
+    /// - Binds signatures to the caller's approved verifier set
+    /// - Checks the seal registry for replay attacks
+    /// - Records adapter-verified inclusion and finality as provider-attested
     pub async fn verify_proof_bundle(
         &self,
         chain: ChainId,
         proof_bundle: &ProofBundle,
         sanad_id: &SanadId,
         authorized_signers: &[Vec<u8>],
-    ) -> Result<bool, CsvError> {
+    ) -> Result<csv_verifier::ProtocolAssuranceReport, CsvError> {
         let adapter = self.get_adapter(chain.clone()).await?;
         if proof_bundle.seal_ref.id.as_slice() != sanad_id.as_bytes() {
             return Err(CsvError::ProofVerificationFailed(
@@ -794,14 +804,28 @@ impl ChainRuntime {
             message: format!("Chain-native proof verification failed: {}", e),
         })?;
 
-        if !chain_native_ok {
-            log::warn!(
-                "Chain-native proof bundle invalid for sanad {:?} on {:?}",
-                sanad_id,
-                chain
-            );
-            return Ok(false);
-        }
+        // The adapter's verdict enters the pipeline as a named attestation rather
+        // than a bare flag, so the report can say who established inclusion and
+        // finality, and can distinguish "the adapter rejected it" from "no adapter
+        // looked" (plan rule 4).
+        let attestation = csv_verifier::ChainNativeProofAttestation::new(
+            format!("parwana.sdk.chain-adapter.{}", chain.as_str()),
+            chain.as_str(),
+            [
+                csv_verifier::ChainNativeClaim::AnchorInclusion,
+                csv_verifier::ChainNativeClaim::CheckpointFinality,
+            ],
+        );
+        let chain_native_proof = if chain_native_ok {
+            csv_verifier::ChainNativeProofAssessment::Attested(
+                attestation
+                    .with_detail("adapter verified inclusion and finality against the chain"),
+            )
+        } else {
+            csv_verifier::ChainNativeProofAssessment::Rejected(
+                attestation.with_detail("adapter rejected the inclusion/finality bundle"),
+            )
+        };
 
         // Pre-fetch seal consumption data BEFORE creating the closure
         // This avoids capturing self (which contains the sync Mutex) in the async context
@@ -826,31 +850,31 @@ impl ChainRuntime {
             }
         };
 
-        // Use the core proof verification pipeline for signatures and seal check.
         // VERIFY-SIGNER-BINDING-001: the caller supplies the approved verifier set
-        // (fails closed if empty) so signatures are bound to an authorized signer.
-        let result = csv_verifier::verify_proof(
-            proof_bundle,
-            seal_checker,
+        // so signatures are bound to an authorized signer. An empty set leaves
+        // authorization Indeterminate, which the runtime policy rejects.
+        let context = csv_verifier::VerificationContext {
+            chain_id: chain.as_str().to_string(),
             signature_scheme,
-            authorized_signers,
-        );
-        if result.is_valid {
-            log::info!(
-                "Proof bundle verified successfully for sanad {:?} on {:?}",
-                sanad_id,
-                chain
-            );
-            Ok(result.is_valid)
-        } else {
-            log::warn!(
-                "Proof verification failed for sanad {:?} on {:?}: {:?}",
-                sanad_id,
-                chain.clone(),
-                result.errors
-            );
-            Ok(false)
-        }
+            // Depth was already enforced by the chain bundle policy above and is
+            // reported through the adapter attestation; nothing here re-derives it
+            // from a synthesized height.
+            required_confirmations: 0,
+            current_block_height: None,
+            seal_registry: Some(Box::new(seal_checker)),
+            chain_data: None,
+            chain_native_proof,
+            sanad_id: Some(csv_hash::SanadId(csv_hash::Hash::new(*sanad_id.as_bytes()))),
+            lock_tx: None,
+            lock_output_index: None,
+            transition_id: None,
+            destination_chain: None,
+            authorized_signers: authorized_signers.to_vec(),
+        };
+
+        use csv_verifier::CanonicalVerifier as _;
+        Ok(csv_verifier::CanonicalVerifierImpl::default()
+            .verify_proof_bundle(proof_bundle, &context))
     }
 
     /// Broadcast a proof via P2P transport for destination chain discovery.

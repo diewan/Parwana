@@ -3,7 +3,7 @@
 //! This module provides helper functions and builders for testing.
 
 use csv_protocol::signature::SignatureScheme;
-use csv_verifier::{CanonicalVerifierImpl, VerificationContext};
+use csv_verifier::{CanonicalVerifierImpl, ChainNativeProofAssessment, VerificationContext};
 
 /// Test context for integration tests
 pub struct TestContext {
@@ -28,7 +28,9 @@ impl TestContext {
             current_block_height: Some(100),
             seal_registry: None,
             chain_data: None,
-            native_proof_validated: false,
+            // No chain-native provider in a bare test context: inclusion and
+            // finality report as unestablished rather than as failures.
+            chain_native_proof: ChainNativeProofAssessment::NotSupplied,
             sanad_id: None,
             lock_tx: None,
             lock_output_index: None,

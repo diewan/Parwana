@@ -76,15 +76,15 @@ fn cmd_consignment(file: String, config: &Config, state: &UnifiedStateManager) -
     output::kv("Destination Seal", &accepted.seal_ref);
 
     output::progress(4, 4, "Validating transition proof and finality...");
-    output::kv(
-        "Verification Level",
-        &format!("{:?}", accepted.verification_level).to_lowercase(),
+    output::assurance_report(
+        &accepted.assurance,
+        &csv_verifier::AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&accepted.assurance),
     );
     if let Some(signal) = &accepted.provenance_strength {
         transfer::emit_provenance_strength_warning(signal);
     }
 
-    output::success("Consignment is valid");
+    output::success("Consignment meets the offline-recipient policy; see limitations above");
     Ok(())
 }
 
@@ -145,28 +145,27 @@ fn cmd_proof(
     // VERIFY-SIGNER-BINDING-001: bind to the approved verifier set (fails closed
     // if unset).
     let authorized_signers = config.approved_verifier_keys()?;
-    let result = csv_verifier::verify_proof(
+    let report = csv_verifier::verify_proof(
         &proof_bundle,
         seal_registry,
         signature_scheme,
         &authorized_signers,
     );
+    let outcome = csv_verifier::AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&report);
+    output::assurance_report(&report, &outcome);
 
-    output::kv(
-        "Verification Level",
-        &format!("{:?}", result.level).to_lowercase(),
-    );
-
-    if !result.errors.is_empty() {
-        for error in &result.errors {
-            output::error(&format!("✗ {}", error));
-        }
-        return Err(anyhow::anyhow!("Proof validation failed"));
+    if !outcome.is_met() {
+        return Err(anyhow::anyhow!(
+            "Proof validation failed: {}",
+            outcome.shortfall_summary()
+        ));
     }
 
     output::progress(3, 3, "Checking seal registry...");
 
-    output::success("Proof is valid");
+    // Deliberately not "the proof is valid": offline verification establishes
+    // structure and authorization, and the limitations above say what it did not.
+    output::success("Proof meets the offline-recipient policy; see limitations above");
     Ok(())
 }
 
@@ -293,26 +292,23 @@ fn cmd_offline(file: String, config: &Config, state: &UnifiedStateManager) -> Re
     // VERIFY-SIGNER-BINDING-001: bind to the approved verifier set (fails closed
     // if unset).
     let authorized_signers = config.approved_verifier_keys()?;
-    let result = csv_verifier::verify_proof(
+    let report = csv_verifier::verify_proof(
         &proof_bundle,
         seal_registry,
         signature_scheme,
         &authorized_signers,
     );
+    let outcome = csv_verifier::AssuranceRequirement::OFFLINE_RECIPIENT.evaluate(&report);
+    output::assurance_report(&report, &outcome);
 
-    output::kv(
-        "Verification Level",
-        &format!("{:?}", result.level).to_lowercase(),
-    );
-
-    if !result.errors.is_empty() {
-        for error in &result.errors {
-            output::error(&format!("✗ {}", error));
-        }
-        return Err(anyhow::anyhow!("Proof verification failed"));
+    if !outcome.is_met() {
+        return Err(anyhow::anyhow!(
+            "Proof verification failed: {}",
+            outcome.shortfall_summary()
+        ));
     }
 
-    output::success("✓ Proof bundle is cryptographically valid");
+    output::success("Proof bundle meets the offline-recipient policy; see limitations above");
 
     output::progress(4, 5, "Generating explorer links...");
 
