@@ -325,6 +325,15 @@ pub struct ResolvedTransition {
 }
 
 impl ResolvedTransition {
+    /// Commitments of every created output in declared order.
+    pub fn created_output_commitments(&self) -> Vec<Hash> {
+        self.outputs
+            .iter()
+            .enumerate()
+            .map(|(index, output)| created_output_digest(index, output))
+            .collect()
+    }
+
     /// The seals consumed by this transition, taken from resolved parent state.
     ///
     /// This replaces `Transition::consumed_seals()`, which could only ever
@@ -361,8 +370,8 @@ impl ResolvedTransition {
         }
 
         data.extend_from_slice(&(self.outputs.len() as u32).to_le_bytes());
-        for (index, output) in self.outputs.iter().enumerate() {
-            data.extend_from_slice(created_output_digest(index, output).as_bytes());
+        for output in self.created_output_commitments() {
+            data.extend_from_slice(output.as_bytes());
         }
 
         data.extend_from_slice(&(self.validation_script.len() as u32).to_le_bytes());

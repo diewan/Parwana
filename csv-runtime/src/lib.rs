@@ -40,6 +40,7 @@ pub mod execution_journal;
 pub mod failure_domain;
 pub mod policy;
 pub mod queue;
+pub mod recipient_acceptance;
 pub mod recovery;
 pub mod replay_database;
 pub mod runtime_mode;
@@ -70,6 +71,10 @@ pub use execution_journal::{
 pub use failure_domain::{ClassifiedError, FailureDomain};
 pub use policy::RuntimePolicy;
 pub use queue::{TaskQueue, TaskQueueError};
+pub use recipient_acceptance::{
+    AcceptanceContext, AcceptanceError, AcceptanceErrorCode, AcceptanceResult, AuthorizedSigner,
+    accept_consignment_v2,
+};
 pub use recovery::{
     CheckpointId, CheckpointManager, RecoveryCheckpoint, ReplayCheckpoint, TransferStage,
     VerificationCheckpoint,
