@@ -392,6 +392,92 @@ impl ConsignmentV2Payload {
             &bytes,
         )))
     }
+
+    /// Validate payload bindings before authorization is produced.
+    ///
+    /// This establishes structural consistency only. Chain-native closure
+    /// semantics and signatures still require their dedicated verifiers.
+    pub fn validate_structure(&self) -> Result<(), ConsignmentV2Error> {
+        if self.protocol_version != CONSIGNMENT_V2_PROTOCOL_VERSION {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::UnsupportedProtocolVersion,
+                format!("unsupported protocol version {}", self.protocol_version),
+            ));
+        }
+        if self.envelope_version != CONSIGNMENT_V2_ENVELOPE_VERSION {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::UnsupportedEnvelopeVersion,
+                format!("unsupported envelope version {}", self.envelope_version),
+            ));
+        }
+        let resolved_source = self
+            .successor
+            .inputs
+            .iter()
+            .find(|input| input.reference == self.source)
+            .ok_or_else(|| {
+                ConsignmentV2Error::new(
+                    ConsignmentV2ErrorCode::SourceTransitionMismatch,
+                    "source is absent from the resolved successor inputs",
+                )
+            })?;
+        if resolved_source.parent.reference() != self.source
+            || resolved_source.parent.recorded_commitment
+                != resolved_source.parent.content_commitment()
+        {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::SourceTransitionMismatch,
+                "resolved parent does not reproduce the consumed source",
+            ));
+        }
+        if self.source_closure.consumed_state != self.source {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::ClosureSourceMismatch,
+                "closure proof names another consumed source",
+            ));
+        }
+        if self.source_closure.successor_commitment != self.successor.commitment() {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::ClosureSuccessorMismatch,
+                "closure proof names another successor commitment",
+            ));
+        }
+        self.source_closure.validate().map_err(|error| {
+            ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidClosureProof,
+                error.to_string(),
+            )
+        })?;
+        let destination = self.destination.bound_seal_point().map_err(|error| {
+            ConsignmentV2Error::new(ConsignmentV2ErrorCode::DestinationMismatch, error)
+        })?;
+        if !self.successor.outputs.iter().any(|output| {
+            csv_hash::seal::SealPoint::try_from(output.seal.clone())
+                .is_ok_and(|seal| seal == destination)
+        }) {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::DestinationMismatch,
+                "no successor output is assigned to the invoice seal",
+            ));
+        }
+        let requirements = &self.proof_requirements;
+        requirements.checkpoint.validate().map_err(|error| {
+            ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidProofRequirements,
+                error.to_string(),
+            )
+        })?;
+        if requirements.proof_provider_id.is_empty()
+            || requirements.verification_context == Hash::zero()
+            || requirements.maximum_checkpoint_age == 0
+        {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidProofRequirements,
+                "provider, verification context, and checkpoint-age bound are required",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl ConsignmentV2 {
@@ -446,85 +532,7 @@ impl ConsignmentV2 {
     /// validity. Native proof and signature verification remain verifier work.
     pub fn validate(&self) -> Result<(), ConsignmentV2Error> {
         let payload = &self.payload;
-        if payload.protocol_version != CONSIGNMENT_V2_PROTOCOL_VERSION {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::UnsupportedProtocolVersion,
-                format!("unsupported protocol version {}", payload.protocol_version),
-            ));
-        }
-        if payload.envelope_version != CONSIGNMENT_V2_ENVELOPE_VERSION {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::UnsupportedEnvelopeVersion,
-                format!("unsupported envelope version {}", payload.envelope_version),
-            ));
-        }
-        let resolved_source = payload
-            .successor
-            .inputs
-            .iter()
-            .find(|input| input.reference == payload.source)
-            .ok_or_else(|| {
-                ConsignmentV2Error::new(
-                    ConsignmentV2ErrorCode::SourceTransitionMismatch,
-                    "source is absent from the resolved successor inputs",
-                )
-            })?;
-        if resolved_source.parent.reference() != payload.source
-            || resolved_source.parent.recorded_commitment
-                != resolved_source.parent.content_commitment()
-        {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::SourceTransitionMismatch,
-                "resolved parent does not reproduce the consumed source",
-            ));
-        }
-        if payload.source_closure.consumed_state != payload.source {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::ClosureSourceMismatch,
-                "closure proof names another consumed source",
-            ));
-        }
-        let successor_commitment = payload.successor.commitment();
-        if payload.source_closure.successor_commitment != successor_commitment {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::ClosureSuccessorMismatch,
-                "closure proof names another successor commitment",
-            ));
-        }
-        payload.source_closure.validate().map_err(|error| {
-            ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::InvalidClosureProof,
-                error.to_string(),
-            )
-        })?;
-        let destination = payload.destination.bound_seal_point().map_err(|error| {
-            ConsignmentV2Error::new(ConsignmentV2ErrorCode::DestinationMismatch, error)
-        })?;
-        if !payload.successor.outputs.iter().any(|output| {
-            csv_hash::seal::SealPoint::try_from(output.seal.clone())
-                .is_ok_and(|seal| seal == destination)
-        }) {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::DestinationMismatch,
-                "no successor output is assigned to the invoice seal",
-            ));
-        }
-        let requirements = &payload.proof_requirements;
-        requirements.checkpoint.validate().map_err(|error| {
-            ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::InvalidProofRequirements,
-                error.to_string(),
-            )
-        })?;
-        if requirements.proof_provider_id.is_empty()
-            || requirements.verification_context == Hash::zero()
-            || requirements.maximum_checkpoint_age == 0
-        {
-            return Err(ConsignmentV2Error::new(
-                ConsignmentV2ErrorCode::InvalidProofRequirements,
-                "provider, verification context, and checkpoint-age bound are required",
-            ));
-        }
+        payload.validate_structure()?;
         let expected = payload.commitment()?;
         if self.commitment != expected {
             return Err(ConsignmentV2Error::new(

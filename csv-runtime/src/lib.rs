@@ -78,9 +78,13 @@ pub use runtime_mode::{
     CircuitBreaker, CircuitBreakerConfig as RuntimeCircuitBreakerConfig, CircuitBreakerState,
     HealthMonitor, HealthStatus, RuntimeMode,
 };
+#[cfg(feature = "persistent")]
+pub use send_transfer::RedbConsignmentEmissionJournal;
 pub use send_transfer::{
-    Consignment, SealAssignment, SealCloseWitness, SendExecutor, SendExecutorError, SendReceipt,
-    SendTransfer,
+    Consignment, ConsignmentEmissionError, ConsignmentEmissionJournal, ConsignmentEmissionRecord,
+    ConsignmentV2Authorizer, ConsignmentV2EmissionRequest, InMemoryConsignmentEmissionJournal,
+    SealAssignment, SealCloseWitness, SendExecutor, SendExecutorError, SendReceipt, SendTransfer,
+    emit_consignment_v2,
 };
 pub use transfer_coordinator::{
     FinalityObservation, RecoveryContextProvider, SettlementEvidence, SettlementReleaseRecord,
