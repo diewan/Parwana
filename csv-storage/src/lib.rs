@@ -14,11 +14,18 @@
 #![warn(missing_docs)]
 #![allow(unexpected_cfgs)]
 
+pub mod accepted_state;
 pub mod backends;
 pub mod errors;
 pub mod traits;
 
 // Re-exports
+#[cfg(feature = "redb")]
+pub use accepted_state::RedbAcceptedStateStore;
+pub use accepted_state::{
+    AcceptedAssuranceReading, AcceptedAssuranceReport, AcceptedStateError, AcceptedStateRecord,
+    AcceptedStateStore, InMemoryAcceptedStateStore,
+};
 pub use backends::in_memory::InMemoryReplayDb;
 #[cfg(feature = "postgres")]
 pub use backends::postgres::PostgresReplayDb;
