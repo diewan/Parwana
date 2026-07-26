@@ -42,6 +42,20 @@ pub const ETHEREUM_CLOSURE_VERIFIER_ID: &str = "parwana.csv-ethereum.closure.v2"
 /// Encoding version of this adapter's closure proof material.
 pub const ETHEREUM_CLOSURE_MATERIAL_VERSION: u16 = 1;
 
+/// Declaration index of `closures` in `csv-contracts`' `CSVClosureRegistry.sol`.
+///
+/// A convenience default, **not** a protocol constant:
+/// [`EthereumClosureRegistry::mapping_slot`] stays configuration because the
+/// storage layout belongs to whichever contract is actually deployed, and
+/// pinning it here would silently misverify against any other registry.
+///
+/// The shipped registry declares `closures` first precisely so this is `0`, and
+/// its `test_closures_is_at_storage_slot_zero` is the tripwire on that side. If
+/// a state variable is ever inserted above it, that test fails and this constant
+/// must change with it — otherwise every storage proof addresses the wrong slot
+/// and silently stops verifying.
+pub const CSV_CLOSURE_REGISTRY_MAPPING_SLOT: u64 = 0;
+
 /// Solidity selector for `register_closure(bytes32,bytes32)`.
 ///
 /// Recomputed rather than hard-coded so a rename cannot silently keep a stale
@@ -261,6 +275,25 @@ mod tests {
             registry.storage_key(&nullifier),
             keccak256(expected_preimage).0
         );
+    }
+
+    #[test]
+    fn the_shipped_registry_slot_matches_the_contract() {
+        // Paired with CSVClosureRegistry.t.sol's storage-layout test. Both must
+        // move together or storage proofs address the wrong slot.
+        assert_eq!(CSV_CLOSURE_REGISTRY_MAPPING_SLOT, 0);
+
+        // And the key derivation must agree with the Solidity mapping rule the
+        // contract test asserts: keccak256(abi.encode(nullifier, uint256(slot))).
+        let registry = EthereumClosureRegistry {
+            mapping_slot: CSV_CLOSURE_REGISTRY_MAPPING_SLOT,
+            ..registry()
+        };
+        let nullifier = SourceNullifier::derive(&source());
+        let mut preimage = [0u8; 64];
+        preimage[..32].copy_from_slice(nullifier.as_bytes());
+        // slot 0 leaves the second word all zero.
+        assert_eq!(registry.storage_key(&nullifier), keccak256(preimage).0);
     }
 
     #[test]
