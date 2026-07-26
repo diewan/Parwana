@@ -27,6 +27,8 @@ pub struct BitcoinClosureArtifact {
     pub commitment_payload: Vec<u8>,
     /// Taproot leaf script used to derive the commitment output key.
     pub commitment_leaf_script: Vec<u8>,
+    /// Untweaked x-only key needed to independently derive the output key.
+    pub internal_key: [u8; 32],
     /// ScriptPubKey of the commitment-carrying successor output.
     pub commitment_output_script: Vec<u8>,
     /// Index of the commitment-carrying successor output.
@@ -53,11 +55,39 @@ impl BitcoinClosureArtifact {
         if self.commitment_payload[32..] != self.successor_commitment {
             return Err(BitcoinClosureError::SuccessorCommitmentMismatch);
         }
+        let mut protocol_id = [0u8; 32];
+        protocol_id.copy_from_slice(&self.commitment_payload[..32]);
+        let expected_leaf = crate::TapretCommitment::new(
+            protocol_id,
+            csv_hash::Hash::new(self.successor_commitment),
+        )
+        .leaf_script();
+        if expected_leaf.as_bytes() != self.commitment_leaf_script {
+            return Err(BitcoinClosureError::CommitmentWitnessMismatch);
+        }
+        let internal_key = bitcoin::XOnlyPublicKey::from_slice(&self.internal_key)
+            .map_err(|_| BitcoinClosureError::CommitmentWitnessMismatch)?;
+        let spend_info = bitcoin::taproot::TaprootBuilder::new()
+            .add_leaf(0, expected_leaf)
+            .map_err(|_| BitcoinClosureError::CommitmentWitnessMismatch)?
+            .finalize(
+                &bitcoin::secp256k1::Secp256k1::verification_only(),
+                internal_key,
+            )
+            .map_err(|_| BitcoinClosureError::CommitmentWitnessMismatch)?;
+        let network = self
+            .network
+            .parse::<bitcoin::Network>()
+            .map_err(|_| BitcoinClosureError::NetworkInvalid)?;
+        let expected_output =
+            bitcoin::Address::p2tr_tweaked(spend_info.output_key(), network).script_pubkey();
         let output = transaction
             .output
             .get(self.commitment_output_index as usize)
             .ok_or(BitcoinClosureError::CommitmentOutputMissing)?;
-        if output.script_pubkey.as_bytes() != self.commitment_output_script {
+        if output.script_pubkey != expected_output
+            || output.script_pubkey.as_bytes() != self.commitment_output_script
+        {
             return Err(BitcoinClosureError::CommitmentOutputMismatch);
         }
         Ok(())
@@ -91,6 +121,11 @@ pub fn build_source_closure(
         successor_commitment,
         commitment_payload: commitment_payload.to_vec(),
         commitment_leaf_script: result.tapret_output.leaf_script.into_bytes(),
+        internal_key: result
+            .tapret_output
+            .taproot_spend_info
+            .internal_key()
+            .serialize(),
         commitment_output_script: result.tapret_output.script_pubkey.into_bytes(),
         commitment_output_index: result.commitment_output_index,
     };
@@ -116,6 +151,12 @@ pub enum BitcoinClosureError {
     /// Witness payload names another successor.
     #[error("Bitcoin closure payload does not bind the successor commitment")]
     SuccessorCommitmentMismatch,
+    /// Leaf/internal-key witness does not derive the committed output.
+    #[error("Bitcoin closure commitment witness is invalid")]
+    CommitmentWitnessMismatch,
+    /// Artifact names an unsupported Bitcoin network.
+    #[error("Bitcoin closure network is invalid")]
+    NetworkInvalid,
     /// Commitment output index is outside the transaction.
     #[error("Bitcoin closure commitment output is missing")]
     CommitmentOutputMissing,
