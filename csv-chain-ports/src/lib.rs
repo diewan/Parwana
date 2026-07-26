@@ -11,6 +11,7 @@ use csv_hash::{Hash, commitment::Commitment};
 use csv_protocol::finality::ChainCapabilities;
 use csv_protocol::proof_taxonomy::ProofBundle;
 use csv_protocol::signature::SignatureScheme;
+use csv_protocol::{ClosureProof, ClosureVerificationResult, FinalizedCheckpoint};
 use serde::{Deserialize, Serialize};
 
 /// Common adapter error type
@@ -38,6 +39,21 @@ pub enum AdapterError {
 
 /// Result type for adapter operations
 pub type AdapterResult<T> = Result<T, AdapterError>;
+
+/// Chain-native source-closure verification boundary.
+///
+/// Implementations must parse and cryptographically verify the supplied proof
+/// material against the supplied checkpoint. Returning a bare success boolean
+/// is intentionally impossible at this boundary.
+#[async_trait]
+pub trait ClosureProofVerifier: Send + Sync {
+    /// Verify source closure, inclusion, finality, and freshness independently.
+    async fn verify_closure(
+        &self,
+        proof: &ClosureProof,
+        checkpoint: &FinalizedCheckpoint,
+    ) -> AdapterResult<ClosureVerificationResult>;
+}
 
 /// Trait for proof verification operations
 #[async_trait]

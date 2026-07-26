@@ -16,6 +16,7 @@
 pub mod chain_adapter_traits;
 pub mod chain_config;
 pub mod chain_registry;
+pub mod closure;
 pub mod commitment;
 pub mod cross_chain;
 pub mod deployment_manifest;
@@ -124,6 +125,12 @@ pub use seal_protocol::DagSegment;
 
 // Re-export commitment types
 pub use commitment::Commitment;
+
+// Re-export source-closure verification boundary types (PAR-CLOSE-001)
+pub use closure::{
+    ClosureDimensionStatus, ClosureInterfaceError, ClosureProof, ClosureProofKind,
+    ClosureTrustMode, ClosureVerificationResult, FinalityPolicy, FinalizedCheckpoint,
+};
 
 // Re-export envelope types
 pub use envelope::{CanonicalSanadEnvelope, TypeId, decode_envelope};
