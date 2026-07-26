@@ -9,8 +9,11 @@
 //!
 //! Canonical hashing uses CBOR via `csv-codec`; `serde_json` is never used here.
 
-use csv_codec::{CodecError, to_canonical_cbor};
+use csv_codec::{CodecError, from_canonical_cbor, to_canonical_cbor};
+use csv_hash::{Hash, csv_tagged_hash};
+use csv_protocol::closure::{ClosureProof, ClosureTrustMode, FinalizedCheckpoint};
 use csv_protocol::proof_taxonomy::ProofBundle;
+use csv_protocol::{ConsumedStateRef, ResolvedTransition, SignatureScheme};
 use serde::{Deserialize, Serialize};
 
 use crate::invoice::Invoice;
@@ -18,6 +21,12 @@ use crate::primitives::SanadIdWire;
 
 /// Current consignment envelope wire version.
 pub const CONSIGNMENT_VERSION: u16 = 1;
+/// Protocol semantics version carried by portable V2 consignments.
+pub const CONSIGNMENT_V2_PROTOCOL_VERSION: u16 = 2;
+/// Current portable consignment envelope version.
+pub const CONSIGNMENT_V2_ENVELOPE_VERSION: u16 = 2;
+/// Domain tag for the commitment signed by every V2 authorization.
+pub const CONSIGNMENT_V2_COMMITMENT_TAG: &str = "consignment-v2";
 
 /// The sender-produced envelope delivering a sanad against a recipient invoice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +76,311 @@ impl Consignment {
     }
 }
 
+/// A signature authorizing exactly one V2 consignment commitment.
+///
+/// Signature verification belongs to `csv-verifier`; the wire layer guarantees
+/// that the claimed signed message is the envelope commitment and cannot be
+/// redirected to another destination or successor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsignmentAuthorization {
+    /// Signature algorithm used by the authorizer.
+    pub scheme: SignatureScheme,
+    /// Authorizer public key.
+    pub public_key: Vec<u8>,
+    /// Signature bytes.
+    pub signature: Vec<u8>,
+    /// Commitment the signature claims to authorize.
+    pub signed_commitment: Hash,
+}
+
+/// External inputs an isolated recipient must obtain before V2 acceptance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsignmentProofRequirements {
+    /// Exact finalized checkpoint against which inclusion is to be checked.
+    pub checkpoint: FinalizedCheckpoint,
+    /// Trust anchor the recipient is expected to use.
+    pub trust_mode: ClosureTrustMode,
+    /// Stable chain-native proof provider identifier.
+    pub proof_provider_id: String,
+    /// Stable verification-context identifier/digest.
+    pub verification_context: Hash,
+    /// Maximum checkpoint age, in blocks, accepted by the sender's profile.
+    pub maximum_checkpoint_age: u64,
+}
+
+/// The fields committed to by a portable V2 consignment.
+///
+/// Keeping this payload separate from the commitment and signatures prevents
+/// recursive encoding and makes the signing preimage independently reproducible.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsignmentV2Payload {
+    /// Protocol semantics version.
+    pub protocol_version: u16,
+    /// Portable envelope version.
+    pub envelope_version: u16,
+    /// State whose unique successor is asserted.
+    pub source: ConsumedStateRef,
+    /// Fully resolved transition, including the parent output and new outputs.
+    pub successor: ResolvedTransition,
+    /// Real chain-native source closure witness.
+    pub source_closure: ClosureProof,
+    /// Recipient-issued invoice binding the destination seal and nonce.
+    pub destination: Invoice,
+    /// Explicit checkpoint, provider, context, freshness, and trust inputs.
+    pub proof_requirements: ConsignmentProofRequirements,
+}
+
+/// Complete portable, closure-carrying consignment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsignmentV2 {
+    /// Every field whose mutation must invalidate authorization.
+    pub payload: ConsignmentV2Payload,
+    /// Domain-separated commitment to `payload`.
+    pub commitment: Hash,
+    /// Authorization evidence over `commitment`.
+    pub authorizations: Vec<ConsignmentAuthorization>,
+}
+
+/// Stable failure codes for deterministic V2 decoding and envelope validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsignmentV2ErrorCode {
+    /// Bytes were not a decodable V2 CBOR object.
+    MalformedEncoding,
+    /// The input decoded but was not the unique canonical representation.
+    NonCanonicalEncoding,
+    /// The protocol version is unsupported.
+    UnsupportedProtocolVersion,
+    /// The envelope version is unsupported.
+    UnsupportedEnvelopeVersion,
+    /// The source is not one of the transition's resolved inputs.
+    SourceTransitionMismatch,
+    /// The closure targets a different source.
+    ClosureSourceMismatch,
+    /// The closure commits to a different successor.
+    ClosureSuccessorMismatch,
+    /// The source closure envelope is invalid.
+    InvalidClosureProof,
+    /// The successor output does not bind the recipient invoice.
+    DestinationMismatch,
+    /// An external proof dependency is invalid or unnamed.
+    InvalidProofRequirements,
+    /// The stored commitment does not reproduce from the payload.
+    CommitmentMismatch,
+    /// No authorization evidence was supplied.
+    MissingAuthorization,
+    /// An authorization is empty or names another commitment.
+    InvalidAuthorization,
+}
+
+/// A V2 wire failure with a stable machine-readable code.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{code:?}: {detail}")]
+pub struct ConsignmentV2Error {
+    /// Stable code suitable for SDK and CLI boundaries.
+    pub code: ConsignmentV2ErrorCode,
+    /// Actionable, non-authoritative diagnostic detail.
+    pub detail: String,
+}
+
+impl ConsignmentV2Error {
+    fn new(code: ConsignmentV2ErrorCode, detail: impl Into<String>) -> Self {
+        Self {
+            code,
+            detail: detail.into(),
+        }
+    }
+}
+
+impl ConsignmentV2Payload {
+    /// Construct the current V2 payload without permitting version ambiguity.
+    pub fn new(
+        source: ConsumedStateRef,
+        successor: ResolvedTransition,
+        source_closure: ClosureProof,
+        destination: Invoice,
+        proof_requirements: ConsignmentProofRequirements,
+    ) -> Self {
+        Self {
+            protocol_version: CONSIGNMENT_V2_PROTOCOL_VERSION,
+            envelope_version: CONSIGNMENT_V2_ENVELOPE_VERSION,
+            source,
+            successor,
+            source_closure,
+            destination,
+            proof_requirements,
+        }
+    }
+
+    /// Reproduce the domain-separated commitment authorization signs.
+    pub fn commitment(&self) -> Result<Hash, ConsignmentV2Error> {
+        let bytes = to_canonical_cbor(self).map_err(|error| {
+            ConsignmentV2Error::new(ConsignmentV2ErrorCode::MalformedEncoding, error.to_string())
+        })?;
+        Ok(Hash::new(csv_tagged_hash(
+            CONSIGNMENT_V2_COMMITMENT_TAG,
+            &bytes,
+        )))
+    }
+}
+
+impl ConsignmentV2 {
+    /// Build an unsigned V2 envelope. Authorization evidence is attached with
+    /// [`Self::with_authorizations`] after signing [`Self::commitment`].
+    pub fn new(payload: ConsignmentV2Payload) -> Result<Self, ConsignmentV2Error> {
+        let commitment = payload.commitment()?;
+        Ok(Self {
+            payload,
+            commitment,
+            authorizations: Vec::new(),
+        })
+    }
+
+    /// Attach authorization evidence and validate the complete envelope.
+    pub fn with_authorizations(
+        mut self,
+        authorizations: Vec<ConsignmentAuthorization>,
+    ) -> Result<Self, ConsignmentV2Error> {
+        self.authorizations = authorizations;
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Deterministic CBOR encoding after all structural bindings are checked.
+    pub fn canonical_cbor(&self) -> Result<Vec<u8>, ConsignmentV2Error> {
+        self.validate()?;
+        to_canonical_cbor(self).map_err(|error| {
+            ConsignmentV2Error::new(ConsignmentV2ErrorCode::MalformedEncoding, error.to_string())
+        })
+    }
+
+    /// Explicit V2 decoder. It never auto-detects or promotes V1 artifacts.
+    pub fn decode_v2(bytes: &[u8]) -> Result<Self, ConsignmentV2Error> {
+        let decoded: Self = from_canonical_cbor(bytes).map_err(|error| {
+            ConsignmentV2Error::new(ConsignmentV2ErrorCode::MalformedEncoding, error.to_string())
+        })?;
+        let canonical = to_canonical_cbor(&decoded).map_err(|error| {
+            ConsignmentV2Error::new(ConsignmentV2ErrorCode::MalformedEncoding, error.to_string())
+        })?;
+        if canonical != bytes {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::NonCanonicalEncoding,
+                "input is not the unique canonical CBOR encoding",
+            ));
+        }
+        decoded.validate()?;
+        Ok(decoded)
+    }
+
+    /// Validate all cross-field bindings without claiming cryptographic proof
+    /// validity. Native proof and signature verification remain verifier work.
+    pub fn validate(&self) -> Result<(), ConsignmentV2Error> {
+        let payload = &self.payload;
+        if payload.protocol_version != CONSIGNMENT_V2_PROTOCOL_VERSION {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::UnsupportedProtocolVersion,
+                format!("unsupported protocol version {}", payload.protocol_version),
+            ));
+        }
+        if payload.envelope_version != CONSIGNMENT_V2_ENVELOPE_VERSION {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::UnsupportedEnvelopeVersion,
+                format!("unsupported envelope version {}", payload.envelope_version),
+            ));
+        }
+        let resolved_source = payload
+            .successor
+            .inputs
+            .iter()
+            .find(|input| input.reference == payload.source)
+            .ok_or_else(|| {
+                ConsignmentV2Error::new(
+                    ConsignmentV2ErrorCode::SourceTransitionMismatch,
+                    "source is absent from the resolved successor inputs",
+                )
+            })?;
+        if resolved_source.parent.reference() != payload.source
+            || resolved_source.parent.recorded_commitment
+                != resolved_source.parent.content_commitment()
+        {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::SourceTransitionMismatch,
+                "resolved parent does not reproduce the consumed source",
+            ));
+        }
+        if payload.source_closure.consumed_state != payload.source {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::ClosureSourceMismatch,
+                "closure proof names another consumed source",
+            ));
+        }
+        let successor_commitment = payload.successor.commitment();
+        if payload.source_closure.successor_commitment != successor_commitment {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::ClosureSuccessorMismatch,
+                "closure proof names another successor commitment",
+            ));
+        }
+        payload.source_closure.validate().map_err(|error| {
+            ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidClosureProof,
+                error.to_string(),
+            )
+        })?;
+        let destination = payload.destination.bound_seal_point().map_err(|error| {
+            ConsignmentV2Error::new(ConsignmentV2ErrorCode::DestinationMismatch, error)
+        })?;
+        if !payload.successor.outputs.iter().any(|output| {
+            csv_hash::seal::SealPoint::try_from(output.seal.clone())
+                .is_ok_and(|seal| seal == destination)
+        }) {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::DestinationMismatch,
+                "no successor output is assigned to the invoice seal",
+            ));
+        }
+        let requirements = &payload.proof_requirements;
+        requirements.checkpoint.validate().map_err(|error| {
+            ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidProofRequirements,
+                error.to_string(),
+            )
+        })?;
+        if requirements.proof_provider_id.is_empty()
+            || requirements.verification_context == Hash::zero()
+            || requirements.maximum_checkpoint_age == 0
+        {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidProofRequirements,
+                "provider, verification context, and checkpoint-age bound are required",
+            ));
+        }
+        let expected = payload.commitment()?;
+        if self.commitment != expected {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::CommitmentMismatch,
+                "payload does not reproduce the stored commitment",
+            ));
+        }
+        if self.authorizations.is_empty() {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::MissingAuthorization,
+                "at least one authorization is required",
+            ));
+        }
+        if self.authorizations.iter().any(|authorization| {
+            authorization.signed_commitment != self.commitment
+                || authorization.public_key.is_empty()
+                || authorization.signature.is_empty()
+        }) {
+            return Err(ConsignmentV2Error::new(
+                ConsignmentV2ErrorCode::InvalidAuthorization,
+                "authorization is empty or is bound to another commitment",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,7 +389,13 @@ mod tests {
     use csv_hash::dag::DAGSegment;
     use csv_hash::seal::{CommitAnchor, SealPoint};
     use csv_protocol::SignatureScheme;
+    use csv_protocol::closure::{
+        ClosureProof, ClosureProofKind, ClosureTrustMode, FinalityPolicy, FinalizedCheckpoint,
+    };
+    use csv_protocol::exclusivity::{ConsumptionMode, ExclusivityClass, StateUseSchema};
     use csv_protocol::proof_taxonomy::{FinalityProof, InclusionProof};
+    use csv_protocol::resolution::{ParentOutput, ResolvedInput, ResolvedTransition};
+    use csv_protocol::state::StateAssignment;
 
     fn sample_invoice() -> Invoice {
         let seal = SealDefinition::sui(vec![0xCD; 32], 7).unwrap();
@@ -132,6 +452,60 @@ mod tests {
         )
     }
 
+    fn sample_v2() -> ConsignmentV2 {
+        let invoice = sample_invoice();
+        let destination = invoice.bound_seal_point().unwrap();
+        let source = ConsumedStateRef::new(Hash::new([0x11; 32]), 0, 7);
+        let mut schema = StateUseSchema::new();
+        schema.bind(7, ExclusivityClass::Exclusive).unwrap();
+        let parent = ParentOutput::sealed(
+            source.transition_id,
+            source.output_index,
+            schema.bind_output(7).unwrap(),
+            SealPoint::new(vec![0x22; 36], None, None).unwrap(),
+            vec![0x33],
+            vec![vec![0x44; 32]],
+        );
+        let successor = ResolvedTransition {
+            transition_id: 9,
+            inputs: vec![ResolvedInput {
+                reference: source,
+                parent,
+                mode: ConsumptionMode::Exclusive,
+            }],
+            outputs: vec![StateAssignment::new(7, destination, vec![0x55])],
+            validation_script: vec![0x66],
+        };
+        let closure = ClosureProof {
+            consumed_state: source,
+            successor_commitment: successor.commitment(),
+            proof_kind: ClosureProofKind::BitcoinTransactionInclusion,
+            proof_material: vec![0x77; 64],
+        };
+        let requirements = ConsignmentProofRequirements {
+            checkpoint: FinalizedCheckpoint {
+                chain_id: "bitcoin".into(),
+                network_id: "signet".into(),
+                block_height: 100,
+                block_id: vec![0x88; 32],
+                finality_policy: FinalityPolicy::Confirmations(6),
+            },
+            trust_mode: ClosureTrustMode::LightClient,
+            proof_provider_id: "bitcoin-spv-v1".into(),
+            verification_context: Hash::new([0x99; 32]),
+            maximum_checkpoint_age: 12,
+        };
+        let payload = ConsignmentV2Payload::new(source, successor, closure, invoice, requirements);
+        let unsigned = ConsignmentV2::new(payload).unwrap();
+        let authorization = ConsignmentAuthorization {
+            scheme: SignatureScheme::Ed25519,
+            public_key: vec![0xAA; 32],
+            signature: vec![0xBB; 64],
+            signed_commitment: unsigned.commitment,
+        };
+        unsigned.with_authorizations(vec![authorization]).unwrap()
+    }
+
     #[test]
     fn canonical_cbor_round_trip() {
         let c = sample_consignment(sample_invoice(), true);
@@ -158,5 +532,77 @@ mod tests {
 
         let unbound = sample_consignment(sample_invoice(), false);
         assert!(!unbound.binds_invoice_seal().unwrap());
+    }
+
+    #[test]
+    fn v2_round_trip_is_explicit_and_canonical() {
+        let consignment = sample_v2();
+        assert_eq!(
+            hex::encode(consignment.commitment.as_bytes()),
+            "a30786a98a733fc92b8f26b4bbc64e45ef1a2bbf1c31ee5722f9a02344f577e3"
+        );
+        let bytes = consignment.canonical_cbor().unwrap();
+        assert_eq!(ConsignmentV2::decode_v2(&bytes).unwrap(), consignment);
+
+        let v1 = sample_consignment(sample_invoice(), true)
+            .canonical_cbor()
+            .unwrap();
+        assert_eq!(
+            ConsignmentV2::decode_v2(&v1).unwrap_err().code,
+            ConsignmentV2ErrorCode::MalformedEncoding
+        );
+    }
+
+    #[test]
+    fn every_security_relevant_mutation_breaks_the_commitment() {
+        let original = sample_v2();
+
+        let mut destination = original.clone();
+        destination.payload.destination.nonce ^= 1;
+        assert_eq!(
+            destination.validate().unwrap_err().code,
+            ConsignmentV2ErrorCode::DestinationMismatch
+        );
+
+        let mut source = original.clone();
+        source.payload.source.output_index += 1;
+        assert_eq!(
+            source.validate().unwrap_err().code,
+            ConsignmentV2ErrorCode::SourceTransitionMismatch
+        );
+
+        let mut transition = original.clone();
+        transition.payload.successor.validation_script.push(0xCC);
+        assert_eq!(
+            transition.validate().unwrap_err().code,
+            ConsignmentV2ErrorCode::ClosureSuccessorMismatch
+        );
+
+        let mut closure = original.clone();
+        closure.payload.source_closure.proof_material.push(0xDD);
+        assert_eq!(
+            closure.validate().unwrap_err().code,
+            ConsignmentV2ErrorCode::CommitmentMismatch
+        );
+    }
+
+    #[test]
+    fn authorization_must_name_the_complete_envelope_commitment() {
+        let mut consignment = sample_v2();
+        consignment.authorizations[0].signed_commitment = Hash::new([0xEE; 32]);
+        assert_eq!(
+            consignment.validate().unwrap_err().code,
+            ConsignmentV2ErrorCode::InvalidAuthorization
+        );
+    }
+
+    #[test]
+    fn trailing_bytes_are_rejected_as_noncanonical() {
+        let mut bytes = sample_v2().canonical_cbor().unwrap();
+        bytes.push(0);
+        assert_eq!(
+            ConsignmentV2::decode_v2(&bytes).unwrap_err().code,
+            ConsignmentV2ErrorCode::NonCanonicalEncoding
+        );
     }
 }

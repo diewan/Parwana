@@ -30,7 +30,12 @@ pub use app::{
     TransferEvent, TransferMode, TransferPhase, TransferReceipt, VerificationAssuranceWire,
 };
 pub use canonical::CanonicalProofWire;
-pub use consignment::{CONSIGNMENT_VERSION, Consignment};
+pub use consignment::{
+    CONSIGNMENT_V2_COMMITMENT_TAG, CONSIGNMENT_V2_ENVELOPE_VERSION,
+    CONSIGNMENT_V2_PROTOCOL_VERSION, CONSIGNMENT_VERSION, Consignment, ConsignmentAuthorization,
+    ConsignmentProofRequirements, ConsignmentV2, ConsignmentV2Error, ConsignmentV2ErrorCode,
+    ConsignmentV2Payload,
+};
 pub use invoice::{INVOICE_VERSION, Invoice};
 pub use primitives::{CommitmentWire, HashWire, SanadIdWire};
 pub use proof::ProofBundleWire;

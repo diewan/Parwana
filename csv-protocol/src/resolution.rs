@@ -40,6 +40,7 @@ use crate::state::{StateAssignment, StateRef, StateTypeId};
 use crate::transition::Transition;
 use csv_hash::seal::SealPoint;
 use csv_hash::{Hash, csv_tagged_hash};
+use serde::{Deserialize, Serialize};
 
 /// Domain tag for a parent output's content commitment.
 pub const PARENT_OUTPUT_TAG: &str = "parent-output-v2";
@@ -53,7 +54,7 @@ pub const RESOLVED_TRANSITION_TAG: &str = "resolved-transition-v2";
 /// The `recorded_commitment` is what the creating transition committed to. It
 /// is checked against a recomputation from the content below, so a parent whose
 /// stored state was mutated after the fact does not resolve.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParentOutput {
     /// Transition that created this output.
     pub transition_id: Hash,
@@ -284,7 +285,7 @@ pub enum ResolutionError {
 }
 
 /// One consumed reference, resolved to exactly one verified parent output.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedInput {
     /// The reference that was resolved.
     pub reference: ConsumedStateRef,
@@ -311,7 +312,7 @@ impl ResolvedInput {
 
 /// A transition whose every consumed reference resolved, with the commitment
 /// that binds those inputs to its created outputs.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedTransition {
     /// Schema-defined transition identifier.
     pub transition_id: u16,
