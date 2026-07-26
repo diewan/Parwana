@@ -116,7 +116,7 @@ std = []
 client = [
     "dep:csv-protocol", "dep:csv-hash", "dep:csv-proof", "dep:csv-verifier",
     "dep:csv-chain-ports", "dep:csv-remote", "dep:csv-runtime", "dep:csv-codec",
-    "dep:csv-wire", "dep:csv-observability", "dep:csv-keys", "dep:serde", "dep:serde_json",
+    "dep:csv-wire", "dep:csv-storage", "dep:csv-observability", "dep:csv-keys", "dep:serde", "dep:serde_json",
     "dep:thiserror", "dep:hex", "dep:bs58", "dep:blake2", "dep:sha2",
     "dep:sha3", "dep:log", "dep:toml", "dep:rand", "dep:uuid",
 ]

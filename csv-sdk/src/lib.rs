@@ -101,6 +101,8 @@ pub mod sanads;
 #[cfg(feature = "client")]
 pub mod transfers;
 #[cfg(feature = "client")]
+pub mod v2;
+#[cfg(feature = "client")]
 pub mod wallet;
 
 /// Canonical encoding and wire contracts supported for application consumers.

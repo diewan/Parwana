@@ -38,6 +38,8 @@ pub use crate::sanads::{SanadFilters, SanadsManager};
 #[cfg(feature = "client")]
 pub use crate::transfers::{TransferBuilder, TransferManager};
 #[cfg(feature = "client")]
+pub use crate::v2;
+#[cfg(feature = "client")]
 pub use crate::wallet::Wallet;
 
 // Re-exports from csv-chain-ports

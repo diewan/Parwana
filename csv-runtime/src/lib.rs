@@ -73,7 +73,7 @@ pub use policy::RuntimePolicy;
 pub use queue::{TaskQueue, TaskQueueError};
 pub use recipient_acceptance::{
     AcceptanceContext, AcceptanceError, AcceptanceErrorCode, AcceptanceResult, AuthorizedSigner,
-    accept_consignment_v2,
+    VerifiedConsignment, accept_consignment_v2, verify_consignment_v2,
 };
 pub use recovery::{
     CheckpointId, CheckpointManager, RecoveryCheckpoint, ReplayCheckpoint, TransferStage,

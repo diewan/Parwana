@@ -118,20 +118,41 @@ pub struct AcceptanceResult {
     pub assurance: ProtocolAssuranceReport,
 }
 
-/// Verify a canonical V2 consignment and atomically persist its accepted successor.
-///
-/// Repeating the same request is idempotent. A different successor for the same
-/// source produces [`AcceptanceErrorCode::Conflict`].
-pub async fn accept_consignment_v2(
+/// Verified V2 consignment whose fields cannot be replaced by callers.
+pub struct VerifiedConsignment {
+    consignment: ConsignmentV2,
+    closure: csv_protocol::ClosureVerificationResult,
+    assurance: ProtocolAssuranceReport,
+}
+
+impl VerifiedConsignment {
+    /// Verified successor transition commitment.
+    pub fn transition_id(&self) -> Hash {
+        self.consignment.payload.successor.commitment()
+    }
+
+    /// Complete typed assurance report produced by verification.
+    pub fn assurance(&self) -> &ProtocolAssuranceReport {
+        &self.assurance
+    }
+}
+
+/// Verify a canonical V2 consignment without mutating recipient state.
+pub async fn verify_consignment_v2(
     bytes: &[u8],
     context: &AcceptanceContext<'_>,
     closure_verifier: &dyn ClosureProofVerifier,
-    store: &dyn AcceptedStateStore,
-) -> Result<AcceptanceResult, AcceptanceError> {
-    // Stage 1: decoding also checks canonical encoding, versions, envelope
-    // structure, commitment binding, and nonempty authorization envelopes.
+) -> Result<VerifiedConsignment, AcceptanceError> {
     let consignment = ConsignmentV2::decode_v2(bytes).map_err(map_wire_error)?;
 
+    verify_decoded_consignment(consignment, context, closure_verifier).await
+}
+
+async fn verify_decoded_consignment(
+    consignment: ConsignmentV2,
+    context: &AcceptanceContext<'_>,
+    closure_verifier: &dyn ClosureProofVerifier,
+) -> Result<VerifiedConsignment, AcceptanceError> {
     let requirements = &consignment.payload.proof_requirements;
     if requirements.verification_context != context.verification_context
         || &requirements.checkpoint != context.checkpoint
@@ -263,15 +284,33 @@ pub async fn accept_consignment_v2(
         .record_closure_result(&closure);
     let report = report_builder.build();
 
-    // Stage 7: one store operation owns conflict detection and persistence.
-    let transition_id = consignment.payload.successor.commitment();
+    Ok(VerifiedConsignment {
+        consignment,
+        closure,
+        assurance: report,
+    })
+}
+
+/// Verify a canonical V2 consignment and atomically persist its accepted successor.
+///
+/// Repeating the same request is idempotent. A different successor for the same
+/// source produces [`AcceptanceErrorCode::Conflict`].
+pub async fn accept_consignment_v2(
+    bytes: &[u8],
+    context: &AcceptanceContext<'_>,
+    closure_verifier: &dyn ClosureProofVerifier,
+    store: &dyn AcceptedStateStore,
+) -> Result<AcceptanceResult, AcceptanceError> {
+    let verified = verify_consignment_v2(bytes, context, closure_verifier).await?;
+    let transition_id = verified.transition_id();
+    let consignment = &verified.consignment;
     let record = AcceptedStateRecord {
         transition_id,
         consumed_state: consignment.payload.source,
         created_outputs: consignment.payload.successor.created_output_commitments(),
         closure_id: consignment.payload.source_closure.commitment(),
-        closure,
-        assurance: persisted_report(&report),
+        closure: verified.closure,
+        assurance: persisted_report(&verified.assurance),
         transfer_id: None,
         status: AcceptedStateStatus::Final,
         observations: vec![AcceptedStateObservation {
@@ -285,7 +324,7 @@ pub async fn accept_consignment_v2(
 
     Ok(AcceptanceResult {
         transition_id,
-        assurance: report,
+        assurance: verified.assurance,
     })
 }
 

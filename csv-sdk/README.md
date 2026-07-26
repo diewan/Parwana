@@ -42,6 +42,40 @@ assert_eq!(artifact.object_version, 1);
 - **wasm** — WebAssembly support
 - **sqlite** — SQLite storage backend
 
+## Portable V2 consumer facade
+
+Consumers use `csv_sdk::v2` for the supported V2 contract. The facade keeps
+inspection, cryptographic verification, and atomic acceptance distinct:
+
+```rust,ignore
+use csv_sdk::v2;
+
+let inspected = v2::inspect(&consignment_bytes)?;
+// Inspection is structural and does not establish proof validity.
+
+let accepted = v2::accept(
+    &consignment_bytes,
+    &recipient_context, // exact context, checkpoint, trust and signer inputs
+    &proof_provider,
+    &accepted_state_store,
+).await?;
+let assurance = accepted.assurance;
+```
+
+`v2::emit` constructs and sends a canonical, closure-carrying consignment using
+a real proof provider, authorizer, and atomic emission journal. No V2 API
+accepts a caller-supplied proof-validation boolean.
+
+The portable inspection, emission, and acceptance APIs are available on native
+and WASM when consumers supply compatible proof-provider and storage
+implementations. Filesystem-backed persistence is native-only:
+`v2::require_capability(v2::Capability::NativePersistence)` returns
+`SDK.V2.UNSUPPORTED_CAPABILITY` on WASM instead of degrading to volatile state.
+
+V1 artifacts remain inspection-only through the legacy inspector. There is
+deliberately no V1-to-V2 conversion: obtain a newly authorized V2 consignment
+from its issuer.
+
 ## Architecture
 
 ```
