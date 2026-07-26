@@ -56,6 +56,10 @@ pub struct AcceptedStateRecord {
     pub assurance: AcceptedAssuranceReport,
     /// Non-authoritative transfer identifier retained only for audit lookup.
     pub transfer_id: Option<String>,
+    /// Current checkpoint-relative status.
+    pub status: AcceptedStateStatus,
+    /// Append-only acceptance, revocation, and revalidation observations.
+    pub observations: Vec<AcceptedStateObservation>,
 }
 
 impl AcceptedStateRecord {
@@ -83,8 +87,50 @@ impl AcceptedStateRecord {
                 "outputs and assurance readings must be retained".into(),
             ));
         }
+        if self.observations.is_empty()
+            || self.observations.last().map(|entry| entry.status) != Some(self.status)
+        {
+            return Err(AcceptedStateError::InvalidRecord(
+                "audit observations must end at the current status".into(),
+            ));
+        }
         Ok(())
     }
+}
+
+/// Current checkpoint-relative status of an accepted transition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AcceptedStateStatus {
+    /// Closure is final at its currently verified checkpoint.
+    Final,
+    /// The checkpoint or closure was explicitly orphaned.
+    Revoked,
+    /// Finality cannot currently be established, including affected descendants.
+    Indeterminate,
+}
+
+/// One append-only accepted-state lifecycle observation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptedStateObservation {
+    /// Monotonic sequence local to this accepted transition.
+    pub sequence: u64,
+    /// Status observed.
+    pub status: AcceptedStateStatus,
+    /// Checkpoint identity that caused the observation.
+    pub checkpoint_id: Hash,
+    /// Stable machine-readable reason.
+    pub reason: String,
+}
+
+/// New reading for a previously accepted checkpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckpointDisposition {
+    /// Checkpoint is still on the selected chain and satisfies finality.
+    Final,
+    /// Checkpoint is known to be orphaned.
+    Orphaned,
+    /// Provider can no longer establish the checkpoint or required depth.
+    Indeterminate,
 }
 
 /// Stable accepted-state storage failure.
@@ -120,6 +166,13 @@ pub trait AcceptedStateStore: Send + Sync {
         &self,
         consumed_state: &ConsumedStateRef,
     ) -> Result<Option<AcceptedStateRecord>, AcceptedStateError>;
+
+    /// Reconcile one checkpoint and downgrade all descendants atomically.
+    async fn reconcile_checkpoint(
+        &self,
+        checkpoint_id: Hash,
+        disposition: CheckpointDisposition,
+    ) -> Result<Vec<Hash>, AcceptedStateError>;
 }
 
 /// In-memory accepted-state implementation with one lock covering check and insert.
@@ -216,6 +269,122 @@ impl AcceptedStateStore for RedbAcceptedStateStore {
             })
             .transpose()
     }
+
+    async fn reconcile_checkpoint(
+        &self,
+        checkpoint_id: Hash,
+        disposition: CheckpointDisposition,
+    ) -> Result<Vec<Hash>, AcceptedStateError> {
+        let write = self
+            .database
+            .begin_write()
+            .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+        let changed;
+        {
+            let mut table = write
+                .open_table(ACCEPTED_STATES)
+                .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+            let mut records = HashMap::new();
+            for entry in table
+                .iter()
+                .map_err(|error| AcceptedStateError::Storage(error.to_string()))?
+            {
+                let (key, value) =
+                    entry.map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+                let key: [u8; 32] = key
+                    .value()
+                    .try_into()
+                    .map_err(|_| AcceptedStateError::Storage("invalid conflict key".into()))?;
+                let record = serde_json::from_slice(value.value())
+                    .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+                records.insert(key, record);
+            }
+            changed = reconcile_records(&mut records, checkpoint_id, disposition);
+            for record in records.values() {
+                let encoded = serde_json::to_vec(record)
+                    .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+                table
+                    .insert(record.conflict_key().as_slice(), encoded.as_slice())
+                    .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+            }
+        }
+        write
+            .commit()
+            .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+        Ok(changed)
+    }
+}
+
+fn reconcile_records(
+    records: &mut HashMap<[u8; 32], AcceptedStateRecord>,
+    checkpoint_id: Hash,
+    disposition: CheckpointDisposition,
+) -> Vec<Hash> {
+    let root_status = match disposition {
+        CheckpointDisposition::Final => AcceptedStateStatus::Final,
+        CheckpointDisposition::Orphaned => AcceptedStateStatus::Revoked,
+        CheckpointDisposition::Indeterminate => AcceptedStateStatus::Indeterminate,
+    };
+    let root_reason = match disposition {
+        CheckpointDisposition::Final => "BITCOIN.CHECKPOINT.REVALIDATED",
+        CheckpointDisposition::Orphaned => "BITCOIN.CHECKPOINT.ORPHANED",
+        CheckpointDisposition::Indeterminate => "BITCOIN.CHECKPOINT.INDETERMINATE",
+    };
+    let mut changed = Vec::new();
+    let mut frontier = Vec::new();
+    for record in records.values_mut() {
+        if record.closure.checkpoint.commitment() == checkpoint_id {
+            if append_observation(record, root_status, checkpoint_id, root_reason) {
+                changed.push(record.transition_id);
+            }
+            frontier.push(record.transition_id);
+        }
+    }
+    let descendant_status = if root_status == AcceptedStateStatus::Final {
+        return changed;
+    } else {
+        AcceptedStateStatus::Indeterminate
+    };
+    while let Some(parent) = frontier.pop() {
+        for record in records.values_mut() {
+            if record.consumed_state.transition_id == parent {
+                if append_observation(
+                    record,
+                    descendant_status,
+                    checkpoint_id,
+                    "BITCOIN.ANCESTOR.NONFINAL",
+                ) {
+                    changed.push(record.transition_id);
+                    frontier.push(record.transition_id);
+                }
+            }
+        }
+    }
+    changed
+}
+
+fn append_observation(
+    record: &mut AcceptedStateRecord,
+    status: AcceptedStateStatus,
+    checkpoint_id: Hash,
+    reason: &str,
+) -> bool {
+    if record.status == status
+        && record
+            .observations
+            .last()
+            .is_some_and(|entry| entry.checkpoint_id == checkpoint_id && entry.reason == reason)
+    {
+        return false;
+    }
+    record.status = status;
+    record.observations.push(AcceptedStateObservation {
+        sequence: record.observations.len() as u64,
+        status,
+        checkpoint_id,
+        reason: reason.into(),
+    });
+    true
 }
 
 #[async_trait]
@@ -248,6 +417,18 @@ impl AcceptedStateStore for InMemoryAcceptedStateStore {
             .read()
             .map_err(|error| AcceptedStateError::Storage(error.to_string()))
             .map(|records| records.get(&key).cloned())
+    }
+
+    async fn reconcile_checkpoint(
+        &self,
+        checkpoint_id: Hash,
+        disposition: CheckpointDisposition,
+    ) -> Result<Vec<Hash>, AcceptedStateError> {
+        let mut records = self
+            .records
+            .write()
+            .map_err(|error| AcceptedStateError::Storage(error.to_string()))?;
+        Ok(reconcile_records(&mut records, checkpoint_id, disposition))
     }
 }
 
@@ -298,6 +479,13 @@ mod tests {
                 }],
             },
             transfer_id: Some(transfer_id.into()),
+            status: AcceptedStateStatus::Final,
+            observations: vec![AcceptedStateObservation {
+                sequence: 0,
+                status: AcceptedStateStatus::Final,
+                checkpoint_id: Hash::new([8; 32]),
+                reason: "BITCOIN.CLOSURE.ACCEPTED".into(),
+            }],
         }
     }
 
@@ -334,6 +522,51 @@ mod tests {
             store.accept(record(9, "right"))
         );
         assert_ne!(left.is_ok(), right.is_ok());
+    }
+
+    #[tokio::test]
+    async fn orphaning_checkpoint_revokes_root_and_downgrades_descendants_idempotently() {
+        let store = InMemoryAcceptedStateStore::default();
+        let root = record(2, "root");
+        let mut child = record(3, "child");
+        child.consumed_state.transition_id = root.transition_id;
+        child.consumed_state.output_index = 1;
+        child.closure.checkpoint.block_height += 1;
+        child.closure.checkpoint.block_id = vec![9; 32];
+        child.observations[0].checkpoint_id = child.closure.checkpoint.commitment();
+        let checkpoint_id = root.closure.checkpoint.commitment();
+        store.accept(root.clone()).await.unwrap();
+        store.accept(child.clone()).await.unwrap();
+
+        let changed = store
+            .reconcile_checkpoint(checkpoint_id, CheckpointDisposition::Orphaned)
+            .await
+            .unwrap();
+        assert_eq!(changed.len(), 2);
+        let revoked = store.get(&root.consumed_state).await.unwrap().unwrap();
+        let downgraded = store.get(&child.consumed_state).await.unwrap().unwrap();
+        assert_eq!(revoked.status, AcceptedStateStatus::Revoked);
+        assert_eq!(downgraded.status, AcceptedStateStatus::Indeterminate);
+        assert_eq!(revoked.observations[0].status, AcceptedStateStatus::Final);
+
+        let root_history_len = revoked.observations.len();
+        assert!(
+            store
+                .reconcile_checkpoint(checkpoint_id, CheckpointDisposition::Orphaned)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .get(&root.consumed_state)
+                .await
+                .unwrap()
+                .unwrap()
+                .observations
+                .len(),
+            root_history_len
+        );
     }
 
     #[cfg(feature = "redb")]

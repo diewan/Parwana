@@ -23,8 +23,9 @@ pub mod traits;
 #[cfg(feature = "redb")]
 pub use accepted_state::RedbAcceptedStateStore;
 pub use accepted_state::{
-    AcceptedAssuranceReading, AcceptedAssuranceReport, AcceptedStateError, AcceptedStateRecord,
-    AcceptedStateStore, InMemoryAcceptedStateStore,
+    AcceptedAssuranceReading, AcceptedAssuranceReport, AcceptedStateError,
+    AcceptedStateObservation, AcceptedStateRecord, AcceptedStateStatus, AcceptedStateStore,
+    CheckpointDisposition, InMemoryAcceptedStateStore,
 };
 pub use backends::in_memory::InMemoryReplayDb;
 #[cfg(feature = "postgres")]
