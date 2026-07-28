@@ -34,9 +34,10 @@ Legacy inclusion or finality fields do not fill those gaps. They remain
 `present_unverified` proof material and cannot upgrade the result.
 
 `LegacyConsignmentInspection` has no conversion into `ConsignmentV2` and is
-not accepted by the V2 validation path. Migration requires constructing a
-complete V2 payload with real closure evidence, binding its commitment, and
-verifying it through the V2 path.
+not accepted by the V2 validation path. Parwana has no prior public release and
+therefore no release migration. A V1 development artifact can only be replaced
+with a complete, newly authorized V2 payload carrying real closure evidence and
+verified through the V2 path.
 
 ## Rejected and unsupported forms
 

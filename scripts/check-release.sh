@@ -10,6 +10,7 @@ trap 'rm -f "$metadata"' EXIT
 
 cargo metadata --locked --format-version 1 >"$metadata"
 python3 scripts/check-contract-manifest.py
+python3 scripts/check-v2-release.py
 python3 scripts/generate-portable-conformance.py --check
 CXXFLAGS="-include cstdint" cargo test --locked \
   -p csv-runtime isolated_recipients_cannot_both_accept_one_source

@@ -1,0 +1,57 @@
+schema_version = 1
+release_name = "Parwana V2"
+crate_version = "0.1.5"
+wire_version = 2
+contract_version = "0.1.10"
+release_status = "first_public_release"
+
+[portable_conformance]
+version = "stage4-v1"
+path = "csv-testkit/corpus/v2/manifest.json"
+sha256 = "1ff11779fb94334d24af10428996215af5b0bba30d9c754ebaee44ac11e83f0e"
+
+[transition_vectors]
+version = 1
+path = "conformance/v2-transition-vectors.json"
+sha256 = "0f4ef333ffbef0906ad99df2170bfab6f046aa1f1722607bd9515a17dc37e249"
+
+[closure_support_matrix]
+version = 1
+path = "csv-testkit/conformance/stage5-closure-support-matrix.json"
+sha256 = "29a730574e3c253757f4aae8d81364e858321b4a07d32e6e0a0f86a579a18ac2"
+
+[compatibility]
+prior_public_release = "none"
+v1_auto_upgrade = false
+v1_portable_non_equivocation = "unavailable"
+unknown_wire_versions = "reject"
+
+[[closure_adapters]]
+chain_id = "bitcoin"
+network_id = "signet"
+proof_kind = "bitcoin-spv-v1"
+claim_c = true
+
+[[closure_adapters]]
+chain_id = "ethereum"
+network_id = "sepolia"
+proof_kind = "ethereum-nullifier-storage-v1"
+claim_c = true
+
+[[closure_adapters]]
+chain_id = "sui"
+network_id = "testnet"
+proof_kind = "sui-object-consumption-v1"
+claim_c = true
+
+[[closure_adapters]]
+chain_id = "aptos"
+network_id = "testnet"
+proof_kind = "aptos-resource-nullifier-v1"
+claim_c = true
+
+[[closure_adapters]]
+chain_id = "solana"
+network_id = "devnet"
+proof_kind = "solana-account-nullifier-v1"
+claim_c = true

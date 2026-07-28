@@ -47,6 +47,11 @@ assert_eq!(artifact.object_version, 1);
 Consumers use `csv_sdk::v2` for the supported V2 contract. The facade keeps
 inspection, cryptographic verification, and atomic acceptance distinct:
 
+The exact first-release claim, supported closure adapters, limitations, and
+fixture digests are published in
+[`PARWANA_V2_RELEASE.md`](../csv-docs/PARWANA_V2_RELEASE.md). Parwana had no
+prior public release, so there is no release migration procedure.
+
 ```rust,ignore
 use csv_sdk::v2;
 
@@ -72,9 +77,9 @@ implementations. Filesystem-backed persistence is native-only:
 `v2::require_capability(v2::Capability::NativePersistence)` returns
 `SDK.V2.UNSUPPORTED_CAPABILITY` on WASM instead of degrading to volatile state.
 
-V1 artifacts remain inspection-only through the legacy inspector. There is
-deliberately no V1-to-V2 conversion: obtain a newly authorized V2 consignment
-from its issuer.
+V1 development artifacts remain inspection-only through the legacy inspector.
+There is deliberately no V1-to-V2 conversion: obtain a newly authorized V2
+consignment from its issuer.
 
 ## Architecture
 
