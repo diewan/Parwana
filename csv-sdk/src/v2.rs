@@ -49,7 +49,7 @@ pub use csv_runtime::{
 };
 pub use csv_verifier::{
     DimensionAssurance, DimensionStatus, ProofKind, ProofProvider, ProtocolAssuranceDimension,
-    ProtocolAssuranceReport, ProtocolReasonCode,
+    ProtocolAssuranceReport, ProtocolReasonCode, PROTOCOL_ASSURANCE_DIMENSIONS,
 };
 pub use csv_wire::{
     ConsignmentAuthorization, ConsignmentProofRequirements, ConsignmentV2, ConsignmentV2Error,
