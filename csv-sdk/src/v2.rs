@@ -4,9 +4,19 @@
 //! atomic acceptance against recipient-owned context, checkpoint, trust, and
 //! proof-provider inputs.
 
-use csv_chain_ports::ClosureProofVerifier;
 use csv_codec::from_canonical_cbor;
 use csv_storage::AcceptedStateStore;
+
+/// Chain-native verification capability supplied to the V2 verifier.
+///
+/// This SDK-owned name keeps consumers on the public facade. Implementations
+/// verify proof material against the explicit checkpoint and return typed
+/// dimensions; a bare caller-supplied validity boolean is not representable.
+pub use csv_chain_ports::ClosureProofVerifier as ClosureVerificationProvider;
+
+/// Typed failure returned when a closure verification provider cannot evaluate
+/// the supplied proof material.
+pub use csv_chain_ports::AdapterError as ClosureVerificationProviderError;
 
 /// Version of the embedded hostile-conformance fixture package.
 pub const CONFORMANCE_PACKAGE_VERSION: &str = "stage4-v1";
@@ -24,7 +34,8 @@ pub const fn conformance_manifest() -> &'static [u8] {
 }
 
 pub use csv_protocol::closure::{
-    ClosureProof, ClosureProofKind, ClosureTrustMode, FinalizedCheckpoint,
+    ClosureDimensionStatus, ClosureProof, ClosureProofKind, ClosureTrustMode,
+    ClosureVerificationResult, FinalityPolicy, FinalizedCheckpoint,
 };
 pub use csv_protocol::resolution::{
     ParentOutput, ResolvedInput, ResolvedTransition, resolve_transition,
@@ -92,7 +103,7 @@ pub fn inspect(bytes: &[u8]) -> Result<ConsignmentV2, ConsignmentV2Error> {
 pub async fn emit(
     request: &ConsignmentV2EmissionRequest,
     source_closure: ClosureProof,
-    closure_verifier: &dyn ClosureProofVerifier,
+    closure_verifier: &dyn ClosureVerificationProvider,
     authorizer: &dyn ConsignmentV2Authorizer,
     journal: &dyn ConsignmentEmissionJournal,
 ) -> Result<Consignment, ConsignmentEmissionError> {
@@ -113,7 +124,7 @@ pub async fn emit(
 pub async fn accept(
     bytes: &[u8],
     context: &AcceptanceContext<'_>,
-    closure_verifier: &dyn ClosureProofVerifier,
+    closure_verifier: &dyn ClosureVerificationProvider,
     store: &dyn AcceptedStateStore,
 ) -> Result<AcceptanceResult, AcceptanceError> {
     csv_runtime::accept_consignment_v2(bytes, context, closure_verifier, store).await
@@ -123,7 +134,7 @@ pub async fn accept(
 pub async fn verify(
     bytes: &[u8],
     context: &AcceptanceContext<'_>,
-    closure_verifier: &dyn ClosureProofVerifier,
+    closure_verifier: &dyn ClosureVerificationProvider,
 ) -> Result<VerifiedConsignment, AcceptanceError> {
     csv_runtime::verify_consignment_v2(bytes, context, closure_verifier).await
 }

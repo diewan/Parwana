@@ -1,6 +1,9 @@
 #![cfg(feature = "client")]
 
-use csv_sdk::v2::{self, Capability};
+use csv_sdk::v2::{
+    self, Capability, ClosureProof, ClosureVerificationProvider,
+    ClosureVerificationProviderError, ClosureVerificationResult, FinalizedCheckpoint,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -117,4 +120,31 @@ fn verification_report_decodes_to_an_immutable_typed_view() {
     let decoded = v2::decode_verification_report(&bytes).unwrap();
     assert_eq!(decoded.verification_context_digest(), "context");
     assert_eq!(decoded.dimensions()[0].status, "satisfied");
+}
+
+// This signature is the regression: an external consumer can name the complete
+// provider boundary without importing csv-chain-ports or another Parwana crate.
+fn consumer_provider_boundary(
+    provider: &dyn ClosureVerificationProvider,
+    proof: &ClosureProof,
+    checkpoint: &FinalizedCheckpoint,
+) {
+    let future: std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        ClosureVerificationResult,
+                        ClosureVerificationProviderError,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > = provider.verify_closure(proof, checkpoint);
+    drop(future);
+}
+
+#[test]
+fn v2_provider_boundary_is_reachable_through_csv_sdk_alone() {
+    let boundary = consumer_provider_boundary;
+    let _ = boundary;
 }
