@@ -3914,9 +3914,21 @@ impl TransferCoordinator {
     ) -> Result<crate::send_transfer::SendReceipt, TransferCoordinatorError> {
         use crate::execution_journal::PhaseOutcome;
         use crate::recovery::TransferStage;
-        use crate::send_transfer::{Consignment, SealAssignment, SealCloseWitness};
+        use crate::send_transfer::{Consignment, SealAssignment, SealCloseWitness, SendCompletion};
 
         let replay_id = csv_wire::HashWire::from(transfer.sanad_id.0);
+
+        // Whether any step's output is already durable when this invocation
+        // begins. Captured before the driver writes anything, because every
+        // step below fills `progress` in as it goes.
+        let completion = if progress.assignment.is_some()
+            || progress.witness.is_some()
+            || progress.consignment.is_some()
+        {
+            SendCompletion::Recovered
+        } else {
+            SendCompletion::Executed
+        };
 
         // Capture the last journaled phase for THIS transfer BEFORE this
         // invocation writes anything. It is `SourceSealClosed` only if a prior
@@ -4057,6 +4069,7 @@ impl TransferCoordinator {
             transfer_id: transfer.transfer_id.clone(),
             consignment,
             witness,
+            completion,
         })
     }
 
@@ -7506,6 +7519,14 @@ mod tests {
         );
         assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 2);
         assert!(receipt.consignment.0.starts_with(b"consignment:"));
+        // The portable-conformance package's `crash-recovery` case tells a
+        // consumer to expect this code. Without it the recovered run and a
+        // fresh one are indistinguishable from their receipts.
+        assert_eq!(
+            receipt.completion,
+            crate::send_transfer::SendCompletion::Recovered
+        );
+        assert_eq!(receipt.completion.registry_id(), "RUNTIME.SEND.RECOVERED");
     }
 
     #[tokio::test]
@@ -7524,7 +7545,21 @@ mod tests {
         assert_eq!(executor.assign_calls.load(Ordering::SeqCst), 1);
         assert_eq!(executor.close_calls.load(Ordering::SeqCst), 1);
         assert_eq!(executor.emit_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(first, second, "resume must reproduce the same receipt");
+        assert_eq!(
+            (&first.transfer_id, &first.consignment, &first.witness),
+            (&second.transfer_id, &second.consignment, &second.witness),
+            "resume must reproduce the same material"
+        );
+        // The material is identical; how it was obtained is not, and the
+        // receipt says so rather than presenting a reused result as fresh work.
+        assert_eq!(
+            first.completion,
+            crate::send_transfer::SendCompletion::Executed
+        );
+        assert_eq!(
+            second.completion,
+            crate::send_transfer::SendCompletion::Recovered
+        );
     }
 
     #[tokio::test]

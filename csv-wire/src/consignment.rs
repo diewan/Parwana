@@ -76,6 +76,51 @@ pub struct LegacyIntegrityDimensions {
     pub portable_non_equivocation: LegacyIntegrityStatus,
 }
 
+impl LegacyIntegrityDimensions {
+    /// Stable reason codes describing what this V1 artifact cannot establish.
+    ///
+    /// Only dimensions that are unverified, contradicted, or unrepresentable in
+    /// V1 report a code. A structurally consistent dimension reports nothing:
+    /// this method never issues an affirmative claim, because V1 decoding
+    /// verifies nothing cryptographically.
+    ///
+    /// `WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE` is the code the portable
+    /// conformance package's `legacy-v1` case tells a consumer to expect, and
+    /// this is the path that emits it.
+    pub fn reason_codes(&self) -> Vec<&'static str> {
+        let mut codes = Vec::new();
+        if self.destination_binding == LegacyIntegrityStatus::Contradicted {
+            codes.push("WIRE.V1.DESTINATION_BINDING_CONTRADICTED");
+        }
+        if self.legacy_proof_bundle == LegacyIntegrityStatus::PresentUnverified {
+            codes.push("WIRE.V1.LEGACY_PROOF_BUNDLE_UNVERIFIED");
+        }
+        if self.source_closure == LegacyIntegrityStatus::Unavailable {
+            codes.push("WIRE.V1.SOURCE_CLOSURE_UNAVAILABLE");
+        }
+        if self.complete_envelope_authorization == LegacyIntegrityStatus::Unavailable {
+            codes.push("WIRE.V1.COMPLETE_ENVELOPE_AUTHORIZATION_UNAVAILABLE");
+        }
+        if self.portable_non_equivocation == LegacyIntegrityStatus::Unavailable {
+            codes.push("WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE");
+        }
+        codes
+    }
+
+    /// Every code [`Self::reason_codes`] can emit, in stable published order.
+    ///
+    /// Deliberately excludes codes for status combinations V1 inspection never
+    /// produces: publishing a code nothing emits is the drift this registry
+    /// exists to prevent.
+    pub const ALL_REGISTRY_IDS: &'static [&'static str] = &[
+        "WIRE.V1.DESTINATION_BINDING_CONTRADICTED",
+        "WIRE.V1.LEGACY_PROOF_BUNDLE_UNVERIFIED",
+        "WIRE.V1.SOURCE_CLOSURE_UNAVAILABLE",
+        "WIRE.V1.COMPLETE_ENVELOPE_AUTHORIZATION_UNAVAILABLE",
+        "WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE",
+    ];
+}
+
 /// Safely inspectable fields from a canonical legacy V1 consignment.
 ///
 /// This type deliberately has no conversion into [`ConsignmentV2`] and is not
@@ -107,6 +152,26 @@ pub enum LegacyConsignmentErrorCode {
     UnsupportedVersion,
     /// A required V1 field is malformed or uses an unsupported nested version.
     UnsupportedArtifact,
+}
+
+impl LegacyConsignmentErrorCode {
+    /// Stable registry identifier for this V1 inspection failure.
+    pub const fn registry_id(self) -> &'static str {
+        match self {
+            Self::MalformedEncoding => "WIRE.V1.MALFORMED_ENCODING",
+            Self::NonCanonicalEncoding => "WIRE.V1.NON_CANONICAL_ENCODING",
+            Self::UnsupportedVersion => "WIRE.V1.UNSUPPORTED_VERSION",
+            Self::UnsupportedArtifact => "WIRE.V1.UNSUPPORTED_ARTIFACT",
+        }
+    }
+
+    /// Every code this family defines, in stable published order.
+    pub const ALL: &'static [Self] = &[
+        Self::MalformedEncoding,
+        Self::NonCanonicalEncoding,
+        Self::UnsupportedVersion,
+        Self::UnsupportedArtifact,
+    ];
 }
 
 /// A V1 inspection failure with a stable machine-readable code.
@@ -341,6 +406,44 @@ pub enum ConsignmentV2ErrorCode {
     MissingAuthorization,
     /// An authorization is empty or names another commitment.
     InvalidAuthorization,
+}
+
+impl ConsignmentV2ErrorCode {
+    /// Stable registry identifier for this wire-level rejection.
+    pub const fn registry_id(self) -> &'static str {
+        match self {
+            Self::MalformedEncoding => "WIRE.V2.MALFORMED_ENCODING",
+            Self::NonCanonicalEncoding => "WIRE.V2.NON_CANONICAL_ENCODING",
+            Self::UnsupportedProtocolVersion => "WIRE.V2.UNSUPPORTED_PROTOCOL_VERSION",
+            Self::UnsupportedEnvelopeVersion => "WIRE.V2.UNSUPPORTED_ENVELOPE_VERSION",
+            Self::SourceTransitionMismatch => "WIRE.V2.SOURCE_TRANSITION_MISMATCH",
+            Self::ClosureSourceMismatch => "WIRE.V2.CLOSURE_SOURCE_MISMATCH",
+            Self::ClosureSuccessorMismatch => "WIRE.V2.CLOSURE_SUCCESSOR_MISMATCH",
+            Self::InvalidClosureProof => "WIRE.V2.INVALID_CLOSURE_PROOF",
+            Self::DestinationMismatch => "WIRE.V2.DESTINATION_MISMATCH",
+            Self::InvalidProofRequirements => "WIRE.V2.INVALID_PROOF_REQUIREMENTS",
+            Self::CommitmentMismatch => "WIRE.V2.COMMITMENT_MISMATCH",
+            Self::MissingAuthorization => "WIRE.V2.MISSING_AUTHORIZATION",
+            Self::InvalidAuthorization => "WIRE.V2.INVALID_AUTHORIZATION",
+        }
+    }
+
+    /// Every code this family defines, in stable published order.
+    pub const ALL: &'static [Self] = &[
+        Self::MalformedEncoding,
+        Self::NonCanonicalEncoding,
+        Self::UnsupportedProtocolVersion,
+        Self::UnsupportedEnvelopeVersion,
+        Self::SourceTransitionMismatch,
+        Self::ClosureSourceMismatch,
+        Self::ClosureSuccessorMismatch,
+        Self::InvalidClosureProof,
+        Self::DestinationMismatch,
+        Self::InvalidProofRequirements,
+        Self::CommitmentMismatch,
+        Self::MissingAuthorization,
+        Self::InvalidAuthorization,
+    ];
 }
 
 /// A V2 wire failure with a stable machine-readable code.
@@ -740,9 +843,65 @@ mod tests {
             inspection.integrity.portable_non_equivocation,
             LegacyIntegrityStatus::Unavailable
         );
+        // The portable-conformance package's `legacy-v1` case tells consumers to
+        // expect exactly this code. This is the path that emits it.
+        assert!(
+            inspection
+                .integrity
+                .reason_codes()
+                .contains(&"WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE")
+        );
+        for code in inspection.integrity.reason_codes() {
+            assert!(
+                LegacyIntegrityDimensions::ALL_REGISTRY_IDS.contains(&code),
+                "{code} is emitted but not published"
+            );
+        }
         assert_eq!(
             hex::encode(csv_tagged_hash("consignment-v1-inspection-vector", &bytes)),
             "b21cebc995b7c215fea8e80b199e027d52aed925a17b12b8b42651c63d3000ce"
+        );
+    }
+
+    #[test]
+    fn every_wire_failure_code_publishes_one_distinct_registry_identifier() {
+        let mut ids: Vec<&'static str> = ConsignmentV2ErrorCode::ALL
+            .iter()
+            .map(|code| code.registry_id())
+            .chain(
+                LegacyConsignmentErrorCode::ALL
+                    .iter()
+                    .map(|code| code.registry_id()),
+            )
+            .chain(LegacyIntegrityDimensions::ALL_REGISTRY_IDS.iter().copied())
+            .collect();
+        for id in &ids {
+            assert!(
+                id.starts_with("WIRE.V1.") || id.starts_with("WIRE.V2."),
+                "{id} is outside the namespace the wire boundary owns"
+            );
+        }
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "two wire failures share an identifier");
+    }
+
+    /// A contradicted destination binding is the one non-constant V1 dimension,
+    /// so its code must actually be reachable rather than published on faith.
+    #[test]
+    fn a_contradicted_destination_binding_emits_its_published_code() {
+        let dimensions = LegacyIntegrityDimensions {
+            destination_binding: LegacyIntegrityStatus::Contradicted,
+            legacy_proof_bundle: LegacyIntegrityStatus::PresentUnverified,
+            source_closure: LegacyIntegrityStatus::Unavailable,
+            complete_envelope_authorization: LegacyIntegrityStatus::Unavailable,
+            portable_non_equivocation: LegacyIntegrityStatus::Unavailable,
+        };
+        assert_eq!(
+            dimensions.reason_codes(),
+            LegacyIntegrityDimensions::ALL_REGISTRY_IDS,
+            "the published list must be exactly what a fully adverse inspection emits"
         );
     }
 

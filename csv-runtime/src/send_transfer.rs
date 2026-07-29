@@ -169,6 +169,37 @@ pub(crate) struct SendProgress {
     pub consignment: Option<Vec<u8>>,
 }
 
+/// How a send-mode transfer reached completion.
+///
+/// A resumed send and a fresh one produce the same consignment and the same
+/// witness, so the receipt alone cannot tell them apart. Recording which path
+/// ran is what makes "the interrupted run recovered without re-closing the
+/// single-use source seal" an observable outcome rather than an inference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendCompletion {
+    /// No prior durable progress existed; every step ran in this invocation.
+    Executed,
+    /// Durable progress from an earlier interrupted run was reused, so at
+    /// least one step was skipped rather than repeated.
+    Recovered,
+}
+
+impl SendCompletion {
+    /// Stable registry identifier for this completion path.
+    ///
+    /// `RUNTIME.SEND.RECOVERED` is the code the portable conformance package's
+    /// `crash-recovery` case tells a consumer to expect.
+    pub const fn registry_id(self) -> &'static str {
+        match self {
+            Self::Executed => "RUNTIME.SEND.EXECUTED",
+            Self::Recovered => "RUNTIME.SEND.RECOVERED",
+        }
+    }
+
+    /// Every code this family defines, in stable published order.
+    pub const ALL: &'static [Self] = &[Self::Executed, Self::Recovered];
+}
+
 /// Outcome of driving a send-mode transfer to (or resuming it toward)
 /// completion.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -179,6 +210,8 @@ pub struct SendReceipt {
     pub consignment: Consignment,
     /// The single-use source-seal close witness.
     pub witness: SealCloseWitness,
+    /// Whether this receipt came from a fresh run or a resumed one.
+    pub completion: SendCompletion,
 }
 
 /// All non-closure inputs needed to emit one portable V2 consignment.

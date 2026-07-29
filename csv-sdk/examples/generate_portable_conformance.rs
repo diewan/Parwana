@@ -6,7 +6,8 @@
 //! Generate the portable V2 hostile-conformance package.
 //!
 //! This is the one designated command that writes
-//! `csv-testkit/corpus/v2/manifest.json`. The file is never hand-edited.
+//! `csv-testkit/corpus/v2/manifest.json` and
+//! `conformance/v2-reason-code-registry.toml`. Neither file is hand-edited.
 //!
 //! The generator deliberately imports **only** `csv_sdk`. Every byte it
 //! distributes is therefore reachable by any downstream consumer holding the
@@ -40,7 +41,15 @@ const CONTRACT_VERSION: &str = "0.1.10";
 
 /// Package version. Bumped whenever distributed material or the consumer
 /// contract changes, never for an editorial change.
-const PACKAGE_VERSION: &str = "stage5-v1";
+///
+/// `stage5-v2` (PAR-CONF-006) replaced fourteen declared reason codes that no
+/// code path emitted with the codes the implementation actually produces, gave
+/// every malicious-graph case an executable vector, and bound the package to
+/// the published reason-code registry.
+const PACKAGE_VERSION: &str = "stage5-v2";
+
+/// Version of the transition-vector package this manifest cites.
+const TRANSITION_VECTOR_VERSION: u32 = 2;
 
 /// Proof material the runtime's positive path treats as a satisfied closure.
 const VALID_PROOF_BYTE: u8 = 0x77;
@@ -144,8 +153,15 @@ enum Material {
     /// The case's executable material lives in the separately versioned
     /// transition-vector package, under the named vector identifier.
     TransitionVector(&'static str),
-    /// No material is distributed. The reason is recorded verbatim.
-    None(&'static str),
+    /// No material is distributed. Both the reason and what a consumer must
+    /// supply in its place are recorded verbatim: a case that ships nothing
+    /// still owes the consumer an actionable answer.
+    None {
+        /// Why this case cannot be distributed as bytes.
+        because: &'static str,
+        /// What the consumer must supply to reproduce it.
+        supply: &'static str,
+    },
 }
 
 impl Material {
@@ -160,12 +176,14 @@ impl Material {
             Material::TransitionVector(id) => json!({
                 "kind": "transition-vector-ref",
                 "package": "v2-transition-vectors",
+                "package_version": TRANSITION_VECTOR_VERSION,
                 "vector_id": id,
                 "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
             }),
-            Material::None(reason) => json!({
+            Material::None { because, supply } => json!({
                 "kind": "none",
-                "not_distributed_because": reason,
+                "not_distributed_because": because,
+                "consumer_must_supply": supply,
             }),
         }
     }
@@ -174,7 +192,7 @@ impl Material {
         match self {
             Material::ConsignmentV2(_) => "yes",
             Material::TransitionVector(_) => "only-with-the-transition-vector-package",
-            Material::None(_) => "no",
+            Material::None { .. } => "no",
         }
     }
 }
@@ -236,19 +254,36 @@ const GRAPH_SOURCE: &str = "csv-protocol/tests/v2_transition_vectors.rs::every_n
 const DIMENSION_SOURCE: &str =
     "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure";
 
-/// A malicious-graph case whose behaviour no published vector exercises.
-const NO_VECTOR: &str = "No vector in the published transition-vector package exercises this mutation. The case records \
-     an expected reason code that Parwana's kernel enforces; it is not executable by a consumer.";
-
 /// A closure case distinguished by recipient-owned inputs rather than bytes.
 const CONTEXT_VARIED: &str = "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or \
      freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying \
      that context to its own proof provider.";
 
+/// What a consumer supplies for a case that varies acceptance context.
+const SUPPLY_CONTEXT: &str = "The recipient-owned acceptance context this case varies — a finalized checkpoint, a finality \
+     policy, a network identifier, and a maximum checkpoint age — together with a closure proof \
+     provider for the declared proof kind. Apply them to the `valid-v2` consignment bytes this \
+     package does distribute.";
+
 /// A closure case that needs a real proof encoding this package does not ship.
+///
+/// PAR-CONF-006 decided against shipping one. A real `bitcoin-spv-v1` encoding
+/// is a signet header chain plus a merkle branch for a specific transaction;
+/// this generator imports only `csv_sdk` and has no chain access, so anything
+/// it emitted would be bytes shaped like a proof that attest to nothing. The
+/// four `proof-wrong-*` cases therefore stay undistributed and say what to
+/// supply instead, rather than shipping material the package would have to
+/// mislabel.
 const NEEDS_REAL_PROOF: &str = "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof \
      encoding. Parwana's own test exercises it through a proof provider; the package distributes no \
      encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it.";
+
+/// What a consumer supplies for a case that needs a real SPV proof.
+const SUPPLY_REAL_PROOF: &str = "A bitcoin-spv-v1 proof provider and a signet block-header chain covering the declared \
+     checkpoint, then the specific malformation this case names (wrong header, wrong merkle path, \
+     wrong outpoint, or wrong successor commitment) applied to a genuine inclusion proof. Parwana \
+     will publish encoded SPV fixtures only alongside a network-independent header-chain fixture; \
+     until then this material is requested through a Parwana ticket.";
 
 fn cases() -> Vec<Case> {
     let mut cases = vec![
@@ -272,34 +307,41 @@ fn cases() -> Vec<Case> {
                 "freshness": "indeterminate", "closure": "indeterminate", "aggregate": "unsupported",
             }),
             source: "csv-wire/src/consignment.rs::v1_inspection_reports_unavailable_v2_integrity",
-            material: Material::None(
-                "A V1 artifact carries no portable-closure evidence. The package distributes no V1 \
-                 bytes because a V1 envelope must never be presented beside V2 material as though \
-                 the two were interchangeable.",
-            ),
+            material: Material::None {
+                because: "A V1 artifact carries no portable-closure evidence. The package distributes no \
+                     V1 bytes because a V1 envelope must never be presented beside V2 material as \
+                     though the two were interchangeable.",
+                supply: "A canonical V1 consignment of the consumer's own, passed to \
+                     `Consignment::decode_v1_for_inspection`. The inspection's reason codes report \
+                     what V1 cannot establish; none of them is an affirmative claim.",
+            },
         },
     ];
 
+    // Every malicious-graph case names a published vector. Each vector's own
+    // `expected_reason_code` is the code below, and the vector executor asserts
+    // that its rejection path emits exactly that identifier — so a case cannot
+    // tell a consumer to expect something the kernel never produces.
     let graph: [(&str, &str, Material); 11] = [
         (
             "graph-cycle",
             "PROTOCOL.DAG.CYCLE",
-            Material::None(NO_VECTOR),
+            Material::TransitionVector("graph-cycle"),
         ),
         (
             "graph-duplicate-node",
-            "PROTOCOL.DAG.DUPLICATE_NODE",
+            "PROTOCOL.DAG.DUPLICATE_NODE_ID",
             Material::TransitionVector("duplicate-node-identifier"),
         ),
         (
             "graph-self-parent",
             "PROTOCOL.DAG.SELF_PARENT",
-            Material::None(NO_VECTOR),
+            Material::TransitionVector("graph-self-parent"),
         ),
         (
             "graph-missing-parent",
             "PROTOCOL.DAG.MISSING_PARENT",
-            Material::None(NO_VECTOR),
+            Material::TransitionVector("graph-missing-parent"),
         ),
         (
             "graph-root-substitution",
@@ -309,27 +351,33 @@ fn cases() -> Vec<Case> {
         (
             "graph-noncanonical-order",
             "PROTOCOL.DAG.NON_CANONICAL_ORDER",
-            Material::None(NO_VECTOR),
+            Material::TransitionVector("graph-noncanonical-order"),
         ),
         (
+            // A mutated node's contents no longer produce its declared
+            // identifier. The package previously declared
+            // `PROTOCOL.STATE.COMMITMENT_MISMATCH` here, which named neither
+            // this vector's rejection nor any other code path.
             "state-content-mutation",
-            "PROTOCOL.STATE.COMMITMENT_MISMATCH",
+            "PROTOCOL.DAG.NODE_ID_MISMATCH",
             Material::TransitionVector("node-content-mutated"),
         ),
         (
             "state-output-index-mutation",
-            "PROTOCOL.STATE.OUTPUT_NOT_FOUND",
-            Material::None(NO_VECTOR),
+            "PROTOCOL.RESOLUTION.WRONG_OUTPUT_INDEX",
+            Material::TransitionVector("parent-output-index-absent"),
         ),
         (
+            // The commitment that binds a transition to its consumed state no
+            // longer reproduces from the parent's content.
             "transition-commitment-mutation",
-            "PROTOCOL.TRANSITION.COMMITMENT_MISMATCH",
-            Material::None(NO_VECTOR),
+            "PROTOCOL.RESOLUTION.COMMITMENT_MISMATCH",
+            Material::TransitionVector("parent-commitment-mutated"),
         ),
         (
             "canonical-root-mutation",
             "PROTOCOL.DAG.ROOT_MISMATCH",
-            Material::None(NO_VECTOR),
+            Material::TransitionVector("canonical-root-recomputed"),
         ),
         (
             "consumed-evidence-substitution",
@@ -364,25 +412,37 @@ fn cases() -> Vec<Case> {
             "proof-wrong-header",
             "ACCEPT.V2.INCLUSION",
             failed_proof(),
-            Material::None(NEEDS_REAL_PROOF),
+            Material::None {
+                because: NEEDS_REAL_PROOF,
+                supply: SUPPLY_REAL_PROOF,
+            },
         ),
         (
             "proof-wrong-merkle-path",
             "ACCEPT.V2.INCLUSION",
             failed_proof(),
-            Material::None(NEEDS_REAL_PROOF),
+            Material::None {
+                because: NEEDS_REAL_PROOF,
+                supply: SUPPLY_REAL_PROOF,
+            },
         ),
         (
             "proof-wrong-outpoint",
             "ACCEPT.V2.SOURCE_CLOSURE",
             failed_proof(),
-            Material::None(NEEDS_REAL_PROOF),
+            Material::None {
+                because: NEEDS_REAL_PROOF,
+                supply: SUPPLY_REAL_PROOF,
+            },
         ),
         (
             "proof-wrong-transition-commitment",
             "ACCEPT.V2.SOURCE_CLOSURE",
             failed_proof(),
-            Material::None(NEEDS_REAL_PROOF),
+            Material::None {
+                because: NEEDS_REAL_PROOF,
+                supply: SUPPLY_REAL_PROOF,
+            },
         ),
         (
             "checkpoint-insufficient-finality",
@@ -392,7 +452,10 @@ fn cases() -> Vec<Case> {
                 ("inclusion", "satisfied"),
                 ("finality", "failed"),
             ]),
-            Material::None(CONTEXT_VARIED),
+            Material::None {
+                because: CONTEXT_VARIED,
+                supply: SUPPLY_CONTEXT,
+            },
         ),
         (
             "checkpoint-stale",
@@ -403,13 +466,19 @@ fn cases() -> Vec<Case> {
                 ("finality", "satisfied"),
                 ("freshness", "failed"),
             ]),
-            Material::None(CONTEXT_VARIED),
+            Material::None {
+                because: CONTEXT_VARIED,
+                supply: SUPPLY_CONTEXT,
+            },
         ),
         (
             "checkpoint-wrong-network",
             "ACCEPT.V2.VERIFICATION_CONTEXT",
             failed_proof(),
-            Material::None(CONTEXT_VARIED),
+            Material::None {
+                because: CONTEXT_VARIED,
+                supply: SUPPLY_CONTEXT,
+            },
         ),
         (
             "checkpoint-orphaned",
@@ -419,7 +488,10 @@ fn cases() -> Vec<Case> {
                 ("inclusion", "failed"),
                 ("finality", "failed"),
             ]),
-            Material::None(CONTEXT_VARIED),
+            Material::None {
+                because: CONTEXT_VARIED,
+                supply: SUPPLY_CONTEXT,
+            },
         ),
     ];
     for (id, reason, dimensions, material) in closure {
@@ -444,10 +516,15 @@ fn cases() -> Vec<Case> {
         reason: "ACCEPT.V2.CONFLICT",
         dimensions: json!({"closure": "failed", "aggregate": "rejected"}),
         source: "csv-runtime/src/recipient_acceptance.rs::isolated_recipients_cannot_both_accept_one_source",
-        material: Material::None(
-            "A conflict is a property of two successors racing for one source against a shared \
-             accepted-state store, not of any single distributed artifact.",
-        ),
+        material: Material::None {
+            because:
+                "A conflict is a property of two successors racing for one source against a shared \
+                 accepted-state store, not of any single distributed artifact.",
+            supply:
+                "A second consignment consuming the same source as the distributed `valid-v2` \
+                 bytes, and one shared accepted-state store both acceptances run against. The \
+                 loser receives ACCEPT.V2.CONFLICT; two isolated stores cannot produce this case.",
+        },
     });
     cases.push(Case {
         id: "reorganization",
@@ -455,10 +532,16 @@ fn cases() -> Vec<Case> {
         reason: "STORAGE.CHECKPOINT.ORPHANED",
         dimensions: json!({"closure": "failed", "aggregate": "revoked"}),
         source: "csv-storage/src/accepted_state.rs::orphaning_checkpoint_revokes_root_and_downgrades_descendants_idempotently",
-        material: Material::None(
-            "A reorganization is a checkpoint transition applied to already-accepted state, not a \
-             distributable artifact.",
-        ),
+        material: Material::None {
+            because:
+                "A reorganization is a checkpoint transition applied to already-accepted state, \
+                 not a distributable artifact.",
+            supply:
+                "An accepted-state store already holding the `valid-v2` acceptance, then a \
+                 checkpoint disposition of Orphaned for that checkpoint. The orphaned record \
+                 reports STORAGE.CHECKPOINT.ORPHANED and its descendants \
+                 STORAGE.ANCESTOR.NON_FINAL; neither identifier names a chain.",
+        },
     });
     cases.push(Case {
         id: "crash-recovery",
@@ -466,10 +549,16 @@ fn cases() -> Vec<Case> {
         reason: "RUNTIME.SEND.RECOVERED",
         dimensions: json!({"aggregate": "accepted"}),
         source: "csv-runtime/src/transfer_coordinator.rs::send_resume_after_emit_interrupt_never_recloses_source_seal",
-        material: Material::None(
-            "Crash recovery is a sequence of interrupted runtime phases, not a distributable \
-             artifact.",
-        ),
+        material: Material::None {
+            because:
+                "Crash recovery is a sequence of interrupted runtime phases, not a distributable \
+                 artifact.",
+            supply:
+                "A durable execution journal, a send whose consignment emission is interrupted \
+                 after the source seal closes, and a resume against the same journal. The resumed \
+                 receipt reports RUNTIME.SEND.RECOVERED and the source seal closes exactly once \
+                 across the whole lifecycle.",
+        },
     });
     cases
 }
@@ -481,9 +570,20 @@ fn render() -> Vec<u8> {
         let kind = match case.material {
             Material::ConsignmentV2(_) => "consignment-v2",
             Material::TransitionVector(_) => "transition-vector-ref",
-            Material::None(_) => "none",
+            Material::None { .. } => "none",
         };
         *by_kind.entry(kind).or_default() += 1;
+    }
+    // A case may only tell a consumer to expect a code the implementation
+    // emits. The generator refuses to write a package that breaks this rather
+    // than leaving it for a downstream test to notice.
+    for case in &cases {
+        assert!(
+            csv_sdk::reason_codes::contains(case.reason),
+            "case {} declares {}, which is not in the published reason-code registry",
+            case.id,
+            case.reason
+        );
     }
     let mut census = Map::new();
     for (kind, count) in &by_kind {
@@ -497,6 +597,15 @@ fn render() -> Vec<u8> {
         "platforms": {
             "native": {"verification": "supported", "persistent_store": "supported"},
             "wasm32": {"verification": "supported", "persistent_store": "unsupported"},
+        },
+        "reason_code_registry": {
+            "path": "conformance/v2-reason-code-registry.toml",
+            "registry_version": csv_sdk::reason_codes::REGISTRY_VERSION,
+            "rule":
+                "Every expected_reason_code below is a member of this registry, and the registry \
+                 is generated from the implementation's own registry_id functions. A code that no \
+                 code path emits cannot appear in either.",
+            "accessor": "csv_sdk::reason_codes::contains",
         },
         "consumer_contract": {
             "generated_by": "cargo run -p csv-sdk --example generate_portable_conformance",
@@ -529,33 +638,53 @@ fn render() -> Vec<u8> {
     rendered.into_bytes()
 }
 
-fn output_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../csv-testkit/corpus/v2/manifest.json")
-        .canonicalize()
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../csv-testkit/corpus/v2/manifest.json")
-        })
+fn workspace_path(relative: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(relative);
+    path.canonicalize().unwrap_or(path)
+}
+
+/// The files this generator owns, in write order.
+///
+/// The registry is written first so a stale-manifest failure never leaves the
+/// two disagreeing about which codes exist.
+fn outputs() -> Vec<(PathBuf, Vec<u8>)> {
+    vec![
+        (
+            workspace_path("conformance/v2-reason-code-registry.toml"),
+            csv_sdk::reason_codes::render_published_registry().into_bytes(),
+        ),
+        (
+            workspace_path("csv-testkit/corpus/v2/manifest.json"),
+            render(),
+        ),
+    ]
 }
 
 fn main() -> std::process::ExitCode {
     let check = std::env::args().any(|argument| argument == "--check");
-    let expected = render();
-    let path = output_path();
-    if check {
-        let current = std::fs::read(&path).unwrap_or_default();
-        if current != expected {
-            eprintln!("csv-testkit/corpus/v2/manifest.json is stale");
-            return std::process::ExitCode::FAILURE;
+    let mut stale = false;
+    for (path, expected) in outputs() {
+        if check {
+            if std::fs::read(&path).unwrap_or_default() != expected {
+                eprintln!("{} is stale", path.display());
+                stale = true;
+            }
+        } else {
+            std::fs::write(&path, &expected).expect("generated file is writable");
+            println!(
+                "wrote {} ({PACKAGE_VERSION}, sha256 {})",
+                path.display(),
+                sha256_hex(&expected)
+            );
         }
+    }
+    if stale {
+        return std::process::ExitCode::FAILURE;
+    }
+    if check {
         println!("portable conformance package is current ({PACKAGE_VERSION})");
-    } else {
-        std::fs::write(&path, &expected).expect("manifest is writable");
-        println!(
-            "wrote {} ({PACKAGE_VERSION}, sha256 {})",
-            path.display(),
-            sha256_hex(&expected)
-        );
     }
     std::process::ExitCode::SUCCESS
 }

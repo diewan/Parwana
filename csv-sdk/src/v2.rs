@@ -19,11 +19,19 @@ pub use csv_chain_ports::ClosureProofVerifier as ClosureVerificationProvider;
 pub use csv_chain_ports::AdapterError as ClosureVerificationProviderError;
 
 /// Version of the embedded hostile-conformance fixture package.
-pub const CONFORMANCE_PACKAGE_VERSION: &str = "stage5-v1";
+pub const CONFORMANCE_PACKAGE_VERSION: &str = "stage5-v2";
 
 /// SHA-256 of the exact embedded conformance manifest bytes.
 pub const CONFORMANCE_MANIFEST_SHA256: &str =
-    "05066d55b0ded97a4bc3cd6e3c96aab5aa971b7ef7a36a5f914736becf23f51e";
+    "3991d66604d4df779fb1eba376b27428d6a8c0b043cdccf3019f13707f648eaa";
+
+/// SHA-256 of the exact published reason-code registry bytes.
+///
+/// Every `expected_reason_code` in the conformance manifest is a member of the
+/// registry these bytes describe. A consumer that pins the manifest without
+/// pinning this is pinning expectations whose vocabulary it cannot check.
+pub const REASON_CODE_REGISTRY_SHA256: &str =
+    "63b8fb265fd76351a9aeebd65fec7ec9c0e2aa4ea0f80d4631946408501038f5";
 
 /// Return the exact, versioned Stage 4 conformance manifest.
 ///

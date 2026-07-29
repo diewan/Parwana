@@ -121,6 +121,46 @@ pub enum DagStructureError {
     },
 }
 
+impl DagStructureError {
+    /// Stable registry identifier for this rejection reason.
+    ///
+    /// These identifiers are the published vocabulary the conformance package
+    /// tells a consumer to expect. They are derived from the variant, never
+    /// from the diagnostic message, so rewording a `Display` string cannot
+    /// change what a consumer matches on.
+    pub const fn registry_id(&self) -> &'static str {
+        match self {
+            Self::EmptySegment => "PROTOCOL.DAG.EMPTY_SEGMENT",
+            Self::DuplicateNodeId { .. } => "PROTOCOL.DAG.DUPLICATE_NODE_ID",
+            Self::NodeIdMismatch { .. } => "PROTOCOL.DAG.NODE_ID_MISMATCH",
+            Self::SelfParent { .. } => "PROTOCOL.DAG.SELF_PARENT",
+            Self::DuplicateParent { .. } => "PROTOCOL.DAG.DUPLICATE_PARENT",
+            Self::MissingParent { .. } => "PROTOCOL.DAG.MISSING_PARENT",
+            Self::Cycle { .. } => "PROTOCOL.DAG.CYCLE",
+            Self::NoRoot => "PROTOCOL.DAG.NO_ROOT",
+            Self::NonCanonicalOrder { .. } => "PROTOCOL.DAG.NON_CANONICAL_ORDER",
+            Self::RootMismatch { .. } => "PROTOCOL.DAG.ROOT_MISMATCH",
+        }
+    }
+
+    /// Every identifier this error can carry, in stable published order.
+    ///
+    /// The registry publisher enumerates this list; a variant added without a
+    /// corresponding entry here fails the exhaustiveness test below.
+    pub const ALL_REGISTRY_IDS: &'static [&'static str] = &[
+        "PROTOCOL.DAG.EMPTY_SEGMENT",
+        "PROTOCOL.DAG.DUPLICATE_NODE_ID",
+        "PROTOCOL.DAG.NODE_ID_MISMATCH",
+        "PROTOCOL.DAG.SELF_PARENT",
+        "PROTOCOL.DAG.DUPLICATE_PARENT",
+        "PROTOCOL.DAG.MISSING_PARENT",
+        "PROTOCOL.DAG.CYCLE",
+        "PROTOCOL.DAG.NO_ROOT",
+        "PROTOCOL.DAG.NON_CANONICAL_ORDER",
+        "PROTOCOL.DAG.ROOT_MISMATCH",
+    ];
+}
+
 impl fmt::Display for DagStructureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1013,6 +1053,65 @@ mod tests {
         let root = root_node(1);
         let child = child_node(2, vec![root.node_id]);
         DAGSegment::sealed(vec![root, child]).expect("canonical chain")
+    }
+
+    /// One instance of every `DagStructureError` variant, so a variant added
+    /// without a registry identifier cannot compile past this list.
+    fn every_variant() -> Vec<DagStructureError> {
+        let node = Hash::new([1u8; 32]);
+        let other = Hash::new([2u8; 32]);
+        vec![
+            DagStructureError::EmptySegment,
+            DagStructureError::DuplicateNodeId { node },
+            DagStructureError::NodeIdMismatch {
+                declared: node,
+                recomputed: other,
+            },
+            DagStructureError::SelfParent { node },
+            DagStructureError::DuplicateParent {
+                node,
+                parent: other,
+            },
+            DagStructureError::MissingParent {
+                node,
+                parent: other,
+            },
+            DagStructureError::Cycle { node },
+            DagStructureError::NoRoot,
+            DagStructureError::NonCanonicalOrder {
+                position: 0,
+                expected: node,
+                found: other,
+            },
+            DagStructureError::RootMismatch {
+                declared: node,
+                recomputed: other,
+            },
+        ]
+    }
+
+    #[test]
+    fn every_structure_error_publishes_one_distinct_registry_identifier() {
+        let variants = every_variant();
+        let ids: Vec<&'static str> = variants
+            .iter()
+            .map(DagStructureError::registry_id)
+            .collect();
+        assert_eq!(
+            ids,
+            DagStructureError::ALL_REGISTRY_IDS,
+            "the published identifier list is not the one the variants emit"
+        );
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "two variants share an identifier");
+        for id in ids {
+            assert!(
+                id.starts_with("PROTOCOL.DAG."),
+                "{id} is outside the namespace this error family owns"
+            );
+        }
     }
 
     // ─────────────────────────────────────────────

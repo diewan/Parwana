@@ -45,6 +45,7 @@
       "expected_reason_code": "WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE",
       "id": "legacy-v1",
       "material": {
+        "consumer_must_supply": "A canonical V1 consignment of the consumer's own, passed to `Consignment::decode_v1_for_inspection`. The inspection's reason codes report what V1 cannot establish; none of them is an affirmative claim.",
         "kind": "none",
         "not_distributed_because": "A V1 artifact carries no portable-closure evidence. The package distributes no V1 bytes because a V1 envelope must never be presented beside V2 material as though the two were interchangeable."
       },
@@ -70,8 +71,11 @@
       "expected_reason_code": "PROTOCOL.DAG.CYCLE",
       "id": "graph-cycle",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "graph-cycle"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -80,7 +84,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -92,12 +96,13 @@
         "aggregate": "rejected",
         "structure": "failed"
       },
-      "expected_reason_code": "PROTOCOL.DAG.DUPLICATE_NODE",
+      "expected_reason_code": "PROTOCOL.DAG.DUPLICATE_NODE_ID",
       "id": "graph-duplicate-node",
       "material": {
         "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
         "kind": "transition-vector-ref",
         "package": "v2-transition-vectors",
+        "package_version": 2,
         "vector_id": "duplicate-node-identifier"
       },
       "reproducible_by_sdk_consumer": {
@@ -122,8 +127,11 @@
       "expected_reason_code": "PROTOCOL.DAG.SELF_PARENT",
       "id": "graph-self-parent",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "graph-self-parent"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -132,7 +140,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -147,8 +155,11 @@
       "expected_reason_code": "PROTOCOL.DAG.MISSING_PARENT",
       "id": "graph-missing-parent",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "graph-missing-parent"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -157,7 +168,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -175,6 +186,7 @@
         "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
         "kind": "transition-vector-ref",
         "package": "v2-transition-vectors",
+        "package_version": 2,
         "vector_id": "segment-root-substituted"
       },
       "reproducible_by_sdk_consumer": {
@@ -199,8 +211,11 @@
       "expected_reason_code": "PROTOCOL.DAG.NON_CANONICAL_ORDER",
       "id": "graph-noncanonical-order",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "graph-noncanonical-order"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -209,7 +224,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -221,12 +236,13 @@
         "aggregate": "rejected",
         "structure": "failed"
       },
-      "expected_reason_code": "PROTOCOL.STATE.COMMITMENT_MISMATCH",
+      "expected_reason_code": "PROTOCOL.DAG.NODE_ID_MISMATCH",
       "id": "state-content-mutation",
       "material": {
         "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
         "kind": "transition-vector-ref",
         "package": "v2-transition-vectors",
+        "package_version": 2,
         "vector_id": "node-content-mutated"
       },
       "reproducible_by_sdk_consumer": {
@@ -248,11 +264,14 @@
         "aggregate": "rejected",
         "structure": "failed"
       },
-      "expected_reason_code": "PROTOCOL.STATE.OUTPUT_NOT_FOUND",
+      "expected_reason_code": "PROTOCOL.RESOLUTION.WRONG_OUTPUT_INDEX",
       "id": "state-output-index-mutation",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "parent-output-index-absent"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -261,7 +280,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -273,11 +292,14 @@
         "aggregate": "rejected",
         "structure": "failed"
       },
-      "expected_reason_code": "PROTOCOL.TRANSITION.COMMITMENT_MISMATCH",
+      "expected_reason_code": "PROTOCOL.RESOLUTION.COMMITMENT_MISMATCH",
       "id": "transition-commitment-mutation",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "parent-commitment-mutated"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -286,7 +308,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -301,8 +323,11 @@
       "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH",
       "id": "canonical-root-mutation",
       "material": {
-        "kind": "none",
-        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "package_version": 2,
+        "vector_id": "canonical-root-recomputed"
       },
       "reproducible_by_sdk_consumer": {
         "aggregate": "no",
@@ -311,7 +336,7 @@
           "a finalized checkpoint and finality policy",
           "recipient-owned verification context and authorized signers"
         ],
-        "canonical_structure": "no"
+        "canonical_structure": "only-with-the-transition-vector-package"
       },
       "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
@@ -329,6 +354,7 @@
         "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
         "kind": "transition-vector-ref",
         "package": "v2-transition-vectors",
+        "package_version": 2,
         "vector_id": "consumed-ref-as-evidence"
       },
       "reproducible_by_sdk_consumer": {
@@ -388,6 +414,7 @@
       "expected_reason_code": "ACCEPT.V2.INCLUSION",
       "id": "proof-wrong-header",
       "material": {
+        "consumer_must_supply": "A bitcoin-spv-v1 proof provider and a signet block-header chain covering the declared checkpoint, then the specific malformation this case names (wrong header, wrong merkle path, wrong outpoint, or wrong successor commitment) applied to a genuine inclusion proof. Parwana will publish encoded SPV fixtures only alongside a network-independent header-chain fixture; until then this material is requested through a Parwana ticket.",
         "kind": "none",
         "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
       },
@@ -417,6 +444,7 @@
       "expected_reason_code": "ACCEPT.V2.INCLUSION",
       "id": "proof-wrong-merkle-path",
       "material": {
+        "consumer_must_supply": "A bitcoin-spv-v1 proof provider and a signet block-header chain covering the declared checkpoint, then the specific malformation this case names (wrong header, wrong merkle path, wrong outpoint, or wrong successor commitment) applied to a genuine inclusion proof. Parwana will publish encoded SPV fixtures only alongside a network-independent header-chain fixture; until then this material is requested through a Parwana ticket.",
         "kind": "none",
         "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
       },
@@ -446,6 +474,7 @@
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "proof-wrong-outpoint",
       "material": {
+        "consumer_must_supply": "A bitcoin-spv-v1 proof provider and a signet block-header chain covering the declared checkpoint, then the specific malformation this case names (wrong header, wrong merkle path, wrong outpoint, or wrong successor commitment) applied to a genuine inclusion proof. Parwana will publish encoded SPV fixtures only alongside a network-independent header-chain fixture; until then this material is requested through a Parwana ticket.",
         "kind": "none",
         "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
       },
@@ -475,6 +504,7 @@
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "proof-wrong-transition-commitment",
       "material": {
+        "consumer_must_supply": "A bitcoin-spv-v1 proof provider and a signet block-header chain covering the declared checkpoint, then the specific malformation this case names (wrong header, wrong merkle path, wrong outpoint, or wrong successor commitment) applied to a genuine inclusion proof. Parwana will publish encoded SPV fixtures only alongside a network-independent header-chain fixture; until then this material is requested through a Parwana ticket.",
         "kind": "none",
         "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
       },
@@ -504,6 +534,7 @@
       "expected_reason_code": "ACCEPT.V2.FINALITY",
       "id": "checkpoint-insufficient-finality",
       "material": {
+        "consumer_must_supply": "The recipient-owned acceptance context this case varies — a finalized checkpoint, a finality policy, a network identifier, and a maximum checkpoint age — together with a closure proof provider for the declared proof kind. Apply them to the `valid-v2` consignment bytes this package does distribute.",
         "kind": "none",
         "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
       },
@@ -533,6 +564,7 @@
       "expected_reason_code": "ACCEPT.V2.FRESHNESS",
       "id": "checkpoint-stale",
       "material": {
+        "consumer_must_supply": "The recipient-owned acceptance context this case varies — a finalized checkpoint, a finality policy, a network identifier, and a maximum checkpoint age — together with a closure proof provider for the declared proof kind. Apply them to the `valid-v2` consignment bytes this package does distribute.",
         "kind": "none",
         "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
       },
@@ -562,6 +594,7 @@
       "expected_reason_code": "ACCEPT.V2.VERIFICATION_CONTEXT",
       "id": "checkpoint-wrong-network",
       "material": {
+        "consumer_must_supply": "The recipient-owned acceptance context this case varies — a finalized checkpoint, a finality policy, a network identifier, and a maximum checkpoint age — together with a closure proof provider for the declared proof kind. Apply them to the `valid-v2` consignment bytes this package does distribute.",
         "kind": "none",
         "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
       },
@@ -591,6 +624,7 @@
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "checkpoint-orphaned",
       "material": {
+        "consumer_must_supply": "The recipient-owned acceptance context this case varies — a finalized checkpoint, a finality policy, a network identifier, and a maximum checkpoint age — together with a closure proof provider for the declared proof kind. Apply them to the `valid-v2` consignment bytes this package does distribute.",
         "kind": "none",
         "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
       },
@@ -616,6 +650,7 @@
       "expected_reason_code": "ACCEPT.V2.CONFLICT",
       "id": "losing-conflict",
       "material": {
+        "consumer_must_supply": "A second consignment consuming the same source as the distributed `valid-v2` bytes, and one shared accepted-state store both acceptances run against. The loser receives ACCEPT.V2.CONFLICT; two isolated stores cannot produce this case.",
         "kind": "none",
         "not_distributed_because": "A conflict is a property of two successors racing for one source against a shared accepted-state store, not of any single distributed artifact."
       },
@@ -641,6 +676,7 @@
       "expected_reason_code": "STORAGE.CHECKPOINT.ORPHANED",
       "id": "reorganization",
       "material": {
+        "consumer_must_supply": "An accepted-state store already holding the `valid-v2` acceptance, then a checkpoint disposition of Orphaned for that checkpoint. The orphaned record reports STORAGE.CHECKPOINT.ORPHANED and its descendants STORAGE.ANCESTOR.NON_FINAL; neither identifier names a chain.",
         "kind": "none",
         "not_distributed_because": "A reorganization is a checkpoint transition applied to already-accepted state, not a distributable artifact."
       },
@@ -665,6 +701,7 @@
       "expected_reason_code": "RUNTIME.SEND.RECOVERED",
       "id": "crash-recovery",
       "material": {
+        "consumer_must_supply": "A durable execution journal, a send whose consignment emission is interrupted after the source seal closes, and a resume against the same journal. The resumed receipt reports RUNTIME.SEND.RECOVERED and the source seal closes exactly once across the whole lifecycle.",
         "kind": "none",
         "not_distributed_because": "Crash recovery is a sequence of interrupted runtime phases, not a distributable artifact."
       },
@@ -689,8 +726,8 @@
     "generator_imports": "csv_sdk only",
     "material_census": {
       "consignment-v2": 2,
-      "none": 19,
-      "transition-vector-ref": 4
+      "none": 12,
+      "transition-vector-ref": 11
     },
     "source_pointers_are": "Parwana-internal test locations, provided so a reader can audit the claim in the Parwana tree. They are not runnable by a downstream consumer.",
     "what_a_consumer_can_reproduce": "The canonical-structure dimension of every case that distributes consignment-v2 material, by decoding it with csv_sdk::v2::inspect.",
@@ -707,6 +744,12 @@
       "verification": "supported"
     }
   },
+  "reason_code_registry": {
+    "accessor": "csv_sdk::reason_codes::contains",
+    "path": "conformance/v2-reason-code-registry.toml",
+    "registry_version": 1,
+    "rule": "Every expected_reason_code below is a member of this registry, and the registry is generated from the implementation's own registry_id functions. A code that no code path emits cannot appear in either."
+  },
   "schema_version": 2,
-  "version": "stage5-v1"
+  "version": "stage5-v2"
 }

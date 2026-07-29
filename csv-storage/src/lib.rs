@@ -25,7 +25,7 @@ pub use accepted_state::RedbAcceptedStateStore;
 pub use accepted_state::{
     AcceptedAssuranceReading, AcceptedAssuranceReport, AcceptedStateError,
     AcceptedStateObservation, AcceptedStateRecord, AcceptedStateStatus, AcceptedStateStore,
-    CheckpointDisposition, InMemoryAcceptedStateStore,
+    CheckpointDisposition, CheckpointObservationCode, InMemoryAcceptedStateStore,
 };
 pub use backends::in_memory::InMemoryReplayDb;
 #[cfg(feature = "postgres")]

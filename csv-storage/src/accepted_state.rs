@@ -122,6 +122,50 @@ pub struct AcceptedStateObservation {
     pub reason: String,
 }
 
+/// Why an accepted-state lifecycle observation was recorded.
+///
+/// Accepted state is chain-agnostic: the same reconciliation runs for Bitcoin,
+/// Ethereum, Sui, Aptos, and Solana closures. These identifiers therefore name
+/// the storage-level event, never a chain. A record whose closure was verified
+/// on Sui must not report a Bitcoin reason code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckpointObservationCode {
+    /// A previously accepted checkpoint is still on the selected chain.
+    Revalidated,
+    /// The checkpoint left the selected chain, so its closure is revoked.
+    Orphaned,
+    /// Finality cannot currently be established for the checkpoint.
+    Indeterminate,
+    /// An ancestor's closure is no longer final, so this descendant's is not
+    /// either. Reported separately so a consumer can tell a directly affected
+    /// record from one downgraded by inheritance.
+    AncestorNonFinal,
+    /// A consignment was verified and atomically committed to accepted state.
+    Committed,
+}
+
+impl CheckpointObservationCode {
+    /// Stable registry identifier for this lifecycle observation.
+    pub const fn registry_id(self) -> &'static str {
+        match self {
+            Self::Revalidated => "STORAGE.CHECKPOINT.REVALIDATED",
+            Self::Orphaned => "STORAGE.CHECKPOINT.ORPHANED",
+            Self::Indeterminate => "STORAGE.CHECKPOINT.INDETERMINATE",
+            Self::AncestorNonFinal => "STORAGE.ANCESTOR.NON_FINAL",
+            Self::Committed => "STORAGE.ACCEPTANCE.COMMITTED",
+        }
+    }
+
+    /// Every code this family defines, in stable published order.
+    pub const ALL: &'static [Self] = &[
+        Self::Revalidated,
+        Self::Orphaned,
+        Self::Indeterminate,
+        Self::AncestorNonFinal,
+        Self::Committed,
+    ];
+}
+
 /// New reading for a previously accepted checkpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckpointDisposition {
@@ -326,10 +370,11 @@ fn reconcile_records(
         CheckpointDisposition::Indeterminate => AcceptedStateStatus::Indeterminate,
     };
     let root_reason = match disposition {
-        CheckpointDisposition::Final => "BITCOIN.CHECKPOINT.REVALIDATED",
-        CheckpointDisposition::Orphaned => "BITCOIN.CHECKPOINT.ORPHANED",
-        CheckpointDisposition::Indeterminate => "BITCOIN.CHECKPOINT.INDETERMINATE",
-    };
+        CheckpointDisposition::Final => CheckpointObservationCode::Revalidated,
+        CheckpointDisposition::Orphaned => CheckpointObservationCode::Orphaned,
+        CheckpointDisposition::Indeterminate => CheckpointObservationCode::Indeterminate,
+    }
+    .registry_id();
     let mut changed = Vec::new();
     let mut frontier = Vec::new();
     for record in records.values_mut() {
@@ -352,7 +397,7 @@ fn reconcile_records(
                     record,
                     descendant_status,
                     checkpoint_id,
-                    "BITCOIN.ANCESTOR.NONFINAL",
+                    CheckpointObservationCode::AncestorNonFinal.registry_id(),
                 ) {
                     changed.push(record.transition_id);
                     frontier.push(record.transition_id);
@@ -484,7 +529,7 @@ mod tests {
                 sequence: 0,
                 status: AcceptedStateStatus::Final,
                 checkpoint_id: Hash::new([8; 32]),
-                reason: "BITCOIN.CLOSURE.ACCEPTED".into(),
+                reason: CheckpointObservationCode::Committed.registry_id().into(),
             }],
         }
     }
@@ -548,6 +593,28 @@ mod tests {
         assert_eq!(revoked.status, AcceptedStateStatus::Revoked);
         assert_eq!(downgraded.status, AcceptedStateStatus::Indeterminate);
         assert_eq!(revoked.observations[0].status, AcceptedStateStatus::Final);
+
+        // The portable-conformance package's `reorganization` case tells a
+        // consumer to expect exactly this code, and a descendant downgraded by
+        // inheritance must be distinguishable from the orphaned root itself.
+        // Neither identifier names a chain: this reconciliation is shared by
+        // every closure adapter.
+        assert_eq!(
+            revoked
+                .observations
+                .last()
+                .expect("the orphaning is recorded")
+                .reason,
+            "STORAGE.CHECKPOINT.ORPHANED"
+        );
+        assert_eq!(
+            downgraded
+                .observations
+                .last()
+                .expect("the downgrade is recorded")
+                .reason,
+            "STORAGE.ANCESTOR.NON_FINAL"
+        );
 
         let root_history_len = revoked.observations.len();
         assert!(

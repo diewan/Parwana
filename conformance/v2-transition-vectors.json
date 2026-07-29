@@ -1,6 +1,6 @@
 {
   "schema": "diewan.parwana.transition-vectors",
-  "version": 1,
+  "version": 2,
   "wire_version": 2,
   "compatibility": {
     "canonical_bytes": "frozen",
@@ -10,6 +10,10 @@
       "output-use-binding-v2"
     ],
     "change_rule": "Any changed expected byte or digest requires a corpus version bump and a conformance changelog entry."
+  },
+  "reason_codes": {
+    "registry": "conformance/v2-reason-code-registry.toml",
+    "rule": "Every negative vector's expected_reason_code must be a member of the published registry, and the portable conformance package may only cite a vector's own code."
   },
   "fixture": {
     "root_node": {
@@ -47,33 +51,90 @@
       "state_type": 513,
       "exclusivity": "exclusive",
       "canonical_bytes_hex": "0200010202"
+    },
+    "parent_output": {
+      "transition_id_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "output_index": 7,
+      "state_type": 513,
+      "seal_id_hex": "aabbccdd",
+      "seal_nonce": 5,
+      "data_hex": "5566",
+      "authorized_consumers_hex": ["77"],
+      "content_commitment_hex": "f27cce5f4c3626c3da954baa790c8f918ff9fb2c2149841e6dd50cd7e2b4b38d"
     }
   },
   "negative_vectors": [
     {
       "id": "node-content-mutated",
       "mutation": "replace root bytecode with ff2030 while retaining its declared node identifier",
-      "expected_reason": "NodeIdMismatch"
+      "expected_reason": "NodeIdMismatch",
+      "expected_reason_code": "PROTOCOL.DAG.NODE_ID_MISMATCH"
     },
     {
       "id": "segment-root-substituted",
       "mutation": "replace the segment root with 32 bytes of 33",
-      "expected_reason": "RootMismatch"
+      "expected_reason": "RootMismatch",
+      "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH"
+    },
+    {
+      "id": "canonical-root-recomputed",
+      "mutation": "drop the child node from the segment while retaining the declared root commitment, so the canonical node set no longer produces it",
+      "expected_reason": "RootMismatch",
+      "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH"
     },
     {
       "id": "duplicate-node-identifier",
       "mutation": "place the root node in the segment twice",
-      "expected_reason": "DuplicateNodeId"
+      "expected_reason": "DuplicateNodeId",
+      "expected_reason_code": "PROTOCOL.DAG.DUPLICATE_NODE_ID"
+    },
+    {
+      "id": "graph-cycle",
+      "mutation": "declare the root node's parent to be the child node, keeping both declared identifiers, so the parent relation closes into a cycle",
+      "expected_reason": "Cycle",
+      "expected_reason_code": "PROTOCOL.DAG.CYCLE"
+    },
+    {
+      "id": "graph-self-parent",
+      "mutation": "declare the root node as its own parent, keeping its declared identifier",
+      "expected_reason": "SelfParent",
+      "expected_reason_code": "PROTOCOL.DAG.SELF_PARENT"
+    },
+    {
+      "id": "graph-missing-parent",
+      "mutation": "present the child node alone, so the parent it references does not resolve inside the segment",
+      "expected_reason": "MissingParent",
+      "expected_reason_code": "PROTOCOL.DAG.MISSING_PARENT"
+    },
+    {
+      "id": "graph-noncanonical-order",
+      "mutation": "store the child node before the root node, against the topological, identifier-ascending canonical order",
+      "expected_reason": "NonCanonicalOrder",
+      "expected_reason_code": "PROTOCOL.DAG.NON_CANONICAL_ORDER"
+    },
+    {
+      "id": "parent-output-index-absent",
+      "mutation": "reference output index 9 of a transition whose only known output is at index 7",
+      "expected_reason": "WrongOutputIndex",
+      "expected_reason_code": "PROTOCOL.RESOLUTION.WRONG_OUTPUT_INDEX"
+    },
+    {
+      "id": "parent-commitment-mutated",
+      "mutation": "replace the parent output's payload with 99 while retaining its recorded commitment, so the transition's binding to its consumed state no longer reproduces",
+      "expected_reason": "CommitmentMismatch",
+      "expected_reason_code": "PROTOCOL.RESOLUTION.COMMITMENT_MISMATCH"
     },
     {
       "id": "consumed-ref-as-evidence",
       "mutation": "truncate consumed-state reference bytes to EvidenceRef width and decode them as EvidenceRef",
-      "expected_reason": "WrongDiscriminant"
+      "expected_reason": "WrongDiscriminant",
+      "expected_reason_code": "PROTOCOL.REFERENCE.WRONG_DISCRIMINANT"
     },
     {
       "id": "unknown-output-exclusivity",
       "mutation": "replace the output-use exclusivity discriminant with ff",
-      "expected_reason": "UnknownClass"
+      "expected_reason": "UnknownClass",
+      "expected_reason_code": "PROTOCOL.EXCLUSIVITY.UNKNOWN_CLASS"
     }
   ]
 }

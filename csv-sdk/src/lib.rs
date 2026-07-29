@@ -90,6 +90,9 @@ pub mod local_store;
 #[cfg(feature = "client")]
 pub mod mcp;
 pub mod prelude;
+/// The published V2 protocol reason-code registry.
+#[cfg(feature = "client")]
+pub mod reason_codes;
 #[cfg(feature = "client")]
 pub mod rpc_identity;
 #[cfg(feature = "client")]

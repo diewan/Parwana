@@ -163,6 +163,41 @@ pub enum ExclusivityError {
     },
 }
 
+impl ExclusivityError {
+    /// Stable registry identifier for this state-use rejection.
+    ///
+    /// Derived from the variant, not from the diagnostic message, so a reworded
+    /// `Display` string cannot change what a consumer matches on.
+    pub const fn registry_id(&self) -> &'static str {
+        match self {
+            Self::ObservationalUseOfExclusiveState { .. } => {
+                "PROTOCOL.EXCLUSIVITY.OBSERVATIONAL_USE_OF_EXCLUSIVE_STATE"
+            }
+            Self::ExclusiveUseOfCitableState { .. } => {
+                "PROTOCOL.EXCLUSIVITY.EXCLUSIVE_USE_OF_CITABLE_STATE"
+            }
+            Self::RebindingRefused { .. } => "PROTOCOL.EXCLUSIVITY.REBINDING_REFUSED",
+            Self::SchemaReinterpretation { .. } => "PROTOCOL.EXCLUSIVITY.SCHEMA_REINTERPRETATION",
+            Self::UnboundStateType { .. } => "PROTOCOL.EXCLUSIVITY.UNBOUND_STATE_TYPE",
+            Self::UnknownClass(_) => "PROTOCOL.EXCLUSIVITY.UNKNOWN_CLASS",
+            Self::UnsupportedSemanticsVersion { .. } => {
+                "PROTOCOL.EXCLUSIVITY.UNSUPPORTED_SEMANTICS_VERSION"
+            }
+        }
+    }
+
+    /// Every identifier this error family can carry, in stable published order.
+    pub const ALL_REGISTRY_IDS: &'static [&'static str] = &[
+        "PROTOCOL.EXCLUSIVITY.OBSERVATIONAL_USE_OF_EXCLUSIVE_STATE",
+        "PROTOCOL.EXCLUSIVITY.EXCLUSIVE_USE_OF_CITABLE_STATE",
+        "PROTOCOL.EXCLUSIVITY.REBINDING_REFUSED",
+        "PROTOCOL.EXCLUSIVITY.SCHEMA_REINTERPRETATION",
+        "PROTOCOL.EXCLUSIVITY.UNBOUND_STATE_TYPE",
+        "PROTOCOL.EXCLUSIVITY.UNKNOWN_CLASS",
+        "PROTOCOL.EXCLUSIVITY.UNSUPPORTED_SEMANTICS_VERSION",
+    ];
+}
+
 /// The immutable use semantics recorded on one created output.
 ///
 /// Created only by [`StateUseSchema::bind_output`], so an output's class always
@@ -352,6 +387,36 @@ mod tests {
 
     const TOKEN: StateTypeId = 10;
     const NOTE: StateTypeId = 11;
+
+    #[test]
+    fn every_state_use_error_publishes_one_distinct_registry_identifier() {
+        let variants = [
+            ExclusivityError::ObservationalUseOfExclusiveState { state_type: TOKEN },
+            ExclusivityError::ExclusiveUseOfCitableState { state_type: TOKEN },
+            ExclusivityError::RebindingRefused {
+                state_type: TOKEN,
+                existing: ExclusivityClass::Exclusive,
+                proposed: ExclusivityClass::Citable,
+            },
+            ExclusivityError::SchemaReinterpretation {
+                state_type: TOKEN,
+                schema: ExclusivityClass::Citable,
+                output: ExclusivityClass::Exclusive,
+            },
+            ExclusivityError::UnboundStateType { state_type: TOKEN },
+            ExclusivityError::UnknownClass(0xff),
+            ExclusivityError::UnsupportedSemanticsVersion {
+                found: 9,
+                supported: 2,
+            },
+        ];
+        let ids: Vec<&'static str> = variants.iter().map(ExclusivityError::registry_id).collect();
+        assert_eq!(ids, ExclusivityError::ALL_REGISTRY_IDS);
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "two variants share an identifier");
+    }
 
     fn schema() -> StateUseSchema {
         let mut schema = StateUseSchema::new();

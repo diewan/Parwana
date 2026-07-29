@@ -288,6 +288,48 @@ impl ProtocolReasonCode {
             Self::NotEvaluated => "PROTOCOL.DIMENSION.NOT_EVALUATED",
         }
     }
+
+    /// Every reason code a dimension reading can carry, in stable published
+    /// order.
+    ///
+    /// The registry publisher enumerates this list. A variant added without an
+    /// entry here fails the exhaustiveness test in this module.
+    pub const ALL: &'static [Self] = &[
+        Self::StructureValidated,
+        Self::BundleTooLarge,
+        Self::DagStructureInvalid,
+        Self::AnchorReferenceInvalid,
+        Self::DagIdentityNotRecomputed,
+        Self::SealReferenceMissing,
+        Self::TransitionBindingVerified,
+        Self::DomainBindingMismatch,
+        Self::ConsumedStateResolutionUnavailable,
+        Self::SignaturesVerified,
+        Self::SignatureInvalid,
+        Self::SignaturesAbsent,
+        Self::SignerSetUnbound,
+        Self::InclusionAttestedByProvider,
+        Self::InclusionRejectedByProvider,
+        Self::InclusionProofMalformed,
+        Self::InclusionNotCryptographicallyVerified,
+        Self::CheckpointAttestedByProvider,
+        Self::CheckpointRejectedByProvider,
+        Self::FinalityProofMalformed,
+        Self::ConfirmationDepthNotMet,
+        Self::CheckpointUnobserved,
+        Self::ReplayRegistryClean,
+        Self::ReplayDetected,
+        Self::ReplayRegistryAbsent,
+        Self::SourceClosureNotExternallyGrounded,
+        Self::SourceClosureCryptographicallyVerified,
+        Self::SourceClosureRejected,
+        Self::WithinMaxAnchorAge,
+        Self::AnchorStale,
+        Self::FreshnessBoundNotConfigured,
+        Self::FreshnessContextIncomplete,
+        Self::FreshnessNotMeasuredInBlocks,
+        Self::NotEvaluated,
+    ];
 }
 
 /// What kind of proof material established a dimension.
@@ -1409,6 +1451,29 @@ fn push_text(out: &mut Vec<u8>, value: &str) {
 mod tests {
     use super::*;
     use csv_accountability::{AssuranceDimension, DimensionResult};
+
+    /// The published list is the registry publisher's only view of this enum.
+    /// The count is asserted explicitly, matching the discipline the V1
+    /// accountability registry already uses, so a variant added without a
+    /// registry entry fails here rather than reaching a consumer unpublished.
+    #[test]
+    fn the_published_reason_code_list_is_complete_unique_and_in_namespace() {
+        assert_eq!(ProtocolReasonCode::ALL.len(), 34);
+        let mut ids: Vec<&'static str> = ProtocolReasonCode::ALL
+            .iter()
+            .map(|code| code.registry_id())
+            .collect();
+        for id in &ids {
+            assert!(
+                id.starts_with("PROTOCOL."),
+                "{id} is outside the namespace the verifier owns"
+            );
+        }
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "two reason codes share an identifier");
+    }
 
     fn digest() -> Hash {
         ContextDigestWriter::new("test").finish()

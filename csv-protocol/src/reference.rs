@@ -327,6 +327,28 @@ pub enum ReferenceDecodeError {
     UnknownProofRequirement(u8),
 }
 
+impl ReferenceDecodeError {
+    /// Stable registry identifier for this decode rejection.
+    ///
+    /// `WRONG_DISCRIMINANT` is the firewall between the consumption and
+    /// citation reference families; a consumer that matches on it is matching
+    /// on the property, not on a message.
+    pub const fn registry_id(&self) -> &'static str {
+        match self {
+            Self::WrongDiscriminant { .. } => "PROTOCOL.REFERENCE.WRONG_DISCRIMINANT",
+            Self::WrongLength { .. } => "PROTOCOL.REFERENCE.WRONG_LENGTH",
+            Self::UnknownProofRequirement(_) => "PROTOCOL.REFERENCE.UNKNOWN_PROOF_REQUIREMENT",
+        }
+    }
+
+    /// Every identifier this error family can carry, in stable published order.
+    pub const ALL_REGISTRY_IDS: &'static [&'static str] = &[
+        "PROTOCOL.REFERENCE.WRONG_DISCRIMINANT",
+        "PROTOCOL.REFERENCE.WRONG_LENGTH",
+        "PROTOCOL.REFERENCE.UNKNOWN_PROOF_REQUIREMENT",
+    ];
+}
+
 /// Cite evidence. Accepts only [`Citable`] references.
 ///
 /// This function exists to make the firewall executable: a `ConsumedStateRef`
@@ -386,6 +408,30 @@ mod tests {
 
     fn consumed() -> ConsumedStateRef {
         ConsumedStateRef::new(Hash::new([1u8; 32]), 3, 10)
+    }
+
+    #[test]
+    fn every_decode_error_publishes_one_distinct_registry_identifier() {
+        let variants = [
+            ReferenceDecodeError::WrongDiscriminant {
+                expected: 2,
+                found: 1,
+            },
+            ReferenceDecodeError::WrongLength {
+                expected: 34,
+                found: 40,
+            },
+            ReferenceDecodeError::UnknownProofRequirement(0xff),
+        ];
+        let ids: Vec<&'static str> = variants
+            .iter()
+            .map(ReferenceDecodeError::registry_id)
+            .collect();
+        assert_eq!(ids, ReferenceDecodeError::ALL_REGISTRY_IDS);
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "two variants share an identifier");
     }
 
     fn evidence() -> EvidenceRef {

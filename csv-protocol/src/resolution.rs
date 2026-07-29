@@ -284,6 +284,49 @@ pub enum ResolutionError {
     },
 }
 
+impl ResolutionError {
+    /// Stable registry identifier for this resolution rejection.
+    ///
+    /// Resolution is where a hostile history is caught claiming a parent that
+    /// does not exist, does not have the referenced output, or no longer
+    /// reproduces its recorded commitment. Each is published separately so a
+    /// consumer can tell which property failed.
+    pub const fn registry_id(&self) -> &'static str {
+        match self {
+            Self::MissingParent { .. } => "PROTOCOL.RESOLUTION.MISSING_PARENT",
+            Self::WrongOutputIndex { .. } => "PROTOCOL.RESOLUTION.WRONG_OUTPUT_INDEX",
+            Self::AmbiguousParent { .. } => "PROTOCOL.RESOLUTION.AMBIGUOUS_PARENT",
+            Self::StateTypeMismatch { .. } => "PROTOCOL.RESOLUTION.STATE_TYPE_MISMATCH",
+            // A schema failure keeps the identifier the state-use family owns,
+            // so the same property never has two published names.
+            Self::Schema(error) => error.registry_id(),
+            Self::CommitmentMismatch { .. } => "PROTOCOL.RESOLUTION.COMMITMENT_MISMATCH",
+            Self::Unauthorized { .. } => "PROTOCOL.RESOLUTION.UNAUTHORIZED",
+            Self::NoAuthorizedConsumer { .. } => "PROTOCOL.RESOLUTION.NO_AUTHORIZED_CONSUMER",
+            Self::DuplicateConsumption { .. } => "PROTOCOL.RESOLUTION.DUPLICATE_CONSUMPTION",
+            Self::UnboundCreatedOutput { .. } => "PROTOCOL.RESOLUTION.UNBOUND_CREATED_OUTPUT",
+            Self::MalformedReference { .. } => "PROTOCOL.RESOLUTION.MALFORMED_REFERENCE",
+        }
+    }
+
+    /// Every identifier this error family owns, in stable published order.
+    ///
+    /// `Schema` is deliberately absent: it forwards to the state-use family's
+    /// identifiers rather than minting duplicates under this namespace.
+    pub const ALL_REGISTRY_IDS: &'static [&'static str] = &[
+        "PROTOCOL.RESOLUTION.MISSING_PARENT",
+        "PROTOCOL.RESOLUTION.WRONG_OUTPUT_INDEX",
+        "PROTOCOL.RESOLUTION.AMBIGUOUS_PARENT",
+        "PROTOCOL.RESOLUTION.STATE_TYPE_MISMATCH",
+        "PROTOCOL.RESOLUTION.COMMITMENT_MISMATCH",
+        "PROTOCOL.RESOLUTION.UNAUTHORIZED",
+        "PROTOCOL.RESOLUTION.NO_AUTHORIZED_CONSUMER",
+        "PROTOCOL.RESOLUTION.DUPLICATE_CONSUMPTION",
+        "PROTOCOL.RESOLUTION.UNBOUND_CREATED_OUTPUT",
+        "PROTOCOL.RESOLUTION.MALFORMED_REFERENCE",
+    ];
+}
+
 /// One consumed reference, resolved to exactly one verified parent output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedInput {
@@ -592,6 +635,77 @@ mod tests {
 
     const TOKEN: StateTypeId = 10;
     const NOTE: StateTypeId = 11;
+
+    #[test]
+    fn every_resolution_error_publishes_one_distinct_registry_identifier() {
+        let transition_id = Hash::new([1u8; 32]);
+        let owned = [
+            ResolutionError::MissingParent { transition_id },
+            ResolutionError::WrongOutputIndex {
+                transition_id,
+                output_index: 4,
+            },
+            ResolutionError::AmbiguousParent {
+                transition_id,
+                output_index: 4,
+                matches: 2,
+            },
+            ResolutionError::StateTypeMismatch {
+                transition_id,
+                output_index: 4,
+                referenced: TOKEN,
+                actual: NOTE,
+            },
+            ResolutionError::CommitmentMismatch {
+                transition_id,
+                output_index: 4,
+                recorded: Hash::new([2u8; 32]),
+                recomputed: Hash::new([3u8; 32]),
+            },
+            ResolutionError::Unauthorized {
+                transition_id,
+                output_index: 4,
+            },
+            ResolutionError::NoAuthorizedConsumer {
+                transition_id,
+                output_index: 4,
+            },
+            ResolutionError::DuplicateConsumption {
+                transition_id,
+                output_index: 4,
+            },
+            ResolutionError::UnboundCreatedOutput {
+                index: 0,
+                state_type: TOKEN,
+            },
+            ResolutionError::MalformedReference {
+                index: 0,
+                reason: "short".into(),
+            },
+        ];
+        let ids: Vec<&'static str> = owned.iter().map(ResolutionError::registry_id).collect();
+        assert_eq!(ids, ResolutionError::ALL_REGISTRY_IDS);
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "two variants share an identifier");
+    }
+
+    /// A state-use failure surfaced through resolution keeps the state-use
+    /// family's identifier. One property must never have two published names.
+    #[test]
+    fn a_forwarded_schema_failure_keeps_the_state_use_identifier() {
+        let error =
+            ResolutionError::Schema(ExclusivityError::UnboundStateType { state_type: TOKEN });
+        assert_eq!(
+            error.registry_id(),
+            "PROTOCOL.EXCLUSIVITY.UNBOUND_STATE_TYPE"
+        );
+        assert!(
+            !ResolutionError::ALL_REGISTRY_IDS.contains(&error.registry_id()),
+            "a forwarded identifier must not also be published under this namespace"
+        );
+    }
     const PARENT: [u8; 32] = [1u8; 32];
 
     fn schema() -> StateUseSchema {

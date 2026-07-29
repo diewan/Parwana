@@ -102,6 +102,91 @@ fn every_source_pointer_names_a_test_that_exists() {
     }
 }
 
+/// The gate PAR-CONF-006 exists to install: a case may only tell a consumer to
+/// expect a reason code the implementation emits.
+///
+/// The package previously declared fourteen codes that appeared nowhere in the
+/// repository — `PROTOCOL.DAG.CYCLE`, `ACCEPT.V2.ACCEPTED`,
+/// `STORAGE.CHECKPOINT.ORPHANED` and others — so a consumer routing on them
+/// would have waited forever for something no code path could produce.
+#[test]
+fn no_case_declares_a_reason_code_the_registry_does_not_publish() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    let registry = include_str!("../../conformance/v2-reason-code-registry.toml");
+    assert_eq!(
+        manifest["reason_code_registry"]["path"], "conformance/v2-reason-code-registry.toml",
+        "the package must name the registry it draws from"
+    );
+    for case in manifest["cases"].as_array().unwrap() {
+        let code = case["expected_reason_code"].as_str().unwrap();
+        assert!(
+            registry.contains(&format!("\"{code}\"")),
+            "case {} declares {code}, which the published registry does not contain",
+            case["id"]
+        );
+    }
+}
+
+/// A case that names a transition vector must expect that vector's own code.
+///
+/// Without this, the two packages could each be internally consistent while
+/// telling a consumer two different things about the same mutation.
+#[test]
+fn every_vector_backed_case_expects_the_code_its_vector_emits() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    let vectors: Value =
+        serde_json::from_str(include_str!("../../conformance/v2-transition-vectors.json")).unwrap();
+    let mut checked = 0usize;
+    for case in manifest["cases"].as_array().unwrap() {
+        let material = &case["material"];
+        if material["kind"] != "transition-vector-ref" {
+            continue;
+        }
+        assert_eq!(
+            material["package_version"], vectors["version"],
+            "case {} cites a transition-vector package version that is not the published one",
+            case["id"]
+        );
+        let vector_id = material["vector_id"].as_str().unwrap();
+        let vector = vectors["negative_vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|vector| vector["id"] == vector_id)
+            .unwrap_or_else(|| panic!("case {} names absent vector {vector_id}", case["id"]));
+        assert_eq!(
+            case["expected_reason_code"], vector["expected_reason_code"],
+            "case {} expects a different code than vector {vector_id} emits",
+            case["id"]
+        );
+        checked += 1;
+    }
+    assert_eq!(
+        checked, 11,
+        "every malicious-graph case must be backed by an executed vector"
+    );
+}
+
+/// A case that distributes nothing still owes the consumer an actionable answer.
+#[test]
+fn every_undistributed_case_names_what_a_consumer_must_supply() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    for case in manifest["cases"].as_array().unwrap() {
+        let material = &case["material"];
+        if material["kind"] != "none" {
+            continue;
+        }
+        let supply = material["consumer_must_supply"]
+            .as_str()
+            .unwrap_or_else(|| panic!("case {} must say what to supply instead", case["id"]));
+        assert!(
+            supply.len() > 40,
+            "case {} gives no actionable substitute",
+            case["id"]
+        );
+    }
+}
+
 /// A case may only carry bytes under a declared, executable material kind.
 #[test]
 fn no_case_ships_material_it_does_not_declare() {

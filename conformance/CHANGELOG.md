@@ -13,6 +13,65 @@ Each entry names the commit whose corpus produces the published digest. The
 manifest's `source.value` and `corpus.digest` must always agree with each
 other; see 0.1.10 for what happens when they do not.
 
+## Portable conformance `stage5-v2`, reason-code registry v1, transition vectors v2 — 2026-07-29 (PAR-CONF-006)
+
+**Breaking for any consumer routing on the portable package's reason codes.**
+
+Publishes `conformance/v2-reason-code-registry.toml`: the complete V2 protocol
+reason-code vocabulary, generated from each owning crate's own `registry_id`
+function. This was the one contract-package component the charter's
+cross-repository contract discipline named that had never been produced. It is
+disjoint from the V1 `ACCOUNTABILITY.*` registry.
+
+Fourteen codes the portable package told consumers to expect were emitted by
+nothing in the repository. They are now either emitted or replaced:
+
+- The eleven malicious-graph codes had no counterpart in the kernel, which
+  reported typed errors with no stable identifiers. `DagStructureError`,
+  `ResolutionError`, `ReferenceDecodeError`, and `ExclusivityError` now publish
+  identifiers, and the package cites those. Four package codes were **removed**
+  and have no successor under their old spelling:
+  - `PROTOCOL.DAG.DUPLICATE_NODE` → `PROTOCOL.DAG.DUPLICATE_NODE_ID`
+  - `PROTOCOL.STATE.COMMITMENT_MISMATCH` → `PROTOCOL.DAG.NODE_ID_MISMATCH`
+  - `PROTOCOL.STATE.OUTPUT_NOT_FOUND` → `PROTOCOL.RESOLUTION.WRONG_OUTPUT_INDEX`
+  - `PROTOCOL.TRANSITION.COMMITMENT_MISMATCH` →
+    `PROTOCOL.RESOLUTION.COMMITMENT_MISMATCH`
+- `ACCEPT.V2.ACCEPTED` is now emitted: recipient acceptance had only failure
+  codes, so the positive path had no publishable outcome.
+- `RUNTIME.SEND.RECOVERED` is now emitted. `SendReceipt` carries a
+  `SendCompletion`, so a resumed send is distinguishable from a fresh one.
+- `STORAGE.CHECKPOINT.ORPHANED` is now emitted. Accepted-state reconciliation
+  had hardcoded `BITCOIN.CHECKPOINT.*` and `BITCOIN.ANCESTOR.NONFINAL` into a
+  chain-agnostic store, so a Sui or Aptos closure reported a Bitcoin reason
+  code. The identifiers are now `STORAGE.*` and name no chain. Consumers
+  matching the `BITCOIN.*` spellings in accepted-state observations must move.
+- `WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE` is now emitted by legacy V1
+  inspection, alongside four sibling codes for what V1 cannot establish.
+- The runtime's accepted-state observation reason changed from the unregistered
+  `ACCEPTANCE.V2.COMMITTED` to `STORAGE.ACCEPTANCE.COMMITTED`.
+
+Transition vectors v2 adds the seven missing negative vectors — `graph-cycle`,
+`graph-self-parent`, `graph-missing-parent`, `graph-noncanonical-order`,
+`canonical-root-recomputed`, `parent-output-index-absent`, and
+`parent-commitment-mutated` — plus a published `parent_output` fixture the
+resolution vectors resolve against. Every negative vector now declares an
+`expected_reason_code` and its executor asserts the rejection path emits it. All
+eleven malicious-graph cases are backed by an executed vector; none is
+undistributed.
+
+Every case that still distributes nothing now records `consumer_must_supply`
+naming what to provide instead. The four `proof-wrong-*` cases will **not**
+ship an encoded `bitcoin-spv-v1` proof: a real one is a signet header chain plus
+a merkle branch, the generator has no chain access, and bytes shaped like a
+proof that attest to nothing would misrepresent the case. That decision is
+recorded in the package.
+
+Gates added, so this cannot drift again: the generator refuses to write a case
+whose code is not in the registry; the published registry must equal the
+implementation's projection; a vector-backed case must expect its vector's own
+code; and `scripts/check-v2-release.py` re-checks the same from the published
+files alone.
+
 ## V2 transition vectors v1 — 2026-07-26 (PAR-VECTORS-001)
 
 Adds the language-neutral `conformance/v2-transition-vectors.json` package.

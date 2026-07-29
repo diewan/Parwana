@@ -52,12 +52,20 @@ supported.
 
 | Package | Version | SHA-256 |
 |---|---|---|
-| Portable hostile conformance manifest | `stage5-v1` | `05066d55b0ded97a4bc3cd6e3c96aab5aa971b7ef7a36a5f914736becf23f51e` |
-| V2 transition vectors | `1` | `0f4ef333ffbef0906ad99df2170bfab6f046aa1f1722607bd9515a17dc37e249` |
+| Portable hostile conformance manifest | `stage5-v2` | `3991d66604d4df779fb1eba376b27428d6a8c0b043cdccf3019f13707f648eaa` |
+| V2 protocol reason-code registry | `1` | `63b8fb265fd76351a9aeebd65fec7ec9c0e2aa4ea0f80d4631946408501038f5` |
+| V2 transition vectors | `2` | `34c4cd2527994899e8ba152028fac1860b341a29dd100cc128ecfab6b8c0b0d1` |
 | Stage 5 closure support matrix | `1` | `29a730574e3c253757f4aae8d81364e858321b4a07d32e6e0a0f86a579a18ac2` |
 
 Consumers pin the release declaration and verify these digests before running
 the fixtures. `csv_sdk::v2::conformance_manifest()` embeds the first package.
+
+The reason-code registry is the vocabulary the conformance manifest's
+`expected_reason_code` fields are drawn from, and the only vocabulary a
+consumer should route V2 outcomes on. It is generated from the implementation's
+own `registry_id` functions and reachable as `csv_sdk::reason_codes::contains`,
+so a consumer can check a code without trusting a copied list. It is disjoint
+from the V1 `ACCOUNTABILITY.*` registry.
 
 ## Compatibility and withdrawal
 

@@ -88,6 +88,21 @@ impl AcceptanceErrorCode {
             Self::Persistence => "ACCEPT.V2.PERSISTENCE",
         }
     }
+
+    /// Every failure code this family defines, in stable published order.
+    pub const ALL: &'static [Self] = &[
+        Self::Decode,
+        Self::Semantics,
+        Self::Authorization,
+        Self::SourceClosure,
+        Self::Inclusion,
+        Self::Finality,
+        Self::Freshness,
+        Self::DestinationBinding,
+        Self::VerificationContext,
+        Self::Conflict,
+        Self::Persistence,
+    ];
 }
 
 /// Actionable rejection detail with a stable machine-readable code.
@@ -116,6 +131,21 @@ pub struct AcceptanceResult {
     pub transition_id: Hash,
     /// Full dimensioned report used for the commit decision.
     pub assurance: ProtocolAssuranceReport,
+}
+
+impl AcceptanceResult {
+    /// Stable registry identifier for a successful V2 acceptance.
+    ///
+    /// The acceptance vocabulary needs an affirmative member: without one, the
+    /// only publishable codes are failures, and a package describing the
+    /// positive path has nothing real to name. This is the code the portable
+    /// conformance package's `valid-v2` case tells a consumer to expect.
+    pub const REGISTRY_ID: &'static str = "ACCEPT.V2.ACCEPTED";
+
+    /// Stable registry identifier for this outcome.
+    pub const fn registry_id(&self) -> &'static str {
+        Self::REGISTRY_ID
+    }
 }
 
 /// Verified V2 consignment whose fields cannot be replaced by callers.
@@ -326,7 +356,13 @@ pub async fn accept_consignment_v2(
             sequence: 0,
             status: AcceptedStateStatus::Final,
             checkpoint_id: context.checkpoint.commitment(),
-            reason: "ACCEPTANCE.V2.COMMITTED".into(),
+            // The storage layer owns this observation's vocabulary; the
+            // acceptance decision's own outcome code is
+            // `AcceptanceResult::REGISTRY_ID`. Two layers, two published
+            // families — never a third, unregistered spelling.
+            reason: csv_storage::CheckpointObservationCode::Committed
+                .registry_id()
+                .into(),
         }],
     };
     store.accept(record).await.map_err(map_store_error)?;
@@ -711,6 +747,37 @@ mod tests {
         assert_eq!(saved.assurance.report_digest, first.assurance.digest());
         assert_eq!(saved.closure.proof_provider_id, "bitcoin-spv-v1");
         assert_eq!(saved.closure.checkpoint, fixture.checkpoint);
+        // The portable-conformance package's `valid-v2` case tells a consumer to
+        // expect this outcome code, and the persisted observation carries the
+        // storage family's own code rather than a third spelling.
+        assert_eq!(first.registry_id(), "ACCEPT.V2.ACCEPTED");
+        assert_eq!(
+            saved.observations.last().unwrap().reason,
+            "STORAGE.ACCEPTANCE.COMMITTED"
+        );
+    }
+
+    #[test]
+    fn every_acceptance_code_publishes_one_distinct_registry_identifier() {
+        let mut ids: Vec<&'static str> = AcceptanceErrorCode::ALL
+            .iter()
+            .map(|code| code.registry_id())
+            .chain(core::iter::once(AcceptanceResult::REGISTRY_ID))
+            .collect();
+        for id in &ids {
+            assert!(
+                id.starts_with("ACCEPT.V2."),
+                "{id} is outside the namespace recipient acceptance owns"
+            );
+        }
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            count,
+            "two acceptance outcomes share an identifier"
+        );
     }
 
     #[tokio::test]

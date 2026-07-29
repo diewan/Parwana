@@ -224,3 +224,44 @@ fn v2_provider_boundary_is_reachable_through_csv_sdk_alone() {
     let boundary = consumer_provider_boundary;
     let _ = boundary;
 }
+
+/// The registry digest the SDK advertises must be the bytes it ships beside.
+#[test]
+fn the_advertised_reason_code_registry_digest_is_the_published_bytes() {
+    let published = include_bytes!("../../conformance/v2-reason-code-registry.toml");
+    assert_eq!(
+        hex::encode(Sha256::digest(published)),
+        v2::REASON_CODE_REGISTRY_SHA256
+    );
+}
+
+/// The published registry must be the projection the implementation produces.
+///
+/// The registry is generated from each owning crate's own `registry_id`
+/// functions, so this asserts the published file is current rather than a
+/// hand-edited list that drifted away from the code paths it describes.
+#[test]
+fn the_published_reason_code_registry_is_the_implementations_own_projection() {
+    let published = include_str!("../../conformance/v2-reason-code-registry.toml");
+    assert_eq!(
+        published,
+        csv_sdk::reason_codes::render_published_registry(),
+        "run `cargo run -p csv-sdk --example generate_portable_conformance`"
+    );
+}
+
+/// Every reason code the embedded conformance manifest declares must be one a
+/// consumer holding only the SDK can look up and route on.
+#[test]
+fn every_declared_conformance_code_is_reachable_through_csv_sdk_alone() {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(csv_sdk::v2::conformance_manifest()).unwrap();
+    for case in manifest["cases"].as_array().unwrap() {
+        let code = case["expected_reason_code"].as_str().unwrap();
+        assert!(
+            csv_sdk::reason_codes::contains(code),
+            "case {} declares {code}, which the SDK's registry does not publish",
+            case["id"]
+        );
+    }
+}
