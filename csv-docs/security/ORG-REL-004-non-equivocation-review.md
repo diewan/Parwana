@@ -2,7 +2,18 @@
 
 Review date: 2026-07-29  
 Reviewed Parwana revision: `1e87e933c4030e135bf177df214fe83191a1afb7`  
-Advertised release: `csv-sdk` `0.2.0`, protocol `2`, object `2`, wire `2`
+Advertised release: `csv-sdk` `0.1.5`, protocol `2`, object `2`, wire `2`
+
+> **Correction, 2026-07-29.** This line originally read `csv-sdk` `0.2.0`. No
+> such crate version exists: the workspace and `csv-sdk/Cargo.toml` declare
+> `0.1.5`, `conformance/parwana-v2-release.toml` declares `crate_version =
+> "0.1.5"`, and
+> [`CROSS-REPOSITORY-PIN-MATRIX.md`](../../../development/CROSS-REPOSITORY-PIN-MATRIX.md)
+> states that the release "does not invent a `0.2.0` package line" — the V2
+> facade ships inside exactly pinned `csv-sdk 0.1.5` while the independently
+> versioned contract package is `0.1.10`. Only the version string was wrong;
+> the reviewed revision and every finding below are unchanged. Reported by the
+> `BOUNTY-002` curated pilot, which pinned and verified `0.1.5`.
 
 ## Review conclusion
 
