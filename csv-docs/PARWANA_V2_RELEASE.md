@@ -4,6 +4,8 @@ Parwana V2 is the first public Parwana protocol release. There is no earlier
 released Parwana installation or dataset to migrate. The machine-readable
 release declaration is
 [`conformance/parwana-v2-release.toml`](../conformance/parwana-v2-release.toml).
+The completed independent security review and its evidence map are recorded in
+[`security/ORG-REL-004-non-equivocation-review.md`](security/ORG-REL-004-non-equivocation-review.md).
 
 ## Exact security claim
 
