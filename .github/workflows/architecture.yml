@@ -89,7 +89,7 @@ jobs:
 
       - name: Required portable non-equivocation hostile conformance
         run: |
-          python3 scripts/generate-portable-conformance.py --check
+          cargo run --locked -q -p csv-sdk --example generate_portable_conformance -- --check
           cargo test -p csv-runtime isolated_recipients_cannot_both_accept_one_source
           cargo test -p csv-runtime send_resume
           cargo test -p csv-storage orphaning_checkpoint

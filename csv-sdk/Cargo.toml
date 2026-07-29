@@ -203,6 +203,9 @@ experimental = ["client"]
 
 [dev-dependencies]
 rand = "0.8"
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+sha2 = "0.10"
+serde_json = "1.0"
 tempfile = "3"
 csv-store = { version = "0.1.5", path = "../csv-store", default-features = false }
 csv-testkit = { version = "0.1.5", path = "../csv-testkit" }

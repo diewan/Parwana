@@ -19,11 +19,11 @@ pub use csv_chain_ports::ClosureProofVerifier as ClosureVerificationProvider;
 pub use csv_chain_ports::AdapterError as ClosureVerificationProviderError;
 
 /// Version of the embedded hostile-conformance fixture package.
-pub const CONFORMANCE_PACKAGE_VERSION: &str = "stage4-v1";
+pub const CONFORMANCE_PACKAGE_VERSION: &str = "stage5-v1";
 
 /// SHA-256 of the exact embedded conformance manifest bytes.
 pub const CONFORMANCE_MANIFEST_SHA256: &str =
-    "1ff11779fb94334d24af10428996215af5b0bba30d9c754ebaee44ac11e83f0e";
+    "05066d55b0ded97a4bc3cd6e3c96aab5aa971b7ef7a36a5f914736becf23f51e";
 
 /// Return the exact, versioned Stage 4 conformance manifest.
 ///
@@ -48,8 +48,8 @@ pub use csv_runtime::{
     ConsignmentV2EmissionRequest, InMemoryConsignmentEmissionJournal, VerifiedConsignment,
 };
 pub use csv_verifier::{
-    DimensionAssurance, DimensionStatus, ProofKind, ProofProvider, ProtocolAssuranceDimension,
-    ProtocolAssuranceReport, ProtocolReasonCode, PROTOCOL_ASSURANCE_DIMENSIONS,
+    DimensionAssurance, DimensionStatus, PROTOCOL_ASSURANCE_DIMENSIONS, ProofKind, ProofProvider,
+    ProtocolAssuranceDimension, ProtocolAssuranceReport, ProtocolReasonCode,
 };
 pub use csv_wire::{
     ConsignmentAuthorization, ConsignmentProofRequirements, ConsignmentV2, ConsignmentV2Error,

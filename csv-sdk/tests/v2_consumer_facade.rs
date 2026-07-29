@@ -1,8 +1,8 @@
 #![cfg(feature = "client")]
 
 use csv_sdk::v2::{
-    self, Capability, ClosureProof, ClosureVerificationProvider,
-    ClosureVerificationProviderError, ClosureVerificationResult, FinalizedCheckpoint,
+    self, Capability, ClosureProof, ClosureVerificationProvider, ClosureVerificationProviderError,
+    ClosureVerificationResult, FinalizedCheckpoint,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -81,6 +81,85 @@ fn embedded_conformance_package_is_content_addressed_and_complete() {
     }));
 }
 
+/// Every byte the package distributes as a consignment must actually be one.
+///
+/// This is the gate that the `stage4-v1` package failed: it carried patterned
+/// filler in a field named `bytes_hex`, so a consumer that fed the material to
+/// the facade was rejected for a reason that had nothing to do with the case.
+#[test]
+fn distributed_consignment_material_decodes_through_the_facade() {
+    let manifest: serde_json::Value = serde_json::from_slice(v2::conformance_manifest()).unwrap();
+    let mut decoded = 0;
+    for case in manifest["cases"].as_array().unwrap() {
+        let material = &case["material"];
+        let id = case["id"].as_str().unwrap();
+        if material["kind"] != "consignment-v2" {
+            assert!(
+                material["bytes_hex"].is_null(),
+                "{id} distributes bytes without declaring consignment material"
+            );
+            continue;
+        }
+        let bytes = hex::decode(material["bytes_hex"].as_str().unwrap())
+            .unwrap_or_else(|error| panic!("{id} material must be hex: {error}"));
+        assert_eq!(
+            hex::encode(Sha256::digest(&bytes)),
+            material["sha256"].as_str().unwrap(),
+            "{id} material digest disagrees with its bytes"
+        );
+        v2::inspect(&bytes).unwrap_or_else(|error| {
+            panic!(
+                "{id} declares consignment material that the facade \
+                 rejects: {error:?}"
+            )
+        });
+        assert_eq!(material["entry_point"], "csv_sdk::v2::inspect");
+        decoded += 1;
+    }
+    assert_eq!(
+        decoded,
+        manifest["consumer_contract"]["executable_by_an_sdk_only_consumer"]
+            .as_u64()
+            .unwrap(),
+        "the declared executable-case count must equal the cases that actually decode"
+    );
+    assert!(
+        decoded > 0,
+        "the package must distribute executable material"
+    );
+}
+
+/// The package must never imply that a consumer can reach an aggregate verdict.
+///
+/// Every aggregate depends on a closure proof provider and recipient-owned
+/// context the package cannot supply; saying so is part of the contract.
+#[test]
+fn the_package_never_claims_a_consumer_can_reach_an_aggregate_verdict() {
+    let manifest: serde_json::Value = serde_json::from_slice(v2::conformance_manifest()).unwrap();
+    let contract = &manifest["consumer_contract"];
+    for field in [
+        "what_a_consumer_can_reproduce",
+        "what_a_consumer_cannot_reproduce",
+        "expected_dimensions_are",
+        "do_not_manufacture_fixtures",
+    ] {
+        assert!(
+            contract[field]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
+            "consumer contract is missing {field}"
+        );
+    }
+    for case in manifest["cases"].as_array().unwrap() {
+        assert_eq!(
+            case["reproducible_by_sdk_consumer"]["aggregate"],
+            "no",
+            "{} claims a consumer can reproduce an aggregate outcome",
+            case["id"].as_str().unwrap()
+        );
+    }
+}
+
 #[test]
 fn verification_report_decodes_to_an_immutable_typed_view() {
     #[derive(Serialize)]
@@ -132,10 +211,7 @@ fn consumer_provider_boundary(
     let future: std::pin::Pin<
         Box<
             dyn std::future::Future<
-                    Output = Result<
-                        ClosureVerificationResult,
-                        ClosureVerificationProviderError,
-                    >,
+                    Output = Result<ClosureVerificationResult, ClosureVerificationProviderError>,
                 > + Send
                 + '_,
         >,

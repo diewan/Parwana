@@ -1,7 +1,6 @@
 {
   "cases": [
     {
-      "bytes_hex": "",
       "category": "positive",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -14,11 +13,25 @@
       },
       "expected_reason_code": "ACCEPT.V2.ACCEPTED",
       "id": "valid-v2",
+      "material": {
+        "bytes_hex": "a3677061796c6f6164a766736f75726365a36a73746174655f74797065076c6f75747075745f696e646578006d7472616e736974696f6e5f69649820111111111111111111111111111111111111111111111111111111111111111169737563636573736f72a466696e7075747381a3646d6f6465694578636c757369766566706172656e74a86464617461811833647365616ca36269649824182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822656e6f6e6365f66776657273696f6ef66a73746174655f74797065076b7573655f62696e64696e67a365636c617373694578636c75736976656a73746174655f74797065077173656d616e746963735f76657273696f6e026c6f75747075745f696e646578006d7472616e736974696f6e5f696498201111111111111111111111111111111111111111111111111111111111111111737265636f726465645f636f6d6d69746d656e74982013181d18dc186b1856186318c218ad18dd18630a18a918f418aa189e18de18f618ab0918d918a018f8189d1880186e18400818ad0e18d818d7182674617574686f72697a65645f636f6e73756d6572738198201821185218f818d1189b1879181d182418451832184218e1185f182e18ab186c18b718cf18fa187b186a185e18d300189718960e061898188118db12697265666572656e6365a36a73746174655f74797065076c6f75747075745f696e646578006d7472616e736974696f6e5f696498201111111111111111111111111111111111111111111111111111111111111111676f75747075747381a36464617461811855647365616ca3626964784063646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364656e6f6e6365096776657273696f6e0767747970655f6964076d7472616e736974696f6e5f6964097176616c69646174696f6e5f7363726970748118666b64657374696e6174696f6ea4647365616ca365636861696e637375696776657273696f6e07696f626a6563745f6964784063646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364656e6f6e6365096776657273696f6e0169736368656d615f69647840303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130316e736f757263655f636c6f73757265a46a70726f6f665f6b696e64781b426974636f696e5472616e73616374696f6e496e636c7573696f6e6e636f6e73756d65645f7374617465a36a73746174655f74797065076c6f75747075745f696e646578006d7472616e736974696f6e5f6964982011111111111111111111111111111111111111111111111111111111111111116e70726f6f665f6d6174657269616c9840187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187718771877187774737563636573736f725f636f6d6d69746d656e7498200b18a11836186e18c6186d188c188e188c18a01857181d1857183018ca184918e0186e18f918760a18bb18eb18bf183b18e418a518931899188c18fb189570656e76656c6f70655f76657273696f6e027070726f746f636f6c5f76657273696f6e027270726f6f665f726571756972656d656e7473a56a636865636b706f696e74a568626c6f636b5f696498201888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188868636861696e5f696467626974636f696e6a6e6574776f726b5f6964667369676e65746c626c6f636b5f68656967687418646f66696e616c6974795f706f6c696379a16d436f6e6669726d6174696f6e73066a74727573745f6d6f64656b4c69676874436c69656e747170726f6f665f70726f76696465725f69646e626974636f696e2d7370762d763174766572696669636174696f6e5f636f6e74657874982018991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899766d6178696d756d5f636865636b706f696e745f6167650c6a636f6d6d69746d656e749820188e186a0818a4187b18a2185b1898188a18ea186a18fe18a8188c11188b18cc18d918e7186818c7182918ad183f187618c7182d185718cc18fd0c18e16e617574686f72697a6174696f6e7381a466736368656d656745643235353139697369676e617475726598400702182918690b18960818a518be183f189418261880186918d418e21836187718ae181f187718411876184c181d18d018bd18df18d618ad183b182118a2183c182b181818d2183918f4184b18b4183018c2181b1862187c18c8181918931830183c18f3187e1895187018c9186718b9185a18190d0618c10b6a7075626c69635f6b657998201821185218f818d1189b1879181d182418451832184218e1185f182e18ab186c18b718cf18fa187b186a185e18d300189718960e061898188118db12717369676e65645f636f6d6d69746d656e749820188e186a0818a4187b18a2185b1898188a18ea186a18fe18a8188c11188b18cc18d918e7186818c7182918ad183f187618c7182d185718cc18fd0c18e1",
+        "entry_point": "csv_sdk::v2::inspect",
+        "kind": "consignment-v2",
+        "sha256": "fb23ef3ae3d8d6fc7b89c86a12b7014642a830c2360fa4ca08c50b624b390486"
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "yes"
+      },
       "source": "csv-runtime/src/recipient_acceptance.rs::success_returns_full_typed_report_and_is_idempotent",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "legacy",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -31,11 +44,23 @@
       },
       "expected_reason_code": "WIRE.V1.PORTABLE_NON_EQUIVOCATION_UNAVAILABLE",
       "id": "legacy-v1",
-      "source": "csv-wire/src/consignment.rs::v1_inspection_never_claims_portable_non_equivocation",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "A V1 artifact carries no portable-closure evidence. The package distributes no V1 bytes because a V1 envelope must never be presented beside V2 material as though the two were interchangeable."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-wire/src/consignment.rs::v1_inspection_reports_unavailable_v2_integrity",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -44,11 +69,23 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.CYCLE",
       "id": "graph-cycle",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -57,11 +94,25 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.DUPLICATE_NODE",
       "id": "graph-duplicate-node",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "vector_id": "duplicate-node-identifier"
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "only-with-the-transition-vector-package"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -70,11 +121,23 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.SELF_PARENT",
       "id": "graph-self-parent",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -83,11 +146,23 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.MISSING_PARENT",
       "id": "graph-missing-parent",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -96,11 +171,25 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH",
       "id": "graph-root-substitution",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "vector_id": "segment-root-substituted"
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "only-with-the-transition-vector-package"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -109,11 +198,23 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.NON_CANONICAL_ORDER",
       "id": "graph-noncanonical-order",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -122,11 +223,25 @@
       },
       "expected_reason_code": "PROTOCOL.STATE.COMMITMENT_MISMATCH",
       "id": "state-content-mutation",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "vector_id": "node-content-mutated"
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "only-with-the-transition-vector-package"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -135,11 +250,23 @@
       },
       "expected_reason_code": "PROTOCOL.STATE.OUTPUT_NOT_FOUND",
       "id": "state-output-index-mutation",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -148,11 +275,23 @@
       },
       "expected_reason_code": "PROTOCOL.TRANSITION.COMMITMENT_MISMATCH",
       "id": "transition-commitment-mutation",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -161,11 +300,23 @@
       },
       "expected_reason_code": "PROTOCOL.DAG.ROOT_MISMATCH",
       "id": "canonical-root-mutation",
-      "source": "csv-protocol/tests/v2_transition_vectors.rs::negative_vectors_fail_for_declared_reason",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "No vector in the published transition-vector package exercises this mutation. The case records an expected reason code that Parwana's kernel enforces; it is not executable by a consumer."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-protocol/tests/v2_transition_vectors.rs::every_negative_vector_fails_for_its_documented_reason",
       "wire_version": 2
     },
     {
-      "bytes_hex": "ff",
       "category": "malicious-graph",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -174,11 +325,25 @@
       },
       "expected_reason_code": "PROTOCOL.REFERENCE.WRONG_DISCRIMINANT",
       "id": "consumed-evidence-substitution",
-      "source": "csv-protocol/src/reference.rs::consumed_and_evidence_references_are_domain_separated",
+      "material": {
+        "entry_point": "csv_protocol negative-vector executor (Parwana-internal)",
+        "kind": "transition-vector-ref",
+        "package": "v2-transition-vectors",
+        "vector_id": "consumed-ref-as-evidence"
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "only-with-the-transition-vector-package"
+      },
+      "source": "csv-protocol/src/reference.rs::consumption_bytes_do_not_decode_as_evidence",
       "wire_version": 2
     },
     {
-      "bytes_hex": "fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -191,11 +356,25 @@
       },
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "proof-nonempty-garbage",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "bytes_hex": "a3677061796c6f6164a766736f75726365a36a73746174655f74797065076c6f75747075745f696e646578006d7472616e736974696f6e5f69649820111111111111111111111111111111111111111111111111111111111111111169737563636573736f72a466696e7075747381a3646d6f6465694578636c757369766566706172656e74a86464617461811833647365616ca36269649824182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822182218221822656e6f6e6365f66776657273696f6ef66a73746174655f74797065076b7573655f62696e64696e67a365636c617373694578636c75736976656a73746174655f74797065077173656d616e746963735f76657273696f6e026c6f75747075745f696e646578006d7472616e736974696f6e5f696498201111111111111111111111111111111111111111111111111111111111111111737265636f726465645f636f6d6d69746d656e74982013181d18dc186b1856186318c218ad18dd18630a18a918f418aa189e18de18f618ab0918d918a018f8189d1880186e18400818ad0e18d818d7182674617574686f72697a65645f636f6e73756d6572738198201821185218f818d1189b1879181d182418451832184218e1185f182e18ab186c18b718cf18fa187b186a185e18d300189718960e061898188118db12697265666572656e6365a36a73746174655f74797065076c6f75747075745f696e646578006d7472616e736974696f6e5f696498201111111111111111111111111111111111111111111111111111111111111111676f75747075747381a36464617461811855647365616ca3626964784063646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364656e6f6e6365096776657273696f6e0767747970655f6964076d7472616e736974696f6e5f6964097176616c69646174696f6e5f7363726970748118666b64657374696e6174696f6ea4647365616ca365636861696e637375696776657273696f6e07696f626a6563745f6964784063646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364656e6f6e6365096776657273696f6e0169736368656d615f69647840303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130313031303130316e736f757263655f636c6f73757265a46a70726f6f665f6b696e64781b426974636f696e5472616e73616374696f6e496e636c7573696f6e6e636f6e73756d65645f7374617465a36a73746174655f74797065076c6f75747075745f696e646578006d7472616e736974696f6e5f6964982011111111111111111111111111111111111111111111111111111111111111116e70726f6f665f6d6174657269616c984018fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa18fa74737563636573736f725f636f6d6d69746d656e7498200b18a11836186e18c6186d188c188e188c18a01857181d1857183018ca184918e0186e18f918760a18bb18eb18bf183b18e418a518931899188c18fb189570656e76656c6f70655f76657273696f6e027070726f746f636f6c5f76657273696f6e027270726f6f665f726571756972656d656e7473a56a636865636b706f696e74a568626c6f636b5f696498201888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188818881888188868636861696e5f696467626974636f696e6a6e6574776f726b5f6964667369676e65746c626c6f636b5f68656967687418646f66696e616c6974795f706f6c696379a16d436f6e6669726d6174696f6e73066a74727573745f6d6f64656b4c69676874436c69656e747170726f6f665f70726f76696465725f69646e626974636f696e2d7370762d763174766572696669636174696f6e5f636f6e74657874982018991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899189918991899766d6178696d756d5f636865636b706f696e745f6167650c6a636f6d6d69746d656e749820161849184d18fe18fd183418e018291876186918c10518b918cc1840187618e318d318ac18741018c7187518a8181d18ba18ca185a061830182b0d6e617574686f72697a6174696f6e7381a466736368656d656745643235353139697369676e61747572659840189f184518ec187f186f185f184b1870184d18d2185b188f186518df182e18bd183318d21823181f18ab18a51847189e18f3187d18a918b1189b18d018f018b718c6185e1868185c030418eb18c21318ce0718c2184f18b31848188718dd189a0f18da187418640018e90e18db188a188718a318a018ce076a7075626c69635f6b657998201821185218f818d1189b1879181d182418451832184218e1185f182e18ab186c18b718cf18fa187b186a185e18d300189718960e061898188118db12717369676e65645f636f6d6d69746d656e749820161849184d18fe18fd183418e018291876186918c10518b918cc1840187618e318d318ac18741018c7187518a8181d18ba18ca185a061830182b0d",
+        "entry_point": "csv_sdk::v2::inspect",
+        "kind": "consignment-v2",
+        "sha256": "2eef6cf7f12e14a48c5f887d7c791d8a108f337644f6da4bf10fc262004dee3e"
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "yes"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::forged_nonempty_proof_cannot_upgrade_assurance",
       "wire_version": 2
     },
     {
-      "bytes_hex": "0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -208,11 +387,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.INCLUSION",
       "id": "proof-wrong-header",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -225,11 +416,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.INCLUSION",
       "id": "proof-wrong-merkle-path",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "030303030303030303030303030303030303030303030303030303030303030303030303",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -242,11 +445,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "proof-wrong-outpoint",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "0404040404040404040404040404040404040404040404040404040404040404",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -259,11 +474,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "proof-wrong-transition-commitment",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "Distinguishing this failure from other closure failures requires a real bitcoin-spv-v1 proof encoding. Parwana's own test exercises it through a proof provider; the package distributes no encoded SPV proof, and shipping opaque bytes labelled as one would misrepresent it."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -276,11 +503,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.FINALITY",
       "id": "checkpoint-insufficient-finality",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -293,11 +532,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.FRESHNESS",
       "id": "checkpoint-stale",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -310,11 +561,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.VERIFICATION_CONTEXT",
       "id": "checkpoint-wrong-network",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "bitcoin-closure",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -327,11 +590,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.SOURCE_CLOSURE",
       "id": "checkpoint-orphaned",
-      "source": "csv-runtime/src/recipient_acceptance.rs::forged_checkpoint_corpus_fails_by_dimension",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "This case varies recipient-owned acceptance context (checkpoint, finality policy, network, or freshness bound), not distributed consignment bytes. A consumer reproduces it by supplying that context to its own proof provider."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
+      "source": "csv-runtime/src/recipient_acceptance.rs::every_native_dimension_has_a_distinct_stable_failure",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "conflict",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -340,11 +615,23 @@
       },
       "expected_reason_code": "ACCEPT.V2.CONFLICT",
       "id": "losing-conflict",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "A conflict is a property of two successors racing for one source against a shared accepted-state store, not of any single distributed artifact."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
       "source": "csv-runtime/src/recipient_acceptance.rs::isolated_recipients_cannot_both_accept_one_source",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "reorganization",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -353,11 +640,23 @@
       },
       "expected_reason_code": "STORAGE.CHECKPOINT.ORPHANED",
       "id": "reorganization",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "A reorganization is a checkpoint transition applied to already-accepted state, not a distributable artifact."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
       "source": "csv-storage/src/accepted_state.rs::orphaning_checkpoint_revokes_root_and_downgrades_descendants_idempotently",
       "wire_version": 2
     },
     {
-      "bytes_hex": "",
       "category": "crash",
       "contract_version": "0.1.10",
       "expected_dimensions": {
@@ -365,10 +664,38 @@
       },
       "expected_reason_code": "RUNTIME.SEND.RECOVERED",
       "id": "crash-recovery",
+      "material": {
+        "kind": "none",
+        "not_distributed_because": "Crash recovery is a sequence of interrupted runtime phases, not a distributable artifact."
+      },
+      "reproducible_by_sdk_consumer": {
+        "aggregate": "no",
+        "aggregate_requires": [
+          "a closure proof provider for the declared proof kind",
+          "a finalized checkpoint and finality policy",
+          "recipient-owned verification context and authorized signers"
+        ],
+        "canonical_structure": "no"
+      },
       "source": "csv-runtime/src/transfer_coordinator.rs::send_resume_after_emit_interrupt_never_recloses_source_seal",
       "wire_version": 2
     }
   ],
+  "consumer_contract": {
+    "do_not_manufacture_fixtures": "A consumer that needs material this package does not distribute must request it through a Parwana ticket rather than constructing its own 'valid' artifact.",
+    "executable_by_an_sdk_only_consumer": 2,
+    "expected_dimensions_are": "The outcome Parwana's named source test observes under its own inputs — a declared expectation, not an outcome this package produces on its own.",
+    "generated_by": "cargo run -p csv-sdk --example generate_portable_conformance",
+    "generator_imports": "csv_sdk only",
+    "material_census": {
+      "consignment-v2": 2,
+      "none": 19,
+      "transition-vector-ref": 4
+    },
+    "source_pointers_are": "Parwana-internal test locations, provided so a reader can audit the claim in the Parwana tree. They are not runnable by a downstream consumer.",
+    "what_a_consumer_can_reproduce": "The canonical-structure dimension of every case that distributes consignment-v2 material, by decoding it with csv_sdk::v2::inspect.",
+    "what_a_consumer_cannot_reproduce": "Any aggregate outcome. Every aggregate in this package depends on a closure proof provider, a finalized checkpoint, and recipient-owned verification context that this package does not and cannot supply. Structural decoding is never cryptographic verification."
+  },
   "package": "parwana-portable-conformance",
   "platforms": {
     "native": {
@@ -380,6 +707,6 @@
       "verification": "supported"
     }
   },
-  "schema_version": 1,
-  "version": "stage4-v1"
+  "schema_version": 2,
+  "version": "stage5-v1"
 }

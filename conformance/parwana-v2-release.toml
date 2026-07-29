@@ -6,9 +6,9 @@ contract_version = "0.1.10"
 release_status = "first_public_release"
 
 [portable_conformance]
-version = "stage4-v1"
+version = "stage5-v1"
 path = "csv-testkit/corpus/v2/manifest.json"
-sha256 = "1ff11779fb94334d24af10428996215af5b0bba30d9c754ebaee44ac11e83f0e"
+sha256 = "05066d55b0ded97a4bc3cd6e3c96aab5aa971b7ef7a36a5f914736becf23f51e"
 
 [transition_vectors]
 version = 1

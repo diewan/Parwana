@@ -52,7 +52,7 @@ supported.
 
 | Package | Version | SHA-256 |
 |---|---|---|
-| Portable hostile conformance manifest | `stage4-v1` | `1ff11779fb94334d24af10428996215af5b0bba30d9c754ebaee44ac11e83f0e` |
+| Portable hostile conformance manifest | `stage5-v1` | `05066d55b0ded97a4bc3cd6e3c96aab5aa971b7ef7a36a5f914736becf23f51e` |
 | V2 transition vectors | `1` | `0f4ef333ffbef0906ad99df2170bfab6f046aa1f1722607bd9515a17dc37e249` |
 | Stage 5 closure support matrix | `1` | `29a730574e3c253757f4aae8d81364e858321b4a07d32e6e0a0f86a579a18ac2` |
 

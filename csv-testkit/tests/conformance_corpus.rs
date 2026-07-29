@@ -1,5 +1,8 @@
-//! Release-corpus shape checks. Semantic behavior is exercised by the source
-//! tests named in the immutable manifest.
+//! Release-corpus checks.
+//!
+//! Semantic behavior is exercised by the source tests each case names; these
+//! checks establish that the package is honest about itself — that every named
+//! source exists, and that no case ships material it does not declare.
 
 use csv_accountability::{EvidenceSourceClass, github_deployment_descriptor};
 use serde_json::Value;
@@ -70,6 +73,70 @@ fn portable_v2_manifest_covers_every_hostile_campaign() {
                 .as_object()
                 .is_some_and(|map| !map.is_empty())
         );
+    }
+}
+
+/// Every `source` pointer must name a test that exists in this tree.
+///
+/// The package's remaining claim to substance is that a reader can audit each
+/// case at the named Parwana test. In `stage4-v1` four of eight pointers named
+/// functions that did not exist, so the claim was unauditable.
+#[test]
+fn every_source_pointer_names_a_test_that_exists() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root");
+    for case in manifest["cases"].as_array().unwrap() {
+        let pointer = case["source"].as_str().expect("every case names a source");
+        let (path, function) = pointer
+            .split_once("::")
+            .unwrap_or_else(|| panic!("{pointer} is not a file::function pointer"));
+        let file = root.join(path);
+        let contents = std::fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("{pointer} names a missing file: {error}"));
+        assert!(
+            contents.contains(&format!("fn {function}(")),
+            "{pointer} names a function that does not exist"
+        );
+    }
+}
+
+/// A case may only carry bytes under a declared, executable material kind.
+#[test]
+fn no_case_ships_material_it_does_not_declare() {
+    let manifest: Value = serde_json::from_str(include_str!("../corpus/v2/manifest.json")).unwrap();
+    for case in manifest["cases"].as_array().unwrap() {
+        let id = case["id"].as_str().unwrap();
+        let material = &case["material"];
+        let kind = material["kind"].as_str().expect("material declares a kind");
+        match kind {
+            "consignment-v2" => {
+                assert!(!material["bytes_hex"].as_str().unwrap().is_empty());
+                assert!(!material["sha256"].as_str().unwrap().is_empty());
+            }
+            "transition-vector-ref" => {
+                assert!(
+                    material["bytes_hex"].is_null(),
+                    "{id} duplicates vector bytes"
+                );
+                assert!(!material["vector_id"].as_str().unwrap().is_empty());
+            }
+            "none" => {
+                assert!(
+                    material["bytes_hex"].is_null(),
+                    "{id} ships undeclared bytes"
+                );
+                assert!(
+                    !material["not_distributed_because"]
+                        .as_str()
+                        .unwrap()
+                        .is_empty(),
+                    "{id} must say why it distributes nothing"
+                );
+            }
+            other => panic!("{id} declares an unknown material kind {other}"),
+        }
     }
 }
 
