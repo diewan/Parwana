@@ -6,9 +6,23 @@
 > [!CAUTION]
 > FREQUENT DRAMATIC CHANGES TO THE CODE, ARCHITECTURE AND CONCEPTS ARE NORMAL AT THIS STAGE :bangbang:
 
-## Constitutional Client-Side Validation Infrastructure
+## Portable, Recipient-Verifiable Accountability Protocol
 
-> A multi-chain, client-validated protocol for cryptographic ownership, transfer, provenance, and state evolution using Single-Use Seals, canonical commitments, deterministic replay resistance, and adversarial runtime orchestration.
+> A multichain, client-validated protocol for proof-carrying state transitions,
+> uniquely ordered source closure, provenance, and accountable action using
+> Single-Use Seals, canonical commitments, typed assurance, and adversarial
+> runtime orchestration.
+
+Parwana V2 now implements portable, recipient-verifiable non-equivocation. An
+isolated recipient can verify that a successor consumes a uniquely ordered
+source state and is bound to the delivered destination assignment under an
+explicit checkpoint, finality policy, proof provider, freshness bound, and
+trust mode—without trusting the sender's database.
+
+The current advertised adapters are reference/testnet capabilities: Bitcoin
+signet, Ethereum Sepolia, Sui testnet, Aptos testnet, and Solana devnet. See
+[`csv-docs/PARWANA_V2_RELEASE.md`](csv-docs/PARWANA_V2_RELEASE.md) for the exact
+claim and limitations.
 
 ## Topology
 
@@ -160,7 +174,7 @@ This gives the protocol:
 - deterministic ownership lineage,
 - replay resistance,
 - monotonic state evolution,
-- cryptographic transfer finality.
+- explicit, context-bound closure and finality assessment.
 
 The protocol treats ownership transitions as:
 
